@@ -22,3 +22,8 @@ src-tauri/binaries/saucebunny-diarize-*
 # Local
 .env
 .env.local
+
+# Build artifacts (generated — vite.config.ts is the real source)
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
