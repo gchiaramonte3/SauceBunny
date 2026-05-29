@@ -1,0 +1,23 @@
+/* Sauce Bunny — section orchestrator.
+ *
+ * `main.tsx` imports this file. Each rule lives in a per-section file
+ * (r48 split from a 4057-line monolith — see CLAUDE.md refactor
+ * priority #2). Tokens stay in their own file (./tokens.css) and are
+ * loaded from base.css.
+ *
+ * Order matters where cascade does — keep this list in the same
+ * sequence the original monolith used so any unintentional rule
+ * shadowing still resolves the same way.
+ */
+@import "./base.css";
+@import "./shell.css";
+@import "./toolbar.css";
+@import "./buttons.css";
+@import "./sidebar.css";
+@import "./monitor.css";
+@import "./transport.css";
+@import "./logs.css";
+@import "./queue-drawer.css";
+@import "./settings.css";
+@import "./palette.css";
+@import "./transcript.css";

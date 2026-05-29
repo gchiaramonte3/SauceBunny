@@ -1,0 +1,307 @@
+/* Transport bar + timeline. r48 split. */
+/* ============================================================
+   TRANSPORT + TIMELINE
+   ============================================================ */
+.cp-transport {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 14px;
+  user-select: none;
+}
+.cp-transport-side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cp-transport-side.left { justify-content: flex-start; }
+.cp-transport-side.right { justify-content: flex-end; }
+
+.cp-transport-center {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: center;
+}
+
+.cp-tc {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-1);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  padding: 5px 9px;
+  background: rgba(0,0,0,0.4);
+  border-radius: 5px;
+  border: 1px solid rgba(255,255,255,0.04);
+  min-width: 108px;
+  text-align: center;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.cp-tc.duration {
+  color: var(--fg-3);
+  background: transparent;
+  border-color: transparent;
+}
+
+.cp-transport-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  color: var(--fg-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.cp-transport-btn:hover { background: rgba(255,255,255,0.07); color: var(--fg-1); border-color: rgba(255,255,255,0.1); }
+.cp-transport-btn.play {
+  width: 46px;
+  height: 36px;
+  background: rgba(255,255,255,0.07);
+  border-color: rgba(255,255,255,0.1);
+}
+.cp-transport-btn.play.active {
+  background: var(--accent);
+  color: #0A0A0D;
+  border-color: transparent;
+  box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.35);
+}
+.cp-transport-btn:active { transform: scale(0.96); }
+
+/* Icon-only action buttons (Mark in/out, Clear, CC) */
+.cp-icon-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 7px;
+}
+.cp-icon-btn {
+  width: 30px;
+  height: 28px;
+  background: transparent;
+  border: none;
+  color: var(--fg-3);
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.cp-icon-btn:hover { background: rgba(255,255,255,0.05); color: var(--fg-1); }
+.cp-icon-btn.active {
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.2);
+}
+.cp-icon-btn.cc,
+.cp-icon-btn.snapshot {
+  width: 32px;
+  height: 30px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.cp-icon-btn.cc:hover,
+.cp-icon-btn.snapshot:hover { background: rgba(255,255,255,0.06); }
+.cp-icon-btn.cc.active {
+  background: rgba(var(--accent-rgb), 0.16);
+  border-color: rgba(var(--accent-rgb), 0.35);
+}
+.cp-icon-btn.snapshot.busy {
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+}
+.cp-icon-btn.snapshot:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.cp-icon-divider {
+  width: 1px;
+  height: 18px;
+  background: rgba(255,255,255,0.08);
+}
+
+/* Timeline */
+.cp-timeline {
+  margin-top: 14px;
+  position: relative;
+  height: 44px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.cp-timeline-ruler {
+  position: relative;
+  height: 16px;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.cp-timeline-ruler .tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255,255,255,0.1);
+}
+.cp-timeline-ruler .tick.major { height: 8px; background: rgba(255,255,255,0.18); }
+.cp-timeline-ruler .tick.minor { height: 4px; }
+.cp-timeline-ruler .tick-label {
+  position: absolute;
+  bottom: 9px;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--fg-5);
+  letter-spacing: 0.04em;
+  /* The ruler sits above the track; clicks must pass through to the track
+     for scrub, and the cursor must never flip to a text caret while
+     dragging across the labels. */
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cp-track {
+  position: relative;
+  height: 22px;
+  background: #0A0A0D;
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 4px;
+  margin-top: 2px;
+  cursor: pointer;
+}
+.cp-track.dragging { cursor: grabbing; }
+.cp-track.dragging .cp-playhead { box-shadow: 0 0 10px rgba(255,255,255,0.6); }
+.cp-track-fill {
+  position: absolute;
+  top: 0; bottom: 0; left: 0; right: 0;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255,255,255,0.04) 0,
+      rgba(255,255,255,0.04) 1px,
+      transparent 1px,
+      transparent 4px
+    ),
+    linear-gradient(180deg, var(--bg-3), var(--bg-2));
+  border-radius: 2px;
+}
+.cp-track-selection {
+  position: absolute;
+  top: -1px; bottom: -1px;
+  background: rgba(var(--marker-rgb), 0.18);
+  border-left: 2px solid var(--marker);
+  border-right: 2px solid var(--marker);
+  box-shadow: inset 0 0 0 1px rgba(var(--marker-rgb), 0.3);
+  z-index: 2;
+}
+/* Already-queued ranges — drawn underneath the active orange selection so
+   the user can see at a glance which sections they've already added to the
+   queue (or completed) and not pick them again. Neutral gray, no glow. */
+.cp-track-queued {
+  position: absolute;
+  top: 0; bottom: 0;
+  background: rgba(255,255,255,0.10);
+  border-left: 1px solid rgba(255,255,255,0.28);
+  border-right: 1px solid rgba(255,255,255,0.28);
+  z-index: 1;
+  /* Subtle diagonal stripe pattern so overlapping bands are visually distinct
+     from a single contiguous one. */
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(255,255,255,0.04) 0,
+    rgba(255,255,255,0.04) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+.cp-track-queued.done {
+  background: rgba(80,200,120,0.10);
+  border-color: rgba(80,200,120,0.30);
+}
+.cp-track-queued.running {
+  /* While exporting, give the band a soft pulse so the user can spot which
+     section is currently being processed. */
+  background: rgba(var(--marker-rgb), 0.12);
+  border-color: rgba(var(--marker-rgb), 0.45);
+  animation: cp-queued-pulse 1.6s ease-in-out infinite;
+}
+.cp-track-queued.error {
+  background: rgba(232,38,38,0.10);
+  border-color: rgba(232,38,38,0.35);
+}
+@keyframes cp-queued-pulse {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1.0; }
+}
+/* Solo mark line — drawn when only one of in/out has been set. */
+.cp-track-mark {
+  position: absolute;
+  top: -2px; bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--marker);
+  box-shadow: 0 0 8px rgba(var(--marker-rgb), 0.55);
+}
+.cp-playhead {
+  position: absolute;
+  top: -4px; bottom: -4px;
+  width: 1px;
+  background: var(--fg-1);
+  /* Clickable so the triangle is also a drag handle; the ::before pseudo
+     expands the hit area above the track. */
+  pointer-events: auto;
+  cursor: grab;
+  box-shadow: 0 0 6px rgba(255,255,255,0.4);
+}
+.cp-playhead:active { cursor: grabbing; }
+.cp-playhead::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 12px; height: 12px;
+  background: var(--fg-1);
+  clip-path: polygon(50% 100%, 0 0, 100% 0);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.cp-playhead:hover::before { transform: translateX(-50%) scale(1.15); }
+/* Larger invisible hit-area around the triangle so it's easier to grab. */
+.cp-playhead::after {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 22px;
+  height: 18px;
+}
+.cp-track.dragging .cp-playhead { cursor: grabbing; }
+
+/* Hint line below the timeline. Fixed min-height so the canvas above
+   never shifts when marks are set/cleared. */
+.cp-fullclip-hint,
+.cp-timeline-hint {
+  margin-top: 8px;
+  min-height: 16px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--fg-4);
+  letter-spacing: 0.02em;
+  text-align: center;
+  line-height: 16px;
+}
+

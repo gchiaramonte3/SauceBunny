@@ -1,0 +1,136 @@
+/* Bottom logs panel — pipeline output. r48 split. */
+/* ============================================================
+   BOTTOM LOGS PANEL
+   ============================================================ */
+.cp-logs {
+  flex-shrink: 0;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  background: #08080A;
+  display: flex;
+  flex-direction: column;
+  transition: height var(--dur-slow) var(--ease-in-out);
+  overflow: hidden;
+}
+.cp-logs.collapsed { height: 32px; }
+.cp-logs.open      { height: 200px; }
+
+.cp-logs-header {
+  height: 32px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-3);
+  letter-spacing: 0.04em;
+}
+.cp-logs-header:hover { color: var(--fg-1); }
+.cp-logs-header .chev {
+  display: inline-block;
+  transition: transform var(--dur-base) var(--ease-out);
+  color: var(--fg-4);
+}
+.cp-logs-header .title { text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px; }
+.cp-logs-header .status-pill {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--fg-3);
+  background: rgba(255,255,255,0.04);
+  padding: 2px 7px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+  text-transform: none;
+}
+.cp-logs-header .status-pill.success { color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
+.cp-logs-header .status-pill.error   { color: #ff7a7a; background: rgba(232,38,38, 0.12); }
+.cp-logs-header .status-pill.working { color: #E87826; background: rgba(232,120,38, 0.12); }
+.cp-logs-header .progress {
+  flex: 1;
+  height: 2px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 1px;
+  position: relative;
+  overflow: hidden;
+  max-width: 240px;
+}
+.cp-logs-header .progress-bar {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  background: var(--accent);
+  border-radius: 1px;
+  transition: width var(--dur-base) var(--ease-out);
+  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.4);
+}
+.cp-logs-header .filler { flex: 1; }
+.cp-logs-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px;
+  background: rgba(232, 38, 38, 0.10);
+  border: 1px solid rgba(232, 38, 38, 0.35);
+  border-radius: 4px;
+  color: #ff8a8a;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.cp-logs-stop:hover {
+  background: rgba(232, 38, 38, 0.18);
+  color: #fff;
+}
+.cp-logs-stop .dot {
+  width: 8px;
+  height: 8px;
+  background: #ff5757;
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(232,38,38, 0.5);
+}
+.cp-logs-header .actions {
+  display: flex;
+  gap: 6px;
+}
+/* Compact button styling now comes from the shared .btn.btn-compact
+   class — single button system across the whole app. */
+
+.cp-logs-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--fg-3);
+}
+.cp-logs-body::-webkit-scrollbar { width: 6px; height: 6px; }
+.cp-logs-body::-webkit-scrollbar-track { background: transparent; }
+.cp-logs-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 3px; }
+
+.log-line {
+  display: grid;
+  grid-template-columns: 64px 64px 1fr;
+  column-gap: 14px;
+  align-items: baseline;
+  padding: 1px 0;
+  font-variant-numeric: tabular-nums;
+}
+.log-line .ts { color: var(--fg-5); font-size: 10px; }
+.log-line .tag { font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.log-line .tag.info  { color: var(--fg-3); }
+.log-line .tag.ok    { color: var(--accent); }
+.log-line .tag.warn  { color: #E87826; }
+.log-line .tag.err   { color: #ff6b6b; }
+.log-line .tag.muxer { color: #B084FF; }
+.log-line .msg { color: var(--fg-2); white-space: pre-wrap; word-break: break-word; }
+

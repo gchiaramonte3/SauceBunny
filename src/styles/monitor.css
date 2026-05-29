@@ -1,0 +1,851 @@
+/* Source monitor — canvas, player chrome, toasts. r48 split. */
+/* ============================================================
+   SOURCE MONITOR
+   ============================================================ */
+.cp-monitor-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 22px 16px;
+  min-height: 0;
+  /* Flat fill. The radial-gradient that used to live here (rgba
+     0.012) was so faint that the GPU stepped it in visible 8-bit
+     intervals, producing visible vertical banding on dark monitors.
+     A flat fill matches the surrounding chrome perfectly. */
+  background: var(--bg-1);
+}
+/* Monitor area: fills the available column above transport/timeline and
+   centers the resizable canvas. The canvas itself is sized in JS so it
+   always perfectly fits at the chosen aspect ratio. */
+.cp-monitor-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cp-monitor {
+  background: #000;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.06);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* width + height set inline from useContainSize */
+  flex-shrink: 0;
+  transition: width var(--dur-base) var(--ease-out),
+              height var(--dur-base) var(--ease-out);
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,0.4),
+    0 18px 50px rgba(0,0,0,0.5);
+}
+.cp-monitor-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Empty state */
+.cp-empty {
+  position: absolute; inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: var(--fg-3);
+  /* Ambient brand wash — three soft radial gradients (green + violet +
+     pink) bloom behind the empty-state copy, kept low-opacity so the
+     dominant impression is still dark/quiet, but the canvas no longer
+     reads as "flat black panel". Same wash is used on a couple of
+     other hero surfaces — see --grad-brand-wash. */
+  background: var(--grad-brand-wash);
+}
+/* Color tint the equaliser bars too so they pick up the brand wash
+   rather than being a flat grey. */
+.cp-empty-perf { display: flex; gap: 6px; opacity: 0.55; }
+.cp-empty-perf span {
+  width: 14px; height: 18px;
+  background: linear-gradient(180deg, rgba(108,255,141,0.20), rgba(109,82,237,0.15));
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 3px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.10),
+    0 0 8px rgba(108,255,141,0.10);
+}
+.cp-empty h3 {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--fg-1);
+  letter-spacing: -0.015em;
+}
+.cp-empty p {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--fg-4);
+  max-width: 360px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* Monitor overlays — minimal: only timecodes by default. */
+.cp-monitor-overlay {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 12px 14px;
+  z-index: 3;
+}
+.cp-monitor-overlay.minimal { justify-content: flex-end; }
+.cp-monitor-overlay .bl, .cp-monitor-overlay .br {
+  display: flex; align-items: center; gap: 8px;
+}
+.cp-monitor-overlay.minimal {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+.cp-monitor-overlay .tc-overlay {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.92);
+  background: rgba(0,0,0,0.6);
+  padding: 4px 8px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.cp-monitor-overlay .tc-overlay.muted { color: var(--fg-3); }
+
+/* Non-blocking "preparing playback…" banner — pinned to the bottom-left of
+   the monitor while ffmpeg normalises an imported file. The player itself
+   stays interactive underneath. */
+.cp-prep-banner {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 8px 12px;
+  background: rgba(15,15,18,0.86);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.45);
+  font-family: var(--font-ui);
+  animation: cp-fade-in var(--dur-fast) var(--ease-out);
+  /* r55: was pointer-events: none so it never blocked clicks on the
+     player underneath. Now we need the inline Cancel button to be
+     clickable, so the banner accepts pointer events. The Cancel
+     button is the only interactive child; the rest of the banner
+     ignores clicks via pointer-events: none on the text wrapper. */
+  pointer-events: auto;
+}
+.cp-prep-banner .cp-prep-spinner,
+.cp-prep-banner .cp-prep-text { pointer-events: none; }
+.cp-prep-cancel {
+  pointer-events: auto;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-1);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 5px;
+  padding: 4px 9px;
+  margin-left: 4px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.cp-prep-cancel:hover {
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(255,255,255,0.24);
+}
+.cp-prep-cancel:active { background: rgba(255,255,255,0.16); }
+.cp-prep-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.18);
+  border-top-color: var(--accent);
+  animation: cp-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+.cp-prep-text { display: flex; flex-direction: column; gap: 1px; }
+.cp-prep-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-1);
+  letter-spacing: 0.02em;
+}
+.cp-prep-sub {
+  font-size: 10px;
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+}
+@keyframes cp-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Stream-loading overlay (r62) ──────────────────────────────────────
+   Full-canvas scrim shown while a web source resolves (yt-dlp) then
+   buffers (MSE). A dimmed+blurred poster sits behind a centered spinner
+   and a phase message so the wait reads as intentional. */
+.cp-stream-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: rgba(10,10,12,0.55);
+  animation: cp-fade-in var(--dur-fast) var(--ease-out);
+}
+.cp-stream-loading-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(0.35) saturate(0.9) blur(8px);
+  transform: scale(1.06); /* hide blur edge bleed */
+  z-index: -1;
+}
+.cp-stream-loading-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 30px;
+  text-align: center;
+  font-family: var(--font-ui);
+}
+.cp-stream-spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.14);
+  border-top-color: var(--accent);
+  animation: cp-spin 0.85s linear infinite;
+}
+.cp-stream-loading-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--fg-0, #fff);
+  letter-spacing: 0.01em;
+}
+.cp-stream-loading-sub {
+  font-size: 11px;
+  color: var(--fg-3);
+  max-width: 280px;
+  line-height: 1.4;
+}
+
+/* View options bar (sits ABOVE the monitor, not on top of the video) */
+.cp-view-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 26px;
+  margin-bottom: 2px;
+  flex-shrink: 0;
+}
+
+.cp-view-options { position: relative; display: flex; gap: 6px; }
+.cp-view-trigger.icon-only { padding: 0 8px; min-width: 30px; justify-content: center; }
+.cp-view-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 6px;
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+  font-variant-numeric: tabular-nums;
+}
+.cp-view-trigger:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); border-color: rgba(255,255,255,0.1); }
+.cp-view-trigger.active { background: rgba(255,255,255,0.08); color: var(--fg-1); }
+.cp-view-trigger .label { letter-spacing: 0.04em; }
+
+.cp-view-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 220px;
+  background: #15151a;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 0.5px rgba(255,255,255,0.04);
+  padding: 6px;
+  z-index: 20;
+  animation: cp-fade-in var(--dur-fast) var(--ease-out);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cp-popover-header {
+  padding: 8px 8px 6px;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--fg-4);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.cp-popover-item {
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  padding: 7px 9px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.cp-popover-item:hover { background: rgba(255,255,255,0.04); color: var(--fg-1); }
+.cp-popover-item.active {
+  background: rgba(var(--accent-rgb), 0.10);
+  color: var(--accent);
+}
+.cp-popover-item .lbl { font-weight: 600; }
+.cp-popover-item .sub {
+  font-size: 10.5px;
+  color: var(--fg-4);
+  letter-spacing: 0.01em;
+}
+.cp-popover-item.active .sub { color: rgba(var(--accent-rgb), 0.7); }
+
+/* Fetching state — scanning line */
+.cp-fetching {
+  position: absolute; inset: 0;
+  background: #0A0A0D;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+}
+.cp-scanline {
+  width: 60%;
+  max-width: 360px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent) 50%, transparent);
+  position: relative;
+  overflow: hidden;
+}
+.cp-scanline::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.5), transparent);
+  animation: scan 1.6s linear infinite;
+}
+@keyframes scan {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.cp-fetching .status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  letter-spacing: 0.04em;
+}
+
+/* Local media player wrapper — fills the monitor frame. */
+.cp-local-media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cp-local-media video {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+/* Video element inside .cp-local-media — replaces an inline style block
+   (r46). Letterbox bg uses --bg-0 (true black is in the token). */
+.cp-local-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--bg-0);
+}
+/* Frame-accurate scrub-preview overlay (r68) — sits exactly over the
+   <video> (same contain box) and shows the WebCodecs-decoded frame under
+   the cursor while scrubbing. Hidden (and click-through) otherwise. */
+.cp-scrub-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--bg-0);
+  pointer-events: none;
+  opacity: 0;
+  z-index: 2;
+}
+.cp-scrub-preview.show { opacity: 1; }
+
+/* Audio-only visible card (the <audio> element itself is invisible). */
+.cp-audio-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 32px;
+  text-align: center;
+  max-width: 80%;
+  user-select: none;
+}
+.cp-audio-icon {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.04);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--dur-base) var(--ease-out);
+}
+.cp-audio-icon.playing {
+  background: rgba(var(--accent-rgb), 0.10);
+  box-shadow: 0 0 32px rgba(var(--accent-rgb), 0.15);
+}
+.cp-audio-name {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-1);
+  letter-spacing: -0.005em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-audio-hint {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--fg-4);
+}
+/* Tiny equaliser shown when audio is actively playing. */
+.cp-eq {
+  position: absolute;
+  bottom: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 14px;
+}
+.cp-eq span {
+  display: inline-block;
+  width: 3px;
+  background: var(--accent);
+  border-radius: 1px;
+  animation: cp-eq-bounce 0.9s ease-in-out infinite;
+}
+.cp-eq span:nth-child(1) { height: 6px; animation-delay: 0.00s; }
+.cp-eq span:nth-child(2) { height: 11px; animation-delay: 0.12s; }
+.cp-eq span:nth-child(3) { height: 8px; animation-delay: 0.24s; }
+.cp-eq span:nth-child(4) { height: 13px; animation-delay: 0.36s; }
+@keyframes cp-eq-bounce {
+  0%, 100% { transform: scaleY(0.4); }
+  50%      { transform: scaleY(1); }
+}
+
+/* Volume control: small icon + popover with slider. */
+.cp-volume { position: relative; }
+.cp-volume-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: -4px;
+  background: #15151a;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  box-shadow: 0 14px 36px rgba(0,0,0,0.55);
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 40;
+  animation: cp-fade-in var(--dur-fast) var(--ease-out);
+}
+.cp-volume-mute {
+  background: transparent;
+  border: none;
+  color: var(--fg-3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.cp-volume-mute:hover { color: var(--fg-1); }
+.cp-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 140px;
+  height: 4px;
+  background: rgba(255,255,255,0.10);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+.cp-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.4);
+  cursor: pointer;
+  border: none;
+}
+.cp-volume-value {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-3);
+  min-width: 22px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cp-icon-btn.volume.muted { color: #ff8a8a; }
+
+/* ── Floating canvas toast (replaces the full-screen success overlay) ── */
+.cp-canvas-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 80%;
+  padding: 10px 14px 10px 12px;
+  background: rgba(20, 20, 22, 0.92);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  z-index: 6;
+  animation: cp-toast-in 220ms var(--ease-out);
+}
+@keyframes cp-toast-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.cp-canvas-toast .icon {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.cp-canvas-toast.success .icon { background: rgba(var(--accent-rgb), 0.18); color: var(--accent); }
+.cp-canvas-toast.error   .icon { background: rgba(232,38,38, 0.18);            color: #ff8a8a;      }
+.cp-canvas-toast.info    .icon { background: rgba(255,255,255,0.10);           color: var(--fg-1);  }
+.cp-canvas-toast .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cp-canvas-toast .title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-1);
+  letter-spacing: -0.005em;
+}
+.cp-canvas-toast .body {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-3);
+  /* Was `white-space: nowrap + text-overflow: ellipsis` — that's why
+     "Preparing a co…" got cut off. Now wraps up to 3 lines (anything
+     longer gets ellipsized at the end of line 3), still leaves the body
+     fully selectable so the user can copy file paths. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 560px;
+  line-height: 1.4;
+  word-break: break-word;
+  user-select: text;
+}
+/* Dedicated × dismiss button — the whole-toast click target was
+   removed because it was triggering when the user just wanted to read. */
+.cp-canvas-toast-close {
+  flex-shrink: 0;
+  margin-left: 4px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--fg-4);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.cp-canvas-toast-close:hover {
+  background: rgba(255,255,255,0.10);
+  color: var(--fg-1);
+}
+
+/* ── Notification bell + dropdown ── */
+.cp-notifications { position: relative; }
+.cp-notif-trigger {
+  position: relative;
+}
+.cp-notif-trigger.has-unread { color: var(--fg-1); border-color: rgba(var(--accent-rgb), 0.35); }
+.cp-notif-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.6);
+}
+.cp-notif-popover {
+  /* `position` + `top`/`right` come from inline style (NotificationBell
+     computes them off the bell-button's bounding rect because the popover
+     renders via a portal at document.body). All we set here is geometry +
+     stacking. z-index 9999 sits above the queue drawer (which is local to
+     .cp-body) and the canvas, but below the SettingsModal overlay which
+     uses z 100 inside its own stacking context. */
+  width: 360px;
+  max-height: 440px;
+  background: #15151a;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  box-shadow: 0 18px 44px rgba(0,0,0,0.55);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: cp-fade-in var(--dur-fast) var(--ease-out);
+}
+.cp-notif-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-family: var(--font-ui);
+}
+.cp-notif-header .title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.cp-notif-header .filler { flex: 1; }
+.cp-notif-header .link {
+  background: transparent;
+  border: none;
+  color: var(--fg-4);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.cp-notif-header .link:hover { color: var(--fg-1); background: rgba(255,255,255,0.04); }
+
+.cp-notif-list { overflow-y: auto; padding: 4px; }
+.cp-notif-empty {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  color: var(--fg-4);
+  padding: 24px 16px;
+  text-align: center;
+  line-height: 1.5;
+}
+.cp-notif-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.cp-notif-item:hover { background: rgba(255,255,255,0.02); }
+.cp-notif-icon {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.cp-notif-item.success .cp-notif-icon { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); }
+.cp-notif-item.error   .cp-notif-icon { background: rgba(232,38,38, 0.16);            color: #ff8a8a;      }
+.cp-notif-item.info    .cp-notif-icon { background: rgba(255,255,255,0.08);           color: var(--fg-2);  }
+
+.cp-notif-body { flex: 1; min-width: 0; }
+.cp-notif-title {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg-1);
+  letter-spacing: -0.005em;
+}
+.cp-notif-text {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-3);
+  margin-top: 3px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.cp-notif-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--fg-4);
+}
+.cp-notif-meta .reveal,
+.cp-notif-meta .dismiss {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  color: var(--fg-3);
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.cp-notif-meta .reveal:hover  { color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
+.cp-notif-meta .dismiss:hover { color: var(--fg-1);   background: rgba(255,255,255,0.04); }
+
+/* Legacy success overlay (kept in case anything else still references it). */
+.cp-success-overlay {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  animation: fadeIn var(--dur-slow) var(--ease-out);
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.cp-success-overlay .check {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+.cp-success-overlay .label {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--fg-1);
+  letter-spacing: -0.005em;
+}
+.cp-success-overlay .meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+/* Error state */
+.cp-error-overlay {
+  position: absolute; inset: 0;
+  background: rgba(20, 8, 8, 0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px;
+}
+.cp-error-overlay .icon {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(232,38,38, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #E82626;
+}
+.cp-error-overlay .label {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--fg-1);
+}
+.cp-error-overlay .detail {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  text-align: center;
+  max-width: 520px;
+  word-break: break-word;
+}
+

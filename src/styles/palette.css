@@ -1,0 +1,176 @@
+/* ⌘K command palette. r48 split. */
+/* ============================================================
+   COMMAND PALETTE (⌘K)
+   Spotlight-style modal — portaled to <body> so it sits above
+   every other surface (canvas, queue drawer, notification popover).
+   Inherits the brand wash for the scrim so it feels native rather
+   than a generic dark overlay.
+   ============================================================ */
+.cp-palette-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10000; /* one above the notification popover (9999) */
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh; /* offset like Spotlight rather than centered */
+  background: rgba(5, 5, 8, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: cp-fade-in var(--dur-fast) var(--ease-out);
+}
+.cp-palette {
+  width: min(640px, 92vw);
+  max-height: 70vh;
+  background: var(--bg-2);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 14px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 32px 80px rgba(0,0,0,0.65),
+    0 0 0 1px rgba(108,255,141,0.08);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: cp-palette-in 180ms var(--ease-out);
+}
+@keyframes cp-palette-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)     scale(1); }
+}
+.cp-palette-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.cp-palette-search-icon {
+  font-size: 14px;
+  color: var(--fg-4);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.cp-palette-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.cp-palette-input::placeholder { color: var(--fg-5); }
+.cp-palette-count {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-5);
+  flex-shrink: 0;
+}
+.cp-palette-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+.cp-palette-empty {
+  padding: 28px 18px;
+  text-align: center;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--fg-4);
+}
+.cp-palette-group { padding: 4px 0; }
+.cp-palette-group-label {
+  padding: 6px 12px 4px;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--fg-5);
+}
+.cp-palette-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.cp-palette-row.active {
+  /* Same green wash as the active tab pill — single accent language. */
+  background: linear-gradient(180deg, rgba(108,255,141,0.14), rgba(108,255,141,0.04));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.06),
+    inset 0 0 0 1px rgba(108,255,141,0.20);
+}
+.cp-palette-row.disabled { opacity: 0.4; cursor: not-allowed; }
+.cp-palette-row-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.cp-palette-row-label {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-1);
+  letter-spacing: -0.005em;
+}
+.cp-palette-row.active .cp-palette-row-label { color: #FFFFFF; }
+.cp-palette-row-desc {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--fg-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cp-palette-row-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-3);
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 4px;
+  flex-shrink: 0;
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,0.25);
+}
+.cp-palette-foot {
+  display: flex;
+  gap: 18px;
+  padding: 10px 18px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--fg-5);
+  background: rgba(0,0,0,0.20);
+}
+.cp-palette-foot kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  margin-right: 4px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 3px;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: var(--fg-3);
+}
+

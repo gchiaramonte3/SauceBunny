@@ -1,0 +1,411 @@
+/* Right-docked queue drawer — tabs, queue items, panel pop-out. r48 split. */
+/* ============================================================
+   CLIPS QUEUE DRAWER — docked sibling of <main> in .cp-body.
+   When open, claims its own flex column and pushes the main area
+   to reflow (Claude/OpenArt-style push panel). Animates `width`
+   so the canvas's ResizeObserver handles the reshape naturally
+   instead of being covered up by an overlay.
+   ============================================================ */
+.cp-queue-drawer {
+  /* Hidden-but-mounted state: zero width, no overflow. Children
+     keep their intrinsic sizes so when we animate width back to
+     the user's preferred width the contents are already laid out
+     (no FOUC). */
+  width: 0;
+  flex-shrink: 0;
+  background: var(--bg-1);
+  border-left: 1px solid transparent;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative; /* anchor the resize handle */
+  transition: border-color var(--dur-slow) var(--ease-in-out);
+}
+.cp-queue-drawer.open {
+  /* width is now set inline from React state (resize-drag persistence).
+     Border just animates on open/close. */
+  border-left-color: rgba(255,255,255,0.05);
+}
+/* Embedded (r44.B) — drawer rendered inside its own native window.
+   The OS window IS the resize handle, so we fill the parent fully
+   and lose the docked-drawer width track. */
+.cp-queue-drawer.embedded {
+  width: 100% !important; /* override the inline width from React state */
+  height: 100%;
+  border-left-color: transparent; /* no docked-edge border in standalone window */
+}
+.cp-panel-window-root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  background: var(--bg-1);
+}
+.cp-tab-popout {
+  /* Pop-out icon button — shares the close button's chrome so the
+     two affordances feel paired in the tab-strip right edge. */
+  color: var(--fg-4);
+}
+.cp-tab-popout:hover { color: var(--color-accent-green); }
+/* Inner content respects the current drawer width — let it shrink. */
+.cp-queue-drawer > * { min-width: 0; }
+
+/* Resize handle — 4px sliver on the left edge. Bigger hover hit zone
+   (8px) via a pseudo-element so the cursor target isn't pixel-precise. */
+.cp-queue-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 4px;
+  cursor: ew-resize;
+  z-index: 5;
+  background: transparent;
+  transition: background 120ms ease;
+}
+.cp-queue-resize::before {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+}
+.cp-queue-resize:hover {
+  background: rgba(108, 255, 141, 0.20);
+}
+/* While dragging, lock cursor + suppress pointer-events on any iframe
+   (notably the YouTube player) so the gesture isn't interrupted when
+   the cursor crosses the embed. */
+body.cp-resizing-drawer { cursor: ew-resize !important; }
+body.cp-resizing-drawer iframe { pointer-events: none; }
+
+/* ── Tab strip — the queue-head is now a real tablist instead of a
+      static title. As we wire more panel features (transcripts, activity
+      history, settings, etc.) they become new .cp-tab pills in this row
+      with no further chrome work. ── */
+.cp-queue-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 6px 6px 0;
+  /* Slight dark wash on the tab strip area pulls it back relative to
+     the active tab so the active pill reads as "raised forward". */
+  background: linear-gradient(180deg, rgba(0,0,0,0.20), rgba(0,0,0,0.0));
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.cp-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  /* Top-rounded only — the tab "merges" into the body when active,
+     standard browser-tab visual idiom. */
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--fg-4);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+  position: relative;
+  margin-bottom: -1px; /* lap onto the head border so active tab visually merges */
+}
+.cp-tab:hover { color: var(--fg-1); background: rgba(255,255,255,0.04); }
+.cp-tab.active {
+  color: var(--color-accent-green);
+  background: linear-gradient(180deg, rgba(108,255,141,0.08), rgba(108,255,141,0.02));
+  border-color: rgba(108,255,141,0.20);
+  border-bottom-color: var(--bg-1); /* visually merges into the body */
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.06),
+    0 -2px 8px rgba(108,255,141,0.10);
+}
+.cp-tab.disabled {
+  color: var(--fg-5);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.cp-tab.disabled:hover { background: transparent; color: var(--fg-5); }
+/* Drag-to-reorder (r44.A) — Zoom-style live shift. The dragged tab
+   lifts (scale + shadow + grabbing cursor) and follows the cursor; the
+   transition kicks in only on OTHER tabs (inline-styled by JS) so they
+   slide out of the way smoothly. The source tab's own transform is
+   driven by JS with `transition: none` so it tracks the cursor 1:1. */
+.cp-tab.dragging {
+  cursor: grabbing;
+  background: rgba(108,255,141,0.10);
+  border-color: rgba(108,255,141,0.25);
+  box-shadow:
+    0 6px 18px rgba(0,0,0,0.32),
+    0 0 0 1px rgba(108,255,141,0.15);
+  /* No opacity drop — Zoom keeps the dragged thing fully opaque so the
+     "this is what's moving" mental model stays crisp. */
+  opacity: 1;
+}
+/* While ANY tab is being dragged, suppress hover styling on the others
+   so they don't flash colours as the cursor sweeps past. */
+body.cp-tab-dragging .cp-tab:not(.dragging):hover {
+  background: transparent;
+  color: var(--fg-4);
+}
+body.cp-tab-dragging { cursor: grabbing; }
+/* The render loop sets `will-change: transform` on tabs only during a
+   drag (via the inline style). This rule provides the resting style. */
+.cp-tab { will-change: auto; }
+.cp-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  background: rgba(108,255,141,0.18);
+  color: var(--color-accent-green);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.cp-tab:not(.active) .cp-tab-badge {
+  background: rgba(255,255,255,0.06);
+  color: var(--fg-3);
+}
+.cp-tab-soon {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.04);
+  color: var(--fg-5);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.cp-tab-filler { flex: 1; }
+.cp-tab-close {
+  align-self: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  margin-bottom: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--fg-4);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.cp-tab-close:hover { color: var(--fg-1); background: rgba(255,255,255,0.06); }
+
+.cp-queue-list { flex: 1; overflow-y: auto; padding: 8px; }
+.cp-queue-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--fg-4);
+}
+.cp-queue-empty-title {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-2);
+}
+.cp-queue-empty-body {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-4);
+  max-width: 260px;
+}
+
+.cp-queue-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.04);
+  margin-bottom: 6px;
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.cp-queue-item.running {
+  background: rgba(var(--accent-rgb), 0.05);
+  border-color: rgba(var(--accent-rgb), 0.3);
+}
+.cp-queue-item.done {
+  background: rgba(var(--accent-rgb), 0.04);
+  border-color: rgba(var(--accent-rgb), 0.2);
+}
+.cp-queue-item.error {
+  background: rgba(232,38,38,0.06);
+  border-color: rgba(232,38,38,0.25);
+}
+.cp-queue-num {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-5);
+  flex-shrink: 0;
+  width: 18px;
+  text-align: right;
+  padding-top: 2px;
+}
+.cp-queue-body { flex: 1; min-width: 0; }
+.cp-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.cp-queue-name {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-1);
+  letter-spacing: -0.005em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.cp-queue-status {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: var(--fg-4);
+  background: rgba(255,255,255,0.04);
+}
+.cp-queue-status.running { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
+.cp-queue-status.done    { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
+.cp-queue-status.error   { color: #ff8a8a; background: rgba(232,38,38,0.14); }
+
+.cp-queue-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.cp-queue-meta .arrow { color: var(--fg-5); flex-shrink: 0; }
+.cp-queue-meta .sep   { color: var(--fg-5); flex-shrink: 0; }
+.cp-queue-meta .tc    { flex-shrink: 0; }
+.cp-queue-meta .dur   { flex-shrink: 0; }
+.cp-queue-meta .fmt   {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-3);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.cp-queue-error {
+  margin-top: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #ff9a9a;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.cp-queue-actions { display: flex; align-items: flex-start; gap: 2px; }
+.cp-queue-iconbtn {
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  color: var(--fg-4);
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.cp-queue-iconbtn:hover { color: var(--fg-1); background: rgba(255,255,255,0.05); }
+.cp-queue-iconbtn.danger:hover { color: #ff8a8a; background: rgba(232,38,38,0.10); }
+
+.cp-queue-foot {
+  border-top: 1px solid rgba(255,255,255,0.05);
+  padding: 10px 12px 14px;
+}
+.cp-queue-summary {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--fg-4);
+}
+.cp-queue-summary .ok  { color: var(--accent); }
+.cp-queue-summary .err { color: #ff8a8a; }
+.cp-queue-foot-row { display: flex; gap: 8px; }
+.cp-queue-foot-row .btn { flex: 1; }
+.cp-queue-foot-row .btn-ghost { flex: 0 0 auto; padding: 0 14px; }
+.cp-queue-stop {
+  background: rgba(232,38,38,0.14);
+  border: 1px solid rgba(232,38,38,0.35);
+  color: #ff8a8a;
+}
+.cp-queue-stop:hover { background: rgba(232,38,38,0.20); color: #fff; }
+
+/* Toolbar drawer toggle badge */
+.cp-queue-toggle { position: relative; }
+.cp-queue-toggle.has-items { border-color: rgba(var(--accent-rgb), 0.35); color: var(--fg-1); }
+.cp-queue-toggle.active { background: rgba(255,255,255,0.06); }
+.cp-queue-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #0A0A0D;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Sidebar "+ Add to queue" small button */
+.cp-add-queue {
+  width: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+}
+

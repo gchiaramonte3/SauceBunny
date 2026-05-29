@@ -1,0 +1,170 @@
+/* Button system — primary, ghost, danger, icon. r48 split. */
+/* ============================================================
+   BUTTONS — visual refresh round
+   Three patterns, all sharing the same bevel shadow stack so the
+   button system reads as one family. The primary CTA gets the green
+   gradient + outer aura; ghost/default get a subtle inset highlight
+   so they feel raised instead of pasted-on.
+   ============================================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--fg-1);
+  /* Subtle vertical gradient — top edge fractionally lighter than the
+     bottom — combined with the bevel shadow gives the "raised chip"
+     read without committing to skeuomorphic gloss. */
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              filter var(--dur-fast) var(--ease-out);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  box-shadow: var(--bevel-raised);
+}
+.btn:hover {
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04));
+  border-color: rgba(255,255,255,0.14);
+  box-shadow: var(--bevel-raised-hover);
+  transform: translateY(-1px);
+}
+.btn:active {
+  transform: translateY(0);
+  box-shadow: var(--bevel-pressed);
+}
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  box-shadow: var(--bevel-raised);
+  transform: none;
+}
+
+.btn-primary {
+  /* Two-stop green gradient (light at top → core accent at bottom)
+     reads as "lit from above". Dark text for AAA contrast against
+     the bright fill. The glow stack does the heavy lifting. */
+  background: linear-gradient(180deg, var(--color-accent-green-2) 0%, var(--color-accent-green) 100%);
+  color: #0A0A0D;
+  border-color: transparent;
+  box-shadow: var(--glow-green-cta);
+}
+.btn-primary:hover {
+  filter: brightness(1.04);
+  background: linear-gradient(180deg, var(--color-accent-green-2) 0%, var(--color-accent-green) 100%);
+  border-color: transparent;
+  box-shadow: var(--glow-green-cta-hover);
+  transform: translateY(-1px);
+}
+.btn-primary:active {
+  transform: translateY(0);
+  filter: brightness(0.96);
+  box-shadow:
+    inset 0 1px 2px rgba(0,0,0,0.20),
+    0 0 0 1px rgba(108,255,141,0.40),
+    0 2px 8px rgba(108,255,141,0.20);
+}
+.btn-primary:disabled {
+  background: rgba(var(--accent-rgb), 0.15);
+  color: var(--fg-4);
+  box-shadow: var(--bevel-raised);
+}
+
+.btn-icon {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  /* Same gradient + bevel as .btn — keeps icon buttons in the same
+     button family. They were previously flat-transparent which made
+     them feel disconnected from the labeled buttons next to them. */
+  background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01));
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 7px;
+  color: var(--fg-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+  box-shadow: var(--bevel-raised);
+}
+.btn-icon:hover {
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03));
+  color: var(--fg-1);
+  border-color: rgba(255,255,255,0.16);
+  box-shadow: var(--bevel-raised-hover);
+  transform: translateY(-1px);
+}
+.btn-icon:active {
+  transform: translateY(0);
+  box-shadow: var(--bevel-pressed);
+}
+
+.btn-ghost {
+  /* Ghost = transparent fill but keeps the bevel + border so it still
+     reads as "pressable" instead of "a div with text on it". */
+  background: linear-gradient(180deg, rgba(255,255,255,0.025), transparent);
+  border-color: rgba(255,255,255,0.10);
+  color: var(--fg-2);
+}
+.btn-ghost:hover {
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.01));
+  border-color: rgba(255,255,255,0.18);
+}
+
+/* Toolbar ghost buttons get a brighter neon-green hover treatment than
+   the rest of the app. The toolbar is where the user lives ~80% of the
+   time (Clear / Fetch / Import), so these buttons earning more visual
+   attention is good — but we don't want every .btn-ghost across the app
+   to flare green on hover (queue Export N, Reveal in Finder, settings
+   Clear cache, etc. should stay subtle). Scoped to .cp-toolbar only. */
+.cp-toolbar .btn.btn-ghost:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(108,255,141,0.14), rgba(108,255,141,0.04));
+  border-color: rgba(108,255,141,0.55);
+  color: var(--fg-1);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.12),
+    inset 0 -1px 0 rgba(0,0,0,0.20),
+    0 0 0 1px rgba(108,255,141,0.30),
+    0 0 22px rgba(108,255,141,0.45),
+    0 4px 14px rgba(0,0,0,0.30);
+  transform: translateY(-1px);
+}
+.cp-toolbar .btn.btn-ghost:active:not(:disabled) {
+  transform: translateY(0);
+  /* Pressed state — bevel inverts, glow dampens but stays present so
+     the click feels like the button absorbing the input. */
+  box-shadow:
+    inset 0 1px 2px rgba(0,0,0,0.25),
+    0 0 0 1px rgba(108,255,141,0.40),
+    0 0 12px rgba(108,255,141,0.25);
+}
+
+/* Compact modifier — shorter, tighter padding, smaller text. Used in
+   chrome strips like the pipeline footer where the default 30px button
+   would steal too much vertical space. Keeps the border + ghost look so
+   it visually rhymes with the top-toolbar Clear button. */
+.btn.btn-compact {
+  height: 22px;
+  padding: 0 10px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 600;
+  border-radius: 5px;
+}
+

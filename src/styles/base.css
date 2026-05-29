@@ -1,0 +1,76 @@
+/* Foundational — reset, body, fonts, accessibility. r48 split. */
+/* Sauce Bunny — editorial source-acquisition utility (Ella tokens). */
+@import './tokens.css';
+
+* {
+  box-sizing: border-box;
+  /* Global tabular numerics — since the whole app is now Nunito Sans
+     (proportional), we'd lose timecode column alignment without this.
+     `tabular-nums` only re-widths digits, never affects letters, so
+     it's safe to apply universally. The old `--font-mono` references
+     don't need to be hunted down individually any more. */
+  font-variant-numeric: tabular-nums;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  font-family: var(--font-sans);
+  color: var(--fg-1);
+  background: var(--bg-1);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+/* Chrome by default is non-selectable; text input + content surfaces
+   opt back in. The explicit -webkit-* prefix is necessary because
+   WKWebView's text selection engine doesn't always honor the
+   unprefixed property on click-and-drag (r42 — user reported they
+   could highlight tab labels like "Transcript"). */
+input, textarea, [contenteditable] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* Explicitly mark surfaces that are genuinely prose / user content —
+   so r-click "Copy" works there without invading chrome. */
+.cp-tx-body,
+.cp-tx-cue,
+.cp-tx-turn-body,
+.cp-logs-area,
+.cp-canvas-toast .text {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+::selection { background: rgba(108,255,141,0.3); color: var(--fg-1); }
+
+/* ============================================================
+   ACCENT
+   ============================================================ */
+:root {
+  --accent: var(--ella-green);
+  --accent-rgb: 108, 255, 141;
+  /* Selection-marker color used for timeline ranges, mark in/out lines,
+     and the running-queue-item pulse. Was orange (#E87826) — too close
+     to a "warning" semantic and clashed with the green accent on focus.
+     Now uses the brand violet from the user's palette: signals
+     "selected/active" without competing with the success-green CTAs. */
+  --marker: #6D52ED;
+  --marker-rgb: 109, 82, 237;
+}
+
+/* ============================================================
+   FOCUS
+   ============================================================ */
+button:focus-visible, input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.4);
+}
+

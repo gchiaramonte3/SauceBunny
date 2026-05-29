@@ -1,0 +1,784 @@
+/* Transcript viewer — header, search, roster, body, popovers. r48 split. */
+/* ─────────────────────────────────────────────────────────────────
+   Transcript tab — the right-drawer's reader view.
+   Layout: flex column, header sticky-ish, search row sticky-ish,
+   body scrolls. Per-turn "chat bubble" with speaker pip + jump-to.
+   ───────────────────────────────────────────────────────────────── */
+
+/* Tiny dot rendered in the tab strip when a fresh transcript arrives
+   and the user is looking at another tab. Pulses to draw the eye. */
+.cp-tab-pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: var(--color-accent-green);
+  box-shadow: 0 0 6px var(--color-accent-green);
+  animation: cp-tab-pulse 1.6s ease-in-out infinite;
+}
+@keyframes cp-tab-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+.cp-tx-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0; /* lets the body actually shrink + scroll inside flex parent */
+  position: relative; /* anchor for the floating Follow-playback pill (r65) */
+}
+
+.cp-tx-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.015);
+}
+.cp-tx-origin { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.cp-tx-origin-tag {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-accent-green);
+  background: rgba(108, 255, 141, 0.08);
+  border: 1px solid rgba(108, 255, 141, 0.18);
+}
+.cp-tx-filename {
+  font-size: 11px;
+  color: var(--fg-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.cp-tx-head-actions { display: flex; gap: 4px; flex-shrink: 0; }
+/* Left-side actions row pushes the right side away — replaces a
+   marginRight: "auto" inline style (r46). */
+.cp-tx-head-left { margin-right: auto; }
+/* × glyph in iconbtns is visually a different baseline than the SVG
+   icons; bump font-size + line-height to match. Replaces an inline
+   style block on the dismiss button (r46). */
+.cp-tx-glyph-x { font-size: 13px; line-height: 1; }
+.cp-tx-iconbtn {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.cp-tx-iconbtn.active {
+  color: var(--color-accent-green);
+  background: rgba(108, 255, 141, 0.08);
+  border-color: rgba(108, 255, 141, 0.18);
+}
+
+/* Transcript history popover — opens from the "History" header button.
+   Right-aligned + portaled so it can overflow the drawer width. */
+.cp-tx-history {
+  position: fixed;
+  background: var(--bg-1, #161616);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+  z-index: 9998;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.cp-tx-history-head {
+  padding: 8px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.015);
+}
+.cp-tx-history-count {
+  font-size: 10px;
+  color: var(--fg-3);
+  background: rgba(255,255,255,0.05);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+.cp-tx-history-empty {
+  padding: 20px 16px;
+  font-size: 12px;
+  color: var(--fg-4);
+  line-height: 1.5;
+  text-align: center;
+}
+.cp-tx-history-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+}
+.cp-tx-history-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 80ms ease;
+}
+.cp-tx-history-row:hover { background: rgba(108, 255, 141, 0.06); }
+.cp-tx-history-row.active {
+  background: rgba(108, 255, 141, 0.08);
+  border-left-color: var(--color-accent-green);
+}
+.cp-tx-history-row-main { flex: 1; min-width: 0; }
+.cp-tx-history-row-title {
+  font-size: 12px;
+  color: var(--fg-2);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cp-tx-history-row-meta {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 10px;
+  color: var(--fg-4);
+  margin-top: 2px;
+}
+.cp-tx-history-origin {
+  font-weight: 600;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cp-tx-history-active-pill {
+  color: var(--color-accent-green);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cp-tx-history-row-remove {
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  color: var(--fg-5);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.cp-tx-history-row-remove:hover {
+  color: var(--fg-1);
+  background: rgba(255,80,80,0.12);
+}
+
+.cp-tx-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: var(--bg-0);
+}
+/* Segmented mode pill — Text · Speakers. Kept compact so the search
+   input next to it doesn't lose meaningful width. Active button glows
+   green to match the accent on the input's :focus state. */
+.cp-tx-search-mode {
+  display: inline-flex;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 5px;
+  padding: 1px;
+}
+.cp-tx-search-mode-btn {
+  height: 24px;
+  padding: 0 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--fg-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cp-tx-search-mode-btn:hover { color: var(--fg-1); }
+.cp-tx-search-mode-btn.active {
+  background: rgba(108, 255, 141, 0.10);
+  color: var(--color-accent-green);
+}
+.cp-tx-search-input {
+  flex: 1;
+  height: 28px;
+  padding: 0 10px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 5px;
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  outline: none;
+}
+.cp-tx-search-input:focus {
+  border-color: rgba(108, 255, 141, 0.45);
+  background: rgba(108, 255, 141, 0.04);
+}
+.cp-tx-search-count {
+  font-size: 10px;
+  color: var(--fg-4);
+  white-space: nowrap;
+}
+/* Empty-keybinding indicator inside the commands list (Settings ▸ Commands).
+   Replaces an inline style block with hardcoded fallback hex (r46). */
+.cp-cmd-empty-key {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.cp-tx-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 12px 0;
+  scroll-behavior: smooth;
+}
+
+/* One turn = one chat bubble. Speaker chip + name on top, prose below. */
+.cp-tx-turn {
+  margin-bottom: 18px;
+}
+.cp-tx-turn-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.cp-tx-speaker {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  color: #0a0a0a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
+}
+.cp-tx-speaker-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-2);
+  flex: 1;
+  min-width: 0;
+}
+.cp-tx-jump {
+  font-size: 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--fg-4);
+  background: transparent;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.cp-tx-jump:hover {
+  color: var(--color-accent-green);
+  background: rgba(255,255,255,0.04);
+}
+
+.cp-tx-turn-body {
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg-2);
+  /* Use a more "prose" font hint — falls back to sans gracefully if
+     the host doesn't have a serif loaded. The transcript is content
+     a person said; the chrome around it is tooling. */
+  font-family: "Newsreader", "Iowan Old Style", Georgia, serif;
+}
+
+/* Cue = one timestamped line inside a turn. Inline so they wrap as
+   prose; the karaoke highlight is a background change on the span. */
+.cp-tx-cue {
+  display: inline;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background-color 80ms ease, color 80ms ease;
+}
+.cp-tx-cue:hover {
+  background: rgba(108, 255, 141, 0.06);
+}
+.cp-tx-cue.active {
+  background: rgba(108, 255, 141, 0.18);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(108, 255, 141, 0.28);
+}
+.cp-tx-cue.match {
+  background: rgba(247, 184, 74, 0.12);
+}
+.cp-tx-cue.match-active {
+  background: rgba(247, 184, 74, 0.28);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(247, 184, 74, 0.42);
+}
+.cp-tx-mark {
+  background: transparent;
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: rgba(247, 184, 74, 0.7);
+  text-underline-offset: 2px;
+}
+
+.cp-tx-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 24px;
+  gap: 6px;
+}
+.cp-tx-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-2);
+}
+.cp-tx-empty-body {
+  font-size: 12px;
+  color: var(--fg-4);
+  line-height: 1.5;
+  max-width: 280px;
+}
+.cp-tx-empty-actions { margin-top: 12px; display: flex; gap: 8px; }
+
+/* Download dropdown — anchored to the Download button in the header. */
+.cp-tx-head-actions { position: relative; }
+.cp-tx-dl-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 200px;
+  background: var(--bg-1, #161616);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  padding: 4px 0;
+  z-index: 200;
+}
+.cp-tx-dl-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  color: var(--fg-2);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cp-tx-dl-menu button:hover {
+  background: rgba(108, 255, 141, 0.08);
+  color: var(--color-accent-green);
+}
+.cp-tx-dl-sep {
+  height: 1px;
+  background: rgba(255,255,255,0.06);
+  margin: 4px 0;
+}
+
+/* Renamed speaker chip — subtle outline so the user can see at a glance
+   which speakers they've customised vs the model defaults. */
+.cp-tx-speaker { cursor: pointer; transition: transform 80ms ease, box-shadow 80ms ease; }
+.cp-tx-speaker:hover { transform: scale(1.05); }
+.cp-tx-speaker.renamed {
+  box-shadow: 0 0 0 2px var(--bg-0, #0a0a0a), 0 0 0 3px var(--color-accent-green);
+}
+
+/* Rename popover — portaled to body, positioned next to the chip. */
+.cp-tx-rename {
+  position: fixed;
+  background: var(--bg-1, #161616);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+  padding: 12px;
+  z-index: 9998;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cp-tx-rename-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+.cp-tx-rename-input {
+  height: 28px;
+  padding: 0 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 5px;
+  color: var(--fg-1);
+  font: 12px var(--font-sans);
+  outline: none;
+}
+.cp-tx-rename-input:focus {
+  border-color: rgba(108, 255, 141, 0.5);
+  background: rgba(108, 255, 141, 0.05);
+}
+/* Merge-confirm variant — shares the rename popover's chrome. The body
+   and hint lines used to be inline-styled in r34; promoted to classes
+   in r46.B when the popover was extracted into its own file. */
+.cp-tx-merge-body { font-size: 12px; color: var(--fg-2); line-height: 1.45; }
+.cp-tx-merge-hint { font-size: 11px; color: var(--fg-4); }
+.cp-tx-rename-scope { display: flex; flex-direction: column; gap: 4px; padding: 2px 0; }
+.cp-tx-rename-scope label {
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: 11px; color: var(--fg-3); cursor: pointer; line-height: 1.4;
+}
+.cp-tx-rename-scope input[type="radio"] {
+  margin-top: 2px; flex-shrink: 0; accent-color: var(--color-accent-green);
+}
+.cp-tx-rename-scope strong { color: var(--fg-2); font-weight: 600; }
+.cp-tx-rename-actions {
+  display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px;
+}
+.cp-tx-rename-actions .btn { height: 26px; padding: 0 12px; font-size: 11px; }
+
+/* Inline opt-in checkbox row used in the Sidebar Whisper section
+   for the "Detect speakers" toggle. Quiet by design — sits between
+   captions and Generate without competing for attention. */
+.cp-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  font-size: 12px;
+  color: var(--fg-2);
+  cursor: pointer;
+  user-select: none;
+}
+.cp-toggle-row input[type="checkbox"] {
+  accent-color: var(--color-accent-green);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.cp-toggle-row input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.cp-toggle-row .lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cp-toggle-row .beta {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(108, 255, 141, 0.10);
+  color: var(--color-accent-green);
+  border: 1px solid rgba(108, 255, 141, 0.18);
+}
+.cp-toggle-row .cp-hint-ok {
+  font-size: 10px;
+  color: var(--color-accent-green);
+  font-weight: 600;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+/* Small inline select used for the "Expected speakers" dropdown
+   under the Detect-speakers checkbox. Sized to match the toggle-row
+   typography so the two read as a single control. */
+.cp-mini-select {
+  margin-left: auto;
+  height: 22px;
+  padding: 0 4px;
+  font: 11px var(--font-sans);
+  color: var(--fg-2);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+}
+.cp-mini-select:focus { border-color: rgba(108, 255, 141, 0.45); }
+.cp-mini-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Folder-picker row used in Settings → Transcription (library path).
+   Path ellipsises; buttons stay flush right. */
+.cp-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 6px;
+}
+.cp-folder-path {
+  flex: 1;
+  min-width: 0;
+  font: 12px var(--font-mono, ui-monospace, monospace);
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cp-folder-row .btn { height: 26px; padding: 0 10px; font-size: 11px; flex-shrink: 0; }
+
+/* Inline diagnostic banner in the TranscriptViewer body — used when
+   we want to nudge the user (e.g. "no speakers in this transcript"). */
+/* Slim, muted "no speaker labels" hint (r65) — quiet info strip, not a
+   full-width yellow warning. One line, tucked under the search row. */
+.cp-tx-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 7px 8px 7px 10px;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.025);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.cp-tx-hint-ico { color: var(--fg-4); flex-shrink: 0; }
+.cp-tx-hint-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+}
+.cp-tx-hint-text em { font-style: normal; color: var(--fg-2); font-weight: 600; }
+.cp-tx-hint-action {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 9px;
+  background: rgba(108, 255, 141, 0.10);
+  border: 1px solid rgba(108, 255, 141, 0.22);
+  border-radius: 4px;
+  color: var(--color-accent-green);
+  font: 600 11px var(--font-sans);
+  cursor: pointer;
+}
+.cp-tx-hint-action:hover { background: rgba(108, 255, 141, 0.18); }
+.cp-tx-hint-action:disabled { opacity: 0.6; cursor: not-allowed; }
+.cp-tx-hint-close {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  color: var(--fg-4);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.cp-tx-hint-close:hover { color: var(--fg-1); background: rgba(255,255,255,0.06); }
+
+/* Compact icon action in the search row (e.g. Reset speaker names) — sized
+   so the row can't clip the way the old text buttons did (r65). */
+.cp-tx-icon-action {
+  flex-shrink: 0;
+  width: 26px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.cp-tx-icon-action:hover { background: rgba(255,255,255,0.09); color: var(--fg-1); }
+
+/* Floating "Follow playback" pill (r65) — sits over the transcript body,
+   bottom-center, when the user has scrolled away from the playhead. */
+.cp-tx-follow-pill {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font: 600 11px var(--font-sans);
+  color: #0a0a0a;
+  background: var(--color-accent-green);
+  border: none;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.4), 0 0 0 1px rgba(108,255,141,0.4);
+  cursor: pointer;
+  animation: cp-fade-in var(--dur-fast, 140ms) var(--ease-out, ease);
+}
+.cp-tx-follow-pill:hover { filter: brightness(1.08); }
+.cp-tx-follow-pill:active { transform: translateX(-50%) scale(0.97); }
+
+/* Pipeline phase tracker (Whisper → Diarize → Merge) under the
+   Generate-transcript button. Quiet typography — the user only looks
+   at this when the bar isn't moving. */
+.cp-phase-track {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px 2px;
+  font-size: 10px;
+  color: var(--fg-4);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.cp-phase-track .step {
+  opacity: 0.45;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.cp-phase-track .step.done {
+  opacity: 1;
+  color: var(--fg-3);
+}
+.cp-phase-track .step.active {
+  opacity: 1;
+  color: var(--color-accent-green);
+  text-shadow: 0 0 6px rgba(108, 255, 141, 0.5);
+}
+.cp-phase-track .sep { opacity: 0.3; }
+
+/* ─────────────────────────────────────────────────────────────────
+   Transcript roster — horizontal strip of speaker chips above the
+   transcript body. Drag any chip onto another to merge speakers.
+   ───────────────────────────────────────────────────────────────── */
+
+.cp-tx-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.015);
+}
+.cp-tx-roster-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.cp-tx-roster-hint {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--fg-5);
+  font-size: 10px;
+}
+.cp-tx-roster-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cp-tx-roster-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 4px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--fg-2);
+  cursor: grab;
+  user-select: none;
+  transition: transform 80ms ease, border-color 80ms ease, background 80ms ease;
+}
+.cp-tx-roster-chip:hover {
+  background: rgba(255,255,255,0.07);
+}
+.cp-tx-roster-chip:active { cursor: grabbing; }
+.cp-tx-roster-chip.dragging {
+  opacity: 0.55;
+  transform: scale(0.97);
+}
+.cp-tx-roster-chip.drop-hover {
+  border-color: var(--color-accent-green);
+  background: rgba(108, 255, 141, 0.10);
+  box-shadow: 0 0 0 1px var(--color-accent-green), 0 0 12px rgba(108, 255, 141, 0.4);
+  transform: scale(1.04);
+}
+.cp-tx-roster-pip {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+  color: #0a0a0a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+.cp-tx-roster-name { font-weight: 600; pointer-events: none; }
+.cp-tx-roster-count {
+  font-size: 10px;
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+  background: rgba(255,255,255,0.05);
+  padding: 1px 5px;
+  border-radius: 3px;
+  pointer-events: none;
+}
+.cp-tx-roster-unmerge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(108, 255, 141, 0.10);
+  color: var(--color-accent-green);
+  border: 1px solid rgba(108, 255, 141, 0.18);
+  cursor: pointer;
+  margin-left: 2px;
+}
+.cp-tx-roster-unmerge:hover {
+  background: rgba(108, 255, 141, 0.18);
+}

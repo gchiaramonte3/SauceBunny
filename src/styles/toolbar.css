@@ -1,0 +1,116 @@
+/* Top toolbar — URL bar, import, queue toggle. r48 split. */
+/* ============================================================
+   TOP TOOLBAR
+   ============================================================ */
+.cp-toolbar {
+  height: 60px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 18px;
+  background: linear-gradient(180deg, rgba(20,20,21,0.5), rgba(14,14,16,0.3));
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  backdrop-filter: blur(20px);
+}
+
+.cp-wordmark {
+  font-family: var(--font-sans);
+  font-weight: 800;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+  user-select: none;
+}
+/* Gradient-text fill for the wordmark itself — uses the brand wash
+   constant so any future palette tweak propagates. `background-clip:
+   text` requires transparent color. Solid white fallback (legacy WebKit
+   pre-clip support) is implicit via the `color` declaration if a host
+   ever fails to honour the clip property. */
+.cp-wordmark > span:first-child {
+  background: var(--grad-text-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.cp-wordmark .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+  transform: translateY(-1px);
+  /* Two-stop glow — inner halo + soft outer ambient — for a more
+     "alive" indicator than the previous flat single-shadow. */
+  box-shadow:
+    0 0 0 1px rgba(108,255,141,0.35),
+    0 0 6px rgba(108,255,141,0.65),
+    0 0 14px rgba(108,255,141,0.30);
+  animation: cp-dot-pulse 2.8s var(--ease-in-out) infinite;
+}
+@keyframes cp-dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(108,255,141,0.35), 0 0 6px rgba(108,255,141,0.65), 0 0 14px rgba(108,255,141,0.30); }
+  50%      { box-shadow: 0 0 0 1px rgba(108,255,141,0.45), 0 0 10px rgba(108,255,141,0.85), 0 0 22px rgba(108,255,141,0.50); }
+}
+
+/* Reusable gradient-text utility — apply with className="cp-grad-text"
+   on any inline element to give it the brand wash treatment. Tasteful
+   sprinkle only — use on max 1-2 headline words per surface so it
+   stays an accent rather than noise. */
+.cp-grad-text {
+  background: var(--grad-text-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.cp-wordmark-sub {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--fg-4);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(255,255,255,0.08);
+}
+
+.cp-url {
+  flex: 1;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  transition: all var(--dur-base) var(--ease-out);
+  max-width: 720px;
+  margin: 0 auto;
+}
+.cp-url:focus-within {
+  border-color: rgba(var(--accent-rgb), 0.5);
+  background: rgba(0,0,0,0.55);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.08);
+}
+.cp-url input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--fg-1);
+  letter-spacing: -0.005em;
+}
+.cp-url input::placeholder { color: var(--fg-4); }
+.cp-url .scheme {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-4);
+}
+

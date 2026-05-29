@@ -1,0 +1,263 @@
+/* ============================================================
+   Ella (by Novella) — Color + Type Tokens
+   ============================================================
+   Ella is a dark-first Chrome extension for generative video +
+   image creation. The palette is built around deep near-black
+   surfaces, a neon "Ella green" as the signature brand accent,
+   a Novella purple as the secondary brand, and a small set of
+   tints used for status + iconography in the editor.
+   ============================================================ */
+
+/* ---------- Fonts ---------- */
+/* Primary: Nunito Sans (UI + display) — bundled locally in fonts/.
+   Secondary: Inter (data, metadata, small caps, logos) — Google Fonts.
+   Mono: JetBrains Mono (rare — debug / code only) — Google Fonts. */
+
+@font-face { font-family: 'Nunito Sans'; font-style: normal; font-weight: 200; src: url('fonts/NunitoSans-ExtraLight.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Nunito Sans'; font-style: italic; font-weight: 200; src: url('fonts/NunitoSans-ExtraLightItalic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Nunito Sans'; font-style: normal; font-weight: 300; src: url('fonts/NunitoSans-Light.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Nunito Sans'; font-style: italic; font-weight: 300; src: url('fonts/NunitoSans-LightItalic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Nunito Sans'; font-style: normal; font-weight: 400; src: url('fonts/NunitoSans-Regular.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Nunito Sans'; font-style: italic; font-weight: 400; src: url('fonts/NunitoSans-Italic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Nunito Sans'; font-style: normal; font-weight: 600; src: url('fonts/NunitoSans-SemiBold.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Nunito Sans'; font-style: italic; font-weight: 600; src: url('fonts/NunitoSans-SemiBoldItalic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Nunito Sans'; font-style: normal; font-weight: 700; src: url('fonts/NunitoSans-Bold.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Nunito Sans'; font-style: italic; font-weight: 700; src: url('fonts/NunitoSans-BoldItalic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Nunito Sans'; font-style: normal; font-weight: 800; src: url('fonts/NunitoSans-ExtraBold.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Nunito Sans'; font-style: italic; font-weight: 800; src: url('fonts/NunitoSans-ExtraBoldItalic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Nunito Sans'; font-style: normal; font-weight: 900; src: url('fonts/NunitoSans-Black.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Nunito Sans'; font-style: italic; font-weight: 900; src: url('fonts/NunitoSans-BlackItalic.ttf') format('truetype'); font-display: swap; }
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* Poppins — marketing / display alt. Bundled locally. */
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 100; src: url('fonts/Poppins-Thin.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: italic; font-weight: 100; src: url('fonts/Poppins-ThinItalic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 200; src: url('fonts/Poppins-ExtraLight.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: italic; font-weight: 200; src: url('fonts/Poppins-ExtraLightItalic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 300; src: url('fonts/Poppins-Light.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: italic; font-weight: 300; src: url('fonts/Poppins-LightItalic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 400; src: url('fonts/Poppins-Regular.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: italic; font-weight: 400; src: url('fonts/Poppins-Italic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 500; src: url('fonts/Poppins-Medium.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: italic; font-weight: 500; src: url('fonts/Poppins-MediumItalic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 600; src: url('fonts/Poppins-SemiBold.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: italic; font-weight: 600; src: url('fonts/Poppins-SemiBoldItalic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 700; src: url('fonts/Poppins-Bold.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: italic; font-weight: 700; src: url('fonts/Poppins-BoldItalic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 800; src: url('fonts/Poppins-ExtraBold.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: italic; font-weight: 800; src: url('fonts/Poppins-ExtraBoldItalic.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 900; src: url('fonts/Poppins-Black.ttf') format('truetype'); font-display: swap; }
+@font-face { font-family: 'Poppins'; font-style: italic; font-weight: 900; src: url('fonts/Poppins-BlackItalic.ttf') format('truetype'); font-display: swap; }
+
+:root {
+  /* ---------- Brand ---------- */
+  --ella-green:      #6CFF8D;   /* rgb(108,255,141) — primary brand accent */
+  --ella-green-2:    #88F362;   /* secondary green tint */
+  --novella-purple:  #8627FF;   /* rgb(134,39,255) — Novella brand purple */
+  --novella-purple-2:#4826E8;   /* deep purple (marketing bgs) */
+  --novella-violet:  #6D52ED;   /* cooler violet tint (shadows) */
+  --novella-magenta: #C54AF7;   /* accent magenta (gradients) */
+  --novella-fuchsia: #B519F5;   /* fuchsia (highlight) */
+  --novella-blue:    #1969F5;   /* supporting blue */
+
+  /* ---------- Neutrals (dark surfaces) ---------- */
+  --bg-0:   #0A0A0D;   /* app background (nav bar) */
+  --bg-1:   #0E0E10;   /* panel / extension body */
+  --bg-2:   #141415;   /* card */
+  --bg-3:   #1E1D20;   /* raised surface */
+  --bg-4:   #28272A;   /* input / field */
+  --bg-5:   #403F46;   /* elevated control */
+  --bg-hair:#141419;   /* hairline bg tint */
+
+  /* ---------- Neutrals (light / content) ---------- */
+  --fg-0:   #FFFFFF;
+  --fg-1:   #F5F5F5;   /* primary text on dark */
+  --fg-2:   #E4E4E6;   /* body text */
+  --fg-3:   #A2A0AA;   /* muted / secondary */
+  --fg-4:   #71717A;   /* tertiary / disabled */
+  --fg-5:   #666666;   /* faint meta */
+
+  /* ---------- Strokes ---------- */
+  --stroke-1: #141419;   /* panel divider */
+  --stroke-2: #28272A;   /* input border */
+  --stroke-3: #403F46;   /* emphasized border */
+  --stroke-green: rgba(108,255,141,0.6);
+
+  /* ---------- Semantic ---------- */
+  --success:  #6CFF8D;
+  --warning:  #E87826;   /* rgb(232,120,38) */
+  --danger:   #E82626;   /* rgb(232,38,38) */
+  --danger-2: #C2252D;   /* rgb(194,37,45) */
+  --info:     #1969F5;
+
+  /* ---------- Shadows (from figma effect tokens) ---------- */
+  --shadow-soft:   0 2px 8px rgba(20,20,21,0.20);
+  --shadow-card:   0 8px 24px rgba(20,20,21,0.60);
+  --shadow-glow-green:  0 0 24px rgba(108,255,141,0.35);
+  --shadow-glow-purple: 0 0 32px rgba(134,39,255,0.45);
+  --shadow-inset-hair:  inset 0 0 0 1px rgba(255,255,255,0.04);
+
+  /* ---------- Radii ---------- */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;   /* extension body, cards */
+  --r-xl: 16px;
+  --r-pill: 999px;
+
+  /* ---------- Spacing (4-based) ---------- */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-7: 28px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+
+  /* ---------- Type families ---------- */
+  --font-sans: 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-display: 'Poppins', 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-ui:   'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* ---------- Type scale (extension-first, 370×981 canvas) ---------- */
+  --fs-10: 10px;  --lh-10: 12px;
+  --fs-11: 11px;  --lh-11: 14px;
+  --fs-12: 12px;  --lh-12: 16px;
+  --fs-13: 13px;  --lh-13: 18px;
+  --fs-14: 14px;  --lh-14: 20px;
+  --fs-16: 16px;  --lh-16: 20px;
+  --fs-18: 18px;  --lh-18: 24px;
+  --fs-20: 20px;  --lh-20: 28px;
+  --fs-24: 24px;  --lh-24: 32px;
+  --fs-40: 40px;  --lh-40: 48px;
+  --fs-72: 72px;  --lh-72: 80px;
+  --fs-120: 120px; --lh-120: 110%;
+
+  /* ---------- Motion ---------- */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 280ms;
+}
+
+/* ============================================================
+   Semantic type styles
+   ============================================================ */
+
+.ella-display {
+  font-family: var(--font-sans);
+  font-weight: 800;      /* Nunito Sans ExtraBold */
+  font-size: var(--fs-72);
+  line-height: 110%;
+  letter-spacing: -0.02em;
+  color: var(--fg-0);
+}
+
+.ella-h1 {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: var(--fs-40);
+  line-height: var(--lh-40);
+  letter-spacing: -0.01em;
+  color: var(--fg-1);
+}
+
+.ella-h2 {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: var(--fs-24);
+  line-height: var(--lh-24);
+  color: var(--fg-1);
+}
+
+.ella-h3 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: var(--fs-18);
+  line-height: var(--lh-18);
+  color: var(--fg-1);
+}
+
+.ella-title-sm {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  color: var(--fg-1);
+}
+
+.ella-body {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  color: var(--fg-2);
+}
+
+.ella-body-sm {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+  color: var(--fg-3);
+}
+
+.ella-caption {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-size: var(--fs-11);
+  line-height: var(--lh-11);
+  color: var(--fg-3);
+}
+
+.ella-token {
+  /* small counters, e.g. "15.000 TOKENS" under nav avatar */
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-size: var(--fs-10);
+  line-height: var(--lh-10);
+  letter-spacing: 0.02em;
+  color: var(--fg-3);
+  text-transform: uppercase;
+}
+
+.ella-meta {
+  /* data tags / model chips (Inter Medium 11) */
+  font-family: var(--font-ui);
+  font-weight: 500;
+  font-size: var(--fs-11);
+  line-height: var(--lh-11);
+  color: var(--fg-2);
+}
+
+.ella-italic-hint {
+  /* marketing italic asides e.g. "(Save up to 50%)" */
+  font-family: var(--font-sans);
+  font-style: italic;
+  font-weight: 300;
+  font-size: var(--fs-12);
+  line-height: var(--lh-14);
+  color: var(--fg-3);
+}
+
+.ella-code {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: var(--fs-11);
+  line-height: var(--lh-11);
+  color: var(--fg-2);
+}
+
+/* Brand wordmark utility — only for the literal word 'ella' in brand contexts */
+.ella-wordmark {
+  font-family: var(--font-sans);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Sauce Bunny — Hardened Runtime entitlements for notarization.
+
+        Distribution model: self-hosted notarized DMG (NOT Mac App
+        Store). The App Sandbox keys (com.apple.security.app-sandbox,
+        com.apple.security.files.user-selected.read-write, etc.) are
+        intentionally NOT set — they're App-Store-only requirements
+        that would break our sidecar-spawning architecture for no
+        gain on the .dmg path.
+
+        See DISTRIBUTION.md for the full reasoning + release flow.
+
+        Principle: grant the minimum the app actually needs. Each
+        entitlement here loosens a Hardened Runtime restriction that
+        would otherwise block a real runtime behaviour.
+    -->
+
+    <!--
+        Required: whisper.cpp accelerates inference via Metal compute
+        kernels. Metal shaders are technically JIT-compiled at first
+        use; without allow-jit, the hardened runtime blocks the
+        writable-executable memory pages Metal needs.
+        Also covers WKWebView's JavaScript JIT.
+    -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!--
+        Required: yt-dlp ships as a PyInstaller bundle. At startup it
+        self-extracts the Python interpreter + bundled dylibs into a
+        randomised /tmp directory and dlopen()s them from there. Those
+        dylibs are NOT code-signed by our Developer ID (PyInstaller
+        signs them with its own at build time), so the hardened
+        runtime's default library-validation check blocks the load.
+        This entitlement allows that pattern.
+    -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!--
+        Allowed by default for hardened runtime + Developer ID
+        distribution, but we declare it explicitly so a reviewer can
+        see exactly what surface this app touches. The app makes
+        network calls only for: user-initiated yt-dlp downloads,
+        Whisper model downloads from HuggingFace mirrors, and the
+        diarizer model fetch on first run.
+    -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!--
+        Required: the app reads/writes the user's Documents directory
+        for the transcript library (~/Documents/Sauce Bunny/Transcripts/).
+        Not actually enforced by hardened runtime (this is an App
+        Sandbox key) but harmless to declare and useful as future-
+        proofing if Apple ever adds Documents access prompts outside
+        the sandbox.
+    -->
+    <!-- NOTE: intentionally NOT declaring com.apple.security.app-sandbox
+         here. We are NOT a sandboxed app. -->
+</dict>
+</plist>

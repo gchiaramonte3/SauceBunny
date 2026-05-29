@@ -1,0 +1,62 @@
+[package]
+name = "sauce-bunny"
+version = "0.1.0"
+description = "Sauce Bunny — local-first transcription + diarization"
+authors = ["Sauce Bunny contributors"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "sauce_bunny_lib"
+# Desktop-macOS only (see tauri.conf.json `bundle.targets = ["app", "dmg"]`).
+# `rlib` is what `cargo run` / `tauri dev` link against. The previous
+# ["staticlib", "cdylib", "rlib"] triple caused rustc to fail the bin link
+# step with `crate tauri required to be available in rlib format` once
+# cargo's incremental cache was purged. Re-add cdylib/staticlib only if/when
+# we target iOS / Android / Windows.
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset", "macos-private-api"] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-notification = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+url = "2"
+anyhow = "1"
+once_cell = "1"
+uuid = { version = "1", features = ["v4"] }
+# `blocking` feature powers the localhost media proxy's thread-per-request
+# handler (r58) — reqwest's blocking client must run OUTSIDE a tokio
+# runtime, which the tiny_http worker threads satisfy. The async client
+# (default) is still used by download.rs / transcript.rs.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
+# r58: localhost HTTP media proxy. WKWebView's media engine refuses to
+# issue requests for <video src="custom-scheme://"> (verified empirically
+# in r57 — the custom URI scheme handler was never invoked). It WILL
+# stream from a real http(s) URL. So we run a tiny loopback HTTP server
+# (127.0.0.1, random port, never exposed off-machine) that proxies the
+# yt-dlp-resolved CDN URL with full header control + forwarded Range
+# requests. This is the mpv/VLC pattern. `base64` decodes the upstream
+# URL the frontend packs into the request path.
+tiny_http = "0.12"
+base64 = "0.22"
+# Single source of truth for cross-boundary types (r49). The `#[derive(TS)]`
+# macro expansion is compile-time only and the `export()` machinery is
+# `#[cfg(test)]`-gated, so the runtime binary carries no ts-rs code.
+# Run `cargo test` to refresh `src/bindings/*.ts`.
+ts-rs = "10"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

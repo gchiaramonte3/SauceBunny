@@ -1,0 +1,156 @@
+/* Ella design tokens — slimmed for Sauce Bunny.
+   Typography: self-hosted Nunito Sans via @fontsource/nunito-sans
+   (imported in src/main.tsx). The manual @font-face block that lived
+   here previously is gone — the fontsource package now provides the
+   @font-face declarations with WOFF2 (much smaller than the .ttf files
+   in public/fonts/, which can be deleted once we confirm everything
+   renders). */
+
+:root {
+  --ella-green:      #6CFF8D;
+  --ella-green-2:    #88F362;
+  --novella-purple:  #8627FF;
+  --novella-purple-2:#4826E8;
+  --novella-violet:  #6D52ED;
+  --novella-magenta: #C54AF7;
+  --novella-fuchsia: #B519F5;
+  --novella-blue:    #1969F5;
+
+  --bg-0:   #0A0A0D;
+  --bg-1:   #0E0E10;
+  --bg-2:   #141415;
+  --bg-3:   #1E1D20;
+  --bg-4:   #28272A;
+  --bg-5:   #403F46;
+  --bg-hair:#141419;
+
+  --fg-0:   #FFFFFF;
+  --fg-1:   #F5F5F5;
+  --fg-2:   #E4E4E6;
+  --fg-3:   #A2A0AA;
+  --fg-4:   #71717A;
+  --fg-5:   #666666;
+
+  --stroke-1: #141419;
+  --stroke-2: #28272A;
+  --stroke-3: #403F46;
+  --stroke-green: rgba(108,255,141,0.6);
+
+  --success:  #6CFF8D;
+  --warning:  #E87826;
+  --danger:   #E82626;
+  --danger-2: #C2252D;
+  --info:     #1969F5;
+
+  --shadow-soft:   0 2px 8px rgba(20,20,21,0.20);
+  --shadow-card:   0 8px 24px rgba(20,20,21,0.60);
+  --shadow-glow-green:  0 0 24px rgba(108,255,141,0.35);
+  --shadow-glow-purple: 0 0 32px rgba(134,39,255,0.45);
+  --shadow-inset-hair:  inset 0 0 0 1px rgba(255,255,255,0.04);
+
+  /* ── Bevel shadow stacks — reused across buttons & cards.
+        Top inset highlight + bottom inset shadow + outer cast = depth
+        without committing to skeuomorphism. ── */
+  --bevel-raised:
+    inset 0 1px 0 rgba(255,255,255,0.10),
+    inset 0 -1px 0 rgba(0,0,0,0.35),
+    0 1px 2px rgba(0,0,0,0.30),
+    0 4px 12px rgba(0,0,0,0.20);
+  --bevel-raised-hover:
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    inset 0 -1px 0 rgba(0,0,0,0.40),
+    0 2px 4px rgba(0,0,0,0.35),
+    0 8px 20px rgba(0,0,0,0.28);
+  --bevel-pressed:
+    inset 0 1px 2px rgba(0,0,0,0.45),
+    inset 0 -1px 0 rgba(255,255,255,0.04);
+  /* Green CTA — gradient + outer aura + inset shine. */
+  --glow-green-cta:
+    inset 0 1px 0 rgba(255,255,255,0.30),
+    inset 0 -1px 0 rgba(0,0,0,0.20),
+    0 0 0 1px rgba(108,255,141,0.50),
+    0 6px 18px rgba(108,255,141,0.30),
+    0 1px 3px rgba(0,0,0,0.40);
+  --glow-green-cta-hover:
+    inset 0 1px 0 rgba(255,255,255,0.40),
+    inset 0 -1px 0 rgba(0,0,0,0.20),
+    0 0 0 1px rgba(108,255,141,0.65),
+    0 8px 24px rgba(108,255,141,0.45),
+    0 1px 3px rgba(0,0,0,0.40);
+  /* Selected/active ring — used on sidebar items, toggles ON, queue
+     currently-exporting, etc. Subtle enough to layer over any bg. */
+  --ring-green:
+    0 0 0 1px rgba(108,255,141,0.55),
+    0 0 14px rgba(108,255,141,0.22);
+  --ring-purple:
+    0 0 0 1px rgba(109,82,237,0.55),
+    0 0 14px rgba(109,82,237,0.30);
+
+  /* ── Semantic surface tokens — aliases over the existing bg-N / fg-N
+        scale. Layered in so component CSS can opt into clearer names
+        without breaking historical rules. Mirrors the palette the user
+        proposed; the bg numbers stay in lockstep with the existing scale
+        so the visual change is purely additive.
+        (Comment text avoids the literal asterisk-slash sequence because
+        PostCSS would treat it as the comment terminator and choke on
+        whatever follows.) ── */
+  --color-bg:                #0A0A0B;
+  --color-surface:           #131315;
+  --color-surface-elevated:  #1A1A1D;
+  --color-divider:           #2A2A2E;
+  --color-divider-strong:    #403F46;
+  --color-text-primary:      #FFFFFF;
+  --color-text-secondary:    #8A8A8E;
+  --color-text-tertiary:     #5A5A5E;
+  --color-accent-green:      #6CFF8D;
+  --color-accent-green-2:    #88F362;
+  --color-accent-purple:     #6D52ED;
+  --color-accent-pink:       #C54AF7;
+  --color-destructive:       #FF5C5C;
+  --color-warning:           #FFB545;
+
+  /* Diagonal brand wash — used as background overlay on hero surfaces
+     (canvas empty state, banner backdrops). Subtle in opacity; reads as
+     "premium tinted dark" rather than "skittles". */
+  --grad-brand-wash:
+    radial-gradient(at 12% 8%,  rgba(108,255,141,0.10) 0%, transparent 42%),
+    radial-gradient(at 88% 92%, rgba(109,82,237,0.10) 0%, transparent 48%),
+    radial-gradient(at 70% 10%, rgba(197,74,247,0.06) 0%, transparent 40%);
+  /* Inline-text gradient for the wordmark + occasional headline accent. */
+  --grad-text-brand:
+    linear-gradient(96deg, #6CFF8D 0%, #88F362 30%, #6D52ED 70%, #C54AF7 100%);
+
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-pill: 999px;
+
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-7: 28px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+
+  /* Single typography family across the entire app — Nunito Sans for
+     headlines, labels, body, AND numeric/tabular contexts (timecodes
+     etc.). Nunito Sans supports `font-variant-numeric: tabular-nums`
+     so timecode columns still line up perfectly. The system-font tail
+     is the load-failure fallback only. */
+  --font-sans: 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-ui:   'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 280ms;
+}
+

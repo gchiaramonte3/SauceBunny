@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  typecheck:
+    name: tsc --noEmit
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  cargo-check:
+    name: cargo check (src-tauri)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The Tauri build script validates that every externalBin entry
+      # in tauri.conf.json exists on disk. CI doesn't have the
+      # gigabyte-sized sidecar binaries (yt-dlp, ffmpeg, whisper-cli,
+      # saucebunny-diarize), so stub them as zero-byte files just to
+      # get past the resource-path check.
+      - name: Stub sidecars so cargo check passes
+        run: |
+          mkdir -p src-tauri/binaries
+          for name in yt-dlp ffmpeg whisper-cli saucebunny-diarize; do
+            touch "src-tauri/binaries/${name}-aarch64-apple-darwin"
+            chmod +x "src-tauri/binaries/${name}-aarch64-apple-darwin"
+          done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: cargo check
+        working-directory: src-tauri
+
+  swift-build:
+    name: swift build (diarizer)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift build -c release --arch arm64
+        working-directory: swift-sidecar
