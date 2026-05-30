@@ -1178,6 +1178,15 @@ export default function App() {
           setWebStreamUrl(proxied);
           appendLog("ok", "yt-dlp",
             `Direct stream ready · ${stream.width ?? "?"}×${stream.height ?? "?"} ${stream.vcodec ?? ""} · via 127.0.0.1 proxy`.trim());
+          // r74: be explicit that PLAYBACK is a low-res proxy (YouTube only
+          // serves a muxed stream at ≤360p; higher res is VP9/AV1 DASH that
+          // WKWebView can't decode). This keeps scrubbing fast and light. The
+          // EXPORT pulls the user's selected quality (up to the source 4K) via
+          // its own yt-dlp call, so clip quality is unaffected.
+          if ((stream.height ?? 0) > 0 && (stream.height ?? 0) <= 480) {
+            appendLog("info", "media",
+              `Preview is ${stream.height}p for instant scrubbing — your export downloads full quality (up to the source resolution).`);
+          }
           // Stall watchdog: if the proxy/MSE pipeline doesn't open in 15s,
           // fall back to the reliable download path.
           if (webStreamWatchdogRef.current != null) window.clearTimeout(webStreamWatchdogRef.current);
@@ -2176,10 +2185,12 @@ export default function App() {
     const entry = findForSource(input);
     if (!entry) return;
     try {
-      // Probe existence with a tiny capped read. We don't keep the
-      // result — TranscriptViewer fetches the file itself when path
-      // changes; here we just need to know it's there.
-      await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 64 });
+      // Probe existence/readability. Use the SAME 8 MB cap the viewer
+      // reads with — read_text_file_capped *errors* when a file exceeds
+      // the cap, so a tiny cap (the old 64 bytes) rejected every real
+      // transcript with "File too large". We don't keep the result; the
+      // viewer fetches the file itself when the path changes.
+      await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 8 * 1024 * 1024 });
       setActiveTranscript({
         path: entry.srtPath,
         origin: entry.origin === "captions" ? "captions"
@@ -2224,7 +2235,7 @@ export default function App() {
       // Probe — read_text_file_capped errors clearly if the file is
       // missing / too large. We don't load the bytes here; the viewer
       // will read them itself on the path change.
-      await invoke<string>("read_text_file_capped", { path: picked, maxBytes: 64 });
+      await invoke<string>("read_text_file_capped", { path: picked, maxBytes: 8 * 1024 * 1024 });
       const title = picked.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "Imported transcript";
       recordTranscript({
         srtPath: picked,
@@ -2243,7 +2254,7 @@ export default function App() {
 
   const handleLoadFromHistory = useCallback(async (entry: TranscriptHistoryEntry) => {
     try {
-      await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 64 });
+      await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 8 * 1024 * 1024 });
       setActiveTranscript({
         path: entry.srtPath,
         origin: entry.origin === "captions" ? "captions"

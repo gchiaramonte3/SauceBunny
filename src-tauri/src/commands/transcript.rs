@@ -362,6 +362,13 @@ pub async fn generate_transcript(
     }
 
     let section = format!("*{:.3}-{:.3}", start_s, end_s);
+    // Bundled ffmpeg for the section cut below — resolved here (the fn returns
+    // AppError) so the move-closure owns it; without it yt-dlp falls back to
+    // PATH/Homebrew, absent on a distributed app (DISTRIBUTION.md).
+    let ffmpeg_for = sidecar_path("ffmpeg")?
+        .to_str()
+        .ok_or_else(|| crate::AppError::internal("ffmpeg path not utf-8"))?
+        .to_string();
     let job_id = args.job_id.clone();
     let job_for = job_id.clone();
     let app_for = app.clone();
@@ -383,7 +390,7 @@ pub async fn generate_transcript(
             format!("Downloading audio for {} → {}…", args.start, args.end),
         );
 
-        let yt = match app_for.shell().sidecar("yt-dlp") {
+        let yt = match ytdlp(&app_for) {
             Ok(c) => c,
             Err(e) => {
                 emit_transcript_done(
@@ -397,6 +404,7 @@ pub async fn generate_transcript(
         let mut yt_args: Vec<String> = vec![
             "--download-sections".into(),
             section.clone(),
+            "--ffmpeg-location".into(), ffmpeg_for,
             "-f".into(), "bestaudio/best".into(),
             "--no-playlist".into(),
             "--no-part".into(),
@@ -408,7 +416,7 @@ pub async fn generate_transcript(
         yt_args.extend(cookies_args(args.cookies_browser.as_deref()));
         yt_args.push(args.url.clone());
 
-        let yt_out = match yt.env("PATH", HOMEBREW_PATH).args(yt_args).output().await {
+        let yt_out = match yt.args(yt_args).output().await {
             Ok(o) => o,
             Err(e) => {
                 emit_transcript_done(

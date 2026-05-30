@@ -85,6 +85,146 @@ fn safari_cookies_readable() -> bool {
     std::fs::File::open(&p).is_ok()
 }
 
+/// Resolve the `yt-dlp` to run. Prefers a user-updated copy in app-data
+/// (`<app_data>/bin/yt-dlp`, installed via Settings → YouTube → Update yt-dlp);
+/// falls back to the bundled sidecar. Either way PATH is set here so yt-dlp can
+/// find ffmpeg for muxing — call sites must NOT set PATH again, or they'd clobber
+/// the app-data dir that makes the updated binary resolvable by name.
+///
+/// The updated copy is run by NAME (`yt-dlp`, allowed in capabilities) with the
+/// app-data bin dir first on PATH, so command resolution picks it deterministically.
+pub(crate) fn ytdlp(app: &AppHandle) -> Result<tauri_plugin_shell::process::Command, String> {
+    if let Ok(data) = app.path().app_data_dir() {
+        let bin_dir = data.join("bin");
+        if bin_dir.join("yt-dlp").is_file() {
+            let path = format!("{}:{}", bin_dir.display(), HOMEBREW_PATH);
+            return Ok(app.shell().command("yt-dlp").env("PATH", path));
+        }
+    }
+    Ok(app
+        .shell()
+        .sidecar("yt-dlp")
+        .map_err(|e| format!("sidecar yt-dlp not found: {e}"))?
+        .env("PATH", HOMEBREW_PATH))
+}
+
+/// Path to the user-updated yt-dlp binary in app-data (whether or not it exists).
+fn updated_ytdlp_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|d| d.join("bin").join("yt-dlp"))
+}
+
+/// Reported back to the YouTube Settings tab: the resolved yt-dlp version string
+/// and whether it's the user-updated copy (`true`) or the bundled sidecar.
+#[derive(serde::Serialize, Clone)]
+pub struct YtdlpStatus {
+    pub version: String,
+    pub updated: bool,
+}
+
+/// Report the version of the yt-dlp currently in use (updated copy if present,
+/// else bundled).
+#[tauri::command]
+pub async fn ytdlp_version(app: AppHandle) -> Result<YtdlpStatus, crate::AppError> {
+    let updated = updated_ytdlp_path(&app)
+        .map(|p| p.is_file())
+        .unwrap_or(false);
+    let out = ytdlp(&app)
+        .map_err(crate::AppError::internal)?
+        .arg("--version")
+        .output()
+        .await
+        .map_err(|e| crate::AppError::internal(format!("yt-dlp --version failed: {e}")))?;
+    let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    Ok(YtdlpStatus { version, updated })
+}
+
+/// Download the latest official self-contained macOS yt-dlp into app-data and
+/// make it the active binary. yt-dlp ships fixes for YouTube extractor changes
+/// often, so this lets users refresh without reinstalling the app. Writes to a
+/// temp path + atomically renames so a partial download never leaves a broken
+/// binary. Returns the new version.
+#[tauri::command]
+pub async fn update_ytdlp(app: AppHandle) -> Result<YtdlpStatus, crate::AppError> {
+    let data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| crate::AppError::internal(format!("app_data_dir: {e}")))?;
+    let bin_dir = data.join("bin");
+    std::fs::create_dir_all(&bin_dir)
+        .map_err(|e| crate::AppError::internal(format!("create bin dir: {e}")))?;
+    let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos";
+    let resp = reqwest::get(url)
+        .await
+        .map_err(|e| crate::AppError::internal(format!("download yt-dlp: {e}")))?
+        .error_for_status()
+        .map_err(|e| crate::AppError::internal(format!("download yt-dlp: {e}")))?;
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| crate::AppError::internal(format!("read yt-dlp: {e}")))?;
+    let tmp = bin_dir.join("yt-dlp.download");
+    std::fs::write(&tmp, &bytes)
+        .map_err(|e| crate::AppError::internal(format!("write yt-dlp: {e}")))?;
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| crate::AppError::internal(format!("chmod yt-dlp: {e}")))?;
+    std::fs::rename(&tmp, bin_dir.join("yt-dlp"))
+        .map_err(|e| crate::AppError::internal(format!("install yt-dlp: {e}")))?;
+    ytdlp_version(app).await
+}
+
+/// Remove the user-updated yt-dlp so the app falls back to the bundled sidecar.
+#[tauri::command]
+pub fn reset_ytdlp(app: AppHandle) -> Result<(), crate::AppError> {
+    if let Some(p) = updated_ytdlp_path(&app) {
+        let _ = std::fs::remove_file(p);
+    }
+    Ok(())
+}
+
+/// macOS app name for a browser id, for `open -a`.
+fn browser_app_name(b: &str) -> Option<&'static str> {
+    match b.to_ascii_lowercase().as_str() {
+        "chrome" => Some("Google Chrome"),
+        "safari" => Some("Safari"),
+        "firefox" => Some("Firefox"),
+        "brave" => Some("Brave Browser"),
+        "edge" => Some("Microsoft Edge"),
+        _ => None,
+    }
+}
+
+/// Open YouTube's sign-in/account page in a specific browser (so the user logs
+/// into the same browser Sauce Bunny borrows cookies from), or the default
+/// browser when none is given. Uses macOS `open` via std::process, which is not
+/// gated by the Tauri shell scope.
+#[tauri::command]
+pub fn open_youtube_signin(browser: Option<String>) -> Result<(), crate::AppError> {
+    let url = "https://www.youtube.com/account";
+    let mut cmd = std::process::Command::new("open");
+    if let Some(app_name) = browser.as_deref().and_then(browser_app_name) {
+        cmd.arg("-a").arg(app_name);
+    }
+    cmd.arg(url)
+        .spawn()
+        .map_err(|e| crate::AppError::internal(format!("open YouTube sign-in: {e}")))?;
+    Ok(())
+}
+
+/// Open System Settings → Privacy & Security → Full Disk Access so the user can
+/// grant Sauce Bunny the access Safari cookie reads require.
+#[tauri::command]
+pub fn open_full_disk_access() -> Result<(), crate::AppError> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        .spawn()
+        .map_err(|e| crate::AppError::internal(format!("open Full Disk Access settings: {e}")))?;
+    Ok(())
+}
+
 /// Cheap per-line check used by the streaming loops (which don't have
 /// access to a single accumulated stderr buffer). Set a captured boolean
 /// when this returns true; on termination, swap the generic
@@ -167,10 +307,7 @@ pub async fn fetch_metadata(
 ) -> Result<Metadata, crate::AppError> {
     validate_source_url(&url)?;
 
-    let cmd = app
-        .shell()
-        .sidecar("yt-dlp")
-        .map_err(|e| format!("sidecar yt-dlp not found: {e}"))?;
+    let cmd = ytdlp(&app)?;
 
     let mut args: Vec<String> = vec![
         "--dump-json".into(),
@@ -185,7 +322,6 @@ pub async fn fetch_metadata(
     args.push(url.clone());
 
     let output = cmd
-        .env("PATH", HOMEBREW_PATH)
         .args(args)
         .output()
         .await
@@ -291,10 +427,7 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
         .ok_or_else(|| crate::AppError::internal("template path is not valid utf-8"))?
         .to_string();
 
-    let cmd = app
-        .shell()
-        .sidecar("yt-dlp")
-        .map_err(|e| format!("sidecar yt-dlp not found: {e}"))?;
+    let cmd = ytdlp(&app)?;
 
     let mut caption_args: Vec<String> = vec![
         "--write-subs".into(),
@@ -313,8 +446,15 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
         // still exit 0. Defence-in-depth alongside the file-scan-on-
         // any-exit logic below.
         "--ignore-errors".into(),
-        "--sub-format".into(), "srt/vtt/best".into(),
-        "--convert-subs".into(), "srt".into(),
+        // Keep WebVTT end-to-end (NOT srt). yt-dlp's --convert-subs srt
+        // flattens WebVTT `<v Speaker>` voice tags — the exact data that
+        // tells us who is talking (YouTube/Vimeo creator captions use them).
+        // Preferring + converting to vtt preserves those tags so the
+        // frontend parser (src/lib/srt.ts) can lift speakers straight out of
+        // the source's own caption file, no diarization needed. parseSrt
+        // reads vtt and srt identically, so nothing downstream breaks.
+        "--sub-format".into(), "vtt/srt/best".into(),
+        "--convert-subs".into(), "vtt".into(),
         "--skip-download".into(),
         "--no-playlist".into(),
         "--newline".into(),
@@ -325,7 +465,6 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
     caption_args.extend(cookies_args(args.cookies_browser.as_deref()));
     caption_args.push(args.url.clone());
     let (mut rx, _child) = cmd
-        .env("PATH", HOMEBREW_PATH)
         .args(caption_args)
         .spawn()
         .map_err(|e| format!("failed to spawn yt-dlp: {e}"))?;
@@ -361,7 +500,7 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
                     }
                 }
                 CommandEvent::Terminated(payload) => {
-                    // Always scan the output dir for SRT files, even on
+                    // Always scan the output dir for caption files, even on
                     // nonzero exit. yt-dlp can 429 on a single phantom
                     // translation track and still have written 1–3
                     // perfectly good English tracks before the failure.
@@ -382,14 +521,22 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("")
                                 .to_string();
-                            if !name.starts_with(&safe_for) || !name.ends_with(".srt") {
+                            if !name.starts_with(&safe_for)
+                                || !(name.ends_with(".vtt") || name.ends_with(".srt"))
+                            {
                                 continue;
                             }
-                            // Lower rank = preferred.
-                            let rank: u8 = if name.ends_with(".en-US.srt")  { 0 }
-                                      else if name.ends_with(".en.srt")     { 1 }
-                                      else if name.ends_with(".en-orig.srt"){ 2 }
-                                      else                                  { 3 };
+                            // Lower rank = preferred. Prefer .vtt over .srt at
+                            // every language tier — vtt is what we now write and
+                            // it's the format that still carries speaker voice
+                            // tags (a stray .srt would have lost them).
+                            let rank: u8 = if name.ends_with(".en-US.vtt")   { 0 }
+                                      else if name.ends_with(".en.vtt")      { 1 }
+                                      else if name.ends_with(".en-orig.vtt") { 2 }
+                                      else if name.ends_with(".en-US.srt")   { 3 }
+                                      else if name.ends_with(".en.srt")      { 4 }
+                                      else if name.ends_with(".en-orig.srt") { 5 }
+                                      else                                   { 6 };
                             candidates.push((rank, p.to_string_lossy().to_string()));
                         }
                     }
@@ -493,10 +640,7 @@ pub async fn get_direct_stream_url(
 ) -> Result<DirectStreamResult, crate::AppError> {
     validate_source_url(&url)?;
 
-    let yt = app
-        .shell()
-        .sidecar("yt-dlp")
-        .map_err(|e| format!("sidecar yt-dlp not found: {e}"))?;
+    let yt = ytdlp(&app)?;
 
     // r54: Force a **single-file progressive** stream (both A+V in one
     // URL, NOT HLS or DASH split tracks). The previous selector
@@ -536,7 +680,6 @@ pub async fn get_direct_stream_url(
     args.push(url.clone());
 
     let out = yt
-        .env("PATH", HOMEBREW_PATH)
         .args(args)
         .output()
         .await
@@ -608,10 +751,13 @@ pub async fn download_web_preview(
         .to_string_lossy()
         .to_string();
 
-    let cmd = app
-        .shell()
-        .sidecar("yt-dlp")
-        .map_err(|e| format!("sidecar yt-dlp not found: {e}"))?;
+    let cmd = ytdlp(&app)?;
+    // Bundled ffmpeg for the DASH merge below — without it yt-dlp falls back to
+    // PATH/Homebrew, absent on a distributed app (DISTRIBUTION.md).
+    let ffmpeg_str = sidecar_path("ffmpeg")?
+        .to_str()
+        .ok_or_else(|| crate::AppError::internal("ffmpeg path not utf-8"))?
+        .to_string();
 
     // Cap at 720p — the preview is for in-app scrubbing/marking, not
     // archival. Smaller file = faster download = quicker time-to-play.
@@ -643,6 +789,7 @@ pub async fn download_web_preview(
         "--http-chunk-size".into(), "10M".into(),
         // Force a single-file MP4 output. If the source is DASH (split
         // A+V), yt-dlp will mux them with ffmpeg here too.
+        "--ffmpeg-location".into(), ffmpeg_str,
         "--merge-output-format".into(), "mp4".into(),
         "-o".into(), template.clone(),
     ];
@@ -650,7 +797,6 @@ pub async fn download_web_preview(
     yt_args.push(args.url.clone());
 
     let (mut rx, child) = cmd
-        .env("PATH", HOMEBREW_PATH)
         .args(yt_args)
         .spawn()
         .map_err(|e| format!("failed to spawn yt-dlp: {e}"))?;

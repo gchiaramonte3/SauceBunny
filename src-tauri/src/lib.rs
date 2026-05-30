@@ -164,6 +164,11 @@ pub fn run() {
             commands::clear_all_cache,
             commands::get_backend_build_id,
             commands::get_stream_proxy_base,
+            commands::ytdlp_version,
+            commands::update_ytdlp,
+            commands::reset_ytdlp,
+            commands::open_youtube_signin,
+            commands::open_full_disk_access,
             commands::open_panel_window,
             commands::close_panel_window,
         ])

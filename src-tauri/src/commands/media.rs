@@ -243,12 +243,8 @@ async fn spawn_video_clip(
     }
     cmd_args.push(args.url);
 
-    let cmd = app
-        .shell()
-        .sidecar("yt-dlp")
-        .map_err(|e| format!("sidecar yt-dlp not found: {e}"))?;
+    let cmd = ytdlp(&app)?;
     let (mut rx, child) = cmd
-        .env("PATH", HOMEBREW_PATH)
         .args(cmd_args)
         .spawn()
         .map_err(|e| format!("failed to spawn yt-dlp: {e}"))?;
@@ -271,7 +267,7 @@ async fn spawn_audio_clip(
     url: String,
     section_secs: Option<(f64, f64)>,
     output_str: String,
-    _ffmpeg_str: String,
+    ffmpeg_str: String,
     cookies_browser: Option<String>,
 ) -> Result<(), String> {
     // Phase 1: yt-dlp downloads raw bestaudio to cache.
@@ -289,6 +285,11 @@ async fn spawn_audio_clip(
     let mut yt_args: Vec<String> = vec![
         "-f".into(),
         "bestaudio/best".into(),
+        // Cut the section with the BUNDLED ffmpeg, not whatever's on PATH.
+        // Without this yt-dlp falls back to /opt/homebrew/bin/ffmpeg, which
+        // isn't present on a distributed app (DISTRIBUTION.md: self-contained).
+        "--ffmpeg-location".into(),
+        ffmpeg_str,
         "--no-playlist".into(),
         "--no-part".into(),
         "--newline".into(),
@@ -309,12 +310,8 @@ async fn spawn_audio_clip(
     }
     yt_args.push(url);
 
-    let cmd = app
-        .shell()
-        .sidecar("yt-dlp")
-        .map_err(|e| format!("sidecar yt-dlp not found: {e}"))?;
+    let cmd = ytdlp(&app)?;
     let (mut rx, child) = cmd
-        .env("PATH", HOMEBREW_PATH)
         .args(yt_args)
         .spawn()
         .map_err(|e| format!("failed to spawn yt-dlp: {e}"))?;
@@ -641,10 +638,7 @@ pub async fn extract_frame(app: AppHandle, args: ExtractFrameArgs) -> Result<Ext
     //   • `--print` twice — line 1 is the URL ffmpeg consumes, line 2 is
     //     human-readable proof of what we picked. Logged to pipeline.
     //   • No height cap — 8K snapshots are fine if YouTube serves them.
-    let yt = app
-        .shell()
-        .sidecar("yt-dlp")
-        .map_err(|e| format!("sidecar yt-dlp not found: {e}"))?;
+    let yt = ytdlp(&app)?;
     let mut yt_invocation: Vec<String> = vec![
         "--no-playlist".into(),
         "--no-warnings".into(),
@@ -661,7 +655,6 @@ pub async fn extract_frame(app: AppHandle, args: ExtractFrameArgs) -> Result<Ext
     yt_invocation.extend(cookies_args(args.cookies_browser.as_deref()));
     yt_invocation.push(args.url.clone());
     let yt_out = yt
-        .env("PATH", HOMEBREW_PATH)
         .args(yt_invocation)
         .output()
         .await

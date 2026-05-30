@@ -1,14 +1,24 @@
 /**
  * Minimal SRT / VTT parser tuned for what yt-dlp and whisper-cli emit.
  *
- * We deliberately do NOT pull in a heavy subtitle library here — the two
- * producers we care about (yt-dlp's --convert-subs srt and whisper-cli's
- * default SRT output) both write canonical SRT, and the few edge cases
- * (UTF-8 BOM, CRLF, blank cue numbers, VTT WEBVTT header) are trivial
- * to handle in a few dozen lines.
+ * We deliberately do NOT pull in a heavy subtitle library here — the producers
+ * we care about (yt-dlp's caption downloads and whisper-cli's SRT output) write
+ * canonical SRT/VTT, and the few edge cases (UTF-8 BOM, CRLF, blank cue numbers,
+ * VTT WEBVTT header, word-timing tags) are trivial to handle in a few dozen lines.
  *
  * Output is a flat array of cues with start/end in **seconds** (floats).
- * No styling, no positioning — the viewer only cares about timing + text.
+ *
+ * Speaker awareness: when the source's own caption file labels who is speaking,
+ * we extract it instead of throwing it away. Three real-world conventions:
+ *   - WebVTT voice tags  `<v Roger Bingham>…</v>`  (YouTube/Vimeo creator captions)
+ *   - Broadcast chevrons  `>> NAME: …`              (TV/CC speaker-change marker)
+ *   - Plain prefixes      `NAME: …` / `[NAME] …`    (gated: only honoured when a
+ *                                                    consistent cast appears, so a
+ *                                                    lone "Note:" can't invent one)
+ * Plus our own diarizer's machine labels (`SPEAKER_00` / `S1`). Anything we
+ * extract lands in `cue.speaker`, so caption speakers flow into the exact same
+ * roster / rename / colour UI as diarization — and make diarization unnecessary
+ * when the source already tells us who's talking.
  */
 
 export type Cue = {
@@ -19,16 +29,14 @@ export type Cue = {
   /** End time in seconds. */
   end: number;
   /**
-   * Plain text content with cue line breaks collapsed to single spaces.
-   * Whisper sometimes emits very long lines (no wrapping); yt-dlp wraps
-   * after ~40 chars. The viewer reflows either way, so we normalise.
+   * Plain text content with cue line breaks collapsed to single spaces and all
+   * SRT/VTT markup stripped. The viewer reflows on its own width.
    */
   text: string;
   /**
-   * Optional speaker label when the underlying source provides one
-   * (whisper.cpp's --tinydiarize, future FluidAudio output). Always
-   * `null` for plain Whisper / yt-dlp captions today; left in the cue
-   * shape so the viewer is forward-compatible with diarized input.
+   * Speaker label when the source provides one — from a WebVTT `<v>` voice tag,
+   * a `>> NAME:` / `NAME:` prefix in the caption, or our diarizer's machine
+   * label. `null` for un-labelled plain captions / Whisper output.
    */
   speaker: string | null;
 };
@@ -54,51 +62,101 @@ function tcToSeconds(tc: string): number {
 
 const TIMESTAMP_LINE = /^\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})/;
 
+// --- speaker extraction patterns ---------------------------------------------
+
+/** WebVTT voice tag: `<v Roger Bingham>` or `<v.loud Roger>` → captures name. */
+const VOICE_TAG = /<v(?:\.[^\s>]+)*\s+([^>]*)>/i;
+/** Our diarizer's machine labels: `[SPEAKER_00] text`, `S1: text`, etc. */
+const MACHINE = /^\[?(SPEAKER[_\s-]?\d+|S\d+)\]?\s*[:\-]?\s+(.*)$/i;
+/** Broadcast speaker change: `>> NAME: text` (the `>>` is unambiguous). */
+const CHEVRON = /^>>\s*([^:>]{1,40}):\s*(.*)$/;
+/** Plain `NAME: text` — gated by name-shape + cast frequency. */
+const COLON = /^([^:]{1,40}):\s+(.+)$/;
+/** Bracketed `[NAME] text` / `(NAME): text` — gated like COLON. */
+const BRACKET = /^[[(]\s*([^\])]{1,40}?)\s*[\])]\s*:?\s+(.+)$/;
+
+/**
+ * Words that look like a `NAME:` / `[NAME]` speaker prefix but are sound cues,
+ * section markers, or sentence-leading words — never a person.
+ */
+const NON_SPEAKER = new Set([
+  "MUSIC", "APPLAUSE", "LAUGHTER", "CHEERING", "CHEERS", "SILENCE", "NOISE",
+  "CROSSTALK", "INAUDIBLE", "FOREIGN", "BACKGROUND NOISE", "SPEAKING FOREIGN LANGUAGE",
+  "NOTE", "NOTES", "WARNING", "CAUTION", "CHAPTER", "PART", "SCENE", "INTRO",
+  "OUTRO", "TRANSCRIPT", "Q", "A", "TODO", "EDIT", "UPDATE",
+]);
+
+/**
+ * Heuristic: does `s` look like a person/voice name rather than a stray word
+ * before a colon? Names are short, name-cased (Title Case or ALL CAPS), and not
+ * a sound cue or a sentence (no trailing `.`/`!`/`?`).
+ */
+function nameShaped(s: string): boolean {
+  const t = s.trim();
+  if (!t || NON_SPEAKER.has(t.toUpperCase())) return false;
+  if (/[.!?]$/.test(t)) return false;
+  if (!/[A-Za-z]/.test(t)) return false;
+  const words = t.split(/\s+/);
+  if (words.length > 4) return false;
+  const allCaps = t === t.toUpperCase() && /^[A-Z0-9 .,'’\-]+$/.test(t);
+  const titleCase = words.every((w) => /^[A-Z][\w'’.\-]*$/.test(w));
+  return allCaps || titleCase;
+}
+
+function normalizeMachine(label: string): string {
+  return label.toUpperCase().replace(/[\s-]/g, "_");
+}
+
+/** Strip SRT/VTT markup that would otherwise show as junk in the reader. */
+function stripCaptionMarkup(s: string): string {
+  return s
+    .replace(/<\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}>/g, "") // VTT word timing
+    .replace(/<\/?[a-zA-Z][^>]*>/g, "")                // tag stripping (incl. <v>)
+    .replace(/\{\\?[a-zA-Z][^}]*\}/g, "")              // ASS/SSA overrides
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /**
  * Parse an SRT or VTT blob into cues. Tolerates:
  *  - UTF-8 BOM
  *  - CRLF or LF line endings
- *  - WEBVTT / NOTE / STYLE blocks (skipped)
+ *  - WEBVTT / NOTE / STYLE / REGION blocks (skipped)
  *  - Missing cue numbers
  *  - Stray blank cues
  *
- * Returns cues in source order; we don't sort because Whisper output is
- * already chronological and resorting would obscure encoder bugs.
+ * Returns cues in source order; we don't sort because both producers emit
+ * chronological output and resorting would obscure encoder bugs.
  */
 export function parseSrt(blob: string): Cue[] {
   // Strip BOM and normalise newlines so the splitter below is simple.
   const text = blob.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
   const lines = text.split("\n");
-  const cues: Cue[] = [];
+
+  // Segment into raw cues, keeping BOTH the markup-bearing raw text (where the
+  // `<v Name>` voice tag lives) and the cleaned plain text.
+  type Raw = { start: number; end: number; raw: string; cleaned: string };
+  const raws: Raw[] = [];
   let i = 0;
-  let fallbackIdx = 0;
 
   while (i < lines.length) {
     const line = lines[i].trim();
 
-    // Skip VTT-only preamble + metadata blocks. We accept VTT because
-    // yt-dlp sometimes serves a .vtt when an .srt isn't available.
+    // Skip VTT-only preamble + metadata blocks.
     if (line === "WEBVTT" || line.startsWith("NOTE") || line.startsWith("STYLE") || line.startsWith("REGION")) {
-      // Advance to the next blank line — that's the block boundary.
       while (i < lines.length && lines[i].trim() !== "") i++;
       i++;
       continue;
     }
 
-    // Try to consume a cue. A cue is:
-    //   [optional integer index]
-    //   HH:MM:SS,mmm --> HH:MM:SS,mmm [optional positioning]
-    //   text line 1
-    //   text line 2
-    //   <blank>
-    // The integer index is optional in VTT and sometimes missing in
-    // hand-edited SRTs, so we don't require it.
+    // A cue is: [optional integer index] / timestamp line / text lines / blank.
     let timeLineIdx = i;
-    // If the current line is purely numeric, it's the cue number; the
-    // timestamp is on the next line.
-    if (/^\d+$/.test(line)) {
-      timeLineIdx = i + 1;
-    }
+    if (/^\d+$/.test(line)) timeLineIdx = i + 1;
     const timeMatch = lines[timeLineIdx]?.match(TIMESTAMP_LINE);
     if (!timeMatch) {
       i++;
@@ -112,7 +170,6 @@ export function parseSrt(blob: string): Cue[] {
       continue;
     }
 
-    // Collect text lines until the next blank line.
     const textLines: string[] = [];
     let j = timeLineIdx + 1;
     while (j < lines.length && lines[j].trim() !== "") {
@@ -120,51 +177,80 @@ export function parseSrt(blob: string): Cue[] {
       j++;
     }
     const rawText = textLines.join(" ").trim();
-
-    // Strip the common SRT/VTT markup that would show as junk in the
-    // reader:  <i>, <b>, <c>, <00:00:00.000>, {\an2}, &lt; entities.
-    // We leave newlines collapsed; the viewer wraps on its own width.
-    const cleaned = rawText
-      .replace(/<\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}>/g, "") // VTT word timing
-      .replace(/<\/?[a-zA-Z][^>]*>/g, "")                // tag stripping
-      .replace(/\{\\?[a-zA-Z][^}]*\}/g, "")              // ASS/SSA overrides
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&#39;/g, "'")
-      .replace(/&quot;/g, '"')
-      .replace(/\s+/g, " ")
-      .trim();
+    const cleaned = stripCaptionMarkup(rawText);
 
     // Skip empty cues (yt-dlp emits these for silence / no-audio gaps).
-    if (cleaned.length > 0) {
-      fallbackIdx += 1;
-      // Detect speaker prefixes. Two shapes we accept:
-      //   [SPEAKER_00] text          ← what our Rust merge writes today
-      //   [SPEAKER_00]: text         ← canonical "speaker turn" SRT style
-      //   SPEAKER_00: text           ← whisper.cpp tinydiarize when bracketless
-      //   [S1] text  / [S1]: text    ← short-form variants
-      // The regex below makes the bracket optional, the separator
-      // (`:` / `-`) optional, and only REQUIRES at least one space
-      // between the tag and the body. Without this fix the merged
-      // SRT from saucebunny-diarize parsed but the SPEAKER tag fell
-      // off, so every cue showed up as "Speaker" with no diarization.
-      const speakerMatch = cleaned.match(
-        /^\[?(SPEAKER[_\s-]?\d+|S\d+)\]?\s*[:\-]?\s+(.*)$/i,
-      );
-      cues.push({
-        index: fallbackIdx,
-        start,
-        end,
-        text: speakerMatch ? speakerMatch[2] : cleaned.replace(/\[SPEAKER_TURN\]/g, "").trim(),
-        speaker: speakerMatch ? speakerMatch[1].toUpperCase().replace(/[\s-]/g, "_") : null,
-      });
-    }
+    if (cleaned.length > 0) raws.push({ start, end, raw: rawText, cleaned });
 
     i = j + 1;
   }
 
-  return cues;
+  return resolveSpeakers(raws);
+}
+
+/**
+ * Turn raw cues into Cues, extracting speakers. Definite signals (voice tag,
+ * machine label, `>>`) win immediately. Weak `NAME:` / `[NAME]` prefixes are
+ * only promoted to speakers when a consistent cast emerges across the file —
+ * a repeated name or prefixes covering ≥40% of cues — so a single stray
+ * "Note:" line can't invent a speaker.
+ */
+function resolveSpeakers(raws: { start: number; end: number; raw: string; cleaned: string }[]): Cue[] {
+  type E = { start: number; end: number; speaker: string | null; text: string; weak: string | null };
+
+  const entries: E[] = raws.map((r) => {
+    // 1) WebVTT voice tag — explicit + reliable.
+    const v = r.raw.match(VOICE_TAG);
+    if (v && v[1].trim()) {
+      return { start: r.start, end: r.end, speaker: v[1].trim(), text: r.cleaned, weak: null };
+    }
+    // 2) Our diarizer's machine labels.
+    const m = r.cleaned.match(MACHINE);
+    if (m) {
+      return { start: r.start, end: r.end, speaker: normalizeMachine(m[1]), text: m[2], weak: null };
+    }
+    // 3) Broadcast ">> NAME:" — chevron is an unambiguous speaker change.
+    const ch = r.cleaned.match(CHEVRON);
+    if (ch && nameShaped(ch[1])) {
+      return { start: r.start, end: r.end, speaker: ch[1].trim(), text: ch[2], weak: null };
+    }
+    // 4/5) Weak "NAME:" / "[NAME]" candidates — recorded, promoted later only
+    //      if the file shows a consistent cast.
+    const co = r.cleaned.match(COLON);
+    if (co && nameShaped(co[1])) {
+      return { start: r.start, end: r.end, speaker: null, text: r.cleaned, weak: co[1].trim() };
+    }
+    const br = r.cleaned.match(BRACKET);
+    if (br && nameShaped(br[1])) {
+      return { start: r.start, end: r.end, speaker: null, text: r.cleaned, weak: br[1].trim() };
+    }
+    return {
+      start: r.start,
+      end: r.end,
+      speaker: null,
+      text: r.cleaned.replace(/\[SPEAKER_TURN\]/g, "").trim(),
+      weak: null,
+    };
+  });
+
+  const hasDefinite = entries.some((e) => e.speaker !== null);
+  const weakCount = new Map<string, number>();
+  for (const e of entries) if (e.weak) weakCount.set(e.weak, (weakCount.get(e.weak) ?? 0) + 1);
+  const weakTotal = [...weakCount.values()].reduce((a, b) => a + b, 0);
+  const promote =
+    !hasDefinite &&
+    weakTotal > 0 &&
+    ([...weakCount.values()].some((n) => n >= 2) || weakTotal >= entries.length * 0.4);
+
+  return entries.map((e, k) => {
+    let speaker = e.speaker;
+    let text = e.text;
+    if (e.weak && promote) {
+      speaker = e.weak;
+      text = text.replace(COLON, "$2").replace(BRACKET, "$2").trim();
+    }
+    return { index: k + 1, start: e.start, end: e.end, text, speaker };
+  });
 }
 
 /**

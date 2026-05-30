@@ -25,7 +25,8 @@
         { "name": "binaries/yt-dlp", "sidecar": true, "args": true },
         { "name": "binaries/ffmpeg", "sidecar": true, "args": true },
         { "name": "binaries/whisper-cli", "sidecar": true, "args": true },
-        { "name": "binaries/saucebunny-diarize", "sidecar": true, "args": true }
+        { "name": "binaries/saucebunny-diarize", "sidecar": true, "args": true },
+        { "name": "yt-dlp", "cmd": "yt-dlp", "args": true }
       ]
     },
     {
@@ -34,7 +35,8 @@
         { "name": "binaries/yt-dlp", "sidecar": true, "args": true },
         { "name": "binaries/ffmpeg", "sidecar": true, "args": true },
         { "name": "binaries/whisper-cli", "sidecar": true, "args": true },
-        { "name": "binaries/saucebunny-diarize", "sidecar": true, "args": true }
+        { "name": "binaries/saucebunny-diarize", "sidecar": true, "args": true },
+        { "name": "yt-dlp", "cmd": "yt-dlp", "args": true }
       ]
     }
   ]

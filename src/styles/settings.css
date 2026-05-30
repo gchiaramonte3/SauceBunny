@@ -565,3 +565,27 @@
   border-color: rgba(108,255,141,0.30);
 }
 .cp-ytauth-browser.recommended .cp-ytauth-browser-hint { color: var(--color-accent-green); }
+
+/* YouTube Settings tab — yt-dlp engine row */
+.cp-ytdlp-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.cp-ytdlp-version {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--fg-3);
+  background: var(--bg-2);
+  border: 1px solid var(--stroke-1);
+  border-radius: 6px;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+.cp-ytdlp-msg {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--fg-3);
+}

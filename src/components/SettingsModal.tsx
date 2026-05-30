@@ -9,8 +9,9 @@ import type {
 } from "../types";
 import type { Command } from "../lib/commands";
 import { formatError } from "../lib/error-format";
+import { YouTubeSettings } from "./YouTubeSettings";
 
-type TabId = "general" | "transcription" | "shortcuts" | "commands" | "about";
+type TabId = "general" | "transcription" | "youtube" | "shortcuts" | "commands" | "about";
 
 export type Defaults = {
   folder: string | null;
@@ -115,6 +116,7 @@ type Props = {
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "general",       label: "General" },
+  { id: "youtube",       label: "YouTube" },
   { id: "transcription", label: "Transcription" },
   { id: "shortcuts",     label: "Shortcuts" },
   { id: "commands",      label: "Commands" },
@@ -525,30 +527,6 @@ export function SettingsModal(props: Props) {
                 </div>
 
                 <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">YouTube auth</div>
-                  <div className="cp-pane-row">
-                    <div className="k">
-                      Cookies from browser
-                      <span className="desc">YouTube increasingly rejects unauthenticated requests with "Sign in to confirm you're not a bot". Pick the browser you're already logged into and yt-dlp will reuse those cookies.</span>
-                    </div>
-                    <div className="v">
-                      <div className="cp-segmented" style={{ minWidth: 320, gridTemplateColumns: "repeat(6, 1fr)" }}>
-                        {(["none","chrome","safari","firefox","brave","edge"] as const).map((b) => (
-                          <button
-                            key={b}
-                            className={defaults.ytCookiesBrowser === b ? "active" : ""}
-                            onClick={() => setDefaults({ ...defaults, ytCookiesBrowser: b })}
-                            title={b === "none" ? "Don't send cookies" : `Read YouTube cookies from ${b}`}
-                          >
-                            {b === "none" ? "Off" : b[0].toUpperCase() + b.slice(1)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="cp-pane-section">
                   <div className="cp-pane-section-label">Timecode</div>
                   <div className="cp-pane-row">
                     <div className="k">
@@ -579,6 +557,10 @@ export function SettingsModal(props: Props) {
                   </div>
                 )}
               </section>
+            )}
+
+            {tab === "youtube" && (
+              <YouTubeSettings defaults={defaults} setDefaults={setDefaults} />
             )}
 
             {tab === "transcription" && (

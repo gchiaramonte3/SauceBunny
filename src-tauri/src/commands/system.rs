@@ -312,7 +312,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-05-29-r63-ffmpeg-fmp4-remux";
+pub const BACKEND_BUILD_ID: &str = "2026-05-30-r73-ytdlp-updater";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {
