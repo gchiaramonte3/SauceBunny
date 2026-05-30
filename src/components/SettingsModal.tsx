@@ -27,12 +27,35 @@ export type Defaults = {
    */
   useWebCodecsDecoder: boolean;
   /**
+   * When true, web sources (YouTube/etc.) try the INSTANT MSE stream
+   * preview (loopback proxy + ffmpeg fMP4 remux) for fastest time-to-play.
+   * Default OFF (r70): the reliable default downloads the file to cache
+   * first, then plays it natively (full audio, instant native scrub, no
+   * MSE fragility). Opt in only if you want fastest playback and accept
+   * that live web streaming is less reliable than download-first.
+   */
+  streamPreview: boolean;
+  /**
+   * One-shot flag: true once the r72 "hybrid is the default" migration has
+   * forced `streamPreview` on for an existing install (which may have saved
+   * the old download-first default). After it latches, the user's own
+   * toggle is honoured. New installs start migrated.
+   */
+  hybridMigrated: boolean;
+  /**
    * Browser to pull YouTube cookies from for yt-dlp's --cookies-from-
    * browser flag. Required for any video YouTube has gated behind "Sign
    * in to confirm you're not a bot" (most videos under heavy detection
    * as of mid-2026). "none" → no cookies sent.
    */
   ytCookiesBrowser: "none" | "chrome" | "safari" | "firefox" | "brave" | "edge";
+  /**
+   * Latches true once the user has seen the first-run "Connect YouTube"
+   * prompt and either picked a browser or dismissed it. Prevents the
+   * welcome modal from nagging on every launch. The bot-check/severed
+   * prompts are independent of this and still fire on real failures.
+   */
+  ytAuthOnboarded: boolean;
   /**
    * When true, the "Generate transcript" flow runs the saucebunny-diarize
    * Swift sidecar after Whisper and stitches speaker labels into the
@@ -483,6 +506,22 @@ export function SettingsModal(props: Props) {
                     </div>
                   </div>
                   <CacheControls />
+                </div>
+
+                <div className="cp-pane-section">
+                  <div className="cp-pane-section-label">Web playback</div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Stream while you watch
+                      <span className="desc">On (default) — stream instantly so you can watch and mark in/out without waiting, then export downloads only the clip you marked. If a stream fails it falls back to downloading automatically. Off — download the full video first before playing (slower, but the most reliable on flaky connections).</span>
+                    </div>
+                    <div className="v">
+                      <button
+                        className={"cp-toggle-switch" + (defaults.streamPreview ? " on" : "")}
+                        onClick={() => setDefaults({ ...defaults, streamPreview: !defaults.streamPreview })}
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="cp-pane-section">

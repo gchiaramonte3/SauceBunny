@@ -553,3 +553,15 @@
               color var(--dur-fast) var(--ease-out);
 }
 .cp-ytauth-dismiss:hover { background: rgba(255,255,255,0.04); color: var(--fg-1); }
+
+/* r72: per-browser keychain hint + Safari "recommended" highlight */
+.cp-ytauth-browser-hint {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--fg-4);
+}
+.cp-ytauth-browser.recommended {
+  border-color: rgba(108,255,141,0.30);
+}
+.cp-ytauth-browser.recommended .cp-ytauth-browser-hint { color: var(--color-accent-green); }

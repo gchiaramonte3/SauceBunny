@@ -58,10 +58,31 @@ fn is_youtube_url(url: &str) -> bool {
 pub(crate) fn cookies_args(browser: Option<&str>) -> Vec<String> {
     match browser {
         Some(b) if b != "none" && !b.is_empty() => {
+            // Safari's cookies live in a TCC-protected container that's only
+            // readable with Full Disk Access. Without it, yt-dlp dies with
+            // "Operation not permitted" and breaks the ENTIRE resolve. Skip
+            // the cookies instead of breaking — degrade to no-auth (which
+            // works unless YouTube is actively bot-checking, in which case the
+            // sign-in modal pops). The frontend warns that Safari needs FDA.
+            if b.eq_ignore_ascii_case("safari") && !safari_cookies_readable() {
+                eprintln!("[cookies] Safari cookies need Full Disk Access — proceeding without cookies");
+                return vec![];
+            }
             vec!["--cookies-from-browser".into(), b.into()]
         }
         _ => vec![],
     }
+}
+
+/// True if we can open Safari's cookie store — i.e. the app has Full Disk
+/// Access. The file lives in a sandboxed container; opening it returns
+/// "Operation not permitted" without FDA.
+fn safari_cookies_readable() -> bool {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let p = format!(
+        "{home}/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies"
+    );
+    std::fs::File::open(&p).is_ok()
 }
 
 /// Cheap per-line check used by the streaming loops (which don't have

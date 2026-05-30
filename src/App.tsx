@@ -154,9 +154,18 @@ export default function App() {
       // it ever causes regressions the user can toggle back to the
       // ffmpeg-prep + <video> path via Settings → Local playback.
       useWebCodecsDecoder: stored.useWebCodecsDecoder ?? true,
+      // r72: HYBRID is the default — stream instantly to watch + mark in/out,
+      // then download ONLY the marked clip on export (no full-video wait on
+      // long videos). `streamPreview: true` = stream-first. Turning it OFF
+      // (Settings → Web playback) gives the download-first path for max
+      // reliability on flaky connections.
+      streamPreview: stored.streamPreview ?? true,
+      hybridMigrated: stored.hybridMigrated ?? false,
       // Default off — user must pick a browser explicitly because pulling
       // cookies prompts the OS keychain on Chrome/Brave/Edge.
       ytCookiesBrowser: stored.ytCookiesBrowser ?? "none",
+      // r71: latches once the first-run "Connect YouTube" prompt is handled.
+      ytAuthOnboarded: stored.ytAuthOnboarded ?? false,
       // Default off — diarization adds 10–60s per transcript and the
       // first-run model download is hundreds of MB. Opt-in via Sidebar.
       detectSpeakers: stored.detectSpeakers ?? false,
@@ -189,6 +198,15 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // r72: one-shot — flip existing installs onto the hybrid (stream-first)
+  // default, even if they saved the old download-first value. Latches so the
+  // user's own Web-playback toggle is respected afterward.
+  useEffect(() => {
+    if (defaults.hybridMigrated) return;
+    setDefaults({ ...defaults, streamPreview: true, hybridMigrated: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const fallbackFps = DEFAULT_FPS_FALLBACK[defaults.timecode] ?? 24;
 
   /**
@@ -202,33 +220,61 @@ export default function App() {
       ? defaults.ytCookiesBrowser
       : undefined;
 
-  // ====== Contextual YouTube auth (cookies-from-browser) ======
-  // When a fetch trips YouTube's bot-check we pop a modal so the user can
-  // borrow their browser's existing YouTube login without hunting through
-  // Settings. `ytAuthPromptedSeq` guards against re-opening for the same
-  // source load; `ytAuthRetry` bumps to re-run handleFetch once a browser
-  // is chosen (the bump lands after `defaults` has updated, so the retry
-  // sees the new cookies setting — no stale closure).
+  // ====== YouTube sign-in (cookies-from-browser) — r71 ======
+  // One modal (YouTubeAuthModal), three surfaces driven by `ytAuthMode`:
+  //   • "welcome"  → FIRST RUN: ask the user to connect once so downloads
+  //     stay reliable + they hit far fewer bot-checks. Shown until they make
+  //     a choice (pick a browser OR dismiss), then `ytAuthOnboarded` latches
+  //     so it never nags again.
+  //   • "blocked"  → a fetch tripped YouTube's bot-check and NO browser is
+  //     configured → "connect to continue".
+  //   • "severed"  → a fetch tripped the bot-check but a browser IS already
+  //     configured → the sign-in broke (cookies expired / signed out) →
+  //     "reconnect".
+  // Cookie-borrow ONLY — never passwords / account creation. The choice is
+  // cached in `defaults.ytCookiesBrowser` (localStorage). `ytAuthRetry`
+  // re-runs handleFetch once a browser is picked (after defaults update, so
+  // no stale closure).
   const [ytAuthOpen, setYtAuthOpen] = useState(false);
+  const [ytAuthMode, setYtAuthMode] = useState<"welcome" | "blocked" | "severed">("blocked");
   const [ytAuthRetry, setYtAuthRetry] = useState(0);
   const ytAuthPromptedSeqRef = useRef(-1);
+
+  // First-run prompt. Latches on `ytAuthOnboarded` (connect OR dismiss),
+  // so it shows exactly once.
+  useEffect(() => {
+    if (defaults.ytAuthOnboarded) return;
+    setYtAuthMode("welcome");
+    setYtAuthOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const maybePromptYtAuth = useCallback((msg: string, seq: number) => {
     if (!isYouTubeBotError(msg)) return;
     if (ytAuthPromptedSeqRef.current === seq) return; // one prompt per source load
     ytAuthPromptedSeqRef.current = seq;
+    // Already picked a browser but STILL bot-checked = the sign-in got severed.
+    setYtAuthMode(defaults.ytCookiesBrowser !== "none" ? "severed" : "blocked");
     setYtAuthOpen(true);
-  }, []);
+  }, [defaults.ytCookiesBrowser]);
 
   const handleYtAuthPick = useCallback(
     (b: Exclude<Defaults["ytCookiesBrowser"], "none">) => {
-      setDefaults({ ...defaults, ytCookiesBrowser: b });
+      setDefaults({ ...defaults, ytCookiesBrowser: b, ytAuthOnboarded: true });
       setYtAuthOpen(false);
       ytAuthPromptedSeqRef.current = -1; // a fresh failure may re-prompt
-      setYtAuthRetry((n) => n + 1); // retry the current source with cookies
+      // Nothing to retry on the first-run welcome (no fetch in flight).
+      if (ytAuthMode !== "welcome") setYtAuthRetry((n) => n + 1);
     },
-    [defaults, setDefaults],
+    [defaults, setDefaults, ytAuthMode],
   );
+
+  // Dismissing any surface counts as onboarded (so the welcome won't nag),
+  // without changing the cookies choice.
+  const handleYtAuthClose = useCallback(() => {
+    setYtAuthOpen(false);
+    if (!defaults.ytAuthOnboarded) setDefaults({ ...defaults, ytAuthOnboarded: true });
+  }, [defaults, setDefaults]);
 
   // ====== URL bar ======
   const [url, setUrl] = useState("");
@@ -1025,8 +1071,11 @@ export default function App() {
     }
   }, []);
 
-  const handleFetch = useCallback(async () => {
-    const full = normalizeUrl(url);
+  const handleFetch = useCallback(async (urlOverride?: string) => {
+    // `urlOverride` lets callers (e.g. paste-and-fetch) pass the URL directly
+    // instead of relying on the `url` state having committed — avoids the
+    // race where a freshly-pasted URL hasn't landed in state yet.
+    const full = normalizeUrl(urlOverride ?? url);
     if (!isLikelyVideoUrl(full)) {
       setErrorDetail("Paste a video URL (YouTube, Vimeo, TikTok, Twitter/X, Reddit, Instagram, or any page with embedded video).");
       setStatus("error");
@@ -1103,44 +1152,60 @@ export default function App() {
     //   HTTP proxy: WKWebView streams http://127.0.0.1 natively through
     //   WebKit's Range/206 path. The Content-Length framing (not chunked)
     //   was the key — see src-tauri/src/stream_proxy.rs.
-    void (async () => {
-      try {
-        appendLog("info", "yt-dlp", `Resolving stream URL for ${hostnameOf(full)}…`);
-        const stream = await invoke<{ url: string; width: number | null; height: number | null; vcodec: string | null }>(
-          "get_direct_stream_url",
-          { url: full, cookiesBrowser: cookiesBrowserOrNone() },
-        );
-        if (sourceSeqRef.current !== seq) return;
-        // base is null only if the proxy failed to bind at startup — then
-        // we hand the raw CDN URL through (won't play; watchdog → download).
-        const proxyBase = await invoke<string | null>("get_stream_proxy_base").catch(() => null);
-        if (sourceSeqRef.current !== seq) return;
-        const proxied = buildProxyUrl(proxyBase, stream.url);
-        setWebStreamUrl(proxied);
-        appendLog("ok", "yt-dlp",
-          `Direct stream ready · ${stream.width ?? "?"}×${stream.height ?? "?"} ${stream.vcodec ?? ""} · via 127.0.0.1 proxy`.trim());
-        // Stall watchdog: the proxy normally streams fine, but if the
-        // upstream URL is expired / the media engine bails, fall back to
-        // the fast format-18 download. 8s is plenty for a healthy stream to
-        // fire loadedmetadata.
-        if (webStreamWatchdogRef.current != null) window.clearTimeout(webStreamWatchdogRef.current);
-        webStreamWatchdogRef.current = window.setTimeout(() => {
-          webStreamWatchdogRef.current = null;
+    // ─── Web-source playback path (r72: HYBRID, stream-first by default) ──
+    // Stream instantly so the user can WATCH and mark in/out without waiting
+    // for a full download (critical on long videos). Export then downloads
+    // ONLY the marked clip (create_clip's section download). If streaming
+    // fails at any point, onMediaError / the watchdog fall back to the
+    // reliable download-to-cache path — so it's fast when it works, reliable
+    // when it doesn't. Turn `streamPreview` OFF (Settings → Web playback) for
+    // the download-first path (slower, max reliability on flaky connections).
+    if (defaults.streamPreview) {
+      // ── STREAM-FIRST (default): MSE via the loopback proxy, download fallback. ──
+      void (async () => {
+        try {
+          appendLog("info", "yt-dlp", `Resolving stream URL for ${hostnameOf(full)}…`);
+          const stream = await invoke<{ url: string; width: number | null; height: number | null; vcodec: string | null }>(
+            "get_direct_stream_url",
+            { url: full, cookiesBrowser: cookiesBrowserOrNone() },
+          );
           if (sourceSeqRef.current !== seq) return;
-          if (webCachePath || webPreviewDownloading) return;
-          appendLog("warn", "media", "Stream didn't open in 15s — falling back to download.");
-          pushNotification("info", "Downloading preview…",
-            "Fetching the file via yt-dlp so you can scrub and mark in-app.");
+          // base is null only if the proxy failed to bind at startup — then
+          // we hand the raw CDN URL through (won't play; watchdog → download).
+          const proxyBase = await invoke<string | null>("get_stream_proxy_base").catch(() => null);
+          if (sourceSeqRef.current !== seq) return;
+          const proxied = buildProxyUrl(proxyBase, stream.url);
+          setWebStreamUrl(proxied);
+          appendLog("ok", "yt-dlp",
+            `Direct stream ready · ${stream.width ?? "?"}×${stream.height ?? "?"} ${stream.vcodec ?? ""} · via 127.0.0.1 proxy`.trim());
+          // Stall watchdog: if the proxy/MSE pipeline doesn't open in 15s,
+          // fall back to the reliable download path.
+          if (webStreamWatchdogRef.current != null) window.clearTimeout(webStreamWatchdogRef.current);
+          webStreamWatchdogRef.current = window.setTimeout(() => {
+            webStreamWatchdogRef.current = null;
+            if (sourceSeqRef.current !== seq) return;
+            if (webCachePath || webPreviewDownloading) return;
+            appendLog("warn", "media", "Stream didn't open in 15s — falling back to download.");
+            pushNotification("info", "Downloading preview…",
+              "Fetching the file via yt-dlp so you can scrub and mark in-app.");
+            void runWebPreviewDownload(full, seq);
+          }, 15000);
+        } catch (err) {
+          if (sourceSeqRef.current !== seq) return;
+          const sErr = formatError(err);
+          appendLog("warn", "yt-dlp", `Direct stream failed: ${sErr} — falling back to download.`);
+          maybePromptYtAuth(sErr, seq);
           void runWebPreviewDownload(full, seq);
-        }, 15000);
-      } catch (err) {
-        if (sourceSeqRef.current !== seq) return;
-        const sErr = formatError(err);
-        appendLog("warn", "yt-dlp", `Direct stream failed: ${sErr} — falling back to download.`);
-        maybePromptYtAuth(sErr, seq);
-        void runWebPreviewDownload(full, seq);
-      }
-    })();
+        }
+      })();
+    } else {
+      // ── DOWNLOAD-FIRST (default, reliable): fetch the file to cache, then
+      //    LocalMediaPlayer plays it natively. Failures (e.g. YouTube bot-
+      //    check) surface as a clean "download failed" + the auth modal,
+      //    not a broken player. ──
+      appendLog("info", "yt-dlp", `Downloading ${hostnameOf(full)} for in-app playback…`);
+      void runWebPreviewDownload(full, seq);
+    }
 
     // ─── Background metadata hydration ───────────────────────────────────
     // If this fails we leave the player visible (the user is probably already
@@ -3025,9 +3090,10 @@ export default function App() {
 
       <YouTubeAuthModal
         open={ytAuthOpen}
+        mode={ytAuthMode}
         current={defaults.ytCookiesBrowser}
         onPick={handleYtAuthPick}
-        onClose={() => setYtAuthOpen(false)}
+        onClose={handleYtAuthClose}
       />
 
       {/* ⌘K command palette — mounted at top level so its portal sits

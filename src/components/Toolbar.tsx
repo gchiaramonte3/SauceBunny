@@ -7,7 +7,7 @@ import type { AppStatus } from "../types";
 type Props = {
   url: string;
   onChange: (v: string) => void;
-  onFetch: () => void;
+  onFetch: (url?: string) => void;
   onClear: () => void;
   onImportFile: () => void;
   onToggleQueue: () => void;
@@ -45,9 +45,10 @@ export function Toolbar({
         onChange(cleaned);
         // Auto-fetch as soon as we have a URL that looks valid. We
         // defer with a microtask so React state has already settled.
-        queueMicrotask(() => {
-          if (cleaned && !fetching) onFetch();
-        });
+        // Pass the URL explicitly so the fetch doesn't race the `url` state
+        // update (onChange above is async; handleFetch would otherwise read
+        // the previous/empty value).
+        if (cleaned && !fetching) onFetch(cleaned);
       }
     } catch (err) {
       console.warn("clipboard read failed", err);
@@ -105,7 +106,7 @@ export function Toolbar({
         <button
           type="button"
           className="btn btn-ghost"
-          onClick={onFetch}
+          onClick={() => onFetch()}
           disabled={fetching || !display}
           style={{ minWidth: 86 }}
         >
