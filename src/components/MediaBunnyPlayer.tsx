@@ -67,6 +67,16 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
    */
   const startMediaTimeRef = useRef(0);
   const startContextTimeRef = useRef(0);
+  // Shuttle (J-K-L): a separate, video-only loop that walks media-time at
+  // `shuttleRate` and decodes each frame via the CanvasSink. Because it owns
+  // its own clock + decodes any frame, MediaBunny does TRUE smooth forward AND
+  // reverse — the normal audio/video loops are stopped while it runs.
+  const shuttleRateRef = useRef(0);
+  const shuttleRafRef = useRef(0);
+  const shuttleTimeRef = useRef(0);
+  const shuttleWasPlayingRef = useRef(false);
+  const shuttleBusyRef = useRef(false);
+  const lastShuttleWallRef = useRef(0);
 
   /**
    * Bumped on every pause/seek/teardown. In-flight async iterators read
@@ -125,6 +135,49 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     setIsPlaying(false);
     onPlayStateChange?.(false);
     cancelInFlight();
+  };
+
+  // Shuttle render loop (J-K-L). Advances `shuttleTime` by `shuttleRate × dt`
+  // each frame and draws the decoded frame at that time — forward OR reverse,
+  // since getCanvas decodes any frame. Video-only (no audio during shuttle,
+  // like a tape machine). A busy guard prevents decode backlog on slow frames.
+  const startShuttleLoop = () => {
+    if (shuttleRafRef.current) return;
+    const step = () => {
+      shuttleRafRef.current = 0;
+      const rate = shuttleRateRef.current;
+      if (rate === 0) return;
+      if (shuttleBusyRef.current) { shuttleRafRef.current = requestAnimationFrame(step); return; }
+      const now = performance.now();
+      const dt = Math.min(0.1, Math.max(0, (now - lastShuttleWallRef.current) / 1000));
+      lastShuttleWallRef.current = now;
+      let t = shuttleTimeRef.current + rate * dt;
+      let atBound = false;
+      if (t <= 0) { t = 0; atBound = true; }
+      else if (t >= durationRef.current) { t = durationRef.current; atBound = true; }
+      shuttleTimeRef.current = t;
+      onTimeUpdateRef.current?.(t);
+      shuttleBusyRef.current = true;
+      const sink = videoSinkRef.current;
+      if (sink) {
+        sink.getCanvas(t)
+          .then((wrapped) => { if (wrapped && shuttleRateRef.current !== 0) drawCanvas(wrapped.canvas); })
+          .catch(() => { /* ignore */ })
+          .finally(() => { shuttleBusyRef.current = false; });
+      } else {
+        shuttleBusyRef.current = false;
+      }
+      if (atBound) {
+        // Hit start/end — stop the shuttle, settle paused at the boundary.
+        shuttleRateRef.current = 0;
+        startMediaTimeRef.current = t;
+        setIsPlaying(false);
+        onPlayStateChange?.(false);
+        return;
+      }
+      shuttleRafRef.current = requestAnimationFrame(step);
+    };
+    shuttleRafRef.current = requestAnimationFrame(step);
   };
 
   // Render-loop drainer for the canvas sink. Walks the async iterator,
@@ -213,7 +266,10 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     const t = window.setInterval(() => {
       if (playingRef.current) onTimeUpdateRef.current?.(currentMediaTime());
     }, 100);
-    return () => window.clearInterval(t);
+    return () => {
+      window.clearInterval(t);
+      if (shuttleRafRef.current) { cancelAnimationFrame(shuttleRafRef.current); shuttleRafRef.current = 0; }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -280,6 +336,51 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       if (gainRef.current) gainRef.current.gain.value = m ? 0 : volumeRef.current;
     },
     isMuted: () => mutedRef.current,
+    setShuttle: (rate: number) => {
+      if (!readyRef.current) return;
+      if (rate === 0) {
+        // Exit shuttle: restore the clock at the shuttle position, then resume
+        // normal playback if we were playing when shuttle engaged.
+        if (shuttleRafRef.current) { cancelAnimationFrame(shuttleRafRef.current); shuttleRafRef.current = 0; }
+        if (shuttleRateRef.current !== 0) {
+          shuttleRateRef.current = 0;
+          startMediaTimeRef.current = shuttleTimeRef.current;
+          onTimeUpdateRef.current?.(shuttleTimeRef.current);
+          if (shuttleWasPlayingRef.current) {
+            const ctx = audioCtxRef.current;
+            if (ctx) {
+              if (ctx.state === "suspended") ctx.resume().catch(() => { /* ignore */ });
+              cancelInFlight();
+              const gen = ++genRef.current;
+              startContextTimeRef.current = ctx.currentTime;
+              playingRef.current = true;
+              setIsPlaying(true);
+              onPlayStateChange?.(true);
+              runAudioLoop(startMediaTimeRef.current, gen);
+              runVideoLoop(startMediaTimeRef.current, gen);
+            }
+          } else {
+            playingRef.current = false;
+            setIsPlaying(false);
+            onPlayStateChange?.(false);
+          }
+        }
+        return;
+      }
+      // Enter / adjust shuttle.
+      if (shuttleRateRef.current === 0) {
+        shuttleWasPlayingRef.current = playingRef.current;
+        if (playingRef.current) startMediaTimeRef.current = currentMediaTime();
+        cancelInFlight();           // stop the normal audio + video loops
+        playingRef.current = false; // the shuttle loop drives the canvas now
+        shuttleTimeRef.current = startMediaTimeRef.current;
+        lastShuttleWallRef.current = performance.now();
+        setIsPlaying(true);
+        onPlayStateChange?.(true);
+      }
+      shuttleRateRef.current = rate;
+      startShuttleLoop();
+    },
     /**
      * Frame-accurate snapshot via the live CanvasSink. Skips the ffmpeg
      * subprocess entirely (~200ms saved per snapshot) and uses the file

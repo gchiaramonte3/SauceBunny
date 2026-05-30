@@ -2321,7 +2321,23 @@ export default function App() {
   }, [appendLog]);
 
   // ====== Transport ======
+  // ── Variable-speed shuttle (J-K-L double-tap) ───────────────────────
+  // rate: 0 = normal · >0 = fast-forward × · <0 = rewind ×. Routed to the live
+  // player, which honors it per-engine (MediaBunny does true smooth reverse;
+  // WebKit fast-forwards natively + scans backward — see PlayerHandle).
+  const shuttleRateRef = useRef(0);
+  const dblTapRef = useRef({ l: 0, j: 0 });
+  const applyShuttle = useCallback((rate: number) => {
+    shuttleRateRef.current = rate;
+    playerRef.current?.setShuttle?.(rate);
+  }, []);
+  const exitShuttle = useCallback(() => {
+    if (shuttleRateRef.current !== 0) applyShuttle(0);
+  }, [applyShuttle]);
+
   const onPlayToggle = useCallback(() => {
+    // K / Space / the play button while shuttling → just stop the shuttle.
+    if (shuttleRateRef.current !== 0) { applyShuttle(0); return; }
     if (status !== "loaded" && status !== "exporting" && status !== "success") return;
     const p = playerRef.current;
     if (p && p.isReady()) {
@@ -2330,9 +2346,10 @@ export default function App() {
     } else {
       setIsPlaying((x) => !x);
     }
-  }, [status, isPlaying]);
+  }, [status, isPlaying, applyShuttle]);
 
   const onStep = useCallback((delta: number) => {
+    exitShuttle();
     const p = playerRef.current;
     const r = Math.max(1, Math.round(fps));
     setPlayheadFrames((f) => {
@@ -2343,16 +2360,17 @@ export default function App() {
       }
       return next;
     });
-  }, [durationFrames, fps]);
+  }, [durationFrames, fps, exitShuttle]);
 
   const seekBySeconds = useCallback((deltaSec: number) => {
+    exitShuttle();
     const r = Math.max(1, Math.round(fps));
     const p = playerRef.current;
     const currentSec = p?.isReady() ? (p.getCurrentTime?.() ?? 0) : playheadFrames / r;
     const targetSec = Math.max(0, Math.min((durationFrames - 1) / r, currentSec + deltaSec));
     setPlayheadFrames(Math.floor(targetSec * r));
     if (p?.isReady()) p.seekTo(targetSec);
-  }, [fps, playheadFrames, durationFrames]);
+  }, [fps, playheadFrames, durationFrames, exitShuttle]);
 
   const onMarkIn = useCallback(() => {
     const r = Math.max(1, Math.round(fps));
@@ -2383,24 +2401,27 @@ export default function App() {
 
   const onGotoIn = useCallback(() => {
     if (inFrames == null) return;
+    exitShuttle();
     const r = Math.max(1, Math.round(fps));
     setPlayheadFrames(inFrames);
     playerRef.current?.seekTo?.(inFrames / r);
-  }, [inFrames, fps]);
+  }, [inFrames, fps, exitShuttle]);
 
   const onGotoOut = useCallback(() => {
     if (outFrames == null) return;
+    exitShuttle();
     const r = Math.max(1, Math.round(fps));
     setPlayheadFrames(outFrames);
     playerRef.current?.seekTo?.(outFrames / r);
-  }, [outFrames, fps]);
+  }, [outFrames, fps, exitShuttle]);
 
   const onSeek = useCallback((f: number) => {
+    exitShuttle();
     const r = Math.max(1, Math.round(fps));
     const clamped = Math.max(0, Math.min(Math.max(0, durationFrames - 1), f));
     setPlayheadFrames(clamped);
     playerRef.current?.seekTo?.(clamped / r);
-  }, [durationFrames, fps]);
+  }, [durationFrames, fps, exitShuttle]);
 
   // ====== Keyboard ======
   useEffect(() => {
@@ -2444,8 +2465,20 @@ export default function App() {
       switch (e.key) {
         case " ": e.preventDefault(); onPlayToggle(); break;
         case "k": case "K": onPlayToggle(); break;
-        case "j": case "J": seekBySeconds(-5); break;
-        case "l": case "L": seekBySeconds(5); break;
+        case "j": case "J": {
+          // Double-tap J → rewind shuttle; single tap → back 5s (exits shuttle).
+          const now = Date.now();
+          if (now - dblTapRef.current.j < 350) { dblTapRef.current.j = 0; applyShuttle(-2); }
+          else { dblTapRef.current.j = now; seekBySeconds(-5); }
+          break;
+        }
+        case "l": case "L": {
+          // Double-tap L → fast-forward shuttle; single tap → forward 5s.
+          const now = Date.now();
+          if (now - dblTapRef.current.l < 350) { dblTapRef.current.l = 0; applyShuttle(2); }
+          else { dblTapRef.current.l = now; seekBySeconds(5); }
+          break;
+        }
         case "i": case "I": onMarkIn(); break;
         case "o": case "O": onMarkOut(); break;
         case "g": case "G": onClearMarks(); break;
@@ -2464,7 +2497,7 @@ export default function App() {
   }, [
     handleFetch, handleExport, handleAddToQueue, status, fps, durationFrames, settingsOpen,
     onPlayToggle, seekBySeconds, onMarkIn, onMarkOut, onClearMarks,
-    onGotoIn, onGotoOut, onStep, onSeek,
+    onGotoIn, onGotoOut, onStep, onSeek, applyShuttle,
   ]);
 
   // ── Native menubar event wiring ─────────────────────────────────

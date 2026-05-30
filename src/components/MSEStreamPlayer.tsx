@@ -76,6 +76,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   // Scrubbing = pause playback so it can't fight the playhead; resume on
   // settle (no seek for ~300ms). Fires after the last seek of a gesture.
   const seekSettleRef = useRef<number | null>(null);
+  // Shuttle (J-K-L): forward uses native playbackRate; reverse runs a backward
+  // currentTime scan on this interval (no native reverse in WebKit).
+  const shuttleRateRef = useRef(0);
+  const shuttleTimerRef = useRef(0);
   // Frame-accurate scrub preview (r68). While dragging, a WebCodecs
   // CanvasSink decodes the exact frame under the cursor onto an overlay
   // canvas — instant + every frame, vs the <video>'s laggy native seek.
@@ -178,6 +182,40 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     getVolume: () => videoRef.current?.volume ?? 1,
     setMuted: (m) => { if (videoRef.current) videoRef.current.muted = m; },
     isMuted: () => videoRef.current?.muted ?? false,
+    setShuttle: (rate) => {
+      const v = videoRef.current;
+      if (!v) return;
+      if (shuttleTimerRef.current) { window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0; }
+      shuttleRateRef.current = rate;
+      if (rate === 0) { v.playbackRate = 1; return; }
+      if (rate > 0) {
+        // Native fast-forward — smooth, full audio.
+        v.playbackRate = rate;
+        v.play().catch(() => { /* ignore */ });
+        return;
+      }
+      // Reverse: <video> can't play backward, so scan currentTime within the
+      // buffered segment. Smooth where buffered; clamps at the segment start
+      // (going further back would need a full stream rebuild).
+      v.playbackRate = 1;
+      try { v.pause(); } catch { /* ignore */ }
+      setIsPlaying(true);
+      const stepMs = 60;
+      shuttleTimerRef.current = window.setInterval(() => {
+        const vv = videoRef.current;
+        if (!vv) return;
+        const next = vv.currentTime + rate * (stepMs / 1000); // rate<0 → backward
+        if (next <= 0) {
+          try { vv.currentTime = 0; } catch { /* ignore */ }
+          window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0;
+          shuttleRateRef.current = 0;
+          setIsPlaying(false);
+          return;
+        }
+        try { vv.currentTime = next; } catch { /* ignore */ }
+        onTimeUpdate?.(baseTimeRef.current + next);
+      }, stepMs);
+    },
   }), [onError, onTimeUpdate]);
 
   // ─── Pipeline lifecycle ─────────────────────────────────────────────
@@ -508,6 +546,8 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     el.addEventListener("loadeddata", onSettled);
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
+      if (shuttleTimerRef.current) { window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0; }
+      shuttleRateRef.current = 0;
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
       el.removeEventListener("playing", onResume);

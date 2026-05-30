@@ -31,6 +31,10 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const readyRef = useRef(false);
   const playingRef = useRef(false);
+  // Shuttle (J-K-L): forward = native playbackRate; reverse = backward
+  // currentTime scan (the whole local file is buffered, so it's smooth).
+  const shuttleRateRef = useRef(0);
+  const shuttleTimerRef = useRef(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
   useImperativeHandle(ref, () => ({
@@ -53,6 +57,38 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     getVolume: () => mediaRef.current?.volume ?? 1,
     setMuted: (m) => { if (mediaRef.current) mediaRef.current.muted = m; },
     isMuted: () => mediaRef.current?.muted ?? false,
+    setShuttle: (rate) => {
+      const m = mediaRef.current;
+      if (!m) return;
+      if (shuttleTimerRef.current) { window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0; }
+      shuttleRateRef.current = rate;
+      if (rate === 0) { m.playbackRate = 1; return; }
+      if (rate > 0) {
+        m.playbackRate = rate;
+        m.play().catch(() => { /* ignore */ });
+        return;
+      }
+      // Reverse: <video> can't play backward; scan currentTime backward. The
+      // whole local file is buffered, so this is smooth across the clip.
+      m.playbackRate = 1;
+      try { m.pause(); } catch { /* ignore */ }
+      setIsPlaying(true);
+      const stepMs = 60;
+      shuttleTimerRef.current = window.setInterval(() => {
+        const mm = mediaRef.current;
+        if (!mm) return;
+        const next = mm.currentTime + rate * (stepMs / 1000); // rate<0 → backward
+        if (next <= 0) {
+          try { mm.currentTime = 0; } catch { /* ignore */ }
+          window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0;
+          shuttleRateRef.current = 0;
+          setIsPlaying(false);
+          return;
+        }
+        try { mm.currentTime = next; } catch { /* ignore */ }
+        onTimeUpdate?.(next);
+      }, stepMs);
+    },
   }), []);
 
   useEffect(() => {
@@ -101,6 +137,8 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     el.addEventListener("error", onErr);
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
+      if (shuttleTimerRef.current) { window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0; }
+      shuttleRateRef.current = 0;
       el.removeEventListener("loadedmetadata", onLoaded);
       el.removeEventListener("play",  onPlay);
       el.removeEventListener("pause", onPause);
