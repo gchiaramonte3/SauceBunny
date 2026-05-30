@@ -48,7 +48,7 @@ export function Toolbar({
         // Pass the URL explicitly so the fetch doesn't race the `url` state
         // update (onChange above is async; handleFetch would otherwise read
         // the previous/empty value).
-        if (cleaned && !fetching) onFetch(cleaned);
+        if (cleaned && !fetching) { onFetch(cleaned); inputRef.current?.blur(); }
       }
     } catch (err) {
       console.warn("clipboard read failed", err);
@@ -71,7 +71,13 @@ export function Toolbar({
           value={display}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !fetching && display) onFetch();
+            if (e.key === "Enter" && !fetching && display) {
+              onFetch();
+              // Drop focus so it leaves the URL bar. Otherwise the App keyboard
+              // handler's `inField` guard swallows every transport key
+              // (Space/K play, J/L seek, I/O marks) until you click elsewhere.
+              e.currentTarget.blur();
+            }
           }}
           placeholder="paste any video URL — youtube, vimeo, tiktok, twitter, reddit, …"
           spellCheck={false}
