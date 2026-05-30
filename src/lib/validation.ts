@@ -92,3 +92,18 @@ export function hostnameOf(raw: string): string {
     return "web";
   }
 }
+
+/**
+ * True when an error came from YouTube's "Sign in to confirm you're not a bot"
+ * challenge — either the raw yt-dlp text or our humanized backend hint
+ * (download.rs `YT_AUTH_HINT`). Drives the contextual auth modal.
+ */
+export function isYouTubeBotError(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    m.includes("not a bot") ||
+    m.includes("confirm you're not a bot") ||
+    m.includes("sign in to confirm") ||
+    m.includes("youtube auth")
+  );
+}

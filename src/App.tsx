@@ -37,11 +37,14 @@ import {
   type TranscriptHistoryEntry,
 } from "./lib/transcript-history";
 import type { Command } from "./lib/commands";
+import { buildCommands } from "./lib/commands";
+import { migrateLegacyStorageKeys } from "./lib/migrate-storage";
+import { loadJson, saveJson } from "./lib/storage";
 import {
   durationToTc, framesToTc, secondsToTc,
   tcToFrames, tcToSeconds,
 } from "./lib/timecode";
-import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl } from "./lib/validation";
+import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError } from "./lib/validation";
 import { buildProxyUrl } from "./lib/stream-proxy";
 import { sanitizeFilename, stripExt, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
@@ -73,69 +76,17 @@ function staleBinaryMessage(commandName: string): string {
   return `${commandName} hasn't been compiled into the running dev server yet. Stop and restart \`npm run tauri dev\` so cargo rebuilds the Rust backend.`;
 }
 
-function loadJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) return JSON.parse(raw) as T;
-  } catch (err) {
-    // Don't crash on a corrupt persisted blob — but do log it so we can
-    // diagnose "my settings keep resetting" reports.
-    console.warn(`loadJson(${key}) failed:`, err);
-  }
-  return fallback;
-}
-function saveJson(key: string, v: unknown) {
-  try { localStorage.setItem(key, JSON.stringify(v)); }
-  catch (err) { console.warn(`saveJson(${key}) failed:`, err); }
-}
-
 // v2 bump: re-encode default flipped from ON to OFF. Older v1 settings are
 // intentionally abandoned so users get the new, much faster default.
 const DEFAULTS_KEY  = "cp-defaults-v2";
 const RECENTS_KEY   = "cp-recents";
 const ASPECT_KEY    = "cp-aspect";
 
-// ─── One-shot rebrand migration (clippull.* → saucebunny.*) ─────────────
-// Runs once at module load (before App renders). For every localStorage
-// key starting with `clippull.`, copy its value to the equivalent
-// `saucebunny.` key when that target doesn't yet exist. Old keys are
-// left in place — users can clean them up manually. This preserves
-// transcript history + diarizer-ready state across the Sauce Bunny rename.
-(function migrateClippullLocalStorageKeys() {
-  try {
-    const toCopy: Array<[string, string]> = [];
-    for (let i = 0; i < localStorage.length; i += 1) {
-      const key = localStorage.key(i);
-      if (!key || !key.startsWith("clippull.")) continue;
-      const rest = key.slice("clippull.".length);
-      const newKey = `saucebunny.${rest}`;
-      if (localStorage.getItem(newKey) === null) {
-        const v = localStorage.getItem(key);
-        if (v !== null) toCopy.push([newKey, v]);
-      }
-    }
-    for (const [k, v] of toCopy) {
-      try { localStorage.setItem(k, v); } catch { /* quota — best-effort */ }
-    }
-  } catch {
-    // localStorage unavailable (private mode quirks) — non-fatal.
-  }
-})();
+// One-shot rebrand migration (clippull.* → saucebunny.*). Runs at module load,
+// before App renders so the default-loading useState initializers see the
+// migrated keys. Body lives in lib/migrate-storage.ts.
+migrateLegacyStorageKeys();
 
-/**
- * True when an error came from YouTube's "Sign in to confirm you're not a
- * bot" challenge — either the raw yt-dlp text or our humanized backend hint
- * (download.rs `YT_AUTH_HINT`). Drives the contextual auth modal.
- */
-function isYouTubeBotError(msg: string): boolean {
-  const m = msg.toLowerCase();
-  return (
-    m.includes("not a bot") ||
-    m.includes("confirm you're not a bot") ||
-    m.includes("sign in to confirm") ||
-    m.includes("youtube auth")
-  );
-}
 
 export default function App() {
   // ====== Persisted defaults (used to seed new fetches + Settings tab) ======
@@ -2591,127 +2542,30 @@ export default function App() {
   // same checks the toolbar/sidebar buttons would use, so the palette
   // never offers actions that wouldn't work.
   const hasSource = status === "loaded" || status === "exporting" || status === "success";
-  const commands: Command[] = useMemo(() => [
-    // ── Source ───────────────────────────────────────────────────
-    { id: "src.fetch", label: "Fetch URL", group: "Source",
-      hotkey: "⌘↵", description: "Resolve the URL in the address bar",
-      disabled: !url, run: () => handleFetch() },
-    { id: "src.import", label: "Import local file…", group: "Source",
-      description: "Pick a video or audio file from disk",
-      run: () => handleImportFile() },
-    { id: "src.clear", label: "Clear source", group: "Source",
-      description: "Unload the current video", disabled: !hasSource,
-      run: () => handleClear() },
-    // ── Playback ────────────────────────────────────────────────
-    { id: "play.toggle", label: isPlaying ? "Pause" : "Play",
-      group: "Playback", hotkey: "Space", disabled: !hasSource,
-      run: () => onPlayToggle() },
-    { id: "play.back5",    label: "Back 5 seconds",    group: "Playback",
-      hotkey: "J", disabled: !hasSource, run: () => seekBySeconds(-5) },
-    { id: "play.fwd5",     label: "Forward 5 seconds", group: "Playback",
-      hotkey: "L", disabled: !hasSource, run: () => seekBySeconds(5) },
-    { id: "play.frameBack", label: "Step 1 frame back",    group: "Playback",
-      hotkey: "←", disabled: !hasSource, run: () => onStep(-1) },
-    { id: "play.frameFwd",  label: "Step 1 frame forward", group: "Playback",
-      hotkey: "→", disabled: !hasSource, run: () => onStep(1) },
-    { id: "play.toStart",  label: "Jump to start", group: "Playback",
-      hotkey: "Home", disabled: !hasSource, run: () => onSeek(0) },
-    { id: "play.toEnd",    label: "Jump to end",   group: "Playback",
-      hotkey: "End",
-      disabled: !hasSource,
-      run: () => onSeek(Math.max(0, durationFrames - 1)) },
-    // ── Marks ────────────────────────────────────────────────────
-    { id: "mark.in",   label: "Mark in",  group: "Marks", hotkey: "I",
-      disabled: !hasSource, run: () => onMarkIn() },
-    { id: "mark.out",  label: "Mark out", group: "Marks", hotkey: "O",
-      disabled: !hasSource, run: () => onMarkOut() },
-    { id: "mark.clear", label: "Clear marks", group: "Marks", hotkey: "G",
-      disabled: inFrames == null && outFrames == null,
-      run: () => onClearMarks() },
-    { id: "mark.gotoIn",  label: "Go to mark in",  group: "Marks", hotkey: "Q",
-      disabled: inFrames == null, run: () => onGotoIn() },
-    { id: "mark.gotoOut", label: "Go to mark out", group: "Marks", hotkey: "W",
-      disabled: outFrames == null, run: () => onGotoOut() },
-    // ── Export ──────────────────────────────────────────────────
-    { id: "export.clip", label: "Export clip", group: "Export",
-      hotkey: "⌥E",
-      description: hasSource ? "Save the current selection" : "Load a source first",
-      disabled: !hasSource || !exportOpts.folder,
-      run: () => handleExport() },
-    { id: "export.snapshot", label: "Snapshot frame", group: "Export",
-      description: "Save the current frame as a JPEG",
-      disabled: !hasSource, run: () => handleSnapshot() },
-    // ── Queue ───────────────────────────────────────────────────
-    { id: "queue.add",    label: "Add selection to queue", group: "Queue",
-      hotkey: "⌘⇧A",
-      disabled: !hasSource || inFrames == null || outFrames == null,
-      run: () => handleAddToQueue() },
-    { id: "queue.toggle", label: "Toggle queue panel", group: "Queue",
-      hotkey: "⌘⇧Q", keywords: ["clips", "drawer"],
-      run: () => setQueueOpen((p) => !p) },
-    { id: "queue.export", label: "Export all queued clips", group: "Queue",
-      disabled: clipQueue.length === 0 || queueRunning || !exportOpts.folder,
-      run: () => handleExportQueue() },
-    { id: "queue.clear",  label: "Clear queue", group: "Queue",
-      disabled: clipQueue.length === 0 || queueRunning,
-      run: () => handleQueueClearAll() },
-    // ── Transcript ──────────────────────────────────────────────
-    { id: "tx.import", label: "Import transcript from disk…", group: "Transcript",
-      description: "Open a .srt or .vtt file from anywhere on disk",
-      keywords: ["load", "open", "subtitle", "captions"],
-      run: () => handleImportTranscript() },
-    { id: "tx.open", label: "Open transcript panel", group: "Transcript",
-      description: activeTranscript
-        ? `View ${activeTranscript.path.split("/").pop()}`
-        : "The panel opens but is empty until you generate a transcript",
-      keywords: ["captions", "subtitles", "reader"],
-      run: () => {
-        setQueueOpen(true);
-        // Bumping arrivedTick is what the drawer listens for to switch
-        // to the Transcript tab; reuse it as our "show this tab now" lever.
-        setTranscriptArrivedTick((n) => n + 1);
-      } },
-    { id: "tx.generate", label: "Generate transcript (Whisper)", group: "Transcript",
-      disabled: !hasSource || !exportOpts.folder,
-      run: () => handleGenerateTranscript() },
-    { id: "tx.download", label: "Download YouTube captions", group: "Transcript",
-      description: "yt-dlp pulls the .srt file",
-      disabled: !hasSource || sourceKind === "file" || !exportOpts.folder,
-      run: () => handleDownloadCaptions() },
-    // ── Dev — diarizer smoke test ───────────────────────────────
-    // B.1 scaffolding only: this just runs `saucebunny-diarize --version`
-    // via the new Rust probe command and shows the result in a toast.
-    // Confirms the Swift binary is built, signed enough to spawn, and
-    // reachable through the Tauri sidecar plumbing. Real diarize-on-
-    // current-source UX lands in B.2.
-    { id: "tx.probe-diarizer", label: "Probe diarizer (dev)", group: "Transcript",
-      description: "Smoke-test the saucebunny-diarize Swift sidecar",
-      keywords: ["fluidaudio", "speakers", "swift"],
-      run: async () => {
-        try {
-          const ver = await invoke<string>("probe_diarizer");
-          pushNotification("success", "Diarizer ready", ver);
-        } catch (e) {
-          pushNotification("error", "Diarizer probe failed", formatError(e));
-        }
-      } },
-    // ── View ────────────────────────────────────────────────────
-    { id: "view.captions", label: captionsOn ? "Hide captions" : "Show captions",
-      group: "View", disabled: !hasSource,
-      run: () => setCaptionsOn((p) => !p) },
-    { id: "view.logs", label: logsOpen ? "Collapse pipeline" : "Expand pipeline",
-      group: "View", hotkey: "⌘\\",
-      run: () => setLogsOpen((p) => !p) },
-    // ── App ─────────────────────────────────────────────────────
-    { id: "app.settings", label: "Open settings", group: "App", hotkey: "⌘,",
-      run: () => setSettingsOpen(true) },
-    { id: "app.palette", label: "Show command palette", group: "App", hotkey: "⌘K",
-      run: () => setPaletteOpen(true) },
-    { id: "app.stop", label: "Stop running operation", group: "App",
-      description: "Cancel the in-flight export / transcript / prep",
-      disabled: status !== "exporting" && transcriptState !== "running" && !playbackPrepBusy,
-      run: () => handleStop() },
-  ], [
+  // Registry body lives in lib/commands.ts (buildCommands); App just injects
+  // its current state + handlers. The dependency array below is unchanged from
+  // when the array was inline, so memoization behaves identically.
+  const commands: Command[] = useMemo(() => buildCommands({
+    url, hasSource, isPlaying, inFrames, outFrames, durationFrames,
+    captionsOn, logsOpen, clipQueueLength: clipQueue.length, queueRunning,
+    activeTranscriptPath: activeTranscript?.path ?? null,
+    exportFolder: exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
+    handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds,
+    onStep, onSeek, onMarkIn, onMarkOut, onClearMarks, onGotoIn, onGotoOut,
+    handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
+    handleQueueClearAll, handleImportTranscript, handleGenerateTranscript,
+    handleDownloadCaptions, handleStop,
+    setQueueOpen, setTranscriptArrivedTick, setCaptionsOn, setLogsOpen,
+    setSettingsOpen, setPaletteOpen,
+    onProbeDiarizer: async () => {
+      try {
+        const ver = await invoke<string>("probe_diarizer");
+        pushNotification("success", "Diarizer ready", ver);
+      } catch (e) {
+        pushNotification("error", "Diarizer probe failed", formatError(e));
+      }
+    },
+  }), [
     url, hasSource, isPlaying, inFrames, outFrames, durationFrames,
     captionsOn, logsOpen, clipQueue.length, queueRunning, activeTranscript,
     exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
