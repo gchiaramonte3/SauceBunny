@@ -471,8 +471,17 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     // an active drag the settle timer is armed, so per-tick 'seeked's don't
     // prematurely reveal the laggy video.
     const onSettled = () => { if (seekSettleRef.current == null) setScrubPreview(false); };
+    // Also hide the overlay the instant real playback resumes. The
+    // out-of-buffer REBUILD path can fire 'loadeddata' while the settle
+    // timer is still armed (so onSettled bails), then resume the rebuilt
+    // <video> with no further 'seeked' — leaving the preview canvas frozen
+    // over a playing video (audio but no picture). 'playing' can't fire
+    // mid-scrub (we pause on every seek tick), so clearing here is always
+    // correct: if the video is genuinely playing, show it, not a stale frame.
+    const onResume = () => setScrubPreview(false);
     el.addEventListener("play", onPlay);
     el.addEventListener("pause", onPause);
+    el.addEventListener("playing", onResume);
     el.addEventListener("timeupdate", onTime);
     el.addEventListener("error", onErr);
     el.addEventListener("seeked", onSettled);
@@ -480,6 +489,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     return () => {
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
+      el.removeEventListener("playing", onResume);
       el.removeEventListener("timeupdate", onTime);
       el.removeEventListener("error", onErr);
       el.removeEventListener("seeked", onSettled);
