@@ -8,7 +8,7 @@
 //!   - Web-preview download (`download_web_preview`) — fallback for
 //!     Referer-gated sources where direct-stream playback fails.
 //!   - YouTube-specific helpers: cookie args, auth-error detection,
-//!     humanised error messages.
+//!     humanized error messages.
 //!
 //! Shared cross-module helpers (`short_err`, `sidecar_path`,
 //! `current_triple`, `HOMEBREW_PATH`) and shared event types

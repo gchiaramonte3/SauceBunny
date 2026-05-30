@@ -17,7 +17,7 @@ import { HistoryPopover } from "./transcript/HistoryPopover";
 import {
   escapeHtml,
   highlightMatch,
-  humaniseSpeakerTag,
+  humanizeSpeakerTag,
   resolveAliasChain,
   speakerColor,
   speakerInitials,
@@ -245,10 +245,10 @@ export function TranscriptViewer({
     const tagKey = resolved ?? "__NULL__";
     const globalOverride = overrides.global[tagKey];
     if (globalOverride) return globalOverride;
-    // Humanise the model-emitted tag for display. SPEAKER_00 → Speaker 1
+    // Humanize the model-emitted tag for display. SPEAKER_00 → Speaker 1
     // (1-indexed, since humans don't say "speaker zero"). Custom tags
     // (already-renamed, or non-diarized null) pass through unchanged.
-    return humaniseSpeakerTag(resolved);
+    return humanizeSpeakerTag(resolved);
   }, [overrides, resolveAlias]);
 
   // ── Search ──────────────────────────────────────────────────────

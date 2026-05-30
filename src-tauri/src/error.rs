@@ -21,8 +21,8 @@
 //!
 //! ```rust,no_run
 //! #[tauri::command]
-//! pub fn foo() -> Result<String, AppError> {
-//!     std::fs::read_to_string("x")?;          // io::Error → AppError via From
+//! pub fn read_config(path: &str) -> Result<String, AppError> {
+//!     std::fs::read_to_string(path)?;         // io::Error → AppError via From
 //!     Err(AppError::Invalid("bad input".into()))
 //! }
 //! ```

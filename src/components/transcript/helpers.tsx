@@ -102,14 +102,14 @@ export function speakerColor(speaker: string | null): string {
  *   SPEAKER_07   → "Speaker 8"
  *   S2           → "Speaker 3"
  *   SPEAKER_UNK  → "Unknown speaker"
- *   null / undiarised → "Speaker"
+ *   null / undiarized → "Speaker"
  *   anything custom (e.g. "Tom") → unchanged
  *
  * The diarizer's internal numbering is 0-indexed; humans expect
  * 1-indexed. We don't pad ("Speaker 01"): once we're in human-readable
  * land we follow human conventions.
  */
-export function humaniseSpeakerTag(tag: string | null): string {
+export function humanizeSpeakerTag(tag: string | null): string {
   if (!tag) return "Speaker";
   if (tag === "SPEAKER_UNK") return "Unknown speaker";
   const m = tag.match(/^SPEAKER[_\s-]?(\d+)$/i) || tag.match(/^S(\d+)$/i);
@@ -122,7 +122,7 @@ export function humaniseSpeakerTag(tag: string | null): string {
 
 /**
  * Two-letter chip label for a speaker. Uses "S1" / "S2" form for the
- * humanised "Speaker N" pattern, and first-letters-of-first-two-words
+ * humanized "Speaker N" pattern, and first-letters-of-first-two-words
  * for everything else. Single-word custom names fall back to the first
  * letter capitalised.
  */
