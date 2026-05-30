@@ -68,9 +68,20 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
         try { el.currentTime = 0.001; } catch { /* ignore */ }
       }
     };
-    const onPlay  = () => { playingRef.current = true;  setIsPlaying(true);  onPlayStateChange?.(true);  };
-    const onPause = () => { playingRef.current = false; setIsPlaying(false); onPlayStateChange?.(false); };
-    const onTime  = () => onTimeUpdate?.(el.currentTime);
+    // Drive the playhead from requestAnimationFrame while playing instead of the
+    // <video>'s ~4Hz 'timeupdate' event, so it advances frame-by-frame rather
+    // than skipping ~4 frames per tick. App floors to a frame number and React
+    // bails when it's unchanged, so this only re-renders on a real frame change.
+    let rafId = 0;
+    const reportTime = () => onTimeUpdate?.(el.currentTime);
+    const tick = () => { rafId = 0; if (!playingRef.current) return; reportTime(); rafId = requestAnimationFrame(tick); };
+    const startTick = () => { if (!rafId) rafId = requestAnimationFrame(tick); };
+    const onPlay  = () => { playingRef.current = true;  setIsPlaying(true);  onPlayStateChange?.(true); startTick(); };
+    const onPause = () => {
+      playingRef.current = false; setIsPlaying(false); onPlayStateChange?.(false);
+      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    };
+    const onTime  = () => reportTime(); // backstop while paused / on seek landing
     const onErr   = () => {
       const me = el.error;
       const map: Record<number, string> = {
@@ -89,6 +100,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     el.addEventListener("timeupdate", onTime);
     el.addEventListener("error", onErr);
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       el.removeEventListener("loadedmetadata", onLoaded);
       el.removeEventListener("play",  onPlay);
       el.removeEventListener("pause", onPause);

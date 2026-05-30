@@ -451,14 +451,34 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     const el = videoRef.current;
     if (!el) return;
     el.volume = Math.max(0, Math.min(1, initialVolume));
-    const onPlay = () => { playingRef.current = true; setIsPlaying(true); onPlayStateChange?.(true); };
-    const onPause = () => { playingRef.current = false; setIsPlaying(false); onPlayStateChange?.(false); };
-    const onTime = () => {
-      // While an out-of-buffer seek is resolving, the old/transitional video
-      // would report a stale position and fight the playhead — suppress it.
-      if (seekingRef.current) return;
-      onTimeUpdate?.(baseTimeRef.current + el.currentTime);
+    // Drive the playhead from requestAnimationFrame (~display refresh) while
+    // playing, NOT the <video>'s 'timeupdate' event. Browsers throttle
+    // 'timeupdate' to ~4Hz, so on 15-30fps content the playhead visibly skips
+    // ~4 frames per update ("playing in chunks"). rAF reads currentTime every
+    // frame, so the playhead advances frame-by-frame. App floors to a frame
+    // number and React bails when it's unchanged, so this only re-renders when
+    // the frame actually advances — cheap.
+    let rafId = 0;
+    const reportTime = () => {
+      // Suppress while an out-of-buffer seek resolves — the old/transitional
+      // video reports a stale position that would fight the playhead.
+      if (!seekingRef.current) onTimeUpdate?.(baseTimeRef.current + el.currentTime);
     };
+    const tick = () => {
+      rafId = 0;
+      if (!playingRef.current) return;
+      reportTime();
+      rafId = requestAnimationFrame(tick);
+    };
+    const startTick = () => { if (!rafId) rafId = requestAnimationFrame(tick); };
+    const onPlay = () => { playingRef.current = true; setIsPlaying(true); onPlayStateChange?.(true); startTick(); };
+    const onPause = () => {
+      playingRef.current = false; setIsPlaying(false); onPlayStateChange?.(false);
+      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    };
+    // 'timeupdate' (≈4Hz) stays as the playhead signal while PAUSED — e.g. a
+    // seek landing — and as a backstop if rAF is throttled in a background tab.
+    const onTime = () => reportTime();
     const onErr = () => {
       const me = el.error;
       const map: Record<number, string> = {
@@ -487,6 +507,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     el.addEventListener("seeked", onSettled);
     el.addEventListener("loadeddata", onSettled);
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
       el.removeEventListener("playing", onResume);
