@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
 import { QueueDrawer } from "./components/QueueDrawer";
+import { PANEL_SNAPSHOT_KEY } from "./hooks/use-panel-bus";
 import type { QueuedClip } from "./types";
 import type { TranscriptHistoryEntry } from "./lib/transcript-history";
 
@@ -72,6 +73,29 @@ function sendAction(kind: ActionKind, payload?: unknown) {
 export default function PanelApp() {
   const [state, setState] = useState<PanelState>(INITIAL);
 
+  // PRIMARY channel: read the snapshot the main window mirrors to localStorage
+  // (shared across same-origin webviews). On mount + on the `storage` event +
+  // a slow poll backstop (in case WKWebView doesn't fire cross-window storage
+  // events). This is what makes the popped-out transcript actually populate.
+  const lastRawRef = useRef<string | null>(null);
+  useEffect(() => {
+    const read = () => {
+      try {
+        const raw = localStorage.getItem(PANEL_SNAPSHOT_KEY);
+        if (raw && raw !== lastRawRef.current) {
+          lastRawRef.current = raw;
+          setState(JSON.parse(raw) as PanelState);
+        }
+      } catch { /* ignore parse/quota */ }
+    };
+    read();
+    const onStorage = (e: StorageEvent) => { if (e.key === PANEL_SNAPSHOT_KEY) read(); };
+    window.addEventListener("storage", onStorage);
+    const poll = window.setInterval(read, 400);
+    return () => { window.removeEventListener("storage", onStorage); window.clearInterval(poll); };
+  }, []);
+
+  // Secondary (fast-path) channel: Tauri events, if they arrive.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
@@ -82,9 +106,6 @@ export default function PanelApp() {
       });
       if (cancelled) { off(); return; }
       unlisten = off;
-      // Tell main "I'm alive, send me current state." Main rebroadcasts
-      // its last computed snapshot in response (cheap — it already has
-      // the values in scope from the effect that emits state on change).
       void emit("panel:request-state");
     })();
     return () => {

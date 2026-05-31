@@ -232,6 +232,9 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               path={webStreamUrl}
               filename={metadata?.title}
               hasVideo
+              /* Authoritative duration so far seeks don't clamp to a short
+                 stream-probe value (was sending 19:40 to 15:12). */
+              knownDuration={metadata?.duration ?? undefined}
               initialVolume={initialVolume}
               onTimeUpdate={onPlayerTimeUpdate}
               onPlayStateChange={onPlayerStateChange}

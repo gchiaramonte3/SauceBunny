@@ -150,9 +150,18 @@ export function TranscriptViewer({
     }
   }, [storageKey]);
 
-  // Persist on every change. Skip the no-op (empty + key absent) write.
+  // The storageKey the persist effect last ran against. CRITICAL: on the render
+  // where the key CHANGES (source swap, or the popped-out window mounting and
+  // receiving its path), `overrides` still holds the OLD value while the load
+  // effect above repopulates it this same commit. Persisting here would write
+  // that stale (usually empty) value — and because both app windows share
+  // localStorage, that empties out a sibling window's saved speaker names (the
+  // "pop out → close → names reset" bug). So we skip the write on the
+  // key-change render and only persist real edits made against a loaded key.
+  const persistKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!storageKey) return;
+    if (!storageKey) { persistKeyRef.current = storageKey; return; }
+    if (persistKeyRef.current !== storageKey) { persistKeyRef.current = storageKey; return; }
     const empty = Object.keys(overrides.global).length === 0
                && Object.keys(overrides.turn).length === 0
                && Object.keys(overrides.aliases).length === 0;

@@ -3,7 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { parseSrt, type Cue } from "../lib/srt";
 import {
   loadSpeakerOverrides,
+  resolveAliasChain,
   resolveSpeakerName,
+  speakerColor,
   SPEAKERS_CHANGED_EVENT,
   type SpeakerOverrides,
 } from "./transcript/helpers";
@@ -166,6 +168,11 @@ export function CaptionOverlay({ path, currentSec, enabled, style }: Props) {
 
   // Resolve the speaker via the panel's live renames (alias → rename → human).
   const speakerName = active?.speaker ? resolveSpeakerName(active.speaker, overrides) : null;
+  // Colour the name with the same per-speaker hue the roster/bubbles use, so
+  // the caption's "Speaker 2:" matches the chip on the right.
+  const speakerHue = active?.speaker
+    ? speakerColor(resolveAliasChain(active.speaker, overrides.aliases))
+    : undefined;
   // Two clause-broken lines, with the first line's budget reduced by the
   // speaker prefix so "Tom Jonathan: …" doesn't overflow.
   const firstMax = speakerName ? Math.max(12, MAX_LINE - (speakerName.length + 2)) : MAX_LINE;
@@ -175,7 +182,7 @@ export function CaptionOverlay({ path, currentSec, enabled, style }: Props) {
     <div className="cp-caption-overlay" aria-live="polite">
       <span className="cp-caption-cue" style={cueStyle}>
         <span className="cp-caption-line">
-          {speakerName && <b className="cp-caption-speaker">{speakerName}: </b>}
+          {speakerName && <b className="cp-caption-speaker" style={{ color: speakerHue }}>{speakerName}: </b>}
           {lines[0]}
         </span>
         {lines[1] && <span className="cp-caption-line">{lines[1]}</span>}

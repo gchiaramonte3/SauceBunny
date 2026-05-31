@@ -186,6 +186,17 @@ export function QueueDrawer({
   useEffect(() => {
     if (activeTab === "transcript") setTranscriptUnread(false);
   }, [activeTab]);
+  // Popped-out window: the user popped this out to read the transcript, but
+  // arrivedTick doesn't change after pop-out, so the auto-switch above never
+  // fires and the window opens on the (often empty) Queue tab. Switch to the
+  // Transcript tab once a transcript path arrives over the panel bus.
+  const embeddedDidSwitch = useRef(false);
+  useEffect(() => {
+    if (embedded && transcriptPath && !embeddedDidSwitch.current) {
+      embeddedDidSwitch.current = true;
+      setActiveTab("transcript");
+    }
+  }, [embedded, transcriptPath]);
 
   const TABS: TabDef[] = [
     { id: "queue", label: "Queue", icon: IconStack, badge: queue.length },
@@ -447,14 +458,14 @@ export function QueueDrawer({
             title="Pop out into its own window"
             aria-label="Pop out"
           >
-            {/* Diagonal-arrow glyph: ⤢ Unicode would work but the
-                outlined SVG matches the visual weight of the other
-                tab-strip icons. */}
+            {/* "Open in new window" glyph (Feather external-link): a window
+                with an arrow leaving the top-right corner — the universally
+                recognized pop-out-to-its-own-window affordance. The old
+                diagonal double-arrow read as fullscreen/expand, not pop-out. */}
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
               <polyline points="15 3 21 3 21 9" />
-              <polyline points="9 21 3 21 3 15" />
-              <line x1="21" y1="3" x2="14" y2="10" />
-              <line x1="3" y1="21" x2="10" y2="14" />
+              <line x1="10" y1="14" x2="21" y2="3" />
             </svg>
           </button>
         )}

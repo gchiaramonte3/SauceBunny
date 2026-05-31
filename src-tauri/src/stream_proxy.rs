@@ -324,6 +324,9 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64) -> std:
     let mut cmd = std::process::Command::new(ff);
     cmd.arg("-hide_banner")
         .arg("-loglevel").arg("error")
+        // Regenerate clean PTS where the source's are missing/broken — YouTube
+        // DASH streams carry a non-zero start PTS and audio encoder-priming.
+        .arg("-fflags").arg("+genpts")
         .arg("-user_agent").arg(SAFARI_UA);
     // Input-side seek (fast, keyframe-accurate) for scrub-rebuilds.
     if start > 0.0 {
@@ -331,6 +334,13 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64) -> std:
     }
     cmd.arg("-i").arg(&upstream)
         .arg("-c").arg("copy")
+        // Re-base the output timeline to zero so the MSE <video>'s currentTime
+        // maps 1:1 to real media time. Without this, the source's start-PTS
+        // offset rides into the fMP4 and the playhead drifts from the audio,
+        // making captions show late. muxpreload/muxdelay 0 drop mux offsets.
+        .arg("-avoid_negative_ts").arg("make_zero")
+        .arg("-muxpreload").arg("0")
+        .arg("-muxdelay").arg("0")
         .arg("-movflags").arg("frag_keyframe+empty_moov+default_base_moof")
         .arg("-f").arg("mp4")
         .arg("pipe:1")

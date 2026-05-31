@@ -1078,10 +1078,10 @@ export default function App() {
     setPlayheadFrames(0);
     setInFrames(null);
     setOutFrames(null);
-    // Auto-load any previously-generated transcript for this URL.
-    // No await — runs in the background; if found, the Transcript tab
-    // pulses + auto-opens via the standard arrivedTick flow.
-    void tryAutoLoadTranscript({ sourceUrl: full });
+    // NOTE: we deliberately do NOT auto-load a prior transcript on fetch.
+    // resetForNewSource() above clears it, so every fetch starts with a clean
+    // transcript panel — no holdover from the previous video. A past transcript
+    // is still one click away via the Transcript tab's History popover.
     // Seed a sensible filename from the URL right away; replaced once title arrives.
     setExportOpts((prev) => ({
       ...prev,
@@ -3004,6 +3004,7 @@ export default function App() {
             onCopy={handleCopyLogs}
             transcriptState={transcriptState}
             transcriptProgress={transcriptProgress}
+            transcriptPhase={transcriptPhase}
             metadataLoading={metadataLoading}
             playbackPrepBusy={playbackPrepBusy}
             canStop={status === "exporting" || transcriptState === "running" || playbackPrepBusy}

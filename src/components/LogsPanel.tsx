@@ -13,6 +13,10 @@ type Props = {
   /** Optional secondary phase that overrides the status pill when active. */
   transcriptState?: "idle" | "running" | "done" | "error";
   transcriptProgress?: number;
+  /** Which stage of the transcript pipeline is live, so the pill reads
+   *  "DOWNLOADING" during the audio pull and "WHISPER" during transcription
+   *  (both share transcriptState === "running"). */
+  transcriptPhase?: string | null;
   /**
    * Background phases that show in the pipeline pill without blocking the
    * canvas. metadataLoading = yt-dlp still resolving manifests after the
@@ -37,9 +41,19 @@ function pillFor(status: AppStatus): { label: string; cls: string } {
   }
 }
 
+function transcriptPillLabel(phase: string | null | undefined, pct: number): string {
+  switch (phase) {
+    case "download":        return `DOWNLOADING · ${pct}%`;
+    case "diarize-prepare": return "LOADING SPEAKERS";
+    case "diarize-process": return "DETECTING SPEAKERS";
+    case "diarize-merge":   return "MERGING SPEAKERS";
+    default:                return `WHISPER · ${pct}%`;
+  }
+}
+
 export function LogsPanel({
   open, onToggle, status, progress, lines, onClear, onCopy,
-  transcriptState, transcriptProgress,
+  transcriptState, transcriptProgress, transcriptPhase,
   metadataLoading, playbackPrepBusy,
   canStop, onStop,
 }: Props) {
@@ -61,7 +75,7 @@ export function LogsPanel({
   const pill = status === "exporting"
     ? { label: `EXPORTING · ${Math.round(progress)}%`, cls: "working" }
     : whisperRunning
-      ? { label: `WHISPER · ${Math.round(transcriptProgress ?? 0)}%`, cls: "working" }
+      ? { label: transcriptPillLabel(transcriptPhase, Math.round(transcriptProgress ?? 0)), cls: "working" }
       : playbackPrepBusy
         ? { label: "PREPARING PLAYBACK", cls: "working" }
         : metadataLoading

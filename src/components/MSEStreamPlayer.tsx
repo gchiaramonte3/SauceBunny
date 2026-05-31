@@ -39,6 +39,9 @@ type Props = {
   onReady?: (duration: number) => void;
   onError?: (message: string) => void;
   onSurfaceClick?: () => void;
+  /** Authoritative duration (seconds) from yt-dlp metadata. Preferred over the
+   *  stream probe, which can read short and make far seeks clamp early. */
+  knownDuration?: number;
 };
 
 /** Seconds to stay buffered ahead of the playhead before pausing reads —
@@ -46,7 +49,7 @@ type Props = {
 const BUFFER_AHEAD_SECONDS = 30;
 
 export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSEStreamPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick },
+  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -57,6 +60,15 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const baseTimeRef = useRef(0);
   const totalDurationRef = useRef(0);
   const mimeRef = useRef<string | null>(null);
+  // Authoritative total from yt-dlp metadata. The mediabunny probe of the
+  // fragmented proxy stream can read short, which made `seekTo` clamp far
+  // seeks early (e.g. 19:40 landing at 15:12). Metadata wins when present.
+  const knownDurationRef = useRef(0);
+  useEffect(() => {
+    const d = knownDuration && isFinite(knownDuration) && knownDuration > 0 ? knownDuration : 0;
+    knownDurationRef.current = d;
+    if (d > 0) totalDurationRef.current = d;
+  }, [knownDuration]);
 
   const msRef = useRef<MediaSource | null>(null);
   const sbRef = useRef<SourceBuffer | null>(null);
@@ -363,7 +375,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             ]);
             if (disposed || gen !== genRef.current) return;
             mimeRef.current = `video/mp4; codecs="${[vCodec, aCodec].filter(Boolean).join(", ")}"`;
-            totalDurationRef.current = dur && isFinite(dur) ? dur : 0;
+            // Prefer the authoritative metadata duration; only trust the probe
+            // when metadata didn't give us one (the probe can read short).
+            totalDurationRef.current = knownDurationRef.current > 0
+              ? knownDurationRef.current
+              : (dur && isFinite(dur) ? dur : 0);
           }
           const mime = mimeRef.current;
           const total = totalDurationRef.current;
