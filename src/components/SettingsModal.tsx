@@ -96,6 +96,9 @@ export type Defaults = {
   captionBgOpacity: number;
   /** Caption text colour (hex). */
   captionColor: string;
+  /** Caption sync offset (seconds) to counter streaming-playhead drift; applied
+   *  only to web stream playback. Positive shows captions earlier. */
+  captionSyncSec: number;
 };
 
 type Props = {
@@ -682,6 +685,33 @@ export function SettingsModal(props: Props) {
                         onChange={(e) => setDefaults({ ...defaults, captionColor: e.target.value })}
                         title="Custom colour"
                       />
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Sync offset
+                      <span className="desc">Streaming only. If captions lag the audio, nudge this up until they line up. Local/downloaded playback is accurate and ignores it.</span>
+                    </div>
+                    <div className="v cp-cap-range">
+                      <button
+                        className="btn btn-ghost cp-cap-nudge"
+                        onClick={() => setDefaults({ ...defaults, captionSyncSec: Math.round((defaults.captionSyncSec - 0.5) * 10) / 10 })}
+                        title="Captions later"
+                      >−0.5s</button>
+                      <input
+                        type="range"
+                        min={-15}
+                        max={15}
+                        step={0.1}
+                        value={defaults.captionSyncSec}
+                        onChange={(e) => setDefaults({ ...defaults, captionSyncSec: Number(e.target.value) })}
+                      />
+                      <button
+                        className="btn btn-ghost cp-cap-nudge"
+                        onClick={() => setDefaults({ ...defaults, captionSyncSec: Math.round((defaults.captionSyncSec + 0.5) * 10) / 10 })}
+                        title="Captions earlier"
+                      >+0.5s</button>
+                      <span className="cp-cap-range-val">{defaults.captionSyncSec > 0 ? "+" : ""}{defaults.captionSyncSec.toFixed(1)}s</span>
                     </div>
                   </div>
                 </div>

@@ -20,6 +20,13 @@ export type CaptionStyle = {
   bgOpacity: number;
   /** Text colour (hex). */
   color: string;
+  /**
+   * Seconds to shift the cue lookup, to counteract the streaming-playhead
+   * drift (positive = show captions earlier, for when they lag the audio).
+   * App passes 0 for accurate paths (local/download) so it only bites on the
+   * MSE stream where the playhead runs behind real media time.
+   */
+  syncSec?: number;
 };
 
 const FONT_STACK: Record<CaptionStyle["font"], string> = {
@@ -153,7 +160,9 @@ export function CaptionOverlay({ path, currentSec, enabled, style }: Props) {
   }, [enabled, path]);
 
   if (!enabled || loadedFor.current !== path || cues.length === 0) return null;
-  const active = cues.find((c) => currentSec >= c.start && currentSec < c.end);
+  // Shift the lookup by the user's sync offset (streaming drift correction).
+  const t = currentSec + (style?.syncSec ?? 0);
+  const active = cues.find((c) => t >= c.start && t < c.end);
   const text = active?.text?.trim();
   if (!text) return null;
 

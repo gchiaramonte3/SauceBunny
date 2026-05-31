@@ -132,6 +132,7 @@ export default function App() {
       captionFont: stored.captionFont ?? "sans",
       captionBgOpacity: stored.captionBgOpacity ?? 0.55,
       captionColor: stored.captionColor ?? "#ffffff",
+      captionSyncSec: stored.captionSyncSec ?? 0,
     };
   });
   const setDefaults = useCallback((d: Defaults) => {
@@ -2932,12 +2933,17 @@ export default function App() {
               transcriptPath={activeTranscript?.path ?? null}
               currentSec={playheadSec}
               captionsOn={captionsOn}
-              /* User-tunable caption look (Settings → Captions). */
+              /* User-tunable caption look (Settings → Captions). The sync
+                 offset only applies to the MSE web stream (the drifty path) —
+                 0 for local/download where the native clock is accurate. */
               captionStyle={{
                 scale: defaults.captionScale,
                 font: defaults.captionFont,
                 bgOpacity: defaults.captionBgOpacity,
                 color: defaults.captionColor,
+                syncSec: (sourceKind === "youtube" && !!webStreamUrl && !webCachePath)
+                  ? defaults.captionSyncSec
+                  : 0,
               }}
               /* Type-a-timecode HUD: digits build this string, Return snaps. */
               tcOverlay={tcOverlay}
