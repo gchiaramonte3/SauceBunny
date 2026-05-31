@@ -150,3 +150,55 @@ export function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+
+// ── Shared speaker-override access (panel ⇄ on-video caption overlay) ──
+// The transcript panel owns the rename/merge UI and persists three layers to
+// localStorage keyed by transcript path. The caption overlay reads the SAME
+// store so a rename ("Speaker 1" → "Tom Jonathan") shows up live on the video.
+
+export type SpeakerOverrides = {
+  global: Record<string, string>;
+  turn: Record<string, string>;
+  aliases: Record<string, string>;
+};
+
+const EMPTY_OVERRIDES: SpeakerOverrides = { global: {}, turn: {}, aliases: {} };
+
+/** localStorage key the panel persists a transcript's speaker overrides under. */
+export function speakerOverridesKey(path: string): string {
+  return `saucebunny.speakerNames.${path}`;
+}
+
+/** Fired on `window` by the panel whenever overrides change, so live consumers
+ *  (the caption overlay) can re-read without polling. Same-window only —
+ *  the native `storage` event doesn't fire in the tab that wrote it. */
+export const SPEAKERS_CHANGED_EVENT = "saucebunny:speakers-changed";
+
+/** Read + shape-clamp the persisted overrides for a path. */
+export function loadSpeakerOverrides(path: string | null): SpeakerOverrides {
+  if (!path) return EMPTY_OVERRIDES;
+  try {
+    const raw = localStorage.getItem(speakerOverridesKey(path));
+    if (!raw) return EMPTY_OVERRIDES;
+    const p = JSON.parse(raw) as Partial<SpeakerOverrides>;
+    return {
+      global: p.global && typeof p.global === "object" ? p.global : {},
+      turn: p.turn && typeof p.turn === "object" ? p.turn : {},
+      aliases: p.aliases && typeof p.aliases === "object" ? p.aliases : {},
+    };
+  } catch {
+    return EMPTY_OVERRIDES;
+  }
+}
+
+/**
+ * Resolve a raw speaker tag to its display name with the same layered rules as
+ * the panel: alias chain → global rename → humanized fallback. Per-turn
+ * overrides aren't applied (they're turn-indexed, not cue-indexed) — those are
+ * rare; the common "rename everywhere" path resolves correctly.
+ */
+export function resolveSpeakerName(tag: string | null, ov: SpeakerOverrides): string {
+  const resolved = resolveAliasChain(tag, ov.aliases);
+  const key = resolved ?? "__NULL__";
+  return ov.global[key] ?? humanizeSpeakerTag(resolved);
+}

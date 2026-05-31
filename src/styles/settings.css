@@ -589,3 +589,74 @@
   font-size: 12px;
   color: var(--fg-3);
 }
+
+/* ── Caption appearance controls (General → Captions) ── */
+.cp-cap-preview {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  min-width: 240px;
+  padding: 14px 10px;
+  border-radius: 8px;
+  /* A checkerboard hints at transparency so the background-opacity slider
+     reads clearly even over a flat panel. */
+  background:
+    linear-gradient(45deg, rgba(255,255,255,0.05) 25%, transparent 25%) 0 0 / 14px 14px,
+    linear-gradient(-45deg, rgba(255,255,255,0.05) 25%, transparent 25%) 0 7px / 14px 14px,
+    var(--bg-0, #0c0c0e);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.cp-cap-preview-cue {
+  display: inline-block;
+  padding: 3px 11px;
+  border-radius: 6px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.95);
+  font-size: calc(clamp(12px, 2vw, 22px) * var(--cap-scale, 1));
+}
+.cp-cap-range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cp-cap-range input[type="range"] {
+  width: 170px;
+  accent-color: var(--accent);
+}
+.cp-cap-range-val {
+  font-size: 12px;
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+}
+.cp-cap-colors {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cp-cap-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.18);
+  cursor: pointer;
+  padding: 0;
+  transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.cp-cap-swatch:hover { transform: scale(1.12); }
+.cp-cap-swatch.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.3);
+}
+.cp-cap-color-custom {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}

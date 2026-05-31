@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { IconReveal, IconAlert, IconChevronDown } from "./Icons";
 import { parseSrt, groupIntoTurns, fmtTime, type Turn } from "../lib/srt";
+import { secondsToTc } from "../lib/timecode";
 import {
   getHistory,
   removeEntry,
@@ -21,6 +22,7 @@ import {
   resolveAliasChain,
   speakerColor,
   speakerInitials,
+  SPEAKERS_CHANGED_EVENT,
 } from "./transcript/helpers";
 
 type Props = {
@@ -70,6 +72,12 @@ type Props = {
    * visible — in that case the button hides rather than failing.
    */
   canRegenerate: boolean;
+  /**
+   * Frame rate of the loaded source, so the per-turn timestamps render in
+   * the same SMPTE HH:MM:SS:FF the player/transport show. Falls back to 30
+   * when no source is loaded (an imported transcript with no video).
+   */
+  fps?: number;
 };
 
 /**
@@ -90,7 +98,7 @@ type Props = {
 export function TranscriptViewer({
   path, playheadSeconds, onSeek, origin: _origin,
   onClearTranscript, onLoadFromHistory,
-  onRegenerate, regenerateBusy, canRegenerate,
+  onRegenerate, regenerateBusy, canRegenerate, fps = 30,
   onImportTranscript,
 }: Props) {
   const [raw, setRaw] = useState<string | null>(null);
@@ -153,7 +161,11 @@ export function TranscriptViewer({
     } else {
       try { localStorage.setItem(storageKey, JSON.stringify(overrides)); } catch { /* quota */ }
     }
-  }, [storageKey, overrides]);
+    // Tell live consumers (the on-video caption overlay) to re-read, so a
+    // rename shows up on the video immediately. Same-window: the native
+    // `storage` event won't fire here, so we dispatch our own.
+    window.dispatchEvent(new CustomEvent(SPEAKERS_CHANGED_EVENT, { detail: { path } }));
+  }, [storageKey, overrides, path]);
 
   /**
    * Walk the alias chain to find the canonical tag a speaker should
@@ -414,6 +426,16 @@ export function TranscriptViewer({
     list.sort((a, b) => (orderMap.get(a.tag)! - orderMap.get(b.tag)!));
     return list;
   }, [turns, resolveAlias, displayNameFor]);
+
+  // True when the transcript actually carries speaker identity — either
+  // more than one speaker, or a single one that's been labeled (not the
+  // generic fallback "Speaker"). When false (un-diarized whisper output,
+  // or a caption file with no <v> voice tags) we drop the repeated
+  // "Speaker" chip above every bubble and render clean reading prose with
+  // just a quiet paragraph timestamp — the chip was pure noise there, and
+  // the user called it out as bad UX ("Speaker above the other text").
+  const hasRealSpeakers =
+    roster.length > 1 || (roster.length === 1 && roster[0].tag !== "Speaker");
 
   // Drag-to-merge: track the dragged source tag in a ref so handlers
   // can read it inside React without re-render thrash. Hover state
@@ -821,7 +843,8 @@ export function TranscriptViewer({
         </div>
         <input
           className="cp-tx-search-input"
-          placeholder={searchMode === "speakers" ? "Find a speaker…" : "Search transcript…  (⌘G next · ⇧⌘G prev)"}
+          placeholder={searchMode === "speakers" ? "Find a speaker…" : "Search transcript…"}
+          title={searchMode === "speakers" ? "Search by speaker name" : "Search the transcript — ⌘G next · ⇧⌘G previous"}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onSearchKey}
@@ -879,14 +902,17 @@ export function TranscriptViewer({
           paragraph shown right out the gate, which read as a warning. Now
           it's a quiet info strip with an inline Regenerate and a dismiss. */}
       {turns.length > 0 && roster.length === 1 && roster[0].tag === "Speaker" && canRegenerate && !noticeDismissed && (
-        <div className="cp-tx-hint">
+        <div
+          className="cp-tx-hint"
+          title="Sauce Bunny uses a source's own caption speaker labels automatically when they exist (e.g. YouTube/Vimeo creator captions) — this one's captions didn't carry any. Detect speakers runs diarization to add them."
+        >
           <svg className="cp-tx-hint-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <circle cx="12" cy="12" r="9" />
             <path d="M12 16v-4" />
             <path d="M12 8h.01" />
           </svg>
           <span className="cp-tx-hint-text">
-            No speaker labels — enable <em>Detect speakers</em> in Settings, then regenerate.
+            No speaker labels — turn on <em>Detect speakers</em> to add them.
           </span>
           <button
             className="cp-tx-hint-action"
@@ -1011,7 +1037,8 @@ export function TranscriptViewer({
             !!overrides.global[turn.speaker ?? "__NULL__"];
           return (
             <div className="cp-tx-turn" key={ti}>
-              <div className="cp-tx-turn-head">
+              <div className={"cp-tx-turn-head" + (hasRealSpeakers ? "" : " no-speaker")}>
+                {hasRealSpeakers && (<>
                 <span
                   className={"cp-tx-speaker" + (hasOverride ? " renamed" : "")}
                   style={{ background: speakerColor(resolveAlias(turn.speaker)) }}
@@ -1038,12 +1065,13 @@ export function TranscriptViewer({
                 >
                   {displayName}
                 </span>
+                </>)}
                 <button
                   className="cp-tx-jump"
                   onClick={() => { setAutoScroll(true); onSeek(turn.start); }}
                   title="Jump to this turn"
                 >
-                  {fmtTime(turn.start)}
+                  {secondsToTc(turn.start, fps)}
                 </button>
               </div>
               <div className="cp-tx-turn-body">
@@ -1063,7 +1091,7 @@ export function TranscriptViewer({
                         (isActiveMatch ? " match-active" : "")
                       }
                       onClick={() => { setAutoScroll(true); onSeek(cue.start); }}
-                      title={`${fmtTime(cue.start)} — click to jump`}
+                      title={`${secondsToTc(cue.start, fps)} — click to jump`}
                     >
                       {/* In speaker mode, don't highlight the body —
                           the query targets the speaker name, not the

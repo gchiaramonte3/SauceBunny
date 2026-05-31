@@ -97,6 +97,7 @@ const FORMATS: { id: FormatId; label: string }[] = [
  */
 function phaseLabel(phase: string | null, percent: number): string {
   switch (phase) {
+    case "download":        return `Downloading audio… ${Math.round(percent)}%`;
     case "diarize-prepare": return "Loading speaker models…";
     case "diarize-process": return "Detecting speakers…";
     case "diarize-merge":   return "Merging speaker labels…";
@@ -400,7 +401,7 @@ export function Sidebar(props: Props) {
                       : detectSpeakers ? "Generate transcript + speakers"
                       : "Generate transcript"}
                   </button>
-                  {transcriptState === "running" && transcriptPhase && transcriptPhase !== "whisper" && (
+                  {transcriptState === "running" && transcriptPhase?.startsWith("diarize") && (
                     /* Mini phase tracker so the user sees we're past
                        Whisper even though the percent bar is pinned. */
                     <div className="cp-phase-track" aria-label={`Pipeline stage: ${transcriptPhase}`}>

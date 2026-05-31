@@ -408,6 +408,26 @@ pub struct CaptionsArgs {
     pub cookies_browser: Option<String>,
 }
 
+/// True when a WebVTT/SRT caption body carries explicit speaker labels —
+/// WebVTT voice tags like `<v Vick>` (or styled `<v.loud Vick>`). Creator-
+/// uploaded YouTube/Vimeo captions use these; auto-generated ASR tracks
+/// never do. yt-dlp downloads BOTH the manual and the automatic English
+/// track and they land under different language suffixes, so a filename-
+/// only rank can pick the speaker-less auto track. Reading the file and
+/// preferring the one with voice tags is the only reliable way to keep the
+/// "who's talking" data the user actually wants.
+fn caption_has_speaker_tags(text: &str) -> bool {
+    text.contains("<v ") || text.contains("<v.")
+}
+
+/// True when a caption body is YouTube's auto-generated (ASR) track rather than
+/// a human-made/corrected one. The auto tracks carry inline word-timing tags
+/// (`<c>` and `<00:00:07.200>`) and roll/scroll; manual creator captions don't.
+/// Manual captions are much more accurate, so we prefer them when both exist.
+fn caption_is_auto_generated(text: &str) -> bool {
+    text.contains("<c>") || text.contains("</c>") || text.contains("<00:")
+}
+
 #[tauri::command]
 pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<String, crate::AppError> {
     validate_source_url(&args.url)?;
@@ -512,7 +532,15 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
                     // (en-US is usually the highest-quality human or
                     // auto-cap track; en-orig is the original-language
                     // fallback and least preferred.)
-                    let mut candidates: Vec<(u8, String)> = Vec::new();
+                    // (has_speakers, is_auto, lang/format rank, path). Sort keys
+                    // in priority order:
+                    //   1. has_speakers — a creator track with `<v Name>` voice
+                    //      tags carries the "who's talking" data we want.
+                    //   2. NOT auto-generated — manual/creator captions are
+                    //      human-corrected and far more accurate than YouTube's
+                    //      ASR auto-captions (the rolling `<c>`-tagged tracks).
+                    //   3. language/format tier.
+                    let mut candidates: Vec<(bool, bool, u8, String)> = Vec::new();
                     if let Ok(entries) = std::fs::read_dir(&out_dir_for) {
                         for entry in entries.flatten() {
                             let p = entry.path();
@@ -537,11 +565,18 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
                                       else if name.ends_with(".en.srt")      { 4 }
                                       else if name.ends_with(".en-orig.srt") { 5 }
                                       else                                   { 6 };
-                            candidates.push((rank, p.to_string_lossy().to_string()));
+                            // Caption files are tiny — read each once to sniff
+                            // for speaker labels AND auto-vs-manual.
+                            let body = std::fs::read_to_string(&p).unwrap_or_default();
+                            let has_speakers = caption_has_speaker_tags(&body);
+                            let is_auto = caption_is_auto_generated(&body);
+                            candidates.push((has_speakers, is_auto, rank, p.to_string_lossy().to_string()));
                         }
                     }
-                    candidates.sort_by_key(|(rank, _)| *rank);
-                    let found: Option<String> = candidates.into_iter().next().map(|(_, p)| p);
+                    // Speaker-bearing first, then manual over auto, then by the
+                    // language/format preference (false sorts before true).
+                    candidates.sort_by_key(|(has_spk, is_auto, rank, _)| (!*has_spk, *is_auto, *rank));
+                    let found: Option<String> = candidates.into_iter().next().map(|(_, _, _, p)| p);
 
                     let exit_ok = payload.code == Some(0);
                     let success = found.is_some();

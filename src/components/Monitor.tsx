@@ -1,6 +1,7 @@
 import { forwardRef, useLayoutEffect, useRef, useState } from "react";
 import { IconAlert } from "./Icons";
 import { CanvasToast, type ToastKind } from "./CanvasToast";
+import { CaptionOverlay, type CaptionStyle } from "./CaptionOverlay";
 import { LocalMediaPlayer } from "./LocalMediaPlayer";
 import { MediaBunnyPlayer } from "./MediaBunnyPlayer";
 import { MSEStreamPlayer } from "./MSEStreamPlayer";
@@ -62,6 +63,16 @@ type Props = {
   onPlayerStateChange?: (playing: boolean) => void;
   onPlayerReady?: (duration: number) => void;
   onSurfaceClick?: () => void;
+  /** Active transcript path (SRT/VTT) for the on-video caption overlay. */
+  transcriptPath?: string | null;
+  /** Current playhead position in seconds — picks which caption cue shows. */
+  currentSec?: number;
+  /** Whether the transport-bar captions toggle is on. */
+  captionsOn?: boolean;
+  /** User-tunable caption appearance (Settings → Captions). */
+  captionStyle?: CaptionStyle;
+  /** Live HH:MM:SS:FF for the type-a-timecode HUD; null hides it. */
+  tcOverlay?: string | null;
 };
 
 /**
@@ -107,6 +118,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     streamLoadingPhase,
     toast, onToastDismiss,
     onPlayerTimeUpdate, onPlayerStateChange, onPlayerReady, onSurfaceClick,
+    transcriptPath, currentSec, captionsOn, captionStyle, tcOverlay,
   } = props;
 
   const natural = metadata?.width && metadata?.height ? metadata.width / metadata.height : 16 / 9;
@@ -243,6 +255,28 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
           )
         ) : metadata?.thumbnail && (
           <img className="cp-monitor-img" src={metadata.thumbnail} alt={metadata.title} referrerPolicy="no-referrer" />
+        )}
+
+        {/* On-video subtitle overlay — driven by our own transcript, so it
+            works for any source (web stream / local file) regardless of
+            WKWebView's native <track> support. Self-contained: loads the
+            cues itself when captions are toggled on. */}
+        <CaptionOverlay
+          path={transcriptPath ?? null}
+          currentSec={currentSec ?? 0}
+          enabled={!!captionsOn}
+          style={captionStyle}
+        />
+
+        {/* Type-a-timecode HUD — appears the moment the user types a digit
+            over the player; Return snaps the playhead, Esc cancels. Driven
+            entirely by App's keyboard handler + state. */}
+        {tcOverlay && (
+          <div className="cp-tc-hud">
+            <div className="cp-tc-hud-label">Go to timecode</div>
+            <div className="cp-tc-hud-value">{tcOverlay}</div>
+            <div className="cp-tc-hud-hint">Return to snap · Esc to cancel</div>
+          </div>
         )}
 
         {/* Non-blocking prep banner — sits at the bottom-left of the canvas

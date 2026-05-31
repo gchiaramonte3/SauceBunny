@@ -74,6 +74,12 @@ const CHEVRON = /^>>\s*([^:>]{1,40}):\s*(.*)$/;
 const COLON = /^([^:]{1,40}):\s+(.+)$/;
 /** Bracketed `[NAME] text` / `(NAME): text` — gated like COLON. */
 const BRACKET = /^[[(]\s*([^\])]{1,40}?)\s*[\])]\s*:?\s+(.+)$/;
+/** A leading `- ` dialogue dash — the turn boundary in creator captions. */
+const DIALOGUE_DASH = /^\s*[-–—]\s+/;
+/** A leading inline `[Name]` / `(Name)` marker (after stripping any dash). */
+const LEAD_NAME = /^\s*[[(]\s*([^\])]{1,30}?)\s*[\])]\s*:?\s*([\s\S]*)$/;
+/** A cue that is ONLY a parenthetical/bracketed sound cue, e.g. "(music)". */
+const ANNOTATION_ONLY = /^\s*[([][^)\]]*[)\]]\s*$/;
 
 /**
  * Words that look like a `NAME:` / `[NAME]` speaker prefix but are sound cues,
@@ -138,6 +144,12 @@ export function parseSrt(blob: string): Cue[] {
   const text = blob.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
   const lines = text.split("\n");
 
+  // YouTube auto-captions are "rolling": each line is repeated across several
+  // cues as words scroll up, so a naive parse yields heavy duplication. The
+  // signature is inline word-timing (`<00:00:07.200>` / `<c>` tags). When we
+  // see it, de-duplicate by overlap after parsing (see dedupeRollingCaptions).
+  const rolling = /<c>|<\d{2}:\d{2}:\d{2}\.\d{3}>/.test(text);
+
   // Segment into raw cues, keeping BOTH the markup-bearing raw text (where the
   // `<v Name>` voice tag lives) and the cleaned plain text.
   type Raw = { start: number; end: number; raw: string; cleaned: string };
@@ -185,7 +197,42 @@ export function parseSrt(blob: string): Cue[] {
     i = j + 1;
   }
 
-  return resolveSpeakers(raws);
+  const cues = resolveSpeakers(raws);
+  return rolling ? dedupeRollingCaptions(cues) : cues;
+}
+
+/**
+ * Collapse YouTube's auto-generated "rolling" captions. As words scroll up,
+ * each line is repeated across several cues, so a naive parse produces heavy
+ * duplication ("Vortex makes a strong, Vortex makes a strong, …"). We merge by
+ * overlap: for each cue, drop the leading words that already sit at the tail of
+ * what we've emitted and keep only the genuinely new text. Each cue keeps its
+ * own start/end, so timing + reading order are preserved. Runs only when the
+ * file is detected as rolling (inline word-timing), so normal SRT/VTT and
+ * Whisper output pass through untouched.
+ */
+function dedupeRollingCaptions(cues: Cue[]): Cue[] {
+  const out: Cue[] = [];
+  let tail: string[] = []; // sliding window of recently-emitted words
+  const norm = (s: string) => s.replace(/^>>\s*/, "").replace(/\s+/g, " ").trim();
+  for (const c of cues) {
+    const words = norm(c.text).split(" ").filter(Boolean);
+    if (words.length === 0) continue;
+    // Largest k where the emitted tail ends with the cue's first k words.
+    let overlap = 0;
+    const maxK = Math.min(words.length, tail.length);
+    for (let k = maxK; k > 0; k--) {
+      const a = tail.slice(tail.length - k).join(" ").toLowerCase();
+      const b = words.slice(0, k).join(" ").toLowerCase();
+      if (a === b) { overlap = k; break; }
+    }
+    const fresh = words.slice(overlap);
+    if (fresh.length === 0) continue; // entirely a repeat of what we've shown
+    out.push({ ...c, text: fresh.join(" ") });
+    tail.push(...fresh);
+    if (tail.length > 40) tail = tail.slice(-40);
+  }
+  return out.map((c, i) => ({ ...c, index: i + 1 }));
 }
 
 /**
@@ -242,14 +289,68 @@ function resolveSpeakers(raws: { start: number; end: number; raw: string; cleane
     weakTotal > 0 &&
     ([...weakCount.values()].some((n) => n >= 2) || weakTotal >= entries.length * 0.4);
 
-  return entries.map((e, k) => {
+  let resolved = entries.map((e) => {
     let speaker = e.speaker;
     let text = e.text;
     if (e.weak && promote) {
       speaker = e.weak;
       text = text.replace(COLON, "$2").replace(BRACKET, "$2").trim();
     }
-    return { index: k + 1, start: e.start, end: e.end, text, speaker };
+    return { start: e.start, end: e.end, speaker, text };
+  });
+
+  // Last resort: creator-caption dialogue that marks turns with a leading
+  // `- ` dash and names some inline (`- [Vic] …`). Only runs when nothing
+  // stronger named anyone, so structured transcripts always win.
+  if (!resolved.some((r) => r.speaker !== null)) {
+    resolved = attributeDialogueSpeakers(resolved);
+  }
+
+  return resolved.map((r, k) => ({ index: k + 1, start: r.start, end: r.end, text: r.text, speaker: r.speaker }));
+}
+
+type Row = { start: number; end: number; speaker: string | null; text: string };
+
+/**
+ * Speaker attribution for creator captions that mark turns with a leading
+ * `- ` dash and name some of them inline — e.g. YouTube's "Very Important
+ * People" style: `- [Vic] Today we're giving…`, `- [Boris] …`, with un-named
+ * guest lines as plain `- …`. We label every turn the captioner named
+ * (carried across that turn's wrapped continuation lines) and leave the rest
+ * as a single rename-able "unknown" speaker, so the named cast (Vic, Boris,
+ * …) lands in the same roster / rename UI as diarization. Sound cues like
+ * "(lively music)" / "(Boris laughs)" are not speakers — `nameShaped` rejects
+ * the multi-word lowercase ones, and pure-annotation cues carry no speaker.
+ */
+function attributeDialogueSpeakers(rows: Row[]): Row[] {
+  let dashes = 0;
+  let named = 0;
+  for (const r of rows) {
+    if (DIALOGUE_DASH.test(r.text)) dashes++;
+    const m = r.text.replace(DIALOGUE_DASH, "").match(LEAD_NAME);
+    if (m && nameShaped(m[1])) named++;
+  }
+  // Demand real evidence of the format before rewriting anything: at least
+  // two inline names and a healthy share of dash-led turns.
+  if (named < 2 || dashes < rows.length * 0.15) return rows;
+
+  let current: string | null = null;
+  return rows.map((r) => {
+    // A standalone sound/music cue isn't speech — drop it out of the running
+    // speaker without disturbing who's talking before/after it.
+    if (ANNOTATION_ONLY.test(r.text)) return { ...r, speaker: null };
+
+    const isTurn = DIALOGUE_DASH.test(r.text);
+    let text = r.text.replace(DIALOGUE_DASH, "");
+    const m = text.match(LEAD_NAME);
+    let name: string | null = null;
+    if (m && nameShaped(m[1])) { name = m[1].trim(); text = m[2].trim(); }
+
+    if (name) current = name;          // named turn → that speaker
+    else if (isTurn) current = null;   // new un-named turn → unknown speaker
+    // else: a wrapped continuation line → keep whoever was speaking
+
+    return { start: r.start, end: r.end, speaker: current, text: text || r.text };
   });
 }
 

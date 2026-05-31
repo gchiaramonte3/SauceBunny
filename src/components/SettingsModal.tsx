@@ -11,7 +11,7 @@ import type { Command } from "../lib/commands";
 import { formatError } from "../lib/error-format";
 import { YouTubeSettings } from "./YouTubeSettings";
 
-type TabId = "general" | "transcription" | "youtube" | "shortcuts" | "commands" | "about";
+type TabId = "general" | "captions" | "transcription" | "youtube" | "shortcuts" | "commands" | "about";
 
 export type Defaults = {
   folder: string | null;
@@ -87,6 +87,15 @@ export type Defaults = {
    * folders.
    */
   transcriptLibrary: string;
+  // ── On-video caption appearance (the transport CC overlay) ──
+  /** Caption text size multiplier (1 = base responsive size). 0.6–1.6. */
+  captionScale: number;
+  /** Caption font family. */
+  captionFont: "sans" | "serif" | "mono";
+  /** Opacity of the caption's dark backing pill, 0 (none) – 1 (solid). */
+  captionBgOpacity: number;
+  /** Caption text colour (hex). */
+  captionColor: string;
 };
 
 type Props = {
@@ -116,6 +125,7 @@ type Props = {
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "general",       label: "General" },
+  { id: "captions",      label: "Captions" },
   { id: "youtube",       label: "YouTube" },
   { id: "transcription", label: "Transcription" },
   { id: "shortcuts",     label: "Shortcuts" },
@@ -178,13 +188,31 @@ const FORMATS: { id: FormatId; label: string }[] = [
   { id: "audio", label: "Audio" },
 ];
 
+// Caption-appearance presets (Settings → General → Captions).
+const CAP_SIZES: { label: string; scale: number }[] = [
+  { label: "S",  scale: 0.7 },
+  { label: "M",  scale: 0.85 },
+  { label: "L",  scale: 1.0 },
+  { label: "XL", scale: 1.3 },
+];
+const CAP_FONTS: Record<Defaults["captionFont"], string> = {
+  sans: "'Nunito Sans', system-ui, sans-serif",
+  serif: "Georgia, 'Times New Roman', serif",
+  mono: "ui-monospace, 'SF Mono', Menlo, monospace",
+};
+const CAP_COLORS = ["#ffffff", "#ffe14d", "#7be8ff", "#7bdcb5", "#ff8a8a"];
+
 function formatMB(bytes: number): string {
   if (!isFinite(bytes) || bytes <= 0) return "—";
   if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(2)} GB`;
   return `${Math.round(bytes / 1_000_000)} MB`;
 }
 
-const RECOMMENDED_MODEL = "base.en";
+// small.en is the accuracy sweet spot (~3.4% WER vs base's much higher rate)
+// and still fast on Apple Silicon. base.en was the old default but its word
+// errors were the top transcription complaint. medium.en / large are offered
+// for users who want maximum accuracy and will accept a slower pass.
+const RECOMMENDED_MODEL = "small.en";
 
 type ModelInfo = {
   tagline: string;
@@ -556,6 +584,107 @@ export function SettingsModal(props: Props) {
                     </button>
                   </div>
                 )}
+              </section>
+            )}
+
+            {tab === "captions" && (
+              <section>
+                <h3 className="cp-pane-title">Captions</h3>
+                <p className="cp-pane-sub">
+                  How the on-video captions (the transport <strong>CC</strong> button) are drawn.
+                  Captions are kept to two lines at the broadcast-standard ~42 characters per line.
+                  Changes apply live.
+                </p>
+                <div className="cp-pane-section">
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Preview
+                      <span className="desc">A sample caption styled with your current settings.</span>
+                    </div>
+                    <div className="v">
+                      <div className="cp-cap-preview">
+                        <span
+                          className="cp-cap-preview-cue"
+                          style={{
+                            ["--cap-scale" as string]: String(defaults.captionScale),
+                            fontFamily: CAP_FONTS[defaults.captionFont],
+                            color: defaults.captionColor,
+                            background: `rgba(0,0,0,${defaults.captionBgOpacity})`,
+                          } as React.CSSProperties}
+                        >
+                          The quick brown fox.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">Size</div>
+                    <div className="v">
+                      <div className="cp-segmented" style={{ minWidth: 200, gridTemplateColumns: "repeat(4, 1fr)" }}>
+                        {CAP_SIZES.map((s) => (
+                          <button
+                            key={s.label}
+                            className={Math.abs(defaults.captionScale - s.scale) < 0.01 ? "active" : ""}
+                            onClick={() => setDefaults({ ...defaults, captionScale: s.scale })}
+                          >
+                            {s.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">Font</div>
+                    <div className="v">
+                      <div className="cp-segmented" style={{ minWidth: 200, gridTemplateColumns: "repeat(3, 1fr)" }}>
+                        {(["sans", "serif", "mono"] as const).map((fnt) => (
+                          <button
+                            key={fnt}
+                            className={defaults.captionFont === fnt ? "active" : ""}
+                            onClick={() => setDefaults({ ...defaults, captionFont: fnt })}
+                          >
+                            {fnt[0].toUpperCase() + fnt.slice(1)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">Background</div>
+                    <div className="v cp-cap-range">
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={Math.round(defaults.captionBgOpacity * 100)}
+                        onChange={(e) => setDefaults({ ...defaults, captionBgOpacity: Number(e.target.value) / 100 })}
+                      />
+                      <span className="cp-cap-range-val">{Math.round(defaults.captionBgOpacity * 100)}%</span>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">Text colour</div>
+                    <div className="v cp-cap-colors">
+                      {CAP_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          className={"cp-cap-swatch" + (defaults.captionColor.toLowerCase() === c.toLowerCase() ? " active" : "")}
+                          style={{ background: c }}
+                          onClick={() => setDefaults({ ...defaults, captionColor: c })}
+                          title={c}
+                          aria-label={`Caption colour ${c}`}
+                        />
+                      ))}
+                      <input
+                        type="color"
+                        className="cp-cap-color-custom"
+                        value={defaults.captionColor}
+                        onChange={(e) => setDefaults({ ...defaults, captionColor: e.target.value })}
+                        title="Custom colour"
+                      />
+                    </div>
+                  </div>
+                </div>
               </section>
             )}
 

@@ -303,6 +303,22 @@
   color: var(--color-accent-green);
   background: rgba(255,255,255,0.04);
 }
+/* No-speaker transcripts (un-diarized whisper output, or a caption file
+   with no <v> voice tags) render as clean reading prose: the per-turn
+   head collapses to a single quiet timestamp marker instead of repeating
+   a generic "Speaker" chip above every paragraph. */
+.cp-tx-turn-head.no-speaker {
+  margin-bottom: 2px;
+  /* Push the lone timestamp to the right edge so it reads as a quiet
+     paragraph marker rather than a label hanging off the left. */
+  justify-content: flex-end;
+}
+.cp-tx-turn-head.no-speaker .cp-tx-jump {
+  opacity: 0.55;
+}
+.cp-tx-turn-head.no-speaker .cp-tx-jump:hover {
+  opacity: 1;
+}
 
 .cp-tx-turn-body {
   padding: 10px 12px;
@@ -432,11 +448,15 @@
   gap: 8px;
 }
 .cp-tx-rename-label {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--fg-4);
+  color: var(--fg-3);
+}
+/* The speaker being renamed, called out above the input so it's always clear
+   which one you're editing (e.g. "Rename Speaker 1" / "Rename Tom Jonathan"). */
+.cp-tx-rename-target {
+  color: var(--fg-1);
+  font-weight: 700;
 }
 .cp-tx-rename-input {
   height: 28px;

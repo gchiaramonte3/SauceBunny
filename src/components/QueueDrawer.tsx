@@ -41,6 +41,8 @@ type Props = {
   transcriptOrigin: "captions" | "whisper" | "unknown";
   /** Playhead seconds for the karaoke highlight, or null. */
   transcriptPlayhead: number | null;
+  /** Source frame rate, so transcript timestamps render as SMPTE. */
+  transcriptFps?: number;
   /** Click-to-seek callback — receives seconds. */
   onTranscriptSeek: (seconds: number) => void;
   /**
@@ -109,7 +111,7 @@ function loadDrawerWidth(): number {
 export function QueueDrawer({
   open, onClose, queue, fps, running, hasFolder,
   onRemove, onClearAll, onExportAll, onStop,
-  transcriptPath, transcriptOrigin, transcriptPlayhead,
+  transcriptPath, transcriptOrigin, transcriptPlayhead, transcriptFps,
   onTranscriptSeek, transcriptArrivedTick,
   onClearTranscript, onLoadFromHistory,
   onRegenerateTranscript, regenerateBusy, canRegenerate,
@@ -580,6 +582,7 @@ export function QueueDrawer({
         <TranscriptViewer
           path={transcriptPath}
           playheadSeconds={transcriptPlayhead}
+          fps={transcriptFps}
           onSeek={onTranscriptSeek}
           origin={transcriptOrigin}
           onClearTranscript={onClearTranscript}

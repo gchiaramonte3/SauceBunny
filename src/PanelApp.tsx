@@ -112,6 +112,7 @@ export default function PanelApp() {
         transcriptPath={state.transcriptPath}
         transcriptOrigin={state.transcriptOrigin}
         transcriptPlayhead={state.transcriptPlayhead}
+        transcriptFps={state.fps}
         onTranscriptSeek={(seconds) => sendAction("seek", { seconds })}
         transcriptArrivedTick={state.transcriptArrivedTick}
         onClearTranscript={() => sendAction("clearTranscript")}

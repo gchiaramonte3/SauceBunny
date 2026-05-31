@@ -257,6 +257,33 @@ async fn download_with_progress(
     Ok(())
 }
 
+/// Ensure the Silero VAD model whisper-cli's `--vad` needs is on disk, fetching
+/// it once (~865 KB) into the models dir. Returns its path, or `None` on any
+/// failure (offline, HTTP error) so transcription cleanly falls back to no-VAD
+/// instead of breaking. VAD trims silence before decoding, which cuts Whisper's
+/// silence-hallucinations and tightens segment timing — a real accuracy win.
+async fn ensure_vad_model(app: &AppHandle) -> Option<PathBuf> {
+    let path = whisper_models_dir(app).ok()?.join("ggml-silero-v5.1.2.bin");
+    if path.exists() && path.metadata().map(|m| m.len() > 1000).unwrap_or(false) {
+        return Some(path);
+    }
+    let url = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin";
+    let res = reqwest::get(url).await.ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    let bytes = res.bytes().await.ok()?;
+    if bytes.len() < 1000 {
+        return None;
+    }
+    // Write to a temp then rename so a killed download can't leave a truncated
+    // model that whisper-cli would choke on.
+    let tmp = path.with_extension("part");
+    tokio::fs::write(&tmp, &bytes).await.ok()?;
+    tokio::fs::rename(&tmp, &path).await.ok()?;
+    Some(path)
+}
+
 #[derive(Deserialize)]
 pub struct GenerateTranscriptArgs {
     pub url: String,
@@ -416,8 +443,17 @@ pub async fn generate_transcript(
         yt_args.extend(cookies_args(args.cookies_browser.as_deref()));
         yt_args.push(args.url.clone());
 
-        let yt_out = match yt.args(yt_args).output().await {
-            Ok(o) => o,
+        // Stream the audio download instead of blocking on `.output()`. The
+        // blocking call pulled the WHOLE audio track (minutes on a long video)
+        // with no streamed output, so the UI sat frozen at 0% the entire time
+        // — which read as "Whisper is stuck" even though Whisper hadn't even
+        // started. Streaming gives a live % and lets STOP cancel the download.
+        let _ = app_for.emit(
+            "transcript-phase",
+            TranscriptPhaseEvent { job_id: job_for.clone(), phase: "download".into() },
+        );
+        let (mut yt_rx, yt_child) = match yt.args(yt_args).spawn() {
+            Ok(c) => c,
             Err(e) => {
                 emit_transcript_done(
                     &app_for, &job_for, false, None, None,
@@ -426,17 +462,47 @@ pub async fn generate_transcript(
                 return;
             }
         };
-
-        if !yt_out.status.success() {
-            let stderr = String::from_utf8_lossy(&yt_out.stderr);
-            // humanize_ytdlp_error maps "Sign in to confirm you're not a
-            // bot" / age-restricted / video-unavailable to actionable text
-            // pointing at Settings → YouTube auth. Falls through to the
-            // first non-empty stderr line for anything else.
-            emit_transcript_done(
-                &app_for, &job_for, false, yt_out.status.code(), None,
-                Some(humanize_ytdlp_error(&stderr)),
-            );
+        // Register so STOP can kill the download (was uncancellable before).
+        app_for.state::<JobRegistry>().insert(job_for.clone(), yt_child);
+        let mut yt_code: Option<i32> = None;
+        let mut yt_log = String::new();
+        let mut last_dl_log = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        while let Some(event) = yt_rx.recv().await {
+            match event {
+                CommandEvent::Stdout(b) | CommandEvent::Stderr(b) => {
+                    let raw = String::from_utf8_lossy(&b).to_string();
+                    for line in raw.lines() {
+                        let line = line.trim_end();
+                        if line.is_empty() { continue; }
+                        yt_log.push_str(line);
+                        yt_log.push('\n');
+                        if let Some(pct) = regex_lite_percent(line) {
+                            let _ = app_for.emit(
+                                "transcript-progress",
+                                ProgressEvent { job_id: job_for.clone(), percent: pct },
+                            );
+                            // Throttle the noisy per-chunk [download] % lines.
+                            if last_dl_log.elapsed().as_millis() < 500 { continue; }
+                            last_dl_log = std::time::Instant::now();
+                        }
+                        emit_transcript_log(&app_for, &job_for, "info", line.to_string());
+                    }
+                }
+                CommandEvent::Terminated(p) => { yt_code = p.code; break; }
+                _ => {}
+            }
+        }
+        let _ = app_for.state::<JobRegistry>().take(&job_for);
+        if yt_code != Some(0) {
+            // code None ⇒ killed via STOP ⇒ surface as a clean cancel; otherwise
+            // humanize_ytdlp_error maps bot-check / age-gate / unavailable to
+            // actionable text pointing at Settings → YouTube auth.
+            let err = if yt_code.is_none() {
+                "Cancelled".to_string()
+            } else {
+                humanize_ytdlp_error(&yt_log)
+            };
+            emit_transcript_done(&app_for, &job_for, false, yt_code, None, Some(err));
             return;
         }
 
@@ -544,27 +610,36 @@ pub async fn generate_transcript(
             }
         };
 
-        // Safety net for the dyld @rpath issue: whisper-cli is built with
-        // rpath `@loader_path/../lib`, which only resolves correctly when
-        // the binary lives in /opt/homebrew/bin. If the bundled copy lost
-        // its patched rpath for any reason, this env var still lets dyld
-        // find libwhisper.dylib in the Homebrew prefix.
-        let spawn = wsp
-            .env("DYLD_LIBRARY_PATH", "/opt/homebrew/lib")
-            .env("DYLD_FALLBACK_LIBRARY_PATH", "/opt/homebrew/lib")
-            .args([
-                "-m",
-                &model_str,
-                "-f",
-                &wav_path_str,
-                "-osrt",
-                "-of",
-                &output_base_str,
-                "-l",
-                "en",
-                "-pp", // print progress
-            ])
-            .spawn();
+        // No DYLD_LIBRARY_PATH override: build-whisper.sh static-links ggml
+        // (`-DBUILD_SHARED_LIBS=OFF`), so the bundled whisper-cli depends only
+        // on system frameworks (`otool -L` shows no Homebrew dylibs). Forcing
+        // /opt/homebrew/lib onto the dyld search path was not a safety net —
+        // it could shadow the system libc++/libobjc with a mismatched Homebrew
+        // copy and hang the process, and it broke self-contained distribution.
+        // Best-effort Silero VAD (accuracy: trims silence → fewer
+        // hallucinations + tighter timing). Downloaded once; None ⇒ no-VAD.
+        let vad_model = ensure_vad_model(&app_for).await
+            .map(|p| p.to_string_lossy().to_string());
+        if vad_model.is_some() {
+            emit_transcript_log(&app_for, &job_for, "info",
+                "Voice-activity detection on (Silero VAD).".into());
+        }
+        let mut wcmd = wsp.args([
+            "-m", &model_str,
+            "-f", &wav_path_str,
+            "-osrt",
+            "-of", &output_base_str,
+            "-l", "en",
+            // Accuracy + caption-grade segmentation (researched): pin max
+            // beam/best-of, and split-on-word at ~2-line length so each cue
+            // fits the on-video overlay without breaking mid-word.
+            "-bs", "5", "-bo", "5", "-sow", "-ml", "84",
+            "-pp", // print progress
+        ]);
+        if let Some(ref vm) = vad_model {
+            wcmd = wcmd.args(["--vad", "-vm", vm.as_str()]);
+        }
+        let spawn = wcmd.spawn();
 
         let (mut rx, child) = match spawn {
             Ok(c) => c,
@@ -827,18 +902,29 @@ pub async fn transcribe_prepared_wav(
                 return;
             }
         };
-        let spawn = wsp
-            .env("DYLD_LIBRARY_PATH", "/opt/homebrew/lib")
-            .env("DYLD_FALLBACK_LIBRARY_PATH", "/opt/homebrew/lib")
+        let vad_model = ensure_vad_model(&app_for).await
+            .map(|p| p.to_string_lossy().to_string());
+        if vad_model.is_some() {
+            emit_transcript_log(&app_for, &job_for, "info",
+                "Voice-activity detection on (Silero VAD).".into());
+        }
+        let mut wcmd = wsp
+            // No DYLD override — whisper-cli is statically linked (see the
+            // generate_transcript spawn for the full rationale).
             .args([
                 "-m", &model_str,
                 "-f", &wav_path_str,
                 "-osrt",
                 "-of", &output_base_str,
                 "-l", "en",
+                // Accuracy + caption-grade segmentation (see generate_transcript).
+                "-bs", "5", "-bo", "5", "-sow", "-ml", "84",
                 "-pp",
-            ])
-            .spawn();
+            ]);
+        if let Some(ref vm) = vad_model {
+            wcmd = wcmd.args(["--vad", "-vm", vm.as_str()]);
+        }
+        let spawn = wcmd.spawn();
         let (mut rx, child) = match spawn {
             Ok(c) => c,
             Err(e) => {
@@ -1055,18 +1141,29 @@ pub async fn transcribe_local_file(
                 return;
             }
         };
-        let spawn = wsp
-            .env("DYLD_LIBRARY_PATH", "/opt/homebrew/lib")
-            .env("DYLD_FALLBACK_LIBRARY_PATH", "/opt/homebrew/lib")
+        let vad_model = ensure_vad_model(&app_for).await
+            .map(|p| p.to_string_lossy().to_string());
+        if vad_model.is_some() {
+            emit_transcript_log(&app_for, &job_for, "info",
+                "Voice-activity detection on (Silero VAD).".into());
+        }
+        let mut wcmd = wsp
+            // No DYLD override — whisper-cli is statically linked (see the
+            // generate_transcript spawn for the full rationale).
             .args([
                 "-m", &model_str,
                 "-f", &wav_path_str,
                 "-osrt",
                 "-of", &output_base_str,
                 "-l", "en",
+                // Accuracy + caption-grade segmentation (see generate_transcript).
+                "-bs", "5", "-bo", "5", "-sow", "-ml", "84",
                 "-pp",
-            ])
-            .spawn();
+            ]);
+        if let Some(ref vm) = vad_model {
+            wcmd = wcmd.args(["--vad", "-vm", vm.as_str()]);
+        }
+        let spawn = wcmd.spawn();
         let (mut rx, child) = match spawn {
             Ok(c) => c,
             Err(e) => {

@@ -51,6 +51,90 @@
   display: block;
 }
 
+/* On-video caption overlay (transport CC toggle). Burned-in subtitle look,
+   anchored to the bottom of the video box (.cp-monitor is position:relative).
+   pointer-events:none so it never eats a click meant for the player surface
+   (which toggles play/pause). */
+.cp-caption-overlay {
+  position: absolute;
+  left: 50%;
+  bottom: 4%;
+  transform: translateX(-50%);
+  max-width: 96%;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 6;
+}
+.cp-caption-cue {
+  /* Lines are pre-split into at most two clause-broken lines by
+     splitCaptionLines() (Netflix/BBC two-line, ~42-char convention), so we
+     render explicit block lines rather than relying on CSS wrapping. */
+  display: inline-block;
+  overflow: hidden;
+  max-width: 46ch;
+  padding: 3px 11px;
+  border-radius: 6px;
+  /* Inline style overrides these from Settings → Captions; the values here
+     are the fallback when no prefs are passed. `--cap-scale` multiplies the
+     responsive base so the size control is resolution-independent. */
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: calc(clamp(12px, 2vw, 22px) * var(--cap-scale, 1));
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.95);
+  white-space: pre-wrap;
+}
+.cp-caption-line {
+  display: block;
+}
+.cp-caption-speaker {
+  color: var(--color-accent-green, #7bdcb5);
+  font-weight: 800;
+}
+
+/* Type-a-timecode HUD — centered over the video. Keyboard-driven (App owns
+   the input), so it's pointer-events:none and never steals focus/clicks. */
+.cp-tc-hud {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 16px;
+  border-radius: 9px;
+  background: rgba(10, 10, 12, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+  z-index: 8;
+}
+.cp-tc-hud-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+.cp-tc-hud-value {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.cp-tc-hud-hint {
+  font-size: 8.5px;
+  color: var(--fg-4);
+}
+
 /* Empty state */
 .cp-empty {
   position: absolute; inset: 0;

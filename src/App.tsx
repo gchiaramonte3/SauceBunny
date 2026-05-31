@@ -100,7 +100,7 @@ export default function App() {
       reencode: stored.reencode ?? false,
       captions: stored.captions ?? false,
       timecode: stored.timecode ?? "24",
-      whisperModel: stored.whisperModel ?? "base.en",
+      whisperModel: stored.whisperModel ?? "small.en",
       // Default ON: mediabunny/WebCodecs is the faster import path. If
       // it ever causes regressions the user can toggle back to the
       // ffmpeg-prep + <video> path via Settings → Local playback.
@@ -126,6 +126,12 @@ export default function App() {
       // Empty string here = "ask backend for the default and persist
       // it on first app boot." See the resolver effect just below.
       transcriptLibrary: stored.transcriptLibrary ?? "",
+      // On-video caption look. Defaults: a touch smaller than before, a
+      // semi-transparent backing, white sans text.
+      captionScale: stored.captionScale ?? 0.85,
+      captionFont: stored.captionFont ?? "sans",
+      captionBgOpacity: stored.captionBgOpacity ?? 0.55,
+      captionColor: stored.captionColor ?? "#ffffff",
     };
   });
   const setDefaults = useCallback((d: Defaults) => {
@@ -772,7 +778,9 @@ export default function App() {
               origin: "captions",
             });
           } catch { /* localStorage quota — non-fatal */ }
-          invoke("reveal_in_finder", { path: e.payload.path }).catch(() => { /* ignore */ });
+          // (No Finder reveal — the transcript loads into the panel; popping
+          // Finder on every download was intrusive, especially on the auto
+          // fetch from the CC toggle.)
         } else {
           setCaptionsState("error");
           const msg = e.payload.error ?? "Caption download failed";
@@ -2304,6 +2312,30 @@ export default function App() {
     // of the playback/transcription state matters here.
   }, [metadata, exportOpts.folder, exportOpts.filename, appendLog, resolveTranscriptOutDir]);
 
+  // Captions are "active" (button green) only when they're actually on
+  // SCREEN — toggled on AND a transcript is loaded to draw from. A bare
+  // captionsOn flag with no transcript shows nothing, so it shouldn't read
+  // as active.
+  const captionsActive = captionsOn && !!activeTranscript;
+
+  // The toggle operates on what the user SEES: live captions → turn off;
+  // otherwise turn on and auto-fetch a transcript if we don't have one. Web
+  // sources pull their own captions (fast, carries creator speaker labels);
+  // we don't auto-run Whisper here (heavy multi-minute job) — just nudge.
+  const onToggleCaptions = useCallback(() => {
+    if (captionsActive) { setCaptionsOn(false); return; }
+    setCaptionsOn(true);
+    if (activeTranscript || captionsState === "running") return;
+    if (sourceKind === "youtube" && metadata) {
+      pushNotification("info", "Fetching captions…",
+        "Grabbing this source's transcript so captions can show on the video.");
+      void handleDownloadCaptions();
+    } else if (sourceKind === "file") {
+      pushNotification("info", "No transcript yet",
+        "Generate a transcript (Transcribe) to show captions for this file.");
+    }
+  }, [captionsActive, activeTranscript, captionsState, sourceKind, metadata, pushNotification, handleDownloadCaptions]);
+
   const handleClearLogs = useCallback(() => setLogs([]), []);
   const handleCopyLogs = useCallback(() => {
     const text = logs.map((l) => `${l.ts} ${l.source.padEnd(8)} ${l.message}`).join("\n");
@@ -2327,6 +2359,15 @@ export default function App() {
   // WebKit fast-forwards natively + scans backward — see PlayerHandle).
   const shuttleRateRef = useRef(0);
   const dblTapRef = useRef({ l: 0, j: 0 });
+
+  // ── Timecode entry HUD (type digits → snap playhead) ──
+  // Raw digits typed so far; null = HUD closed. A bare number key opens it;
+  // digits fill right-to-left into HH:MM:SS:FF (last two = frames), Return
+  // snaps the playhead, Esc cancels. Mirrored into a ref so the window
+  // keydown handler reads the live value without re-binding every keystroke.
+  const [tcEntry, setTcEntry] = useState<string | null>(null);
+  const tcEntryRef = useRef<string | null>(null);
+  useEffect(() => { tcEntryRef.current = tcEntry; }, [tcEntry]);
   const applyShuttle = useCallback((rate: number) => {
     shuttleRateRef.current = rate;
     playerRef.current?.setShuttle?.(rate);
@@ -2461,6 +2502,32 @@ export default function App() {
       }
 
       if (inField || settingsOpen) return;
+
+      // ── Timecode entry HUD ──
+      // While open: digits append, Backspace deletes, Return snaps the
+      // playhead, Esc cancels; everything else is swallowed so transport
+      // keys can't fire mid-entry. While closed: a bare number key opens it
+      // (seeded with that digit) as long as a source with a duration is up.
+      if (tcEntryRef.current != null) {
+        if (e.key >= "0" && e.key <= "9") { e.preventDefault(); setTcEntry((s) => ((s ?? "") + e.key).slice(-8)); return; }
+        if (e.key === "Backspace")        { e.preventDefault(); setTcEntry((s) => (s ?? "").slice(0, -1)); return; }
+        if (e.key === "Escape")           { e.preventDefault(); setTcEntry(null); return; }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const d = (tcEntryRef.current || "0").slice(-8).padStart(8, "0");
+          const r = Math.max(1, Math.round(fps));
+          const frames = ((+d.slice(0, 2) * 3600 + +d.slice(2, 4) * 60 + +d.slice(4, 6)) * r) + +d.slice(6, 8);
+          setTcEntry(null);
+          onSeek(frames);
+          return;
+        }
+        return;
+      }
+      if (e.key >= "0" && e.key <= "9" && durationFrames > 0) {
+        e.preventDefault();
+        setTcEntry(e.key);
+        return;
+      }
 
       switch (e.key) {
         case " ": e.preventDefault(); onPlayToggle(); break;
@@ -2654,6 +2721,10 @@ export default function App() {
 
   // ====== Derived ======
   const playheadTc = framesToTc(playheadFrames, fps);
+  const playheadSec = playheadFrames / Math.max(1, Math.round(fps));
+  // Live HH:MM:SS:FF for the timecode-entry HUD (right-aligned digit fill).
+  const tcOverlay = tcEntry == null ? null
+    : (() => { const d = tcEntry.slice(-8).padStart(8, "0"); return `${d.slice(0, 2)}:${d.slice(2, 4)}:${d.slice(4, 6)}:${d.slice(6, 8)}`; })();
   const titleSuffix = (status === "loaded" || status === "exporting" || status === "success") && exportOpts.filename
     ? ` — ${exportOpts.filename}`
     : "";
@@ -2856,13 +2927,29 @@ export default function App() {
               onPlayerStateChange={onPlayerStateChange}
               onPlayerReady={onPlayerReady}
               onSurfaceClick={onPlayToggle}
+              /* On-video captions (the transport CC toggle). Driven by the
+                 active transcript + playhead so they work for any source. */
+              transcriptPath={activeTranscript?.path ?? null}
+              currentSec={playheadSec}
+              captionsOn={captionsOn}
+              /* User-tunable caption look (Settings → Captions). */
+              captionStyle={{
+                scale: defaults.captionScale,
+                font: defaults.captionFont,
+                bgOpacity: defaults.captionBgOpacity,
+                color: defaults.captionColor,
+              }}
+              /* Type-a-timecode HUD: digits build this string, Return snaps. */
+              tcOverlay={tcOverlay}
             />
             <Transport
               status={status}
               isPlaying={isPlaying}
               playheadTc={playheadTc}
               durationTc={durationTc}
-              captionsOn={captionsOn}
+              /* Green only when captions are actually on-screen (toggled on
+                 AND a transcript is loaded), not just when the flag is set. */
+              captionsOn={captionsActive}
               snapshotBusy={snapshotBusy}
               canSnapshot={status === "loaded" || status === "exporting" || status === "success"}
               volume={volume}
@@ -2872,7 +2959,7 @@ export default function App() {
               onMarkIn={onMarkIn}
               onMarkOut={onMarkOut}
               onClearMarks={onClearMarks}
-              onToggleCaptions={() => setCaptionsOn((p) => !p)}
+              onToggleCaptions={onToggleCaptions}
               onSnapshot={handleSnapshot}
               onVolumeChange={handleVolumeChange}
               onMutedChange={handleMutedChange}
@@ -2949,6 +3036,7 @@ export default function App() {
           transcriptPath={activeTranscript?.path ?? null}
           transcriptOrigin={activeTranscript?.origin ?? "unknown"}
           transcriptPlayhead={hasSource ? playheadFrames / Math.max(1, Math.round(fps)) : null}
+          transcriptFps={fps}
           onTranscriptSeek={(seconds) => {
             // Clamp to duration so a stale cue past the end doesn't put
             // the playhead in a no-man's-land that shows blank video.

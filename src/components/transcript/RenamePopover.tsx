@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { humanizeSpeakerTag } from "./helpers";
 
 /**
  * Inline rename UI for a speaker chip. Anchored to the chip's bounding
@@ -76,7 +77,9 @@ export function RenamePopover({ state, onCancel, onApply }: Props) {
       style={{ top, left, width: POP_W }}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="cp-tx-rename-label">Rename speaker</div>
+      <div className="cp-tx-rename-label">
+        Rename <span className="cp-tx-rename-target">{state.currentName}</span>
+      </div>
       <input
         ref={inputRef}
         className="cp-tx-rename-input"
@@ -111,7 +114,7 @@ export function RenamePopover({ state, onCancel, onApply }: Props) {
           />
           <span>
             Apply to every{" "}
-            <strong>{state.originalTag ?? "Speaker"}</strong> in this transcript
+            <strong>{humanizeSpeakerTag(state.originalTag ?? null)}</strong> in this transcript
           </span>
         </label>
         <label>
