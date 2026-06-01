@@ -27,6 +27,10 @@ type Props = {
    * branch was removed in r53; see DISTRIBUTION.md for the rationale.
    */
   webStreamUrl?: string | null;
+  /** r74: asset:// URL of the audio track for streaming caption sync. When
+   *  set, MSEStreamPlayer decodes it and drives audio + captions from a
+   *  sample-accurate AudioContext clock (video becomes muted picture-only). */
+  audioMasterSrc?: string | null;
   /** Initial volume for the LocalMediaPlayer when it mounts. */
   initialVolume: number;
   /**
@@ -113,7 +117,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     status, metadata,
     errorDetail,
     aspect,
-    sourceKind, localFilePath, webStreamUrl, initialVolume, onMediaError,
+    sourceKind, localFilePath, webStreamUrl, audioMasterSrc, initialVolume, onMediaError,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs,
     streamLoadingPhase,
     toast, onToastDismiss,
@@ -232,6 +236,10 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               path={webStreamUrl}
               filename={metadata?.title}
               hasVideo
+              /* r74: when present, the player decodes this audio track and
+                 drives audio + captions from a sample-accurate clock so
+                 captions match what you hear (video → muted picture only). */
+              audioMasterSrc={audioMasterSrc ?? undefined}
               /* Authoritative duration so far seeks don't clamp to a short
                  stream-probe value (was sending 19:40 to 15:12). */
               knownDuration={metadata?.duration ?? undefined}

@@ -149,6 +149,7 @@ pub fn run() {
             commands::extract_frame,
             commands::get_direct_stream_url,
             commands::download_web_preview,
+            commands::download_audio_track,
             commands::cancel_job,
             commands::reveal_in_finder,
             commands::write_bytes_to_path,

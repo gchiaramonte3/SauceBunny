@@ -267,6 +267,20 @@ export default function App() {
    * the player to this local path. Cleared by resetForNewSource.
    */
   const [webCachePath, setWebCachePath] = useState<string | null>(null);
+  /**
+   * Audio-master source (r74): asset:// URL of the full audio track downloaded
+   * for a STREAMING web source while captions are on. The MSEStreamPlayer
+   * decodes it (Web Audio) and drives both the heard audio and the caption
+   * playhead from a sample-accurate AudioContext clock, so captions match what
+   * you hear instead of the drifting MSE <video> timeline. Null = normal MSE
+   * audio (no captions, or downloaded-to-cache, or local file).
+   */
+  const [webAudioMasterSrc, setWebAudioMasterSrc] = useState<string | null>(null);
+  /** The COMMITTED source page URL of the current fetch (what yt-dlp resolves),
+   *  captured at fetch time. The audio-master effect keys off THIS, not the
+   *  live `url` input — editing the input box mid-playback must not repoint the
+   *  cached audio at a different (or empty) URL. Cleared by resetForNewSource. */
+  const [activeSourceUrl, setActiveSourceUrl] = useState<string | null>(null);
   /** True while the web-preview download is in flight. */
   const [webPreviewDownloading, setWebPreviewDownloading] = useState(false);
   /** True once the active player has reported ready (loadedmetadata /
@@ -597,6 +611,19 @@ export default function App() {
     logIdRef.current += 1;
     setLogs((prev) => [...prev, { id: logIdRef.current, ts: nowHms(), tag, source, message }]);
   }, []);
+
+  // The streaming player classifies its own caption sync (RATE / OFFSET /
+  // locked) from rVFC frame timing and dispatches a window event. Surface it
+  // in the Logs panel so diagnosing drift never needs devtools.
+  useEffect(() => {
+    const onDiag = (e: Event) => {
+      const d = (e as CustomEvent<{ tag?: string; line?: string }>).detail;
+      if (!d?.line) return;
+      appendLog(asLogTag(d.tag ?? "info"), "stream-sync", d.line);
+    };
+    window.addEventListener("sb-mse-diag", onDiag);
+    return () => window.removeEventListener("sb-mse-diag", onDiag);
+  }, [appendLog]);
 
   // ====== Backend build check ======
   // Runs once on mount. If the running Rust binary's BACKEND_BUILD_ID
@@ -1014,6 +1041,8 @@ export default function App() {
     setWebCodecsFallbackForImport(false);
     setWebStreamUrl(null);
     setWebCachePath(null);
+    setWebAudioMasterSrc(null);
+    setActiveSourceUrl(null);
     setWebPreviewDownloading(false);
     setPlayerReady(false);
     if (webStreamWatchdogRef.current != null) {
@@ -1042,6 +1071,9 @@ export default function App() {
       return;
     }
     resetForNewSource();
+    // Committed source URL for the audio-master cache (keyed off this, not the
+    // live `url` input, which can change without a re-fetch).
+    setActiveSourceUrl(full);
     // Capture this load's sequence — any await continuation below must
     // re-check the ref before calling setState to avoid clobbering a newer
     // source the user has since started.
@@ -2318,6 +2350,8 @@ export default function App() {
   // captionsOn flag with no transcript shows nothing, so it shouldn't read
   // as active.
   const captionsActive = captionsOn && !!activeTranscript;
+  // Shows the streaming-drift caption notice at most once per session.
+  const streamCaptionHintRef = useRef(false);
 
   // The toggle operates on what the user SEES: live captions → turn off;
   // otherwise turn on and auto-fetch a transcript if we don't have one. Web
@@ -2326,6 +2360,14 @@ export default function App() {
   const onToggleCaptions = useCallback(() => {
     if (captionsActive) { setCaptionsOn(false); return; }
     setCaptionsOn(true);
+    // One-time-per-session heads-up: streaming playback's clock drifts from
+    // real media time, so captions can lag. Tell the user the accurate path.
+    const streaming = sourceKind === "youtube" && !!webStreamUrl && !webCachePath;
+    if (streaming && !streamCaptionHintRef.current) {
+      streamCaptionHintRef.current = true;
+      pushNotification("info", "Streaming captions can drift",
+        "While streaming, captions may lag the audio. For exact sync, turn off “Stream while you watch” (Settings → Web playback) to download first — or nudge the offset in Settings → Captions.");
+    }
     if (activeTranscript || captionsState === "running") return;
     if (sourceKind === "youtube" && metadata) {
       pushNotification("info", "Fetching captions…",
@@ -2335,7 +2377,55 @@ export default function App() {
       pushNotification("info", "No transcript yet",
         "Generate a transcript (Transcribe) to show captions for this file.");
     }
-  }, [captionsActive, activeTranscript, captionsState, sourceKind, metadata, pushNotification, handleDownloadCaptions]);
+  }, [captionsActive, activeTranscript, captionsState, sourceKind, metadata, webStreamUrl, webCachePath, pushNotification, handleDownloadCaptions]);
+
+  // ── Audio-master clock + shared audio cache (r74) ───────────────────
+  // For EVERY streaming web source (proxy MSE path — not downloaded-to-cache,
+  // not a local file) we ALWAYS download + cache the full audio track up
+  // front. The player decodes it (Web Audio) and locks both the heard audio
+  // and the caption playhead to a sample-accurate AudioContext clock from
+  // t=0, so captions can't drift from the words. The cache is source-keyed
+  // and persistent, so the SAME file is reused by the Whisper pipeline — when
+  // you transcribe, the audio is already there and the transcript is clocked
+  // against the exact track you heard. See src/lib/audio-twin.ts + the
+  // download_audio_track / generate_transcript backend sharing.
+  const audioTwinJobRef = useRef<string | null>(null);
+  useEffect(() => {
+    const streaming = sourceKind === "youtube" && !!webStreamUrl && !webCachePath;
+    if (!streaming || !activeSourceUrl) {
+      setWebAudioMasterSrc(null);
+      return;
+    }
+    if (webAudioMasterSrc) return; // already prepared for this source
+    let cancelled = false;
+    const seq = sourceSeqRef.current;
+    (async () => {
+      try {
+        const jobId = await invoke<string>("new_job_id");
+        if (cancelled || sourceSeqRef.current !== seq) return;
+        audioTwinJobRef.current = jobId;
+        appendLog("info", "audio-sync", "Caching the audio track (drives caption sync + reused by Whisper)…");
+        const path = await invoke<string>("download_audio_track", {
+          args: { url: activeSourceUrl, job_id: jobId, cookies_browser: cookiesBrowserOrNone() },
+        });
+        if (cancelled || sourceSeqRef.current !== seq) return;
+        const { convertFileSrc } = await import("@tauri-apps/api/core");
+        setWebAudioMasterSrc(convertFileSrc(path));
+        appendLog("ok", "audio-sync", "Audio cached — captions now follow the audio, not the video clock.");
+      } catch (err) {
+        if (cancelled || sourceSeqRef.current !== seq) return;
+        appendLog("warn", "audio-sync",
+          `Audio cache unavailable (${formatError(err)}) — captions will follow the video clock.`);
+      } finally {
+        audioTwinJobRef.current = null;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      const j = audioTwinJobRef.current;
+      if (j) { audioTwinJobRef.current = null; invoke("cancel_job", { jobId: j }).catch(() => { /* best-effort */ }); }
+    };
+  }, [sourceKind, webStreamUrl, webCachePath, activeSourceUrl, webAudioMasterSrc, appendLog]);
 
   const handleClearLogs = useCallback(() => setLogs([]), []);
   const handleCopyLogs = useCallback(() => {
@@ -2840,6 +2930,10 @@ export default function App() {
                  direct stream actually failed, so this swap = "we know
                  the CDN was rejecting us, use the local bytes". */
               webStreamUrl={webCachePath ?? webStreamUrl}
+              /* r74: audio-master src is only meaningful while actually
+                 STREAMING (no cache path) — the local player is already
+                 sample-accurate once downloaded. */
+              audioMasterSrc={webCachePath ? null : webAudioMasterSrc}
               initialVolume={muted ? 0 : volume}
               playbackPrepBusy={playbackPrepBusy}
               playbackPrepProgress={playbackPrepProgress}

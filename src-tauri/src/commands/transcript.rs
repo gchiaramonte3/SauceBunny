@@ -409,7 +409,21 @@ pub async fn generate_transcript(
     let expected_speakers = args.expected_speakers;
 
     tokio::spawn(async move {
-        // ─── Phase 1: yt-dlp downloads raw bestaudio (no post-processing) ───
+        // ─── Phase 1: obtain the source audio ───
+        // Prefer the cached FULL track (already downloaded for the audio-master
+        // playback clock): no re-download, AND Whisper transcribes the exact
+        // audio the captions are clocked against, so they're aligned by
+        // construction. Phase 2 cuts the [start,end] section from it. Otherwise
+        // yt-dlp downloads just the section (the original path).
+        let cached_full = find_audio_in_cache(&cache_for, &source_audio_prefix(&args.url))
+            .filter(|p| p.metadata().map(|m| m.len() > 0).unwrap_or(false));
+        let (raw_path, cut_section, keep_raw) = if let Some(cached) = cached_full {
+            emit_transcript_log(
+                &app_for, &job_for, "info",
+                "Using the cached source audio (already downloaded for playback) — no re-download.".into(),
+            );
+            (cached, true, true)
+        } else {
         emit_transcript_log(
             &app_for,
             &job_for,
@@ -517,6 +531,9 @@ pub async fn generate_transcript(
                 return;
             }
         };
+        (raw_path, false, false)
+        };
+
         let raw_mb = raw_path
             .metadata()
             .map(|m| m.len() as f64 / 1_000_000.0)
@@ -542,15 +559,22 @@ pub async fn generate_transcript(
                 return;
             }
         };
-        let ff_out = ff
-            .args([
-                "-y", "-i", &raw_path_str,
-                "-vn", "-ar", "16000", "-ac", "1",
-                &wav_path_str,
-            ])
-            .output()
-            .await;
-        let _ = std::fs::remove_file(&raw_path); // raw no longer needed
+        // When reusing the cached FULL track, cut the [start,end] section here
+        // (yt-dlp already cut it in the download path). Input-side -ss/-t is
+        // fast and sample-accurate enough for speech.
+        let start_arg = format!("{start_s:.3}");
+        let dur_arg = format!("{:.3}", (end_s - start_s).max(0.0));
+        let mut ff_args: Vec<&str> = vec!["-y"];
+        if cut_section {
+            ff_args.extend(["-ss", start_arg.as_str(), "-i", &raw_path_str, "-t", dur_arg.as_str()]);
+        } else {
+            ff_args.extend(["-i", &raw_path_str]);
+        }
+        ff_args.extend(["-vn", "-ar", "16000", "-ac", "1", &wav_path_str]);
+        let ff_out = ff.args(ff_args).output().await;
+        if !keep_raw {
+            let _ = std::fs::remove_file(&raw_path); // temp download — keep the shared cache
+        }
         let ff_out = match ff_out {
             Ok(o) => o,
             Err(e) => {

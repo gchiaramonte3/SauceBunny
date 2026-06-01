@@ -915,3 +915,164 @@ pub async fn download_web_preview(
     Ok(args.job_id)
 }
 
+// ────────────────────────────────────────────────────────────────────────
+// AUDIO-MASTER TRACK  (streaming caption sync)
+//
+// Downloads ONLY the full-fidelity audio track (no video) to cache and returns
+// its path. The frontend decodes it with Web Audio `decodeAudioData` and plays
+// it on a sample-accurate AudioContext clock — so captions lock to the audio
+// you actually hear, instead of the MSE <video> timeline that drifts. The
+// streamed <video> is kept muted for picture only. See src/lib/audio-twin.ts.
+//
+// Audio-only is small and fast (a fraction of the video), so the brief wait is
+// negligible. Registered in the JobRegistry so a new source / STOP can cancel.
+// ────────────────────────────────────────────────────────────────────────
+
+/// Stable cache PREFIX for a source's full audio track, keyed by a
+/// deterministic hash of the URL. The audio-master playback clock AND the
+/// Whisper pipeline both resolve a source's audio through this prefix, so the
+/// file is downloaded ONCE and reused: re-opening a source, or transcribing
+/// after streaming, is instant — and Whisper transcribes the exact track the
+/// captions are clocked against, so they're aligned by construction.
+///
+/// FNV-1a (deterministic across process runs; std `DefaultHasher` is seeded
+/// randomly per-process, so its output couldn't be reused across launches).
+pub(crate) fn source_audio_hash(url: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in url.as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01B3);
+    }
+    format!("{h:016x}")
+}
+
+/// The COMPLETE-file prefix. A file under this prefix is fully downloaded and
+/// safe to reuse (the in-flight download lands under a different temp prefix,
+/// then atomically renames here on success — so Whisper never reads a partial).
+pub(crate) fn source_audio_prefix(url: &str) -> String {
+    format!("saucebunny-audio-{}", source_audio_hash(url))
+}
+
+#[derive(Deserialize)]
+pub struct AudioTrackArgs {
+    pub url: String,
+    pub job_id: String,
+    pub cookies_browser: Option<String>,
+}
+
+#[tauri::command]
+pub async fn download_audio_track(
+    app: AppHandle,
+    args: AudioTrackArgs,
+) -> Result<String, crate::AppError> {
+    validate_source_url(&args.url)?;
+
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("app_cache_dir: {e}"))?;
+    std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
+
+    // Persistent, source-keyed cache (shared with the Whisper pipeline).
+    let final_prefix = source_audio_prefix(&args.url); // saucebunny-audio-<hash>
+    // Already fully cached (non-empty) → reuse instantly, no re-download.
+    if let Some(existing) = find_audio_in_cache(&cache, &final_prefix) {
+        if existing.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+            if let Some(s) = existing.to_str() {
+                return Ok(s.to_string());
+            }
+        }
+    }
+    // Download under a JOB-scoped temp prefix — distinct from the final name
+    // (so an in-flight partial is never matched by find_audio_in_cache on the
+    // final prefix) AND distinct from any concurrent call (so two downloads
+    // can't write the same temp). Rename to the final name only on a clean
+    // exit, making the cache hit atomic.
+    let dl_prefix = format!("saucebunny-audiodl-{}", args.job_id);
+    let template = cache
+        .join(format!("{}.%(ext)s", dl_prefix))
+        .to_string_lossy()
+        .to_string();
+
+    let cmd = ytdlp(&app)?;
+    // Bundled ffmpeg for any DASH audio merge — never PATH/Homebrew (DISTRIBUTION.md).
+    let ffmpeg_str = sidecar_path("ffmpeg")?
+        .to_str()
+        .ok_or_else(|| crate::AppError::internal("ffmpeg path not utf-8"))?
+        .to_string();
+
+    // Prefer progressive m4a/AAC: WKWebView's decodeAudioData decodes AAC
+    // reliably, whereas opus/webm is far less certain. Fall back through any
+    // bestaudio so non-YouTube hosts still resolve.
+    let mut yt_args: Vec<String> = vec![
+        "-f".into(),
+        "ba[ext=m4a][protocol^=http][protocol!*=m3u8]/\
+         ba[acodec^=mp4a]/bestaudio[ext=m4a]/bestaudio/best".into(),
+        "--no-playlist".into(),
+        "--no-part".into(),
+        "--newline".into(),
+        YT_EXTRACTOR_ARGS[0].into(),
+        YT_EXTRACTOR_ARGS[1].into(),
+        "--concurrent-fragments".into(), "16".into(),
+        "--ffmpeg-location".into(), ffmpeg_str,
+        "-o".into(), template.clone(),
+    ];
+    yt_args.extend(cookies_args(args.cookies_browser.as_deref()));
+    yt_args.push(args.url.clone());
+
+    let (mut rx, child) = cmd
+        .args(yt_args)
+        .spawn()
+        .map_err(|e| format!("failed to spawn yt-dlp: {e}"))?;
+    app.state::<JobRegistry>().insert(args.job_id.clone(), child);
+
+    let mut saw_auth_error = false;
+    let mut code: Option<i32> = None;
+    let mut signalled = false;
+    while let Some(event) = rx.recv().await {
+        match event {
+            CommandEvent::Stdout(b) | CommandEvent::Stderr(b) => {
+                let raw = String::from_utf8_lossy(&b);
+                for line in raw.lines() {
+                    if is_youtube_auth_error_line(line) { saw_auth_error = true; }
+                }
+            }
+            CommandEvent::Terminated(payload) => {
+                code = payload.code;
+                signalled = payload.signal.is_some();
+                break;
+            }
+            _ => {}
+        }
+    }
+    let _ = app.state::<JobRegistry>().take(&args.job_id);
+
+    if code != Some(0) {
+        if signalled {
+            return Err(crate::AppError::internal("Cancelled"));
+        }
+        if saw_auth_error {
+            return Err(crate::AppError::internal(YT_AUTH_HINT));
+        }
+        return Err(crate::AppError::internal(format!(
+            "audio download failed (yt-dlp exit {code:?})"
+        )));
+    }
+
+    // Find the temp file yt-dlp wrote, then atomically rename it to the final
+    // source-keyed name so the cache hit is all-or-nothing.
+    let dl_file = find_audio_in_cache(&cache, &dl_prefix).ok_or_else(|| {
+        crate::AppError::internal("yt-dlp exited cleanly but no audio file was found in cache")
+    })?;
+    let ext = dl_file
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("m4a");
+    let final_path = cache.join(format!("{final_prefix}.{ext}"));
+    std::fs::rename(&dl_file, &final_path).map_err(|e| format!("cache rename: {e}"))?;
+    final_path
+        .to_str()
+        .map(String::from)
+        .ok_or_else(|| crate::AppError::internal("cached audio path not utf-8"))
+}
+

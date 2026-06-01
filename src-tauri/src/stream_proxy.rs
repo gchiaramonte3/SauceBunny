@@ -324,9 +324,10 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64) -> std:
     let mut cmd = std::process::Command::new(ff);
     cmd.arg("-hide_banner")
         .arg("-loglevel").arg("error")
-        // Regenerate clean PTS where the source's are missing/broken — YouTube
-        // DASH streams carry a non-zero start PTS and audio encoder-priming.
-        .arg("-fflags").arg("+genpts")
+        // NOTE: deliberately NO `-fflags +genpts`. It FABRICATES timestamps when
+        // it thinks they're missing, which can invent a wrong rate and mask the
+        // real AAC encoder-priming — i.e. it can manufacture the very caption
+        // drift we're chasing. `-c copy` should carry the source PTS verbatim.
         .arg("-user_agent").arg(SAFARI_UA);
     // Input-side seek (fast, keyframe-accurate) for scrub-rebuilds.
     if start > 0.0 {
@@ -338,9 +339,17 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64) -> std:
         // maps 1:1 to real media time. Without this, the source's start-PTS
         // offset rides into the fMP4 and the playhead drifts from the audio,
         // making captions show late. muxpreload/muxdelay 0 drop mux offsets.
+        // make_zero shifts ALL tracks by a single offset, so audio/video stay
+        // aligned (it is NOT a per-stream shift).
         .arg("-avoid_negative_ts").arg("make_zero")
         .arg("-muxpreload").arg("0")
         .arg("-muxdelay").arg("0")
+        // Pin the video track to a clean 90kHz timescale. A weird source
+        // timescale can round each frame's duration and make WKWebView's
+        // currentTime tick slightly slower than real seconds — a RATE error
+        // that compounds into growing caption drift. 90000 is the MP4 standard
+        // and divides evenly for common frame rates.
+        .arg("-video_track_timescale").arg("90000")
         .arg("-movflags").arg("frag_keyframe+empty_moov+default_base_moof")
         .arg("-f").arg("mp4")
         .arg("pipe:1")

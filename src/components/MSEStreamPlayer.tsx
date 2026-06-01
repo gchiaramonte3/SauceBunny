@@ -4,6 +4,7 @@ import {
 import { Input, UrlSource, CanvasSink, ALL_FORMATS } from "mediabunny";
 import { IconFilm } from "./Icons";
 import type { PlayerHandle } from "./player-handle";
+import { createAudioTwin, type AudioTwin } from "../lib/audio-twin";
 
 /**
  * Streams a web source (YouTube/Vimeo/…) into a NATIVE `<video>` element via
@@ -42,6 +43,12 @@ type Props = {
   /** Authoritative duration (seconds) from yt-dlp metadata. Preferred over the
    *  stream probe, which can read short and make far seeks clamp early. */
   knownDuration?: number;
+  /** r74 — AUDIO-MASTER MODE. asset:// URL of the full audio track. When set,
+   *  we decode it (Web Audio) and drive BOTH the heard audio and the playhead
+   *  from a sample-accurate AudioContext clock; the streamed <video> is muted
+   *  and used for picture only. This is what makes streaming captions match
+   *  the audio you hear instead of the drifting MSE <video> timeline. */
+  audioMasterSrc?: string;
 };
 
 /** Seconds to stay buffered ahead of the playhead before pausing reads —
@@ -49,7 +56,7 @@ type Props = {
 const BUFFER_AHEAD_SECONDS = 30;
 
 export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSEStreamPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration },
+  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration, audioMasterSrc },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -60,6 +67,13 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const baseTimeRef = useRef(0);
   const totalDurationRef = useRef(0);
   const mimeRef = useRef<string | null>(null);
+  // Origin of the fMP4 timeline (buffered.start(0) of the current pipeline).
+  // The proxy can emit a non-zero start PTS / encoder-priming, which made
+  // <video>.currentTime sit BEHIND real media time and captions lag. We
+  // capture it once per pipeline and subtract it so the reported playhead
+  // tracks real media time. Re-captured on every rebuild (seek).
+  const clockOriginRef = useRef(0);
+  const clockOriginSetRef = useRef(false);
   // Authoritative total from yt-dlp metadata. The mediabunny probe of the
   // fragmented proxy stream can read short, which made `seekTo` clamp far
   // seeks early (e.g. 19:40 landing at 15:12). Metadata wins when present.
@@ -109,16 +123,33 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   // the pre-seek position — the "scrubbing won't go past here" wrestling).
   const seekingRef = useRef(false);
 
+  // ─── Audio-master (r74) ─────────────────────────────────────────────
+  // When audioMasterSrc is provided, twinRef holds a decoded copy of the
+  // audio playing on a sample-accurate AudioContext clock. While it's ready,
+  // the heard audio + the playhead come from the twin, the <video> is muted
+  // for picture only, and captions can't drift from the words. See
+  // src/lib/audio-twin.ts.
+  const twinRef = useRef<AudioTwin | null>(null);
+  const twinReadyRef = useRef(false);
+  const twinSeekTargetRef = useRef<number | null>(null);
+  const masterActive = () => twinReadyRef.current && !!twinRef.current;
+
   // ─── Imperative handle ──────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
     play: () => {
       const el = videoRef.current;
       if (!el) return;
+      // Audio-master: the twin produces the heard audio; the <video> is muted
+      // picture only. Start both — the 'play' event drives the playhead loop.
+      if (masterActive()) { el.muted = true; twinRef.current!.play(); }
       el.play().catch((err) => {
         onError?.(`Playback failed: ${err?.name ?? "Error"} — ${err?.message ?? String(err)}`);
       });
     },
-    pause: () => { videoRef.current?.pause(); },
+    pause: () => {
+      if (masterActive()) twinRef.current!.pause();
+      videoRef.current?.pause();
+    },
     seekTo: (s) => {
       const v = videoRef.current;
       const sb = sbRef.current;
@@ -138,6 +169,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       if (newGesture) wantPlayRef.current = !!v && !v.paused;
       seekingRef.current = true;
       try { v?.pause(); } catch { /* ignore */ }
+      // Audio-master: silence the twin during the scrub (a restart per seek
+      // tick would glitch). The final position + resume happen on settle.
+      if (masterActive()) twinRef.current!.pause();
+      twinSeekTargetRef.current = target;
       onTimeUpdate?.(target);
       // Frame-accurate preview overlay while scrubbing (r68). The decoded
       // frame at `target` is drawn instantly to a canvas above the <video>,
@@ -148,6 +183,16 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       if (seekSettleRef.current != null) window.clearTimeout(seekSettleRef.current);
       seekSettleRef.current = window.setTimeout(() => {
         seekSettleRef.current = null;
+        // Audio-master: apply the final seek to the twin clock and resume it
+        // if we were playing. The twin doesn't need the video buffered, so do
+        // this regardless of the in-buffer / rebuild split below (the picture
+        // catches up via its own pipeline; the audio leads as the master).
+        if (masterActive()) {
+          const tgt = twinSeekTargetRef.current ?? baseTimeRef.current;
+          twinSeekTargetRef.current = null;
+          twinRef.current!.seek(tgt);
+          if (wantPlayRef.current) twinRef.current!.play(tgt);
+        }
         // A rebuild (out-of-buffer) owns its own resume via onReady — only
         // resume here for the in-buffer case (current pipeline still live).
         if (rebuildTimerRef.current != null) return; // rebuild imminent
@@ -183,17 +228,27 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     },
     // While a seek is resolving, report the TARGET (not the old/paused
     // video's time) so nothing reading this can snap the playhead back.
-    getCurrentTime: () =>
-      (seekingRef.current && pendingSeekRef.current != null)
-        ? pendingSeekRef.current
-        : baseTimeRef.current + (videoRef.current?.currentTime ?? 0),
+    getCurrentTime: () => {
+      if (seekingRef.current && pendingSeekRef.current != null) return pendingSeekRef.current;
+      if (masterActive()) return twinRef.current!.getTime();
+      return baseTimeRef.current + Math.max(0, (videoRef.current?.currentTime ?? 0) - clockOriginRef.current);
+    },
     getDuration: () => totalDurationRef.current || 0,
     isReady: () => readyRef.current,
     isPlaying: () => playingRef.current,
-    setVolume: (v) => { if (videoRef.current) videoRef.current.volume = Math.max(0, Math.min(1, v)); },
-    getVolume: () => videoRef.current?.volume ?? 1,
-    setMuted: (m) => { if (videoRef.current) videoRef.current.muted = m; },
-    isMuted: () => videoRef.current?.muted ?? false,
+    // In audio-master mode the <video> is permanently muted; volume/mute act
+    // on the twin (the thing actually making sound).
+    setVolume: (v) => {
+      const c = Math.max(0, Math.min(1, v));
+      if (masterActive()) twinRef.current!.setVolume(c);
+      else if (videoRef.current) videoRef.current.volume = c;
+    },
+    getVolume: () => masterActive() ? twinRef.current!.getVolume() : (videoRef.current?.volume ?? 1),
+    setMuted: (m) => {
+      if (masterActive()) twinRef.current!.setMuted(m);
+      else if (videoRef.current) videoRef.current.muted = m;
+    },
+    isMuted: () => masterActive() ? twinRef.current!.isMuted() : (videoRef.current?.muted ?? false),
     setShuttle: (rate) => {
       const v = videoRef.current;
       if (!v) return;
@@ -411,9 +466,16 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             catch (err) { fail(`addSourceBuffer(${mime}) failed: ${err instanceof Error ? err.message : String(err)}`); return; }
             sb.mode = "segments";
             sbRef.current = sb;
+            clockOriginSetRef.current = false; // re-capture for this pipeline
             const localDur = total > fromSeconds ? total - fromSeconds : 0;
             if (localDur > 0) { try { ms.duration = localDur; } catch { /* ignore */ } }
             sb.addEventListener("updateend", () => {
+              // Capture the timeline origin from the first buffered range (later
+              // ranges shift forward as old data is evicted, so capture ONCE).
+              if (!clockOriginSetRef.current && sb.buffered.length > 0) {
+                clockOriginSetRef.current = true;
+                clockOriginRef.current = sb.buffered.start(0);
+              }
               const c = currentRef.current;
               currentRef.current = null;
               c?.resolve();
@@ -513,25 +575,122 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     // number and React bails when it's unchanged, so this only re-renders when
     // the frame actually advances — cheap.
     let rafId = 0;
-    const reportTime = () => {
+    let rvfcId = 0;
+    // ── Self-classifying sync telemetry (surfaced in the in-app Logs panel,
+    // no devtools needed). Anchor wall-clock vs media-time at playback start
+    // and watch the ratio: rate≈1 → the video timeline tracks real seconds;
+    // rate<1 → a compounding RATE error; a steady currentTime-vs-frame gap →
+    // a fixed OFFSET. Re-anchors after any stall/seek so idle time can't skew
+    // the slope. Emits one line per state CHANGE (never spams).
+    let driftAnchored = false;
+    let driftAnchorWall = 0;   // ms (rVFC timestamp)
+    let driftAnchorMedia = 0;  // s  (frame PTS)
+    let lastFrameWall = 0;     // ms
+    let lastDiagClass = "";
+    type RVFCVideo = HTMLVideoElement & {
+      requestVideoFrameCallback: (cb: (now: number, meta: { mediaTime: number }) => void) => number;
+      cancelVideoFrameCallback: (id: number) => void;
+    };
+    const rvfc = el as RVFCVideo;
+    const hasRVFC = typeof rvfc.requestVideoFrameCallback === "function";
+    // Correct the raw <video> time for the fMP4 clock origin so the reported
+    // media time tracks REAL media time (the proxy can leave a non-zero start
+    // PTS, which made captions lag). In AUDIO-MASTER mode the truth is the
+    // twin's AudioContext clock — the <video> timeline is ignored entirely.
+    const corrected = (raw: number) =>
+      masterActive()
+        ? twinRef.current!.getTime()
+        : baseTimeRef.current + Math.max(0, raw - clockOriginRef.current);
+    const reportTime = (raw?: number) => {
       // Suppress while an out-of-buffer seek resolves — the old/transitional
       // video reports a stale position that would fight the playhead.
-      if (!seekingRef.current) onTimeUpdate?.(baseTimeRef.current + el.currentTime);
+      if (!seekingRef.current) onTimeUpdate?.(corrected(raw ?? el.currentTime));
+    };
+    // Audio-master: softly slave the muted <video> picture to the twin clock.
+    // Map the absolute audio time into THIS pipeline's relative timeline and
+    // nudge only when it has drifted enough to matter (a hard currentTime set
+    // mid-play stutters), throttled so we don't fight normal playback.
+    let lastNudgeWall = 0;
+    const slavePicture = (nowMs: number) => {
+      const twin = twinRef.current;
+      if (!twin || !twinReadyRef.current) return;
+      if (nowMs - lastNudgeWall < 700) return;
+      const rel = (twin.getTime() - baseTimeRef.current) + clockOriginRef.current;
+      if (!isFinite(rel) || rel < 0) return;
+      let inBuf = false;
+      for (let i = 0; i < el.buffered.length; i++) {
+        if (rel >= el.buffered.start(i) - 0.1 && rel <= el.buffered.end(i) + 0.1) { inBuf = true; break; }
+      }
+      if (!inBuf) return; // picture not buffered there yet — let it catch up
+      if (Math.abs(el.currentTime - rel) > 0.4) {
+        lastNudgeWall = nowMs;
+        try { el.currentTime = rel; } catch { /* ignore */ }
+      }
+    };
+    const emitDiag = (cls: string, tag: string, line: string) => {
+      if (cls === lastDiagClass) return; // one line per state change, no spam
+      lastDiagClass = cls;
+      try { window.dispatchEvent(new CustomEvent("sb-mse-diag", { detail: { tag, line } })); } catch { /* ignore */ }
+    };
+    const classifyDrift = (now: number, mediaTime: number) => {
+      // (Re-)anchor on the first frame, or after a >1s wall gap with no frame
+      // (a stall or seek), so paused/buffering time never skews the ratio.
+      if (!driftAnchored || now - lastFrameWall > 1000) {
+        driftAnchored = true;
+        driftAnchorWall = now;
+        driftAnchorMedia = mediaTime;
+        lastFrameWall = now;
+        return;
+      }
+      lastFrameWall = now;
+      const wallEl = (now - driftAnchorWall) / 1000;
+      if (wallEl < 6) return; // need a few seconds of slope before judging
+      const rate = (mediaTime - driftAnchorMedia) / wallEl;
+      const gap = el.currentTime - mediaTime;
+      if (rate < 0.97) {
+        emitDiag("rate-slow", "warn",
+          `Streaming sync: RATE error — video runs ${(rate * 100).toFixed(1)}% of real time (~${((1 - rate) * 60).toFixed(1)}s/min of growing drift). Downloading the source plays captions accurately; fixing streaming needs a constant-frame-rate re-encode.`);
+      } else if (rate > 1.03) {
+        emitDiag("rate-fast", "warn",
+          `Streaming sync: RATE error — video runs ${(rate * 100).toFixed(1)}% of real time (too fast).`);
+      } else if (Math.abs(gap) > 0.3) {
+        emitDiag("offset", "warn",
+          `Streaming sync: fixed OFFSET — playhead sits ${gap >= 0 ? "+" : ""}${gap.toFixed(2)}s from the on-screen frame.`);
+      } else {
+        emitDiag("locked", "ok",
+          `Streaming sync: playhead locked to the picture (rate ${(rate * 100).toFixed(1)}%, gap ${gap.toFixed(2)}s). Any remaining audio-vs-caption lag is a container A/V offset.`);
+      }
+    };
+    // PRIMARY playhead: requestVideoFrameCallback hands us the EXACT PTS of the
+    // frame on screen (meta.mediaTime), so captions tie to the displayed frame.
+    // rVFC pauses when the window is occluded — rAF (below) is the fallback.
+    const onFrame = (now: number, meta: { mediaTime: number }) => {
+      rvfcId = 0;
+      if (!playingRef.current) return;
+      reportTime(meta.mediaTime);
+      if (masterActive()) slavePicture(now);
+      else classifyDrift(now, meta.mediaTime);
+      rvfcId = rvfc.requestVideoFrameCallback(onFrame);
     };
     const tick = () => {
       rafId = 0;
       if (!playingRef.current) return;
       reportTime();
+      if (masterActive()) slavePicture(performance.now());
       rafId = requestAnimationFrame(tick);
     };
-    const startTick = () => { if (!rafId) rafId = requestAnimationFrame(tick); };
+    const startTick = () => {
+      if (hasRVFC) { if (!rvfcId) rvfcId = rvfc.requestVideoFrameCallback(onFrame); }
+      else if (!rafId) rafId = requestAnimationFrame(tick);
+    };
     const onPlay = () => { playingRef.current = true; setIsPlaying(true); onPlayStateChange?.(true); startTick(); };
     const onPause = () => {
       playingRef.current = false; setIsPlaying(false); onPlayStateChange?.(false);
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+      if (rvfcId) { try { rvfc.cancelVideoFrameCallback(rvfcId); } catch { /* ignore */ } rvfcId = 0; }
     };
     // 'timeupdate' (≈4Hz) stays as the playhead signal while PAUSED — e.g. a
-    // seek landing — and as a backstop if rAF is throttled in a background tab.
+    // seek landing — and as a backstop if the frame callbacks are throttled.
     const onTime = () => reportTime();
     const onErr = () => {
       const me = el.error;
@@ -562,6 +721,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     el.addEventListener("loadeddata", onSettled);
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
+      if (rvfcId) { try { rvfc.cancelVideoFrameCallback(rvfcId); } catch { /* ignore */ } rvfcId = 0; }
       if (shuttleTimerRef.current) { window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0; }
       shuttleRateRef.current = 0;
       el.removeEventListener("play", onPlay);
@@ -574,6 +734,84 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
+
+  // ─── Audio-master loader (r74) ──────────────────────────────────────
+  // Decode the full audio track and become the sample-accurate clock. While
+  // ready: the <video> is muted (picture only) and audio + playhead + captions
+  // all come from the twin, so captions can't drift from the words you hear.
+  useEffect(() => {
+    if (!audioMasterSrc) return;
+    // Guard the single-shot decodeAudioData against very long tracks: it
+    // expands the whole file to PCM in RAM (~21 MB/min), so a multi-hour
+    // video could OOM the WebView. Skip past ~70 min and keep the video clock.
+    const known = knownDurationRef.current;
+    if (known > 0 && known > 70 * 60) {
+      try {
+        window.dispatchEvent(new CustomEvent("sb-mse-diag", { detail: { tag: "warn",
+          line: "Audio-synced captions are limited to ~70 min videos for now; this one uses the video clock." } }));
+      } catch { /* ignore */ }
+      return;
+    }
+    let cancelled = false;
+    const twin = createAudioTwin();
+    twin.setVolume(Math.max(0, Math.min(1, initialVolume)));
+    // WebKit starts AudioContexts suspended and only unlocks them inside a
+    // user gesture. play() resumes (the common path); this backstops the
+    // mid-playback handoff (captions toggled WHILE already playing, where the
+    // resume isn't in a gesture) by unlocking on the user's next click.
+    const unlock = () => { twin.resume(); window.removeEventListener("pointerdown", unlock); };
+    window.addEventListener("pointerdown", unlock);
+    (async () => {
+      try {
+        const resp = await fetch(audioMasterSrc);
+        if (cancelled) return;
+        const bytes = await resp.arrayBuffer();
+        if (cancelled) return;
+        const dur = await twin.load(bytes);
+        if (cancelled) { twin.dispose(); return; }
+        twinRef.current = twin;
+        twinReadyRef.current = true;
+        const el = videoRef.current;
+        if (el) el.muted = true; // picture only — the twin makes the sound now
+        if (dur > totalDurationRef.current) totalDurationRef.current = dur;
+        // Seamless mid-playback handoff: if the <video> was already playing its
+        // own audio, start the twin at the current position so the only audible
+        // change is that captions snap into sync.
+        if (playingRef.current) {
+          const absNow = baseTimeRef.current + Math.max(0, ((el?.currentTime) ?? 0) - clockOriginRef.current);
+          twin.play(absNow);
+        }
+        try {
+          window.dispatchEvent(new CustomEvent("sb-mse-diag", { detail: { tag: "ok",
+            line: "Audio-master clock engaged — captions now locked to the audio." } }));
+        } catch { /* ignore */ }
+      } catch (err) {
+        if (!cancelled) {
+          twin.dispose();
+          try {
+            window.dispatchEvent(new CustomEvent("sb-mse-diag", { detail: { tag: "warn",
+              line: `Audio-master decode failed (${err instanceof Error ? err.message : String(err)}); using the video clock.` } }));
+          } catch { /* ignore */ }
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      window.removeEventListener("pointerdown", unlock);
+      twinReadyRef.current = false;
+      const t = twinRef.current;
+      twinRef.current = null;
+      try { t?.pause(); } catch { /* ignore */ }
+      try { t?.dispose(); } catch { /* ignore */ }
+      // Restore the <video>'s own audio when captions/audio-master turn off.
+      const el = videoRef.current;
+      if (el) el.muted = false;
+    };
+    // initialVolume intentionally excluded: it's only the SEED volume; live
+    // changes route through setVolume → the twin. Re-running on it would
+    // re-download + re-decode the whole track.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioMasterSrc]);
 
   return (
     <div className="cp-local-media" onClick={onSurfaceClick}>
