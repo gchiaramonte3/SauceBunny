@@ -300,14 +300,14 @@ export default function App() {
    */
   const [webCachePath, setWebCachePath] = useState<string | null>(null);
   /**
-   * Audio-master source (r74): asset:// URL of the full audio track downloaded
-   * for a STREAMING web source while captions are on. The MSEStreamPlayer
-   * decodes it (Web Audio) and drives both the heard audio and the caption
-   * playhead from a sample-accurate AudioContext clock, so captions match what
-   * you hear instead of the drifting MSE <video> timeline. Null = normal MSE
-   * audio (no captions, or downloaded-to-cache, or local file).
+   * Pre-cached source audio (r76): asset:// URL of the full audio track we
+   * download in the background for a STREAMING web source. Playback is native
+   * (the proxy-merged fMP4 carries the audio), so this is NOT used for playback
+   * — it's a head start for Whisper (the same source-keyed file the transcript
+   * pipeline reuses). Doubles as the per-source "already cached" guard so we
+   * don't re-download. Null = not streaming / cached-to-disk / local file.
    */
-  const [webAudioMasterSrc, setWebAudioMasterSrc] = useState<string | null>(null);
+  const [webAudioCachedSrc, setWebAudioCachedSrc] = useState<string | null>(null);
   /** The COMMITTED source page URL of the current fetch (what yt-dlp resolves),
    *  captured at fetch time. The audio-master effect keys off THIS, not the
    *  live `url` input — editing the input box mid-playback must not repoint the
@@ -643,19 +643,6 @@ export default function App() {
     logIdRef.current += 1;
     setLogs((prev) => [...prev, { id: logIdRef.current, ts: nowHms(), tag, source, message }]);
   }, []);
-
-  // The streaming player classifies its own caption sync (RATE / OFFSET /
-  // locked) from rVFC frame timing and dispatches a window event. Surface it
-  // in the Logs panel so diagnosing drift never needs devtools.
-  useEffect(() => {
-    const onDiag = (e: Event) => {
-      const d = (e as CustomEvent<{ tag?: string; line?: string }>).detail;
-      if (!d?.line) return;
-      appendLog(asLogTag(d.tag ?? "info"), "stream-sync", d.line);
-    };
-    window.addEventListener("sb-mse-diag", onDiag);
-    return () => window.removeEventListener("sb-mse-diag", onDiag);
-  }, [appendLog]);
 
   // ====== Backend build check ======
   // Runs once on mount. If the running Rust binary's BACKEND_BUILD_ID
@@ -1074,7 +1061,7 @@ export default function App() {
     setWebStreamUrl(null);
     setWebStreamAudioUrl(null);
     setWebCachePath(null);
-    setWebAudioMasterSrc(null);
+    setWebAudioCachedSrc(null);
     setActiveSourceUrl(null);
     setWebPreviewDownloading(false);
     setPlayerReady(false);
@@ -2418,53 +2405,51 @@ export default function App() {
     }
   }, [captionsActive, activeTranscript, captionsState, sourceKind, metadata, webStreamUrl, webCachePath, pushNotification, handleDownloadCaptions]);
 
-  // ── Audio-master clock + shared audio cache (r74) ───────────────────
-  // For EVERY streaming web source (proxy MSE path — not downloaded-to-cache,
-  // not a local file) we ALWAYS download + cache the full audio track up
-  // front. The player decodes it (Web Audio) and locks both the heard audio
-  // and the caption playhead to a sample-accurate AudioContext clock from
-  // t=0, so captions can't drift from the words. The cache is source-keyed
-  // and persistent, so the SAME file is reused by the Whisper pipeline — when
-  // you transcribe, the audio is already there and the transcript is clocked
-  // against the exact track you heard. See src/lib/audio-twin.ts + the
-  // download_audio_track / generate_transcript backend sharing.
-  const audioTwinJobRef = useRef<string | null>(null);
+  // ── Pre-stage the source audio for Whisper (r74 → r76) ──────────────
+  // For every streaming web source we download + cache the full audio track in
+  // the background. Playback itself is NATIVE (the proxy-merged fMP4 carries the
+  // audio, and the <video>'s currentTime tracks it — see MSEStreamPlayer), so
+  // this cache is purely a HEAD START for transcription: it's source-keyed and
+  // persistent, so when you hit Transcribe the audio is already on disk and the
+  // Whisper transcript is clocked against the exact track you heard. See
+  // download_audio_track / generate_transcript (source_audio_prefix) sharing.
+  const audioCacheJobRef = useRef<string | null>(null);
   useEffect(() => {
     const streaming = sourceKind === "youtube" && !!webStreamUrl && !webCachePath;
     if (!streaming || !activeSourceUrl) {
-      setWebAudioMasterSrc(null);
+      setWebAudioCachedSrc(null);
       return;
     }
-    if (webAudioMasterSrc) return; // already prepared for this source
+    if (webAudioCachedSrc) return; // already cached for this source
     let cancelled = false;
     const seq = sourceSeqRef.current;
     (async () => {
       try {
         const jobId = await invoke<string>("new_job_id");
         if (cancelled || sourceSeqRef.current !== seq) return;
-        audioTwinJobRef.current = jobId;
-        appendLog("info", "audio-sync", "Caching the audio track (drives caption sync + reused by Whisper)…");
+        audioCacheJobRef.current = jobId;
+        appendLog("info", "audio-cache", "Pre-caching the audio track for fast, aligned transcription…");
         const path = await invoke<string>("download_audio_track", {
           args: { url: activeSourceUrl, job_id: jobId, cookies_browser: cookiesBrowserOrNone() },
         });
         if (cancelled || sourceSeqRef.current !== seq) return;
         const { convertFileSrc } = await import("@tauri-apps/api/core");
-        setWebAudioMasterSrc(convertFileSrc(path));
-        appendLog("ok", "audio-sync", "Audio cached — captions now follow the audio, not the video clock.");
+        setWebAudioCachedSrc(convertFileSrc(path));
+        appendLog("ok", "audio-cache", "Audio cached — Transcribe will be instant for this source.");
       } catch (err) {
         if (cancelled || sourceSeqRef.current !== seq) return;
-        appendLog("warn", "audio-sync",
-          `Audio cache unavailable (${formatError(err)}) — captions will follow the video clock.`);
+        appendLog("warn", "audio-cache",
+          `Audio pre-cache skipped (${formatError(err)}) — Transcribe will fetch it on demand.`);
       } finally {
-        audioTwinJobRef.current = null;
+        audioCacheJobRef.current = null;
       }
     })();
     return () => {
       cancelled = true;
-      const j = audioTwinJobRef.current;
-      if (j) { audioTwinJobRef.current = null; invoke("cancel_job", { jobId: j }).catch(() => { /* best-effort */ }); }
+      const j = audioCacheJobRef.current;
+      if (j) { audioCacheJobRef.current = null; invoke("cancel_job", { jobId: j }).catch(() => { /* best-effort */ }); }
     };
-  }, [sourceKind, webStreamUrl, webCachePath, activeSourceUrl, webAudioMasterSrc, appendLog]);
+  }, [sourceKind, webStreamUrl, webCachePath, activeSourceUrl, webAudioCachedSrc, appendLog]);
 
   const handleClearLogs = useCallback(() => setLogs([]), []);
   const handleCopyLogs = useCallback(() => {
@@ -2972,7 +2957,6 @@ export default function App() {
               /* r74: audio-master src is only meaningful while actually
                  STREAMING (no cache path) — the local player is already
                  sample-accurate once downloaded. */
-              audioMasterSrc={webCachePath ? null : webAudioMasterSrc}
               /* r75: separate audio track for DASH-split sources, merged by the
                  proxy. Only while streaming (the cached file is already muxed). */
               audioStreamUrl={webCachePath ? null : webStreamAudioUrl}
