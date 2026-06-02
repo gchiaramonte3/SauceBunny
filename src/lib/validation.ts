@@ -107,3 +107,42 @@ export function isYouTubeBotError(msg: string): boolean {
     m.includes("youtube auth")
   );
 }
+
+/**
+ * True when a fetch failed because the SOURCE needs the user's login cookies —
+ * YouTube's bot-check, or any login-gated site (Reddit now requires it, others
+ * may follow). Catches both raw yt-dlp text and our humanized backend hints.
+ * Drives the contextual cookie reminder for ANY site, not just YouTube.
+ */
+export function needsCookiesError(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    isYouTubeBotError(msg) ||
+    m.includes("account authentication is required") ||
+    m.includes("requires you to be signed in") ||
+    m.includes("--cookies-from-browser") ||
+    m.includes("use --cookies") ||
+    m.includes("reuses those cookies")
+  );
+}
+
+/** Human-friendly site name from a hostname, for cookie-reminder copy.
+ *  "www.reddit.com" → "Reddit", "youtu.be" → "YouTube". */
+export function prettyHost(host: string): string {
+  const h = host.replace(/^www\./, "").toLowerCase();
+  const known: Record<string, string> = {
+    "reddit.com": "Reddit",
+    "youtube.com": "YouTube",
+    "youtu.be": "YouTube",
+    "vimeo.com": "Vimeo",
+    "tiktok.com": "TikTok",
+    "twitter.com": "X",
+    "x.com": "X",
+    "instagram.com": "Instagram",
+    "facebook.com": "Facebook",
+    "twitch.tv": "Twitch",
+  };
+  if (known[h]) return known[h];
+  const label = h.split(".")[0] || h;
+  return label ? label.charAt(0).toUpperCase() + label.slice(1) : "this site";
+}

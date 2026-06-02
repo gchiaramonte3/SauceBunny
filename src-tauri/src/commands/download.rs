@@ -235,6 +235,28 @@ pub(crate) fn is_youtube_auth_error_line(line: &str) -> bool {
         || l.contains("login_required")
         || l.contains("not a bot")
         || (l.contains("age") && l.contains("restricted"))
+        // Generic login-gated sources (Reddit now requires it; others may too):
+        // yt-dlp tells the user to pass cookies. Same remedy as YouTube — reuse
+        // the signed-in browser's cookies — so treat it as an auth error.
+        || l.contains("account authentication is required")
+        || l.contains("--cookies-from-browser")
+        || l.contains("use --cookies")
+}
+
+/// First `[Extractor]` tag yt-dlp prints (e.g. "Reddit", "youtube"). Used to
+/// name the site in auth-error guidance. Returns None for the `generic`
+/// fallback extractor or when absent.
+fn ytdlp_extractor_tag(stderr: &str) -> Option<String> {
+    let s = stderr.trim_start();
+    let start = s.find('[')?;
+    let rest = &s[start + 1..];
+    let end = rest.find(']')?;
+    let tag = rest[..end].trim();
+    if tag.is_empty() || tag.eq_ignore_ascii_case("generic") {
+        None
+    } else {
+        Some(tag.to_string())
+    }
 }
 
 /// Standard auth-issue message — kept identical to `humanize_ytdlp_error`'s
@@ -259,6 +281,19 @@ pub(crate) fn humanize_ytdlp_error(stderr: &str) -> String {
                 already logged into YouTube on (Chrome/Safari/etc.) so \
                 yt-dlp can reuse those cookies."
             .into();
+    }
+    // Login-gated, non-YouTube sources (Reddit requires this as of late 2025).
+    // yt-dlp can't even read the metadata without the user's cookies.
+    if trimmed.contains("Account authentication is required")
+        || trimmed.contains("--cookies-from-browser")
+        || (trimmed.contains("use --cookies") && !trimmed.contains("Sign in to confirm"))
+    {
+        let host = ytdlp_extractor_tag(trimmed).unwrap_or_else(|| "This site".to_string());
+        return format!(
+            "{host} requires you to be signed in to load this video. When the \
+             sign-in panel appears, pick the browser you're already logged into \
+             {host} on — Sauce Bunny reuses those cookies for every site."
+        );
     }
     if trimmed.contains("Video unavailable") {
         return "YouTube reports this video is unavailable (deleted, private, or region-locked).".into();
@@ -881,7 +916,11 @@ pub async fn download_web_preview(
                             error: Some(if payload.signal.is_some() {
                                 "Cancelled".into()
                             } else if saw_auth_error {
-                                YT_AUTH_HINT.into()
+                                // Host-neutral: this path serves ALL web sources,
+                                // and Reddit/others now also gate on login cookies.
+                                "This site requires you to be signed in. When the sign-in panel \
+                                 appears, pick the browser you're already logged into it on — \
+                                 Sauce Bunny reuses those cookies for every site.".into()
                             } else {
                                 format!("Preview download failed (yt-dlp exit {:?})", payload.code)
                             }),

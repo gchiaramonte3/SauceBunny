@@ -6,8 +6,10 @@ import type { Defaults } from "./SettingsModal";
 type Browser = Defaults["ytCookiesBrowser"];
 type RealBrowser = Exclude<Browser, "none">;
 
-/** Which surface is showing. Drives the copy only — the picker is identical. */
-export type YtAuthMode = "welcome" | "blocked" | "severed";
+/** Which surface is showing. Drives the copy only — the picker is identical.
+ *  "site-login" is the generic reminder for non-YouTube login-gated sources
+ *  (Reddit, etc.); its copy is built from the `site` prop. */
+export type YtAuthMode = "welcome" | "blocked" | "severed" | "site-login";
 
 // Ordered by least friction on macOS. Firefox reads cookies with no prompt
 // and no special permission (easiest). Chrome/Brave/Edge encrypt theirs → a
@@ -31,7 +33,7 @@ const HINTS: Record<RealBrowser, string> = {
   safari: "Full Disk Access",
 };
 
-const COPY: Record<YtAuthMode, { title: string; lead: ReactNode; dismiss: string }> = {
+const COPY: Record<"welcome" | "blocked" | "severed", { title: string; lead: ReactNode; dismiss: string }> = {
   welcome: {
     title: "Connect YouTube",
     lead: (
@@ -78,17 +80,35 @@ const COPY: Record<YtAuthMode, { title: string; lead: ReactNode; dismiss: string
 export function YouTubeAuthModal({
   open,
   mode,
+  site = "YouTube",
   current,
   onPick,
   onClose,
 }: {
   open: boolean;
   mode: YtAuthMode;
+  /** Site the reminder is about ("YouTube", "Reddit", …). Drives copy only. */
+  site?: string;
   current: Browser;
   onPick: (b: RealBrowser) => void;
   onClose: () => void;
 }) {
-  const copy = COPY[mode];
+  // "site-login" is the generic reminder for non-YouTube login-gated sources —
+  // its copy is built from `site` (the YouTube modes stay hand-written).
+  const copy =
+    mode === "site-login"
+      ? {
+          title: `Sign in to ${site}`,
+          lead: (
+            <>
+              <strong>{site}</strong> requires you to be signed in to load this video. Pick a
+              browser you’re already logged into {site} on — Sauce Bunny borrows its cookies
+              (no password is entered, and nothing leaves your Mac).
+            </>
+          ),
+          dismiss: "Not now",
+        }
+      : COPY[mode];
   // Self-contained Esc handling (capture phase so it beats the App-level
   // shortcut handler) — the modal owns its own dismissal.
   useEffect(() => {
@@ -138,7 +158,7 @@ export function YouTubeAuthModal({
                 onClick={() => onPick(b)}
                 title={
                   b === "firefox"
-                    ? "Use your Firefox YouTube login — no prompt, nothing to grant"
+                    ? `Use your Firefox ${site} login — no prompt, nothing to grant`
                     : b === "safari"
                       ? "Use your Safari login — needs Full Disk Access for Sauce Bunny"
                       : `Use your ${LABELS[b]} login — macOS asks for your Mac password once`
@@ -155,8 +175,8 @@ export function YouTubeAuthModal({
             Cookies are read locally and never leave your Mac — no account or password is entered.{" "}
             <strong>Firefox</strong> is easiest (no prompt). Chrome/Brave/Edge ask for your Mac login
             password once — click <strong>Always Allow</strong>. Safari needs <strong>Full Disk
-            Access</strong> granted to Sauce Bunny. Change anytime in <strong>Settings → YouTube
-            auth</strong>.
+            Access</strong> granted to Sauce Bunny (so it’s least reliable — prefer Firefox).
+            Change anytime in <strong>Settings</strong>.
           </p>
         </div>
 

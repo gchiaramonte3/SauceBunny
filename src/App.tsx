@@ -44,7 +44,7 @@ import {
   durationToTc, framesToTc, secondsToTc,
   tcToFrames, tcToSeconds,
 } from "./lib/timecode";
-import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError } from "./lib/validation";
+import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, prettyHost } from "./lib/validation";
 import { buildProxyUrl } from "./lib/stream-proxy";
 import { sanitizeFilename, stripExt, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
@@ -194,7 +194,14 @@ export default function App() {
   // re-runs handleFetch once a browser is picked (after defaults update, so
   // no stale closure).
   const [ytAuthOpen, setYtAuthOpen] = useState(false);
-  const [ytAuthMode, setYtAuthMode] = useState<"welcome" | "blocked" | "severed">("blocked");
+  const [ytAuthMode, setYtAuthMode] = useState<"welcome" | "blocked" | "severed" | "site-login">("blocked");
+  // Which site the cookie reminder is about ("YouTube", "Reddit", …). The
+  // picker is identical (cookies are read per-browser, not per-site) — only the
+  // copy changes so the reminder reads right for whatever the user just fetched.
+  const [ytAuthSite, setYtAuthSite] = useState("YouTube");
+  // Committed source URL, set SYNCHRONOUSLY at fetch time so the reminder can
+  // name the host even within the same fetch (the state version would be stale).
+  const activeSourceUrlRef = useRef<string | null>(null);
   const [ytAuthRetry, setYtAuthRetry] = useState(0);
   const ytAuthPromptedSeqRef = useRef(-1);
 
@@ -208,11 +215,28 @@ export default function App() {
   }, []);
 
   const maybePromptYtAuth = useCallback((msg: string, seq: number) => {
-    if (!isYouTubeBotError(msg)) return;
+    // Fire for ANY login-gated source (YouTube bot-check OR Reddit/other sites
+    // that now require cookies) — that's the "remind me about cookies when
+    // appropriate" behavior.
+    if (!needsCookiesError(msg)) return;
     if (ytAuthPromptedSeqRef.current === seq) return; // one prompt per source load
     ytAuthPromptedSeqRef.current = seq;
-    // Already picked a browser but STILL bot-checked = the sign-in got severed.
-    setYtAuthMode(defaults.ytCookiesBrowser !== "none" ? "severed" : "blocked");
+    const host = hostnameOf(activeSourceUrlRef.current ?? "");
+    // Decide by HOST first. The error text can contain "YouTube auth" (that's
+    // the name of the cookies setting) even for a Reddit failure, so sniffing
+    // the message would wrongly show the YouTube modal. Only fall back to the
+    // message when we genuinely don't know the host.
+    const isYouTube = host
+      ? /youtube\.com|youtu\.be/.test(host)
+      : isYouTubeBotError(msg);
+    if (isYouTube) {
+      setYtAuthSite("YouTube");
+      // Already picked a browser but STILL bot-checked = the sign-in got severed.
+      setYtAuthMode(defaults.ytCookiesBrowser !== "none" ? "severed" : "blocked");
+    } else {
+      setYtAuthSite(prettyHost(host));
+      setYtAuthMode("site-login");
+    }
     setYtAuthOpen(true);
   }, [defaults.ytCookiesBrowser]);
 
@@ -1072,7 +1096,9 @@ export default function App() {
     }
     resetForNewSource();
     // Committed source URL for the audio-master cache (keyed off this, not the
-    // live `url` input, which can change without a re-fetch).
+    // live `url` input, which can change without a re-fetch). The ref mirror is
+    // set synchronously so the cookie reminder can name the host mid-fetch.
+    activeSourceUrlRef.current = full;
     setActiveSourceUrl(full);
     // Capture this load's sequence — any await continuation below must
     // re-check the ref before calling setState to avoid clobbering a newer
@@ -3178,6 +3204,7 @@ export default function App() {
       <YouTubeAuthModal
         open={ytAuthOpen}
         mode={ytAuthMode}
+        site={ytAuthSite}
         current={defaults.ytCookiesBrowser}
         onPick={handleYtAuthPick}
         onClose={handleYtAuthClose}
