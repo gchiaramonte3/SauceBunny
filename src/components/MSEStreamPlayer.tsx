@@ -5,6 +5,7 @@ import { Input, UrlSource, CanvasSink, ALL_FORMATS } from "mediabunny";
 import { IconFilm } from "./Icons";
 import type { PlayerHandle } from "./player-handle";
 import { createAudioTwin, type AudioTwin } from "../lib/audio-twin";
+import { base64UrlEncode } from "../lib/stream-proxy";
 
 /**
  * Streams a web source (YouTube/Vimeo/…) into a NATIVE `<video>` element via
@@ -49,6 +50,13 @@ type Props = {
    *  and used for picture only. This is what makes streaming captions match
    *  the audio you hear instead of the drifting MSE <video> timeline. */
   audioMasterSrc?: string;
+  /** r75 — DASH-split sources (Reddit, YouTube >360p) have no muxed progressive
+   *  URL. When present, this is the RAW audio-track CDN URL; the player passes
+   *  it to the proxy's fMP4 route as `?audio=<b64>` so ffmpeg merges video +
+   *  audio on the fly and the source STREAMS (with sound) instead of falling
+   *  back to a full download. This is the PICTURE+SOUND stream merge — distinct
+   *  from audioMasterSrc (the muted-video caption-sync clock). */
+  audioStreamUrl?: string;
 };
 
 /** Seconds to stay buffered ahead of the playhead before pausing reads —
@@ -56,7 +64,7 @@ type Props = {
 const BUFFER_AHEAD_SECONDS = 30;
 
 export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSEStreamPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration, audioMasterSrc },
+  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration, audioMasterSrc, audioStreamUrl },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -505,9 +513,14 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
           const startFetch = async (from: number, g: number) => {
             try {
               // path is the RAW proxy URL …/v1/<b64>; the fMP4 route is the
-              // same b64 under /fmp4/v1/ with an optional ?start= seek.
+              // same b64 under /fmp4/v1/ with an optional ?start= seek, plus an
+              // optional ?audio=<b64> second input for DASH-split sources so the
+              // proxy merges video+audio into one fMP4 (full audio, no download).
+              const qs: string[] = [];
+              if (from > 0) qs.push(`start=${Math.floor(from)}`);
+              if (audioStreamUrl) qs.push(`audio=${base64UrlEncode(audioStreamUrl)}`);
               const fmp4Url = path.replace("/v1/", "/fmp4/v1/")
-                + (from > 0 ? `?start=${Math.floor(from)}` : "");
+                + (qs.length ? `?${qs.join("&")}` : "");
               const resp = await fetch(fmp4Url);
               if (disposed || g !== genRef.current) { try { await resp.body?.cancel(); } catch { /* ignore */ } return; }
               if (!resp.ok || !resp.body) { fail(`fMP4 stream HTTP ${resp.status}`); return; }

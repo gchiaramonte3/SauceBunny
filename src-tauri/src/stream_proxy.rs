@@ -138,7 +138,7 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
     // keyframe seeks for scrubbing.
     if raw_path.trim_start_matches('/').starts_with("fmp4/v1/") {
         match decode_after("fmp4/v1/", &raw_path) {
-            Some(u) => return serve_fmp4(request, u, parse_start_query(&raw_path)),
+            Some(u) => return serve_fmp4(request, u, parse_start_query(&raw_path), parse_audio_query(&raw_path)),
             None => {
                 return request.respond(
                     tiny_http::Response::from_string("bad fmp4 path").with_status_code(400),
@@ -284,6 +284,24 @@ fn parse_start_query(url_path: &str) -> f64 {
         .unwrap_or(0.0)
 }
 
+/// Pull the optional `audio=<base64url>` query value — a SECOND upstream URL
+/// (the audio track of a DASH-split source) for the 2-input fMP4 remux.
+/// Returns the decoded http(s) URL, or None when absent/malformed.
+fn parse_audio_query(url_path: &str) -> Option<String> {
+    let b64 = url_path
+        .split('?')
+        .nth(1)?
+        .split('&')
+        .find_map(|kv| kv.strip_prefix("audio="))?;
+    let bytes = URL_SAFE_NO_PAD.decode(b64.as_bytes()).ok()?;
+    let url = String::from_utf8(bytes).ok()?;
+    if url.starts_with("http://") || url.starts_with("https://") {
+        Some(url)
+    } else {
+        None
+    }
+}
+
 /// Decode `<prefix><base64url>[?query]` → upstream http(s) URL. Generalizes
 /// `decode_upstream` for both the raw-proxy (`v1/`) and fMP4 (`fmp4/v1/`)
 /// routes. Returns `None` for malformed paths or non-http(s) values.
@@ -306,7 +324,7 @@ fn decode_after(prefix: &str, url_path: &str) -> Option<String> {
 /// stdout to the response. ffmpeg is killed when the client disconnects
 /// (MSE torn down on seek/source-change) or when it finishes — `respond`
 /// returns once the socket closes either way.
-fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64) -> std::io::Result<()> {
+fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: Option<String>) -> std::io::Result<()> {
     let ff = match ffmpeg_path() {
         Some(p) => p,
         None => {
@@ -317,31 +335,43 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64) -> std:
         }
     };
     eprintln!(
-        "[media-proxy] FMP4 start={start} host={}",
-        upstream.split('/').nth(2).unwrap_or("?")
+        "[media-proxy] FMP4 start={start} host={}{}",
+        upstream.split('/').nth(2).unwrap_or("?"),
+        if audio.is_some() { " +audio(2-input)" } else { "" }
     );
 
     let mut cmd = std::process::Command::new(ff);
-    cmd.arg("-hide_banner")
-        .arg("-loglevel").arg("error")
-        // NOTE: deliberately NO `-fflags +genpts`. It FABRICATES timestamps when
-        // it thinks they're missing, which can invent a wrong rate and mask the
-        // real AAC encoder-priming — i.e. it can manufacture the very caption
-        // drift we're chasing. `-c copy` should carry the source PTS verbatim.
-        .arg("-user_agent").arg(SAFARI_UA);
-    // Input-side seek (fast, keyframe-accurate) for scrub-rebuilds.
-    if start > 0.0 {
-        cmd.arg("-ss").arg(format!("{start}"));
+    cmd.arg("-hide_banner").arg("-loglevel").arg("error");
+    // ── input 0: video (a muxed progressive, OR the video-only track of a
+    // DASH-split source). NOTE: deliberately NO `-fflags +genpts` — it
+    // fabricates timestamps and can mask AAC priming → manufactured drift;
+    // `-c copy` carries the source PTS verbatim. Input-side `-ss` (fast,
+    // keyframe-accurate) is applied to EACH input so a 2-input merge stays
+    // in sync on scrub-rebuilds.
+    if start > 0.0 { cmd.arg("-ss").arg(format!("{start}")); }
+    cmd.arg("-user_agent").arg(SAFARI_UA).arg("-i").arg(&upstream);
+    // ── input 1: a separate audio track for DASH-split sources (Reddit,
+    // YouTube >360p). ffmpeg merges the two into one fMP4 — full audio, no
+    // download wait. `-map` pins video from input 0, audio from input 1.
+    if let Some(a) = &audio {
+        if start > 0.0 { cmd.arg("-ss").arg(format!("{start}")); }
+        cmd.arg("-user_agent").arg(SAFARI_UA).arg("-i").arg(a);
+        cmd.arg("-map").arg("0:v:0").arg("-map").arg("1:a:0");
     }
-    cmd.arg("-i").arg(&upstream)
-        .arg("-c").arg("copy")
-        // Re-base the output timeline to zero so the MSE <video>'s currentTime
-        // maps 1:1 to real media time. Without this, the source's start-PTS
-        // offset rides into the fMP4 and the playhead drifts from the audio,
-        // making captions show late. muxpreload/muxdelay 0 drop mux offsets.
-        // make_zero shifts ALL tracks by a single offset, so audio/video stay
-        // aligned (it is NOT a per-stream shift).
-        .arg("-avoid_negative_ts").arg("make_zero")
+    cmd.arg("-c").arg("copy");
+    // HLS segments carry AAC in ADTS framing; the MP4 muxer DROPS the audio
+    // ("Malformed AAC bitstream") unless it's converted to ASC. Apply ONLY for
+    // HLS inputs — running it on already-ASC MP4/DASH audio would corrupt those.
+    if upstream.contains("m3u8") || audio.as_deref().map_or(false, |a| a.contains("m3u8")) {
+        cmd.arg("-bsf:a").arg("aac_adtstoasc");
+    }
+    // Re-base the output timeline to zero so the MSE <video>'s currentTime
+    // maps 1:1 to real media time. Without this, the source's start-PTS
+    // offset rides into the fMP4 and the playhead drifts from the audio,
+    // making captions show late. muxpreload/muxdelay 0 drop mux offsets.
+    // make_zero shifts ALL tracks by a single offset, so audio/video stay
+    // aligned (it is NOT a per-stream shift).
+    cmd.arg("-avoid_negative_ts").arg("make_zero")
         .arg("-muxpreload").arg("0")
         .arg("-muxdelay").arg("0")
         // Pin the video track to a clean 90kHz timescale. A weird source

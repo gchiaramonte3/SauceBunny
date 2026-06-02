@@ -26,32 +26,6 @@ use super::*;
 /// it, yt-dlp falls back to lower-resolution clients automatically.
 pub(crate) const YT_EXTRACTOR_ARGS: [&str; 2] = ["--extractor-args", "youtube:player_client=default,-tv"];
 
-/// Hosts where we KNOW yt-dlp's optimized extractor exists and the
-/// playback flow goes through our IFrame fast-path. Everything else
-/// still routes through yt-dlp (which covers ~1,800 sites via dedicated
-/// extractors plus a `generic` fallback for arbitrary pages with embedded
-/// video), it just plays via the direct-stream-URL path instead.
-const YOUTUBE_HOSTS: &[&str] = &[
-    "youtube.com",
-    "www.youtube.com",
-    "m.youtube.com",
-    "music.youtube.com",
-    "youtu.be",
-];
-
-/// True if the URL is a YouTube canonical host. Reserved for future
-/// server-side branching (e.g. format-selector tweaks) — frontend has
-/// its own copy of this check today.
-#[allow(dead_code)]
-fn is_youtube_url(url: &str) -> bool {
-    let parsed = match url::Url::parse(url) {
-        Ok(u) => u,
-        Err(_) => return false,
-    };
-    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
-    YOUTUBE_HOSTS.iter().any(|h| host == *h)
-}
-
 /// Build the `--cookies-from-browser <name>` argv fragment if the user
 /// has picked a browser in Settings. Returns an empty Vec for `None` /
 /// `"none"` so callers can `cmd_args.extend(cookies_args(...))` blindly.
@@ -697,6 +671,13 @@ pub async fn save_thumbnail(args: SaveThumbArgs) -> Result<(), crate::AppError> 
 #[derive(Serialize)]
 pub struct DirectStreamResult {
     pub url: String,
+    /// DASH-split sources (Reddit, YouTube >360p, …) have no single muxed
+    /// progressive URL. When that's the case we resolve the best H.264 video
+    /// AND best AAC audio as separate URLs; the loopback proxy merges them on
+    /// the fly into fragmented MP4 (`/fmp4/v1/<b64video>?audio=<b64audio>`) so
+    /// the source STREAMS (with sound) instead of falling back to download.
+    /// `None` ⇒ `url` is already muxed (the common path).
+    pub audio_url: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub vcodec: Option<String>,
@@ -754,26 +735,126 @@ pub async fn get_direct_stream_url(
         .output()
         .await
         .map_err(|e| format!("yt-dlp failed: {e}"))?;
+    if out.status.success() {
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let mut lines = stdout.lines().filter(|l| !l.trim().is_empty());
+        if let Some(direct) = lines.next() {
+            let (w, h, vcodec) = if let Some(meta) = lines.next() {
+                let parts: Vec<&str> = meta.split('\t').collect();
+                let w  = parts.first().and_then(|s| s.parse::<u32>().ok());
+                let h  = parts.get(1).and_then(|s| s.parse::<u32>().ok());
+                let vc = parts.get(2).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
+                (w, h, vc)
+            } else { (None, None, None) };
+            return Ok(DirectStreamResult { url: direct.to_string(), audio_url: None, width: w, height: h, vcodec });
+        }
+    }
+    // No single muxed progressive (a DASH-split source — Reddit, YouTube >360p,
+    // etc.). Resolve best H.264 video + best AAC audio as SEPARATE URLs so the
+    // proxy can merge them on the fly and the source still STREAMS.
+    let muxed_stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    if let Some(split) = resolve_split_stream(&app, &url, cookies_browser.as_deref()).await {
+        return Ok(split);
+    }
+    // Tier 3: HLS-only sources (some Twitter/X). The best format is an m3u8;
+    // the proxy's ffmpeg reads the HLS server-side and remuxes it to fMP4
+    // (with aac_adtstoasc for the TS→MP4 audio). Single input — no `?audio=`.
+    if let Some(hls) = resolve_hls_stream(&app, &url, cookies_browser.as_deref()).await {
+        return Ok(hls);
+    }
+    Err(humanize_ytdlp_error(&muxed_stderr).into())
+}
+
+/// DASH-split resolve: best H.264 video + best AAC audio as two separate URLs
+/// (for the proxy's 2-input fMP4 remux). H.264+AAC so WKWebView can decode the
+/// remuxed output. Returns None when the source has no such split (the caller
+/// then surfaces the original muxed error).
+async fn resolve_split_stream(
+    app: &AppHandle,
+    url: &str,
+    cookies_browser: Option<&str>,
+) -> Option<DirectStreamResult> {
+    let yt = ytdlp(app).ok()?;
+    let mut args: Vec<String> = vec![
+        "--no-playlist".into(),
+        "--no-warnings".into(),
+        "-f".into(),
+        "bv*[vcodec^=avc1][protocol^=http][protocol!*=m3u8]+ba[acodec^=mp4a][protocol^=http][protocol!*=m3u8]/\
+         bv*[vcodec^=avc1]+ba[ext=m4a]/\
+         bv*+ba".into(),
+        YT_EXTRACTOR_ARGS[0].into(),
+        YT_EXTRACTOR_ARGS[1].into(),
+        // requested_formats.0 = video, .1 = audio for a merged (v+a) selection.
+        "--print".into(),
+        "%(requested_formats.0.url)s\t%(requested_formats.1.url)s\t%(width)s\t%(height)s\t%(vcodec)s".into(),
+    ];
+    args.extend(cookies_args(cookies_browser));
+    args.push(url.to_string());
+
+    let out = yt.args(args).output().await.ok()?;
     if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-        return Err(humanize_ytdlp_error(&stderr).into());
+        return None;
     }
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-    let mut lines = stdout.lines().filter(|l| !l.trim().is_empty());
-    let direct = lines
-        .next()
-        .ok_or_else(|| crate::AppError::internal("yt-dlp returned no stream URL — this site may require auth or use a format Safari can't play"))?
-        .to_string();
-    let (w, h, vcodec) = if let Some(meta) = lines.next() {
-        let parts: Vec<&str> = meta.split('\t').collect();
-        let w  = parts.first().and_then(|s| s.parse::<u32>().ok());
-        let h  = parts.get(1).and_then(|s| s.parse::<u32>().ok());
-        let vc = parts.get(2).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
-        (w, h, vc)
-    } else {
-        (None, None, None)
-    };
-    Ok(DirectStreamResult { url: direct, width: w, height: h, vcodec })
+    let line = stdout.lines().find(|l| !l.trim().is_empty())?;
+    let parts: Vec<&str> = line.split('\t').collect();
+    let video = parts.first().copied().filter(|s| s.starts_with("http"))?;
+    let audio = parts.get(1).copied().filter(|s| s.starts_with("http"))?;
+    let w  = parts.get(2).and_then(|s| s.parse::<u32>().ok());
+    let h  = parts.get(3).and_then(|s| s.parse::<u32>().ok());
+    let vc = parts.get(4).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
+    Some(DirectStreamResult {
+        url: video.to_string(),
+        audio_url: Some(audio.to_string()),
+        width: w,
+        height: h,
+        vcodec: vc,
+    })
+}
+
+/// HLS-only resolve: the best SINGLE format allowing m3u8 (some Twitter/X
+/// videos are HLS-only). Returns one URL — the proxy's ffmpeg reads the HLS
+/// playlist server-side and remuxes to fMP4. Last resort before the download
+/// fallback. Returns None if nothing resolves.
+async fn resolve_hls_stream(
+    app: &AppHandle,
+    url: &str,
+    cookies_browser: Option<&str>,
+) -> Option<DirectStreamResult> {
+    let yt = ytdlp(app).ok()?;
+    let mut args: Vec<String> = vec![
+        "--no-playlist".into(),
+        "--no-warnings".into(),
+        // Best muxed format, ANY protocol (this is the tier that finally allows
+        // HLS); fall back to the overall best single format.
+        "-f".into(),
+        "b[acodec!=none][vcodec!=none]/b".into(),
+        YT_EXTRACTOR_ARGS[0].into(),
+        YT_EXTRACTOR_ARGS[1].into(),
+        "--print".into(),
+        "%(url)s\t%(width)s\t%(height)s\t%(vcodec)s".into(),
+    ];
+    args.extend(cookies_args(cookies_browser));
+    args.push(url.to_string());
+
+    let out = yt.args(args).output().await.ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let line = stdout.lines().find(|l| !l.trim().is_empty())?;
+    let parts: Vec<&str> = line.split('\t').collect();
+    let url_out = parts.first().copied().filter(|s| s.starts_with("http"))?;
+    let w = parts.get(1).and_then(|s| s.parse::<u32>().ok());
+    let h = parts.get(2).and_then(|s| s.parse::<u32>().ok());
+    let vc = parts.get(3).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
+    Some(DirectStreamResult {
+        url: url_out.to_string(),
+        audio_url: None,
+        width: w,
+        height: h,
+        vcodec: vc,
+    })
 }
 
 // ────────────────────────────────────────────────────────────────────────

@@ -284,6 +284,14 @@ export default function App() {
    */
   const [webStreamUrl, setWebStreamUrl] = useState<string | null>(null);
   /**
+   * Separate audio-track CDN URL for DASH-split sources (Reddit, YouTube
+   * >360p) that have no muxed progressive stream (r75). Passed to the player,
+   * which hands it to the proxy's fMP4 route (`?audio=`) so ffmpeg merges
+   * video+audio on the fly — the source STREAMS with sound instead of falling
+   * back to a full download. Null for muxed sources / local files.
+   */
+  const [webStreamAudioUrl, setWebStreamAudioUrl] = useState<string | null>(null);
+  /**
    * Per-import fallback for web sources whose CDN rejects cross-origin
    * fetches (LinkedIn, X, Instagram, FB — most major social platforms
    * check the Referer header). When `<video>` errors trying to load
@@ -1064,6 +1072,7 @@ export default function App() {
     setPlaybackPrepProgress(0);
     setWebCodecsFallbackForImport(false);
     setWebStreamUrl(null);
+    setWebStreamAudioUrl(null);
     setWebCachePath(null);
     setWebAudioMasterSrc(null);
     setActiveSourceUrl(null);
@@ -1183,7 +1192,7 @@ export default function App() {
       void (async () => {
         try {
           appendLog("info", "yt-dlp", `Resolving stream URL for ${hostnameOf(full)}…`);
-          const stream = await invoke<{ url: string; width: number | null; height: number | null; vcodec: string | null }>(
+          const stream = await invoke<{ url: string; audio_url: string | null; width: number | null; height: number | null; vcodec: string | null }>(
             "get_direct_stream_url",
             { url: full, cookiesBrowser: cookiesBrowserOrNone() },
           );
@@ -1194,8 +1203,12 @@ export default function App() {
           if (sourceSeqRef.current !== seq) return;
           const proxied = buildProxyUrl(proxyBase, stream.url);
           setWebStreamUrl(proxied);
+          // DASH-split source (Reddit, YouTube >360p): the separate audio URL is
+          // passed straight through to the player → proxy fMP4 merge (r75). RAW
+          // CDN URL (ffmpeg fetches it server-side), not proxied.
+          setWebStreamAudioUrl(stream.audio_url ?? null);
           appendLog("ok", "yt-dlp",
-            `Direct stream ready · ${stream.width ?? "?"}×${stream.height ?? "?"} ${stream.vcodec ?? ""} · via 127.0.0.1 proxy`.trim());
+            `Direct stream ready · ${stream.width ?? "?"}×${stream.height ?? "?"} ${stream.vcodec ?? ""}${stream.audio_url ? " · split A/V merged" : ""} · via 127.0.0.1 proxy`.trim());
           // r74: be explicit that PLAYBACK is a low-res proxy (YouTube only
           // serves a muxed stream at ≤360p; higher res is VP9/AV1 DASH that
           // WKWebView can't decode). This keeps scrubbing fast and light. The
@@ -2960,6 +2973,9 @@ export default function App() {
                  STREAMING (no cache path) — the local player is already
                  sample-accurate once downloaded. */
               audioMasterSrc={webCachePath ? null : webAudioMasterSrc}
+              /* r75: separate audio track for DASH-split sources, merged by the
+                 proxy. Only while streaming (the cached file is already muxed). */
+              audioStreamUrl={webCachePath ? null : webStreamAudioUrl}
               initialVolume={muted ? 0 : volume}
               playbackPrepBusy={playbackPrepBusy}
               playbackPrepProgress={playbackPrepProgress}

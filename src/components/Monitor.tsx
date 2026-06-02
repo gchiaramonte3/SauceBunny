@@ -31,6 +31,10 @@ type Props = {
    *  set, MSEStreamPlayer decodes it and drives audio + captions from a
    *  sample-accurate AudioContext clock (video becomes muted picture-only). */
   audioMasterSrc?: string | null;
+  /** r75: RAW audio-track CDN URL for DASH-split sources (Reddit, YouTube
+   *  >360p). Passed to the proxy's fMP4 route so video+audio are merged on the
+   *  fly → the source streams with sound instead of downloading first. */
+  audioStreamUrl?: string | null;
   /** Initial volume for the LocalMediaPlayer when it mounts. */
   initialVolume: number;
   /**
@@ -117,7 +121,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     status, metadata,
     errorDetail,
     aspect,
-    sourceKind, localFilePath, webStreamUrl, audioMasterSrc, initialVolume, onMediaError,
+    sourceKind, localFilePath, webStreamUrl, audioMasterSrc, audioStreamUrl, initialVolume, onMediaError,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs,
     streamLoadingPhase,
     toast, onToastDismiss,
@@ -240,6 +244,9 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
                  drives audio + captions from a sample-accurate clock so
                  captions match what you hear (video → muted picture only). */
               audioMasterSrc={audioMasterSrc ?? undefined}
+              /* r75: separate audio track → proxy merges it into the fMP4 so
+                 DASH-split sources (Reddit, YouTube >360p) stream with sound. */
+              audioStreamUrl={audioStreamUrl ?? undefined}
               /* Authoritative duration so far seeks don't clamp to a short
                  stream-probe value (was sending 19:40 to 15:12). */
               knownDuration={metadata?.duration ?? undefined}
