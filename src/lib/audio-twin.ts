@@ -33,6 +33,9 @@ export type AudioTwin = {
   getDuration: () => number;
   isPlaying: () => boolean;
   isReady: () => boolean;
+  /** True only when the AudioContext is actually running (producing sound).
+   *  WebKit keeps it "suspended" until resumed inside a user gesture. */
+  isRunning: () => boolean;
   setVolume: (v: number) => void;
   getVolume: () => number;
   setMuted: (m: boolean) => void;
@@ -137,6 +140,7 @@ export function createAudioTwin(): AudioTwin {
     getDuration: () => buffer?.duration ?? 0,
     isPlaying: () => playing,
     isReady: () => !!buffer,
+    isRunning: () => ctx?.state === "running",
     setVolume: (v) => { volume = Math.max(0, Math.min(1, v)); if (gain && !muted) gain.gain.value = volume; },
     getVolume: () => volume,
     setMuted: (m) => { muted = m; if (gain) gain.gain.value = m ? 0 : volume; },

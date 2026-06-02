@@ -132,6 +132,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const twinRef = useRef<AudioTwin | null>(null);
   const twinReadyRef = useRef(false);
   const twinSeekTargetRef = useRef<number | null>(null);
+  // Set when the twin became ready mid-playback but its AudioContext couldn't
+  // resume (not in a user gesture). The pointerdown unlock completes the audio
+  // handoff (mute video → play twin) on the user's next click; until then the
+  // <video> stays audible so there's never a silent gap.
+  const handoffPendingRef = useRef(false);
   const masterActive = () => twinReadyRef.current && !!twinRef.current;
 
   // ─── Imperative handle ──────────────────────────────────────────────
@@ -759,27 +764,48 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     // user gesture. play() resumes (the common path); this backstops the
     // mid-playback handoff (captions toggled WHILE already playing, where the
     // resume isn't in a gesture) by unlocking on the user's next click.
-    const unlock = () => { twin.resume(); window.removeEventListener("pointerdown", unlock); };
+    const unlock = () => {
+      twin.resume();
+      // Complete a deferred mid-playback handoff now that we're in a gesture:
+      // re-anchor the twin to where the (still-audible) video is, then mute it.
+      if (handoffPendingRef.current && playingRef.current && twinRef.current) {
+        handoffPendingRef.current = false;
+        const el = videoRef.current;
+        const at = baseTimeRef.current + Math.max(0, ((el?.currentTime) ?? 0) - clockOriginRef.current);
+        twinRef.current.play(at);
+        if (el) el.muted = true;
+      }
+      window.removeEventListener("pointerdown", unlock);
+    };
     window.addEventListener("pointerdown", unlock);
     (async () => {
       try {
         const resp = await fetch(audioMasterSrc);
-        if (cancelled) return;
+        if (cancelled) { twin.dispose(); return; } // dispose the eager AudioContext
         const bytes = await resp.arrayBuffer();
-        if (cancelled) return;
+        if (cancelled) { twin.dispose(); return; }
         const dur = await twin.load(bytes);
         if (cancelled) { twin.dispose(); return; }
         twinRef.current = twin;
         twinReadyRef.current = true;
         const el = videoRef.current;
-        if (el) el.muted = true; // picture only — the twin makes the sound now
         if (dur > totalDurationRef.current) totalDurationRef.current = dur;
-        // Seamless mid-playback handoff: if the <video> was already playing its
-        // own audio, start the twin at the current position so the only audible
-        // change is that captions snap into sync.
+        // Mid-playback handoff: the <video> is already playing its own audio.
+        // Anchor the twin to the current position and try to resume. If the
+        // AudioContext actually started (sticky user activation), switch audio
+        // to the twin now; otherwise leave the <video> AUDIBLE and defer the
+        // mute/switch to the next click (pointerdown `unlock`) — no silent gap.
+        // The not-yet-playing path mutes in the imperative play() (a real
+        // gesture), so we deliberately do NOT mute here.
         if (playingRef.current) {
           const absNow = baseTimeRef.current + Math.max(0, ((el?.currentTime) ?? 0) - clockOriginRef.current);
           twin.play(absNow);
+          if (twin.isRunning()) {
+            if (el) el.muted = true; // context live → the twin is the sound now
+          } else {
+            twin.pause(); // not audible yet; unlock will (re)start it fresh
+            handoffPendingRef.current = true;
+          }
         }
         try {
           window.dispatchEvent(new CustomEvent("sb-mse-diag", { detail: { tag: "ok",
@@ -799,6 +825,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       cancelled = true;
       window.removeEventListener("pointerdown", unlock);
       twinReadyRef.current = false;
+      handoffPendingRef.current = false;
       const t = twinRef.current;
       twinRef.current = null;
       try { t?.pause(); } catch { /* ignore */ }
