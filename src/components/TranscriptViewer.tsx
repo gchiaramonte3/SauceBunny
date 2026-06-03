@@ -406,8 +406,14 @@ export function TranscriptViewer({
   // Used by the roster panel above the transcript body AND drives the
   // drop-target set for the drag-to-merge interaction.
   type RosterEntry = {
-    /** Canonical tag — after alias resolution. */
+    /** Canonical tag — after alias resolution. The untagged group uses the
+     *  literal "Speaker" sentinel (can't key a Map on null). */
     tag: string;
+    /** Null-preserving resolved tag used ONLY for colour, so the roster pip
+     *  matches the turn-bubble + caption hue for the SAME speaker. The bubble
+     *  colours from resolveAlias(speaker) (null for untagged); keying colour
+     *  off `tag` instead would hash the "Speaker" sentinel to a different hue. */
+    colorTag: string | null;
     /** Display name (after rename). */
     name: string;
     /** Number of turns assigned to this canonical tag. */
@@ -424,11 +430,13 @@ export function TranscriptViewer({
     const orderMap = new Map<string, number>();
     for (let ti = 0; ti < turns.length; ti++) {
       const t = turns[ti];
-      const canonical = resolveAlias(t.speaker) ?? "Speaker";
+      const resolved = resolveAlias(t.speaker);
+      const canonical = resolved ?? "Speaker";
       let entry = byCanonical.get(canonical);
       if (!entry) {
         entry = {
           tag: canonical,
+          colorTag: resolved,
           name: displayNameFor(ti, t.speaker),
           turnCount: 0,
           sourceTags: [],
@@ -445,6 +453,28 @@ export function TranscriptViewer({
     list.sort((a, b) => (orderMap.get(a.tag)! - orderMap.get(b.tag)!));
     return list;
   }, [turns, resolveAlias, displayNameFor]);
+
+  // ── Roster strip overflow → edge-fade hints ─────────────────────
+  // The roster is one horizontally-scrollable line. Fade whichever edge has
+  // more chips off-screen (and only that edge) so the user can tell there's
+  // more to scroll to, without clipping a cast that already fits.
+  const rosterChipsRef = useRef<HTMLDivElement>(null);
+  const [rosterFade, setRosterFade] = useState({ left: false, right: false });
+  const updateRosterFade = useCallback(() => {
+    const el = rosterChipsRef.current;
+    if (!el) return;
+    const left = el.scrollLeft > 1;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    setRosterFade((p) => (p.left === left && p.right === right ? p : { left, right }));
+  }, []);
+  useEffect(() => {
+    const el = rosterChipsRef.current;
+    if (!el) return;
+    updateRosterFade();
+    const ro = new ResizeObserver(updateRosterFade);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [updateRosterFade, roster]);
 
   // True when the transcript actually carries speaker identity — either
   // more than one speaker, or a single one that's been labeled (not the
@@ -527,6 +557,28 @@ export function TranscriptViewer({
     });
     setRename(null);
   }
+
+  // Jump to the FIRST appearance of the speaker being renamed — handy for
+  // identifying an "Unknown speaker" before naming it. Resolves through the
+  // alias chain (so a merged or untagged speaker is matched by canonical key),
+  // seeks + scrolls to that turn's first cue, and closes the popover. Reuses
+  // the same seek/scroll idiom as search-jump and cue-click.
+  const goToSpeaker = useCallback(() => {
+    if (!rename) return;
+    const targetKey = resolveAlias(rename.originalTag) ?? "__NULL__";
+    const turnIdx = turns.findIndex(
+      (t) => (resolveAlias(t.speaker) ?? "__NULL__") === targetKey,
+    );
+    setRename(null);
+    if (turnIdx < 0) return;
+    const cueIdx = flatCues.findIndex((f) => f.turnIdx === turnIdx && f.cueIdx === 0);
+    if (cueIdx < 0) return;
+    setAutoScroll(false);
+    onSeek(flatCues[cueIdx].cue.start);
+    scrollRef.current
+      ?.querySelector<HTMLElement>(`[data-cue-idx="${cueIdx}"]`)
+      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [rename, resolveAlias, turns, flatCues, onSeek]);
 
   function resetAllRenames() {
     setOverrides({ global: {}, turn: {}, aliases: {} });
@@ -956,7 +1008,15 @@ export function TranscriptViewer({
             {roster.length} speaker{roster.length === 1 ? "" : "s"}
             <span className="cp-tx-roster-hint">drag to merge</span>
           </div>
-          <div className="cp-tx-roster-chips">
+          <div
+            className={
+              "cp-tx-roster-chips" +
+              (rosterFade.left ? " fade-l" : "") +
+              (rosterFade.right ? " fade-r" : "")
+            }
+            ref={rosterChipsRef}
+            onScroll={updateRosterFade}
+          >
             {roster.map((r) => {
               const isDropHover = dragHoverTag === r.tag;
               const isDragSource = dragTagRef.current === r.tag;
@@ -1019,7 +1079,7 @@ export function TranscriptViewer({
                 >
                   <span
                     className="cp-tx-roster-pip"
-                    style={{ background: speakerColor(r.tag) }}
+                    style={{ background: speakerColor(r.colorTag) }}
                   >
                     {speakerInitials(r.name)}
                   </span>
@@ -1155,6 +1215,7 @@ export function TranscriptViewer({
           state={rename}
           onCancel={() => setRename(null)}
           onApply={applyRename}
+          onGoToSpeaker={goToSpeaker}
         />
       )}
       {mergeConfirm && (

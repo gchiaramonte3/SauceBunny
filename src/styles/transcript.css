@@ -490,6 +490,9 @@
   display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px;
 }
 .cp-tx-rename-actions .btn { height: 26px; padding: 0 12px; font-size: 11px; }
+/* "Go to speaker" is a navigation action, not commit/cancel — sit it at the
+   far left so Cancel/Rename stay grouped on the right. */
+.cp-tx-rename-goto { margin-right: auto; padding: 0 10px; }
 
 /* Inline opt-in checkbox row used in the Sidebar Whisper section
    for the "Detect speakers" toggle. Quiet by design — sits between
@@ -730,15 +733,47 @@
   color: var(--fg-5);
   font-size: 10px;
 }
+/* Single horizontally-scrollable strip — one line tall no matter how many
+   speakers, so a 20-speaker transcript never wraps into a wall that buries the
+   reading area. The edge fade is applied INLINE (see TranscriptViewer) only on
+   the side that actually has off-screen chips, so a short cast isn't clipped. */
 .cp-tx-roster-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.18) transparent;
+}
+.cp-tx-roster-chips::-webkit-scrollbar { height: 6px; }
+.cp-tx-roster-chips::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.14);
+  border-radius: 3px;
+}
+.cp-tx-roster-chips::-webkit-scrollbar-track { background: transparent; }
+/* Edge fade — toggled by TranscriptViewer from scroll position, only on the
+   side that has off-screen chips (so a short cast that already fits is never
+   clipped). The `#000` stops are mask alpha, not colour. */
+.cp-tx-roster-chips.fade-l {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px);
+          mask-image: linear-gradient(to right, transparent 0, #000 16px);
+}
+.cp-tx-roster-chips.fade-r {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
+          mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
+}
+.cp-tx-roster-chips.fade-l.fade-r {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+          mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
 }
 .cp-tx-roster-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
+  white-space: nowrap;
   padding: 4px 8px 4px 4px;
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.08);

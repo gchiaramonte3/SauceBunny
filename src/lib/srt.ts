@@ -66,8 +66,12 @@ const TIMESTAMP_LINE = /^\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d
 
 /** WebVTT voice tag: `<v Roger Bingham>` or `<v.loud Roger>` → captures name. */
 const VOICE_TAG = /<v(?:\.[^\s>]+)*\s+([^>]*)>/i;
-/** Our diarizer's machine labels: `[SPEAKER_00] text`, `S1: text`, etc. */
-const MACHINE = /^\[?(SPEAKER[_\s-]?\d+|S\d+)\]?\s*[:\-]?\s+(.*)$/i;
+/** Our diarizer's machine labels: `[SPEAKER_00] text`, `S1: text`, and the
+ *  explicit `[SPEAKER_UNK]` the diarizer emits for unattributed / non-speech
+ *  segments (e.g. "(music)"). UNK is a definite label — without it here the
+ *  prefix leaks into the reading text and the segment is mis-coloured as a
+ *  null speaker. humanizeSpeakerTag maps SPEAKER_UNK → "Unknown speaker". */
+const MACHINE = /^\[?(SPEAKER[_\s-]?(?:\d+|UNK)|S\d+)\]?\s*[:\-]?\s+(.*)$/i;
 /** Broadcast speaker change: `>> NAME: text` (the `>>` is unambiguous). */
 const CHEVRON = /^>>\s*([^:>]{1,40}):\s*(.*)$/;
 /** Plain `NAME: text` — gated by name-shape + cast frequency. */
