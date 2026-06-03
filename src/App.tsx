@@ -178,6 +178,32 @@ export default function App() {
       ? defaults.ytCookiesBrowser
       : undefined;
 
+  /**
+   * Run a cookie-taking yt-dlp command, then RETRY once WITHOUT cookies if it
+   * failed while cookies were actually applied. Public social posts (LinkedIn,
+   * many Reddit/IG/X) break when yt-dlp is handed auth cookies — it fetches a
+   * logged-in page it can't parse ("Unable to extract video") — while the
+   * public page resolves fine. Mirrors the backend resolver's cookie-fallback
+   * (get_direct_stream_url / fetch_metadata) for the awaited download/export
+   * commands. Cancellations are never retried. `buildArgs` is called with the
+   * cookie value to use so the same arg shape serves both attempts.
+   */
+  async function invokeWithCookieRetry<T>(
+    cmd: string,
+    buildArgs: (cookies: string | undefined) => Record<string, unknown>,
+  ): Promise<T> {
+    const cookies = cookiesBrowserOrNone();
+    try {
+      return await invoke<T>(cmd, buildArgs(cookies));
+    } catch (err) {
+      if (cookies && !formatError(err).toLowerCase().includes("cancel")) {
+        appendLog("info", "yt-dlp", `${cmd} failed with sign-in cookies — retrying without…`);
+        return await invoke<T>(cmd, buildArgs(undefined));
+      }
+      throw err;
+    }
+  }
+
   // ====== YouTube sign-in (cookies-from-browser) — r71 ======
   // One modal (YouTubeAuthModal), three surfaces driven by `ytAuthMode`:
   //   • "welcome"  → FIRST RUN: ask the user to connect once so downloads
@@ -1428,6 +1454,9 @@ export default function App() {
       // backend skips --download-sections so yt-dlp just grabs the whole stream.
       const startStr = inFrames  != null ? framesToTc(inFrames,  fps) : null;
       const endStr   = outFrames != null ? framesToTc(outFrames, fps) : null;
+      // create_clip is fire-and-forget (reports via the clip-done event), so a
+      // frontend cookie-retry can't observe its failure — the backend owns the
+      // cookie-fallback for the clip download (see spawn_video_clip).
       await invoke<string>("create_clip", {
         args: {
           url: metadata.webpage_url,
@@ -1556,24 +1585,39 @@ export default function App() {
       setWebPreviewDownloading(true);
       setPlaybackPrepBusy(true);
       setPlaybackPrepProgress(0);
-      const jobId = await invoke<string>("new_job_id");
-      setPlaybackPrepJobId(jobId);
       appendLog("info", "web-preview", "CDN rejected cross-origin fetch — downloading via yt-dlp…");
-      const cachePath = await new Promise<string>((resolve, reject) => {
-        playbackPrepResolverRef.current = { resolve, reject };
-        invoke("download_web_preview", {
-          args: {
-            url,
-            job_id: jobId,
-            cookies_browser: cookiesBrowserOrNone(),
-          },
-        }).catch((err) => {
-          if (playbackPrepResolverRef.current) {
-            playbackPrepResolverRef.current = null;
-            reject(err);
-          }
+      // One download attempt for a given cookie setting; resolves to the cache
+      // path or rejects (via the playback-prep-done event / invoke rejection).
+      const attempt = (cookies: string | undefined) =>
+        new Promise<string>((resolve, reject) => {
+          void (async () => {
+            const jobId = await invoke<string>("new_job_id");
+            setPlaybackPrepJobId(jobId);
+            playbackPrepResolverRef.current = { resolve, reject };
+            invoke("download_web_preview", {
+              args: { url, job_id: jobId, cookies_browser: cookies },
+            }).catch((err) => {
+              if (playbackPrepResolverRef.current) {
+                playbackPrepResolverRef.current = null;
+                reject(err);
+              }
+            });
+          })().catch(reject);
         });
-      });
+      const cookies = cookiesBrowserOrNone();
+      let cachePath: string;
+      try {
+        cachePath = await attempt(cookies);
+      } catch (err) {
+        const m = formatError(err);
+        // Public social posts (LinkedIn…) break with auth cookies — retry public.
+        if (cookies && !m.includes("Cancelled") && !m.includes("Source changed") && sourceSeqRef.current === seq) {
+          appendLog("info", "web-preview", "Download failed with sign-in cookies — retrying without…");
+          cachePath = await attempt(undefined);
+        } else {
+          throw err;
+        }
+      }
       if (sourceSeqRef.current !== seq) return;
       setWebCachePath(cachePath);
       appendLog("ok", "web-preview", `Cached preview ready → ${cachePath}`);
@@ -1876,32 +1920,48 @@ export default function App() {
       if (!clipQueueRef.current.some((c) => c.id === item.id)) continue;
       setClipQueue((prev) => prev.map((c) => c.id === item.id ? { ...c, status: "running" } : c));
       setProgress(0);
-      const jobId = await invoke<string>("new_job_id");
-      setJobId(jobId);
       appendLog("info", "queue", `Exporting ${item.filename} (${framesToTc(item.inFrames, fps)} → ${framesToTc(item.outFrames, fps)})…`);
-      const result = await new Promise<{ success: boolean; path?: string; error?: string }>((resolve) => {
-        queueResolverRef.current = resolve;
-        invoke("create_clip", {
-          args: {
-            url: metadata.webpage_url,
-            start: framesToTc(item.inFrames, fps),
-            end: framesToTc(item.outFrames, fps),
-            fps,
-            output_dir: exportOpts.folder,
-            filename: item.filename,
-            job_id: jobId,
-            format: item.format,
-            reencode: item.reencode,
-            captions: item.captions,
-            cookies_browser: cookiesBrowserOrNone(),
-          },
-        }).catch((err) => {
-          if (queueResolverRef.current) {
-            queueResolverRef.current = null;
-            resolve({ success: false, error: formatError(err) });
-          }
+      // One clip attempt for a given cookie setting (fresh job id each time so
+      // cancellation tracks the live attempt). Resolves via the queue done-event
+      // resolver, or via the invoke's own rejection.
+      const runClip = (cookies: string | undefined) =>
+        new Promise<{ success: boolean; path?: string; error?: string }>((resolve) => {
+          void (async () => {
+            const jobId = await invoke<string>("new_job_id");
+            setJobId(jobId);
+            queueResolverRef.current = resolve;
+            invoke("create_clip", {
+              args: {
+                url: metadata.webpage_url,
+                start: framesToTc(item.inFrames, fps),
+                end: framesToTc(item.outFrames, fps),
+                fps,
+                output_dir: exportOpts.folder,
+                filename: item.filename,
+                job_id: jobId,
+                format: item.format,
+                reencode: item.reencode,
+                captions: item.captions,
+                cookies_browser: cookies,
+              },
+            }).catch((err) => {
+              if (queueResolverRef.current) {
+                queueResolverRef.current = null;
+                resolve({ success: false, error: formatError(err) });
+              }
+            });
+          })();
         });
-      });
+      let result = await runClip(cookiesBrowserOrNone());
+      // Public social posts (LinkedIn…) break with auth cookies — retry public.
+      if (
+        !result.success &&
+        cookiesBrowserOrNone() &&
+        !(result.error ?? "").toLowerCase().includes("cancel")
+      ) {
+        appendLog("info", "queue", "create_clip failed with sign-in cookies — retrying without…");
+        result = await runClip(undefined);
+      }
       if (result.error === "Cancelled") {
         cancelled = true;
         setClipQueue((prev) => prev.map((c) => c.id === item.id ? { ...c, status: "queued" } : c));
@@ -2010,14 +2070,14 @@ export default function App() {
           });
         }
       } else {
-        raw = await invoke("extract_frame", {
+        raw = await invokeWithCookieRetry("extract_frame", (cookies) => ({
           args: {
             url: metadata.webpage_url,
             timestamp_seconds: seconds,
             dest,
-            cookies_browser: cookiesBrowserOrNone(),
+            cookies_browser: cookies,
           },
-        });
+        }));
       }
       const result = (raw && typeof raw === "object" ? raw : {}) as {
         path?: string;
@@ -2352,15 +2412,15 @@ export default function App() {
     try {
       const id = await invoke<string>("new_job_id");
       setCaptionsJobId(id);
-      await invoke<string>("download_captions", {
+      await invokeWithCookieRetry<string>("download_captions", (cookies) => ({
         args: {
           url: metadata.webpage_url,
           output_dir: outDir,
           filename: sanitizeFilename(exportOpts.filename || "transcript"),
           job_id: id,
-          cookies_browser: cookiesBrowserOrNone(),
+          cookies_browser: cookies,
         },
-      });
+      }));
     } catch (err) {
       const msg = formatError(err);
       setCaptionsState("error");
@@ -2429,9 +2489,9 @@ export default function App() {
         if (cancelled || sourceSeqRef.current !== seq) return;
         audioCacheJobRef.current = jobId;
         appendLog("info", "audio-cache", "Pre-caching the audio track for fast, aligned transcription…");
-        const path = await invoke<string>("download_audio_track", {
-          args: { url: activeSourceUrl, job_id: jobId, cookies_browser: cookiesBrowserOrNone() },
-        });
+        const path = await invokeWithCookieRetry<string>("download_audio_track", (cookies) => ({
+          args: { url: activeSourceUrl, job_id: jobId, cookies_browser: cookies },
+        }));
         if (cancelled || sourceSeqRef.current !== seq) return;
         const { convertFileSrc } = await import("@tauri-apps/api/core");
         setWebAudioCachedSrc(convertFileSrc(path));

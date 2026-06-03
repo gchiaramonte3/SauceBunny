@@ -59,6 +59,38 @@ fn safari_cookies_readable() -> bool {
     std::fs::File::open(&p).is_ok()
 }
 
+/// True when `cookies_args` would actually inject `--cookies-from-browser` for
+/// this browser (set, not "none", and — for Safari — readable). Lets callers
+/// decide whether a no-cookies *retry* would even differ from the first attempt
+/// before paying for it.
+fn cookies_active(browser: Option<&str>) -> bool {
+    !cookies_args(browser).is_empty()
+}
+
+/// Wall-clock ceiling for a single stream-URL / metadata resolve attempt.
+const RESOLVE_TIMEOUT_SECS: u64 = 40;
+
+/// Run a one-shot yt-dlp command with a hard wall-clock ceiling.
+///
+/// yt-dlp's own `--socket-timeout` bounds individual reads, but a wedged
+/// extractor — or a site that serves a logged-in page our extractor can't
+/// parse and then retries (LinkedIn does exactly this with auth cookies) — can
+/// still run for minutes. This guarantees the call RETURNS so the caller can
+/// retry without cookies or fall back to download, instead of the UI hanging
+/// (the stream watchdog only arms *after* resolution returns). On timeout the
+/// child is abandoned; the bounded `--socket-timeout` we pass keeps it
+/// short-lived rather than a long-running orphan.
+async fn output_timed(
+    cmd: tauri_plugin_shell::process::Command,
+    secs: u64,
+) -> Result<tauri_plugin_shell::process::Output, String> {
+    match tokio::time::timeout(std::time::Duration::from_secs(secs), cmd.output()).await {
+        Ok(Ok(out)) => Ok(out),
+        Ok(Err(e)) => Err(format!("yt-dlp failed: {e}")),
+        Err(_) => Err(format!("timed out after {secs}s")),
+    }
+}
+
 /// Resolve the `yt-dlp` to run. Prefers a user-updated copy in app-data
 /// (`<app_data>/bin/yt-dlp`, installed via Settings → YouTube → Update yt-dlp);
 /// falls back to the bundled sidecar. Either way PATH is set here so yt-dlp can
@@ -308,16 +340,15 @@ pub struct Metadata {
     pub has_subs: bool,
 }
 
-#[tauri::command]
-pub async fn fetch_metadata(
-    app: AppHandle,
-    url: String,
-    cookies_browser: Option<String>,
-) -> Result<Metadata, crate::AppError> {
-    validate_source_url(&url)?;
-
-    let cmd = ytdlp(&app)?;
-
+/// One `--dump-json` metadata probe for a given cookie setting, wall-clock
+/// bounded. Returns the raw process output so the caller can branch on
+/// success / retry-without-cookies.
+async fn run_metadata_ytdlp(
+    app: &AppHandle,
+    url: &str,
+    cookies_browser: Option<&str>,
+) -> Result<tauri_plugin_shell::process::Output, String> {
+    let cmd = ytdlp(app)?;
     let mut args: Vec<String> = vec![
         "--dump-json".into(),
         "--no-warnings".into(),
@@ -327,14 +358,31 @@ pub async fn fetch_metadata(
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
     ];
-    args.extend(cookies_args(cookies_browser.as_deref()));
-    args.push(url.clone());
+    args.extend(cookies_args(cookies_browser));
+    args.push(url.to_string());
+    output_timed(cmd.args(args), RESOLVE_TIMEOUT_SECS).await
+}
 
-    let output = cmd
-        .args(args)
-        .output()
-        .await
-        .map_err(|e| format!("failed to run yt-dlp: {e}"))?;
+#[tauri::command]
+pub async fn fetch_metadata(
+    app: AppHandle,
+    url: String,
+    cookies_browser: Option<String>,
+) -> Result<Metadata, crate::AppError> {
+    validate_source_url(&url)?;
+
+    // Cookies-first (YouTube bot-checks / private content), then retry WITHOUT
+    // cookies if that failed and cookies were actually applied — some sites
+    // (LinkedIn) serve a logged-in page yt-dlp can't parse, while the public
+    // page resolves fine. Mirrors get_direct_stream_url so title/duration still
+    // populate when the cookied probe is the one that fails.
+    let cookied = cookies_active(cookies_browser.as_deref());
+    let mut result = run_metadata_ytdlp(&app, &url, cookies_browser.as_deref()).await;
+    if !matches!(&result, Ok(o) if o.status.success()) && cookied {
+        eprintln!("[metadata] resolve with cookies failed; retrying without cookies");
+        result = run_metadata_ytdlp(&app, &url, None).await;
+    }
+    let output = result.map_err(crate::AppError::internal)?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -690,8 +738,32 @@ pub async fn get_direct_stream_url(
     cookies_browser: Option<String>,
 ) -> Result<DirectStreamResult, crate::AppError> {
     validate_source_url(&url)?;
+    // Cookies-first (needed for YouTube bot-checks / private content). If that
+    // fails AND cookies were actually applied, retry once WITHOUT them: some
+    // sites (LinkedIn) serve a logged-in page variant yt-dlp can't parse
+    // ("Unable to extract video"), while the public page resolves fine.
+    // Genuinely gated content still errors → download fallback / sign-in modal.
+    match resolve_stream_tiers(&app, &url, cookies_browser.as_deref()).await {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            if !cookies_active(cookies_browser.as_deref()) {
+                return Err(e);
+            }
+            eprintln!("[stream] resolve with cookies failed; retrying without cookies");
+            resolve_stream_tiers(&app, &url, None).await
+        }
+    }
+}
 
-    let yt = ytdlp(&app)?;
+/// Resolve a playable stream URL through the muxed → DASH-split → HLS tiers for
+/// one cookie setting. Each yt-dlp call is wall-clock-bounded (`output_timed`)
+/// so a wedged extractor can't hang the resolve.
+async fn resolve_stream_tiers(
+    app: &AppHandle,
+    url: &str,
+    cookies_browser: Option<&str>,
+) -> Result<DirectStreamResult, crate::AppError> {
+    let yt = ytdlp(app)?;
 
     // r54: Force a **single-file progressive** stream (both A+V in one
     // URL, NOT HLS or DASH split tracks). The previous selector
@@ -717,6 +789,7 @@ pub async fn get_direct_stream_url(
     let mut args: Vec<String> = vec![
         "--no-playlist".into(),
         "--no-warnings".into(),
+        "--socket-timeout".into(), "20".into(),
         "-f".into(),
         "b[acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]/\
          b[acodec!=none][vcodec!=none][ext=mp4]/\
@@ -727,14 +800,15 @@ pub async fn get_direct_stream_url(
         "--print".into(), "url".into(),
         "--print".into(), "%(width)s\t%(height)s\t%(vcodec)s".into(),
     ];
-    args.extend(cookies_args(cookies_browser.as_deref()));
-    args.push(url.clone());
+    args.extend(cookies_args(cookies_browser));
+    args.push(url.to_string());
 
-    let out = yt
-        .args(args)
-        .output()
+    // A timeout/spawn failure here is systemic (wedged or slow extractor — often
+    // the logged-in-page case), so propagate it: the caller retries WITHOUT
+    // cookies rather than burning two more equally-slow tier calls.
+    let out = output_timed(yt.args(args), RESOLVE_TIMEOUT_SECS)
         .await
-        .map_err(|e| format!("yt-dlp failed: {e}"))?;
+        .map_err(crate::AppError::internal)?;
     if out.status.success() {
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         let mut lines = stdout.lines().filter(|l| !l.trim().is_empty());
@@ -753,13 +827,13 @@ pub async fn get_direct_stream_url(
     // etc.). Resolve best H.264 video + best AAC audio as SEPARATE URLs so the
     // proxy can merge them on the fly and the source still STREAMS.
     let muxed_stderr = String::from_utf8_lossy(&out.stderr).to_string();
-    if let Some(split) = resolve_split_stream(&app, &url, cookies_browser.as_deref()).await {
+    if let Some(split) = resolve_split_stream(app, url, cookies_browser).await {
         return Ok(split);
     }
     // Tier 3: HLS-only sources (some Twitter/X). The best format is an m3u8;
     // the proxy's ffmpeg reads the HLS server-side and remuxes it to fMP4
     // (with aac_adtstoasc for the TS→MP4 audio). Single input — no `?audio=`.
-    if let Some(hls) = resolve_hls_stream(&app, &url, cookies_browser.as_deref()).await {
+    if let Some(hls) = resolve_hls_stream(app, url, cookies_browser).await {
         return Ok(hls);
     }
     Err(humanize_ytdlp_error(&muxed_stderr).into())
@@ -778,6 +852,7 @@ async fn resolve_split_stream(
     let mut args: Vec<String> = vec![
         "--no-playlist".into(),
         "--no-warnings".into(),
+        "--socket-timeout".into(), "20".into(),
         "-f".into(),
         "bv*[vcodec^=avc1][protocol^=http][protocol!*=m3u8]+ba[acodec^=mp4a][protocol^=http][protocol!*=m3u8]/\
          bv*[vcodec^=avc1]+ba[ext=m4a]/\
@@ -791,7 +866,7 @@ async fn resolve_split_stream(
     args.extend(cookies_args(cookies_browser));
     args.push(url.to_string());
 
-    let out = yt.args(args).output().await.ok()?;
+    let out = output_timed(yt.args(args), RESOLVE_TIMEOUT_SECS).await.ok()?;
     if !out.status.success() {
         return None;
     }
@@ -825,6 +900,7 @@ async fn resolve_hls_stream(
     let mut args: Vec<String> = vec![
         "--no-playlist".into(),
         "--no-warnings".into(),
+        "--socket-timeout".into(), "20".into(),
         // Best muxed format, ANY protocol (this is the tier that finally allows
         // HLS); fall back to the overall best single format.
         "-f".into(),
@@ -837,7 +913,7 @@ async fn resolve_hls_stream(
     args.extend(cookies_args(cookies_browser));
     args.push(url.to_string());
 
-    let out = yt.args(args).output().await.ok()?;
+    let out = output_timed(yt.args(args), RESOLVE_TIMEOUT_SECS).await.ok()?;
     if !out.status.success() {
         return None;
     }
