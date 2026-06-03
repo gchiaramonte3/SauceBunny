@@ -255,6 +255,15 @@ export function TranscriptViewer({
     if (delta > 80) setAutoScroll(false);
   }
 
+  // True when at least one turn carries a real (non-null) speaker tag. When so,
+  // a turn the diarizer left UNassigned (null tag) reads "Unknown speaker"
+  // instead of a bare "Speaker" that looks like a numbered peer. For a fully
+  // un-diarized transcript this is false → plain "Speaker" (and chips are hidden).
+  const hasIdentifiedSpeakers = useMemo(
+    () => turns.some((t) => resolveAlias(t.speaker) != null),
+    [turns, resolveAlias],
+  );
+
   // ── Speaker display name resolution ──────────────────────────────
   // Hoisted above the search block (r43) so `matches` in speaker mode
   // can call it. The full block (rename + merge + roster) still lives
@@ -268,9 +277,10 @@ export function TranscriptViewer({
     if (globalOverride) return globalOverride;
     // Humanize the model-emitted tag for display. SPEAKER_00 → Speaker 1
     // (1-indexed, since humans don't say "speaker zero"). Custom tags
-    // (already-renamed, or non-diarized null) pass through unchanged.
-    return humanizeSpeakerTag(resolved);
-  }, [overrides, resolveAlias]);
+    // (already-renamed, or non-diarized null) pass through unchanged. A
+    // null tag amid real speakers → "Unknown speaker" (the diarizer skipped it).
+    return humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers });
+  }, [overrides, resolveAlias, hasIdentifiedSpeakers]);
 
   // ── Search ──────────────────────────────────────────────────────
   // Two modes today:
@@ -1000,7 +1010,10 @@ export function TranscriptViewer({
                     // "rename all" as "rename this canonical tag", so
                     // any matching turnIdx works.
                     const anyTurnIdx = turns.findIndex((t) => (resolveAlias(t.speaker) ?? "Speaker") === r.tag);
-                    if (anyTurnIdx >= 0) openRename(e, anyTurnIdx, r.tag);
+                    // Pass the RESOLVED tag (null-preserving), not r.tag — for the
+                    // untagged group r.tag is the literal "Speaker" string, but the
+                    // override is keyed "__NULL__"; passing null keeps write==read.
+                    if (anyTurnIdx >= 0) openRename(e, anyTurnIdx, resolveAlias(turns[anyTurnIdx].speaker));
                   }}
                   title={`${r.name} · ${r.turnCount} turn${r.turnCount === 1 ? "" : "s"}\nClick to rename · drag onto another speaker to merge`}
                 >

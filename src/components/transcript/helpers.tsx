@@ -102,15 +102,17 @@ export function speakerColor(speaker: string | null): string {
  *   SPEAKER_07   → "Speaker 8"
  *   S2           → "Speaker 3"
  *   SPEAKER_UNK  → "Unknown speaker"
- *   null / undiarized → "Speaker"
+ *   null / undiarized → "Speaker" (or "Unknown speaker" when other speakers
+ *                      ARE identified — i.e. this one turn the diarizer left
+ *                      unassigned; pass { unknownWhenNull: true } for that)
  *   anything custom (e.g. "Tom") → unchanged
  *
  * The diarizer's internal numbering is 0-indexed; humans expect
  * 1-indexed. We don't pad ("Speaker 01"): once we're in human-readable
  * land we follow human conventions.
  */
-export function humanizeSpeakerTag(tag: string | null): string {
-  if (!tag) return "Speaker";
+export function humanizeSpeakerTag(tag: string | null, opts?: { unknownWhenNull?: boolean }): string {
+  if (!tag) return opts?.unknownWhenNull ? "Unknown speaker" : "Speaker";
   if (tag === "SPEAKER_UNK") return "Unknown speaker";
   const m = tag.match(/^SPEAKER[_\s-]?(\d+)$/i) || tag.match(/^S(\d+)$/i);
   if (m) {
@@ -197,8 +199,12 @@ export function loadSpeakerOverrides(path: string | null): SpeakerOverrides {
  * overrides aren't applied (they're turn-indexed, not cue-indexed) — those are
  * rare; the common "rename everywhere" path resolves correctly.
  */
-export function resolveSpeakerName(tag: string | null, ov: SpeakerOverrides): string {
+export function resolveSpeakerName(
+  tag: string | null,
+  ov: SpeakerOverrides,
+  opts?: { unknownWhenNull?: boolean },
+): string {
   const resolved = resolveAliasChain(tag, ov.aliases);
   const key = resolved ?? "__NULL__";
-  return ov.global[key] ?? humanizeSpeakerTag(resolved);
+  return ov.global[key] ?? humanizeSpeakerTag(resolved, opts);
 }

@@ -176,11 +176,17 @@ export function CaptionOverlay({ path, currentSec, enabled, style }: Props) {
   } as CSSProperties;
 
   // Resolve the speaker via the panel's live renames (alias → rename → human).
-  const speakerName = active?.speaker ? resolveSpeakerName(active.speaker, overrides) : null;
+  // Show a name for the untagged turn too WHEN the transcript has other
+  // identified speakers (so a renamed "Unknown speaker" shows here, matching the
+  // panel) — but stay label-free for fully un-diarized transcripts.
+  const hasIdentifiedSpeakers = cues.some((c) => !!c.speaker);
+  const speakerName = active && (active.speaker || hasIdentifiedSpeakers)
+    ? resolveSpeakerName(active.speaker ?? null, overrides, { unknownWhenNull: hasIdentifiedSpeakers })
+    : null;
   // Colour the name with the same per-speaker hue the roster/bubbles use, so
   // the caption's "Speaker 2:" matches the chip on the right.
-  const speakerHue = active?.speaker
-    ? speakerColor(resolveAliasChain(active.speaker, overrides.aliases))
+  const speakerHue = speakerName
+    ? speakerColor(resolveAliasChain(active?.speaker ?? null, overrides.aliases))
     : undefined;
   // Two clause-broken lines, with the first line's budget reduced by the
   // speaker prefix so "Tom Jonathan: …" doesn't overflow.
