@@ -2795,7 +2795,18 @@ export default function App() {
   // Cross-window state-sync bridge lives in src/hooks/use-panel-bus.ts.
   // We hand it the rendered snapshot + freshly-bound handlers; the hook
   // owns the listeners, the ref discipline, and the popout dispatch.
-  const transcriptPlayhead = hasSource ? playheadFrames / Math.max(1, Math.round(fps)) : null;
+  // The on-video caption applies a sync offset on the drifty MSE web-stream
+  // path (the video clock runs ahead of the heard audio). The transcript
+  // panel's active-line highlight must use the SAME effective time, so the
+  // highlighted line tracks what's actually being heard — and matches the
+  // caption — during follow-playback, instead of the raw, ahead-of-audio
+  // playhead. 0 on the accurate local/download paths → unchanged behaviour.
+  const captionSyncSec = (sourceKind === "youtube" && !!webStreamUrl && !webCachePath)
+    ? defaults.captionSyncSec
+    : 0;
+  const transcriptPlayhead = hasSource
+    ? playheadFrames / Math.max(1, Math.round(fps)) + captionSyncSec
+    : null;
   const { handlePopOut: handlePopOutPanel } = usePanelBus({
     panelDetached,
     setPanelDetached,
@@ -3061,9 +3072,7 @@ export default function App() {
                 font: defaults.captionFont,
                 bgOpacity: defaults.captionBgOpacity,
                 color: defaults.captionColor,
-                syncSec: (sourceKind === "youtube" && !!webStreamUrl && !webCachePath)
-                  ? defaults.captionSyncSec
-                  : 0,
+                syncSec: captionSyncSec,
               }}
               /* Type-a-timecode HUD: digits build this string, Return snaps. */
               tcOverlay={tcOverlay}
@@ -3162,7 +3171,7 @@ export default function App() {
           onStop={handleStop}
           transcriptPath={activeTranscript?.path ?? null}
           transcriptOrigin={activeTranscript?.origin ?? "unknown"}
-          transcriptPlayhead={hasSource ? playheadFrames / Math.max(1, Math.round(fps)) : null}
+          transcriptPlayhead={transcriptPlayhead}
           transcriptFps={fps}
           onTranscriptSeek={(seconds) => {
             // Clamp to duration so a stale cue past the end doesn't put
