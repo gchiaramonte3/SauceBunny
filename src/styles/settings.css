@@ -155,6 +155,9 @@
   letter-spacing: 0.1em;
   margin: 0 0 10px;
 }
+/* Adds breathing room above a stacked sub-section head (e.g. the second
+   group in the merged Commands & Shortcuts pane). */
+.cp-pane-subhead-gap { margin-top: 22px; }
 .cp-pane-row {
   display: grid;
   grid-template-columns: 220px 1fr;

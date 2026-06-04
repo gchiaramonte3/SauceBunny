@@ -664,6 +664,10 @@
   from { opacity: 0; transform: translate(-50%, 8px); }
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
+/* Stacked above the bottom-left prep banner (download/transcode in progress)
+   so the centered toast and the banner never overlap in the same bottom band.
+   The translateX(-50%) centering is preserved — only the bottom offset lifts. */
+.cp-canvas-toast.cp-canvas-toast--above-banner { bottom: 72px; }
 .cp-canvas-toast .icon {
   width: 26px; height: 26px;
   border-radius: 50%;

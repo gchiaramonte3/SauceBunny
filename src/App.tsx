@@ -28,6 +28,7 @@ import type {
 import { asLogTag } from "./types";
 import { formatError } from "./lib/error-format";
 import { usePanelBus } from "./hooks/use-panel-bus";
+import { useWebPlayback } from "./hooks/use-web-playback";
 import { QueueDrawer } from "./components/QueueDrawer";
 import { CommandPalette } from "./components/CommandPalette";
 import {
@@ -45,7 +46,6 @@ import {
   tcToFrames, tcToSeconds,
 } from "./lib/timecode";
 import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, prettyHost } from "./lib/validation";
-import { buildProxyUrl } from "./lib/stream-proxy";
 import { sanitizeFilename, stripExt, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
 import { extractFrameAsBlob } from "./lib/mediabunny-helpers";
@@ -133,6 +133,9 @@ export default function App() {
       captionBgOpacity: stored.captionBgOpacity ?? 0.55,
       captionColor: stored.captionColor ?? "#ffffff",
       captionSyncSec: stored.captionSyncSec ?? 0,
+      // 480 by default: the preview is throwaway (scrub/mark only), so we
+      // optimise for fast download over sharpness. Export uses real quality.
+      previewMaxHeight: stored.previewMaxHeight ?? 480,
     };
   });
   const setDefaults = useCallback((d: Defaults) => {
@@ -301,30 +304,9 @@ export default function App() {
    * `transcribe_local_file` / export pipelines.
    */
   const [playbackPath, setPlaybackPath] = useState<string | null>(null);
-  /**
-   * For non-YouTube web sources (Vimeo, TikTok, Twitter/X, etc.): the
-   * signed direct-stream URL yt-dlp resolved via `-g`. We hand this
-   * straight to <video src> — Safari does range-fetch to the CDN itself,
-   * no download wait, no disk usage. Null for YouTube (uses IFrame) and
-   * for local files.
-   */
-  const [webStreamUrl, setWebStreamUrl] = useState<string | null>(null);
-  /**
-   * Separate audio-track CDN URL for DASH-split sources (Reddit, YouTube
-   * >360p) that have no muxed progressive stream (r75). Passed to the player,
-   * which hands it to the proxy's fMP4 route (`?audio=`) so ffmpeg merges
-   * video+audio on the fly — the source STREAMS with sound instead of falling
-   * back to a full download. Null for muxed sources / local files.
-   */
-  const [webStreamAudioUrl, setWebStreamAudioUrl] = useState<string | null>(null);
-  /**
-   * Per-import fallback for web sources whose CDN rejects cross-origin
-   * fetches (LinkedIn, X, Instagram, FB — most major social platforms
-   * check the Referer header). When `<video>` errors trying to load
-   * `webStreamUrl`, we download via yt-dlp into the app cache and swap
-   * the player to this local path. Cleared by resetForNewSource.
-   */
-  const [webCachePath, setWebCachePath] = useState<string | null>(null);
+  // (r80) Web-source stream/cache/codecs/download state now lives in the
+  // useWebPlayback state machine (see the hook call above). Read its read-model
+  // (webPlayback.streamUrl / cachePath / videoCodec / downloading / …).
   /**
    * Pre-cached source audio (r76): asset:// URL of the full audio track we
    * download in the background for a STREAMING web source. Playback is native
@@ -339,21 +321,11 @@ export default function App() {
    *  live `url` input — editing the input box mid-playback must not repoint the
    *  cached audio at a different (or empty) URL. Cleared by resetForNewSource. */
   const [activeSourceUrl, setActiveSourceUrl] = useState<string | null>(null);
-  /** True while the web-preview download is in flight. */
-  const [webPreviewDownloading, setWebPreviewDownloading] = useState(false);
   /** True once the active player has reported ready (loadedmetadata /
    *  SourceBuffer open). Drives the r62 "resolving / starting playback"
    *  overlay so the user sees a clear status over the poster during the
    *  yt-dlp resolve + MSE buffer window. Reset on every new source. */
   const [playerReady, setPlayerReady] = useState(false);
-  /**
-   * Watchdog timer ID for the direct-stream load. Many social-CDN 403s
-   * never surface as <video> error events — Safari just stalls silently.
-   * We start this timer when we mount a web stream and clear it when
-   * onPlayerReady fires. If it expires, we trigger the download fallback
-   * the same way an explicit error would.
-   */
-  const webStreamWatchdogRef = useRef<number | null>(null);
   /**
    * True while yt-dlp is still resolving the highest-quality stream URL in
    * the background. The IFrame player is already mounted and playable; this
@@ -597,7 +569,7 @@ export default function App() {
 
   // ====== Settings modal ======
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "shortcuts" | "commands" | "about">("general");
+  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "commands" | "about">("general");
 
   // ====== Active transcript ======
   // The Transcript tab in the right drawer reads from here. We track the
@@ -669,6 +641,29 @@ export default function App() {
     logIdRef.current += 1;
     setLogs((prev) => [...prev, { id: logIdRef.current, ts: nowHms(), tag, source, message }]);
   }, []);
+
+  // ====== Web-source playback (r80) — stream ↔ download state machine ======
+  // Owns the entire web stream → resolve → download-fallback → watchdog →
+  // cache lifecycle that used to be ~300 lines of boolean/ref soup in this
+  // file. Exposes a read-model (streamUrl/cachePath/codecs/downloading/…) the
+  // Monitor consumes, plus stable actions. See src/hooks/use-web-playback.ts.
+  const webPlayback = useWebPlayback({
+    appendLog,
+    pushNotification,
+    maybePromptYtAuth,
+    cookiesBrowser: cookiesBrowserOrNone,
+    previewMaxHeight: defaults.previewMaxHeight,
+  });
+  const {
+    loadWeb: loadWebPlayback,
+    reset: resetWebPlayback,
+    stop: stopWebPlayback,
+    onPlayerReady: webOnPlayerReady,
+    onMediaError: webOnMediaError,
+  } = webPlayback;
+  // True while actively MSE-streaming a web source (not yet downloaded to
+  // cache). Gates the audio pre-cache, caption auto-fetch, caption-sync offset.
+  const webStreaming = webPlayback.state.kind === "streaming";
 
   // ====== Backend build check ======
   // Runs once on mount. If the running Rust binary's BACKEND_BUILD_ID
@@ -1003,12 +998,9 @@ export default function App() {
   }, []);
 
   const onPlayerReady = useCallback((dur: number) => {
-    // Player loaded metadata successfully — disarm the web-stream stall
-    // watchdog so we don't trigger an unnecessary download fallback.
-    if (webStreamWatchdogRef.current != null) {
-      window.clearTimeout(webStreamWatchdogRef.current);
-      webStreamWatchdogRef.current = null;
-    }
+    // Player opened — tell the web machine (disarms its stall watchdog so we
+    // don't trigger an unnecessary download fallback). No-op for local files.
+    webOnPlayerReady();
     // Player is up → drop the resolving/buffering overlay (r62).
     setPlayerReady(true);
     // Apply persisted volume + mute as soon as a player becomes ready.
@@ -1030,7 +1022,7 @@ export default function App() {
         return { ...prev, duration: dur };
       });
     }
-  }, [volume, muted]);
+  }, [volume, muted, webOnPlayerReady]);
 
   // ====== Actions ======
   /**
@@ -1084,17 +1076,12 @@ export default function App() {
     setPlaybackPrepJobId(null);
     setPlaybackPrepProgress(0);
     setWebCodecsFallbackForImport(false);
-    setWebStreamUrl(null);
-    setWebStreamAudioUrl(null);
-    setWebCachePath(null);
+    // Tear down the web-playback machine (cancels any in-flight resolve/
+    // download + watchdog, → inactive). r80.
+    resetWebPlayback();
     setWebAudioCachedSrc(null);
     setActiveSourceUrl(null);
-    setWebPreviewDownloading(false);
     setPlayerReady(false);
-    if (webStreamWatchdogRef.current != null) {
-      window.clearTimeout(webStreamWatchdogRef.current);
-      webStreamWatchdogRef.current = null;
-    }
     // Cancel any in-flight mediabunny local export tied to the previous
     // source — without this, switching sources mid-export would leave
     // the Conversion writing into a buffer for a file the user no
@@ -1104,7 +1091,7 @@ export default function App() {
       localExportCancelRef.current.cancelled = true;
       localExportCancelRef.current = null;
     }
-  }, []);
+  }, [resetWebPlayback]);
 
   const handleFetch = useCallback(async (urlOverride?: string) => {
     // `urlOverride` lets callers (e.g. paste-and-fetch) pass the URL directly
@@ -1192,73 +1179,21 @@ export default function App() {
     //   HTTP proxy: WKWebView streams http://127.0.0.1 natively through
     //   WebKit's Range/206 path. The Content-Length framing (not chunked)
     //   was the key — see src-tauri/src/stream_proxy.rs.
-    // ─── Web-source playback path (r72: HYBRID, stream-first by default) ──
-    // Stream instantly so the user can WATCH and mark in/out without waiting
-    // for a full download (critical on long videos). Export then downloads
-    // ONLY the marked clip (create_clip's section download). If streaming
-    // fails at any point, onMediaError / the watchdog fall back to the
-    // reliable download-to-cache path — so it's fast when it works, reliable
-    // when it doesn't. Turn `streamPreview` OFF (Settings → Web playback) for
-    // the download-first path (slower, max reliability on flaky connections).
-    if (defaults.streamPreview) {
-      // ── STREAM-FIRST (default): MSE via the loopback proxy, download fallback. ──
-      void (async () => {
-        try {
-          appendLog("info", "yt-dlp", `Resolving stream URL for ${hostnameOf(full)}…`);
-          const stream = await invoke<{ url: string; audio_url: string | null; width: number | null; height: number | null; vcodec: string | null }>(
-            "get_direct_stream_url",
-            { url: full, cookiesBrowser: cookiesBrowserOrNone() },
-          );
-          if (sourceSeqRef.current !== seq) return;
-          // base is null only if the proxy failed to bind at startup — then
-          // we hand the raw CDN URL through (won't play; watchdog → download).
-          const proxyBase = await invoke<string | null>("get_stream_proxy_base").catch(() => null);
-          if (sourceSeqRef.current !== seq) return;
-          const proxied = buildProxyUrl(proxyBase, stream.url);
-          setWebStreamUrl(proxied);
-          // DASH-split source (Reddit, YouTube >360p): the separate audio URL is
-          // passed straight through to the player → proxy fMP4 merge (r75). RAW
-          // CDN URL (ffmpeg fetches it server-side), not proxied.
-          setWebStreamAudioUrl(stream.audio_url ?? null);
-          appendLog("ok", "yt-dlp",
-            `Direct stream ready · ${stream.width ?? "?"}×${stream.height ?? "?"} ${stream.vcodec ?? ""}${stream.audio_url ? " · split A/V merged" : ""} · via 127.0.0.1 proxy`.trim());
-          // r74: be explicit that PLAYBACK is a low-res proxy (YouTube only
-          // serves a muxed stream at ≤360p; higher res is VP9/AV1 DASH that
-          // WKWebView can't decode). This keeps scrubbing fast and light. The
-          // EXPORT pulls the user's selected quality (up to the source 4K) via
-          // its own yt-dlp call, so clip quality is unaffected.
-          if ((stream.height ?? 0) > 0 && (stream.height ?? 0) <= 480) {
-            appendLog("info", "media",
-              `Preview is ${stream.height}p for instant scrubbing — your export downloads full quality (up to the source resolution).`);
-          }
-          // Stall watchdog: if the proxy/MSE pipeline doesn't open in 15s,
-          // fall back to the reliable download path.
-          if (webStreamWatchdogRef.current != null) window.clearTimeout(webStreamWatchdogRef.current);
-          webStreamWatchdogRef.current = window.setTimeout(() => {
-            webStreamWatchdogRef.current = null;
-            if (sourceSeqRef.current !== seq) return;
-            if (webCachePath || webPreviewDownloading) return;
-            appendLog("warn", "media", "Stream didn't open in 15s — falling back to download.");
-            pushNotification("info", "Downloading preview…",
-              "Fetching the file via yt-dlp so you can scrub and mark in-app.");
-            void runWebPreviewDownload(full, seq);
-          }, 15000);
-        } catch (err) {
-          if (sourceSeqRef.current !== seq) return;
-          const sErr = formatError(err);
-          appendLog("warn", "yt-dlp", `Direct stream failed: ${sErr} — falling back to download.`);
-          maybePromptYtAuth(sErr, seq);
-          void runWebPreviewDownload(full, seq);
-        }
-      })();
-    } else {
-      // ── DOWNLOAD-FIRST (default, reliable): fetch the file to cache, then
-      //    LocalMediaPlayer plays it natively. Failures (e.g. YouTube bot-
-      //    check) surface as a clean "download failed" + the auth modal,
-      //    not a broken player. ──
-      appendLog("info", "yt-dlp", `Downloading ${hostnameOf(full)} for in-app playback…`);
-      void runWebPreviewDownload(full, seq);
-    }
+    // ─── Web-source playback path (r72 HYBRID; r80 state machine) ──
+    // The whole stream → resolve → download-fallback → watchdog → cache
+    // lifecycle lives in the `useWebPlayback` state machine now. Here we just
+    // kick it off in the user's chosen mode; the hook logs its own progress
+    // and exposes a read-model the Monitor consumes (see webPlayback.* below).
+    // `streamPreview` ON = stream-first (instant, fall back to download on any
+    // failure); OFF = download-first (slower, max reliability on flaky links).
+    appendLog(
+      "info",
+      "yt-dlp",
+      defaults.streamPreview
+        ? `Resolving stream URL for ${hostnameOf(full)}…`
+        : `Downloading ${hostnameOf(full)} for in-app playback…`,
+    );
+    loadWebPlayback(full, defaults.streamPreview ? "stream-first" : "download-first", seq);
 
     // ─── Background metadata hydration ───────────────────────────────────
     // If this fails we leave the player visible (the user is probably already
@@ -1306,7 +1241,7 @@ export default function App() {
     } finally {
       if (sourceSeqRef.current === seq) setMetadataLoading(false);
     }
-  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth]);
+  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, loadWebPlayback]);
 
   // Re-run the current fetch after the user picks a browser in the YouTube
   // auth modal. By the time this fires, `defaults.ytCookiesBrowser` (and thus
@@ -1571,77 +1506,6 @@ export default function App() {
     }
   }, [appendLog, pushNotification]);
 
-  /**
-   * Web-source fallback: when LocalMediaPlayer fails to load a Referer-
-   * gated CDN URL (LinkedIn licdn, X twimg, IG cdninstagram, FB fbcdn —
-   * all 403 cross-origin requests), download the file via yt-dlp into
-   * the app cache and swap the player to the local asset:// URL. Reuses
-   * the playback-prep event channels for progress/done so the pipeline
-   * UI lights up the same way as a local-file ffmpeg prep.
-   */
-  const runWebPreviewDownload = useCallback(async (url: string, seq: number) => {
-    if (webPreviewDownloading) return;
-    try {
-      setWebPreviewDownloading(true);
-      setPlaybackPrepBusy(true);
-      setPlaybackPrepProgress(0);
-      appendLog("info", "web-preview", "CDN rejected cross-origin fetch — downloading via yt-dlp…");
-      // One download attempt for a given cookie setting; resolves to the cache
-      // path or rejects (via the playback-prep-done event / invoke rejection).
-      const attempt = (cookies: string | undefined) =>
-        new Promise<string>((resolve, reject) => {
-          void (async () => {
-            const jobId = await invoke<string>("new_job_id");
-            setPlaybackPrepJobId(jobId);
-            playbackPrepResolverRef.current = { resolve, reject };
-            invoke("download_web_preview", {
-              args: { url, job_id: jobId, cookies_browser: cookies },
-            }).catch((err) => {
-              if (playbackPrepResolverRef.current) {
-                playbackPrepResolverRef.current = null;
-                reject(err);
-              }
-            });
-          })().catch(reject);
-        });
-      const cookies = cookiesBrowserOrNone();
-      let cachePath: string;
-      try {
-        cachePath = await attempt(cookies);
-      } catch (err) {
-        const m = formatError(err);
-        // Public social posts (LinkedIn…) break with auth cookies — retry public.
-        if (cookies && !m.includes("Cancelled") && !m.includes("Source changed") && sourceSeqRef.current === seq) {
-          appendLog("info", "web-preview", "Download failed with sign-in cookies — retrying without…");
-          cachePath = await attempt(undefined);
-        } else {
-          throw err;
-        }
-      }
-      if (sourceSeqRef.current !== seq) return;
-      setWebCachePath(cachePath);
-      appendLog("ok", "web-preview", `Cached preview ready → ${cachePath}`);
-    } catch (err) {
-      if (sourceSeqRef.current !== seq) return;
-      const msg = formatError(err);
-      if (msg.includes("Source changed")) return;
-      if (msg.includes("Cancelled")) {
-        appendLog("warn", "web-preview", "Preview download cancelled");
-      } else {
-        appendLog("err", "web-preview", `Preview download failed: ${msg}`);
-        pushNotification("error", "Preview unavailable", msg);
-        maybePromptYtAuth(msg, seq);
-      }
-    } finally {
-      if (sourceSeqRef.current === seq) {
-        setWebPreviewDownloading(false);
-        setPlaybackPrepBusy(false);
-        setPlaybackPrepJobId(null);
-        setPlaybackPrepProgress(0);
-      }
-    }
-  }, [webPreviewDownloading, appendLog, pushNotification, maybePromptYtAuth]);
-
   const handleImportFile = useCallback(async () => {
     try {
       const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
@@ -1828,9 +1692,13 @@ export default function App() {
     const ids = [jobId, transcriptJobId, playbackPrepJobId].filter((x): x is string => !!x);
     const hasLocalExport = !!localExportCancelRef.current;
     const hadPlaybackPrep = !!playbackPrepJobId;
-    if (ids.length === 0 && !hasLocalExport) return;
+    const webDownloading = webPlayback.downloading;
+    if (ids.length === 0 && !hasLocalExport && !webDownloading) return;
     appendLog("warn", "control",
-      `Stopping ${ids.length + (hasLocalExport ? 1 : 0)} job(s)…`);
+      `Stopping ${ids.length + (hasLocalExport ? 1 : 0) + (webDownloading ? 1 : 0)} job(s)…`);
+    // Cancel an in-flight web-preview download (the hook SIGKILLs its yt-dlp
+    // job + resets the machine). No-op for streaming/cached/local.
+    if (webDownloading) stopWebPlayback();
     // Flip the cancel-token for the in-browser mediabunny export — its
     // poll loop sees the flip within 150ms and triggers Conversion.cancel().
     if (hasLocalExport) localExportCancelRef.current!.cancelled = true;
@@ -1849,7 +1717,6 @@ export default function App() {
       setPlaybackPrepBusy(false);
       setPlaybackPrepJobId(null);
       setPlaybackPrepProgress(0);
-      setWebPreviewDownloading(false);
     }
     for (const id of ids) {
       try {
@@ -1858,7 +1725,7 @@ export default function App() {
         appendLog("err", "control", `Cancel failed: ${formatError(err)}`);
       }
     }
-  }, [jobId, transcriptJobId, playbackPrepJobId, appendLog]);
+  }, [jobId, transcriptJobId, playbackPrepJobId, appendLog, webPlayback.downloading, stopWebPlayback]);
 
   /** Add the current active selection as a new queued item, then clear marks. */
   const handleAddToQueue = useCallback(() => {
@@ -2448,8 +2315,7 @@ export default function App() {
     setCaptionsOn(true);
     // One-time-per-session heads-up: streaming playback's clock drifts from
     // real media time, so captions can lag. Tell the user the accurate path.
-    const streaming = sourceKind === "youtube" && !!webStreamUrl && !webCachePath;
-    if (streaming && !streamCaptionHintRef.current) {
+    if (webStreaming && !streamCaptionHintRef.current) {
       streamCaptionHintRef.current = true;
       pushNotification("info", "Streaming captions can drift",
         "While streaming, captions may lag the audio. For exact sync, turn off “Stream while you watch” (Settings → Web playback) to download first — or nudge the offset in Settings → Captions.");
@@ -2463,7 +2329,7 @@ export default function App() {
       pushNotification("info", "No transcript yet",
         "Generate a transcript (Transcribe) to show captions for this file.");
     }
-  }, [captionsActive, activeTranscript, captionsState, sourceKind, metadata, webStreamUrl, webCachePath, pushNotification, handleDownloadCaptions]);
+  }, [captionsActive, activeTranscript, captionsState, sourceKind, metadata, webStreaming, pushNotification, handleDownloadCaptions]);
 
   // ── Pre-stage the source audio for Whisper (r74 → r76) ──────────────
   // For every streaming web source we download + cache the full audio track in
@@ -2475,8 +2341,7 @@ export default function App() {
   // download_audio_track / generate_transcript (source_audio_prefix) sharing.
   const audioCacheJobRef = useRef<string | null>(null);
   useEffect(() => {
-    const streaming = sourceKind === "youtube" && !!webStreamUrl && !webCachePath;
-    if (!streaming || !activeSourceUrl) {
+    if (!webStreaming || !activeSourceUrl) {
       setWebAudioCachedSrc(null);
       return;
     }
@@ -2509,7 +2374,7 @@ export default function App() {
       const j = audioCacheJobRef.current;
       if (j) { audioCacheJobRef.current = null; invoke("cancel_job", { jobId: j }).catch(() => { /* best-effort */ }); }
     };
-  }, [sourceKind, webStreamUrl, webCachePath, activeSourceUrl, webAudioCachedSrc, appendLog]);
+  }, [webStreaming, activeSourceUrl, webAudioCachedSrc, appendLog]);
 
   const handleClearLogs = useCallback(() => setLogs([]), []);
   const handleCopyLogs = useCallback(() => {
@@ -2861,9 +2726,7 @@ export default function App() {
   // highlighted line tracks what's actually being heard — and matches the
   // caption — during follow-playback, instead of the raw, ahead-of-audio
   // playhead. 0 on the accurate local/download paths → unchanged behaviour.
-  const captionSyncSec = (sourceKind === "youtube" && !!webStreamUrl && !webCachePath)
-    ? defaults.captionSyncSec
-    : 0;
+  const captionSyncSec = webStreaming ? defaults.captionSyncSec : 0;
   const transcriptPlayhead = hasSource
     ? playheadFrames / Math.max(1, Math.round(fps)) + captionSyncSec
     : null;
@@ -3020,28 +2883,28 @@ export default function App() {
                  original so the user still sees a player even if prep is
                  still running or failed. */
               localFilePath={playbackPath ?? localFilePath}
-              /* Prefer the cached local copy (from runWebPreviewDownload)
-                 over the direct stream — the cache is set only after the
-                 direct stream actually failed, so this swap = "we know
-                 the CDN was rejecting us, use the local bytes". */
-              webStreamUrl={webCachePath ?? webStreamUrl}
-              /* r74: audio-master src is only meaningful while actually
-                 STREAMING (no cache path) — the local player is already
-                 sample-accurate once downloaded. */
-              /* r75: separate audio track for DASH-split sources, merged by the
-                 proxy. Only while streaming (the cached file is already muxed). */
-              audioStreamUrl={webCachePath ? null : webStreamAudioUrl}
+              /* r80: web-playback read-model from useWebPlayback. cachePath
+                 (download fallback) wins over the live stream; both are null
+                 until the machine produces one. */
+              webStreamUrl={webPlayback.cachePath ?? webPlayback.streamUrl}
+              /* Audio track + codecs are meaningful only while STREAMING (the
+                 cached file is already muxed and sample-accurate). */
+              audioStreamUrl={webPlayback.audioUrl}
+              streamVideoCodec={webPlayback.videoCodec}
+              streamAudioCodec={webPlayback.audioCodec}
               initialVolume={muted ? 0 : volume}
-              playbackPrepBusy={playbackPrepBusy}
-              playbackPrepProgress={playbackPrepProgress}
+              /* Prep banner is shared with local-file ffmpeg prep — OR the two
+                 sources so the web download lights it up too. */
+              playbackPrepBusy={playbackPrepBusy || webPlayback.downloading}
+              playbackPrepProgress={webPlayback.downloading ? webPlayback.downloadProgress : playbackPrepProgress}
               /* r62: friendly "what's happening" overlay over the poster
                  while a web source resolves (yt-dlp ~8s) then buffers
                  (MSE). Null once the player is ready or for local files /
                  the download fallback (which has its own banner). */
               streamLoadingPhase={
                 sourceKind === "youtube" && status === "loaded" && !playerReady
-                  && !webPreviewDownloading && !playbackPrepBusy
-                  ? ((webStreamUrl || webCachePath) ? "Starting playback…" : "Resolving stream…")
+                  && !webPlayback.downloading && !playbackPrepBusy
+                  ? ((webPlayback.streamUrl || webPlayback.cachePath) ? "Starting playback…" : "Resolving stream…")
                   : null
               }
               /* r55: on-canvas Cancel for the web-preview download fallback.
@@ -3084,31 +2947,12 @@ export default function App() {
                   return;
                 }
 
-                // Web-source playback fallback (r60): the web branch streams
-                // through MediaBunnyPlayer (WebCodecs over the loopback
-                // proxy). If mediabunny can't open/demux/decode the stream
-                // — "Failed to open file…", "[WEBCODECS_UNSUPPORTED]…",
-                // "Video/Audio decode failed…" — OR the old <video> path
-                // reports MEDIA_ERR_*, fall back to the yt-dlp download.
-                // We match on the web-source CONTEXT, not the message text,
-                // so any failure mode degrades gracefully to the path that
-                // always works. (No-op once we're already downloading or
-                // playing the cached local file.)
-                if (
-                  sourceKind === "youtube"            // i.e. web (not local file)
-                  && webStreamUrl                      // we WERE trying to stream
-                  && !webCachePath                     // not already in fallback
-                  && !webPreviewDownloading            // not already downloading
-                  && metadata
-                ) {
-                  appendLog("warn", "media",
-                    `Stream playback failed (${msg}) — falling back to download.`);
-                  pushNotification("info", "Downloading preview…",
-                    "Couldn't stream this source in-app. Sauce Bunny is fetching the file via yt-dlp so you can scrub and mark.");
-                  const seq = sourceSeqRef.current;
-                  void runWebPreviewDownload(metadata.webpage_url, seq);
-                  return;
-                }
+                // Web-source playback fallback (r80): delegate to the state
+                // machine. When it's mid-stream it logs, shows the toast, and
+                // transitions streaming → downloading (exactly once — the
+                // double-download race is gone) and returns true. Any other
+                // state returns false → fall through to the generic error.
+                if (webOnMediaError(msg)) return;
 
                 appendLog("err", "media", msg);
                 pushNotification("error", "Playback error", msg);

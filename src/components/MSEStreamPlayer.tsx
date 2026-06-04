@@ -50,6 +50,14 @@ type Props = {
    *  back to a full download. Native muxed playback then keeps A/V in sync and
    *  currentTime tracks the heard audio, so captions stay married to it. */
   audioStreamUrl?: string;
+  /** r79 — codec strings from yt-dlp's resolver (`get_direct_stream_url`), e.g.
+   *  "avc1.640028" / "mp4a.40.2". When the video codec is H.264 we build the
+   *  MSE MIME directly from these and SKIP the mediabunny probe of the raw
+   *  stream — that probe was a fragile extra round-trip that turned a transient
+   *  CDN hiccup into an instant "Load failed" → full-download fallback. If the
+   *  codecs are absent/unsupported we fall back to probing (then to download). */
+  videoCodec?: string;
+  audioCodec?: string;
 };
 
 /** Seconds to stay buffered ahead of the playhead before pausing reads —
@@ -57,7 +65,7 @@ type Props = {
 const BUFFER_AHEAD_SECONDS = 30;
 
 export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSEStreamPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration, audioStreamUrl },
+  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration, audioStreamUrl, videoCodec, audioCodec },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -84,6 +92,14 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     knownDurationRef.current = d;
     if (d > 0) totalDurationRef.current = d;
   }, [knownDuration]);
+
+  // r79: codec strings from the resolver, kept in refs so buildPipeline reads
+  // the current values without re-running its effect (mirrors knownDurationRef).
+  // Declared before the pipeline effect so they're set first on a source switch.
+  const videoCodecRef = useRef<string | null>(null);
+  const audioCodecRef = useRef<string | null>(null);
+  useEffect(() => { videoCodecRef.current = videoCodec ?? null; }, [videoCodec]);
+  useEffect(() => { audioCodecRef.current = audioCodec ?? null; }, [audioCodec]);
 
   const msRef = useRef<MediaSource | null>(null);
   const sbRef = useRef<SourceBuffer | null>(null);
@@ -375,8 +391,33 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
 
       void (async () => {
         try {
+          // r79 FAST PATH: build the MIME from the resolver's codec strings and
+          // skip the raw-stream probe entirely. That probe (mediabunny reading
+          // the moov over the loopback proxy) is the one fragile pre-check that
+          // turned a transient CDN hiccup into an instant "Load failed" + a
+          // full-video download. We already know the codecs; the robust ffmpeg
+          // /fmp4 path does the real work. Only H.264 video qualifies (what the
+          // resolver targets + what WKWebView decodes); anything else falls
+          // through to the probe below (which falls through to download).
+          if (!mimeRef.current && videoCodecRef.current && /^(avc1|avc3|h264)/i.test(videoCodecRef.current)) {
+            const aCodec = audioCodecRef.current && /(mp4a|aac)/i.test(audioCodecRef.current)
+              ? audioCodecRef.current
+              : "mp4a.40.2";
+            const candidate = `video/mp4; codecs="${videoCodecRef.current}, ${aCodec}"`;
+            const MSx: typeof MediaSource | undefined =
+              (typeof MediaSource !== "undefined" ? MediaSource : undefined) ??
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (window as any).ManagedMediaSource;
+            if (MSx && typeof MSx.isTypeSupported === "function" && MSx.isTypeSupported(candidate)) {
+              mimeRef.current = candidate;
+              // Metadata duration (0 ⇒ filled when metadata lands via the
+              // knownDuration effect; seek clamping uses knownDurationRef too).
+              totalDurationRef.current = knownDurationRef.current;
+            }
+          }
           // Probe codecs + total duration once (same source across seeks).
-          // Reads the RAW proxy stream's moov; cheap.
+          // Reads the RAW proxy stream's moov; cheap. Only runs when the fast
+          // path above didn't already establish the MIME.
           if (!mimeRef.current) {
             const input = new Input({ source: new UrlSource(path), formats: ALL_FORMATS });
             probeInputRef.current = input;

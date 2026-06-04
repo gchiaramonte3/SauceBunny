@@ -9,6 +9,8 @@ type Props = {
   body?: string;
   /** Auto-dismiss after this many ms. 0 = never. Default depends on `kind`. */
   timeout?: number;
+  /** Extra root class — e.g. to lift the toast above the prep banner. */
+  className?: string;
   onDismiss: () => void;
 };
 
@@ -24,7 +26,7 @@ const DEFAULT_TIMEOUT: Record<ToastKind, number> = {
   error: 10000,
 };
 
-export function CanvasToast({ kind, title, body, timeout, onDismiss }: Props) {
+export function CanvasToast({ kind, title, body, timeout, className, onDismiss }: Props) {
   const ttl = timeout ?? DEFAULT_TIMEOUT[kind];
   const [paused, setPaused] = useState(false);
   // Remaining-time accounting so hover-to-pause genuinely *pauses* instead
@@ -66,7 +68,7 @@ export function CanvasToast({ kind, title, body, timeout, onDismiss }: Props) {
 
   return (
     <div
-      className={"cp-canvas-toast " + kind}
+      className={"cp-canvas-toast " + kind + (className ? " " + className : "")}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       role="status"

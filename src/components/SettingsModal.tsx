@@ -11,7 +11,7 @@ import type { Command } from "../lib/commands";
 import { formatError } from "../lib/error-format";
 import { YouTubeSettings } from "./YouTubeSettings";
 
-type TabId = "general" | "captions" | "transcription" | "youtube" | "shortcuts" | "commands" | "about";
+type TabId = "general" | "captions" | "transcription" | "youtube" | "commands" | "about";
 
 export type Defaults = {
   folder: string | null;
@@ -99,6 +99,14 @@ export type Defaults = {
   /** Caption sync offset (seconds) to counter streaming-playhead drift; applied
    *  only to web stream playback. Positive shows captions earlier. */
   captionSyncSec: number;
+  /**
+   * Max height (px) for the web-preview download — the throwaway copy we
+   * fetch via yt-dlp so you can scrub/mark a web source in-app. Lower =
+   * far smaller file = faster time-to-play; the actual export still uses
+   * the quality you pick on the export form. 480 is plenty for finding
+   * clip points; bump to 720/1080 if you want a sharper preview.
+   */
+  previewMaxHeight: 480 | 720 | 1080;
 };
 
 type Props = {
@@ -129,10 +137,9 @@ type Props = {
 const TABS: { id: TabId; label: string }[] = [
   { id: "general",       label: "General" },
   { id: "captions",      label: "Captions" },
-  { id: "youtube",       label: "YouTube" },
+  { id: "youtube",       label: "Web sources" },
   { id: "transcription", label: "Transcription" },
-  { id: "shortcuts",     label: "Shortcuts" },
-  { id: "commands",      label: "Commands" },
+  { id: "commands",      label: "Commands & Shortcuts" },
   { id: "about",         label: "About" },
 ];
 
@@ -927,15 +934,21 @@ export function SettingsModal(props: Props) {
               </section>
             )}
 
-            {tab === "shortcuts" && (
+            {tab === "commands" && (
               <section>
-                <h3 className="cp-pane-title">Keyboard shortcuts</h3>
+                <h3 className="cp-pane-title">Commands &amp; shortcuts</h3>
                 <p className="cp-pane-sub">
-                  Source-monitor controls modelled on Premiere / Resolve. Editing the URL or a timecode
-                  field temporarily releases these shortcuts. For the full list of every action
-                  (including ones without a default hotkey), see the Commands tab or hit{" "}
-                  <kbd>⌘</kbd><kbd>K</kbd>.
+                  Every action Sauce Bunny exposes, plus the source-monitor keymap. Open the
+                  palette anywhere with <kbd>⌘</kbd><kbd>K</kbd> to run any command with fuzzy
+                  search. The command list is generated from the same registry the palette uses —
+                  it can't drift out of sync with what actually runs.
                 </p>
+
+                {/* Source-monitor keymap (transport/marking keys, modelled on
+                    Premiere / Resolve — includes keys that aren't standalone
+                    commands, e.g. frame-step). Editing the URL or a timecode
+                    field temporarily releases these. */}
+                <div className="cp-pane-section-label">Keyboard shortcuts</div>
                 <div className="cp-shortcuts-grid">
                   {SHORTCUTS.map((cat) => (
                     <div className="cp-shortcut-cat" key={cat.category}>
@@ -953,18 +966,8 @@ export function SettingsModal(props: Props) {
                     </div>
                   ))}
                 </div>
-              </section>
-            )}
 
-            {tab === "commands" && (
-              <section>
-                <h3 className="cp-pane-title">Commands</h3>
-                <p className="cp-pane-sub">
-                  Every action Sauce Bunny exposes, grouped by domain. Open the palette anywhere
-                  with <kbd>⌘</kbd><kbd>K</kbd> to run any of these with fuzzy search.
-                  This list is generated from the same registry the palette uses — it can't
-                  drift out of sync with what actually runs.
-                </p>
+                <div className="cp-pane-section-label cp-pane-subhead-gap">All commands</div>
                 {(() => {
                   const list = commands ?? [];
                   if (list.length === 0) {

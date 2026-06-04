@@ -729,6 +729,10 @@ pub struct DirectStreamResult {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub vcodec: Option<String>,
+    /// Audio codec of the selected stream (e.g. "mp4a.40.2"). Lets the frontend
+    /// build an exact MSE MIME without probing the raw stream. None/NA ⇒ the
+    /// frontend assumes AAC (the resolver constrains the avc tiers to mp4a).
+    pub acodec: Option<String>,
 }
 
 #[tauri::command]
@@ -736,6 +740,10 @@ pub async fn get_direct_stream_url(
     app: AppHandle,
     url: String,
     cookies_browser: Option<String>,
+    // Cap the streamed video height (px) — same throwaway-preview rationale as
+    // the download path. None ⇒ no cap (full source resolution). Keeps the
+    // streamed bytes small so playback starts reliably on flaky CDNs.
+    max_height: Option<u32>,
 ) -> Result<DirectStreamResult, crate::AppError> {
     validate_source_url(&url)?;
     // Cookies-first (needed for YouTube bot-checks / private content). If that
@@ -743,14 +751,14 @@ pub async fn get_direct_stream_url(
     // sites (LinkedIn) serve a logged-in page variant yt-dlp can't parse
     // ("Unable to extract video"), while the public page resolves fine.
     // Genuinely gated content still errors → download fallback / sign-in modal.
-    match resolve_stream_tiers(&app, &url, cookies_browser.as_deref()).await {
+    match resolve_stream_tiers(&app, &url, cookies_browser.as_deref(), max_height).await {
         Ok(r) => Ok(r),
         Err(e) => {
             if !cookies_active(cookies_browser.as_deref()) {
                 return Err(e);
             }
             eprintln!("[stream] resolve with cookies failed; retrying without cookies");
-            resolve_stream_tiers(&app, &url, None).await
+            resolve_stream_tiers(&app, &url, None, max_height).await
         }
     }
 }
@@ -762,8 +770,12 @@ async fn resolve_stream_tiers(
     app: &AppHandle,
     url: &str,
     cookies_browser: Option<&str>,
+    max_height: Option<u32>,
 ) -> Result<DirectStreamResult, crate::AppError> {
     let yt = ytdlp(app)?;
+    // Optional height cap injected into the primary selector terms. Fallback
+    // terms stay uncapped so resolution never fails for lack of an exact match.
+    let hc = max_height.map(|h| format!("[height<={h}]")).unwrap_or_default();
 
     // r54: Force a **single-file progressive** stream (both A+V in one
     // URL, NOT HLS or DASH split tracks). The previous selector
@@ -791,14 +803,16 @@ async fn resolve_stream_tiers(
         "--no-warnings".into(),
         "--socket-timeout".into(), "20".into(),
         "-f".into(),
-        "b[acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]/\
-         b[acodec!=none][vcodec!=none][ext=mp4]/\
-         b[ext=mp4]/b".into(),
+        format!(
+            "b{hc}[acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]/\
+             b[acodec!=none][vcodec!=none][ext=mp4]/\
+             b[ext=mp4]/b"
+        ),
         "-S".into(), "res,vbr,ext".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
         "--print".into(), "url".into(),
-        "--print".into(), "%(width)s\t%(height)s\t%(vcodec)s".into(),
+        "--print".into(), "%(width)s\t%(height)s\t%(vcodec)s\t%(acodec)s".into(),
     ];
     args.extend(cookies_args(cookies_browser));
     args.push(url.to_string());
@@ -813,21 +827,22 @@ async fn resolve_stream_tiers(
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         let mut lines = stdout.lines().filter(|l| !l.trim().is_empty());
         if let Some(direct) = lines.next() {
-            let (w, h, vcodec) = if let Some(meta) = lines.next() {
+            let (w, h, vcodec, acodec) = if let Some(meta) = lines.next() {
                 let parts: Vec<&str> = meta.split('\t').collect();
                 let w  = parts.first().and_then(|s| s.parse::<u32>().ok());
                 let h  = parts.get(1).and_then(|s| s.parse::<u32>().ok());
                 let vc = parts.get(2).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
-                (w, h, vc)
-            } else { (None, None, None) };
-            return Ok(DirectStreamResult { url: direct.to_string(), audio_url: None, width: w, height: h, vcodec });
+                let ac = parts.get(3).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
+                (w, h, vc, ac)
+            } else { (None, None, None, None) };
+            return Ok(DirectStreamResult { url: direct.to_string(), audio_url: None, width: w, height: h, vcodec, acodec });
         }
     }
     // No single muxed progressive (a DASH-split source — Reddit, YouTube >360p,
     // etc.). Resolve best H.264 video + best AAC audio as SEPARATE URLs so the
     // proxy can merge them on the fly and the source still STREAMS.
     let muxed_stderr = String::from_utf8_lossy(&out.stderr).to_string();
-    if let Some(split) = resolve_split_stream(app, url, cookies_browser).await {
+    if let Some(split) = resolve_split_stream(app, url, cookies_browser, max_height).await {
         return Ok(split);
     }
     // Tier 3: HLS-only sources (some Twitter/X). The best format is an m3u8;
@@ -847,21 +862,25 @@ async fn resolve_split_stream(
     app: &AppHandle,
     url: &str,
     cookies_browser: Option<&str>,
+    max_height: Option<u32>,
 ) -> Option<DirectStreamResult> {
     let yt = ytdlp(app).ok()?;
+    let hc = max_height.map(|h| format!("[height<={h}]")).unwrap_or_default();
     let mut args: Vec<String> = vec![
         "--no-playlist".into(),
         "--no-warnings".into(),
         "--socket-timeout".into(), "20".into(),
         "-f".into(),
-        "bv*[vcodec^=avc1][protocol^=http][protocol!*=m3u8]+ba[acodec^=mp4a][protocol^=http][protocol!*=m3u8]/\
-         bv*[vcodec^=avc1]+ba[ext=m4a]/\
-         bv*+ba".into(),
+        format!(
+            "bv*[vcodec^=avc1]{hc}[protocol^=http][protocol!*=m3u8]+ba[acodec^=mp4a][protocol^=http][protocol!*=m3u8]/\
+             bv*[vcodec^=avc1]{hc}+ba[ext=m4a]/\
+             bv*+ba"
+        ),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
         // requested_formats.0 = video, .1 = audio for a merged (v+a) selection.
         "--print".into(),
-        "%(requested_formats.0.url)s\t%(requested_formats.1.url)s\t%(width)s\t%(height)s\t%(vcodec)s".into(),
+        "%(requested_formats.0.url)s\t%(requested_formats.1.url)s\t%(width)s\t%(height)s\t%(vcodec)s\t%(requested_formats.1.acodec)s".into(),
     ];
     args.extend(cookies_args(cookies_browser));
     args.push(url.to_string());
@@ -878,12 +897,14 @@ async fn resolve_split_stream(
     let w  = parts.get(2).and_then(|s| s.parse::<u32>().ok());
     let h  = parts.get(3).and_then(|s| s.parse::<u32>().ok());
     let vc = parts.get(4).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
+    let ac = parts.get(5).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
     Some(DirectStreamResult {
         url: video.to_string(),
         audio_url: Some(audio.to_string()),
         width: w,
         height: h,
         vcodec: vc,
+        acodec: ac,
     })
 }
 
@@ -908,7 +929,7 @@ async fn resolve_hls_stream(
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
         "--print".into(),
-        "%(url)s\t%(width)s\t%(height)s\t%(vcodec)s".into(),
+        "%(url)s\t%(width)s\t%(height)s\t%(vcodec)s\t%(acodec)s".into(),
     ];
     args.extend(cookies_args(cookies_browser));
     args.push(url.to_string());
@@ -924,12 +945,14 @@ async fn resolve_hls_stream(
     let w = parts.get(1).and_then(|s| s.parse::<u32>().ok());
     let h = parts.get(2).and_then(|s| s.parse::<u32>().ok());
     let vc = parts.get(3).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
+    let ac = parts.get(4).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
     Some(DirectStreamResult {
         url: url_out.to_string(),
         audio_url: None,
         width: w,
         height: h,
         vcodec: vc,
+        acodec: ac,
     })
 }
 
@@ -956,6 +979,11 @@ pub struct DownloadWebPreviewArgs {
     pub url: String,
     pub job_id: String,
     pub cookies_browser: Option<String>,
+    /// Max preview height (px). The preview is a throwaway scrub/mark copy,
+    /// so we cap resolution to keep the download small and fast — export
+    /// uses the user's real quality. None → 720 (back-compat default).
+    #[serde(default)]
+    pub max_height: Option<u32>,
 }
 
 #[tauri::command]
@@ -986,26 +1014,37 @@ pub async fn download_web_preview(
         .ok_or_else(|| crate::AppError::internal("ffmpeg path not utf-8"))?
         .to_string();
 
-    // Cap at 720p — the preview is for in-app scrubbing/marking, not
+    // Cap resolution — the preview is for in-app scrubbing/marking, not
     // archival. Smaller file = faster download = quicker time-to-play.
     // The actual export still uses the user's selected quality via
-    // create_clip's own format selector.
+    // create_clip's own format selector. Height is user-configurable
+    // (Settings → Web sources → Preview quality); default 720 for
+    // back-compat when the arg is absent.
     //
-    // r56: force progressive HTTPS (NOT HLS m3u8). The previous selector
-    // `b[height<=720][ext=mp4]/...` was happy to pick a YouTube HLS
-    // playlist; that downloads as 1000+ tiny fragments, half of which
-    // 401 mid-stream when the signed manifest tokens rotate. The new
-    // selector tries: progressive MP4 ≤720p with A+V → progressive MP4
-    // (any height) → DASH video+audio merged (still single HTTPS files,
-    // not HLS) → format 18 (legacy 360p progressive — YouTube's
-    // last-resort guaranteed-playable) → anything yt-dlp can find.
+    // r56/r78: force progressive HTTPS (NOT HLS m3u8) AND cap the DASH
+    // branch. Two failures this guards against, both seen in the wild:
+    //   • The previous `b` catch-all happily picked a YouTube HLS
+    //     playlist — 1000+ tiny fragments, half of which 401 mid-stream
+    //     when the signed manifest tokens rotate (esp. with cookies).
+    //     HLS is now LAST resort, behind a non-m3u8 catch-all.
+    //   • The DASH merge branch had no height cap, so it grabbed 1080p
+    //     (format 137, ≈1GB for a long video) even though we "cap at
+    //     720". Both DASH and progressive branches now carry [height<=H].
+    // Cascade: capped muxed MP4 → capped DASH MP4 merge → any progressive
+    // MP4 → format 18 (legacy 360p, guaranteed-playable) → any non-HLS →
+    // anything (HLS only if literally nothing else exists).
+    let h = args.max_height.unwrap_or(720);
+    let fmt = format!(
+        "b[height<={h}][ext=mp4][acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]/\
+         bv*[height<={h}][ext=mp4][protocol^=http][protocol!*=m3u8]+ba[ext=m4a][protocol^=http][protocol!*=m3u8]/\
+         b[ext=mp4][acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]/\
+         18/\
+         b[protocol!*=m3u8]/\
+         b"
+    );
     let mut yt_args: Vec<String> = vec![
         "-f".into(),
-        "b[height<=720][ext=mp4][acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]/\
-         b[ext=mp4][acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]/\
-         bv*[ext=mp4][protocol^=http][protocol!*=m3u8]+ba[ext=m4a][protocol^=http][protocol!*=m3u8]/\
-         18/\
-         b".into(),
+        fmt,
         "--no-playlist".into(),
         "--no-part".into(),
         "--newline".into(),

@@ -31,6 +31,10 @@ type Props = {
    *  >360p). Passed to the proxy's fMP4 route so video+audio are merged on the
    *  fly → the source streams with sound instead of downloading first. */
   audioStreamUrl?: string | null;
+  /** r79: resolver codec strings forwarded to MSEStreamPlayer so it can build
+   *  the MSE MIME directly and skip the fragile raw-stream probe. */
+  streamVideoCodec?: string | null;
+  streamAudioCodec?: string | null;
   /** Initial volume for the LocalMediaPlayer when it mounts. */
   initialVolume: number;
   /**
@@ -117,7 +121,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     status, metadata,
     errorDetail,
     aspect,
-    sourceKind, localFilePath, webStreamUrl, audioStreamUrl, initialVolume, onMediaError,
+    sourceKind, localFilePath, webStreamUrl, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs,
     streamLoadingPhase,
     toast, onToastDismiss,
@@ -242,6 +246,9 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               /* r75: separate audio track → proxy merges it into the fMP4 so
                  DASH-split sources (Reddit, YouTube >360p) stream with sound. */
               audioStreamUrl={audioStreamUrl ?? undefined}
+              /* r79: known codecs → MSEStreamPlayer skips the raw-stream probe. */
+              videoCodec={streamVideoCodec ?? undefined}
+              audioCodec={streamAudioCodec ?? undefined}
               /* Authoritative duration so far seeks don't clamp to a short
                  stream-probe value (was sending 19:40 to 15:12). */
               knownDuration={metadata?.duration ?? undefined}
@@ -360,6 +367,10 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             kind={toast.kind}
             title={toast.title}
             body={toast.body}
+            /* When the bottom-left prep banner is up (e.g. the web-preview
+               download), lift the centered toast above it so the two don't
+               collide in the same bottom band. */
+            className={playbackPrepBusy ? "cp-canvas-toast--above-banner" : undefined}
             onDismiss={onToastDismiss}
           />
         )}

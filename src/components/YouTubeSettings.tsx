@@ -7,20 +7,25 @@ import type { Defaults } from "./SettingsModal";
 type YtdlpStatus = { version: string; updated: boolean };
 
 const BROWSERS = ["none", "chrome", "safari", "firefox", "brave", "edge"] as const;
+const PREVIEW_HEIGHTS = [480, 720, 1080] as const;
 
 function browserLabel(b: string): string {
   return b === "none" ? "your default browser" : b[0].toUpperCase() + b.slice(1);
 }
 
 /**
- * The "YouTube" Settings tab — its own space for everything YouTube/web-source:
+ * The "Web sources" Settings tab — everything that applies to any web video you
+ * paste (YouTube, Vimeo, Reddit, X, LinkedIn, …), not just YouTube:
  *   1. Sign in: which browser to borrow cookies from + a one-click link to log
  *      into YouTube in that browser + a Full Disk Access shortcut (Safari only).
- *   2. Engine: the yt-dlp version in use + an Update button (yt-dlp ships fixes
+ *   2. Preview: resolution cap for the throwaway scrub/mark download (export
+ *      quality is independent).
+ *   3. Engine: the yt-dlp version in use + an Update button (yt-dlp ships fixes
  *      for site changes constantly) + Reset-to-bundled.
  *
  * This is cookie-borrowing ONLY — Sauce Bunny never sees a password and never
  * creates an account. Cookies are read locally by yt-dlp and never leave the Mac.
+ * (Component/file name kept as YouTubeSettings to avoid churn; it's web-generic.)
  */
 export function YouTubeSettings({
   defaults,
@@ -82,11 +87,12 @@ export function YouTubeSettings({
 
   return (
     <section>
-      <h3 className="cp-pane-title">YouTube</h3>
+      <h3 className="cp-pane-title">Web sources</h3>
       <p className="cp-pane-sub">
-        Sign in once so YouTube stays reliable and you hit far fewer bot checks. Sauce Bunny
-        borrows your browser's existing YouTube cookies — it never sees or stores your password,
-        and nothing leaves your Mac.
+        Settings for any web video you paste — YouTube, Vimeo, Reddit, X, LinkedIn, and anywhere
+        else yt-dlp supports. Sign in once so gated sites stay reliable and you hit far fewer bot
+        checks. Sauce Bunny borrows your browser's existing cookies — it never sees or stores your
+        password, and nothing leaves your Mac.
       </p>
 
       <div className="cp-pane-section">
@@ -95,9 +101,9 @@ export function YouTubeSettings({
           <div className="k">
             Cookies from browser
             <span className="desc">
-              Pick the browser you're already signed into on YouTube. Safari is the best fit on a
-              Mac — it's made for macOS — but needs Full Disk Access (granted below). Firefox needs
-              no permission; Chrome/Brave/Edge ask for your Mac password once.
+              Pick the browser you're already signed into on the sites you use. Safari is the best
+              fit on a Mac — it's made for macOS — but needs Full Disk Access (granted below).
+              Firefox needs no permission; Chrome/Brave/Edge ask for your Mac password once.
             </span>
           </div>
           <div className="v">
@@ -146,6 +152,37 @@ export function YouTubeSettings({
             <button className="btn btn-ghost" onClick={openFda}>
               Open settings ↗
             </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="cp-pane-section">
+        <div className="cp-pane-section-label">Preview</div>
+        <div className="cp-pane-row">
+          <div className="k">
+            Preview quality
+            <span className="desc">
+              Resolution of the throwaway copy Sauce Bunny downloads so you can scrub and mark a
+              web source in-app. Lower = much smaller file = faster to play. Your exported clip
+              always uses the quality you pick on the export form — not this.
+            </span>
+          </div>
+          <div className="v">
+            <div
+              className="cp-segmented"
+              style={{ minWidth: 240, gridTemplateColumns: "repeat(3, 1fr)" }}
+            >
+              {PREVIEW_HEIGHTS.map((h) => (
+                <button
+                  key={h}
+                  className={defaults.previewMaxHeight === h ? "active" : ""}
+                  onClick={() => setDefaults({ ...defaults, previewMaxHeight: h })}
+                  title={`Download web previews at up to ${h}p`}
+                >
+                  {h}p
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
