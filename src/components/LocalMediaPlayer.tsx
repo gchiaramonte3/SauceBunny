@@ -72,7 +72,6 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       // whole local file is buffered, so this is smooth across the clip.
       m.playbackRate = 1;
       try { m.pause(); } catch { /* ignore */ }
-      setIsPlaying(true);
       const stepMs = 60;
       shuttleTimerRef.current = window.setInterval(() => {
         const mm = mediaRef.current;

@@ -12,6 +12,7 @@
     "build:diarizer:universal": "bash scripts/build-diarizer.sh --universal",
     "refresh:sidecars": "bash scripts/refresh-sidecars.sh",
     "refresh:ffmpeg": "bash scripts/fetch-ffmpeg.sh",
+    "refresh:ffprobe": "bash scripts/fetch-ffprobe.sh",
     "build:whisper": "bash scripts/build-whisper.sh",
     "check:release": "bash scripts/check-notarization-ready.sh"
   },

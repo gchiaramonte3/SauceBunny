@@ -110,12 +110,13 @@ Generate transcript:
 
 ## Sidecars
 
-Four executables ship in `src-tauri/binaries/`. The Tauri shell invokes them via `app.shell().sidecar(name)` with the platform-tuple naming convention (`<name>-aarch64-apple-darwin`).
+Five executables ship in `src-tauri/binaries/`, using the platform-tuple naming convention (`<name>-aarch64-apple-darwin`). The app invokes `yt-dlp`, `ffmpeg`, `whisper-cli`, and `saucebunny-diarize` directly (via `app.shell().sidecar(name)` / a resolved path). `ffprobe` is the exception — the app never spawns it; it ships beside `ffmpeg` so yt-dlp can discover it (yt-dlp derives `ffprobe-<triple>` from the `--ffmpeg-location` path it's given).
 
 | Sidecar | What it does | Where it comes from |
 |---|---|---|
 | `yt-dlp` | Resolves video URLs, downloads streams, fetches captions | Official static build from github.com/yt-dlp/yt-dlp/releases. Refresh via `scripts/refresh-sidecars.sh` (YouTube extractors rot weekly). |
-| `ffmpeg` | Audio extraction, video transcoding, frame extraction | Homebrew ffmpeg or static build. Stable; rebuild rarely. |
+| `ffmpeg` | Audio extraction, video transcoding, frame extraction | osxexperts.net static arm64 build via `npm run refresh:ffmpeg`. Stable; rebuild rarely. |
+| `ffprobe` | yt-dlp's HLS fixup (`aac_adtstoasc`) + media metadata. Not spawned by the app — found by yt-dlp beside ffmpeg. | ffmpeg.martin-riedl.de static arm64 build via `npm run refresh:ffprobe`. Required for playable HLS/live downloads. |
 | `whisper-cli` | Whisper.cpp speech-to-text | Build whisper.cpp from source, copy the `whisper-cli` binary. Stable. |
 | `saucebunny-diarize` | Speaker diarization (SpeakerKit primary, FluidAudio fallback) | Built locally via `npm run build:diarizer`. We own this code (`swift-sidecar/`). |
 

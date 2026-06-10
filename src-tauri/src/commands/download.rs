@@ -1032,7 +1032,18 @@ pub async fn download_web_preview(
     //     720". Both DASH and progressive branches now carry [height<=H].
     // Cascade: capped muxed MP4 → capped DASH MP4 merge → any progressive
     // MP4 → format 18 (legacy 360p, guaranteed-playable) → any non-HLS →
-    // anything (HLS only if literally nothing else exists).
+    // capped HLS → anything (HLS only if literally nothing else exists).
+    //
+    // r80/r81: some sources — notably past LIVE broadcasts
+    // (`source/yt_live_broadcast`) — expose ONLY HLS to a signed-in client,
+    // so every `[protocol!*=m3u8]` tier above misses and we'd fall to the bare
+    // `b` = *best* HLS (1080p), blowing the preview height cap. The
+    // `b[height<={h}]` tier keeps the cap honored on HLS-only sources (≈480p
+    // instead of 1080p). HLS is downloaded by yt-dlp's native concurrent
+    // downloader, then FixupM3u8 rewraps the MPEG-TS into a clean avc1/mp4a
+    // faststart MP4 — this works because we now bundle ffprobe (see the
+    // `--ffmpeg-location` note below); without it the AAC stayed raw ADTS and
+    // WKWebView showed a black player.
     let h = args.max_height.unwrap_or(720);
     let fmt = format!(
         "b[height<={h}][ext=mp4][acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]/\
@@ -1040,6 +1051,7 @@ pub async fn download_web_preview(
          b[ext=mp4][acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]/\
          18/\
          b[protocol!*=m3u8]/\
+         b[height<={h}]/\
          b"
     );
     let mut yt_args: Vec<String> = vec![
@@ -1053,8 +1065,17 @@ pub async fn download_web_preview(
         YT_EXTRACTOR_ARGS[1].into(),
         "--concurrent-fragments".into(), "16".into(),
         "--http-chunk-size".into(), "10M".into(),
-        // Force a single-file MP4 output. If the source is DASH (split
-        // A+V), yt-dlp will mux them with ffmpeg here too.
+        // r81: we pass the bundled ffmpeg *file* here, and yt-dlp derives the
+        // sibling ffprobe (`ffprobe-<triple>`, bundled next to ffmpeg) from
+        // this path automatically — verified across dev (suffixed names) and
+        // the prod layout. ffprobe is what makes the native concurrent
+        // downloader safe for HLS: FixupM3u8 needs it to detect that the
+        // MPEG-TS AAC requires `aac_adtstoasc`, yielding a clean avc1/mp4a
+        // faststart MP4. Earlier (no ffprobe) we worked around this with
+        // `--downloader m3u8:ffmpeg` — correct but SEQUENTIAL (~3.5 min for an
+        // 85-min source). Native + ffprobe is ~3.4× faster (≈1 min) and just
+        // as clean, so the per-protocol downloader override is gone. The DASH
+        // split-A/V branch also muxes via this ffmpeg.
         "--ffmpeg-location".into(), ffmpeg_str,
         "--merge-output-format".into(), "mp4".into(),
         "-o".into(), template.clone(),

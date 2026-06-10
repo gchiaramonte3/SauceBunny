@@ -132,15 +132,17 @@ export default function App() {
       captionFont: stored.captionFont ?? "sans",
       captionBgOpacity: stored.captionBgOpacity ?? 0.55,
       captionColor: stored.captionColor ?? "#ffffff",
-      captionSyncSec: stored.captionSyncSec ?? 0,
       // 480 by default: the preview is throwaway (scrub/mark only), so we
       // optimise for fast download over sharpness. Export uses real quality.
       previewMaxHeight: stored.previewMaxHeight ?? 480,
     };
   });
-  const setDefaults = useCallback((d: Defaults) => {
-    setDefaultsState(d);
-    saveJson(DEFAULTS_KEY, d);
+  const setDefaults = useCallback((d: Defaults | ((prev: Defaults) => Defaults)) => {
+    setDefaultsState((prev) => {
+      const next = typeof d === "function" ? (d as (p: Defaults) => Defaults)(prev) : d;
+      saveJson(DEFAULTS_KEY, next);
+      return next;
+    });
   }, []);
 
   // Lazily populate transcriptLibrary with the OS-correct default on
@@ -153,7 +155,10 @@ export default function App() {
     (async () => {
       try {
         const p = await invoke<string>("default_transcript_library_path");
-        if (p) setDefaults({ ...defaults, transcriptLibrary: p });
+        // Functional update: this resolves asynchronously, so merge against the
+        // LATEST defaults — a stale-snapshot spread would clobber any change made
+        // meanwhile (e.g. the hybrid-migration latch or a Settings toggle).
+        if (p) setDefaults((prev) => prev.transcriptLibrary ? prev : { ...prev, transcriptLibrary: p });
       } catch { /* user can still set it manually from Settings */ }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -164,21 +169,30 @@ export default function App() {
   // user's own Web-playback toggle is respected afterward.
   useEffect(() => {
     if (defaults.hybridMigrated) return;
-    setDefaults({ ...defaults, streamPreview: true, hybridMigrated: true });
+    setDefaults((prev) => prev.hybridMigrated ? prev : { ...prev, streamPreview: true, hybridMigrated: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fallbackFps = DEFAULT_FPS_FALLBACK[defaults.timecode] ?? 24;
+
+  // Live mirror of `defaults` for closures that outlive the render they were
+  // created in. The cookie helpers below are captured by useCallbacks whose dep
+  // arrays don't list ytCookiesBrowser, so reading `defaults` directly would
+  // pin them to a stale value — connecting a browser in Settings then wouldn't
+  // take effect for export/captions/transcript/snapshot. The ref is always current.
+  const defaultsRef = useRef(defaults);
+  defaultsRef.current = defaults;
 
   /**
    * Returns the configured cookies-browser identifier, or undefined when
    * the user has it disabled. Threaded into every yt-dlp invoke so we
    * authenticate consistently across fetch / clip / captions / snapshot
    * / transcript. Backend treats undefined / "none" identically.
+   * Reads defaultsRef so stale callback closures still see the live setting.
    */
   const cookiesBrowserOrNone = (): string | undefined =>
-    defaults.ytCookiesBrowser && defaults.ytCookiesBrowser !== "none"
-      ? defaults.ytCookiesBrowser
+    defaultsRef.current.ytCookiesBrowser && defaultsRef.current.ytCookiesBrowser !== "none"
+      ? defaultsRef.current.ytCookiesBrowser
       : undefined;
 
   /**
@@ -368,7 +382,10 @@ export default function App() {
     inTc: "",
     outTc: "",
     filename: "clip",
-    folder: defaults.folder,
+    // Prefer the Settings default; fall back to the last sidebar-picked folder
+    // (persisted under "cp-folder" below) so a folder chosen only from the
+    // sidebar survives relaunch instead of leaving Export disabled.
+    folder: defaults.folder ?? (() => { try { return localStorage.getItem("cp-folder"); } catch { return null; } })(),
     format: defaults.format,
     captions: defaults.captions,
     reencode: defaults.reencode,
@@ -637,9 +654,30 @@ export default function App() {
 
   // ====== Append log ======
   const logIdRef = useRef(0);
+  // A "progress" line is one carrying a percentage (yt-dlp `[download] 12.3%`,
+  // ffmpeg/whisper `... 47%`). Sidecars emit hundreds of these per second with
+  // `--newline`, which used to flood the Pipeline panel with a new row per tick.
+  // We collapse a run of progress lines from the SAME source into ONE row that
+  // updates in place (id preserved → React updates, doesn't remount), so the
+  // user sees a single live "downloading … 87%" line instead of thousands. Any
+  // non-progress line (start, "Cached preview ready", an error) appends normally
+  // and naturally ends the run.
   const appendLog = useCallback((tag: ClientLog["tag"], source: string, message: string) => {
-    logIdRef.current += 1;
-    setLogs((prev) => [...prev, { id: logIdRef.current, ts: nowHms(), tag, source, message }]);
+    const isProgress = /\d{1,3}(?:\.\d+)?%/.test(message);
+    setLogs((prev) => {
+      const last = prev[prev.length - 1];
+      if (
+        isProgress &&
+        last &&
+        last.source === source &&
+        /\d{1,3}(?:\.\d+)?%/.test(last.message)
+      ) {
+        const updated: ClientLog = { ...last, ts: nowHms(), tag, message };
+        return [...prev.slice(0, -1), updated];
+      }
+      logIdRef.current += 1;
+      return [...prev, { id: logIdRef.current, ts: nowHms(), tag, source, message }];
+    });
   }, []);
 
   // ====== Web-source playback (r80) — stream ↔ download state machine ======
@@ -735,6 +773,11 @@ export default function App() {
   captionsJobIdRef.current = captionsJobId;
   const transcriptJobIdRef = useRef<string | null>(null);
   transcriptJobIdRef.current = transcriptJobId;
+  // Snapshot of the source's title/thumbnail taken when a SINGLE clip export
+  // starts, so the Recent entry is attributed to the source that was exported
+  // even if the user switches sources before clip-done fires (the listener
+  // guards only on job_id, which we must keep live to resolve the queue).
+  const clipJobMetaRef = useRef<{ title: string; thumbnail: RecentClip["thumbnail"] } | null>(null);
   const diarizerPrepareJobIdRef = useRef<string | null>(null);
   diarizerPrepareJobIdRef.current = diarizerPrepareJobId;
   // Ref for transcript-history bookkeeping — captions/whisper listeners
@@ -789,7 +832,9 @@ export default function App() {
           const filename = e.payload.path.split("/").pop() ?? "Done.";
           pushNotification("success", "Clip exported", filename, e.payload.path);
           notify("Clip exported", filename);
-          const m = metadataRef.current;
+          // Title/thumbnail snapshot from export start — NOT metadataRef, which
+          // may now point at a different source the user switched to mid-export.
+          const m = clipJobMetaRef.current;
           const f = fpsRef.current;
           const opts = exportOptsRef.current;
           if (m) {
@@ -1048,6 +1093,17 @@ export default function App() {
       playbackPrepResolverRef.current.reject(new Error("Source changed"));
       playbackPrepResolverRef.current = null;
     }
+    // Cancel AND disown any in-flight captions/transcript job from the previous
+    // source. The long-lived 'captions-done'/'transcript-done' listeners guard
+    // only on job_id, so without NULLING these refs an OLD job completing after
+    // a source switch would load the wrong SRT over the new source AND record it
+    // in transcript history against the new URL (poisoning its auto-load).
+    const staleCap = captionsJobIdRef.current;
+    if (staleCap) invoke("cancel_job", { jobId: staleCap }).catch(() => { /* best-effort */ });
+    setCaptionsJobId(null);
+    const staleTx = transcriptJobIdRef.current;
+    if (staleTx) invoke("cancel_job", { jobId: staleTx }).catch(() => { /* best-effort */ });
+    setTranscriptJobId(null);
     setMetadata(null);
     setErrorDetail(null);
     setLogs([]);
@@ -1097,6 +1153,10 @@ export default function App() {
     // `urlOverride` lets callers (e.g. paste-and-fetch) pass the URL directly
     // instead of relying on the `url` state having committed — avoids the
     // race where a freshly-pasted URL hasn't landed in state yet.
+    // Empty URL bar → do nothing. Without this, ⌘Enter (which the raw key
+    // binding doesn't gate the way the command registry does) would flip status
+    // to "error" and kill a currently-loaded source's transport.
+    if (!(urlOverride ?? url).trim()) return;
     const full = normalizeUrl(urlOverride ?? url);
     if (!isLikelyVideoUrl(full)) {
       setErrorDetail("Paste a video URL (YouTube, Vimeo, TikTok, Twitter/X, Reddit, Instagram, or any page with embedded video).");
@@ -1385,6 +1445,11 @@ export default function App() {
     try {
       const id = await invoke<string>("new_job_id");
       setJobId(id);
+      // Attribute the Recent entry to THIS source now (see clipJobMetaRef) so a
+      // source switch before clip-done can't stamp the new source's title on it.
+      clipJobMetaRef.current = metadataRef.current
+        ? { title: metadataRef.current.title, thumbnail: metadataRef.current.thumbnail }
+        : null;
       // Marks may be null (full-clip export) — pass null through, the
       // backend skips --download-sections so yt-dlp just grabs the whole stream.
       const startStr = inFrames  != null ? framesToTc(inFrames,  fps) : null;
@@ -2111,6 +2176,62 @@ export default function App() {
       appendLog, resolveTranscriptOutDir, localFilePath, sourceKind,
       durationFrames, inFrames, outFrames]);
 
+  // r84: "Fix accuracy" — manually re-time loose YouTube captions with Whisper.
+  // YouTube auto-caption cue times are ASR-biased ~150–700ms late and variable
+  // (the caption-sync research proved our clock is correct; the offset is in the
+  // cue data). This re-derives word-accurate timing from the SAME cached audio
+  // the player uses (start_time 0 → onset matches the heard speech), over the
+  // FULL video (ignores in/out marks — captions cover the whole clip, unlike the
+  // marked-range export transcript). The whisper-done handler swaps
+  // activeTranscript origin "captions" → "whisper", so the banner self-dismisses
+  // and captions snap into sync. Surfaced via the TranscriptViewer banner.
+  const handleFixCaptionTiming = useCallback(async () => {
+    if (!metadata?.webpage_url) return;
+    const outDir = await resolveTranscriptOutDir() ?? exportOpts.folder;
+    if (!outDir) {
+      // Must flip state to "error" too — the Sidebar only renders transcriptError
+      // when transcriptState === "error" (matches handleGenerateTranscript).
+      setTranscriptState("error");
+      setTranscriptError("Transcript library isn't set up yet — open Settings → Transcription and pick a folder.");
+      return;
+    }
+    if (!selectedModel?.downloaded) {
+      setSettingsInitialTab("transcription");
+      setSettingsOpen(true);
+      return;
+    }
+    setTranscriptState("running");
+    setTranscriptError(null);
+    setTranscriptProgress(0);
+    setTranscriptPhase(null);
+    appendLog("info", "whisper", "Fixing caption timing with Whisper (reusing the cached audio)…");
+    try {
+      const id = await invoke<string>("new_job_id");
+      setTranscriptJobId(id);
+      const dur = durationFrames > 0 ? durationFrames - 1 : 0;
+      await invoke<string>("generate_transcript", {
+        args: {
+          url: metadata.webpage_url,
+          start: framesToTc(0, fps),
+          end: framesToTc(dur, fps),
+          fps,
+          output_dir: outDir,
+          filename: sanitizeFilename(exportOpts.filename || "transcript"),
+          model_id: defaults.whisperModel,
+          job_id: id,
+          cookies_browser: cookiesBrowserOrNone(),
+          detect_speakers: defaults.detectSpeakers,
+          expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
+        },
+      });
+    } catch (err) {
+      setTranscriptState("error");
+      setTranscriptError(formatError(err));
+      appendLog("warn", "whisper", `Caption-timing fix failed (${formatError(err)}); keeping YouTube's captions.`);
+    }
+  }, [metadata, exportOpts.folder, exportOpts.filename, resolveTranscriptOutDir, selectedModel,
+      durationFrames, fps, defaults.whisperModel, defaults.detectSpeakers, defaults.expectedSpeakers, appendLog]);
+
   const handleOpenTranscriptionSettings = useCallback(() => {
     setSettingsInitialTab("transcription");
     setSettingsOpen(true);
@@ -2304,7 +2425,7 @@ export default function App() {
   // as active.
   const captionsActive = captionsOn && !!activeTranscript;
   // Shows the streaming-drift caption notice at most once per session.
-  const streamCaptionHintRef = useRef(false);
+  const streamVideoDriftHintRef = useRef(false);
 
   // The toggle operates on what the user SEES: live captions → turn off;
   // otherwise turn on and auto-fetch a transcript if we don't have one. Web
@@ -2313,13 +2434,10 @@ export default function App() {
   const onToggleCaptions = useCallback(() => {
     if (captionsActive) { setCaptionsOn(false); return; }
     setCaptionsOn(true);
-    // One-time-per-session heads-up: streaming playback's clock drifts from
-    // real media time, so captions can lag. Tell the user the accurate path.
-    if (webStreaming && !streamCaptionHintRef.current) {
-      streamCaptionHintRef.current = true;
-      pushNotification("info", "Streaming captions can drift",
-        "While streaming, captions may lag the audio. For exact sync, turn off “Stream while you watch” (Settings → Web playback) to download first — or nudge the offset in Settings → Captions.");
-    }
+    // r82: captions no longer drift while streaming — they're locked to the
+    // audio-master clock (see MSEStreamPlayer / audio-twin). The remaining
+    // streaming caveat is the muted VIDEO PICTURE drifting, surfaced once via
+    // the streamVideoDriftHint effect below, not here.
     if (activeTranscript || captionsState === "running") return;
     if (sourceKind === "youtube" && metadata) {
       pushNotification("info", "Fetching captions…",
@@ -2329,7 +2447,24 @@ export default function App() {
       pushNotification("info", "No transcript yet",
         "Generate a transcript (Transcribe) to show captions for this file.");
     }
-  }, [captionsActive, activeTranscript, captionsState, sourceKind, metadata, webStreaming, pushNotification, handleDownloadCaptions]);
+  }, [captionsActive, activeTranscript, captionsState, sourceKind, metadata, pushNotification, handleDownloadCaptions]);
+
+  // r82: one-time-per-session heads-up that the STREAMED video PICTURE can
+  // drift from the audio. The audio + captions are locked to an accurate clock
+  // (the audio-master / cached track); only the muted MSE picture slides — a
+  // WKWebView streaming-pipeline limitation. Fires once playback is actually up
+  // (not premature), and only on the live stream (downloaded/local play is
+  // frame-accurate).
+  useEffect(() => {
+    if (webStreaming && playerReady && !streamVideoDriftHintRef.current) {
+      streamVideoDriftHintRef.current = true;
+      pushNotification(
+        "info",
+        "Streamed video sync",
+        "Sauce Bunny keeps the streamed picture matched to the audio in real time, but on some sources it can still drift slightly over long playback (a WebKit streaming limit). Audio and captions are always exact — clip-marking by the transcript is frame-true. For guaranteed frame-accurate video, turn off “Stream while you watch” (Settings → Web playback) to play a downloaded copy.",
+      );
+    }
+  }, [webStreaming, playerReady, pushNotification]);
 
   // ── Pre-stage the source audio for Whisper (r74 → r76) ──────────────
   // For every streaming web source we download + cache the full audio track in
@@ -2536,7 +2671,10 @@ export default function App() {
         setQueueOpen((p) => !p);
         return;
       }
-      if (e.altKey && (e.key === "e" || e.key === "E")) {
+      // ⌥E — export. On macOS Option+E is the acute-accent dead key, so
+      // e.key is "Dead", not "e" — match on e.code instead. !inField keeps
+      // Option+E composition (typing é) working in text inputs.
+      if (e.altKey && !cmd && e.code === "KeyE" && !inField && !settingsOpen) {
         if (status === "loaded") { e.preventDefault(); handleExport(); }
         return;
       }
@@ -2591,8 +2729,10 @@ export default function App() {
         case "g": case "G": onClearMarks(); break;
         case "q": case "Q": onGotoIn(); break;
         case "w": case "W": onGotoOut(); break;
-        case ",": onStep(e.shiftKey ? -Math.round(fps) : -1); break;
-        case ".": onStep(e.shiftKey ?  Math.round(fps) :  1); break;
+        // With Shift held the key is "<" / ">" (US layout), so include those
+        // labels — otherwise the 1-second (Shift) jump never matched.
+        case ",": case "<": onStep(e.shiftKey ? -Math.round(fps) : -1); break;
+        case ".": case ">": onStep(e.shiftKey ?  Math.round(fps) :  1); break;
         case "ArrowLeft":  onStep(e.shiftKey ? -Math.round(fps) : -1); break;
         case "ArrowRight": onStep(e.shiftKey ?  Math.round(fps) :  1); break;
         case "Home": onSeek(0); break;
@@ -2720,15 +2860,14 @@ export default function App() {
   // Cross-window state-sync bridge lives in src/hooks/use-panel-bus.ts.
   // We hand it the rendered snapshot + freshly-bound handlers; the hook
   // owns the listeners, the ref discipline, and the popout dispatch.
-  // The on-video caption applies a sync offset on the drifty MSE web-stream
-  // path (the video clock runs ahead of the heard audio). The transcript
-  // panel's active-line highlight must use the SAME effective time, so the
-  // highlighted line tracks what's actually being heard — and matches the
-  // caption — during follow-playback, instead of the raw, ahead-of-audio
-  // playhead. 0 on the accurate local/download paths → unchanged behaviour.
-  const captionSyncSec = webStreaming ? defaults.captionSyncSec : 0;
+  // r82: the playhead is now ONE clock across every path — the audio-master
+  // twin drives streaming time off the heard audio, and local/download use
+  // the native/AudioContext clock — so the transcript highlight, the on-video
+  // caption, the scrubber, and click-to-seek all read the same value with no
+  // offset. (This retired the captionSyncSec band-aid, whose highlight-only
+  // offset put highlight and click-to-seek in different time domains.)
   const transcriptPlayhead = hasSource
-    ? playheadFrames / Math.max(1, Math.round(fps)) + captionSyncSec
+    ? playheadFrames / Math.max(1, Math.round(fps))
     : null;
   const { handlePopOut: handlePopOutPanel } = usePanelBus({
     panelDetached,
@@ -2887,6 +3026,11 @@ export default function App() {
                  (download fallback) wins over the live stream; both are null
                  until the machine produces one. */
               webStreamUrl={webPlayback.cachePath ?? webPlayback.streamUrl}
+              /* r82: cached source audio → audio-master clock for the LIVE
+                 stream only. The download-fallback (LocalMediaPlayer) and local
+                 files already have an accurate native/AudioContext clock. */
+              audioMasterSrc={webStreaming ? webAudioCachedSrc : null}
+              onDiag={(tag, msg) => appendLog(asLogTag(tag), "audio-sync", msg)}
               /* Audio track + codecs are meaningful only while STREAMING (the
                  cached file is already muxed and sample-accurate). */
               audioStreamUrl={webPlayback.audioUrl}
@@ -2968,15 +3112,14 @@ export default function App() {
               transcriptPath={activeTranscript?.path ?? null}
               currentSec={playheadSec}
               captionsOn={captionsOn}
-              /* User-tunable caption look (Settings → Captions). The sync
-                 offset only applies to the MSE web stream (the drifty path) —
-                 0 for local/download where the native clock is accurate. */
+              /* User-tunable caption look (Settings → Captions). r82: no sync
+                 offset — the audio-master clock keeps captions on the heard
+                 audio across every path. */
               captionStyle={{
                 scale: defaults.captionScale,
                 font: defaults.captionFont,
                 bgOpacity: defaults.captionBgOpacity,
                 color: defaults.captionColor,
-                syncSec: captionSyncSec,
               }}
               /* Type-a-timecode HUD: digits build this string, Return snaps. */
               tcOverlay={tcOverlay}
@@ -3094,6 +3237,8 @@ export default function App() {
           regenerateBusy={transcriptState === "running"}
           canRegenerate={hasSource && !!selectedModel?.downloaded}
           onImportTranscript={handleImportTranscript}
+          sourceKind={sourceKind}
+          onFixCaptionTiming={handleFixCaptionTiming}
         />}
       </div>
 

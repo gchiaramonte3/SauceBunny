@@ -78,6 +78,13 @@ type Props = {
    * when no source is loaded (an imported transcript with no video).
    */
   fps?: number;
+  /** r84: source kind — the "fix caption timing" banner only applies to web
+   *  sources (YouTube auto-caption ASR timing is the loose case). */
+  sourceKind?: "youtube" | "file";
+  /** r84: re-time the loose YouTube captions with Whisper (full range, reusing
+   *  the cached audio). When omitted (e.g. the popped-out panel), the banner
+   *  is hidden rather than showing a dead button. */
+  onFixCaptionTiming?: () => void;
 };
 
 /**
@@ -96,10 +103,10 @@ type Props = {
  * etc. The rename UI works identically in both worlds.
  */
 export function TranscriptViewer({
-  path, playheadSeconds, onSeek, origin: _origin,
+  path, playheadSeconds, onSeek, origin,
   onClearTranscript, onLoadFromHistory,
   onRegenerate, regenerateBusy, canRegenerate, fps = 30,
-  onImportTranscript,
+  onImportTranscript, sourceKind, onFixCaptionTiming,
 }: Props) {
   const [raw, setRaw] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -624,6 +631,22 @@ export function TranscriptViewer({
       else   localStorage.removeItem(noticeStorageKey);
     } catch { /* quota */ }
   }, [noticeStorageKey]);
+  // r84: separate dismissal for the "fix caption timing" banner, per SRT path,
+  // so it doesn't fight the speaker-labels notice above.
+  const timingFixKey = path ? `saucebunny.timingFixDismissed.${path}` : null;
+  const [timingFixDismissed, setTimingFixDismissedState] = useState(false);
+  useEffect(() => {
+    if (!timingFixKey) { setTimingFixDismissedState(false); return; }
+    setTimingFixDismissedState(localStorage.getItem(timingFixKey) === "1");
+  }, [timingFixKey]);
+  const setTimingFixDismissed = useCallback((v: boolean) => {
+    setTimingFixDismissedState(v);
+    if (!timingFixKey) return;
+    try {
+      if (v) localStorage.setItem(timingFixKey, "1");
+      else   localStorage.removeItem(timingFixKey);
+    } catch { /* quota */ }
+  }, [timingFixKey]);
   useEffect(() => {
     if (!historyOpen) return;
     setHistoryEntries(getHistory());
@@ -972,6 +995,37 @@ export function TranscriptViewer({
       {/* Slim, muted, one-line hint (r65) — was a full-width yellow
           paragraph shown right out the gate, which read as a warning. Now
           it's a quiet info strip with an inline Regenerate and a dismiss. */}
+      {/* r84: loose YouTube ASR caption timing → offer an exact Whisper re-time.
+          Same quiet cp-tx-hint pattern; self-dismisses once origin flips to
+          "whisper" (handleFixCaptionTiming swaps it). Web sources only. */}
+      {turns.length > 0 && origin === "captions" && sourceKind === "youtube" && canRegenerate && !!onFixCaptionTiming && !timingFixDismissed && (
+        <div
+          className="cp-tx-hint"
+          title="Re-transcribes the cached audio locally with Whisper for exact timing — a few minutes for long clips. Your current captions stay until it finishes."
+        >
+          <svg className="cp-tx-hint-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+          <span className="cp-tx-hint-text">
+            Captions are auto-timed by YouTube and can run late.
+          </span>
+          <button
+            className="cp-tx-hint-action"
+            onClick={onFixCaptionTiming}
+            disabled={regenerateBusy}
+            title="Re-time captions to the audio with Whisper (local, exact)"
+          >
+            {regenerateBusy ? "Re-timing…" : "Fix timing with Whisper"}
+          </button>
+          <button
+            className="cp-tx-hint-close"
+            onClick={() => setTimingFixDismissed(true)}
+            title="Dismiss (won't show again for this transcript)"
+            aria-label="Dismiss"
+          >×</button>
+        </div>
+      )}
       {turns.length > 0 && roster.length === 1 && roster[0].tag === "Speaker" && canRegenerate && !noticeDismissed && (
         <div
           className="cp-tx-hint"

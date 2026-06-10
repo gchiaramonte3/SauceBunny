@@ -19,8 +19,6 @@ type TabDef = {
   label: string;
   icon: (props: { size?: number; stroke?: string }) => React.ReactElement;
   badge?: number;
-  /** Tiny dot next to the icon — used to signal "new content arrived". */
-  pulse?: boolean;
   disabled?: boolean;
 };
 
@@ -63,6 +61,11 @@ type Props = {
   canRegenerate: boolean;
   /** Open a .srt / .vtt from disk (file picker). */
   onImportTranscript: () => void;
+  /** r84: source kind — gates the "fix caption timing" banner to web sources. */
+  sourceKind?: "youtube" | "file";
+  /** r84: re-time loose YouTube captions with Whisper. Optional (omitted in the
+   *  popped-out panel, where the banner is hidden rather than wired over the bus). */
+  onFixCaptionTiming?: () => void;
   /**
    * Pop the drawer out into its own native OS window (r44.B). When
    * undefined, the pop-out button doesn't render — the floating window
@@ -115,7 +118,7 @@ export function QueueDrawer({
   onTranscriptSeek, transcriptArrivedTick,
   onClearTranscript, onLoadFromHistory,
   onRegenerateTranscript, regenerateBusy, canRegenerate,
-  onImportTranscript,
+  onImportTranscript, sourceKind, onFixCaptionTiming,
   onPopOut, embedded = false,
 }: Props) {
   const counts = queue.reduce(
@@ -170,22 +173,16 @@ export function QueueDrawer({
   const errorCount = counts.error ?? 0;
 
   const [activeTab, setActiveTab] = useState<TabId>("queue");
-  // Pulse the Transcript tab title when a NEW transcript arrives but
-  // the user is looking at another tab — drops the moment they switch in.
-  const [transcriptUnread, setTranscriptUnread] = useState(false);
   useEffect(() => {
     if (transcriptArrivedTick === 0) return; // ignore the boot value
-    if (activeTab !== "transcript") {
-      setTranscriptUnread(true);
-      // Also auto-switch when the panel is already open — the user
-      // explicitly asked for that flow ("the result appears here").
-      if (open) setActiveTab("transcript");
-    }
+    // A new transcript arrived → show it. App opens the drawer on the first
+    // arrival, but that open() lands a render AFTER this effect, so the old
+    // `if (open)` gate saw open===false and left the drawer on Queue. Switch
+    // to the Transcript tab UNCONDITIONALLY — when the drawer then opens (or is
+    // already open / reopened) it's on the right tab.
+    if (activeTab !== "transcript") setActiveTab("transcript");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transcriptArrivedTick]);
-  useEffect(() => {
-    if (activeTab === "transcript") setTranscriptUnread(false);
-  }, [activeTab]);
   // Popped-out window: the user popped this out to read the transcript, but
   // arrivedTick doesn't change after pop-out, so the auto-switch above never
   // fires and the window opens on the (often empty) Queue tab. Switch to the
@@ -200,7 +197,7 @@ export function QueueDrawer({
 
   const TABS: TabDef[] = [
     { id: "queue", label: "Queue", icon: IconStack, badge: queue.length },
-    { id: "transcript", label: "Transcript", icon: IconSparkles, pulse: transcriptUnread },
+    { id: "transcript", label: "Transcript", icon: IconSparkles },
   ];
 
   // ── User-reorderable tab order ─────────────────────────────────
@@ -441,7 +438,6 @@ export function QueueDrawer({
               {t.badge != null && t.badge > 0 && (
                 <span className="cp-tab-badge">{t.badge}</span>
               )}
-              {t.pulse && <span className="cp-tab-pulse" aria-label="new content" />}
               {t.disabled && <span className="cp-tab-soon">Soon</span>}
             </button>
           );
@@ -602,6 +598,8 @@ export function QueueDrawer({
           regenerateBusy={regenerateBusy}
           canRegenerate={canRegenerate}
           onImportTranscript={onImportTranscript}
+          sourceKind={sourceKind}
+          onFixCaptionTiming={onFixCaptionTiming}
         />
       )}
     </aside>

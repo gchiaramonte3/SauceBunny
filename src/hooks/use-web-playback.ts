@@ -269,7 +269,10 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     const s = stateRef.current;
     if (s.kind === "streaming") {
       const h = helpersRef.current;
-      h.appendLog("warn", "media", `Stream playback failed (${message}) — falling back to download.`);
+      // r81: not a failure from the user's POV — some sources (HLS-only /
+      // live broadcasts) just can't decode in WKWebView's MSE pipeline, so
+      // we quietly download a playable copy. Keep it `info`, not `warn`.
+      h.appendLog("info", "media", `In-app stream unavailable for this source (${message}) — downloading a playable copy instead…`);
       h.pushNotification("info", "Downloading preview…", "Couldn't stream this source in-app. Sauce Bunny is fetching the file via yt-dlp so you can scrub and mark.");
       dispatch({ t: "MEDIA_ERROR", seq: s.seq });
       return true;
