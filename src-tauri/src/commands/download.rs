@@ -541,10 +541,13 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
     ];
     caption_args.extend(cookies_args(args.cookies_browser.as_deref()));
     caption_args.push(args.url.clone());
-    let (mut rx, _child) = cmd
+    let (mut rx, child) = cmd
         .args(caption_args)
         .spawn()
         .map_err(|e| format!("failed to spawn yt-dlp: {e}"))?;
+    // Register so the UI's Stop / a source switch can cancel — caption runs can
+    // sleep+retry for a long time on YouTube 429s, exactly when cancel matters.
+    app.state::<JobRegistry>().insert(args.job_id.clone(), child);
 
     let job_id = args.job_id.clone();
     let job_for = job_id.clone();
@@ -577,6 +580,7 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
                     }
                 }
                 CommandEvent::Terminated(payload) => {
+                    let _ = app_for.state::<JobRegistry>().take(&job_for);
                     // Always scan the output dir for caption files, even on
                     // nonzero exit. yt-dlp can 429 on a single phantom
                     // translation track and still have written 1–3
@@ -606,8 +610,19 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("")
                                 .to_string();
-                            if !name.starts_with(&safe_for)
-                                || !(name.ends_with(".vtt") || name.ends_with(".srt"))
+                            // Only THIS job's language variants: `<safe>.<lang>.<vtt|srt>`.
+                            // Requiring `<safe>.` rejects a different video that merely
+                            // shares a title prefix ("My Video" vs "My Video Part 2");
+                            // requiring a language segment (≥2 dots after the base)
+                            // rejects a stale bare `<safe>.srt` from an earlier Whisper
+                            // run in the same dir — which the manual-preferred sort would
+                            // otherwise rank ABOVE the freshly downloaded caption.
+                            let rest = match name.strip_prefix(&safe_for) {
+                                Some(r) if r.starts_with('.') => r,
+                                _ => continue,
+                            };
+                            if !(rest.ends_with(".vtt") || rest.ends_with(".srt"))
+                                || rest.matches('.').count() < 2
                             {
                                 continue;
                             }
@@ -1249,6 +1264,18 @@ pub async fn download_audio_track(
         .join(format!("{}.%(ext)s", dl_prefix))
         .to_string_lossy()
         .to_string();
+    // Clear any leftover partial from a prior failed/cancelled attempt under
+    // this SAME job_id — the frontend's cookie-retry reuses the job_id, and
+    // yt-dlp's default --continue would otherwise resume a partial that may now
+    // be a DIFFERENT format (cookie vs no-cookie resolve gives a different
+    // bitrate/container), splicing mismatched bytes into the cached audio.
+    if let Ok(entries) = std::fs::read_dir(&cache) {
+        for entry in entries.flatten() {
+            if entry.file_name().to_string_lossy().starts_with(&dl_prefix) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
 
     let cmd = ytdlp(&app)?;
     // Bundled ffmpeg for any DASH audio merge — never PATH/Homebrew (DISTRIBUTION.md).

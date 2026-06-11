@@ -52,6 +52,27 @@ use std::sync::OnceLock;
 /// failed to bind — callers fall back to the download path).
 static BASE: OnceLock<String> = OnceLock::new();
 
+/// Per-session capability token, minted at `start()`. Every request path must
+/// be prefixed `/t/<token>/` or it's rejected with 403. Without it, ANY local
+/// process — or any web page that port-scans 127.0.0.1 — could drive this proxy
+/// to fetch arbitrary attacker-supplied URLs (open proxy / SSRF) or read the
+/// media the user is currently watching. The token rides inside the base URL
+/// the frontend receives, so all existing URL construction (`buildProxyUrl` +
+/// the `/fmp4/` string-replace) carries it transparently — no frontend change.
+static TOKEN: OnceLock<String> = OnceLock::new();
+
+/// 24 crypto-random bytes from `/dev/urandom` (always present on macOS — the
+/// only target), base64url-encoded → an unguessable 32-char token. Reads the
+/// OS CSPRNG directly so we add no `rand`/`getrandom` dependency.
+fn mint_token() -> String {
+    let mut buf = [0u8; 24];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        use std::io::Read;
+        let _ = f.read_exact(&mut buf);
+    }
+    URL_SAFE_NO_PAD.encode(buf)
+}
+
 /// Safari UA — yt-dlp resolves `web_safari`-compatible URLs, and the CDN
 /// treats Safari-shaped requests as well-formed without extra handshakes.
 const SAFARI_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) \
@@ -91,7 +112,11 @@ pub fn start() -> std::io::Result<String> {
         .to_ip()
         .map(|a| a.port())
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "no loopback port"))?;
-    let base = format!("http://127.0.0.1:{port}");
+    let token = mint_token();
+    let _ = TOKEN.set(token.clone());
+    // Token lives in the path, not the authority, so it's still a valid
+    // `http://127.0.0.1:<port>/…` URL WebKit will stream.
+    let base = format!("http://127.0.0.1:{port}/t/{token}");
     let _ = BASE.set(base.clone());
 
     std::thread::Builder::new()
@@ -102,6 +127,12 @@ pub fn start() -> std::io::Result<String> {
             // context is in scope.
             let client = match reqwest::blocking::Client::builder()
                 .redirect(reqwest::redirect::Policy::limited(3))
+                // Bound a never-completing TCP/TLS connect so a dead upstream
+                // can't park a worker thread forever. Deliberately NO total
+                // `.timeout()` — that caps the whole request including the body
+                // read, which would abort legitimate long/backpressured streams
+                // (our buffer-ahead cap intentionally stalls reads on pause).
+                .connect_timeout(std::time::Duration::from_secs(15))
                 .build()
             {
                 Ok(c) => c,
@@ -126,7 +157,23 @@ pub fn start() -> std::io::Result<String> {
 }
 
 fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std::io::Result<()> {
-    let raw_path = request.url().to_string();
+    let raw_path_full = request.url().to_string();
+    // Capability gate: every request must carry the per-session token as the
+    // path prefix `/t/<token>/`. This is what stops a local process or a
+    // port-scanning web page from using us as an open proxy / reading the
+    // user's media. The token is base64url (no '/'), so the split is exact.
+    let token = TOKEN.get().map(String::as_str).unwrap_or("");
+    let raw_path = match raw_path_full
+        .strip_prefix("/t/")
+        .and_then(|r| r.strip_prefix(token))
+    {
+        Some(rest) if !token.is_empty() && rest.starts_with('/') => rest.to_string(),
+        _ => {
+            return request.respond(
+                tiny_http::Response::from_string("forbidden").with_status_code(403),
+            );
+        }
+    };
 
     // ── fMP4 remux route (r63) ──────────────────────────────────────
     // `/fmp4/v1/<b64-upstream>?start=<secs>` → spawn the ffmpeg sidecar to
@@ -280,7 +327,11 @@ fn parse_start_query(url_path: &str) -> f64 {
         .nth(1)
         .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("start=")))
         .and_then(|v| v.parse::<f64>().ok())
-        .map(|f| f.max(0.0))
+        // Reject inf/NaN (str::parse accepts "inf"/"nan") and clamp to a sane
+        // upper bound before it reaches ffmpeg `-ss` — `-ss inf` spawns an
+        // ffmpeg that does no useful work. 24h is far past any real media.
+        .filter(|f| f.is_finite())
+        .map(|f| f.clamp(0.0, 86_400.0))
         .unwrap_or(0.0)
 }
 

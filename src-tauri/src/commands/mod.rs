@@ -64,9 +64,14 @@ fn short_err(stderr: &str) -> String {
         .unwrap_or(stderr.trim())
         .trim()
         .to_string();
-    // Cap absurdly long URLs etc. so the UI hint stays scannable.
+    // Cap absurdly long URLs etc. so the UI hint stays scannable. Truncate on a
+    // CHAR boundary — yt-dlp/ffmpeg error lines carry multibyte UTF-8 (CJK/emoji
+    // titles, curly quotes), and byte-slicing mid-codepoint panics, which would
+    // kill the spawned task right as it tries to report a failure (UI hangs).
     if trimmed.len() > 400 {
-        format!("{}…", &trimmed[..400])
+        let mut end = 400;
+        while end > 0 && !trimmed.is_char_boundary(end) { end -= 1; }
+        format!("{}…", &trimmed[..end])
     } else {
         trimmed
     }
@@ -97,7 +102,18 @@ fn sidecar_path(name: &str) -> Result<PathBuf, crate::AppError> {
     } else {
         let exe = std::env::current_exe()?;
         let dir = exe.parent().ok_or_else(|| crate::AppError::internal("exe has no parent"))?;
-        Ok(dir.join(filename))
+        // Tauri STRIPS the target triple when copying externalBin next to the
+        // executable, so the bundled file is the PLAIN name (`ffmpeg`, not
+        // `ffmpeg-aarch64-apple-darwin`). Prefer the plain name; fall back to
+        // the suffixed name only for layouts that keep it. Without this, every
+        // sidecar call (export / transcription / download) hard-fails in the
+        // packaged .dmg while dev (debug branch, suffixed repo binaries) works.
+        let plain = dir.join(name);
+        if plain.is_file() {
+            Ok(plain)
+        } else {
+            Ok(dir.join(filename))
+        }
     }
 }
 

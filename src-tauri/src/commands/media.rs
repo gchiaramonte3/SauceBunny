@@ -263,6 +263,27 @@ async fn spawn_video_clip(
         if !outcome.success && !outcome.signalled && cookied {
             emit_clip_log(&app, &job_id, "info",
                 "Export failed with sign-in cookies — retrying without…".into());
+            // Clear the partial output + yt-dlp format intermediates so the
+            // no-cookie retry starts clean. Otherwise --continue resumes the
+            // cookied attempt's half-file, and the no-cookie resolve can pick a
+            // DIFFERENT format → spliced/corrupt output (or a size-complete file
+            // makes yt-dlp print "already downloaded" and exit 0 over junk).
+            let _ = std::fs::remove_file(&output_str);
+            let _ = std::fs::remove_file(format!("{output_str}.part"));
+            let out_path = std::path::Path::new(&output_str);
+            if let (Some(dir), Some(stem)) =
+                (out_path.parent(), out_path.file_stem().and_then(|s| s.to_str()))
+            {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        // `<stem>.fNNN.<ext>` format intermediates (clip.f399.mp4)
+                        if name.starts_with(stem) && name[stem.len()..].starts_with(".f") {
+                            let _ = std::fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
             outcome = run_video_attempt(&app, &job_id, with(None), total_seconds).await;
         }
         let success = outcome.success;

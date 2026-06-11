@@ -236,18 +236,25 @@ export function TranscriptViewer({
   );
 
   // ── Active row from playhead ─────────────────────────────────────
+  // Click-to-jump seeks to cue.start, but App floors seconds→frames, landing
+  // the playhead up to one frame BEFORE the cue begins. Without tolerance the
+  // search then reads `playhead < cue.start` and snaps to the PREVIOUS cue —
+  // at a turn boundary that's the prior speaker's last line ("click 'Know',
+  // highlights 'Let's roll it.'"). Snap a playhead within one frame of a cue's
+  // start up to that cue so the clicked chunk is the one selected.
   const activeCueIdx = useMemo(() => {
     if (playheadSeconds == null || flatCues.length === 0) return -1;
+    const eps = 1 / Math.max(1, Math.round(fps)); // one frame, in seconds
     let lo = 0, hi = flatCues.length - 1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
       const c = flatCues[mid].cue;
-      if (playheadSeconds < c.start) hi = mid - 1;
+      if (playheadSeconds < c.start - eps) hi = mid - 1;
       else if (playheadSeconds > c.end) lo = mid + 1;
       else return mid;
     }
     return Math.max(-1, hi);
-  }, [playheadSeconds, flatCues]);
+  }, [playheadSeconds, flatCues, fps]);
 
   useEffect(() => {
     if (!autoScroll || activeCueIdx < 0 || !scrollRef.current) return;

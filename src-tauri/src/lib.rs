@@ -180,7 +180,8 @@ pub fn run() {
             // stream_proxy.rs for the full rationale. Non-fatal if it
             // fails to bind — the app falls back to the download path.
             match stream_proxy::start() {
-                Ok(base) => eprintln!("[startup] media proxy listening on {base}"),
+                // Don't log the base — it carries the per-session capability token.
+                Ok(_) => eprintln!("[startup] media proxy listening (loopback, token-gated)"),
                 Err(e) => eprintln!("[startup] media proxy failed to start: {e}"),
             }
 

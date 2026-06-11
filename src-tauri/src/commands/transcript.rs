@@ -762,7 +762,11 @@ pub async fn generate_transcript(
                     } else {
                         let _ = std::fs::remove_file(&wav_path_for);
                         let msg = if !success {
-                            format!("whisper-cli exited with code {:?}", payload.code)
+                            if payload.signal.is_some() {
+                                "Cancelled".to_string() // user Stop → SIGKILL, code is None
+                            } else {
+                                format!("whisper-cli exited with code {:?}", payload.code)
+                            }
                         } else {
                             format!("Transcript not produced at {}", srt)
                         };
@@ -1257,7 +1261,11 @@ pub async fn transcribe_local_file(
                     } else {
                         let _ = std::fs::remove_file(&wav_path_for);
                         let msg = if !success {
-                            format!("whisper-cli exited with code {:?}", payload.code)
+                            if payload.signal.is_some() {
+                                "Cancelled".to_string() // user Stop → SIGKILL, code is None
+                            } else {
+                                format!("whisper-cli exited with code {:?}", payload.code)
+                            }
                         } else {
                             format!("Transcript not produced at {}", srt)
                         };
@@ -1557,7 +1565,11 @@ async fn run_diarize_and_merge(
                 let raw = String::from_utf8_lossy(&b).to_string();
                 stderr_tail.push_str(&raw);
                 if stderr_tail.len() > 4096 {
-                    let cut = stderr_tail.len() - 2048;
+                    // Round to a char boundary — from_utf8_lossy chunks can split
+                    // a multibyte char (Swift '…' progress, etc.); byte-slicing
+                    // mid-codepoint panics and hangs the diarize task.
+                    let mut cut = stderr_tail.len() - 2048;
+                    while cut < stderr_tail.len() && !stderr_tail.is_char_boundary(cut) { cut += 1; }
                     stderr_tail = stderr_tail[cut..].to_string();
                 }
             }
@@ -1750,7 +1762,7 @@ pub async fn run_diarizer(app: AppHandle, args: DiarizeArgs) -> Result<String, c
              Run `npm run build:diarizer` from the project root."
         ))?;
 
-    let (mut rx, _child) = cmd
+    let (mut rx, child) = cmd
         .args([
             "--input", &args.input_wav,
             "--output", &args.output_json,
@@ -1758,6 +1770,9 @@ pub async fn run_diarizer(app: AppHandle, args: DiarizeArgs) -> Result<String, c
         ])
         .spawn()
         .map_err(|e| format!("failed to spawn saucebunny-diarize: {e}"))?;
+    // Register so Stop can cancel — first run downloads hundreds of MB of Core
+    // ML models, then diarization runs 10-60s (mirrors run_diarize_and_merge).
+    app.state::<JobRegistry>().insert(args.job_id.clone(), child);
 
     let job_id = args.job_id.clone();
     let job_for = job_id.clone();
@@ -1801,6 +1816,7 @@ pub async fn run_diarizer(app: AppHandle, args: DiarizeArgs) -> Result<String, c
                     }
                 }
                 CommandEvent::Terminated(payload) => {
+                    let _ = app_for.state::<JobRegistry>().take(&job_for);
                     let success = payload.code == Some(0);
                     let error = if success {
                         None
@@ -1883,7 +1899,10 @@ pub async fn prepare_diarizer_models(app: AppHandle, job_id: String) -> Result<S
                     let raw = String::from_utf8_lossy(&b).to_string();
                     stderr_tail.push_str(&raw);
                     if stderr_tail.len() > 4096 {
-                        let cut = stderr_tail.len() - 2048;
+                        // Round to a char boundary (see run_diarize_and_merge) —
+                        // mid-codepoint byte-slicing panics and hangs the task.
+                        let mut cut = stderr_tail.len() - 2048;
+                        while cut < stderr_tail.len() && !stderr_tail.is_char_boundary(cut) { cut += 1; }
                         stderr_tail = stderr_tail[cut..].to_string();
                     }
                 }
