@@ -118,8 +118,18 @@ pub fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppError> {
 /// active job ID are SKIPPED so we don't yank the rug out from under an
 /// in-flight ffmpeg playback prep / audio download / etc — those would
 /// otherwise complete and emit "saved" pointing at a file we just deleted.
+///
+/// `exclude`: full filesystem paths the CURRENT session is actively playing
+/// from (web download-cache file, audio-master track, playback-prep copy).
+/// Those were produced by jobs that already finished — the JobRegistry no
+/// longer knows about them — so without this list, Clear cache would delete
+/// the file backing the video that's on screen right now.
 #[tauri::command]
-pub fn clear_all_cache(app: AppHandle, registry: State<'_, JobRegistry>) -> Result<u32, crate::AppError> {
+pub fn clear_all_cache(
+    app: AppHandle,
+    registry: State<'_, JobRegistry>,
+    exclude: Option<Vec<String>>,
+) -> Result<u32, crate::AppError> {
     let cache = app
         .path()
         .app_cache_dir()
@@ -131,6 +141,7 @@ pub fn clear_all_cache(app: AppHandle, registry: State<'_, JobRegistry>) -> Resu
     // below. Holding the registry lock for the whole scan would be fine
     // (clear-cache is rare) but a snapshot is simpler and lock-free.
     let active: std::collections::HashSet<String> = registry.active_ids().into_iter().collect();
+    let excluded: std::collections::HashSet<String> = exclude.unwrap_or_default().into_iter().collect();
     let mut removed: u32 = 0;
     if let Ok(entries) = std::fs::read_dir(&cache) {
         for entry in entries.flatten() {
@@ -141,6 +152,10 @@ pub fn clear_all_cache(app: AppHandle, registry: State<'_, JobRegistry>) -> Resu
             if !name.starts_with("saucebunny-") { continue; }
             if active.iter().any(|jid| name.contains(jid)) {
                 // In-flight job is writing to this file — skip.
+                continue;
+            }
+            if excluded.contains(&entry.path().to_string_lossy().to_string()) {
+                // The current session is playing from this file — skip.
                 continue;
             }
             let meta = match entry.metadata() { Ok(m) => m, Err(_) => continue };
@@ -312,7 +327,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-06-10-r84-audio-master";
+pub const BACKEND_BUILD_ID: &str = "2026-06-11-r85-review-closeout";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

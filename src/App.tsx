@@ -621,7 +621,12 @@ export default function App() {
   // The notification bell holds a session history of completion events; the
   // toast is the transient confirmation that pops over the canvas.
   const [notifications, setNotifications] = useState<Notif[]>([]);
-  const [toast, setToast] = useState<{ kind: ToastKind; title: string; body?: string } | null>(null);
+  // `id` is a monotonic counter so Monitor can KEY the CanvasToast on it —
+  // replacing a visible toast then remounts (fresh countdown) instead of
+  // reusing the old instance's nearly-expired timer (which made the new
+  // toast flash and vanish).
+  const [toast, setToast] = useState<{ id: number; kind: ToastKind; title: string; body?: string } | null>(null);
+  const toastIdRef = useRef(0);
 
   const pushNotification = useCallback(
     (kind: ToastKind, title: string, body: string, path?: string) => {
@@ -635,7 +640,7 @@ export default function App() {
         read: false,
       };
       setNotifications((prev) => [n, ...prev].slice(0, 20));
-      setToast({ kind, title, body });
+      setToast({ id: ++toastIdRef.current, kind, title, body });
       if (kind === "success") playSuccess();
       else if (kind === "error") playError();
       else playInfo();
@@ -936,8 +941,11 @@ export default function App() {
           // the result landed, so the body text was redundant chrome.
           notify("Transcript ready", filename);
           pushNotification("success", "Transcript ready", "", e.payload.path);
-        } else if (e.payload.error === "Cancelled" || e.payload.error?.startsWith("whisper-cli exited with code")) {
-          // Whisper exits non-zero when killed via SIGTERM — treat as cancel.
+        } else if (e.payload.error === "Cancelled") {
+          // User Stop — the Rust Terminated handlers map signal-kills to
+          // "Cancelled", so a bare exit-code message is a REAL crash (corrupt
+          // model, unreadable WAV, OOM) and must fall through to the error
+          // branch, not be silently absorbed as a cancel.
           setTranscriptState("idle");
           setTranscriptError(null);
           setTranscriptProgress(0);
@@ -1135,6 +1143,7 @@ export default function App() {
     // Tear down the web-playback machine (cancels any in-flight resolve/
     // download + watchdog, → inactive). r80.
     resetWebPlayback();
+    webAudioCachedPathRef.current = null;
     setWebAudioCachedSrc(null);
     setActiveSourceUrl(null);
     setPlayerReady(false);
@@ -1682,8 +1691,10 @@ export default function App() {
         } · ${lf.duration?.toFixed(1) ?? "?"}s`
       );
       // Auto-load any prior transcript we generated for this exact file
-      // path. Silent miss — first-time imports proceed normally.
-      void tryAutoLoadTranscript({ sourcePath: picked });
+      // path. Silent miss — first-time imports proceed normally. seq-guarded
+      // so a source switch mid-probe can't attach this file's transcript to
+      // the next source.
+      void tryAutoLoadTranscript({ sourcePath: picked }, seq);
       setStatus("loaded");
 
       // ─── Playback prep ─────────────────────────────────────────────
@@ -1808,13 +1819,18 @@ export default function App() {
       pushNotification("error", "Invalid range", "Mark out must be after Mark in.");
       return;
     }
-    const nextIndex = clipQueueRef.current.length + 1;
     const baseName = sanitizeFilename(exportOpts.filename || "clip");
+    // Bump until unique WITHIN the queue — a bare length+1 collides after a
+    // remove-then-add (clip-1, clip-2; remove clip-1; add → length+1 = 2 →
+    // another clip-2) and Export All would silently overwrite the first file.
+    const nameFor = (n: number) => baseName === "clip" ? `clip-${n}` : `${baseName}-${n}`;
+    let nextIndex = clipQueueRef.current.length + 1;
+    while (clipQueueRef.current.some((c) => c.filename === nameFor(nextIndex))) nextIndex++;
     const item: QueuedClip = {
       id: Math.random().toString(36).slice(2),
       inFrames,
       outFrames,
-      filename: baseName === "clip" ? `clip-${nextIndex}` : `${baseName}-${nextIndex}`,
+      filename: nameFor(nextIndex),
       format: exportOpts.format,
       reencode: exportOpts.reencode,
       captions: exportOpts.captions,
@@ -2079,6 +2095,17 @@ export default function App() {
       setTranscriptError("Load a source URL first.");
       return;
     }
+    // Web sources with no out-mark transcribe up to the source duration. If
+    // the user clicks Transcribe during the optimistic-mount window (duration
+    // not hydrated → durationFrames 0), start == end == 00:00:00:00 and the
+    // backend rejects it with a baffling "Mark out must be after mark in".
+    if (sourceKind !== "file" && outFrames == null && durationFrames === 0) {
+      setTranscriptState("error");
+      setTranscriptError(metadataLoading
+        ? "Source info is still loading — try again in a moment."
+        : "This source has no known duration — set an out-mark to transcribe a range.");
+      return;
+    }
     // Resolve the per-month transcript-library subdir. Falls back to
     // exportOpts.folder for the brief moment between first launch and
     // the library-default-resolver effect landing.
@@ -2171,7 +2198,7 @@ export default function App() {
       setTranscriptError(msg);
       appendLog("err", "whisper", msg);
     }
-  }, [metadata, exportOpts, fps, selectedModel, defaults.whisperModel,
+  }, [metadata, metadataLoading, exportOpts, fps, selectedModel, defaults.whisperModel,
       defaults.detectSpeakers, defaults.expectedSpeakers,
       appendLog, resolveTranscriptOutDir, localFilePath, sourceKind,
       durationFrames, inFrames, outFrames]);
@@ -2187,6 +2214,15 @@ export default function App() {
   // and captions snap into sync. Surfaced via the TranscriptViewer banner.
   const handleFixCaptionTiming = useCallback(async () => {
     if (!metadata?.webpage_url) return;
+    // Full-range re-time needs a real duration — see handleGenerateTranscript's
+    // identical guard (start == end would be rejected as a marks error).
+    if (durationFrames === 0) {
+      setTranscriptState("error");
+      setTranscriptError(metadataLoading
+        ? "Source info is still loading — try again in a moment."
+        : "This source has no known duration — captions can't be re-timed.");
+      return;
+    }
     const outDir = await resolveTranscriptOutDir() ?? exportOpts.folder;
     if (!outDir) {
       // Must flip state to "error" too — the Sidebar only renders transcriptError
@@ -2229,7 +2265,7 @@ export default function App() {
       setTranscriptError(formatError(err));
       appendLog("warn", "whisper", `Caption-timing fix failed (${formatError(err)}); keeping YouTube's captions.`);
     }
-  }, [metadata, exportOpts.folder, exportOpts.filename, resolveTranscriptOutDir, selectedModel,
+  }, [metadata, metadataLoading, exportOpts.folder, exportOpts.filename, resolveTranscriptOutDir, selectedModel,
       durationFrames, fps, defaults.whisperModel, defaults.detectSpeakers, defaults.expectedSpeakers, appendLog]);
 
   const handleOpenTranscriptionSettings = useCallback(() => {
@@ -2247,7 +2283,7 @@ export default function App() {
   const tryAutoLoadTranscript = useCallback(async (input: {
     sourcePath?: string | null;
     sourceUrl?: string | null;
-  }) => {
+  }, seq: number) => {
     const entry = findForSource(input);
     if (!entry) return;
     try {
@@ -2257,6 +2293,10 @@ export default function App() {
       // transcript with "File too large". We don't keep the result; the
       // viewer fetches the file itself when the path changes.
       await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 8 * 1024 * 1024 });
+      // The probe is an awaited IPC disk read — if the user switched sources
+      // meanwhile, attaching the OLD source's transcript to the NEW source
+      // (and pulsing the Transcript tab open over it) would be wrong.
+      if (sourceSeqRef.current !== seq) return;
       setActiveTranscript({
         path: entry.srtPath,
         origin: entry.origin === "captions" ? "captions"
@@ -2400,15 +2440,20 @@ export default function App() {
     try {
       const id = await invoke<string>("new_job_id");
       setCaptionsJobId(id);
-      await invokeWithCookieRetry<string>("download_captions", (cookies) => ({
+      // Plain invoke, no frontend cookie-retry wrapper: download_captions is
+      // fire-and-forget (resolves at spawn, reports via captions-done), so a
+      // wrapper could never observe the real failure. The BACKEND retries
+      // without cookies inside its monitor task when the cookied attempt
+      // writes no caption files.
+      await invoke<string>("download_captions", {
         args: {
           url: metadata.webpage_url,
           output_dir: outDir,
           filename: sanitizeFilename(exportOpts.filename || "transcript"),
           job_id: id,
-          cookies_browser: cookies,
+          cookies_browser: cookiesBrowserOrNone(),
         },
-      }));
+      });
     } catch (err) {
       const msg = formatError(err);
       setCaptionsState("error");
@@ -2475,8 +2520,13 @@ export default function App() {
   // Whisper transcript is clocked against the exact track you heard. See
   // download_audio_track / generate_transcript (source_audio_prefix) sharing.
   const audioCacheJobRef = useRef<string | null>(null);
+  // Raw fs path of the cached audio-master track (webAudioCachedSrc holds only
+  // the asset:// URL). Clear-cache passes this as an exclusion so it can't
+  // delete the file the streaming clock is playing from.
+  const webAudioCachedPathRef = useRef<string | null>(null);
   useEffect(() => {
     if (!webStreaming || !activeSourceUrl) {
+      webAudioCachedPathRef.current = null;
       setWebAudioCachedSrc(null);
       return;
     }
@@ -2494,6 +2544,9 @@ export default function App() {
         }));
         if (cancelled || sourceSeqRef.current !== seq) return;
         const { convertFileSrc } = await import("@tauri-apps/api/core");
+        // Keep the RAW fs path too — Clear cache excludes the files the
+        // current session is playing from, and it matches on raw paths.
+        webAudioCachedPathRef.current = path;
         setWebAudioCachedSrc(convertFileSrc(path));
         appendLog("ok", "audio-cache", "Audio cached — Transcribe will be instant for this source.");
       } catch (err) {
@@ -3046,8 +3099,17 @@ export default function App() {
                  (MSE). Null once the player is ready or for local files /
                  the download fallback (which has its own banner). */
               streamLoadingPhase={
+                /* Only while the machine is actually WORKING toward playback
+                   (resolving/streaming/cached). The terminal states — failed,
+                   or inactive after a user cancel — must clear the overlay, or
+                   the canvas stays under an infinite "Preparing your video…"
+                   spinner after the error/cancel toast fades. `downloading` has
+                   its own overlay with a Cancel button. */
                 sourceKind === "youtube" && status === "loaded" && !playerReady
-                  && !webPlayback.downloading && !playbackPrepBusy
+                  && !playbackPrepBusy
+                  && (webPlayback.state.kind === "resolving"
+                    || webPlayback.state.kind === "streaming"
+                    || webPlayback.state.kind === "cached")
                   ? ((webPlayback.streamUrl || webPlayback.cachePath) ? "Starting playback…" : "Resolving stream…")
                   : null
               }
@@ -3110,6 +3172,7 @@ export default function App() {
               /* On-video captions (the transport CC toggle). Driven by the
                  active transcript + playhead so they work for any source. */
               transcriptPath={activeTranscript?.path ?? null}
+              transcriptReloadToken={transcriptArrivedTick}
               currentSec={playheadSec}
               captionsOn={captionsOn}
               /* User-tunable caption look (Settings → Captions). r82: no sync
@@ -3245,6 +3308,14 @@ export default function App() {
       <SettingsModal
         open={settingsOpen}
         onClose={() => { setSettingsOpen(false); refreshWhisperModels(); }}
+        /* Cache files the CURRENT session plays from — Clear cache must not
+           delete the video/audio that's on screen right now. Their jobs have
+           finished, so the JobRegistry guard alone doesn't protect them. */
+        cacheExcludePaths={[
+          webPlayback.cachePath,
+          playbackPath,
+          webAudioCachedPathRef.current,
+        ].filter((p): p is string => !!p)}
         defaults={defaults}
         setDefaults={setDefaults}
         initialTab={settingsInitialTab}

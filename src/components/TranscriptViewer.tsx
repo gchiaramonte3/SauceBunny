@@ -4,6 +4,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { IconReveal, IconAlert, IconChevronDown } from "./Icons";
 import { parseSrt, groupIntoTurns, fmtTime, type Turn } from "../lib/srt";
 import { secondsToTc } from "../lib/timecode";
+import { formatError } from "../lib/error-format";
 import {
   getHistory,
   removeEntry,
@@ -31,6 +32,10 @@ type Props = {
    * empty state. When changed, we reload + reparse.
    */
   path: string | null;
+  /** Bumped by App on every transcript arrival. Regenerate / Fix-timing
+   *  overwrite the SAME path, so this is what forces a re-read of the file
+   *  when only its contents changed. Optional: the popped-out panel omits it. */
+  reloadToken?: number;
   /**
    * Current playhead position in seconds. Drives the karaoke highlight.
    * Pass `null` when no source is loaded.
@@ -103,7 +108,7 @@ type Props = {
  * etc. The rename UI works identically in both worlds.
  */
 export function TranscriptViewer({
-  path, playheadSeconds, onSeek, origin,
+  path, reloadToken, playheadSeconds, onSeek, origin,
   onClearTranscript, onLoadFromHistory,
   onRegenerate, regenerateBusy, canRegenerate, fps = 30,
   onImportTranscript, sourceKind, onFixCaptionTiming,
@@ -198,6 +203,10 @@ export function TranscriptViewer({
   }, [overrides.aliases]);
 
   // ── Load the file whenever the path changes ──────────────────────
+  // `reloadToken` is also a dep: Regenerate / Fix-timing overwrite the SAME
+  // .srt path, so a path-only key would keep showing the old transcript after
+  // a "Transcript ready" — the user would wait through a whole Whisper run and
+  // see nothing change. App bumps the token on every transcript arrival.
   useEffect(() => {
     let cancelled = false;
     if (!path) {
@@ -222,7 +231,7 @@ export function TranscriptViewer({
       }
     })();
     return () => { cancelled = true; };
-  }, [path]);
+  }, [path, reloadToken]);
 
   // ── Parse + group whenever the raw text changes ──────────────────
   const turns: Turn[] = useMemo(() => {
@@ -451,7 +460,12 @@ export function TranscriptViewer({
         entry = {
           tag: canonical,
           colorTag: resolved,
-          name: displayNameFor(ti, t.speaker),
+          // Global rename or the humanized default — NOT displayNameFor, which
+          // applies per-turn overrides first: a one-off rename on the group's
+          // first turn would mislabel the whole roster chip (and the
+          // merge-confirm dialog) with that turn's name.
+          name: overrides.global[resolved ?? "__NULL__"]
+            ?? humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers }),
           turnCount: 0,
           sourceTags: [],
         };
@@ -466,7 +480,7 @@ export function TranscriptViewer({
     const list = Array.from(byCanonical.values());
     list.sort((a, b) => (orderMap.get(a.tag)! - orderMap.get(b.tag)!));
     return list;
-  }, [turns, resolveAlias, displayNameFor]);
+  }, [turns, resolveAlias, overrides.global, hasIdentifiedSpeakers]);
 
   // ── Roster strip overflow → edge-fade hints ─────────────────────
   // The roster is one horizontally-scrollable line. Fade whichever edge has
@@ -539,9 +553,17 @@ export function TranscriptViewer({
         turn:    { ...prev.turn },
         aliases: { ...prev.aliases },
       };
-      const tagKey = rename.originalTag ?? "__NULL__";
+      // Key the GLOBAL rename on the alias-RESOLVED tag — displayNameFor reads
+      // overrides under the resolved key, and mergeSpeaker deletes globals
+      // keyed under merged-away tags. Without resolving, renaming a turn whose
+      // original tag was merged into another speaker writes a key nobody reads:
+      // the popover closes and nothing changes on screen.
+      const resolvedTag = resolveAliasChain(rename.originalTag, prev.aliases);
+      const tagKey = resolvedTag ?? "__NULL__";
       if (scope === "all") {
-        if (trimmed && trimmed !== (rename.originalTag ?? "Speaker")) {
+        // Clearing = typing back the DEFAULT display name of the resolved tag
+        // (not rename.currentName, which may itself be an existing override).
+        if (trimmed && trimmed !== humanizeSpeakerTag(resolvedTag, { unknownWhenNull: hasIdentifiedSpeakers })) {
           next.global[tagKey] = trimmed;
         } else {
           delete next.global[tagKey];
@@ -601,6 +623,14 @@ export function TranscriptViewer({
 
   // ── Download menu state ──────────────────────────────────────────
   const [dlOpen, setDlOpen] = useState(false);
+  // Write-failure message for downloadAs (the menu is already closed when the
+  // write fails, so the error renders next to the Download button). Auto-clears.
+  const [dlError, setDlError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!dlError) return;
+    const t = window.setTimeout(() => setDlError(null), 8000);
+    return () => window.clearTimeout(t);
+  }, [dlError]);
   const dlRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!dlOpen) return;
@@ -715,8 +745,12 @@ export function TranscriptViewer({
       }
       const bytes = Array.from(new TextEncoder().encode(content));
       await invoke("write_bytes_to_path", { path: dest, bytes });
+      setDlError(null);
     } catch (e) {
       console.error("transcript download failed:", e);
+      // Surface it — read-only folder / disk-full failures were silent: the
+      // menu closed and the user believed the file saved.
+      setDlError(formatError(e));
     }
   }
 
@@ -915,6 +949,11 @@ export function TranscriptViewer({
               <button role="menuitem" onClick={onReveal}>Reveal original in Finder</button>
             </div>
           )}
+          {dlError && (
+            <div className="cp-tx-dl-error" role="alert" title={dlError}>
+              Save failed: {dlError}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1089,7 +1128,13 @@ export function TranscriptViewer({
                     (isDropHover ? " drop-hover" : "") +
                     (isDragSource ? " dragging" : "")
                   }
-                  draggable
+                  /* The untagged group's chip (colorTag null, sentinel tag
+                     "Speaker") can't participate in merges: null-tagged turns
+                     have no alias to rewrite, so dragging it ONTO a speaker is
+                     a silent no-op, and dropping a speaker ONTO it would alias
+                     real turns to the literal string "Speaker" (wrong colour,
+                     orphaned rename). Rename the group instead. */
+                  draggable={r.colorTag !== null}
                   onDragStart={(e) => {
                     dragTagRef.current = r.tag;
                     e.dataTransfer.effectAllowed = "move";
@@ -1097,8 +1142,11 @@ export function TranscriptViewer({
                   }}
                   onDragEnd={() => { dragTagRef.current = null; setDragHoverTag(null); }}
                   onDragOver={(e) => {
+                    if (r.colorTag === null) return; // sentinel can't be a merge target
                     const src = dragTagRef.current;
                     if (!src || src === r.tag) return;
+                    const srcEntry = roster.find((x) => x.tag === src);
+                    if (srcEntry && srcEntry.colorTag === null) return; // sentinel can't be a source
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "move";
                     if (dragHoverTag !== r.tag) setDragHoverTag(r.tag);
@@ -1113,6 +1161,11 @@ export function TranscriptViewer({
                     setDragHoverTag(null);
                     dragTagRef.current = null;
                     if (!src || src === r.tag) return;
+                    // Belt-and-braces for the dataTransfer fallback path: the
+                    // sentinel group can be neither source nor target.
+                    if (r.colorTag === null) return;
+                    const srcRosterEntry = roster.find((x) => x.tag === src);
+                    if (srcRosterEntry && srcRosterEntry.colorTag === null) return;
                     // Open confirm popover; commit happens there.
                     const rect = e.currentTarget.getBoundingClientRect();
                     const srcEntry = roster.find((x) => x.tag === src || x.sourceTags.includes(src));
@@ -1177,7 +1230,9 @@ export function TranscriptViewer({
           const displayName = displayNameFor(ti, turn.speaker);
           const hasOverride =
             !!overrides.turn[String(ti)] ||
-            !!overrides.global[turn.speaker ?? "__NULL__"];
+            // Resolve the alias chain — globals are keyed on the RESOLVED tag,
+            // so a merged-then-renamed turn must check its canonical key.
+            !!overrides.global[resolveAlias(turn.speaker) ?? "__NULL__"];
           return (
             <div className="cp-tx-turn" key={ti}>
               <div className={"cp-tx-turn-head" + (hasRealSpeakers ? "" : " no-speaker")}>

@@ -109,6 +109,11 @@ export type Defaults = {
 type Props = {
   open: boolean;
   onClose: () => void;
+  /** Cache files the current session is actively playing from (web preview
+   *  download, audio-master track, playback-prep copy). Clear cache skips
+   *  these — their jobs already finished, so the backend's in-flight-job
+   *  guard alone would let the on-screen video's file be deleted. */
+  cacheExcludePaths?: string[];
   defaults: Defaults;
   setDefaults: (d: Defaults) => void;
   /** Apply current defaults to the in-flight export form. */
@@ -263,12 +268,20 @@ function ModelInfoPopover({ id }: { id: string }) {
     function onDown(e: MouseEvent) {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     }
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      // Capture + stop: Esc dismisses just the popover — without this it
+      // bubbles on to SettingsModal's and App's Escape handlers and closes
+      // the whole Settings window (CommandPalette uses the same pattern).
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      setOpen(false);
+    }
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
     };
   }, [open]);
 
@@ -315,7 +328,11 @@ export function SettingsModal(props: Props) {
   // Whisper model state.
   const [models, setModels] = useState<WhisperModel[]>([]);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [downloadJobId, setDownloadJobId] = useState<string | null>(null);
+  // Set SYNCHRONOUSLY in startDownload before any await. The event
+  // listeners are mounted once and filter against this ref — re-subscribing on
+  // a state change (the old design) raced the backend: events emitted before
+  // the new listener attached were dropped, leaving "Downloading…" stuck.
+  const downloadJobIdRef = useRef<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<{
     modelId: string;
     percent: number;
@@ -338,13 +355,15 @@ export function SettingsModal(props: Props) {
     if (open) refreshModels();
   }, [open, refreshModels]);
 
-  // Listen for download events.
+  // Listen for download events. Mounted ONCE — filtering goes through
+  // downloadJobIdRef so a new job never has to wait for a re-subscription
+  // round-trip (events fired during that gap were silently dropped).
   useEffect(() => {
     const unlistens: UnlistenFn[] = [];
     let mounted = true;
     (async () => {
       const a = await listen<ModelDownloadEvent>("model-download-progress", (e) => {
-        if (!mounted || e.payload.job_id !== downloadJobId) return;
+        if (!mounted || e.payload.job_id !== downloadJobIdRef.current) return;
         setDownloadProgress({
           modelId: e.payload.model_id,
           percent: e.payload.percent,
@@ -353,18 +372,17 @@ export function SettingsModal(props: Props) {
         });
       });
       const b = await listen<DoneEvent>("model-download-done", (e) => {
-        if (!mounted || e.payload.job_id !== downloadJobId) return;
+        if (!mounted || e.payload.job_id !== downloadJobIdRef.current) return;
+        downloadJobIdRef.current = null;
         if (e.payload.success) {
           setDownloadingId(null);
           setDownloadProgress(null);
-          setDownloadJobId(null);
           setDownloadError(null);
           refreshModels();
         } else {
           setDownloadError(e.payload.error ?? "Download failed");
           setDownloadingId(null);
           setDownloadProgress(null);
-          setDownloadJobId(null);
         }
       });
       unlistens.push(a, b);
@@ -373,7 +391,7 @@ export function SettingsModal(props: Props) {
       mounted = false;
       unlistens.forEach((u) => u());
     };
-  }, [downloadJobId, refreshModels]);
+  }, [refreshModels]);
 
   // Auto-select first downloaded model if none selected.
   useEffect(() => {
@@ -393,12 +411,23 @@ export function SettingsModal(props: Props) {
     setDownloadingId(modelId);
     try {
       const id = await invoke<string>("new_job_id");
-      setDownloadJobId(id);
+      downloadJobIdRef.current = id; // sync, BEFORE the download can emit
       await invoke<string>("download_whisper_model", { args: { model_id: modelId, job_id: id } });
+      // The backend early-returns WITHOUT emitting any event when the model
+      // file already exists — resolve that here so "Downloading…" can't stick.
+      const fresh = await invoke<WhisperModel[]>("list_whisper_models").catch(() => null);
+      if (fresh) {
+        setModels(fresh);
+        if (fresh.some((m) => m.id === modelId && m.downloaded)) {
+          downloadJobIdRef.current = null;
+          setDownloadingId(null);
+          setDownloadProgress(null);
+        }
+      }
     } catch (err) {
+      downloadJobIdRef.current = null;
       setDownloadError(formatError(err));
       setDownloadingId(null);
-      setDownloadJobId(null);
     }
   }
 
@@ -542,7 +571,7 @@ export function SettingsModal(props: Props) {
                       />
                     </div>
                   </div>
-                  <CacheControls />
+                  <CacheControls excludePaths={props.cacheExcludePaths} />
                 </div>
 
                 <div className="cp-pane-section">
@@ -1047,7 +1076,7 @@ export function SettingsModal(props: Props) {
  * thumbnails, whisper wavs, audio raw downloads. Files NOT under that
  * prefix (e.g. whisper-models/) are never touched.
  */
-function CacheControls() {
+function CacheControls({ excludePaths }: { excludePaths?: string[] }) {
   // CacheStats now comes from the canonical Rust definition (r49 +
   // r50). The inline-anonymous-type pattern was a workaround from
   // before the bindings existed.
@@ -1076,7 +1105,7 @@ function CacheControls() {
     if (!confirm(`Delete ${stats.file_count} cached file${stats.file_count === 1 ? "" : "s"} (${formatBytes(stats.bytes_total)})? This won't affect your exported clips.`)) return;
     setBusy(true);
     try {
-      await invoke<number>("clear_all_cache");
+      await invoke<number>("clear_all_cache", { exclude: excludePaths ?? [] });
     } catch (err) {
       console.warn("clear_all_cache failed", err);
     } finally {

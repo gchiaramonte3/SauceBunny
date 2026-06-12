@@ -173,8 +173,14 @@ export function QueueDrawer({
   const errorCount = counts.error ?? 0;
 
   const [activeTab, setActiveTab] = useState<TabId>("queue");
+  // Seed with the MOUNT-TIME tick so a remount (re-dock after closing the
+  // pop-out panel) doesn't re-fire the auto-switch for a transcript that
+  // arrived long ago — only a NEW arrival (tick actually advancing while
+  // mounted) should yank the user to the Transcript tab.
+  const lastArrivedTickRef = useRef(transcriptArrivedTick);
   useEffect(() => {
-    if (transcriptArrivedTick === 0) return; // ignore the boot value
+    if (transcriptArrivedTick === lastArrivedTickRef.current) return;
+    lastArrivedTickRef.current = transcriptArrivedTick;
     // A new transcript arrived → show it. App opens the drawer on the first
     // arrival, but that open() lands a render AFTER this effect, so the old
     // `if (open)` gate saw open===false and left the drawer on Queue. Switch
@@ -588,6 +594,8 @@ export function QueueDrawer({
       {activeTab === "transcript" && (
         <TranscriptViewer
           path={transcriptPath}
+          /* Same-path overwrites (Regenerate / Fix-timing) re-read via the tick. */
+          reloadToken={transcriptArrivedTick}
           playheadSeconds={transcriptPlayhead}
           fps={transcriptFps}
           onSeek={onTranscriptSeek}

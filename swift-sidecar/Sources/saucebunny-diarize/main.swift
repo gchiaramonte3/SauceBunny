@@ -54,10 +54,12 @@ import FluidAudio
 // keep the dependency footprint smaller by reading the buffer with
 // AVAudioFile directly.
 //
-// If the file isn't 16 kHz mono we let AVAudioFile's converter do the
-// resample — slower, but correct. The Sauce Bunny pipeline never
-// triggers that path in practice; it's a safety net for users who
-// invoke the binary against arbitrary audio from a terminal.
+// If the file isn't 16 kHz we resample with AVAudioConverter (AVAudioFile's
+// read(into:) only converts encoding/interleaving — NEVER sample rate, so the
+// old pass-through fed e.g. 48 kHz samples to a 16 kHz model and produced
+// timestamps stretched ~3×, silently). The Sauce Bunny pipeline always emits
+// 16 kHz mono WAV; this path is the safety net for users who invoke the
+// binary against arbitrary audio from a terminal.
 
 func loadWavAsFloatArray(path: String) throws -> [Float] {
   let url = URL(fileURLWithPath: path)
@@ -70,6 +72,40 @@ func loadWavAsFloatArray(path: String) throws -> [Float] {
                   userInfo: [NSLocalizedDescriptionKey: "AVAudioPCMBuffer alloc failed for \(path)"])
   }
   try file.read(into: buf)
+
+  // Resample + downmix in one converter pass when the rate isn't the model's
+  // 16 kHz. The already-16 kHz path below stays byte-identical.
+  let srcRate = file.processingFormat.sampleRate
+  if srcRate != 16_000 {
+    guard let dstFormat = AVAudioFormat(
+      commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false
+    ), let converter = AVAudioConverter(from: file.processingFormat, to: dstFormat) else {
+      throw NSError(domain: "saucebunny", code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "cannot build 16 kHz resampler for \(path)"])
+    }
+    let dstCapacity = AVAudioFrameCount((Double(file.length) * 16_000 / srcRate).rounded(.up)) + 1024
+    guard let dst = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: dstCapacity) else {
+      throw NSError(domain: "saucebunny", code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "resample buffer alloc failed for \(path)"])
+    }
+    var fed = false
+    var convErr: NSError?
+    let status = converter.convert(to: dst, error: &convErr) { _, outStatus in
+      if fed { outStatus.pointee = .endOfStream; return nil }
+      fed = true
+      outStatus.pointee = .haveData
+      return buf
+    }
+    if status == .error {
+      throw convErr ?? NSError(domain: "saucebunny", code: 3,
+                               userInfo: [NSLocalizedDescriptionKey: "resample to 16 kHz failed for \(path)"])
+    }
+    guard let ch = dst.floatChannelData else {
+      throw NSError(domain: "saucebunny", code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "resampled buffer has no float channel data"])
+    }
+    return Array(UnsafeBufferPointer(start: ch[0], count: Int(dst.frameLength)))
+  }
 
   let frames = Int(buf.frameLength)
   let channels = Int(buf.format.channelCount)
@@ -237,11 +273,22 @@ func writeEnvelope(
 // the WAV into the Float array SpeakerKit expects; diarize() takes
 // optional PyannoteDiarizationOptions for speaker-count hints.
 
-func runSpeakerKit(args: Args, emit: Bool) async throws -> ([Turn], String, String) {
+// Init split from diarize so `auto` mode can fall back to FluidAudio ONLY on
+// init/model errors — once diarization has STARTED, a failure is a real audio
+// issue and retrying another backend would just hide it (and report the
+// misleading exit 5 "both backends unavailable" instead of exit 3).
+func initSpeakerKit(emit: Bool) async throws -> SpeakerKit {
   emitStatus(["phase": "prepare", "message": "Loading SpeakerKit models…", "backend": "speakerkit"], emit: emit)
   // Init triggers HuggingFace model download on first run (cached after).
-  let kit = try await SpeakerKit()
+  return try await SpeakerKit()
+}
 
+func runSpeakerKit(args: Args, emit: Bool) async throws -> ([Turn], String, String) {
+  let kit = try await initSpeakerKit(emit: emit)
+  return try await runSpeakerKitDiarize(kit: kit, args: args, emit: emit)
+}
+
+func runSpeakerKitDiarize(kit: SpeakerKit, args: Args, emit: Bool) async throws -> ([Turn], String, String) {
   emitStatus(["phase": "process", "message": "Running SpeakerKit diarization…"], emit: emit)
   let audio = try loadWavAsFloatArray(path: args.input!)
 
@@ -297,6 +344,12 @@ func runFluidAudio(args: Args, emit: Bool) async throws -> ([Turn], String, Stri
       userInfo: [NSLocalizedDescriptionKey: "FluidAudio result lacks `segments` (API rename?)"]
     )
   }
+  // FluidAudio 0.14.x's TimedSpeakerSegment.speakerId is a STRING (numeric,
+  // from `String(nextSpeakerId)`; "" for unattributed). The old `as? Int` read
+  // was always nil, so EVERY segment was skipped and the fallback silently
+  // returned zero turns. Accept String or Int and normalize to SPEAKER_%02d;
+  // non-numeric IDs (future API churn) get stable first-seen indices.
+  var unknownIds: [String: Int] = [:]
   for child in Mirror(reflecting: segments).children {
     let segM = Mirror(reflecting: child.value)
     func num(_ name: String) -> Double? {
@@ -306,13 +359,26 @@ func runFluidAudio(args: Args, emit: Bool) async throws -> ([Turn], String, Stri
       if let i = v as? Int { return Double(i) }
       return nil
     }
-    func intF(_ name: String) -> Int? {
-      segM.children.first(where: { $0.label == name })?.value as? Int
+    func idF(_ name: String) -> String? {
+      guard let v = segM.children.first(where: { $0.label == name })?.value else { return nil }
+      if let s = v as? String { return s }
+      if let i = v as? Int { return String(i) }
+      return nil
     }
-    guard let sid = intF("speakerId"),
+    guard let sid = idF("speakerId"), !sid.isEmpty,
           let s = num("startTimeSeconds"),
           let e = num("endTimeSeconds") else { continue }
-    turns.append(Turn(speaker: String(format: "SPEAKER_%02d", sid), start: s, end: e))
+    let idx: Int
+    if let n = Int(sid) {
+      idx = n
+    } else if let seen = unknownIds[sid] {
+      idx = seen
+    } else {
+      let next = unknownIds.count
+      unknownIds[sid] = next
+      idx = next
+    }
+    turns.append(Turn(speaker: String(format: "SPEAKER_%02d", idx), start: s, end: e))
   }
   return (turns, "fluidaudio-offline-diarizer", FLUIDAUDIO_PACKAGE_VERSION)
 }
@@ -323,11 +389,23 @@ func prepareModelsOnly(backend: Backend, emit: Bool) async {
   emitStatus(["phase": "prepare", "message": "Loading diarization models…"], emit: emit)
   do {
     switch backend {
-    case .speakerkit, .auto:
+    case .speakerkit:
       _ = try await SpeakerKit()
     case .fluidaudio:
       let manager = OfflineDiarizerManager(config: OfflineDiarizerConfig())
       try await manager.prepareModels()
+    case .auto:
+      // Mirror the diarize path's auto semantics: SpeakerKit first, FluidAudio
+      // on init failure. Otherwise a SpeakerKit download hiccup reports the
+      // pre-warm as failed even though a real run would succeed via fallback.
+      do {
+        _ = try await SpeakerKit()
+      } catch let primaryErr {
+        eprintln("warning: SpeakerKit prepare failed (\(primaryErr)) — preparing FluidAudio fallback.")
+        emitStatus(["phase": "fallback", "message": "SpeakerKit unavailable, preparing FluidAudio…"], emit: emit)
+        let manager = OfflineDiarizerManager(config: OfflineDiarizerConfig())
+        try await manager.prepareModels()
+      }
     }
   } catch {
     eprintln("error: model preparation failed: \(error)")
@@ -386,9 +464,13 @@ struct Main {
         exit(3)
       }
     case .auto:
+      // Fallback fires ONLY on init/model failure. A post-init failure
+      // (unreadable WAV, processing error) is a real audio problem — exit 3
+      // so the Rust caller maps it to "audio processing failed" instead of
+      // the misleading "both backends unavailable".
+      var kit: SpeakerKit? = nil
       do {
-        let r = try await runSpeakerKit(args: args, emit: args.emitProgress)
-        (turns, modelName, modelVersion) = r
+        kit = try await initSpeakerKit(emit: args.emitProgress)
       } catch let primaryErr {
         eprintln("warning: SpeakerKit unavailable (\(primaryErr)) — falling back to FluidAudio.")
         emitStatus(["phase": "fallback", "message": "SpeakerKit unavailable, trying FluidAudio…"], emit: args.emitProgress)
@@ -398,6 +480,15 @@ struct Main {
         } catch let fallbackErr {
           eprintln("error: both backends failed. SpeakerKit: \(primaryErr). FluidAudio: \(fallbackErr)")
           exit(5)
+        }
+      }
+      if let kit {
+        do {
+          let r = try await runSpeakerKitDiarize(kit: kit, args: args, emit: args.emitProgress)
+          (turns, modelName, modelVersion) = r
+        } catch {
+          eprintln("error: SpeakerKit failed: \(error)")
+          exit(3)
         }
       }
     }

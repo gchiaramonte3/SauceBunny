@@ -506,7 +506,7 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
 
     let cmd = ytdlp(&app)?;
 
-    let mut caption_args: Vec<String> = vec![
+    let caption_args: Vec<String> = vec![
         "--write-subs".into(),
         "--write-auto-subs".into(),
         // Explicit, finite list of English variants. The earlier glob
@@ -539,10 +539,18 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
         YT_EXTRACTOR_ARGS[1].into(),
         "-o".into(), template_str.clone(),
     ];
-    caption_args.extend(cookies_args(args.cookies_browser.as_deref()));
-    caption_args.push(args.url.clone());
-    let (mut rx, child) = cmd
-        .args(caption_args)
+    // `caption_args` stays the cookie-free, URL-free base; each attempt appends
+    // the cookie flag (or not) + the URL, so a cookied failure can be retried
+    // public (mirrors spawn_video_clip — some sites serve logged-in pages
+    // yt-dlp can't parse). The command itself returns immediately (fire-and-
+    // forget), so the retry must live HERE in the monitor task, not in a
+    // frontend invoke wrapper that resolves before the download finishes.
+    let cookied = cookies_active(args.cookies_browser.as_deref());
+    let mut first_args = caption_args.clone();
+    first_args.extend(cookies_args(args.cookies_browser.as_deref()));
+    first_args.push(args.url.clone());
+    let (rx, child) = cmd
+        .args(first_args)
         .spawn()
         .map_err(|e| format!("failed to spawn yt-dlp: {e}"))?;
     // Register so the UI's Stop / a source switch can cancel — caption runs can
@@ -554,129 +562,167 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
     let app_for = app.clone();
     let out_dir_for = out_dir.clone();
     let safe_for = safe.clone();
+    let base_args = caption_args;
+    let url_for = args.url.clone();
 
     tokio::spawn(async move {
+        // Scan the output dir for caption files — runs after EVERY attempt,
+        // even on nonzero exit. yt-dlp can 429 on a single phantom translation
+        // track and still have written 1–3 perfectly good English tracks before
+        // the failure. The presence of the file on disk is the source of truth,
+        // not the exit code.
+        //
+        // Pick the best variant by preference:
+        //   en-US  > en  > en-orig  > anything else
+        // (has_speakers, is_auto, lang/format rank, path). Sort keys in
+        // priority order:
+        //   1. has_speakers — a creator track with `<v Name>` voice tags
+        //      carries the "who's talking" data we want.
+        //   2. NOT auto-generated — manual/creator captions are human-corrected
+        //      and far more accurate than YouTube's ASR auto-captions.
+        //   3. language/format tier.
+        fn scan_best(dir: &std::path::Path, safe_for: &str) -> Option<String> {
+            let mut candidates: Vec<(bool, bool, u8, String)> = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    let name = p
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    // Only THIS job's language variants: `<safe>.<lang>.<vtt|srt>`.
+                    // Requiring `<safe>.` rejects a different video that merely
+                    // shares a title prefix ("My Video" vs "My Video Part 2");
+                    // requiring a language segment (≥2 dots after the base)
+                    // rejects a stale bare `<safe>.srt` from an earlier Whisper
+                    // run in the same dir — which the manual-preferred sort would
+                    // otherwise rank ABOVE the freshly downloaded caption.
+                    let rest = match name.strip_prefix(safe_for) {
+                        Some(r) if r.starts_with('.') => r,
+                        _ => continue,
+                    };
+                    if !(rest.ends_with(".vtt") || rest.ends_with(".srt"))
+                        || rest.matches('.').count() < 2
+                    {
+                        continue;
+                    }
+                    // Lower rank = preferred. Prefer .vtt over .srt at
+                    // every language tier — vtt is what we now write and
+                    // it's the format that still carries speaker voice
+                    // tags (a stray .srt would have lost them).
+                    let rank: u8 = if name.ends_with(".en-US.vtt")   { 0 }
+                              else if name.ends_with(".en.vtt")      { 1 }
+                              else if name.ends_with(".en-orig.vtt") { 2 }
+                              else if name.ends_with(".en-US.srt")   { 3 }
+                              else if name.ends_with(".en.srt")      { 4 }
+                              else if name.ends_with(".en-orig.srt") { 5 }
+                              else                                   { 6 };
+                    // Caption files are tiny — read each once to sniff
+                    // for speaker labels AND auto-vs-manual.
+                    let body = std::fs::read_to_string(&p).unwrap_or_default();
+                    let has_speakers = caption_has_speaker_tags(&body);
+                    let is_auto = caption_is_auto_generated(&body);
+                    candidates.push((has_speakers, is_auto, rank, p.to_string_lossy().to_string()));
+                }
+            }
+            // Speaker-bearing first, then manual over auto, then by the
+            // language/format preference (false sorts before true).
+            candidates.sort_by_key(|(has_spk, is_auto, rank, _)| (!*has_spk, *is_auto, *rank));
+            candidates.into_iter().next().map(|(_, _, _, p)| p)
+        }
+
         let mut saw_auth_error = false;
-        while let Some(event) = rx.recv().await {
-            match event {
-                CommandEvent::Stdout(b) | CommandEvent::Stderr(b) => {
-                    let raw = String::from_utf8_lossy(&b).to_string();
-                    for line in raw.lines() {
-                        let line = line.trim_end();
-                        if line.is_empty() {
-                            continue;
+        let mut attempt = 1;
+        let mut rx = rx;
+        loop {
+            let mut exit_code: Option<i32> = None;
+            let mut signalled = false;
+            while let Some(event) = rx.recv().await {
+                match event {
+                    CommandEvent::Stdout(b) | CommandEvent::Stderr(b) => {
+                        let raw = String::from_utf8_lossy(&b).to_string();
+                        for line in raw.lines() {
+                            let line = line.trim_end();
+                            if line.is_empty() {
+                                continue;
+                            }
+                            if is_youtube_auth_error_line(line) { saw_auth_error = true; }
+                            let tag = classify_line(line);
+                            let _ = app_for.emit(
+                                "captions-log",
+                                LogEvent {
+                                    job_id: job_for.clone(),
+                                    stream: "stdout".into(),
+                                    tag,
+                                    line: line.to_string(),
+                                },
+                            );
                         }
-                        if is_youtube_auth_error_line(line) { saw_auth_error = true; }
-                        let tag = classify_line(line);
+                    }
+                    CommandEvent::Terminated(payload) => {
+                        let _ = app_for.state::<JobRegistry>().take(&job_for);
+                        exit_code = payload.code;
+                        signalled = payload.signal.is_some();
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            let found = scan_best(&out_dir_for, &safe_for);
+
+            // Cookied attempt produced nothing → retry once WITHOUT cookies
+            // (LinkedIn/public-post failure mode; mirrors spawn_video_clip).
+            // Never resurrect a user cancel (signalled), and keep the second
+            // child registered under the SAME job_id so Stop still works.
+            if found.is_none() && attempt == 1 && cookied && !signalled {
+                if let Ok(cmd2) = ytdlp(&app_for) {
+                    let mut second = base_args.clone();
+                    second.push(url_for.clone());
+                    if let Ok((rx2, child2)) = cmd2.args(second).spawn() {
                         let _ = app_for.emit(
                             "captions-log",
                             LogEvent {
                                 job_id: job_for.clone(),
                                 stream: "stdout".into(),
-                                tag,
-                                line: line.to_string(),
+                                tag: "info".into(),
+                                line: "Caption download failed with sign-in cookies — retrying without…".into(),
                             },
                         );
+                        app_for.state::<JobRegistry>().insert(job_for.clone(), child2);
+                        rx = rx2;
+                        attempt = 2;
+                        continue;
                     }
                 }
-                CommandEvent::Terminated(payload) => {
-                    let _ = app_for.state::<JobRegistry>().take(&job_for);
-                    // Always scan the output dir for caption files, even on
-                    // nonzero exit. yt-dlp can 429 on a single phantom
-                    // translation track and still have written 1–3
-                    // perfectly good English tracks before the failure.
-                    // The presence of the file on disk is the source of
-                    // truth, not the exit code.
-                    //
-                    // Pick the best variant by preference:
-                    //   en-US  > en  > en-orig  > anything else
-                    // (en-US is usually the highest-quality human or
-                    // auto-cap track; en-orig is the original-language
-                    // fallback and least preferred.)
-                    // (has_speakers, is_auto, lang/format rank, path). Sort keys
-                    // in priority order:
-                    //   1. has_speakers — a creator track with `<v Name>` voice
-                    //      tags carries the "who's talking" data we want.
-                    //   2. NOT auto-generated — manual/creator captions are
-                    //      human-corrected and far more accurate than YouTube's
-                    //      ASR auto-captions (the rolling `<c>`-tagged tracks).
-                    //   3. language/format tier.
-                    let mut candidates: Vec<(bool, bool, u8, String)> = Vec::new();
-                    if let Ok(entries) = std::fs::read_dir(&out_dir_for) {
-                        for entry in entries.flatten() {
-                            let p = entry.path();
-                            let name = p
-                                .file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("")
-                                .to_string();
-                            // Only THIS job's language variants: `<safe>.<lang>.<vtt|srt>`.
-                            // Requiring `<safe>.` rejects a different video that merely
-                            // shares a title prefix ("My Video" vs "My Video Part 2");
-                            // requiring a language segment (≥2 dots after the base)
-                            // rejects a stale bare `<safe>.srt` from an earlier Whisper
-                            // run in the same dir — which the manual-preferred sort would
-                            // otherwise rank ABOVE the freshly downloaded caption.
-                            let rest = match name.strip_prefix(&safe_for) {
-                                Some(r) if r.starts_with('.') => r,
-                                _ => continue,
-                            };
-                            if !(rest.ends_with(".vtt") || rest.ends_with(".srt"))
-                                || rest.matches('.').count() < 2
-                            {
-                                continue;
-                            }
-                            // Lower rank = preferred. Prefer .vtt over .srt at
-                            // every language tier — vtt is what we now write and
-                            // it's the format that still carries speaker voice
-                            // tags (a stray .srt would have lost them).
-                            let rank: u8 = if name.ends_with(".en-US.vtt")   { 0 }
-                                      else if name.ends_with(".en.vtt")      { 1 }
-                                      else if name.ends_with(".en-orig.vtt") { 2 }
-                                      else if name.ends_with(".en-US.srt")   { 3 }
-                                      else if name.ends_with(".en.srt")      { 4 }
-                                      else if name.ends_with(".en-orig.srt") { 5 }
-                                      else                                   { 6 };
-                            // Caption files are tiny — read each once to sniff
-                            // for speaker labels AND auto-vs-manual.
-                            let body = std::fs::read_to_string(&p).unwrap_or_default();
-                            let has_speakers = caption_has_speaker_tags(&body);
-                            let is_auto = caption_is_auto_generated(&body);
-                            candidates.push((has_speakers, is_auto, rank, p.to_string_lossy().to_string()));
-                        }
-                    }
-                    // Speaker-bearing first, then manual over auto, then by the
-                    // language/format preference (false sorts before true).
-                    candidates.sort_by_key(|(has_spk, is_auto, rank, _)| (!*has_spk, *is_auto, *rank));
-                    let found: Option<String> = candidates.into_iter().next().map(|(_, _, _, p)| p);
-
-                    let exit_ok = payload.code == Some(0);
-                    let success = found.is_some();
-                    let error = if !success {
-                        Some(if saw_auth_error {
-                            YT_AUTH_HINT.into()
-                        } else if !exit_ok {
-                            format!("yt-dlp exited with code {:?} and no captions were written", payload.code)
-                        } else {
-                            "No captions found for this source".into()
-                        })
-                    } else {
-                        None
-                    };
-                    let _ = app_for.emit(
-                        "captions-done",
-                        DoneEvent {
-                            job_id: job_for.clone(),
-                            success,
-                            code: payload.code,
-                            path: found,
-                            error,
-                        },
-                    );
-                    break;
-                }
-                _ => {}
             }
+
+            let exit_ok = exit_code == Some(0);
+            let success = found.is_some();
+            let error = if !success {
+                Some(if signalled {
+                    "Cancelled".into()
+                } else if saw_auth_error {
+                    YT_AUTH_HINT.into()
+                } else if !exit_ok {
+                    format!("yt-dlp exited with code {exit_code:?} and no captions were written")
+                } else {
+                    "No captions found for this source".into()
+                })
+            } else {
+                None
+            };
+            let _ = app_for.emit(
+                "captions-done",
+                DoneEvent {
+                    job_id: job_for.clone(),
+                    success,
+                    code: exit_code,
+                    path: found,
+                    error,
+                },
+            );
+            break;
         }
     });
 

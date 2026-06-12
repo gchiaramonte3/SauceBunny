@@ -6,6 +6,7 @@ import {
   resolveAliasChain,
   resolveSpeakerName,
   speakerColor,
+  speakerOverridesKey,
   SPEAKERS_CHANGED_EVENT,
   type SpeakerOverrides,
 } from "./transcript/helpers";
@@ -102,6 +103,10 @@ function splitCaptionLines(text: string, firstMax = MAX_LINE, max = MAX_LINE): s
 type Props = {
   /** Path to the active transcript (SRT/VTT). Null when none is loaded. */
   path: string | null;
+  /** Bumped by App on every transcript arrival. Regenerate / Fix-timing
+   *  overwrite the SAME path, so without this the overlay would keep showing
+   *  the old cues the user just paid a Whisper run to replace. */
+  reloadToken?: number;
   /** Current playhead position, in seconds. */
   currentSec: number;
   /** Whether the captions toggle in the transport bar is on. */
@@ -119,47 +124,76 @@ type Props = {
  * WKWebView would render a native <track>. It also means the diarized
  * speaker name rides along on screen.
  */
-export function CaptionOverlay({ path, currentSec, enabled, style }: Props) {
+export function CaptionOverlay({ path, reloadToken, currentSec, enabled, style }: Props) {
   const [cues, setCues] = useState<Cue[]>([]);
-  // The path the current `cues` belong to. Guards against showing one
-  // source's captions over another's video during the async load gap.
+  // The path+token the current `cues` belong to. Guards against showing one
+  // source's captions over another's video during the async load gap, while
+  // the token component forces a re-read when the SAME path is overwritten.
   const loadedFor = useRef<string | null>(null);
+  const loadKey = path ? `${path}#${reloadToken ?? 0}` : null;
 
   // Speaker renames live in the transcript panel's localStorage store; mirror
   // them here so a rename ("Speaker 1" → "Tom Jonathan") updates the on-video
   // caption immediately. The panel fires SPEAKERS_CHANGED_EVENT on every edit.
   const [overrides, setOverrides] = useState<SpeakerOverrides>(() => loadSpeakerOverrides(path));
+  // Last raw localStorage string we applied — skip setState when unchanged so
+  // the cross-window poll below doesn't re-render every tick.
+  const overridesRawRef = useRef<string | null>(null);
   useEffect(() => {
-    const reload = () => setOverrides(loadSpeakerOverrides(path));
-    reload();
+    const key = path ? speakerOverridesKey(path) : null;
+    const reload = (force = false) => {
+      let raw: string | null = null;
+      if (key) { try { raw = localStorage.getItem(key); } catch { /* ignore */ } }
+      if (!force && raw === overridesRawRef.current) return;
+      overridesRawRef.current = raw;
+      setOverrides(loadSpeakerOverrides(path));
+    };
+    reload(true);
     const onChange = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (!detail || detail.path === path) reload();
+      if (!detail || detail.path === path) reload(true);
     };
+    // Same-window fast path (the panel fires this on every edit)…
     window.addEventListener(SPEAKERS_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(SPEAKERS_CHANGED_EVENT, onChange);
+    // …plus cross-WINDOW paths: renames made in the popped-out panel land in
+    // shared localStorage but its CustomEvent never reaches this webview.
+    // `storage` is the native cross-window signal; WKWebView delivery is
+    // unreliable enough (see use-panel-bus) that a slow poll + focus re-read
+    // back it up. The raw-string dedupe makes all three cheap.
+    const onStorage = (e: StorageEvent) => { if (!key || e.key === null || e.key === key) reload(); };
+    const onFocus = () => reload();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", onFocus);
+    const poll = window.setInterval(() => reload(), 1500);
+    return () => {
+      window.removeEventListener(SPEAKERS_CHANGED_EVENT, onChange);
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(poll);
+    };
   }, [path]);
 
   useEffect(() => {
-    if (!path) { setCues([]); loadedFor.current = null; return; }
+    if (!path || !loadKey) { setCues([]); loadedFor.current = null; return; }
     // Only read the file once captions are actually on, and only once per
-    // path — toggling off then on again doesn't re-read.
-    if (!enabled || loadedFor.current === path) return;
+    // path+token — toggling off then on again doesn't re-read, but a
+    // regeneration that overwrote the same path (token bump) does.
+    if (!enabled || loadedFor.current === loadKey) return;
     let cancelled = false;
     (async () => {
       try {
         const text = await invoke<string>("read_text_file_capped", { path, maxBytes: 8 * 1024 * 1024 });
         if (cancelled) return;
         setCues(parseSrt(text));
-        loadedFor.current = path;
+        loadedFor.current = loadKey;
       } catch {
         if (!cancelled) { setCues([]); loadedFor.current = null; }
       }
     })();
     return () => { cancelled = true; };
-  }, [enabled, path]);
+  }, [enabled, path, loadKey]);
 
-  if (!enabled || loadedFor.current !== path || cues.length === 0) return null;
+  if (!enabled || loadedFor.current !== loadKey || cues.length === 0) return null;
   // Shift the lookup by the user's sync offset (streaming drift correction).
   const t = currentSec + (style?.syncSec ?? 0);
   const active = cues.find((c) => t >= c.start && t < c.end);

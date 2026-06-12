@@ -7,7 +7,7 @@
  * a banner if they don't match — which is the unambiguous signal that
  * `npm run tauri dev` needs to be restarted so cargo rebuilds the binary.
  */
-export const EXPECTED_BACKEND_BUILD_ID = "2026-06-10-r84-audio-master";
+export const EXPECTED_BACKEND_BUILD_ID = "2026-06-11-r85-review-closeout";
 
 export type BuildIdCheck =
   | { kind: "ok"; id: string }

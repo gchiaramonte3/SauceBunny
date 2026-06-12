@@ -42,15 +42,19 @@ export type Cue = {
 };
 
 /**
- * Parse `HH:MM:SS,mmm` (SRT) or `HH:MM:SS.mmm` (VTT) into seconds. Returns
- * NaN on garbage; the caller filters those out.
+ * Parse `HH:MM:SS,mmm` (SRT), `HH:MM:SS.mmm` (VTT), or the WebVTT
+ * optional-hours form `MM:SS.mmm` into seconds. Returns NaN on garbage;
+ * the caller filters those out.
  */
 function tcToSeconds(tc: string): number {
   // Accept either comma (SRT) or dot (VTT) as the millisecond separator.
   // Some whisper builds emit a 2-digit hour without leading zero — be lenient.
-  const m = tc.trim().match(/^(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})$/);
+  // The WebVTT spec makes hours OPTIONAL (Rev, Premiere, browser-exported VTT
+  // all emit "00:01.000 --> 00:04.000") — without accepting that form a valid
+  // imported VTT parses to zero cues and shows "Transcript is empty".
+  const m = tc.trim().match(/^(?:(\d{1,2}):)?(\d{2}):(\d{2})[,.](\d{1,3})$/);
   if (!m) return NaN;
-  const h = parseInt(m[1], 10);
+  const h = m[1] ? parseInt(m[1], 10) : 0; // hour group absent in MM:SS.mmm
   const mi = parseInt(m[2], 10);
   const s = parseInt(m[3], 10);
   // Pad ms to 3 digits ("5" → "500", "12" → "120") to keep semantics
@@ -60,7 +64,7 @@ function tcToSeconds(tc: string): number {
   return h * 3600 + mi * 60 + s + ms / 1000;
 }
 
-const TIMESTAMP_LINE = /^\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})/;
+const TIMESTAMP_LINE = /^\s*((?:\d{1,2}:)?\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*((?:\d{1,2}:)?\d{2}:\d{2}[,.]\d{1,3})/;
 
 // --- speaker extraction patterns ---------------------------------------------
 
@@ -123,11 +127,18 @@ function stripCaptionMarkup(s: string): string {
     .replace(/<\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}>/g, "") // VTT word timing
     .replace(/<\/?[a-zA-Z][^>]*>/g, "")                // tag stripping (incl. <v>)
     .replace(/\{\\?[a-zA-Z][^}]*\}/g, "")              // ASS/SSA overrides
-    .replace(/&amp;/g, "&")
+    // Entity decoding. &nbsp;/&#160; → plain space (YouTube tracks are full of
+    // them; undecoded they render literally in the reader and every export).
+    // &amp; must be decoded LAST: doing it first turns "&amp;lt;" into "&lt;"
+    // which the next replace double-decodes to "<" instead of the intended
+    // literal "&lt;".
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&#160;/g, " ")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&#39;/g, "'")
     .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ")
     .trim();
 }

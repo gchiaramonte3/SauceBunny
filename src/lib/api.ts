@@ -79,7 +79,7 @@ export const api = {
   whisper: {
     listModels:       ()                                => invoke<WhisperModel[]>("list_whisper_models"),
     downloadModel:    (args: DownloadModelArgs)         => invoke<string>("download_whisper_model", { args }),
-    deleteModel:      (id: string)                      => invoke<void>("delete_whisper_model", { id }),
+    deleteModel:      (modelId: string)                 => invoke<void>("delete_whisper_model", { modelId }),
     generate:         (args: GenerateTranscriptArgs)    => invoke<string>("generate_transcript", { args }),
     transcribeLocal:  (args: TranscribeLocalArgs)       => invoke<string>("transcribe_local_file", { args }),
     transcribePrepared: (args: TranscribePreparedWavArgs) => invoke<string>("transcribe_prepared_wav", { args }),

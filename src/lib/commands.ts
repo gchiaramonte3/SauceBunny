@@ -239,7 +239,9 @@ export function buildCommands(d: CommandDeps): Command[] {
  *  - exact-substring hit in label  (10)
  *  - exact-substring hit in keywords/group/description (5 each)
  *  - per-char in-order match in label (1 each, +2 if at word start)
- * Higher = better. Returns 0 (filtered out) when no chars match at all.
+ * Higher = better. Returns 0 (filtered out) only when there is no substring
+ * hit anywhere AND the in-order label fuzzy match fails — a keyword/description
+ * hit stands on its own (that's the whole point of the keywords field).
  */
 export function scoreCommand(cmd: Command, query: string): number {
   const q = query.trim().toLowerCase();
@@ -250,6 +252,10 @@ export function scoreCommand(cmd: Command, query: string): number {
   let score = 0;
   if (label.includes(q)) score += 10;
   if (haystack.includes(q)) score += 5;
+  // A substring hit anywhere survives the label gate below — without this,
+  // searching "clips" could never find "Toggle queue" even though its
+  // keywords declare it (the label has no in-order "clips" chars).
+  const substringHit = score > 0;
 
   // Per-char in-order match against the label.
   let qi = 0;
@@ -262,6 +268,8 @@ export function scoreCommand(cmd: Command, query: string): number {
     }
     prevWasSeparator = ch === " " || ch === "-" || ch === "_";
   }
-  if (qi < q.length) return 0; // not all query chars matched in order
+  // Label fuzzy match incomplete → keep a substring hit's score; zero out
+  // pure misses.
+  if (qi < q.length) return substringHit ? score : 0;
   return score;
 }

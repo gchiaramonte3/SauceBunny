@@ -142,7 +142,12 @@ export function prettyHost(host: string): string {
     "facebook.com": "Facebook",
     "twitch.tv": "Twitch",
   };
-  if (known[h]) return known[h];
+  // Match by registrable-domain suffix, not exact host — otherwise
+  // old.reddit.com → "Old" and mobile.twitter.com → "Mobile" in the
+  // sign-in reminder copy.
+  for (const [k, v] of Object.entries(known)) {
+    if (h === k || h.endsWith("." + k)) return v;
+  }
   const label = h.split(".")[0] || h;
   return label ? label.charAt(0).toUpperCase() + label.slice(1) : "this site";
 }

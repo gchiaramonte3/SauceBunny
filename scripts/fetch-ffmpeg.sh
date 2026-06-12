@@ -50,7 +50,7 @@ echo "→ Discovering latest osxexperts.net arm64 build"
 FFMPEG_FILENAME="$(curl -fs https://www.osxexperts.net/ \
   | grep -oE 'ffmpeg[0-9]+arm\.zip' \
   | sort -u \
-  | tail -1)"
+  | tail -1 || true)"  # `|| true`: grep miss must reach the diagnostic below, not die under set -e/pipefail
 if [ -z "${FFMPEG_FILENAME}" ]; then
   echo "✗ couldn't find an ffmpeg*arm.zip link on osxexperts.net"
   echo "  (page layout may have changed; check https://www.osxexperts.net/)"

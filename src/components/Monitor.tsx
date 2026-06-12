@@ -73,7 +73,7 @@ type Props = {
   useWebCodecs?: boolean;
   onMediaError?: (msg: string) => void;
   /** Transient toast — auto-fades after a few seconds. */
-  toast: { kind: ToastKind; title: string; body?: string } | null;
+  toast: { id: number; kind: ToastKind; title: string; body?: string } | null;
   onToastDismiss: () => void;
   onPlayerTimeUpdate?: (seconds: number) => void;
   onPlayerStateChange?: (playing: boolean) => void;
@@ -81,6 +81,9 @@ type Props = {
   onSurfaceClick?: () => void;
   /** Active transcript path (SRT/VTT) for the on-video caption overlay. */
   transcriptPath?: string | null;
+  /** Bumped on every transcript arrival — forces a cue re-read when a
+   *  regeneration overwrote the SAME path. */
+  transcriptReloadToken?: number;
   /** Current playhead position in seconds — picks which caption cue shows. */
   currentSec?: number;
   /** Whether the transport-bar captions toggle is on. */
@@ -134,7 +137,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     streamLoadingPhase,
     toast, onToastDismiss,
     onPlayerTimeUpdate, onPlayerStateChange, onPlayerReady, onSurfaceClick,
-    transcriptPath, currentSec, captionsOn, captionStyle, tcOverlay,
+    transcriptPath, transcriptReloadToken, currentSec, captionsOn, captionStyle, tcOverlay,
   } = props;
 
   const natural = metadata?.width && metadata?.height ? metadata.width / metadata.height : 16 / 9;
@@ -293,6 +296,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             cues itself when captions are toggled on. */}
         <CaptionOverlay
           path={transcriptPath ?? null}
+          reloadToken={transcriptReloadToken}
           currentSec={currentSec ?? 0}
           enabled={!!captionsOn}
           style={captionStyle}
@@ -374,6 +378,9 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             bell up in the toolbar — the canvas stays clean. */}
         {toast && (
           <CanvasToast
+            /* Keyed on the monotonic id: replacing a visible toast remounts
+               with a FRESH countdown instead of inheriting the old timer. */
+            key={toast.id}
             kind={toast.kind}
             title={toast.title}
             body={toast.body}
