@@ -24,14 +24,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # The Tauri build script validates that every externalBin entry
-      # in tauri.conf.json exists on disk. CI doesn't have the
-      # gigabyte-sized sidecar binaries (yt-dlp, ffmpeg, whisper-cli,
-      # saucebunny-diarize), so stub them as zero-byte files just to
-      # get past the resource-path check.
+      # in tauri.conf.json exists on disk. Sidecar binaries are not in
+      # git (devs run `npm run setup`), so stub them as zero-byte files
+      # just to get past the resource-path check.
       - name: Stub sidecars so cargo check passes
         run: |
           mkdir -p src-tauri/binaries
-          for name in yt-dlp ffmpeg whisper-cli saucebunny-diarize; do
+          for name in yt-dlp ffmpeg ffprobe whisper-cli saucebunny-diarize; do
             touch "src-tauri/binaries/${name}-aarch64-apple-darwin"
             chmod +x "src-tauri/binaries/${name}-aarch64-apple-darwin"
           done

@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "setup": "bash scripts/setup.sh",
     "build:diarizer": "bash scripts/build-diarizer.sh",
     "build:diarizer:universal": "bash scripts/build-diarizer.sh --universal",
     "refresh:sidecars": "bash scripts/refresh-sidecars.sh",
