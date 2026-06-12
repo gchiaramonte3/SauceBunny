@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "setup": "bash scripts/setup.sh",
+    "test": "vitest run",
     "build:diarizer": "bash scripts/build-diarizer.sh",
     "build:diarizer:universal": "bash scripts/build-diarizer.sh --universal",
     "refresh:sidecars": "bash scripts/refresh-sidecars.sh",
@@ -37,6 +38,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.7.2",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^4.1.8"
   }
 }

@@ -279,3 +279,39 @@ pub(crate) struct DoneEvent {
 
 
 
+
+#[cfg(test)]
+mod tests {
+    use super::short_err;
+
+    #[test]
+    fn short_err_picks_last_meaningful_line() {
+        let blob = "WARNING: something benign\nERROR: the real problem\n\n";
+        assert_eq!(short_err(blob), "ERROR: the real problem");
+    }
+
+    #[test]
+    fn short_err_falls_back_to_whole_blob_when_all_warnings() {
+        let blob = "WARNING: only warnings here";
+        assert_eq!(short_err(blob), blob);
+    }
+
+    // Regression: byte-slicing at 400 mid-codepoint panicked, killing the
+    // task right as it tried to report a failure (UI hung forever).
+    #[test]
+    fn short_err_truncates_multibyte_on_char_boundary() {
+        // 200 × '→' (3 bytes each) = 600 bytes; byte 400 lands mid-codepoint.
+        let long: String = "→".repeat(200);
+        let out = short_err(&long);
+        assert!(out.ends_with('…'));
+        assert!(out.len() <= 404); // ≤400 content bytes + the ellipsis
+        // Must be valid UTF-8 end to end (would have panicked before the fix).
+        assert!(out.chars().all(|c| c == '→' || c == '…'));
+    }
+
+    #[test]
+    fn short_err_leaves_short_messages_alone() {
+        assert_eq!(short_err("tiny"), "tiny");
+        assert_eq!(short_err(""), "");
+    }
+}

@@ -1,0 +1,139 @@
+import { describe, expect, it } from "vitest";
+import { parseSrt, groupIntoTurns, fmtTime } from "./srt";
+
+// The parser is the single highest-blast-radius pure module in the app: the
+// transcript panel, the on-video captions, search, click-to-seek, and every
+// export all read its output. Each regression test below pins a bug the r85
+// review actually found in production code.
+
+const SRT = `1
+00:00:00,190 --> 00:00:10,780
+[SPEAKER_00]: The greatest weapon of humankind
+
+2
+00:00:10,780 --> 00:00:19,910
+[SPEAKER_01]: is their very own mind.
+`;
+
+describe("parseSrt — SRT basics", () => {
+  it("parses cues with machine speaker tags", () => {
+    const cues = parseSrt(SRT);
+    expect(cues).toHaveLength(2);
+    expect(cues[0].start).toBeCloseTo(0.19, 3);
+    expect(cues[0].end).toBeCloseTo(10.78, 3);
+    expect(cues[0].speaker).toBe("SPEAKER_00");
+    expect(cues[0].text).toBe("The greatest weapon of humankind");
+    expect(cues[1].speaker).toBe("SPEAKER_01");
+  });
+
+  it("tolerates CRLF line endings and a UTF-8 BOM", () => {
+    const crlf = "﻿" + SRT.replace(/\n/g, "\r\n");
+    const cues = parseSrt(crlf);
+    expect(cues).toHaveLength(2);
+    expect(cues[0].text).toContain("greatest weapon");
+  });
+});
+
+describe("parseSrt — WebVTT", () => {
+  it("parses a standard VTT with hours", () => {
+    const vtt = `WEBVTT
+
+00:00:01.000 --> 00:00:04.000
+Hello there.
+`;
+    const cues = parseSrt(vtt);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].start).toBeCloseTo(1, 3);
+  });
+
+  // r85 review: hour-less MM:SS.mmm (Rev, Premiere, browser exports) parsed
+  // to ZERO cues and the viewer showed "Transcript is empty".
+  it("parses hour-less MM:SS.mmm timestamps", () => {
+    const vtt = `WEBVTT
+
+00:01.000 --> 00:04.500
+First line.
+
+01:02.250 --> 01:05.000
+Second line.
+`;
+    const cues = parseSrt(vtt);
+    expect(cues).toHaveLength(2);
+    expect(cues[0].start).toBeCloseTo(1, 3);
+    expect(cues[0].end).toBeCloseTo(4.5, 3);
+    expect(cues[1].start).toBeCloseTo(62.25, 3);
+  });
+
+  it("extracts <v Name> voice tags as speakers and strips the markup", () => {
+    const vtt = `WEBVTT
+
+00:00:01.000 --> 00:00:04.000
+<v Roger Bingham>We are in New York City
+`;
+    const cues = parseSrt(vtt);
+    expect(cues[0].speaker).toBe("Roger Bingham");
+    expect(cues[0].text).toBe("We are in New York City");
+  });
+});
+
+describe("parseSrt — entity decoding", () => {
+  // r85 review: &nbsp; rendered literally in the reader and all exports;
+  // &amp; decoded FIRST double-decoded "&amp;lt;" into "<".
+  it("decodes &nbsp; and &#160; to spaces", () => {
+    const srt = `1
+00:00:01,000 --> 00:00:02,000
+he's [&nbsp;__&nbsp;] bricks&#160;now
+`;
+    const cues = parseSrt(srt);
+    expect(cues[0].text).not.toContain("&nbsp;");
+    expect(cues[0].text).toBe("he's [ __ ] bricks now");
+  });
+
+  it("decodes &amp; LAST so &amp;lt; yields a literal &lt;", () => {
+    const srt = `1
+00:00:01,000 --> 00:00:02,000
+a &amp;lt; b &amp; c &lt; d
+`;
+    const cues = parseSrt(srt);
+    expect(cues[0].text).toBe("a &lt; b & c < d");
+  });
+});
+
+describe("parseSrt — malformed input", () => {
+  it("returns no cues for garbage and empty input", () => {
+    expect(parseSrt("")).toHaveLength(0);
+    expect(parseSrt("not a subtitle file at all")).toHaveLength(0);
+  });
+
+  it("skips blocks with broken timestamps but keeps the good ones", () => {
+    const srt = `1
+99:99 --> nonsense
+Bad block.
+
+2
+00:00:01,000 --> 00:00:02,000
+Good block.
+`;
+    const cues = parseSrt(srt);
+    expect(cues).toHaveLength(1);
+    expect(cues[0].text).toBe("Good block.");
+  });
+});
+
+describe("groupIntoTurns", () => {
+  it("groups consecutive same-speaker cues and splits on speaker change", () => {
+    const cues = parseSrt(SRT);
+    const turns = groupIntoTurns(cues);
+    expect(turns).toHaveLength(2);
+    expect(turns[0].speaker).toBe("SPEAKER_00");
+    expect(turns[1].speaker).toBe("SPEAKER_01");
+  });
+});
+
+describe("fmtTime", () => {
+  it("formats h:mm:ss and m:ss", () => {
+    expect(fmtTime(0)).toMatch(/0:00/);
+    expect(fmtTime(75)).toMatch(/1:15/);
+    expect(fmtTime(3723)).toMatch(/1:02:03/);
+  });
+});

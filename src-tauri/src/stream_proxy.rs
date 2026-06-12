@@ -519,3 +519,82 @@ fn decode_upstream(url_path: &str) -> Option<String> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn b64(url: &str) -> String {
+        URL_SAFE_NO_PAD.encode(url.as_bytes())
+    }
+
+    // ── parse_start_query — feeds ffmpeg -ss; attacker-reachable ────────
+    #[test]
+    fn start_query_parses_fractional_seconds() {
+        assert!((parse_start_query("/fmp4/v1/abc?start=19.933") - 19.933).abs() < 1e-9);
+        assert!((parse_start_query("/fmp4/v1/abc?start=0") - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn start_query_defaults_to_zero_when_absent_or_malformed() {
+        assert_eq!(parse_start_query("/fmp4/v1/abc"), 0.0);
+        assert_eq!(parse_start_query("/fmp4/v1/abc?start=banana"), 0.0);
+        assert_eq!(parse_start_query("/fmp4/v1/abc?other=1"), 0.0);
+    }
+
+    #[test]
+    fn start_query_rejects_non_finite_and_clamps() {
+        // str::parse::<f64> accepts these spellings — they must never reach -ss.
+        assert_eq!(parse_start_query("/fmp4/v1/abc?start=inf"), 0.0);
+        assert_eq!(parse_start_query("/fmp4/v1/abc?start=NaN"), 0.0);
+        assert_eq!(parse_start_query("/fmp4/v1/abc?start=-5"), 0.0);
+        assert_eq!(parse_start_query("/fmp4/v1/abc?start=999999999"), 86_400.0);
+    }
+
+    // ── decode_upstream / decode_after — the b64 URL envelope ───────────
+    #[test]
+    fn decode_upstream_roundtrips_http_urls() {
+        let url = "https://example.com/video.mp4?sig=abc";
+        assert_eq!(decode_upstream(&format!("/v1/{}", b64(url))).as_deref(), Some(url));
+    }
+
+    #[test]
+    fn decode_upstream_rejects_non_http_and_garbage() {
+        assert_eq!(decode_upstream(&format!("/v1/{}", b64("file:///etc/passwd"))), None);
+        assert_eq!(decode_upstream(&format!("/v1/{}", b64("ftp://host/x"))), None);
+        assert_eq!(decode_upstream("/v1/"), None);
+        assert_eq!(decode_upstream("/v1/!!!not-base64!!!"), None);
+        assert_eq!(decode_upstream("/other/abc"), None);
+        // Invalid UTF-8 after decode must not panic.
+        let bad = URL_SAFE_NO_PAD.encode([0xff, 0xfe, 0xfd]);
+        assert_eq!(decode_upstream(&format!("/v1/{bad}")), None);
+    }
+
+    #[test]
+    fn decode_after_strips_query_and_fragment() {
+        let url = "https://example.com/seg.m3u8";
+        let path = format!("/fmp4/v1/{}?start=3.5#frag", b64(url));
+        assert_eq!(decode_after("fmp4/v1/", &path).as_deref(), Some(url));
+    }
+
+    // ── parse_audio_query — second upstream for DASH-split merges ───────
+    #[test]
+    fn audio_query_decodes_http_only() {
+        let url = "https://cdn.example.com/audio.m4a";
+        let path = format!("/fmp4/v1/abc?start=1&audio={}", b64(url));
+        assert_eq!(parse_audio_query(&path).as_deref(), Some(url));
+        let evil = format!("/fmp4/v1/abc?audio={}", b64("file:///etc/hosts"));
+        assert_eq!(parse_audio_query(&evil), None);
+        assert_eq!(parse_audio_query("/fmp4/v1/abc"), None);
+    }
+
+    // ── body_len_from_range — WKWebView needs exact Content-Length ──────
+    #[test]
+    fn range_length_math() {
+        assert_eq!(body_len_from_range("bytes 0-1/28523658"), Some(2));
+        assert_eq!(body_len_from_range("bytes 100-199/500"), Some(100));
+        assert_eq!(body_len_from_range("bytes */500"), None); // unsatisfied form
+        assert_eq!(body_len_from_range("bytes 5-1/10"), None); // end < start
+        assert_eq!(body_len_from_range("garbage"), None);
+    }
+}

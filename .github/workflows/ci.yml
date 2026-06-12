@@ -8,7 +8,7 @@ on:
 
 jobs:
   typecheck:
-    name: tsc --noEmit
+    name: tsc + vitest
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,6 +17,7 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: npx tsc --noEmit
+      - run: npx vitest run
 
   cargo-check:
     name: cargo check (src-tauri)
@@ -39,6 +40,10 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: cargo check
+        working-directory: src-tauri
+      # Unit tests (proxy parsing, error truncation) + the ts-rs binding
+      # exports, which double as a stale-bindings check.
+      - run: cargo test --lib
         working-directory: src-tauri
 
   swift-build:
