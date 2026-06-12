@@ -186,7 +186,7 @@ pub fn run() {
             }
 
             // Build + install the native menu bar.
-            let menu = build_menu(&app.handle())?;
+            let menu = build_menu(app.handle())?;
             app.set_menu(menu)?;
             // Fan menu clicks out as `menu:<id>` window events. The React
             // layer subscribes via the standard `listen()` API so menu

@@ -204,11 +204,10 @@ pub fn cleanup_stale_cache(app: AppHandle) -> Result<u32, crate::AppError> {
         }
         let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
         let age = now.duration_since(modified).unwrap_or_default();
-        if age.as_secs() > CACHE_TTL_SECONDS {
-            if std::fs::remove_file(&path).is_ok() {
+        if age.as_secs() > CACHE_TTL_SECONDS
+            && std::fs::remove_file(&path).is_ok() {
                 removed += 1;
             }
-        }
     }
     Ok(removed)
 }

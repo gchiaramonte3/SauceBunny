@@ -623,11 +623,9 @@ pub(crate) fn classify_line(line: &str) -> String {
         "muxer".into()
     } else if l.starts_with("[download]") && l.contains("100%") {
         "ok".into()
-    } else if l.starts_with("[download]") {
-        "info".into()
-    } else if l.starts_with("[") {
-        "info".into()
     } else {
+        // [download] progress, other [bracketed] sources, and plain lines
+        // all render as plain info.
         "info".into()
     }
 }
@@ -849,13 +847,13 @@ fn parse_ffmpeg_video(stderr: &str) -> (Option<u32>, Option<u32>, Option<f64>, O
         // codec lives between "Video: " and the next " " or "("
         let codec = line
             .split("Video: ").nth(1)
-            .and_then(|s| s.split(|c: char| c == ' ' || c == ',' || c == '(').next())
+            .and_then(|s| s.split([' ', ',', '(']).next())
             .map(|s| s.to_string());
         // WxH
         let mut w: Option<u32> = None;
         let mut h: Option<u32> = None;
         // Scan tokens for "WxH" where W,H are digits
-        for tok in line.split(|c: char| c == ' ' || c == ',' || c == '[' || c == ']') {
+        for tok in line.split([' ', ',', '[', ']']) {
             if let Some((a, b)) = tok.split_once('x') {
                 if let (Ok(aw), Ok(bh)) = (a.parse::<u32>(), b.parse::<u32>()) {
                     if aw >= 16 && bh >= 16 && aw <= 16384 && bh <= 16384 {
@@ -886,7 +884,7 @@ fn parse_ffmpeg_audio(stderr: &str) -> Option<String> {
         }
         return line
             .split("Audio: ").nth(1)
-            .and_then(|s| s.split(|c: char| c == ' ' || c == ',' || c == '(').next())
+            .and_then(|s| s.split([' ', ',', '(']).next())
             .map(|s| s.to_string());
     }
     None
@@ -1081,7 +1079,7 @@ pub async fn generate_local_thumbnail(
     }
 
     let ts_secs = match args.duration_seconds {
-        Some(d) if d > 0.0 => (d * 0.10).min(5.0).max(0.0),
+        Some(d) if d > 0.0 => (d * 0.10).clamp(0.0, 5.0),
         _ => 0.0,
     };
     let ts = format!("{:.3}", ts_secs);

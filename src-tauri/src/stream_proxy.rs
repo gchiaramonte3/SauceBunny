@@ -106,12 +106,12 @@ pub fn base_url() -> Option<String> {
 /// at app setup.
 pub fn start() -> std::io::Result<String> {
     let server = tiny_http::Server::http("127.0.0.1:0")
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     let port = server
         .server_addr()
         .to_ip()
         .map(|a| a.port())
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "no loopback port"))?;
+        .ok_or_else(|| std::io::Error::other("no loopback port"))?;
     let token = mint_token();
     let _ = TOKEN.set(token.clone());
     // Token lives in the path, not the authority, so it's still a valid
@@ -413,7 +413,7 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
     // HLS segments carry AAC in ADTS framing; the MP4 muxer DROPS the audio
     // ("Malformed AAC bitstream") unless it's converted to ASC. Apply ONLY for
     // HLS inputs — running it on already-ASC MP4/DASH audio would corrupt those.
-    if upstream.contains("m3u8") || audio.as_deref().map_or(false, |a| a.contains("m3u8")) {
+    if upstream.contains("m3u8") || audio.as_deref().is_some_and(|a| a.contains("m3u8")) {
         cmd.arg("-bsf:a").arg("aac_adtstoasc");
     }
     // Re-base the output timeline to zero so the MSE <video>'s currentTime

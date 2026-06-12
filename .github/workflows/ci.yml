@@ -45,6 +45,9 @@ jobs:
       # exports, which double as a stale-bindings check.
       - run: cargo test --lib
         working-directory: src-tauri
+      # Zero-warning policy — the codebase is clippy-clean as of r86.
+      - run: cargo clippy -- -D warnings
+        working-directory: src-tauri
 
   swift-build:
     name: swift build (diarizer)
