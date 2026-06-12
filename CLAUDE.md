@@ -2,7 +2,7 @@
 
 > Claude Code reads this file automatically on every session.
 > It is the single source of truth for how this codebase should be maintained, refactored, and extended.
-> Current revision: r44 (2026-05-24)
+> Current revision: r86 (2026-06-11)
 
 ---
 
@@ -51,7 +51,13 @@ src-tauri/                    # Rust backend
   src/
     main.rs                   # 4-line shim — calls sauce_bunny_lib::run()
     lib.rs                    # Tauri app setup, menu, window management, command registry
-    commands.rs               # ~30 invoke handlers (monolith — splitting is on roadmap)
+    commands/                 # Invoke handlers, split by domain (r47):
+      mod.rs                  #   shared helpers + event types, re-exports
+      download.rs             #   yt-dlp: metadata, preview, captions, audio
+      media.rs                #   clip export, snapshots, playback prep
+      transcript.rs           #   whisper + diarizer pipelines
+      system.rs               #   JobRegistry, cache, fs, windows, build-id
+    stream_proxy.rs           # loopback media proxy (token-gated; see below)
   tauri.conf.json             # Tauri config (titleBarStyle: Overlay, sidecar declarations)
   Cargo.toml                  # Package: sauce-bunny · lib: sauce_bunny_lib
 swift-sidecar/                # Speaker diarization (Swift 5.9+, SPM)
@@ -223,6 +229,20 @@ Key rules:
 - **Scrubbing pauses playback** (resumes on settle) so playback can't fight the playhead.
 - Any failure → `onMediaError` → the yt-dlp **download-to-cache fallback** (plays the local file via `LocalMediaPlayer`), so playback can't regress to nothing.
 
+**Audio-master clock (r82+):** while a web source streams, the cached source
+audio (`download_audio_track`) plays on a hidden native `<audio>` element
+(`src/lib/audio-twin.ts`) and its `currentTime` IS the playback clock — the
+playhead, transcript highlight, and on-video captions all read it, so captions
+lock to the audio you hear. The MSE `<video>` is muted picture-only, kept
+aligned by a continuous playbackRate soft-sync (dead-band / slew / hard-seek
+backstop). Playback starts instantly on the video's own clock and hands off
+when the cache lands.
+
+**Proxy security:** every proxy request carries a per-session capability token
+in the path (`/t/<token>/…`). Without it the loopback server would be an open
+relay for any local process or port-scanning webpage. Keep the token check
+intact when touching `stream_proxy.rs`.
+
 Don't reintroduce the IFrame, custom URI schemes for `<video>`, or WebCodecs-audio — all three are proven non-starters in WKWebView (see the deep-research notes that drove r61/r63).
 
 ---
@@ -235,8 +255,12 @@ All sidecars are bundled binaries invoked through `tauri-plugin-shell`. Each lon
 |---------|---------|-----------------|
 | yt-dlp | Video/URL download | `npm run refresh:sidecars` (pulls yt-dlp's static binary) |
 | ffmpeg | Clip cutting, transcode, audio extraction | `npm run refresh:ffmpeg` (osxexperts.net static arm64) |
+| ffprobe | yt-dlp stream fixups (HLS aac_adtstoasc) | `npm run refresh:ffprobe` (martin-riedl.de static arm64) |
 | whisper-cli | Local speech-to-text (whisper.cpp) | `npm run build:whisper` (builds from source, statically linked) |
 | saucebunny-diarize | Speaker diarization (Swift) | `npm run build:diarizer` (builds from `swift-sidecar/`) |
+
+**Not in git**: sidecar binaries are assembled locally by `npm run setup`
+(fresh clones) — they are gitignored, and CI stubs them.
 
 **Distribution rule**: every binary in `src-tauri/binaries/` MUST be self-contained. No `/opt/homebrew/`, `/usr/local/`, or `/Users/` dylib references. Each script above enforces this with an `otool -L` guard rail and refuses to install a leaky binary. The previous `cp /opt/homebrew/bin/ffmpeg …` and `cp /opt/homebrew/bin/whisper-cli …` recipes were silently shipping binaries that crashed on any user's Mac without the exact matching Homebrew install — that class of bug is now blocked at the script level.
 
@@ -246,14 +270,16 @@ All sidecars are bundled binaries invoked through `tauri-plugin-shell`. Each lon
 
 These are the known cleanup tasks. When Claude Code has discretion on how to organize something, prefer these directions:
 
-1. **Split `commands.rs`** — The ~30 invoke handlers in one file should be organized into modules by domain: `commands/transcript.rs`, `commands/media.rs`, `commands/download.rs`, `commands/system.rs`. Each module exports its handlers; `commands/mod.rs` re-exports them. Keep handlers as thin wrappers.
-2. **CSS organization** — `app.css` is growing. Evaluate splitting into per-section files (`player.css`, `transcript.css`, `sidebar.css`) imported from a single `index.css`. Tokens stay in `tokens.css`.
+1. ~~**Split `commands.rs`**~~ — DONE in r47 (`commands/{download,media,transcript,system}.rs`, thin wrappers, `mod.rs` re-exports).
+2. ~~**CSS organization**~~ — DONE in r48 (per-section files imported from `index.css`; tokens stay in `tokens.css`).
 3. ~~**Type consolidation**~~ — DONE in r49. Shared types are generated from canonical Rust structs via the `ts-rs` crate. Cross-boundary structs carry `#[derive(ts_rs::TS)] #[ts(export, export_to = "../../src/bindings/")]`. Run `cargo test --lib` from `src-tauri/` to refresh `src/bindings/*.ts`. `src/types.ts` re-exports the generated types + adds frontend-only types (form state, narrowed enums like `LogTag`, etc.). When adding a new Rust struct that crosses the invoke boundary, derive TS on it; do not hand-write the TS shape in `types.ts`.
-4. **Error handling** — IN PROGRESS (r50). The typed error system is wired (`src-tauri/src/error.rs`'s `AppError` enum, generated TS binding at `src/bindings/AppError.ts`, frontend bridge at `src/lib/error-format.ts`). One command (`get_cache_stats`) is migrated end-to-end as the reference. **Remaining work (r51)**: bulk-migrate the other 32 `Result<T, String>` handlers to `Result<T, AppError>`. The pattern is mechanical:
+4. ~~**Error handling**~~ — DONE through r51 (bulk migration to `AppError`). The typed error system is wired (`src-tauri/src/error.rs`'s `AppError` enum, generated TS binding at `src/bindings/AppError.ts`, frontend bridge at `src/lib/error-format.ts`). One command (`get_cache_stats`) is migrated end-to-end as the reference. **Remaining work (r51)**: bulk-migrate the other 32 `Result<T, String>` handlers to `Result<T, AppError>`. The pattern is mechanical:
    - Change return type `Result<T, String>` → `Result<T, AppError>`
    - Replace `.map_err(|e| e.to_string())` with appropriate `AppError` variant (`AppError::internal(...)`, `AppError::not_found(...)`, etc.) OR rely on the `From` impls for `std::io::Error` / `reqwest::Error` / `serde_json::Error` (then `?` just works).
    - Update frontend callers to use `formatError(e)` from `lib/error-format.ts` instead of `String(e)`.
    - Re-run `cargo test --lib` if you add new `AppError` variants — the binding regenerates automatically.
+5. **UI smoke harness** — unit tests (vitest + `cargo test --lib`) cover the parsers/timecode/proxy logic since r86; playback and the transcript pipeline are still verified manually. A Playwright/tauri-driver smoke run is the open item.
+6. **Transcript render performance** — the karaoke highlight recomputes O(turns²) bookkeeping per playhead tick; fine normally, measurable on multi-hour transcripts.
 
 ---
 
@@ -262,11 +288,13 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
 Run and confirm all pass:
 
 ```bash
-# 1. TypeScript type check
+# 1. TypeScript type check + unit tests
 npx tsc --noEmit
+npm test             # vitest (srt/timecode/commands/validation)
 
-# 2. Rust compilation
+# 2. Rust compilation + unit tests
 cargo check          # from src-tauri/
+cargo test --lib     # proxy parsing, short_err + ts-rs binding freshness
 
 # 3. Swift sidecar
 swift build          # from swift-sidecar/

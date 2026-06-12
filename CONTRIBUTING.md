@@ -13,7 +13,7 @@ From a clean machine:
 git clone <repo-url> "Sauce Bunny"
 cd "Sauce Bunny"
 npm install
-npm run build:diarizer   # builds the Swift sidecar (~60s first time)
+npm run setup       # fetch/build all five sidecar binaries (one-time)
 npm run tauri dev
 ```
 
@@ -36,11 +36,13 @@ The repo splits cleanly into React frontend, Rust Tauri shell, and a Swift
 sidecar for diarization. Read `ARCHITECTURE.md` for the full tour with a
 data-flow diagram.
 
-Three of the four bundled sidecars (yt-dlp, ffmpeg, whisper-cli) come from
-upstream releases and live in `src-tauri/binaries/` pre-built — we do not
-rebuild them as part of the normal dev loop. The fourth, `saucebunny-diarize`,
-is ours — its source lives in `swift-sidecar/` and is built locally via
-`npm run build:diarizer`.
+Sidecar binaries are **not** checked into git (they were ~150 MB of blobs).
+`npm run setup` assembles all five into `src-tauri/binaries/`: yt-dlp, ffmpeg,
+and ffprobe are downloaded as static builds; whisper-cli is compiled from
+whisper.cpp source; `saucebunny-diarize` is ours — its source lives in
+`swift-sidecar/` and builds via `npm run build:diarizer`. Every install path
+runs an `otool -L` guard that refuses binaries with non-system dylib
+references, so what you bundle runs on any Mac.
 
 ## Build the diarizer locally
 
@@ -57,12 +59,14 @@ automatically.
 
 ```bash
 npx tsc --noEmit                   # type-check frontend
-(cd src-tauri && cargo check)      # type-check backend
+npm test                           # vitest — parser/timecode/scoring units
+(cd src-tauri && cargo test --lib) # Rust units + ts-rs binding freshness
 npm run build:diarizer             # ensure the Swift sidecar still builds
 ```
 
-There is no test runner configured yet — that's tracked on the roadmap in
-`ARCHITECTURE.md`. Until then, please describe the manual smoke-test you ran
+CI runs all of these on every PR. Unit tests cover the pure logic (SRT/VTT
+parsing, timecode math, proxy request parsing); playback and pipeline flows
+are still verified manually, so please also describe the smoke-test you ran
 in the PR body (e.g. "Pulled a YouTube clip, generated a transcript with
 diarization on, dragged two speaker bubbles to merge — no regressions").
 
@@ -70,18 +74,18 @@ diarization on, dragged two speaker bubbles to merge — no regressions").
 
 - **TypeScript strict mode.** No `any` unless you leave a comment explaining
   why the type can't be expressed.
-- **All Tauri command invocations go through `src/lib/api.ts`** — the typed
-  client wrapper. Don't call `invoke()` directly from components. (Legacy
-  direct-invoke call sites still exist; they are being migrated and you
-  should not add new ones.)
-- **Rust commands live in `src-tauri/src/commands.rs`** — one big file today.
-  Splitting it per feature is on the roadmap; until then, group new commands
-  near existing related ones.
+- **Call `invoke()` directly, typed by the generated bindings.** Cross-
+  boundary structs are defined once in Rust with `#[derive(ts_rs::TS)]`; run
+  `cargo test --lib` from `src-tauri/` to regenerate `src/bindings/*.ts`.
+  Don't hand-write a TS mirror of a Rust struct.
+- **Rust commands live in `src-tauri/src/commands/`**, split by domain
+  (`download.rs`, `media.rs`, `transcript.rs`, `system.rs`). Handlers are
+  thin wrappers; put new commands in the module that owns their domain.
 - **Comments explain WHY, not WHAT.** Look at existing files for the
   established voice — terse, dry, no marketing-speak. If a comment is
   restating the code in English, delete it.
 - **Build ID handshake.** The constant in `src/lib/build-id.ts` must match
-  the one in `src-tauri/src/commands.rs` (`BACKEND_BUILD_ID`). Bump both
+  the one in `src-tauri/src/commands/system.rs` (`BACKEND_BUILD_ID`). Bump both
   whenever you change a Rust command the frontend depends on — otherwise
   the in-app red banner will yell at you (and that's the point).
 

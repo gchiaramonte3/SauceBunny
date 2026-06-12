@@ -1,46 +1,48 @@
-# Sauce Bunny
+# Sauce Bunny 🐰
 
-A Mac-first local desktop app for clipping a section of a YouTube video into an MP4. Tauri 2 + React + bundled `yt-dlp` and `ffmpeg`.
+**Local-first macOS app for pulling, transcribing, and clipping video — no cloud, no accounts, no telemetry.**
 
-## Personal-use only
+Paste a URL (YouTube, Vimeo, TikTok, X, Reddit, Instagram, or any page with embedded video) or import a local file. Watch it instantly, mark in/out points frame-accurately, export lossless clips or MP3s, and generate speaker-labeled transcripts — everything runs on your machine.
 
-This is a local utility — no cloud, no accounts. Use it on content you have the rights to clip.
+## Features
 
-## Dev
+- **Instant web playback** — streams web sources straight into the player (no full download wait) via a loopback ffmpeg→MSE pipeline, with an automatic download-to-cache fallback. Seek anywhere; J-K-L shuttle; frame-accurate scrubbing with a WebCodecs preview.
+- **Transcription** — local Whisper (whisper.cpp) with downloadable models, or pull the source's own captions in one click. Captions stay locked to the audio you hear via an audio-master clock; a "Fix timing with Whisper" button re-times loose YouTube auto-captions.
+- **Speaker diarization** — on-device speaker detection (SpeakerKit, FluidAudio fallback) with a full speaker editor: rename, drag-to-merge, per-turn overrides, color-coded roster.
+- **Transcript workspace** — searchable karaoke-highlighted reader, click any line to jump the video, pop it out to its own floating window, export TXT/MD/SRT/PDF.
+- **Clip export** — lossless cuts or re-encodes, full-clip or marked range, MP3 audio export, an export queue, on-video captions drawn from your transcript.
+- **Command palette** (⌘K), customizable defaults, dark editorial UI.
 
-```
+## Privacy & local-first
+
+Everything happens on your Mac. The only network traffic is the content **you** ask it to fetch (the video/captions) and model downloads **you** trigger. Optional: sign-in-gated sources can use your browser's cookies via yt-dlp's `--cookies-from-browser` — off by default, configured in Settings. See [SECURITY.md](SECURITY.md) for the threat model (including the loopback media proxy).
+
+Use it on content you have the rights to clip.
+
+## Install
+
+**Requirements:** macOS 13+ (14+ recommended for diarization), Apple Silicon.
+
+Grab the notarized `.dmg` from [Releases](../../releases) — or build from source:
+
+```bash
+git clone <repo-url> "Sauce Bunny"
+cd "Sauce Bunny"
 npm install
+npm run setup        # fetches/builds the sidecar binaries (one-time)
 npm run tauri dev
 ```
 
-First build pulls all Rust dependencies and takes a while.
+Build prerequisites: Xcode Command Line Tools, Rust 1.77+, Node 20+, Swift 5.9+. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full dev guide.
 
-## Bundled binaries
+## How it works
 
-`src-tauri/binaries/` ships two sidecars, both suffixed with the Mac arm64 target triple Tauri expects:
+Tauri 2 shell (Rust) + React 18 frontend in WKWebView. Media work is done by bundled, self-contained sidecars — yt-dlp, ffmpeg/ffprobe, whisper.cpp, and our own Swift diarizer — orchestrated by thin Rust commands (argument arrays, never shell strings). Web playback streams through a token-gated `127.0.0.1` proxy that remuxes to fragmented MP4 for MSE (the only path WKWebView plays web video with sound). The full tour lives in [ARCHITECTURE.md](ARCHITECTURE.md); the project's engineering rules live in [CLAUDE.md](CLAUDE.md).
 
-- `yt-dlp-aarch64-apple-darwin` — official macOS yt-dlp release
-- `ffmpeg-aarch64-apple-darwin` — copied from Homebrew (`/opt/homebrew/bin/ffmpeg`)
+## Contributing
 
-The Homebrew ffmpeg dynamically links against dylibs under `/opt/homebrew/Cellar/...`, so the resulting `.app` is not portable to other Macs without those dylibs. For personal use on the build machine this is fine; for distribution, replace with a static ffmpeg build.
+PRs welcome — read [CONTRIBUTING.md](CONTRIBUTING.md) first (setup, checks, conventions). Bugs and ideas go through the [issue templates](.github/ISSUE_TEMPLATE/); include the pipeline log (⌘\ → Copy) in bug reports.
 
-## Architecture
+## License
 
-- `src/` — React UI. Single window: URL → metadata → Mark In / Mark Out → output folder → Pull Clip.
-- `src-tauri/src/commands.rs` — Rust commands: `fetch_metadata`, `create_clip`, `reveal_in_finder`, `new_job_id`. All argument arrays — never raw shell strings.
-- `src-tauri/capabilities/default.json` — sidecar allow-list (only the two binaries we ship).
-
-## Clip flow
-
-```
-yt-dlp \
-  --download-sections "*HH:MM:SS-HH:MM:SS" \
-  -f "bv*+ba/b" \
-  --merge-output-format mp4 \
-  --ffmpeg-location <bundled ffmpeg> \
-  --no-playlist --no-part --newline --progress \
-  -o <output path> \
-  <url>
-```
-
-Progress is streamed back as `clip-log` events; completion fires `clip-done`.
+[MIT](LICENSE)

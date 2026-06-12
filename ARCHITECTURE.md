@@ -158,7 +158,7 @@ A one-shot migration helper at app boot copies any leftover `clippull.*` keys to
 ## Build-ID handshake
 
 Both sides of the IPC carry a build-ID string:
-- `src-tauri/src/commands.rs` `BACKEND_BUILD_ID`
+- `src-tauri/src/commands/system.rs` `BACKEND_BUILD_ID`
 - `src/lib/build-id.ts` `EXPECTED_BACKEND_BUILD_ID`
 
 On launch, the frontend asks the backend for its ID and shows a red banner if they don't match. That's the unambiguous "you need to restart `npm run tauri dev`" signal — without it, mismatched Rust binaries would cause silent runtime mysteries.
@@ -167,10 +167,11 @@ Bump both whenever you change a Rust command's signature or add a new one.
 
 ## Roadmap
 
-The non-trivial items, roughly in priority order:
+Done since this list was written: the commands.rs split (r47 — `commands/{download,media,transcript,system}.rs`), the floating side-panel window (r44.B), typed errors via `AppError` (r50–51), generated TS bindings via ts-rs (r49), unit tests for the pure logic in CI (r86 — vitest + `cargo test --lib`). The `api.ts` wrapper experiment was retired in r86: the codebase calls `invoke()` directly, typed by the generated bindings.
 
-1. **Split `src-tauri/src/commands.rs`** into per-feature modules (`commands/yt_dlp.rs`, `commands/whisper.rs`, `commands/diarize.rs`, etc.) — the monolith is the single biggest barrier to drive-by contributions.
-2. **Migrate every `invoke()` call site through `src/lib/api.ts`** — the typed client wrapper landed in r40; existing direct calls are technical debt.
-3. **Real test harness** — cargo test for Rust unit tests, Playwright for UI smoke. Currently we rely on manual reproduction.
-4. **Float side panel to its own window** — Tauri 2 supports multi-window; the Transcript drawer would benefit (Premiere-style detach).
-5. **Linux / Windows builds** — macOS-first while we hit 1.0; cross-platform after.
+Remaining, roughly in priority order:
+
+1. **UI smoke harness** — unit tests cover the parsers/math; playback and the transcript pipeline are still verified manually. A Playwright (or tauri-driver) smoke run would close that gap.
+2. **First public release** — tagged v0.1.0 with a notarized .dmg (see DISTRIBUTION.md), plus an app-update story (tauri-plugin-updater) and a plan for yt-dlp staleness (YouTube breaks extractors faster than app releases ship).
+3. **Transcript render performance** — the karaoke highlight recomputes O(turns²) bookkeeping per playhead tick; fine for normal transcripts, measurable on multi-hour ones.
+4. **Linux / Windows builds** — macOS-first while we hit 1.0; cross-platform after.
