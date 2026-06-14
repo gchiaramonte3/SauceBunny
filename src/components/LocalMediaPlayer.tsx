@@ -17,6 +17,8 @@ type Props = {
   /** Surface any HTML5 media error (decode, network, src missing, etc). */
   onError?: (message: string) => void;
   onSurfaceClick?: () => void;
+  /** Seek/duration diagnostics → the Pipeline log (channel "seek"). */
+  onDiag?: (tag: string, message: string) => void;
 };
 
 /**
@@ -25,12 +27,14 @@ type Props = {
  * the same imperative handle as YouTubePlayer.
  */
 export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function LocalMediaPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick },
+  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, onDiag },
   ref,
 ) {
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const readyRef = useRef(false);
   const playingRef = useRef(false);
+  const onDiagRef = useRef<Props["onDiag"]>(undefined);
+  useEffect(() => { onDiagRef.current = onDiag; }, [onDiag]);
   // Shuttle (J-K-L): forward = native playbackRate; reverse = backward
   // currentTime scan (the whole local file is buffered, so it's smooth).
   const shuttleRateRef = useRef(0);
@@ -48,7 +52,17 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       });
     },
     pause: () => { mediaRef.current?.pause(); },
-    seekTo: (s) => { if (mediaRef.current) mediaRef.current.currentTime = Math.max(0, s); },
+    seekTo: (s) => {
+      const el = mediaRef.current;
+      if (!el) return;
+      const target = Math.max(0, s);
+      el.currentTime = target;
+      // Diagnostic: native seek is el.currentTime = seconds. If this lands
+      // wrong, it's the file duration vs the timeline (el.duration here is the
+      // real file length; if it's shorter than `s`, the seek clamps to the end).
+      onDiagRef.current?.("info",
+        `seek → ${target.toFixed(1)}s (file duration ${(el.duration || 0).toFixed(1)}s, landed ${el.currentTime.toFixed(1)}s)`);
+    },
     getCurrentTime: () => mediaRef.current?.currentTime ?? 0,
     getDuration: () => mediaRef.current?.duration ?? 0,
     isReady: () => readyRef.current,
@@ -97,6 +111,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     const onLoaded = () => {
       readyRef.current = true;
       onReady?.(el.duration);
+      onDiagRef.current?.("ok", `native player loaded · file duration ${(el.duration || 0).toFixed(1)}s`);
       // Nudge currentTime so the browser actually renders a frame instead
       // of leaving the canvas black until the user hits play.
       if (hasVideo && el.currentTime === 0) {

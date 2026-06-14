@@ -71,28 +71,57 @@ export function resolveAliasChain(
   return cur;
 }
 
+// Shared speaker palette — the SINGLE source of truth for per-speaker hues,
+// consumed by the roster chips, the per-turn avatar (gradients), AND the
+// on-video caption label (solid). Index 0..5 maps a speaker to a hue; the
+// solid base and the gradient at the same index are the same family, so a
+// speaker's caption-label colour matches their sidebar chip.
+const SPEAKER_SOLIDS = ["#6CFF8D", "#6D52ED", "#C54AF7", "#52B5ED", "#F7B84A", "#F7714A"];
+const SPEAKER_GRADIENTS = [
+  "linear-gradient(180deg,#6CFF8D 0%,#3FCB6A 100%)", // green (brand)
+  "linear-gradient(180deg,#6D52ED 0%,#4F3BC7 100%)", // purple (marker)
+  "linear-gradient(180deg,#C54AF7 0%,#9C2EE0 100%)", // pink (brand)
+  "linear-gradient(180deg,#52B5ED 0%,#3B8DC7 100%)", // cyan
+  "linear-gradient(180deg,#F7B84A 0%,#E09B2E 100%)", // amber
+  "linear-gradient(180deg,#F7714A 0%,#E0512E 100%)", // coral
+];
+
 /**
- * Deterministic palette picker for a speaker tag. Hashes the tag into a
- * fixed-length palette so the same speaker keeps the same colour across
- * re-renders and sessions.
- *
- * The palette uses brand-aligned gradients (green/purple/pink primary,
- * cyan/amber/coral secondary). When `null`, returns the brand-green
- * default so the single un-diarised "Speaker" still feels intentional.
+ * Stable palette index for a speaker tag. The diarizer's raw tags carry a
+ * number (`SPEAKER_00`→0, `S1`→1), so colour by that number — deterministic
+ * and identical everywhere a speaker appears (sidebar, bubble, caption), with
+ * no hash collisions. `null` / non-numeric (`SPEAKER_UNK`, custom) fall back to
+ * a stable string hash. Callers MUST pass the alias-resolved RAW tag (never a
+ * humanized "Speaker N"), which every call site does.
  */
-export function speakerColor(speaker: string | null): string {
-  const palette = [
-    "linear-gradient(180deg,#6CFF8D 0%,#3FCB6A 100%)", // green (brand)
-    "linear-gradient(180deg,#6D52ED 0%,#4F3BC7 100%)", // purple (marker)
-    "linear-gradient(180deg,#C54AF7 0%,#9C2EE0 100%)", // pink (brand)
-    "linear-gradient(180deg,#52B5ED 0%,#3B8DC7 100%)", // cyan
-    "linear-gradient(180deg,#F7B84A 0%,#E09B2E 100%)", // amber
-    "linear-gradient(180deg,#F7714A 0%,#E0512E 100%)", // coral
-  ];
-  if (!speaker) return palette[0];
+export function speakerColorIndex(speaker: string | null): number {
+  if (!speaker) return 0;
+  const m = speaker.match(/(\d+)/);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (Number.isFinite(n)) return n;
+  }
   let h = 0;
   for (let i = 0; i < speaker.length; i++) h = (h * 31 + speaker.charCodeAt(i)) | 0;
-  return palette[Math.abs(h) % palette.length];
+  return Math.abs(h);
+}
+
+/**
+ * GRADIENT for a speaker — use as a `background` (roster pip, turn avatar).
+ * NOT valid as a CSS `color:` (it's a gradient); use {@link speakerTextColor}
+ * for text. When `null`, returns the brand-green default.
+ */
+export function speakerColor(speaker: string | null): string {
+  return SPEAKER_GRADIENTS[speakerColorIndex(speaker) % SPEAKER_GRADIENTS.length];
+}
+
+/**
+ * SOLID hue for a speaker — use as a CSS `color:` (the on-video caption label).
+ * Same index/family as {@link speakerColor}, so the caption label colour
+ * matches that speaker's sidebar chip gradient.
+ */
+export function speakerTextColor(speaker: string | null): string {
+  return SPEAKER_SOLIDS[speakerColorIndex(speaker) % SPEAKER_SOLIDS.length];
 }
 
 /**
@@ -162,9 +191,11 @@ export type SpeakerOverrides = {
   global: Record<string, string>;
   turn: Record<string, string>;
   aliases: Record<string, string>;
+  /** Per-speaker custom pip colour (canonical tag → hex). null group = "__NULL__". */
+  colors: Record<string, string>;
 };
 
-const EMPTY_OVERRIDES: SpeakerOverrides = { global: {}, turn: {}, aliases: {} };
+const EMPTY_OVERRIDES: SpeakerOverrides = { global: {}, turn: {}, aliases: {}, colors: {} };
 
 /** localStorage key the panel persists a transcript's speaker overrides under. */
 export function speakerOverridesKey(path: string): string {
@@ -187,10 +218,25 @@ export function loadSpeakerOverrides(path: string | null): SpeakerOverrides {
       global: p.global && typeof p.global === "object" ? p.global : {},
       turn: p.turn && typeof p.turn === "object" ? p.turn : {},
       aliases: p.aliases && typeof p.aliases === "object" ? p.aliases : {},
+      colors: p.colors && typeof p.colors === "object" ? p.colors : {},
     };
   } catch {
     return EMPTY_OVERRIDES;
   }
+}
+
+/**
+ * SOLID caption colour for a speaker, honouring a user override. The override
+ * is keyed on the alias-resolved tag (null group → "__NULL__"), matching the
+ * transcript panel's `overrides.colors`; falls back to the auto palette so the
+ * caption label always matches that speaker's sidebar pip.
+ */
+export function resolveSpeakerColor(
+  rawSpeaker: string | null,
+  overrides: SpeakerOverrides,
+): string {
+  const resolved = resolveAliasChain(rawSpeaker, overrides.aliases);
+  return overrides.colors[resolved ?? "__NULL__"] || speakerTextColor(resolved);
 }
 
 /**

@@ -229,14 +229,24 @@ Key rules:
 - **Scrubbing pauses playback** (resumes on settle) so playback can't fight the playhead.
 - Any failure → `onMediaError` → the yt-dlp **download-to-cache fallback** (plays the local file via `LocalMediaPlayer`), so playback can't regress to nothing.
 
-**Audio-master clock (r82+):** while a web source streams, the cached source
-audio (`download_audio_track`) plays on a hidden native `<audio>` element
-(`src/lib/audio-twin.ts`) and its `currentTime` IS the playback clock — the
-playhead, transcript highlight, and on-video captions all read it, so captions
-lock to the audio you hear. The MSE `<video>` is muted picture-only, kept
-aligned by a continuous playbackRate soft-sync (dead-band / slew / hard-seek
-backstop). Playback starts instantly on the video's own clock and hands off
-when the cache lands.
+**Single-clock model (r88 — reverts the r82 audio-master twin):** the streamed
+native muxed `<video>` is the ONE clock for audio, picture, and captions. WebKit
+keeps A/V locked inside that element, and the playhead = `corrected(video.currentTime)`
+= `baseTime + max(0, currentTime − clockOrigin)` (clockOrigin = `buffered.start(0)`,
+subtracts the fMP4 start-PTS). The transcript highlight and on-video captions read
+that same playhead, so all three are in sync by construction. The proxy's fMP4
+remux carries full audio (incl. the r75 DASH audio-merge), so the `<video>` is
+audible and unmuted. **Do NOT reintroduce the hidden-`<audio>` "twin" / audio-master
+clock** (it ran two independent media-element clocks; the muted picture drifted from
+the audio and needed a fragile playbackRate soft-sync — retired in `cd11f08`, briefly
+re-added, removed again in r88). The cached source audio (`download_audio_track`) is
+still fetched, but ONLY as a transcription head-start (Whisper reuses it via
+`source_audio_prefix`); it is not a playback clock.
+
+**Transcript timeline:** Whisper SRT cue times are absolute source time. When a
+mark-in sub-range is cut for transcription (`generate_transcript` `cut_section`),
+the cues are re-based by `+start_s` (`shift_srt_file` in `transcript.rs`) so they
+stay aligned to the full playback timeline — never offset by the in-point.
 
 **Proxy security:** every proxy request carries a per-session capability token
 in the path (`/t/<token>/…`). Without it the loopback server would be an open
@@ -258,6 +268,7 @@ All sidecars are bundled binaries invoked through `tauri-plugin-shell`. Each lon
 | ffprobe | yt-dlp stream fixups (HLS aac_adtstoasc) | `npm run refresh:ffprobe` (martin-riedl.de static arm64) |
 | whisper-cli | Local speech-to-text (whisper.cpp) | `npm run build:whisper` (builds from source, statically linked) |
 | saucebunny-diarize | Speaker diarization (Swift) | `npm run build:diarizer` (builds from `swift-sidecar/`) |
+| llama-server | Local LLM chat for the AI Summary tab | `npm run build:llama` (builds llama.cpp from source, static + Metal) |
 
 **Not in git**: sidecar binaries are assembled locally by `npm run setup`
 (fresh clones) — they are gitignored, and CI stubs them.

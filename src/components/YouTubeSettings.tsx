@@ -85,26 +85,33 @@ export function YouTubeSettings({
     invoke("open_youtube_signin", { browser: browser === "none" ? null : browser }).catch(() => {});
   const openFda = () => invoke("open_full_disk_access").catch(() => {});
 
+  // Contextual hint under the browser picker — collapses the old standalone
+  // "Full Disk Access" row + the per-browser permission caveats into one line
+  // that changes with the selection (progressive disclosure).
+  const cookieNote: { text: string; action?: { label: string; fn: () => void } } =
+    browser === "safari"
+      ? { text: "Safari needs Full Disk Access — grant it, then it picks up your sign-ins automatically.", action: { label: "Grant access ↗", fn: openFda } }
+      : browser === "firefox"
+        ? { text: "Firefox needs no extra permission." }
+        : browser === "none"
+          ? { text: "Public videos only — pick a browser to load age-gated or members-only sources." }
+          : { text: `${browser[0].toUpperCase() + browser.slice(1)} asks for your Mac password once to read its cookies.` };
+
   return (
     <section>
       <h3 className="cp-pane-title">Web sources</h3>
       <p className="cp-pane-sub">
-        Settings for any web video you paste — YouTube, Vimeo, Reddit, X, LinkedIn, and anywhere
-        else yt-dlp supports. Sign in once so gated sites stay reliable and you hit far fewer bot
-        checks. Sauce Bunny borrows your browser's existing cookies — it never sees or stores your
-        password, and nothing leaves your Mac.
+        How any pasted web video loads — YouTube, Vimeo, Reddit, X, and anywhere yt-dlp supports.
+        100% local: Sauce Bunny borrows your browser's cookies but never sees your password, and
+        nothing leaves your Mac.
       </p>
 
       <div className="cp-pane-section">
         <div className="cp-pane-section-label">Sign in</div>
         <div className="cp-pane-row">
           <div className="k">
-            Cookies from browser
-            <span className="desc">
-              Pick the browser you're already signed into on the sites you use. Safari is the best
-              fit on a Mac — it's made for macOS — but needs Full Disk Access (granted below).
-              Firefox needs no permission; Chrome/Brave/Edge ask for your Mac password once.
-            </span>
+            Browser cookies
+            <span className="desc">Borrow a browser's sign-in so gated sites stay reliable.</span>
           </div>
           <div className="v">
             <div
@@ -116,7 +123,7 @@ export function YouTubeSettings({
                   key={b}
                   className={browser === b ? "active" : ""}
                   onClick={() => setDefaults({ ...defaults, ytCookiesBrowser: b })}
-                  title={b === "none" ? "Don't send cookies" : `Read YouTube cookies from ${b}`}
+                  title={b === "none" ? "Don't send cookies" : `Read cookies from ${b}`}
                 >
                   {b === "none" ? "Off" : b[0].toUpperCase() + b.slice(1)}
                 </button>
@@ -125,32 +132,27 @@ export function YouTubeSettings({
           </div>
         </div>
 
+        {/* Contextual note — replaces the standalone Full Disk Access row +
+            the per-browser permission caveats; changes with the selection. */}
+        <div className="cp-pane-note">
+          <span>{cookieNote.text}</span>
+          {cookieNote.action && (
+            <button className="btn btn-ghost" onClick={cookieNote.action.fn}>
+              {cookieNote.action.label}
+            </button>
+          )}
+        </div>
+
         <div className="cp-pane-row">
           <div className="k">
-            Sign in to YouTube
-            <span className="desc">
-              Opens YouTube in {browserLabel(browser)} so you can log in. Once you're signed in
-              there, Sauce Bunny picks up the cookies automatically.
+            YouTube account
+            <span className="desc" title={`Opens YouTube in ${browserLabel(browser)} so you can log in; Sauce Bunny then picks up the cookies automatically.`}>
+              Sign in once for reliable, bot-check-free loads.
             </span>
           </div>
           <div className="v">
             <button className="btn btn-ghost" onClick={signIn}>
               Open YouTube ↗
-            </button>
-          </div>
-        </div>
-
-        <div className="cp-pane-row">
-          <div className="k">
-            Full Disk Access
-            <span className="desc">
-              Only needed for Safari cookies. Grant Sauce Bunny access in System Settings, then
-              come back and pick Safari above.
-            </span>
-          </div>
-          <div className="v">
-            <button className="btn btn-ghost" onClick={openFda}>
-              Open settings ↗
             </button>
           </div>
         </div>
@@ -161,10 +163,8 @@ export function YouTubeSettings({
         <div className="cp-pane-row">
           <div className="k">
             Preview quality
-            <span className="desc">
-              Resolution of the throwaway copy Sauce Bunny downloads so you can scrub and mark a
-              web source in-app. Lower = much smaller file = faster to play. Your exported clip
-              always uses the quality you pick on the export form — not this.
+            <span className="desc" title="Resolution of the throwaway scrub/mark copy. Lower = smaller + faster. Your exported clip uses the export-form quality, not this.">
+              The scrub copy only — your export uses the export-form quality.
             </span>
           </div>
           <div className="v">
@@ -193,9 +193,8 @@ export function YouTubeSettings({
           <div className="k">
             yt-dlp version
             <span className="desc">
-              yt-dlp is the tool that reads YouTube and other sites. Its maintainers ship fixes
-              often when sites change — update here if videos stop loading.{" "}
-              {status?.updated ? "Currently using your updated copy." : "Currently using the bundled copy."}
+              The tool that reads YouTube + other sites — update if videos stop loading.{" "}
+              {status?.updated ? "Using your updated copy." : "Using the bundled copy."}
             </span>
           </div>
           <div className="v cp-ytdlp-actions">

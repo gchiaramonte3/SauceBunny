@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  IconStack, IconReveal, IconTrash, IconCheck, IconAlert, IconSparkles,
+  IconStack, IconReveal, IconTrash, IconCheck, IconAlert, IconSparkles, IconBrainTab,
 } from "./Icons";
 import type { QueuedClip } from "../types";
 import { secondsToHms } from "../lib/timecode";
 import { TranscriptViewer } from "./TranscriptViewer";
+import { AiSummary, type SummaryStyle } from "./AiSummary";
 import type { TranscriptHistoryEntry } from "../lib/transcript-history";
 
 /**
@@ -13,7 +14,7 @@ import type { TranscriptHistoryEntry } from "../lib/transcript-history";
  * in the TABS array + one body case below. We deliberately avoid
  * shipping "Soon" placeholder tabs (UI bloat).
  */
-type TabId = "queue" | "transcript";
+type TabId = "queue" | "transcript" | "ai";
 type TabDef = {
   id: TabId;
   label: string;
@@ -59,6 +60,10 @@ type Props = {
   regenerateBusy: boolean;
   /** True if there's a source loaded that we COULD regenerate against. */
   canRegenerate: boolean;
+  /** Re-run ONLY speaker detection on the current transcript (no re-transcribe). */
+  onRedetectSpeakers?: () => void;
+  /** True when re-detecting speakers is possible (a transcript + a source). */
+  canRedetect?: boolean;
   /** Open a .srt / .vtt from disk (file picker). */
   onImportTranscript: () => void;
   /** r84: source kind — gates the "fix caption timing" banner to web sources. */
@@ -66,6 +71,11 @@ type Props = {
   /** r84: re-time loose YouTube captions with Whisper. Optional (omitted in the
    *  popped-out panel, where the banner is hidden rather than wired over the bus). */
   onFixCaptionTiming?: () => void;
+  /** AI Summary: the summarization model + output style chosen in Settings. */
+  aiModelId?: string | null;
+  aiStyle?: SummaryStyle;
+  /** Open Settings → AI Summary (manage/download/switch the model). */
+  onOpenAiSettings?: () => void;
   /**
    * Pop the drawer out into its own native OS window (r44.B). When
    * undefined, the pop-out button doesn't render — the floating window
@@ -99,7 +109,10 @@ const DRAWER_WIDTH_KEY = "saucebunny.queueDrawerWidth";
 const TAB_ORDER_KEY    = "saucebunny.queueDrawerTabOrder";
 const DRAWER_WIDTH_MIN = 280;
 const DRAWER_WIDTH_MAX = 720;
-const DRAWER_WIDTH_DEFAULT = 360;
+// Wide enough that the transcript toolbar's primary actions + the Tools menu
+// fit without clipping, and the AI Summary reads comfortably. Users can still
+// drag-resize (persisted) or double-click the handle to reset to this.
+const DRAWER_WIDTH_DEFAULT = 440;
 
 function loadDrawerWidth(): number {
   try {
@@ -118,7 +131,9 @@ export function QueueDrawer({
   onTranscriptSeek, transcriptArrivedTick,
   onClearTranscript, onLoadFromHistory,
   onRegenerateTranscript, regenerateBusy, canRegenerate,
+  onRedetectSpeakers, canRedetect,
   onImportTranscript, sourceKind, onFixCaptionTiming,
+  aiModelId, aiStyle, onOpenAiSettings,
   onPopOut, embedded = false,
 }: Props) {
   const counts = queue.reduce(
@@ -204,6 +219,7 @@ export function QueueDrawer({
   const TABS: TabDef[] = [
     { id: "queue", label: "Queue", icon: IconStack, badge: queue.length },
     { id: "transcript", label: "Transcript", icon: IconSparkles },
+    { id: "ai", label: "AI Summary", icon: IconBrainTab },
   ];
 
   // ── User-reorderable tab order ─────────────────────────────────
@@ -217,7 +233,7 @@ export function QueueDrawer({
       const raw = localStorage.getItem(TAB_ORDER_KEY);
       const stored: unknown = raw ? JSON.parse(raw) : null;
       if (Array.isArray(stored)) {
-        const valid = stored.filter((x): x is TabId => x === "queue" || x === "transcript");
+        const valid = stored.filter((x): x is TabId => x === "queue" || x === "transcript" || x === "ai");
         const defaults: TabId[] = TABS.map((t) => t.id);
         // Drop any stored ids that no longer exist + append any
         // brand-new tab ids that weren't in storage.
@@ -605,9 +621,20 @@ export function QueueDrawer({
           onRegenerate={onRegenerateTranscript}
           regenerateBusy={regenerateBusy}
           canRegenerate={canRegenerate}
+          onRedetectSpeakers={onRedetectSpeakers}
+          canRedetect={canRedetect}
           onImportTranscript={onImportTranscript}
           sourceKind={sourceKind}
           onFixCaptionTiming={onFixCaptionTiming}
+        />
+      )}
+      {activeTab === "ai" && (
+        <AiSummary
+          transcriptPath={transcriptPath}
+          reloadToken={transcriptArrivedTick}
+          selectedModelId={aiModelId}
+          style={aiStyle}
+          onOpenSettings={onOpenAiSettings}
         />
       )}
     </aside>

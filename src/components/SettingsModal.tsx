@@ -8,10 +8,12 @@ import type {
   CacheStats,
 } from "../types";
 import type { Command } from "../lib/commands";
+import type { LlmModel } from "../bindings/LlmModel";
 import { formatError } from "../lib/error-format";
+import { CollapsibleSection } from "./CollapsibleSection";
 import { YouTubeSettings } from "./YouTubeSettings";
 
-type TabId = "general" | "captions" | "transcription" | "youtube" | "commands" | "about";
+type TabId = "general" | "captions" | "transcription" | "youtube" | "ai-summary" | "commands" | "about";
 
 export type Defaults = {
   folder: string | null;
@@ -20,6 +22,21 @@ export type Defaults = {
   captions: boolean;
   timecode: "24" | "25" | "30";
   whisperModel: string; // e.g. "base.en"
+  /**
+   * Active transcription engine. "whisper" → whisper-cli (the bundled
+   * default, English-tuned). "parakeet" → FluidAudio's Parakeet TDT v3
+   * (Core ML, multilingual, word-level timings) run via the diarize
+   * sidecar's --asr mode; requires its ~0.5 GB model to be downloaded
+   * first (Settings → Transcription → Parakeet → Download). Both run
+   * 100% on-device.
+   */
+  transcriptionEngine: "whisper" | "parakeet";
+  /** AI Summary: chosen local llama.cpp model id (Settings → AI Summary). */
+  llmSummarizationModel: string;
+  /** AI Summary output shape — bullets, numbered list, or prose. */
+  summaryFormat: "bullets" | "numbered" | "prose";
+  /** AI Summary length target. */
+  summaryLength: "brief" | "standard" | "detailed";
   /**
    * When true, imported local files are played via mediabunny + WebCodecs
    * instead of the ffmpeg pre-encode path. Skips the 6–13s prep on import
@@ -141,6 +158,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "captions",      label: "Captions" },
   { id: "youtube",       label: "Web sources" },
   { id: "transcription", label: "Transcription" },
+  { id: "ai-summary",    label: "AI Summary" },
   { id: "commands",      label: "Commands & Shortcuts" },
   { id: "about",         label: "About" },
 ];
@@ -340,6 +358,36 @@ export function SettingsModal(props: Props) {
     total: number;
   } | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  // Transcription-engine tree (host → models). Whisper open by default.
+  const [whisperOpen, setWhisperOpen] = useState(true);
+  const [parakeetOpen, setParakeetOpen] = useState(false);
+  // Parakeet engine state. null = not yet checked. The model downloads via the
+  // diarize sidecar (--prepare-asr-models), which has no byte-level progress, so
+  // this is a simple busy/ready flag rather than the percent bar Whisper uses.
+  const [parakeetReady, setParakeetReady] = useState<boolean | null>(null);
+  const [parakeetBusy, setParakeetBusy] = useState(false);
+  const [parakeetError, setParakeetError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    invoke<boolean>("parakeet_model_downloaded")
+      .then(setParakeetReady)
+      .catch(() => setParakeetReady(false));
+  }, [open]);
+
+  const downloadParakeet = useCallback(async () => {
+    setParakeetBusy(true);
+    setParakeetError(null);
+    try {
+      const id = await invoke<string>("new_job_id");
+      await invoke("download_parakeet_model", { jobId: id });
+      setParakeetReady(true);
+    } catch (e) {
+      setParakeetError(formatError(e));
+    } finally {
+      setParakeetBusy(false);
+    }
+  }, []);
 
   const refreshModels = useCallback(async () => {
     try {
@@ -351,9 +399,41 @@ export function SettingsModal(props: Props) {
     }
   }, []);
 
+  // ── AI Summary (local LLM) models — share the whisper download channel ──
+  const [llmModels, setLlmModels] = useState<LlmModel[]>([]);
+  const refreshLlmModels = useCallback(async () => {
+    try { setLlmModels(await invoke<LlmModel[]>("list_llm_models")); }
+    catch (err) { console.warn("list_llm_models failed", err); }
+  }, []);
+  const startLlmDownload = useCallback(async (modelId: string) => {
+    setDownloadError(null);
+    setDownloadingId(modelId);
+    setDownloadProgress(null);
+    try {
+      const id = await invoke<string>("new_job_id");
+      downloadJobIdRef.current = id;
+      await invoke("download_llm_model", { args: { model_id: modelId, job_id: id } });
+    } catch (e) {
+      downloadJobIdRef.current = null;
+      setDownloadingId(null);
+      setDownloadError(formatError(e));
+    }
+  }, []);
+  const deleteLlmModel = useCallback(async (modelId: string) => {
+    try {
+      await invoke("delete_llm_model", { modelId });
+      if (defaults.llmSummarizationModel === modelId) {
+        const fallback = llmModels.find((m) => m.recommended && m.id !== modelId)
+          ?? llmModels.find((m) => m.id !== modelId);
+        if (fallback) setDefaults({ ...defaults, llmSummarizationModel: fallback.id });
+      }
+      refreshLlmModels();
+    } catch (e) { setDownloadError(formatError(e)); }
+  }, [refreshLlmModels, defaults, setDefaults, llmModels]);
+
   useEffect(() => {
-    if (open) refreshModels();
-  }, [open, refreshModels]);
+    if (open) { refreshModels(); refreshLlmModels(); }
+  }, [open, refreshModels, refreshLlmModels]);
 
   // Listen for download events. Mounted ONCE — filtering goes through
   // downloadJobIdRef so a new job never has to wait for a re-subscription
@@ -379,6 +459,7 @@ export function SettingsModal(props: Props) {
           setDownloadProgress(null);
           setDownloadError(null);
           refreshModels();
+          refreshLlmModels();
         } else {
           setDownloadError(e.payload.error ?? "Download failed");
           setDownloadingId(null);
@@ -391,7 +472,7 @@ export function SettingsModal(props: Props) {
       mounted = false;
       unlistens.forEach((u) => u());
     };
-  }, [refreshModels]);
+  }, [refreshModels, refreshLlmModels]);
 
   // Auto-select first downloaded model if none selected.
   useEffect(() => {
@@ -732,14 +813,21 @@ export function SettingsModal(props: Props) {
               <section>
                 <h3 className="cp-pane-title">Transcription</h3>
                 <p className="cp-pane-sub">
-                  Local-only transcription via <strong>whisper.cpp</strong>. Pick a model below and
-                  download it once — Sauce Bunny will use it to generate an .srt for the marked section
-                  of your next clip. Audio is extracted with yt-dlp + ffmpeg; nothing leaves your
-                  machine.
+                  Transcription runs <strong>100% on your Mac</strong> — choose an engine below,
+                  download a model once, and Sauce Bunny generates an .srt for your clips. Audio is
+                  extracted with yt-dlp + ffmpeg; nothing ever leaves your machine.
                 </p>
 
                 <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Whisper model</div>
+                  <div className="cp-pane-section-label">Transcription engine</div>
+                  <CollapsibleSection
+                    id="eng-whisper"
+                    label="Whisper"
+                    meta="whisper.cpp · local models"
+                    summary="whisper.cpp · local models"
+                    open={whisperOpen}
+                    onToggle={() => setWhisperOpen((o) => !o)}
+                  >
                   <div className="cp-models">
                     {models.length === 0 && (
                       <div className="cp-source-hint muted">Loading models…</div>
@@ -814,6 +902,80 @@ export function SettingsModal(props: Props) {
                       {downloadError}
                     </div>
                   )}
+                  </CollapsibleSection>
+                  <CollapsibleSection
+                    id="eng-parakeet"
+                    label="Parakeet"
+                    meta={
+                      defaults.transcriptionEngine === "parakeet"
+                        ? "NVIDIA · in use"
+                        : parakeetReady
+                          ? "NVIDIA · downloaded"
+                          : "NVIDIA · word-level timing"
+                    }
+                    summary="NVIDIA · word-level timing"
+                    open={parakeetOpen}
+                    onToggle={() => setParakeetOpen((o) => !o)}
+                  >
+                    <div className="cp-source-hint muted" style={{ lineHeight: 1.6, marginBottom: 12 }}>
+                      <strong>Parakeet TDT v3</strong> (NVIDIA) runs fully on-device on Apple
+                      Silicon via Core ML and emits <strong>word-level</strong> timestamps —
+                      multilingual, with tighter caption sync than Whisper's segment timing.
+                      One-time download is about 0.5 GB.
+                    </div>
+                    <div className={"cp-model-row" + (defaults.transcriptionEngine === "parakeet" ? " selected" : "")}>
+                      <div className="cp-model-info-wrap">
+                        <div className="cp-model-head">
+                          <IconSparkles size={13} stroke="var(--fg-4)" />
+                          <span className="name">Parakeet TDT v3</span>
+                          <span className="size">≈0.5 GB</span>
+                          {parakeetReady && <span className="badge installed">Installed</span>}
+                          {defaults.transcriptionEngine === "parakeet" && (
+                            <span className="badge selected">Default</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="cp-model-actions">
+                        {parakeetReady === null ? (
+                          <span className="size">checking…</span>
+                        ) : !parakeetReady ? (
+                          <button
+                            className="btn btn-primary"
+                            onClick={downloadParakeet}
+                            disabled={parakeetBusy}
+                          >
+                            {parakeetBusy ? "Downloading…" : "Download"}
+                          </button>
+                        ) : defaults.transcriptionEngine === "parakeet" ? (
+                          <button
+                            className="btn btn-ghost"
+                            onClick={() => setDefaults({ ...defaults, transcriptionEngine: "whisper" })}
+                            title="Switch transcription back to Whisper"
+                          >
+                            Use Whisper
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => setDefaults({ ...defaults, transcriptionEngine: "parakeet" })}
+                          >
+                            Use as default
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {parakeetBusy && (
+                      <div className="cp-source-hint muted" style={{ marginTop: 10 }}>
+                        Downloading the Parakeet model — this runs once and can take a few
+                        minutes on the first go. You can keep using the app meanwhile.
+                      </div>
+                    )}
+                    {parakeetError && (
+                      <div className="cp-source-hint err" style={{ marginTop: 10 }}>
+                        {parakeetError}
+                      </div>
+                    )}
+                  </CollapsibleSection>
                 </div>
 
                 <div className="cp-pane-section">
@@ -929,6 +1091,112 @@ export function SettingsModal(props: Props) {
                     whisper-cli writes <code>&lt;filename&gt;.srt</code> next to where your clip would
                     save. Larger models = better accuracy, longer transcribe time.
                   </p>
+                </div>
+              </section>
+            )}
+
+            {tab === "ai-summary" && (
+              <section>
+                <h3 className="cp-pane-title">AI Summary</h3>
+                <p className="cp-pane-sub">
+                  Summarize and chat with transcripts using a local AI model — runs entirely on
+                  your Mac via llama.cpp (Metal). No cloud, no account, nothing leaves the machine.
+                  Pick the model that fits your Mac's memory below.
+                </p>
+
+                <div className="cp-pane-section">
+                  <div className="cp-pane-section-label">Model</div>
+                  <div className="cp-model-list">
+                    {llmModels.map((m) => {
+                      const isSel = defaults.llmSummarizationModel === m.id;
+                      const prog = downloadProgress?.modelId === m.id ? downloadProgress : null;
+                      return (
+                        <div key={m.id} className={"cp-model-row" + (isSel && m.downloaded ? " selected" : "")}>
+                          <div className="cp-model-info-wrap">
+                            <div className="cp-model-head">
+                              <IconSparkles size={13} stroke="var(--fg-4)" />
+                              <span className="name">{m.name}</span>
+                              <span className="size">{formatMB(m.size_bytes)}</span>
+                              {m.recommended && <span className="badge recommended">Recommended</span>}
+                              {m.downloaded && <span className="badge installed">Installed</span>}
+                              {isSel && m.downloaded && <span className="badge selected">Default</span>}
+                            </div>
+                            <div className="cp-model-blurb">{m.blurb}</div>
+                            {prog && (
+                              <div className="cp-model-progress">
+                                <div className="bar"><span style={{ width: `${prog.percent}%` }} /></div>
+                                <span className="meta">
+                                  {prog.percent.toFixed(0)}%
+                                  {prog.total > 0 && ` · ${formatMB(prog.done)} / ${formatMB(prog.total)}`}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="cp-model-actions">
+                            {!m.downloaded ? (
+                              <button className="btn btn-primary" disabled={!!downloadingId} onClick={() => startLlmDownload(m.id)}>
+                                {downloadingId === m.id ? "Downloading…" : "Download"}
+                              </button>
+                            ) : isSel ? (
+                              <span className="cp-ytdlp-version">In use</span>
+                            ) : (
+                              <button className="btn btn-primary" onClick={() => setDefaults({ ...defaults, llmSummarizationModel: m.id })}>
+                                Use as default
+                              </button>
+                            )}
+                            {m.downloaded && (
+                              <button className="btn btn-ghost" onClick={() => deleteLlmModel(m.id)} title="Remove this model file from disk">
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {downloadError && <div className="cp-source-hint err" style={{ marginTop: 12 }}>{downloadError}</div>}
+                </div>
+
+                <div className="cp-pane-section">
+                  <div className="cp-pane-section-label">Summary style</div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Format
+                      <span className="desc">How answers are structured — real bullets / numbers, not asterisks.</span>
+                    </div>
+                    <div className="v">
+                      <div className="cp-segmented" style={{ minWidth: 270, gridTemplateColumns: "repeat(3, 1fr)" }}>
+                        {(["bullets", "numbered", "prose"] as const).map((f) => (
+                          <button
+                            key={f}
+                            className={defaults.summaryFormat === f ? "active" : ""}
+                            onClick={() => setDefaults({ ...defaults, summaryFormat: f })}
+                          >
+                            {f === "bullets" ? "Bullets" : f === "numbered" ? "Numbered" : "Prose"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Length
+                      <span className="desc">Roughly how much detail the model includes.</span>
+                    </div>
+                    <div className="v">
+                      <div className="cp-segmented" style={{ minWidth: 270, gridTemplateColumns: "repeat(3, 1fr)" }}>
+                        {(["brief", "standard", "detailed"] as const).map((l) => (
+                          <button
+                            key={l}
+                            className={defaults.summaryLength === l ? "active" : ""}
+                            onClick={() => setDefaults({ ...defaults, summaryLength: l })}
+                          >
+                            {l[0].toUpperCase() + l.slice(1)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </section>
             )}

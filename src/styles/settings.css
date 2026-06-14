@@ -188,12 +188,38 @@
   gap: 8px;
   justify-content: flex-end;
 }
+/* Contextual note under a setting (e.g. the per-browser cookie hint). A slim,
+   neutral strip — folds conditional rows into one line that changes with the
+   selection. */
+.cp-pane-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -2px 0 12px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--fg-3);
+}
+.cp-pane-note span { flex: 1; min-width: 0; }
+.cp-pane-note .btn { flex-shrink: 0; }
 
 /* ── Whisper model list (Settings → Transcription) ── */
 .cp-models {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.cp-model-list { display: flex; flex-direction: column; gap: 8px; }
+.cp-model-blurb {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-4);
 }
 .cp-model-row {
   display: flex;

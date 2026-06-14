@@ -114,6 +114,12 @@ export const IconSparkles = (p: IconProps) => (
     <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.5 5.5l2 2M16.5 16.5l2 2M5.5 18.5l2-2M16.5 7.5l2-2" />
   </Icon>
 );
+export const IconBrainTab = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 5a3 3 0 0 0-3 3 3 3 0 0 0-1 5.8V16a2 2 0 0 0 4 0" />
+    <path d="M12 5a3 3 0 0 1 3 3 3 3 0 0 1 1 5.8V16a2 2 0 0 1-4 0" />
+  </Icon>
+);
 export const IconMarkIn = (p: IconProps) => (
   <Icon {...p} strokeWidth={2}>
     <path d="M7 4v16" strokeLinecap="square" />

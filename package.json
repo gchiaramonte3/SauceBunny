@@ -16,6 +16,7 @@
     "refresh:ffmpeg": "bash scripts/fetch-ffmpeg.sh",
     "refresh:ffprobe": "bash scripts/fetch-ffprobe.sh",
     "build:whisper": "bash scripts/build-whisper.sh",
+    "build:llama": "bash scripts/build-llama.sh",
     "check:release": "bash scripts/check-notarization-ready.sh"
   },
   "dependencies": {

@@ -11,10 +11,8 @@ import {
   type TranscriptHistoryEntry,
 } from "../lib/transcript-history";
 import { RenamePopover, type RenameState } from "./transcript/RenamePopover";
-import {
-  MergeConfirmPopover,
-  type MergeConfirmState,
-} from "./transcript/MergeConfirmPopover";
+import { SpeakerRosterModal } from "./transcript/SpeakerRosterModal";
+import { SpeakerColorPicker } from "./SpeakerColorPicker";
 import { HistoryPopover } from "./transcript/HistoryPopover";
 import {
   escapeHtml,
@@ -22,6 +20,7 @@ import {
   humanizeSpeakerTag,
   resolveAliasChain,
   speakerColor,
+  speakerTextColor,
   speakerInitials,
   SPEAKERS_CHANGED_EVENT,
 } from "./transcript/helpers";
@@ -64,6 +63,11 @@ type Props = {
    * to hunt back to the Sidebar for the Generate button.
    */
   onRegenerate: () => void;
+  /** Re-run ONLY speaker diarization on the current transcript (no Whisper
+   *  re-run) — fast on long sources. Optional: omitted on the pop-out panel. */
+  onRedetectSpeakers?: () => void;
+  /** True when re-detecting speakers is possible (a transcript + a source). */
+  canRedetect?: boolean;
   /** Open a .srt / .vtt from disk into the viewer (and add to history). */
   onImportTranscript: () => void;
   /**
@@ -111,6 +115,7 @@ export function TranscriptViewer({
   path, reloadToken, playheadSeconds, onSeek, origin,
   onClearTranscript, onLoadFromHistory,
   onRegenerate, regenerateBusy, canRegenerate, fps = 30,
+  onRedetectSpeakers, canRedetect,
   onImportTranscript, sourceKind, onFixCaptionTiming,
 }: Props) {
   const [raw, setRaw] = useState<string | null>(null);
@@ -137,13 +142,14 @@ export function TranscriptViewer({
     global: Record<string, string>;
     turn: Record<string, string>;
     aliases: Record<string, string>;
+    colors: Record<string, string>; // canonical tag → custom hex pip colour
   };
   const storageKey = path ? `saucebunny.speakerNames.${path}` : null;
-  const [overrides, setOverrides] = useState<Overrides>({ global: {}, turn: {}, aliases: {} });
+  const [overrides, setOverrides] = useState<Overrides>({ global: {}, turn: {}, aliases: {}, colors: {} });
 
   // Load overrides when the path changes.
   useEffect(() => {
-    if (!storageKey) { setOverrides({ global: {}, turn: {}, aliases: {} }); return; }
+    if (!storageKey) { setOverrides({ global: {}, turn: {}, aliases: {}, colors: {} }); return; }
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
@@ -153,12 +159,13 @@ export function TranscriptViewer({
           global:  typeof parsed.global  === "object" && parsed.global  ? parsed.global  : {},
           turn:    typeof parsed.turn    === "object" && parsed.turn    ? parsed.turn    : {},
           aliases: typeof parsed.aliases === "object" && parsed.aliases ? parsed.aliases : {},
+          colors:  typeof parsed.colors  === "object" && parsed.colors  ? parsed.colors  : {},
         });
       } else {
-        setOverrides({ global: {}, turn: {}, aliases: {} });
+        setOverrides({ global: {}, turn: {}, aliases: {}, colors: {} });
       }
     } catch {
-      setOverrides({ global: {}, turn: {}, aliases: {} });
+      setOverrides({ global: {}, turn: {}, aliases: {}, colors: {} });
     }
   }, [storageKey]);
 
@@ -176,7 +183,8 @@ export function TranscriptViewer({
     if (persistKeyRef.current !== storageKey) { persistKeyRef.current = storageKey; return; }
     const empty = Object.keys(overrides.global).length === 0
                && Object.keys(overrides.turn).length === 0
-               && Object.keys(overrides.aliases).length === 0;
+               && Object.keys(overrides.aliases).length === 0
+               && Object.keys(overrides.colors).length === 0;
     if (empty) {
       localStorage.removeItem(storageKey);
     } else {
@@ -408,6 +416,7 @@ export function TranscriptViewer({
         global:  { ...prev.global },
         turn:    { ...prev.turn },
         aliases: { ...prev.aliases, [sourceTag]: canonicalTarget },
+        colors:  { ...prev.colors },
       };
       // Drop a now-unused global rename on the source (its tag
       // resolves elsewhere, so the rename would never display anyway).
@@ -416,14 +425,25 @@ export function TranscriptViewer({
     });
   }, []);
 
-  const unmergeSpeaker = useCallback((sourceTag: string) => {
+  // Global rename keyed on the canonical (alias-resolved) tag — the form the
+  // roster already exposes as `tag`. Used by the Speakers modal. ("Speaker"
+  // sentinel = the untagged group → the "__NULL__" override key.)
+  const renameSpeaker = useCallback((canonicalTag: string, name: string) => {
+    const trimmed = name.trim();
+    const key = canonicalTag === "Speaker" ? "__NULL__" : canonicalTag;
+    const resolved = key === "__NULL__" ? null : key;
     setOverrides((prev) => {
-      if (!prev.aliases[sourceTag]) return prev;
-      const next = { ...prev, aliases: { ...prev.aliases } };
-      delete next.aliases[sourceTag];
+      const next: Overrides = {
+        global: { ...prev.global }, turn: { ...prev.turn }, aliases: { ...prev.aliases }, colors: { ...prev.colors },
+      };
+      if (trimmed && trimmed !== humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers })) {
+        next.global[key] = trimmed;
+      } else {
+        delete next.global[key];
+      }
       return next;
     });
-  }, []);
+  }, [hasIdentifiedSpeakers]);
 
   // ── Roster: unique speakers (post-alias) + their stats ──────────
   // Used by the roster panel above the transcript body AND drives the
@@ -482,28 +502,6 @@ export function TranscriptViewer({
     return list;
   }, [turns, resolveAlias, overrides.global, hasIdentifiedSpeakers]);
 
-  // ── Roster strip overflow → edge-fade hints ─────────────────────
-  // The roster is one horizontally-scrollable line. Fade whichever edge has
-  // more chips off-screen (and only that edge) so the user can tell there's
-  // more to scroll to, without clipping a cast that already fits.
-  const rosterChipsRef = useRef<HTMLDivElement>(null);
-  const [rosterFade, setRosterFade] = useState({ left: false, right: false });
-  const updateRosterFade = useCallback(() => {
-    const el = rosterChipsRef.current;
-    if (!el) return;
-    const left = el.scrollLeft > 1;
-    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
-    setRosterFade((p) => (p.left === left && p.right === right ? p : { left, right }));
-  }, []);
-  useEffect(() => {
-    const el = rosterChipsRef.current;
-    if (!el) return;
-    updateRosterFade();
-    const ro = new ResizeObserver(updateRosterFade);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [updateRosterFade, roster]);
-
   // True when the transcript actually carries speaker identity — either
   // more than one speaker, or a single one that's been labeled (not the
   // generic fallback "Speaker"). When false (un-diarized whisper output,
@@ -514,17 +512,29 @@ export function TranscriptViewer({
   const hasRealSpeakers =
     roster.length > 1 || (roster.length === 1 && roster[0].tag !== "Speaker");
 
-  // Drag-to-merge: track the dragged source tag in a ref so handlers
-  // can read it inside React without re-render thrash. Hover state
-  // for visual feedback lives in component state.
-  const dragTagRef = useRef<string | null>(null);
-  const [dragHoverTag, setDragHoverTag] = useState<string | null>(null);
+  // Speaker colour picker — which speaker (canonical colour key) is being
+  // recoloured + the pip rect to anchor the popover. Opened from the modal.
+  const [colorPick, setColorPick] = useState<{ key: string; rect: DOMRect } | null>(null);
 
-  // Merge-confirm popover — opens at the drop site when the user
-  // releases a chip on top of another. Confirmed merges call
-  // mergeSpeaker; cancellation just dismisses. Component + type live in
-  // ./transcript/MergeConfirmPopover.tsx.
-  const [mergeConfirm, setMergeConfirm] = useState<MergeConfirmState | null>(null);
+  // Resolve a speaker's pip colour: a user override (set via the picker) wins,
+  // else the auto palette colour. Keyed on the resolved tag (null = untagged) —
+  // the same key the caption overlay reads — so a custom colour shows in the
+  // transcript bubbles, the Speakers modal, AND on-video captions.
+  const speakerDisplayColor = useCallback(
+    (colorTag: string | null) =>
+      overrides.colors[colorTag ?? "__NULL__"] || speakerColor(colorTag),
+    [overrides.colors],
+  );
+  const setSpeakerColor = useCallback((key: string, hex: string) => {
+    setOverrides((p) => ({ ...p, colors: { ...p.colors, [key]: hex } }));
+  }, []);
+  const resetSpeakerColor = useCallback((key: string) => {
+    setOverrides((p) => {
+      const colors = { ...p.colors };
+      delete colors[key];
+      return { ...p, colors };
+    });
+  }, []);
 
   // Rename popover state — tracks which turn the user is editing.
   // Anchored to the speaker chip rect so the popover appears next to
@@ -552,6 +562,7 @@ export function TranscriptViewer({
         global:  { ...prev.global },
         turn:    { ...prev.turn },
         aliases: { ...prev.aliases },
+        colors:  { ...prev.colors },
       };
       // Key the GLOBAL rename on the alias-RESOLVED tag — displayNameFor reads
       // overrides under the resolved key, and mergeSpeaker deletes globals
@@ -617,7 +628,7 @@ export function TranscriptViewer({
   }, [rename, resolveAlias, turns, flatCues, onSeek]);
 
   function resetAllRenames() {
-    setOverrides({ global: {}, turn: {}, aliases: {} });
+    setOverrides({ global: {}, turn: {}, aliases: {}, colors: {} });
     setRename(null);
   }
 
@@ -641,12 +652,27 @@ export function TranscriptViewer({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [dlOpen]);
 
+  // ── Tools menu state ─────────────────────────────────────────────
+  // Groups the secondary toolbar actions (re-detect speakers, history) so the
+  // primary actions stay visible and the bar scales as features are added.
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const toolsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!toolsOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (!toolsRef.current?.contains(e.target as Node)) setToolsOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [toolsOpen]);
+
   // ── History popover state ────────────────────────────────────────
   // Anchored to the History button. Closes on outside-click or Esc.
   // Re-reads localStorage on each open so the list reflects entries
   // recorded by other components / other open windows.
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyBtnRef = useRef<HTMLButtonElement>(null);
+  const [speakerModalOpen, setSpeakerModalOpen] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<TranscriptHistoryEntry[]>([]);
 
   // Dismissal state for the "No speakers" diagnostic, persisted per-
@@ -914,20 +940,39 @@ export function TranscriptViewer({
               <span>{regenerateBusy ? "Regenerating…" : "Regenerate"}</span>
             </button>
           )}
-          <button
-            className={"btn btn-ghost cp-tx-iconbtn" + (historyOpen ? " active" : "")}
-            onClick={() => setHistoryOpen((p) => !p)}
-            title="Re-open a previous transcript"
-            ref={historyBtnRef}
-          >
-            {/* Inline clock glyph — bare SVG keeps the icon file from
-                growing every time we need a one-off. */}
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="9" />
-              <polyline points="12 7 12 12 15 14" />
-            </svg>
-            <span>History</span>
-          </button>
+          {/* Secondary actions live in a Tools menu so the bar stays compact
+              and scales as features are added. The menu is anchored via
+              historyBtnRef so the History popover opens beneath it. */}
+          <div className="cp-tx-tools" ref={toolsRef}>
+            <button
+              className={"btn btn-ghost cp-tx-iconbtn" + (toolsOpen || historyOpen ? " active" : "")}
+              onClick={() => setToolsOpen((p) => !p)}
+              title="More transcript tools"
+              ref={historyBtnRef}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /><circle cx="5" cy="12" r="1.5" />
+              </svg>
+              <span>Tools</span>
+              <IconChevronDown size={10} />
+            </button>
+            {toolsOpen && (
+              <div className="cp-tx-dl-menu" role="menu">
+                {canRedetect && onRedetectSpeakers && (
+                  <button
+                    role="menuitem"
+                    disabled={regenerateBusy}
+                    onClick={() => { setToolsOpen(false); onRedetectSpeakers(); }}
+                  >
+                    {regenerateBusy ? "Detecting speakers…" : "Re-detect speakers"}
+                  </button>
+                )}
+                <button role="menuitem" onClick={() => { setToolsOpen(false); setHistoryOpen(true); }}>
+                  Transcript history…
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <div className="cp-tx-head-actions" ref={dlRef}>
           <button
@@ -1106,119 +1151,14 @@ export function TranscriptViewer({
         <div className="cp-tx-roster" role="toolbar" aria-label="Speakers in this transcript">
           <div className="cp-tx-roster-label">
             {roster.length} speaker{roster.length === 1 ? "" : "s"}
-            <span className="cp-tx-roster-hint">drag to merge</span>
-          </div>
-          <div
-            className={
-              "cp-tx-roster-chips" +
-              (rosterFade.left ? " fade-l" : "") +
-              (rosterFade.right ? " fade-r" : "")
-            }
-            ref={rosterChipsRef}
-            onScroll={updateRosterFade}
-          >
-            {roster.map((r) => {
-              const isDropHover = dragHoverTag === r.tag;
-              const isDragSource = dragTagRef.current === r.tag;
-              return (
-                <div
-                  key={r.tag}
-                  className={
-                    "cp-tx-roster-chip" +
-                    (isDropHover ? " drop-hover" : "") +
-                    (isDragSource ? " dragging" : "")
-                  }
-                  /* The untagged group's chip (colorTag null, sentinel tag
-                     "Speaker") can't participate in merges: null-tagged turns
-                     have no alias to rewrite, so dragging it ONTO a speaker is
-                     a silent no-op, and dropping a speaker ONTO it would alias
-                     real turns to the literal string "Speaker" (wrong colour,
-                     orphaned rename). Rename the group instead. */
-                  draggable={r.colorTag !== null}
-                  onDragStart={(e) => {
-                    dragTagRef.current = r.tag;
-                    e.dataTransfer.effectAllowed = "move";
-                    e.dataTransfer.setData("application/x-cp-speaker", r.tag);
-                  }}
-                  onDragEnd={() => { dragTagRef.current = null; setDragHoverTag(null); }}
-                  onDragOver={(e) => {
-                    if (r.colorTag === null) return; // sentinel can't be a merge target
-                    const src = dragTagRef.current;
-                    if (!src || src === r.tag) return;
-                    const srcEntry = roster.find((x) => x.tag === src);
-                    if (srcEntry && srcEntry.colorTag === null) return; // sentinel can't be a source
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    if (dragHoverTag !== r.tag) setDragHoverTag(r.tag);
-                  }}
-                  onDragLeave={(e) => {
-                    if (e.currentTarget === e.target) setDragHoverTag(null);
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const src = dragTagRef.current
-                              ?? e.dataTransfer.getData("application/x-cp-speaker");
-                    setDragHoverTag(null);
-                    dragTagRef.current = null;
-                    if (!src || src === r.tag) return;
-                    // Belt-and-braces for the dataTransfer fallback path: the
-                    // sentinel group can be neither source nor target.
-                    if (r.colorTag === null) return;
-                    const srcRosterEntry = roster.find((x) => x.tag === src);
-                    if (srcRosterEntry && srcRosterEntry.colorTag === null) return;
-                    // Open confirm popover; commit happens there.
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const srcEntry = roster.find((x) => x.tag === src || x.sourceTags.includes(src));
-                    setMergeConfirm({
-                      sourceTag: src,
-                      sourceName: srcEntry?.name ?? src,
-                      targetTag: r.tag,
-                      targetName: r.name,
-                      rect,
-                    });
-                  }}
-                  onClick={(e) => {
-                    // Click-to-rename on roster chip — find any turn
-                    // whose canonical tag matches and pass it as the
-                    // anchor turn index. The rename popover treats
-                    // "rename all" as "rename this canonical tag", so
-                    // any matching turnIdx works.
-                    const anyTurnIdx = turns.findIndex((t) => (resolveAlias(t.speaker) ?? "Speaker") === r.tag);
-                    // Pass the RESOLVED tag (null-preserving), not r.tag — for the
-                    // untagged group r.tag is the literal "Speaker" string, but the
-                    // override is keyed "__NULL__"; passing null keeps write==read.
-                    if (anyTurnIdx >= 0) openRename(e, anyTurnIdx, resolveAlias(turns[anyTurnIdx].speaker));
-                  }}
-                  title={`${r.name} · ${r.turnCount} turn${r.turnCount === 1 ? "" : "s"}\nClick to rename · drag onto another speaker to merge`}
-                >
-                  <span
-                    className="cp-tx-roster-pip"
-                    style={{ background: speakerColor(r.colorTag) }}
-                  >
-                    {speakerInitials(r.name)}
-                  </span>
-                  <span className="cp-tx-roster-name">{r.name}</span>
-                  <span className="cp-tx-roster-count">{r.turnCount}</span>
-                  {r.sourceTags.length > 1 && (
-                    <button
-                      className="cp-tx-roster-unmerge"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        // Unmerge the most-recent alias pointing here.
-                        // Cheap approximation of "undo last merge for
-                        // this canonical" — pop the first sourceTag
-                        // that isn't the canonical itself.
-                        const peel = r.sourceTags.find((s) => s !== r.tag);
-                        if (peel) unmergeSpeaker(peel);
-                      }}
-                      title={`Merged from ${r.sourceTags.length} original speakers — click to peel one off`}
-                    >
-                      ⌥{r.sourceTags.length}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
+            <button
+              type="button"
+              className="cp-tx-roster-manage"
+              onClick={() => setSpeakerModalOpen(true)}
+              title="See all speakers · rename · recolour · merge"
+            >
+              Manage speakers
+            </button>
           </div>
         </div>
       )}
@@ -1239,18 +1179,10 @@ export function TranscriptViewer({
                 {hasRealSpeakers && (<>
                 <span
                   className={"cp-tx-speaker" + (hasOverride ? " renamed" : "")}
-                  style={{ background: speakerColor(resolveAlias(turn.speaker)) }}
+                  style={{ background: speakerDisplayColor(resolveAlias(turn.speaker)) }}
                   onClick={(e) => openRename(e, ti, turn.speaker)}
                   onContextMenu={(e) => openRename(e, ti, turn.speaker)}
-                  title="Click or right-click to rename · drag onto a speaker in the roster to merge"
-                  draggable={!!turn.speaker}
-                  onDragStart={(e) => {
-                    if (!turn.speaker) return;
-                    dragTagRef.current = resolveAlias(turn.speaker) ?? turn.speaker;
-                    e.dataTransfer.effectAllowed = "move";
-                    e.dataTransfer.setData("application/x-cp-speaker", dragTagRef.current);
-                  }}
-                  onDragEnd={() => { dragTagRef.current = null; setDragHoverTag(null); }}
+                  title="Click or right-click to rename · use Manage speakers to recolour or merge"
                 >
                   {speakerInitials(displayName)}
                 </span>
@@ -1334,14 +1266,28 @@ export function TranscriptViewer({
           onGoToSpeaker={goToSpeaker}
         />
       )}
-      {mergeConfirm && (
-        <MergeConfirmPopover
-          state={mergeConfirm}
-          onCancel={() => setMergeConfirm(null)}
-          onConfirm={() => {
-            mergeSpeaker(mergeConfirm.sourceTag, mergeConfirm.targetTag);
-            setMergeConfirm(null);
-          }}
+      {speakerModalOpen && (
+        <SpeakerRosterModal
+          roster={roster}
+          onRename={renameSpeaker}
+          onMerge={mergeSpeaker}
+          colorOf={(item) => speakerDisplayColor(item.colorTag)}
+          onPickColor={(item, rect) => setColorPick({ key: item.colorTag ?? "__NULL__", rect })}
+          onClose={() => setSpeakerModalOpen(false)}
+        />
+      )}
+      {colorPick && (
+        <SpeakerColorPicker
+          value={
+            overrides.colors[colorPick.key]
+            || speakerTextColor(colorPick.key === "__NULL__" ? null : colorPick.key)
+          }
+          anchorRect={colorPick.rect}
+          onCommit={(hex) => setSpeakerColor(colorPick.key, hex)}
+          onReset={overrides.colors[colorPick.key]
+            ? () => { resetSpeakerColor(colorPick.key); setColorPick(null); }
+            : undefined}
+          onClose={() => setColorPick(null)}
         />
       )}
       {historyOpen && historyBtnRef.current && (

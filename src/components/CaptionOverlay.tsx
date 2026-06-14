@@ -3,9 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { parseSrt, type Cue } from "../lib/srt";
 import {
   loadSpeakerOverrides,
-  resolveAliasChain,
   resolveSpeakerName,
-  speakerColor,
+  resolveSpeakerColor,
   speakerOverridesKey,
   SPEAKERS_CHANGED_EVENT,
   type SpeakerOverrides,
@@ -218,9 +217,12 @@ export function CaptionOverlay({ path, reloadToken, currentSec, enabled, style }
     ? resolveSpeakerName(active.speaker ?? null, overrides, { unknownWhenNull: hasIdentifiedSpeakers })
     : null;
   // Colour the name with the same per-speaker hue the roster/bubbles use, so
-  // the caption's "Speaker 2:" matches the chip on the right.
+  // the caption's "Speaker 2:" matches the chip on the right. SOLID colour
+  // (speakerTextColor) — a gradient is invalid as CSS `color:` and was silently
+  // falling back to the default caption hue, which is why the label colour
+  // didn't match the sidebar chip.
   const speakerHue = speakerName
-    ? speakerColor(resolveAliasChain(active?.speaker ?? null, overrides.aliases))
+    ? resolveSpeakerColor(active?.speaker ?? null, overrides)
     : undefined;
   // Two clause-broken lines, with the first line's budget reduced by the
   // speaker prefix so "Tom Jonathan: …" doesn't overflow.

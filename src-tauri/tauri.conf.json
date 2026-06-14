@@ -52,7 +52,8 @@
       "binaries/ffmpeg",
       "binaries/ffprobe",
       "binaries/whisper-cli",
-      "binaries/saucebunny-diarize"
+      "binaries/saucebunny-diarize",
+      "binaries/llama-server"
     ],
     "macOS": {
       "minimumSystemVersion": "13.0",

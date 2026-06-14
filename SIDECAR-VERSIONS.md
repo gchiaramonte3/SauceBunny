@@ -31,3 +31,8 @@ guard rail and refuses to install a leaky binary.
 - version: 8.1.1
 - source: https://ffmpeg.martin-riedl.de/ (static arm64 build)
 - refreshed: 2026-06-04
+
+## llama-server
+- version: 88a39274ecf88ba11686acd357b59685b1cbf03d (commit 88a3927)
+- source: https://github.com/ggml-org/llama.cpp (built from source, static)
+- refreshed: 2026-06-12

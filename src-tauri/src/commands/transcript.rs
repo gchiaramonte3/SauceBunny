@@ -77,6 +77,139 @@ fn model_path(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
     Ok(whisper_models_dir(app)?.join(format!("ggml-{id}.bin")))
 }
 
+// ── Parakeet ASR engine (r90) ───────────────────────────────────────
+// FluidAudio's Parakeet TDT v3 (Core ML), run via the saucebunny-diarize
+// sidecar's --asr mode. The ~0.5 GB model lives in an app-managed dir
+// (mirrors whisper_models_dir); Settings downloads it on demand.
+
+fn parakeet_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| format!("app_data_dir: {e}"))?;
+    let dir = base.join("models").join("parakeet");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir parakeet models: {e}"))?;
+    Ok(dir)
+}
+
+/// True when the Parakeet model dir holds compiled Core ML bundles (.mlmodelc).
+#[tauri::command]
+pub fn parakeet_model_downloaded(app: AppHandle) -> bool {
+    let Ok(dir) = parakeet_models_dir(&app) else { return false };
+    std::fs::read_dir(&dir)
+        .map(|rd| rd.flatten().any(|e| {
+            e.path().extension().map(|x| x == "mlmodelc").unwrap_or(false)
+                || (e.path().is_dir() && e.file_name().to_string_lossy().ends_with(".mlmodelc"))
+        }))
+        .unwrap_or(false)
+}
+
+/// Download + compile the Parakeet Core ML model into the app-managed dir.
+/// Drives the Settings "Download" button; cancellable via the JobRegistry.
+#[tauri::command]
+pub async fn download_parakeet_model(app: AppHandle, job_id: String) -> Result<(), crate::AppError> {
+    let dir = parakeet_models_dir(&app)?;
+    let dir_str = dir.to_string_lossy().to_string();
+    let cmd = app
+        .shell()
+        .sidecar("saucebunny-diarize")
+        .map_err(|e| format!("saucebunny-diarize sidecar not bundled: {e}. Run `npm run build:diarizer`."))?;
+    let (mut rx, child) = cmd
+        .args(["--prepare-asr-models", "--models-dir", &dir_str, "--emit-progress"])
+        .spawn()
+        .map_err(|e| format!("failed to spawn saucebunny-diarize: {e}"))?;
+    app.state::<JobRegistry>().insert(job_id.clone(), child);
+    let _ = app.emit(
+        "transcript-phase",
+        TranscriptPhaseEvent { job_id: job_id.clone(), phase: "parakeet-download".into() },
+    );
+    emit_transcript_log(&app, &job_id, "info", "Downloading Parakeet model (~0.5 GB, first run only)…".into());
+    let mut stderr_tail = String::new();
+    while let Some(event) = rx.recv().await {
+        match event {
+            CommandEvent::Stderr(b) => {
+                let raw = String::from_utf8_lossy(&b).to_string();
+                stderr_tail.push_str(&raw);
+                if stderr_tail.len() > 4096 {
+                    let mut cut = stderr_tail.len() - 2048;
+                    while cut < stderr_tail.len() && !stderr_tail.is_char_boundary(cut) { cut += 1; }
+                    stderr_tail = stderr_tail[cut..].to_string();
+                }
+            }
+            CommandEvent::Terminated(payload) => {
+                let _ = app.state::<JobRegistry>().take(&job_id);
+                if payload.code != Some(0) {
+                    return Err(crate::AppError::SidecarFailed {
+                        name: "saucebunny-diarize".into(),
+                        exit_code: payload.code,
+                        tail: stderr_tail.trim().to_string(),
+                    });
+                }
+                break;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Run Parakeet ASR on a 16 kHz WAV → SRT (same contract as whisper-cli).
+/// Registered under `job_id` so Stop cancels it.
+async fn run_parakeet_asr(
+    app: &AppHandle, job_id: &str, wav_path: &std::path::Path, srt_path: &str,
+) -> Result<(), crate::AppError> {
+    let dir = parakeet_models_dir(app)?;
+    let dir_str = dir.to_string_lossy().to_string();
+    let wav_str = wav_path.to_string_lossy().to_string();
+    let cmd = app
+        .shell()
+        .sidecar("saucebunny-diarize")
+        .map_err(|e| format!("saucebunny-diarize sidecar not bundled: {e}"))?;
+    let (mut rx, child) = cmd
+        .args(["--asr", "--input", &wav_str, "--output", srt_path, "--models-dir", &dir_str, "--emit-progress"])
+        .spawn()
+        .map_err(|e| format!("failed to spawn saucebunny-diarize --asr: {e}"))?;
+    app.state::<JobRegistry>().insert(job_id.to_string(), child);
+    let mut stderr_tail = String::new();
+    let mut cancelled = false;
+    while let Some(event) = rx.recv().await {
+        match event {
+            CommandEvent::Stdout(b) => {
+                let raw = String::from_utf8_lossy(&b).to_string();
+                for line in raw.lines() {
+                    let t = line.trim();
+                    if t.contains("\"phase\":\"process\"") {
+                        emit_transcript_log(app, job_id, "info", "Transcribing with Parakeet…".into());
+                    } else if t.contains("\"phase\":\"prepare\"") {
+                        emit_transcript_log(app, job_id, "info", "Loading Parakeet model…".into());
+                    }
+                }
+            }
+            CommandEvent::Stderr(b) => {
+                let raw = String::from_utf8_lossy(&b).to_string();
+                stderr_tail.push_str(&raw);
+                if stderr_tail.len() > 4096 {
+                    let mut cut = stderr_tail.len() - 2048;
+                    while cut < stderr_tail.len() && !stderr_tail.is_char_boundary(cut) { cut += 1; }
+                    stderr_tail = stderr_tail[cut..].to_string();
+                }
+            }
+            CommandEvent::Terminated(payload) => {
+                let _ = app.state::<JobRegistry>().take(job_id);
+                if payload.signal.is_some() { cancelled = true; }
+                if payload.code != Some(0) {
+                    if cancelled { return Err("Cancelled".into()); }
+                    return Err(crate::AppError::SidecarFailed {
+                        name: "saucebunny-diarize --asr".into(),
+                        exit_code: payload.code,
+                        tail: stderr_tail.trim().to_string(),
+                    });
+                }
+                break;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn list_whisper_models(app: AppHandle) -> Result<Vec<WhisperModel>, crate::AppError> {
     let dir = whisper_models_dir(&app)?;
@@ -202,7 +335,7 @@ pub async fn download_whisper_model(
     Ok(args.job_id)
 }
 
-async fn download_with_progress(
+pub(crate) async fn download_with_progress(
     app: &AppHandle,
     url: &str,
     dest: &PathBuf,
@@ -302,6 +435,10 @@ pub struct GenerateTranscriptArgs {
     /// None / 0 → let the model auto-estimate. See `run_diarize_and_merge`.
     #[serde(default)]
     pub expected_speakers: Option<u32>,
+    /// Transcription engine: None / "whisper" → whisper-cli (default);
+    /// "parakeet" → FluidAudio Parakeet via the diarize sidecar's --asr mode.
+    #[serde(default)]
+    pub engine: Option<String>,
 }
 
 fn emit_transcript_done(
@@ -602,6 +739,48 @@ pub async fn generate_transcript(
             return;
         }
 
+        // ─── Phase 3 (Parakeet branch, r90) ───
+        // When the user picked Parakeet, the diarize sidecar's --asr mode
+        // produces the .srt instead of whisper-cli; the finalize steps
+        // (optional diarization + section-cut re-base + emit) are identical.
+        if args.engine.as_deref() == Some("parakeet") {
+            emit_transcript_log(
+                &app_for, &job_for, "ok",
+                "Audio ready — transcribing with Parakeet…".into(),
+            );
+            let srt = format!("{}.srt", out_dir_for.join(&safe_for).to_string_lossy());
+            if let Err(e) = run_parakeet_asr(&app_for, &job_for, &wav_path_for, &srt).await {
+                let _ = std::fs::remove_file(&wav_path_for);
+                let msg = e.to_string();
+                if msg.contains("Cancelled") {
+                    emit_transcript_done(&app_for, &job_for, false, None, None, Some("Cancelled".into()));
+                } else {
+                    emit_transcript_done(&app_for, &job_for, false, None, None,
+                        Some(format!("Parakeet transcription failed — {msg}")));
+                }
+                return;
+            }
+            let mut warn_note: Option<String> = None;
+            if detect_speakers {
+                if let Err(e) = run_diarize_and_merge(
+                    &app_for, &job_for, &wav_path_for, std::path::Path::new(&srt), expected_speakers,
+                ).await {
+                    emit_transcript_log(&app_for, &job_for, "warn",
+                        format!("Speaker detection failed — transcript saved without speaker labels. ({e})"));
+                    warn_note = Some(format!("Diarization skipped: {e}"));
+                }
+            }
+            if cut_section {
+                if let Err(e) = shift_srt_file(std::path::Path::new(&srt), start_s) {
+                    emit_transcript_log(&app_for, &job_for, "warn",
+                        format!("Caption time re-base failed ({e})."));
+                }
+            }
+            let _ = std::fs::remove_file(&wav_path_for);
+            emit_transcript_done(&app_for, &job_for, true, Some(0), Some(srt), warn_note);
+            return;
+        }
+
         emit_transcript_log(
             &app_for,
             &job_for,
@@ -750,6 +929,19 @@ pub async fn generate_transcript(
                                 warn_note = Some(format!("Diarization skipped: {e}"));
                             }
                         }
+                        // Re-base sub-range cues onto the FULL source timeline.
+                        // The cut WAV (and so the whisper SRT, and the diarize
+                        // merge above which works on that same 0-based WAV) start
+                        // at the mark-in; the player runs on absolute time, so
+                        // shift the FINAL SRT by +start_s. No-op when start_s==0.
+                        if cut_section {
+                            if let Err(e) = shift_srt_file(std::path::Path::new(&srt), start_s) {
+                                emit_transcript_log(
+                                    &app_for, &job_for, "warn",
+                                    format!("Caption time re-base failed ({e}); cues may be offset by the mark-in."),
+                                );
+                            }
+                        }
                         let _ = std::fs::remove_file(&wav_path_for);
                         emit_transcript_done(
                             &app_for,
@@ -825,6 +1017,122 @@ fn parse_whisper_progress_line(line: &str) -> Option<f64> {
 }
 
 #[derive(Deserialize)]
+pub struct ReDiarizeArgs {
+    /// The existing saved SRT to re-diarize IN PLACE.
+    pub transcript_path: String,
+    pub job_id: String,
+    /// Speaker-count hint; None/0 → auto-estimate (the recommended default).
+    #[serde(default)]
+    pub expected_speakers: Option<u32>,
+    /// Web source URL — locates the cached source audio (download_audio_track).
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Local file path — used directly for a local-file transcript.
+    #[serde(default)]
+    pub input_path: Option<String>,
+}
+
+/// Re-run ONLY speaker diarization on an existing transcript — no Whisper pass.
+/// Reuses the cached source audio (web) or the local file, extracts a 16 kHz
+/// WAV, runs the diarizer, and merges fresh speaker labels into the EXISTING
+/// SRT in place. On a long source this is seconds vs. re-transcribing minutes.
+/// Emits the same transcript-phase/-progress/-done events as a full run, so the
+/// frontend's existing listeners drive the UI + reload the transcript.
+#[tauri::command]
+pub async fn re_diarize_transcript(
+    app: AppHandle,
+    args: ReDiarizeArgs,
+) -> Result<String, crate::AppError> {
+    let srt_path = PathBuf::from(&args.transcript_path);
+    if !srt_path.exists() {
+        return Err(format!("Transcript not found: {}", args.transcript_path).into());
+    }
+
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("app_cache_dir: {e}"))?;
+    std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
+
+    // Resolve the audio source: an explicit local file, else the cached web
+    // source audio (download_audio_track pre-stages it, keyed by URL hash).
+    let audio_src: PathBuf = if let Some(p) = args.input_path.as_deref().filter(|s| !s.is_empty()) {
+        let pb = PathBuf::from(p);
+        if !pb.exists() {
+            return Err(format!("Audio source not found: {p}").into());
+        }
+        pb
+    } else if let Some(url) = args.url.as_deref().filter(|s| !s.is_empty()) {
+        validate_source_url(url)?;
+        find_audio_in_cache(&cache, &source_audio_prefix(url))
+            .filter(|p| p.metadata().map(|m| m.len() > 0).unwrap_or(false))
+            .ok_or_else(|| crate::AppError::not_found(
+                "Source audio isn't cached — use Regenerate to transcribe and detect speakers.",
+            ))?
+    } else {
+        return Err("No audio source provided for re-diarization".into());
+    };
+
+    let wav_path = cache.join(format!("saucebunny-{}.wav", args.job_id));
+    let job_id = args.job_id.clone();
+    let job_for = job_id.clone();
+    let app_for = app.clone();
+    let wav_path_for = wav_path.clone();
+    let srt_for = srt_path.clone();
+    let audio_str = audio_src.to_string_lossy().to_string();
+    let wav_str = wav_path.to_string_lossy().to_string();
+    let expected = args.expected_speakers;
+    let transcript_path_out = args.transcript_path.clone();
+
+    tokio::spawn(async move {
+        emit_transcript_log(
+            &app_for, &job_for, "info",
+            "Re-detecting speakers (reusing the existing transcript — no re-transcription)…".into(),
+        );
+        // Extract a 16 kHz mono WAV (the diarizer's input) from the source audio.
+        let ff = match app_for.shell().sidecar("ffmpeg") {
+            Ok(c) => c,
+            Err(e) => {
+                emit_transcript_done(&app_for, &job_for, false, None, None,
+                    Some(format!("ffmpeg sidecar not found: {e}")));
+                return;
+            }
+        };
+        let ff_out = ff
+            .args(["-y", "-i", &audio_str, "-vn", "-ar", "16000", "-ac", "1", &wav_str])
+            .output()
+            .await;
+        match ff_out {
+            Ok(o) if o.status.success() && wav_path_for.exists() => {}
+            Ok(o) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                let _ = std::fs::remove_file(&wav_path_for);
+                emit_transcript_done(&app_for, &job_for, false, o.status.code(), None,
+                    Some(format!("Audio conversion failed — {}", short_err(&stderr))));
+                return;
+            }
+            Err(e) => {
+                emit_transcript_done(&app_for, &job_for, false, None, None,
+                    Some(format!("ffmpeg failed to run: {e}")));
+                return;
+            }
+        }
+        // Diarize + merge fresh speaker labels into the existing SRT in place.
+        let result = run_diarize_and_merge(&app_for, &job_for, &wav_path_for, &srt_for, expected).await;
+        let _ = std::fs::remove_file(&wav_path_for);
+        match result {
+            Ok(()) => emit_transcript_done(
+                &app_for, &job_for, true, Some(0), Some(transcript_path_out), None),
+            Err(e) => emit_transcript_done(
+                &app_for, &job_for, false, None, None,
+                Some(format!("Speaker detection failed: {e}"))),
+        }
+    });
+
+    Ok(job_id)
+}
+
+#[derive(Deserialize)]
 pub struct TranscribeLocalArgs {
     pub input_path: String,
     pub output_dir: String,
@@ -841,6 +1149,10 @@ pub struct TranscribeLocalArgs {
     /// Speaker-count hint forwarded to the diarizer when present.
     #[serde(default)]
     pub expected_speakers: Option<u32>,
+    /// Transcription engine: None / "whisper" → whisper-cli; "parakeet" →
+    /// FluidAudio Parakeet via the diarize sidecar's --asr mode.
+    #[serde(default)]
+    pub engine: Option<String>,
 }
 
 /// Frontend-provided pre-normalised audio (16 kHz mono WAV bytes). Lets
@@ -861,6 +1173,8 @@ pub struct TranscribePreparedWavArgs {
     /// Speaker-count hint forwarded to the diarizer when present.
     #[serde(default)]
     pub expected_speakers: Option<u32>,
+    // NB: no `engine` field — Parakeet local-file runs route through
+    // transcribe_local_file (ffmpeg WAV), not this WebCodecs fast-path.
 }
 
 #[tauri::command]
@@ -1094,6 +1408,7 @@ pub async fn transcribe_local_file(
     let wav_path_for = wav_path.clone();
     let detect_speakers = args.detect_speakers;
     let expected_speakers = args.expected_speakers;
+    let engine = args.engine.clone().unwrap_or_default();
 
     tokio::spawn(async move {
         // Phase 1: ffmpeg → 16 kHz mono WAV (works for any video or audio in).
@@ -1145,6 +1460,37 @@ pub async fn transcribe_local_file(
                 &app_for, &job_for, false, None, None,
                 Some("WAV conversion produced no file".into()),
             );
+            return;
+        }
+
+        // Phase 2 (Parakeet branch, r90) — see generate_transcript for rationale.
+        if engine == "parakeet" {
+            emit_transcript_log(&app_for, &job_for, "ok",
+                "Audio ready — transcribing with Parakeet…".into());
+            let srt = format!("{}.srt", output_base_str);
+            if let Err(e) = run_parakeet_asr(&app_for, &job_for, &wav_path_for, &srt).await {
+                let _ = std::fs::remove_file(&wav_path_for);
+                let msg = e.to_string();
+                if msg.contains("Cancelled") {
+                    emit_transcript_done(&app_for, &job_for, false, None, None, Some("Cancelled".into()));
+                } else {
+                    emit_transcript_done(&app_for, &job_for, false, None, None,
+                        Some(format!("Parakeet transcription failed — {msg}")));
+                }
+                return;
+            }
+            let mut warn_note: Option<String> = None;
+            if detect_speakers {
+                if let Err(e) = run_diarize_and_merge(
+                    &app_for, &job_for, &wav_path_for, std::path::Path::new(&srt), expected_speakers,
+                ).await {
+                    emit_transcript_log(&app_for, &job_for, "warn",
+                        format!("Speaker detection failed — transcript saved without speaker labels. ({e})"));
+                    warn_note = Some(format!("Diarization skipped: {e}"));
+                }
+            }
+            let _ = std::fs::remove_file(&wav_path_for);
+            emit_transcript_done(&app_for, &job_for, true, Some(0), Some(srt), warn_note);
             return;
         }
 
@@ -1356,6 +1702,90 @@ fn seconds_to_srt_tc(secs: f64) -> String {
     let s  = (total_ms / 1000) % 60;
     let ms = total_ms % 1000;
     format!("{:02}:{:02}:{:02},{:03}", h, m, s, ms)
+}
+
+/// Re-base every cue timestamp in an SRT by `offset_s` seconds and return the
+/// rewritten text. When a sub-range is cut for transcription (an in/out mark on
+/// a web source, i.e. `generate_transcript`'s `cut_section` path), whisper writes
+/// cue times relative to the cut, so the SRT starts at the mark-in instead of the
+/// true source start. The player runs on the FULL source timeline, so captions,
+/// the transcript highlight, and click-to-seek would all land off by exactly the
+/// mark-in. Re-basing the cues to absolute source time fixes it on every playback
+/// path. Identity when `offset_s <= 0` (full-source and "Fix accuracy" runs
+/// already start at zero).
+fn shift_srt_text(text: &str, offset_s: f64) -> String {
+    if offset_s <= 0.0 {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    // split_inclusive keeps each line's trailing "\n" (or "\r\n") so non-timing
+    // lines (numbers, text, blanks) pass through byte-for-byte.
+    for line in text.split_inclusive('\n') {
+        if let Some(arrow) = line.find(" --> ") {
+            let after = &line[arrow + 5..]; // the second timestamp + any trailing
+            let first = srt_tc_to_seconds(line[..arrow].trim());
+            let second = after.get(..12).and_then(srt_tc_to_seconds);
+            if let (Some(a), Some(b)) = (first, second) {
+                out.push_str(&seconds_to_srt_tc(a + offset_s));
+                out.push_str(" --> ");
+                out.push_str(&seconds_to_srt_tc(b + offset_s));
+                out.push_str(&after[12..]); // newline / VTT position metadata, kept
+                continue;
+            }
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+fn shift_srt_file(path: &std::path::Path, offset_s: f64) -> std::io::Result<()> {
+    if offset_s <= 0.0 {
+        return Ok(());
+    }
+    let text = std::fs::read_to_string(path)?;
+    std::fs::write(path, shift_srt_text(&text, offset_s))
+}
+
+#[cfg(test)]
+mod srt_shift_tests {
+    use super::{seconds_to_srt_tc, shift_srt_text, srt_tc_to_seconds};
+
+    #[test]
+    fn srt_tc_roundtrip() {
+        assert_eq!(srt_tc_to_seconds("00:00:01,500"), Some(1.5));
+        assert_eq!(srt_tc_to_seconds("01:02:03,004"), Some(3723.004));
+        assert_eq!(seconds_to_srt_tc(1.5), "00:00:01,500");
+        assert_eq!(seconds_to_srt_tc(3723.004), "01:02:03,004");
+    }
+
+    #[test]
+    fn shift_zero_or_negative_is_identity() {
+        let srt = "1\n00:00:00,000 --> 00:00:02,000\nhello\n";
+        assert_eq!(shift_srt_text(srt, 0.0), srt);
+        assert_eq!(shift_srt_text(srt, -5.0), srt);
+    }
+
+    #[test]
+    fn shift_rebases_cue_times_to_absolute() {
+        // A sub-range transcript whose cues start at 0 is pushed forward by the
+        // mark-in (10s) — both ends of every cue; text/numbers/blanks untouched.
+        let srt = "1\n00:00:00,000 --> 00:00:02,500\nfirst line\n\n2\n00:00:02,500 --> 00:00:05,000\nsecond line\n";
+        let shifted = shift_srt_text(srt, 10.0);
+        assert!(shifted.contains("00:00:10,000 --> 00:00:12,500"));
+        assert!(shifted.contains("00:00:12,500 --> 00:00:15,000"));
+        assert!(shifted.contains("first line"));
+        assert!(shifted.contains("second line"));
+        assert!(shifted.starts_with("1\n"));
+        assert!(shifted.contains("\n\n2\n"));
+    }
+
+    #[test]
+    fn shift_handles_hour_rollover_and_crlf() {
+        let srt = "1\r\n00:59:59,000 --> 01:00:01,000\r\ntext\r\n";
+        let shifted = shift_srt_text(srt, 2.0);
+        assert!(shifted.contains("01:00:01,000 --> 01:00:03,000"));
+        assert!(shifted.contains("\r\ntext\r\n"));
+    }
 }
 
 /// Walk the SRT cue by cue, stamp the best-overlap speaker on each,

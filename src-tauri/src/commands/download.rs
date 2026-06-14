@@ -1233,13 +1233,14 @@ pub async fn download_web_preview(
 }
 
 // ────────────────────────────────────────────────────────────────────────
-// AUDIO-MASTER TRACK  (streaming caption sync)
+// CACHED SOURCE AUDIO  (transcription head-start)
 //
 // Downloads ONLY the full-fidelity audio track (no video) to cache and returns
-// its path. The frontend decodes it with Web Audio `decodeAudioData` and plays
-// it on a sample-accurate AudioContext clock — so captions lock to the audio
-// you actually hear, instead of the MSE <video> timeline that drifts. The
-// streamed <video> is kept muted for picture only. See src/lib/audio-twin.ts.
+// its path. This is a HEAD START for Whisper: it's source-keyed and persistent,
+// so when the user hits Transcribe the audio is already on disk (generate_transcript
+// reuses it via source_audio_prefix) and the transcript is clocked against the
+// exact source timeline. Playback itself does NOT use this file — the streamed
+// native <video> is the single audio+picture+caption clock (see MSEStreamPlayer).
 //
 // Audio-only is small and fast (a fraction of the video), so the brief wait is
 // negligible. Registered in the JobRegistry so a new source / STOP can cancel.

@@ -33,6 +33,8 @@ pub mod media;
 pub use media::*;
 pub mod transcript;
 pub use transcript::*;
+pub mod llm;
+pub use llm::*;
 
 
 

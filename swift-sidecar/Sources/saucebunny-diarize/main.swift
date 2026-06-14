@@ -142,6 +142,10 @@ struct Args {
   var numSpeakers: Int?
   var minSpeakers: Int?
   var maxSpeakers: Int?
+  // ── ASR (Parakeet) mode (r90) ──
+  var asr: Bool = false              // transcribe --input WAV → --output SRT
+  var prepareAsrModels: Bool = false // download/cache the Parakeet model + exit
+  var modelsDir: String?             // where the Parakeet Core ML model lives
 }
 
 func parseArgs(_ argv: [String]) -> Args {
@@ -158,6 +162,12 @@ func parseArgs(_ argv: [String]) -> Args {
       a.emitProgress = true
     case "--prepare-models":
       a.prepareModelsOnly = true
+    case "--asr":
+      a.asr = true
+    case "--prepare-asr-models":
+      a.prepareAsrModels = true
+    case "--models-dir":
+      i += 1; if i < argv.count { a.modelsDir = argv[i] }
     case "--backend":
       i += 1
       if i < argv.count, let b = Backend(rawValue: argv[i].lowercased()) {
@@ -199,9 +209,9 @@ func emitStatus(_ obj: [String: Any], emit: Bool) {
 
 // ── Version / help ──────────────────────────────────────────────────
 
-let SAUCEBUNNY_DIARIZE_VERSION = "0.2.0"
+let SAUCEBUNNY_DIARIZE_VERSION = "0.3.0"
 let SPEAKERKIT_PACKAGE_VERSION = "1.0.x"
-let FLUIDAUDIO_PACKAGE_VERSION = "0.14.x"
+let FLUIDAUDIO_PACKAGE_VERSION = "0.15.3"
 
 func printVersion() {
   print("saucebunny-diarize \(SAUCEBUNNY_DIARIZE_VERSION) (SpeakerKit \(SPEAKERKIT_PACKAGE_VERSION) + FluidAudio \(FLUIDAUDIO_PACKAGE_VERSION))")
@@ -415,6 +425,108 @@ func prepareModelsOnly(backend: Backend, emit: Bool) async {
   exit(0)
 }
 
+// ── ASR: Parakeet (r90) ─────────────────────────────────────────────
+//
+// FluidAudio's Parakeet TDT v3 (multilingual) on Core ML — same package as the
+// diarizer fallback. transcribe() yields per-token timings; we group them into
+// caption-grade SRT cues (≤84 chars, break on sentence end) so the output is
+// the SAME .srt contract whisper-cli produces. The Rust caller + the
+// diarize-merge step are therefore engine-agnostic.
+
+func srtTimecode(_ seconds: Double) -> String {
+  let ms = Int((max(0, seconds) * 1000).rounded())
+  return String(format: "%02d:%02d:%02d,%03d",
+                ms / 3_600_000, (ms / 60_000) % 60, (ms / 1000) % 60, ms % 1000)
+}
+
+func tokensToSrt(_ tokens: [TokenTiming]) -> String {
+  var cues: [(start: Double, end: Double, text: String)] = []
+  var text = ""
+  var start: Double? = nil
+  var end = 0.0
+  func flush() {
+    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let s = start, !t.isEmpty { cues.append((start: s, end: end, text: t)) }
+    text = ""; start = nil; end = 0
+  }
+  for tok in tokens {
+    if start == nil { start = tok.startTime }
+    text += tok.token
+    end = tok.endTime
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let endsSentence = trimmed.hasSuffix(".") || trimmed.hasSuffix("?") || trimmed.hasSuffix("!")
+    // Cap at ~2 overlay lines; also break at a sentence end once the cue is
+    // long enough that we don't fragment into one-word cues.
+    if trimmed.count >= 84 || (endsSentence && trimmed.count >= 32) { flush() }
+  }
+  flush()
+  var out = ""
+  for (i, c) in cues.enumerated() {
+    out += "\(i + 1)\n\(srtTimecode(c.start)) --> \(srtTimecode(c.end))\n\(c.text)\n\n"
+  }
+  return out
+}
+
+// The Rust caller passes --models-dir (app_data_dir/models/parakeet) so the
+// Core ML bundle is app-managed + reused across runs, not buried in
+// ~/Library/Application Support/FluidAudio.
+func asrModelsDirURL(_ args: Args) -> URL? {
+  args.modelsDir.map { URL(fileURLWithPath: $0) }
+}
+
+func prepareAsrModelsOnly(args: Args) async {
+  emitStatus(["phase": "prepare", "message": "Downloading Parakeet model (~0.5 GB, first run only)…", "backend": "parakeet"], emit: args.emitProgress)
+  do {
+    _ = try await AsrModels.download(to: asrModelsDirURL(args), version: .v3)
+  } catch {
+    eprintln("error: Parakeet model download failed: \(error)")
+    exit(2)
+  }
+  emitStatus(["phase": "done", "message": "Parakeet model ready."], emit: args.emitProgress)
+  exit(0)
+}
+
+func runAsrMode(args: Args) async {
+  guard let inPath = args.input, let outPath = args.output else {
+    eprintln("error: --asr needs --input <wav> and --output <srt>")
+    exit(1)
+  }
+  guard FileManager.default.fileExists(atPath: inPath) else {
+    eprintln("error: input file not found: \(inPath)")
+    exit(1)
+  }
+  let started = Date()
+  do {
+    emitStatus(["phase": "prepare", "message": "Loading Parakeet model…", "backend": "parakeet"], emit: args.emitProgress)
+    // Load from the app-managed dir (offline). If absent, the model wasn't
+    // downloaded yet — surface a clear error so the UI prompts a download.
+    let models: AsrModels
+    if let dir = asrModelsDirURL(args) {
+      models = try await AsrModels.load(from: dir, version: .v3)
+    } else {
+      models = try await AsrModels.downloadAndLoad(version: .v3)
+    }
+    let asr = AsrManager(config: .default)
+    try await asr.initialize(models: models)
+
+    emitStatus(["phase": "process", "message": "Transcribing with Parakeet…", "backend": "parakeet"], emit: args.emitProgress)
+    var state = TdtDecoderState()
+    let result = try await asr.transcribe(URL(fileURLWithPath: inPath), decoderState: &state)
+    let srt = tokensToSrt(result.tokenTimings ?? [])
+    if srt.isEmpty {
+      eprintln("error: Parakeet produced no transcript (no token timings)")
+      exit(3)
+    }
+    try srt.write(to: URL(fileURLWithPath: outPath), atomically: true, encoding: .utf8)
+  } catch {
+    eprintln("error: Parakeet transcription failed: \(error)")
+    exit(3)
+  }
+  emitStatus(["phase": "done", "message": "Parakeet transcript ready.",
+              "wall_clock_seconds": Date().timeIntervalSince(started)], emit: args.emitProgress)
+  exit(0)
+}
+
 // ── Main ────────────────────────────────────────────────────────────
 
 @main
@@ -427,6 +539,9 @@ struct Main {
     if args.prepareModelsOnly {
       await prepareModelsOnly(backend: args.backend, emit: args.emitProgress)
     }
+    // Parakeet ASR (r90) — separate modes from diarization; each exits.
+    if args.prepareAsrModels { await prepareAsrModelsOnly(args: args) }
+    if args.asr { await runAsrMode(args: args) }
 
     guard let inPath = args.input, let outPath = args.output else {
       eprintln("error: --input and --output are required (try --help)")

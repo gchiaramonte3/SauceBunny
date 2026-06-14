@@ -101,6 +101,14 @@ export default function App() {
       captions: stored.captions ?? false,
       timecode: stored.timecode ?? "24",
       whisperModel: stored.whisperModel ?? "small.en",
+      // Whisper is the bundled default; Parakeet is opt-in once its model is
+      // downloaded (Settings → Transcription). Persisted across sessions.
+      transcriptionEngine: stored.transcriptionEngine ?? "whisper",
+      // AI Summary: default to the recommended small model; the user can
+      // download + switch to a larger one in Settings → AI Summary.
+      llmSummarizationModel: stored.llmSummarizationModel ?? "qwen3-4b-instruct",
+      summaryFormat: stored.summaryFormat ?? "bullets",
+      summaryLength: stored.summaryLength ?? "standard",
       // Default ON: mediabunny/WebCodecs is the faster import path. If
       // it ever causes regressions the user can toggle back to the
       // ffmpeg-prep + <video> path via Settings → Local playback.
@@ -120,9 +128,12 @@ export default function App() {
       // Default off — diarization adds 10–60s per transcript and the
       // first-run model download is hundreds of MB. Opt-in via Sidebar.
       detectSpeakers: stored.detectSpeakers ?? false,
-      // 0 = auto. Other values pass through as --num-speakers to the
-      // Swift sidecar; pyannote clustering then skips estimation.
-      expectedSpeakers: stored.expectedSpeakers ?? 0,
+      // 0 = auto. ALWAYS start at auto each launch (never restore a stored
+      // count): a sticky wrong count — e.g. 2 when the source has 4 speakers —
+      // silently and severely degrades diarization. The Sidebar picker is a
+      // per-session override only; auto is the reliable default the diarizer
+      // estimates from the audio. (>0 still passes through as --num-speakers.)
+      expectedSpeakers: 0,
       // Empty string here = "ask backend for the default and persist
       // it on first app boot." See the resolver effect just below.
       transcriptLibrary: stored.transcriptLibrary ?? "",
@@ -586,7 +597,7 @@ export default function App() {
 
   // ====== Settings modal ======
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "commands" | "about">("general");
+  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "commands" | "about">("general");
 
   // ====== Active transcript ======
   // The Transcript tab in the right drawer reads from here. We track the
@@ -2115,7 +2126,19 @@ export default function App() {
       setTranscriptError("Transcript library isn't set up yet — open Settings → Transcription and pick a folder.");
       return;
     }
-    if (!selectedModel?.downloaded) {
+    // Engine gate — Parakeet needs its Core ML model on disk; Whisper needs
+    // the selected ggml model. Either way, missing → bounce to Settings.
+    const engine = defaults.transcriptionEngine;
+    if (engine === "parakeet") {
+      const ready = await invoke<boolean>("parakeet_model_downloaded").catch(() => false);
+      if (!ready) {
+        setTranscriptState("error");
+        setTranscriptError("The Parakeet model isn't downloaded yet. Opening Settings → Transcription.");
+        setSettingsInitialTab("transcription");
+        setSettingsOpen(true);
+        return;
+      }
+    } else if (!selectedModel?.downloaded) {
       setTranscriptState("error");
       setTranscriptError(`Whisper model "${defaults.whisperModel}" is not downloaded. Opening Settings → Transcription.`);
       setSettingsInitialTab("transcription");
@@ -2125,9 +2148,10 @@ export default function App() {
     setTranscriptState("running");
     setTranscriptError(null);
     setTranscriptProgress(0);
-    setTranscriptPhase(null); // backend will emit "whisper" then "diarize-*"
+    setTranscriptPhase(null); // backend emits "whisper"/"parakeet" then "diarize-*"
+    const engineLabel = engine === "parakeet" ? "Parakeet" : (selectedModel?.name ?? "Whisper");
     const srcLabel = sourceKind === "file" ? metadata.title : `${exportOpts.inTc || "00:00:00:00"} → ${exportOpts.outTc || "end"}`;
-    appendLog("info", "whisper", `Transcribing ${srcLabel} with ${selectedModel.name}…`);
+    appendLog("info", "whisper", `Transcribing ${srcLabel} with ${engineLabel}…`);
     try {
       const id = await invoke<string>("new_job_id");
       setTranscriptJobId(id);
@@ -2139,7 +2163,9 @@ export default function App() {
         //     the audio extraction step.
         //   • ffmpeg fallback: existing transcribe_local_file which
         //     handles the ffmpeg subprocess + whisper-cli inline.
-        const wavBlob = defaults.useWebCodecsDecoder
+        // Parakeet runs only via transcribe_local_file (ffmpeg WAV); the
+        // WebCodecs prepared-WAV fast-path is whisper-only.
+        const wavBlob = (engine !== "parakeet" && defaults.useWebCodecsDecoder)
           ? await extractAudioAsWav16k(localFilePath).catch(() => null)
           : null;
         if (wavBlob) {
@@ -2158,7 +2184,9 @@ export default function App() {
             },
           });
         } else {
-          appendLog("info", "whisper", "Mediabunny can't decode this audio codec — falling back to ffmpeg.");
+          if (engine !== "parakeet") {
+            appendLog("info", "whisper", "Mediabunny can't decode this audio codec — falling back to ffmpeg.");
+          }
           await invoke<string>("transcribe_local_file", {
             args: {
               input_path: localFilePath,
@@ -2168,6 +2196,7 @@ export default function App() {
               job_id: id,
               detect_speakers: defaults.detectSpeakers,
               expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
+              engine,
             },
           });
         }
@@ -2189,6 +2218,7 @@ export default function App() {
             cookies_browser: cookiesBrowserOrNone(),
             detect_speakers: defaults.detectSpeakers,
             expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
+            engine,
           },
         });
       }
@@ -2199,9 +2229,52 @@ export default function App() {
       appendLog("err", "whisper", msg);
     }
   }, [metadata, metadataLoading, exportOpts, fps, selectedModel, defaults.whisperModel,
+      defaults.transcriptionEngine, defaults.useWebCodecsDecoder,
       defaults.detectSpeakers, defaults.expectedSpeakers,
       appendLog, resolveTranscriptOutDir, localFilePath, sourceKind,
       durationFrames, inFrames, outFrames]);
+
+  // Re-detect speakers WITHOUT re-transcribing: reuses the cached source audio
+  // (web) or the local file + the EXISTING SRT, runs only the diarizer, and
+  // merges fresh speaker labels in place. Seconds instead of a full Whisper
+  // pass on a long source. Reuses the same transcript-* event listeners (set up
+  // via setTranscriptJobId), so progress + reload-on-done are already handled.
+  const handleRediarize = useCallback(async () => {
+    const tx = activeTranscript;
+    if (!tx) return;
+    if (!metadata) { setTranscriptState("error"); setTranscriptError("Load a source first."); return; }
+    const isFile = sourceKind === "file";
+    const url = metadata.webpage_url ?? null;
+    if (!isFile && !url) {
+      setTranscriptState("error");
+      setTranscriptError("No source to re-detect speakers against.");
+      return;
+    }
+    setTranscriptState("running");
+    setTranscriptError(null);
+    setTranscriptProgress(0);
+    setTranscriptPhase(null);
+    appendLog("info", "diarize", "Re-detecting speakers (reusing the existing transcript)…");
+    try {
+      const id = await invoke<string>("new_job_id");
+      setTranscriptJobId(id);
+      await invoke<string>("re_diarize_transcript", {
+        args: {
+          transcript_path: tx.path,
+          job_id: id,
+          // Auto by default; only pass a count if the user set one this session.
+          expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
+          url: isFile ? null : url,
+          input_path: isFile ? localFilePath : null,
+        },
+      });
+    } catch (err) {
+      const msg = formatError(err);
+      setTranscriptState("error");
+      setTranscriptError(msg);
+      appendLog("err", "diarize", msg);
+    }
+  }, [activeTranscript, metadata, sourceKind, localFilePath, defaults.expectedSpeakers, appendLog]);
 
   // r84: "Fix accuracy" — manually re-time loose YouTube captions with Whisper.
   // YouTube auto-caption cue times are ASR-biased ~150–700ms late and variable
@@ -2469,8 +2542,6 @@ export default function App() {
   // captionsOn flag with no transcript shows nothing, so it shouldn't read
   // as active.
   const captionsActive = captionsOn && !!activeTranscript;
-  // Shows the streaming-drift caption notice at most once per session.
-  const streamVideoDriftHintRef = useRef(false);
 
   // The toggle operates on what the user SEES: live captions → turn off;
   // otherwise turn on and auto-fetch a transcript if we don't have one. Web
@@ -2479,10 +2550,8 @@ export default function App() {
   const onToggleCaptions = useCallback(() => {
     if (captionsActive) { setCaptionsOn(false); return; }
     setCaptionsOn(true);
-    // r82: captions no longer drift while streaming — they're locked to the
-    // audio-master clock (see MSEStreamPlayer / audio-twin). The remaining
-    // streaming caveat is the muted VIDEO PICTURE drifting, surfaced once via
-    // the streamVideoDriftHint effect below, not here.
+    // Captions ride the single native <video> clock (audio + picture + captions
+    // share it), so on-video captions track the audio you hear by construction.
     if (activeTranscript || captionsState === "running") return;
     if (sourceKind === "youtube" && metadata) {
       pushNotification("info", "Fetching captions…",
@@ -2493,23 +2562,6 @@ export default function App() {
         "Generate a transcript (Transcribe) to show captions for this file.");
     }
   }, [captionsActive, activeTranscript, captionsState, sourceKind, metadata, pushNotification, handleDownloadCaptions]);
-
-  // r82: one-time-per-session heads-up that the STREAMED video PICTURE can
-  // drift from the audio. The audio + captions are locked to an accurate clock
-  // (the audio-master / cached track); only the muted MSE picture slides — a
-  // WKWebView streaming-pipeline limitation. Fires once playback is actually up
-  // (not premature), and only on the live stream (downloaded/local play is
-  // frame-accurate).
-  useEffect(() => {
-    if (webStreaming && playerReady && !streamVideoDriftHintRef.current) {
-      streamVideoDriftHintRef.current = true;
-      pushNotification(
-        "info",
-        "Streamed video sync",
-        "Sauce Bunny keeps the streamed picture matched to the audio in real time, but on some sources it can still drift slightly over long playback (a WebKit streaming limit). Audio and captions are always exact — clip-marking by the transcript is frame-true. For guaranteed frame-accurate video, turn off “Stream while you watch” (Settings → Web playback) to play a downloaded copy.",
-      );
-    }
-  }, [webStreaming, playerReady, pushNotification]);
 
   // ── Pre-stage the source audio for Whisper (r74 → r76) ──────────────
   // For every streaming web source we download + cache the full audio track in
@@ -3079,11 +3131,7 @@ export default function App() {
                  (download fallback) wins over the live stream; both are null
                  until the machine produces one. */
               webStreamUrl={webPlayback.cachePath ?? webPlayback.streamUrl}
-              /* r82: cached source audio → audio-master clock for the LIVE
-                 stream only. The download-fallback (LocalMediaPlayer) and local
-                 files already have an accurate native/AudioContext clock. */
-              audioMasterSrc={webStreaming ? webAudioCachedSrc : null}
-              onDiag={(tag, msg) => appendLog(asLogTag(tag), "audio-sync", msg)}
+              onDiag={(tag, msg) => appendLog(asLogTag(tag), "seek", msg)}
               /* Audio track + codecs are meaningful only while STREAMING (the
                  cached file is already muxed and sample-accurate). */
               audioStreamUrl={webPlayback.audioUrl}
@@ -3299,9 +3347,14 @@ export default function App() {
           onRegenerateTranscript={handleGenerateTranscript}
           regenerateBusy={transcriptState === "running"}
           canRegenerate={hasSource && !!selectedModel?.downloaded}
+          onRedetectSpeakers={() => { void handleRediarize(); }}
+          canRedetect={hasSource && !!activeTranscript}
           onImportTranscript={handleImportTranscript}
           sourceKind={sourceKind}
           onFixCaptionTiming={handleFixCaptionTiming}
+          aiModelId={defaults.llmSummarizationModel}
+          aiStyle={{ format: defaults.summaryFormat, length: defaults.summaryLength }}
+          onOpenAiSettings={() => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); }}
         />}
       </div>
 

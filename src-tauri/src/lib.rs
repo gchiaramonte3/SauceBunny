@@ -131,6 +131,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .manage(commands::JobRegistry::default())
+        .manage(commands::LlmServer::default())
         .invoke_handler(tauri::generate_handler![
             commands::fetch_metadata,
             commands::create_clip,
@@ -139,13 +140,22 @@ pub fn run() {
             commands::list_whisper_models,
             commands::download_whisper_model,
             commands::delete_whisper_model,
+            commands::parakeet_model_downloaded,
+            commands::download_parakeet_model,
             commands::generate_transcript,
+            commands::list_llm_models,
+            commands::download_llm_model,
+            commands::delete_llm_model,
+            commands::start_llm_server,
+            commands::stop_llm_server,
+            commands::llm_server_status,
             commands::probe_local_file,
             commands::prepare_local_for_playback,
             commands::extract_local_frame,
             commands::generate_local_thumbnail,
             commands::transcribe_local_file,
             commands::transcribe_prepared_wav,
+            commands::re_diarize_transcript,
             commands::extract_frame,
             commands::get_direct_stream_url,
             commands::download_web_preview,
@@ -227,6 +237,13 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Kill the resident llama-server on quit — it holds a multi-GB
+            // model in memory and would otherwise survive as an orphan.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<commands::LlmServer>().shutdown();
+            }
+        });
 }

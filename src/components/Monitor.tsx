@@ -27,13 +27,7 @@ type Props = {
    * branch was removed in r53; see DISTRIBUTION.md for the rationale.
    */
   webStreamUrl?: string | null;
-  /** r82: asset:// URL of the cached source audio for streaming caption sync.
-   *  When set, MSEStreamPlayer decodes it and drives audio + captions from a
-   *  sample-accurate AudioContext clock (video becomes muted picture-only),
-   *  so streaming captions match the audio you hear instead of the drifting
-   *  MSE <video> timeline. Ignored on the local/downloaded paths. */
-  audioMasterSrc?: string | null;
-  /** r82: audio-master handoff diagnostics → Pipeline log (source "audio-sync"). */
+  /** Pipeline/seek diagnostics → the Pipeline log (channel "seek"). */
   onDiag?: (tag: string, message: string) => void;
   /** r75: RAW audio-track CDN URL for DASH-split sources (Reddit, YouTube
    *  >360p). Passed to the proxy's fMP4 route so video+audio are merged on the
@@ -132,7 +126,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     status, metadata,
     errorDetail,
     aspect,
-    sourceKind, localFilePath, webStreamUrl, audioMasterSrc, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
+    sourceKind, localFilePath, webStreamUrl, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs,
     streamLoadingPhase,
     toast, onToastDismiss,
@@ -229,6 +223,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               onPlayStateChange={onPlayerStateChange}
               onReady={onPlayerReady}
               onError={onMediaError}
+              onDiag={onDiag}
               onSurfaceClick={onSurfaceClick}
             />
           )
@@ -251,13 +246,9 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               path={webStreamUrl}
               filename={metadata?.title}
               hasVideo
-              /* r82: when present, the player decodes this cached source audio
-                 and drives audio + captions from a sample-accurate clock so
-                 captions match what you hear (video → muted picture only). */
-              audioMasterSrc={audioMasterSrc ?? undefined}
-              onDiag={onDiag}
               /* r75: separate audio track → proxy merges it into the fMP4 so
                  DASH-split sources (Reddit, YouTube >360p) stream with sound. */
+              onDiag={onDiag}
               audioStreamUrl={audioStreamUrl ?? undefined}
               /* r79: known codecs → MSEStreamPlayer skips the raw-stream probe. */
               videoCodec={streamVideoCodec ?? undefined}
@@ -283,6 +274,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               onPlayStateChange={onPlayerStateChange}
               onReady={onPlayerReady}
               onError={onMediaError}
+              onDiag={onDiag}
               onSurfaceClick={onSurfaceClick}
             />
           )

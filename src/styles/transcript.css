@@ -375,6 +375,9 @@
 
 /* Download dropdown — anchored to the Download button in the header. */
 .cp-tx-head-actions { position: relative; }
+/* Tools menu anchors to its own button (left group) and opens left-aligned. */
+.cp-tx-tools { position: relative; display: inline-flex; }
+.cp-tx-tools .cp-tx-dl-menu { left: 0; right: auto; }
 .cp-tx-dl-menu {
   position: absolute;
   top: calc(100% + 4px);
@@ -840,4 +843,295 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── Manage-speakers button (roster header) ───────────────────────────── */
+.cp-tx-roster-manage {
+  margin-left: 8px;
+  padding: 2px 9px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fg-2);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.cp-tx-roster-manage:hover { background: rgba(255,255,255,0.1); color: var(--fg-1); }
+
+/* ── Speakers modal ───────────────────────────────────────────────────── */
+.cp-spk-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: cp-fade-in var(--dur-fast) var(--ease-out);
+}
+.cp-spk-modal {
+  width: min(460px, calc(100vw - 48px));
+  max-height: min(70vh, 640px);
+  display: flex;
+  flex-direction: column;
+  background: #15151a;
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.55), 0 0 0 0.5px rgba(255,255,255,0.04);
+  overflow: hidden;
+}
+.cp-spk-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 10px;
+}
+.cp-spk-title {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+.cp-spk-badge {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--fg-3);
+  background: rgba(255,255,255,0.07);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.cp-spk-x {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--fg-3);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cp-spk-x:hover { background: rgba(255,255,255,0.07); color: var(--fg-1); }
+.cp-spk-sub {
+  padding: 0 16px 12px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-4);
+}
+.cp-spk-list {
+  overflow-y: auto;
+  padding: 4px 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cp-spk-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 8px;
+}
+.cp-spk-row:hover { background: rgba(255,255,255,0.03); }
+.cp-spk-pip {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.06);
+}
+.cp-spk-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--fg-1);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 7px;
+}
+.cp-spk-name:hover { border-color: rgba(255,255,255,0.08); }
+.cp-spk-name:focus {
+  outline: none;
+  background: rgba(0,0,0,0.25);
+  border-color: rgba(var(--accent-rgb), 0.5);
+}
+.cp-spk-count {
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+}
+.cp-spk-merge {
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--fg-2);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 6px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.cp-spk-merge:hover { background: rgba(255,255,255,0.09); }
+
+/* Clickable colour pip in the Speakers modal — the trigger for the picker. */
+.cp-spk-pip-btn {
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: transform 90ms ease, box-shadow 120ms ease;
+}
+.cp-spk-pip-btn:hover {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.16);
+}
+.cp-spk-pip-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #15151a, 0 0 0 4px rgba(var(--accent-rgb), 0.55);
+}
+
+/* ── SpeakerColorPicker — hand-rolled premium picker (see SpeakerColorPicker.tsx) ── */
+.cp-colorpick {
+  position: fixed;
+  z-index: 4000;
+  width: 248px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #1c1d22;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,0.4),
+    0 8px 24px -4px rgba(0,0,0,0.5),
+    0 2px 6px rgba(0,0,0,0.4);
+  animation: cp-colorpick-in 120ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes cp-colorpick-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-colorpick { animation: none; }
+}
+.cp-colorpick-sv {
+  position: relative;
+  height: 150px;
+  border-radius: 8px;
+  cursor: crosshair;
+  touch-action: none;
+  background:
+    linear-gradient(to top, #000, transparent),
+    linear-gradient(to right, #fff, transparent),
+    hsl(var(--cp-hue) 100% 50%);
+}
+.cp-colorpick-thumb {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.5);
+  pointer-events: none;
+}
+.cp-colorpick-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cp-colorpick-preview {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--cp-current);
+  box-shadow: 0 0 0 2px #1c1d22, 0 0 0 3px var(--cp-current);
+}
+.cp-colorpick-hue {
+  position: relative;
+  flex: 1;
+  height: 14px;
+  border-radius: 7px;
+  cursor: pointer;
+  touch-action: none;
+  background: linear-gradient(to right,
+    #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+}
+.cp-colorpick-hue-thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: #fff;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.5);
+  pointer-events: none;
+}
+.cp-colorpick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cp-colorpick-hex {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0,0,0,0.25);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 7px;
+  padding: 5px 9px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--fg-3);
+}
+.cp-colorpick-hex:focus-within { border-color: rgba(var(--accent-rgb), 0.5); }
+.cp-colorpick-hex input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  text-transform: lowercase;
+}
+.cp-colorpick-reset { height: 28px; padding: 0 10px; font-size: 11px; }
+.cp-colorpick-presets {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+.cp-colorpick-swatch {
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.1);
+  cursor: pointer;
+  transition: transform 90ms ease, box-shadow 120ms ease;
+}
+.cp-colorpick-swatch:hover { transform: translateY(-1px); border-color: rgba(255,255,255,0.3); }
+.cp-colorpick-swatch.sel { box-shadow: 0 0 0 2px #1c1d22, 0 0 0 3px var(--fg-1); }
+.cp-colorpick-swatch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #1c1d22, 0 0 0 4px rgba(var(--accent-rgb), 0.5);
 }
