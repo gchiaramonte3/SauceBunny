@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { CollapsibleSection } from "./CollapsibleSection";
@@ -540,7 +540,7 @@ export function Sidebar(props: Props) {
               {/* Use the source-aware availableFormats list (filtered
                   above) — drops Audio for local files so the user
                   doesn't click into a "coming soon" dead end. */}
-              <div className="cp-segmented" style={{ gridTemplateColumns: `repeat(${availableFormats.length}, 1fr)` }}>
+              <div className="cp-segmented" style={{ ["--seg-count"]: availableFormats.length, ["--seg-active"]: Math.max(0, availableFormats.findIndex((f) => f.id === exportOpts.format)) } as CSSProperties}>
                 {availableFormats.map((f) => (
                   <button
                     key={f.id}

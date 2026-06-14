@@ -2989,6 +2989,8 @@ export default function App() {
       transcriptArrivedTick,
       regenerateBusy: transcriptState === "running",
       canRegenerate: hasSource && !!selectedModel?.downloaded,
+      aiModelId: defaults.llmSummarizationModel,
+      aiStyle: { format: defaults.summaryFormat, length: defaults.summaryLength },
     },
     handlers: {
       onRemove: handleQueueRemove,
@@ -3009,6 +3011,7 @@ export default function App() {
       onLoadFromHistory: handleLoadFromHistory,
       onRegenerate: () => { void handleGenerateTranscript(); },
       onImportTranscript: () => { void handleImportTranscript(); },
+      onOpenAiSettings: () => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); },
     },
   });
 

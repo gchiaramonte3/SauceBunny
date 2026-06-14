@@ -21,16 +21,21 @@ function plain(s: string, key: number): ReactNode {
   return <span key={key}>{s.replace(/\*/g, "")}</span>;
 }
 
-// Split a line into text + <strong> spans (bold first, then de-emphasise rest).
+// Split a line into rich spans: **bold**, `inline code`, and [m:ss] / [h:mm:ss]
+// timestamp citations (the AI's main structured output) get their own styling;
+// everything else is plain text with stray asterisks stripped.
 function renderInline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
-  const re = /\*\*(.+?)\*\*/g;
+  // Groups: 1=**(2)**  3=`(4)`  5=[timestamp]
+  const re = /(\*\*(.+?)\*\*)|(`([^`]+)`)|(\[\d{1,2}:\d{2}(?::\d{2})?\])/g;
   let last = 0;
   let k = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     if (m.index > last) out.push(plain(text.slice(last, m.index), k++));
-    out.push(<strong key={k++}>{m[1]}</strong>);
+    if (m[2] !== undefined) out.push(<strong key={k++}>{m[2]}</strong>);
+    else if (m[4] !== undefined) out.push(<code key={k++} className="cp-md-code">{m[4]}</code>);
+    else if (m[5] !== undefined) out.push(<span key={k++} className="cp-md-ts">{m[5]}</span>);
     last = re.lastIndex;
   }
   out.push(plain(text.slice(last), k++));

@@ -37,6 +37,11 @@ type PanelState = {
   transcriptArrivedTick: number;
   regenerateBusy: boolean;
   canRegenerate: boolean;
+  aiModelId: string;
+  aiStyle: {
+    format: "bullets" | "numbered" | "prose";
+    length: "brief" | "standard" | "detailed";
+  };
 };
 
 const INITIAL: PanelState = {
@@ -50,6 +55,8 @@ const INITIAL: PanelState = {
   transcriptArrivedTick: 0,
   regenerateBusy: false,
   canRegenerate: false,
+  aiModelId: "qwen3-4b-instruct",
+  aiStyle: { format: "bullets", length: "standard" },
 };
 
 type ActionKind =
@@ -61,7 +68,8 @@ type ActionKind =
   | "clearTranscript"
   | "loadFromHistory"
   | "regenerate"
-  | "importTranscript";
+  | "importTranscript"
+  | "openAiSettings";
 
 function sendAction(kind: ActionKind, payload?: unknown) {
   // Fire-and-forget: main subscribes once at startup and we don't need
@@ -142,6 +150,9 @@ export default function PanelApp() {
         regenerateBusy={state.regenerateBusy}
         canRegenerate={state.canRegenerate}
         onImportTranscript={() => sendAction("importTranscript")}
+        aiModelId={state.aiModelId}
+        aiStyle={state.aiStyle}
+        onOpenAiSettings={() => sendAction("openAiSettings")}
         /* `onPopOut` intentionally undefined — the pop-out button
            shouldn't appear inside the popped-out window. */
       />

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import type { Defaults } from "./SettingsModal";
@@ -116,7 +116,7 @@ export function YouTubeSettings({
           <div className="v">
             <div
               className="cp-segmented"
-              style={{ minWidth: 320, gridTemplateColumns: "repeat(6, 1fr)" }}
+              style={{ minWidth: 320, ["--seg-count"]: BROWSERS.length, ["--seg-active"]: Math.max(0, BROWSERS.indexOf(browser)) } as CSSProperties}
             >
               {BROWSERS.map((b) => (
                 <button
@@ -170,7 +170,7 @@ export function YouTubeSettings({
           <div className="v">
             <div
               className="cp-segmented"
-              style={{ minWidth: 240, gridTemplateColumns: "repeat(3, 1fr)" }}
+              style={{ minWidth: 240, ["--seg-count"]: PREVIEW_HEIGHTS.length, ["--seg-active"]: Math.max(0, PREVIEW_HEIGHTS.indexOf(defaults.previewMaxHeight)) } as CSSProperties}
             >
               {PREVIEW_HEIGHTS.map((h) => (
                 <button

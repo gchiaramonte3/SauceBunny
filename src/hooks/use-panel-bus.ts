@@ -39,6 +39,13 @@ export type PanelSnapshot = {
   transcriptArrivedTick: number;
   regenerateBusy: boolean;
   canRegenerate: boolean;
+  /** AI Summary: chosen model + output style, mirrored so the popped-out
+   *  panel's AI tab uses the same model/style as the docked view. */
+  aiModelId: string;
+  aiStyle: {
+    format: "bullets" | "numbered" | "prose";
+    length: "brief" | "standard" | "detailed";
+  };
 };
 
 export type PanelHandlers = {
@@ -51,6 +58,8 @@ export type PanelHandlers = {
   onLoadFromHistory: (entry: TranscriptHistoryEntry) => void;
   onRegenerate: () => void;
   onImportTranscript: () => void;
+  /** Panel asked to manage AI models — main opens Settings → AI Summary. */
+  onOpenAiSettings: () => void;
 };
 
 /** Shared key the main window writes the live snapshot to and the popped-out
@@ -69,6 +78,8 @@ const INITIAL_SNAPSHOT: PanelSnapshot = {
   transcriptArrivedTick: 0,
   regenerateBusy: false,
   canRegenerate: false,
+  aiModelId: "qwen3-4b-instruct",
+  aiStyle: { format: "bullets", length: "standard" },
 };
 
 type Args = {
@@ -171,6 +182,8 @@ export function usePanelBus({
           () => handlersRef.current.onRegenerate()),
         listen("panel:action:importTranscript",
           () => handlersRef.current.onImportTranscript()),
+        listen("panel:action:openAiSettings",
+          () => handlersRef.current.onOpenAiSettings()),
       ]);
       if (cancelled) { off.forEach((u) => u()); return; }
       unlistens = off;

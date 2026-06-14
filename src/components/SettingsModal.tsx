@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+
+/** Style helper for the sliding-pill segmented control: drives the active
+ *  index + segment count CSS vars the .cp-segmented pill animates from. */
+const segStyle = (active: number, count: number, extra?: CSSProperties): CSSProperties =>
+  ({ ...extra, ["--seg-active"]: Math.max(0, active), ["--seg-count"]: count } as CSSProperties);
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -611,7 +616,7 @@ export function SettingsModal(props: Props) {
                       <span className="desc">Which yt-dlp format selector to use by default.</span>
                     </div>
                     <div className="v">
-                      <div className="cp-segmented" style={{ minWidth: 260, gridTemplateColumns: "repeat(4, 1fr)" }}>
+                      <div className="cp-segmented" style={segStyle(FORMATS.findIndex((f) => f.id === defaults.format), FORMATS.length, { minWidth: 260 })}>
                         {FORMATS.map((f) => (
                           <button
                             key={f.id}
@@ -679,7 +684,7 @@ export function SettingsModal(props: Props) {
                       <span className="desc">Used when the source doesn't report a frame rate.</span>
                     </div>
                     <div className="v">
-                      <div className="cp-segmented" style={{ minWidth: 200, gridTemplateColumns: "repeat(3, 1fr)" }}>
+                      <div className="cp-segmented" style={segStyle(["24", "25", "30"].indexOf(defaults.timecode), 3, { minWidth: 200 })}>
                         {(["24","25","30"] as const).map((f) => (
                           <button
                             key={f}
@@ -737,7 +742,7 @@ export function SettingsModal(props: Props) {
                   <div className="cp-pane-row">
                     <div className="k">Size</div>
                     <div className="v">
-                      <div className="cp-segmented" style={{ minWidth: 200, gridTemplateColumns: "repeat(4, 1fr)" }}>
+                      <div className="cp-segmented" style={segStyle(CAP_SIZES.findIndex((s) => Math.abs(defaults.captionScale - s.scale) < 0.01), CAP_SIZES.length, { minWidth: 200 })}>
                         {CAP_SIZES.map((s) => (
                           <button
                             key={s.label}
@@ -753,7 +758,7 @@ export function SettingsModal(props: Props) {
                   <div className="cp-pane-row">
                     <div className="k">Font</div>
                     <div className="v">
-                      <div className="cp-segmented" style={{ minWidth: 200, gridTemplateColumns: "repeat(3, 1fr)" }}>
+                      <div className="cp-segmented" style={segStyle(["sans", "serif", "mono"].indexOf(defaults.captionFont), 3, { minWidth: 200 })}>
                         {(["sans", "serif", "mono"] as const).map((fnt) => (
                           <button
                             key={fnt}
@@ -1165,7 +1170,7 @@ export function SettingsModal(props: Props) {
                       <span className="desc">How answers are structured — real bullets / numbers, not asterisks.</span>
                     </div>
                     <div className="v">
-                      <div className="cp-segmented" style={{ minWidth: 270, gridTemplateColumns: "repeat(3, 1fr)" }}>
+                      <div className="cp-segmented" style={segStyle(["bullets", "numbered", "prose"].indexOf(defaults.summaryFormat), 3, { minWidth: 270 })}>
                         {(["bullets", "numbered", "prose"] as const).map((f) => (
                           <button
                             key={f}
@@ -1184,7 +1189,7 @@ export function SettingsModal(props: Props) {
                       <span className="desc">Roughly how much detail the model includes.</span>
                     </div>
                     <div className="v">
-                      <div className="cp-segmented" style={{ minWidth: 270, gridTemplateColumns: "repeat(3, 1fr)" }}>
+                      <div className="cp-segmented" style={segStyle(["brief", "standard", "detailed"].indexOf(defaults.summaryLength), 3, { minWidth: 270 })}>
                         {(["brief", "standard", "detailed"] as const).map((l) => (
                           <button
                             key={l}
