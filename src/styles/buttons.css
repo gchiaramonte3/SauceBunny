@@ -80,6 +80,59 @@
   box-shadow: var(--bevel-raised);
 }
 
+/* Hero export CTA — the app's single most important action gets its own
+   identity: a violet→indigo gradient (the brand purple, --color-accent-purple
+   #6D52ED, sits mid-stop) with a top sheen for depth, white text, and a layered
+   purple glow. Overrides the green .btn-primary it's layered on; defined after
+   it so equal-specificity base rules lose on source order. */
+.cp-export-cta {
+  background:
+    radial-gradient(135% 120% at 50% -15%, rgba(255,255,255,0.22), rgba(255,255,255,0) 55%),
+    linear-gradient(143deg, #9D7BFF 0%, #6D52ED 50%, #5A39D6 100%);
+  color: #fff;
+  border-color: transparent;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.30),
+    inset 0 -1px 0 rgba(0,0,0,0.22),
+    0 1px 2px rgba(0,0,0,0.45),
+    0 0 0 1px rgba(157,117,250,0.30),
+    0 6px 20px -2px rgba(109,82,237,0.50),
+    0 0 28px rgba(157,117,250,0.26);
+  transition: box-shadow var(--dur-fast) var(--ease-out),
+              filter var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.cp-export-cta:hover:not(:disabled) {
+  filter: brightness(1.06) saturate(1.04);
+  background:
+    radial-gradient(135% 120% at 50% -15%, rgba(255,255,255,0.26), rgba(255,255,255,0) 55%),
+    linear-gradient(143deg, #9D7BFF 0%, #6D52ED 50%, #5A39D6 100%);
+  border-color: transparent;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.35),
+    inset 0 -1px 0 rgba(0,0,0,0.22),
+    0 1px 2px rgba(0,0,0,0.45),
+    0 0 0 1px rgba(157,117,250,0.45),
+    0 9px 28px -2px rgba(109,82,237,0.60),
+    0 0 40px rgba(157,117,250,0.40);
+}
+.cp-export-cta:active:not(:disabled) {
+  transform: translateY(0);
+  filter: brightness(0.97);
+  box-shadow:
+    inset 0 1px 2px rgba(0,0,0,0.28),
+    0 0 0 1px rgba(157,117,250,0.35),
+    0 2px 8px rgba(109,82,237,0.35);
+}
+.cp-export-cta:disabled {
+  background: rgba(157,117,250,0.14);
+  color: var(--fg-4);
+  text-shadow: none;
+  box-shadow: var(--bevel-raised);
+}
+
 .btn-icon {
   width: 30px;
   height: 30px;

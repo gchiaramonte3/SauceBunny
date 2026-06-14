@@ -595,7 +595,7 @@ export function Sidebar(props: Props) {
               ) : queueCount > 0 ? (
                 // Queue is the source of truth when it has items.
                 <button
-                  className="btn btn-primary"
+                  className="btn btn-primary cp-export-cta"
                   style={{ flex: 1, height: 36, fontSize: 13 }}
                   onClick={onExportQueue}
                   disabled={queueRunning || !exportOpts.folder}
@@ -604,7 +604,7 @@ export function Sidebar(props: Props) {
                 </button>
               ) : (
                 <button
-                  className="btn btn-primary"
+                  className="btn btn-primary cp-export-cta"
                   style={{ flex: 1, height: 36, fontSize: 13 }}
                   onClick={onExport}
                   disabled={!canExport}
