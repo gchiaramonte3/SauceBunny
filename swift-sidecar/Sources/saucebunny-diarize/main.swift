@@ -507,10 +507,11 @@ func runAsrMode(args: Args) async {
       models = try await AsrModels.downloadAndLoad(version: .v3)
     }
     let asr = AsrManager(config: .default)
-    try await asr.initialize(models: models)
+    try await asr.loadModels(models)
 
     emitStatus(["phase": "process", "message": "Transcribing with Parakeet…", "backend": "parakeet"], emit: args.emitProgress)
-    var state = TdtDecoderState()
+    // TdtDecoderState() is a throwing initializer in FluidAudio 0.15.x.
+    var state = try TdtDecoderState()
     let result = try await asr.transcribe(URL(fileURLWithPath: inPath), decoderState: &state)
     let srt = tokensToSrt(result.tokenTimings ?? [])
     if srt.isEmpty {
