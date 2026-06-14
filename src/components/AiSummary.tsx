@@ -261,6 +261,10 @@ export function AiSummary({ transcriptPath, reloadToken, selectedModelId, style,
 
   function stop() { abortRef.current?.abort(); setStreaming(false); }
 
+  // If the chosen model changes (in Settings) mid-stream, abort the in-flight
+  // run so the next turn starts cleanly on the newly-loaded model.
+  useEffect(() => { abortRef.current?.abort(); }, [selectedModelId]);
+
   // ── Export (Copy / .md / .txt / PDF) — mirrors the transcript menu ─
   const [dlOpen, setDlOpen] = useState(false);
   const [dlError, setDlError] = useState<string | null>(null);
@@ -442,7 +446,10 @@ export function AiSummary({ transcriptPath, reloadToken, selectedModelId, style,
         {hasOutput && (
           <div className="cp-ai-export" ref={dlRef}>
             <button className="btn btn-ghost cp-ai-export-btn" onClick={() => setDlOpen((p) => !p)} title="Export this summary">
-              Export ▾
+              Export
+              <svg className={"cp-ai-caret" + (dlOpen ? " open" : "")} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M6 9l6 6 6-6" />
+              </svg>
             </button>
             {dlOpen && (
               <div className="cp-ai-export-menu" role="menu">
@@ -464,8 +471,8 @@ export function AiSummary({ transcriptPath, reloadToken, selectedModelId, style,
             <div className="cp-ai-empty-title">Chat with this transcript</div>
             <div className="cp-ai-empty-sub">Ask anything — it answers only from the words in the video, with timestamps.</div>
             <div className="cp-ai-suggest">
-              {SUGGESTIONS.map((s) => (
-                <button key={s} className="cp-ai-chip" onClick={() => send(s)}>{s}</button>
+              {SUGGESTIONS.map((s, i) => (
+                <button key={s} className="cp-ai-chip" style={{ animationDelay: `${i * 40}ms` }} onClick={() => send(s)}>{s}</button>
               ))}
             </div>
           </div>

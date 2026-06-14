@@ -132,10 +132,27 @@ export function SpeakerColorPicker({
       <div
         ref={svRef}
         className="cp-colorpick-sv"
+        role="slider"
+        tabIndex={0}
+        aria-label="Saturation and brightness"
+        aria-valuetext={`${Math.round(hsv.s * 100)}% saturation, ${Math.round(hsv.v * 100)}% brightness`}
         style={{ ["--cp-hue" as string]: hsv.h }}
         onPointerDown={onSvDown}
         onPointerMove={onSvMove}
         onPointerUp={onSvUp}
+        onPointerCancel={(e) => { if (svRef.current?.hasPointerCapture(e.pointerId)) svRef.current.releasePointerCapture(e.pointerId); }}
+        onKeyDown={(e) => {
+          const step = e.shiftKey ? 0.1 : 0.02;
+          let { s, v } = hsv;
+          if (e.key === "ArrowLeft") s = clamp01(s - step);
+          else if (e.key === "ArrowRight") s = clamp01(s + step);
+          else if (e.key === "ArrowUp") v = clamp01(v + step);
+          else if (e.key === "ArrowDown") v = clamp01(v - step);
+          else return;
+          e.preventDefault();
+          const next = { ...hsv, s, v };
+          setHsv(next); commit(next);
+        }}
       >
         <span
           className="cp-colorpick-thumb"
@@ -148,9 +165,26 @@ export function SpeakerColorPicker({
         <div
           ref={hueRef}
           className="cp-colorpick-hue"
+          role="slider"
+          tabIndex={0}
+          aria-label="Hue"
+          aria-valuemin={0}
+          aria-valuemax={360}
+          aria-valuenow={Math.round(hsv.h)}
           onPointerDown={onHueDown}
           onPointerMove={onHueMove}
           onPointerUp={onHueUp}
+          onPointerCancel={(e) => { if (hueRef.current?.hasPointerCapture(e.pointerId)) hueRef.current.releasePointerCapture(e.pointerId); }}
+          onKeyDown={(e) => {
+            const step = e.shiftKey ? 15 : 3;
+            let h = hsv.h;
+            if (e.key === "ArrowLeft") h = (h - step + 360) % 360;
+            else if (e.key === "ArrowRight") h = (h + step) % 360;
+            else return;
+            e.preventDefault();
+            const next = { ...hsv, h };
+            setHsv(next); commit(next);
+          }}
         >
           <span className="cp-colorpick-hue-thumb" style={{ left: `${(hsv.h / 360) * 100}%` }} />
         </div>

@@ -96,7 +96,7 @@
   padding: 14px 12px 4px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
   scroll-behavior: smooth;
 }
 .cp-ai-suggest {
@@ -108,19 +108,34 @@
   max-width: 340px;
 }
 .cp-ai-chip {
+  position: relative;
   text-align: left;
   font-size: 12px;
   color: var(--fg-2);
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.09);
-  border-radius: 8px;
-  padding: 8px 11px;
+  border-radius: var(--r-md);
+  padding: 8px 28px 8px 11px;
   cursor: pointer;
-  transition: background 80ms ease, border-color 80ms ease;
+  transition: background 80ms ease, border-color 80ms ease, transform 80ms ease;
+  animation: cp-ai-chip-in var(--dur-base) var(--ease-out) backwards;
 }
-.cp-ai-chip:hover { background: rgba(108, 255, 141, 0.06); border-color: rgba(108, 255, 141, 0.25); }
+.cp-ai-chip:hover { background: rgba(108, 255, 141, 0.06); border-color: rgba(108, 255, 141, 0.25); transform: translateX(2px); }
+.cp-ai-chip::after {
+  content: "→";
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  transform: translateY(-50%) translateX(-3px);
+  opacity: 0;
+  color: var(--color-accent-green);
+  transition: opacity 80ms ease, transform 80ms ease;
+}
+.cp-ai-chip:hover::after { opacity: 1; transform: translateY(-50%) translateX(0); }
+@keyframes cp-ai-chip-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .cp-ai-chip { animation: none; } }
 
-.cp-ai-msg { display: flex; flex-direction: column; gap: 3px; }
+.cp-ai-msg { display: flex; flex-direction: column; gap: 5px; }
 .cp-ai-msg-role {
   font-size: 9.5px;
   font-weight: 700;
@@ -136,12 +151,21 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* The answer gets a hairline brand-accent rail so it reads as a unit and the
+   thread has a clear scan line. */
+.cp-ai-msg.assistant .cp-ai-msg-body {
+  border-left: 2px solid rgba(108, 255, 141, 0.22);
+  padding-left: 11px;
+  margin-left: 1px;
+}
 .cp-ai-msg.user .cp-ai-msg-body {
   color: var(--fg-2);
-  background: rgba(255,255,255,0.03);
-  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  box-shadow: var(--shadow-inset-hair);
+  border-radius: var(--r-md);
   padding: 7px 10px;
   align-self: flex-start;
+  max-width: 88%;
 }
 
 .cp-ai-status {
@@ -173,6 +197,7 @@
   padding: 10px 12px;
   border-top: 1px solid rgba(255,255,255,0.06);
   background: var(--bg-0);
+  box-shadow: 0 -8px 16px -12px rgba(0,0,0,0.6);
 }
 .cp-ai-input {
   flex: 1;
@@ -186,7 +211,16 @@
   font-size: 12.5px;
   outline: none;
 }
-.cp-ai-input:focus { border-color: rgba(108, 255, 141, 0.45); background: rgba(108, 255, 141, 0.04); }
+.cp-ai-input {
+  transition: border-color var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+.cp-ai-input:focus {
+  border-color: rgba(108, 255, 141, 0.45);
+  background: rgba(108, 255, 141, 0.04);
+  box-shadow: 0 0 0 3px rgba(108, 255, 141, 0.10);
+}
 .cp-ai-input:disabled { opacity: 0.6; }
 
 /* ── Top bar: active model + export ───────────────────────────────── */
@@ -215,7 +249,9 @@
 .cp-ai-model-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-ai-model-pick:hover { background: rgba(255, 255, 255, 0.07); color: var(--fg-1); }
 .cp-ai-export { margin-left: auto; position: relative; }
-.cp-ai-export-btn { height: 26px; padding: 0 9px; font-size: 11.5px; }
+.cp-ai-export-btn { height: 26px; padding: 0 9px; font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; }
+.cp-ai-caret { transition: transform var(--dur-fast) var(--ease-out); opacity: 0.7; }
+.cp-ai-caret.open { transform: rotate(180deg); }
 .cp-ai-export-menu {
   position: absolute;
   top: calc(100% + 4px);
@@ -225,10 +261,10 @@
   padding: 4px;
   display: flex;
   flex-direction: column;
-  background: #1c1d22;
+  background: var(--color-surface-elevated);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 9px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
 }
 .cp-ai-export-menu button {
   text-align: left;
