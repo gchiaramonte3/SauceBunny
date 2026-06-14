@@ -635,6 +635,7 @@ export function QueueDrawer({
           selectedModelId={aiModelId}
           style={aiStyle}
           onOpenSettings={onOpenAiSettings}
+          onSeek={onTranscriptSeek}
         />
       )}
     </aside>

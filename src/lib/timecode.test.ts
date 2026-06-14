@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { framesToTc, tcToFrames, tcToSeconds } from "./timecode";
+import { framesToTc, tcToFrames, tcToSeconds, hmsToSeconds } from "./timecode";
 
 // Frames↔timecode math drives the playhead, marks, exports, and the
 // transcript click-to-seek (whose floor-rounding produced the r85
@@ -54,5 +54,20 @@ describe("tcToSeconds", () => {
   it("converts via frames", () => {
     expect(tcToSeconds("00:00:01:15", 30)).toBeCloseTo(1.5, 5);
     expect(tcToSeconds("garbage", 30)).toBeNull();
+  });
+});
+
+describe("hmsToSeconds", () => {
+  it("parses m:ss and h:mm:ss (the AI summary's clickable timecodes)", () => {
+    expect(hmsToSeconds("7:23")).toBe(7 * 60 + 23);
+    expect(hmsToSeconds("0:42")).toBe(42);
+    expect(hmsToSeconds("1:02:03")).toBe(3600 + 123);
+    expect(hmsToSeconds("12")).toBe(12);
+  });
+  it("rejects out-of-range fields and garbage", () => {
+    expect(hmsToSeconds("7:99")).toBeNull(); // seconds >= 60
+    expect(hmsToSeconds("1:99:00")).toBeNull(); // minutes >= 60
+    expect(hmsToSeconds("a:bc")).toBeNull();
+    expect(hmsToSeconds("1:2:3:4")).toBeNull();
   });
 });

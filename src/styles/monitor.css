@@ -67,13 +67,15 @@
   z-index: 6;
 }
 .cp-caption-cue {
-  /* Lines are pre-split into at most two clause-broken lines by
-     splitCaptionLines() (Netflix/BBC two-line, ~42-char convention), so we
-     render explicit block lines rather than relying on CSS wrapping. */
+  /* The speaker label sits on its own line above the body; the body is at most
+     two clause-broken lines from splitCaptionLines() (Netflix/BBC ~42-char
+     convention). Left-aligned in a fixed-width box so wrapping is consistent
+     and nothing exceeds the box; `text-wrap: balance` (where supported) evens
+     the two lines so a single word never gets orphaned. */
   display: inline-block;
   overflow: hidden;
-  max-width: 46ch;
-  padding: 3px 11px;
+  max-width: 42ch;
+  padding: 4px 12px;
   border-radius: 6px;
   /* Inline style overrides these from Settings → Captions; the values here
      are the fallback when no prefs are passed. `--cap-scale` multiplies the
@@ -83,16 +85,21 @@
   font-size: calc(clamp(12px, 2vw, 22px) * var(--cap-scale, 1));
   font-weight: 600;
   line-height: 1.4;
-  text-align: center;
+  text-align: left;
   text-shadow: 0 1px 3px rgba(0,0,0,0.95);
   white-space: pre-wrap;
 }
 .cp-caption-line {
   display: block;
+  text-wrap: balance;
 }
 .cp-caption-speaker {
+  display: block;
+  margin-bottom: 2px;
   color: var(--color-accent-green, #7bdcb5);
   font-weight: 800;
+  font-size: 0.82em;
+  letter-spacing: 0.01em;
 }
 
 /* Type-a-timecode HUD — centered over the video. Keyboard-driven (App owns

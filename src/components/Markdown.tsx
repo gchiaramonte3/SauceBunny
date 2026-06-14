@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { hmsToSeconds } from "../lib/timecode";
 
 /**
  * Tiny, dependency-free Markdown renderer for AI-summary output.
@@ -24,7 +25,7 @@ function plain(s: string, key: number): ReactNode {
 // Split a line into rich spans: **bold**, `inline code`, and [m:ss] / [h:mm:ss]
 // timestamp citations (the AI's main structured output) get their own styling;
 // everything else is plain text with stray asterisks stripped.
-function renderInline(text: string): ReactNode[] {
+function renderInline(text: string, onSeek?: (seconds: number) => void): ReactNode[] {
   const out: ReactNode[] = [];
   // Groups: 1=**(2)**  3=`(4)`  5=[timestamp]
   const re = /(\*\*(.+?)\*\*)|(`([^`]+)`)|(\[\d{1,2}:\d{2}(?::\d{2})?\])/g;
@@ -35,7 +36,26 @@ function renderInline(text: string): ReactNode[] {
     if (m.index > last) out.push(plain(text.slice(last, m.index), k++));
     if (m[2] !== undefined) out.push(<strong key={k++}>{m[2]}</strong>);
     else if (m[4] !== undefined) out.push(<code key={k++} className="cp-md-code">{m[4]}</code>);
-    else if (m[5] !== undefined) out.push(<span key={k++} className="cp-md-ts">{m[5]}</span>);
+    else if (m[5] !== undefined) {
+      // [m:ss] / [h:mm:ss] citation. When a seek handler is provided, render a
+      // real button that jumps playback to that point; else a plain span.
+      const secs = hmsToSeconds(m[5].slice(1, -1));
+      out.push(
+        onSeek && secs != null ? (
+          <button
+            key={k++}
+            type="button"
+            className="cp-md-ts cp-md-ts-btn"
+            title="Jump to this point"
+            onClick={() => onSeek(secs)}
+          >
+            {m[5]}
+          </button>
+        ) : (
+          <span key={k++} className="cp-md-ts">{m[5]}</span>
+        ),
+      );
+    }
     last = re.lastIndex;
   }
   out.push(plain(text.slice(last), k++));
@@ -46,7 +66,7 @@ const isHeading = (l: string) => /^(#{1,3})\s+/.test(l);
 const isBullet = (l: string) => /^\s*[-*+]\s+/.test(l);
 const isNumbered = (l: string) => /^\s*\d+\.\s+/.test(l);
 
-export function Markdown({ source }: { source: string }) {
+export function Markdown({ source, onSeek }: { source: string; onSeek?: (seconds: number) => void }) {
   const lines = source.replace(/\r\n/g, "\n").split("\n");
   const blocks: ReactNode[] = [];
   let i = 0;
@@ -61,7 +81,7 @@ export function Markdown({ source }: { source: string }) {
     if (h) {
       const level = Math.min(4, h[1].length + 1); // # → h2, so no h1 inside a card
       const Tag = `h${level}` as "h2" | "h3" | "h4";
-      blocks.push(<Tag key={key++} className="cp-md-h">{renderInline(h[2])}</Tag>);
+      blocks.push(<Tag key={key++} className="cp-md-h">{renderInline(h[2], onSeek)}</Tag>);
       i++;
       continue;
     }
@@ -69,7 +89,7 @@ export function Markdown({ source }: { source: string }) {
     if (isBullet(line)) {
       const items: ReactNode[] = [];
       while (i < lines.length && isBullet(lines[i])) {
-        items.push(<li key={key++}>{renderInline(lines[i].replace(/^\s*[-*+]\s+/, ""))}</li>);
+        items.push(<li key={key++}>{renderInline(lines[i].replace(/^\s*[-*+]\s+/, ""), onSeek)}</li>);
         i++;
       }
       blocks.push(<ul key={key++} className="cp-md-ul">{items}</ul>);
@@ -79,7 +99,7 @@ export function Markdown({ source }: { source: string }) {
     if (isNumbered(line)) {
       const items: ReactNode[] = [];
       while (i < lines.length && isNumbered(lines[i])) {
-        items.push(<li key={key++}>{renderInline(lines[i].replace(/^\s*\d+\.\s+/, ""))}</li>);
+        items.push(<li key={key++}>{renderInline(lines[i].replace(/^\s*\d+\.\s+/, ""), onSeek)}</li>);
         i++;
       }
       blocks.push(<ol key={key++} className="cp-md-ol">{items}</ol>);
@@ -96,7 +116,7 @@ export function Markdown({ source }: { source: string }) {
       para.push(lines[i]);
       i++;
     }
-    blocks.push(<p key={key++} className="cp-md-p">{renderInline(para.join(" "))}</p>);
+    blocks.push(<p key={key++} className="cp-md-p">{renderInline(para.join(" "), onSeek)}</p>);
   }
 
   return <div className="cp-md">{blocks}</div>;

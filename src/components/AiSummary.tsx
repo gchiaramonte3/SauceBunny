@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { parseSrt, groupIntoTurns, fmtTime } from "../lib/srt";
+import { loadSpeakerOverrides, resolveSpeakerName, SPEAKERS_CHANGED_EVENT } from "./transcript/helpers";
 import { streamChat, type ChatMessage } from "../lib/ai-chat";
 import { formatError } from "../lib/error-format";
 import { Markdown } from "./Markdown";
@@ -30,6 +31,8 @@ type Props = {
   style?: SummaryStyle;
   /** Open Settings → AI Summary (manage / switch / download models). */
   onOpenSettings?: () => void;
+  /** Seek playback to a timestamp (seconds) — makes summary [m:ss] clickable. */
+  onSeek?: (seconds: number) => void;
 };
 
 const SUGGESTIONS = [
@@ -41,7 +44,7 @@ const SUGGESTIONS = [
 
 const DEFAULT_STYLE: SummaryStyle = { format: "bullets", length: "standard" };
 
-function buildSystemPrompt(transcript: string, truncated: boolean, style: SummaryStyle): string {
+function buildSystemPrompt(transcript: string, truncated: boolean, style: SummaryStyle, hasSpeakers: boolean): string {
   const fmt =
     style.format === "numbered"
       ? '- Structure lists as a numbered list using "1. ", "2. " — one item per line.'
@@ -60,6 +63,9 @@ function buildSystemPrompt(transcript: string, truncated: boolean, style: Summar
     "- When asked for quotes, copy the wording VERBATIM and include the [timestamp].",
     "- When you reference a moment, cite its [timestamp] (e.g. [7:23]).",
     "- If the transcript doesn't cover what's asked, say so plainly.",
+    hasSpeakers
+      ? "- Speakers are identified in the transcript (each line is prefixed with the speaker's name). Attribute key points, claims, and quotes to the correct speaker by name."
+      : "",
     fmt,
     len,
     "- Format in GitHub-flavoured Markdown. Put a blank line between paragraphs and before any list.",
@@ -80,7 +86,7 @@ function buildSystemPrompt(transcript: string, truncated: boolean, style: Summar
   ].filter(Boolean).join("\n");
 }
 
-export function AiSummary({ transcriptPath, reloadToken, selectedModelId, style, onOpenSettings }: Props) {
+export function AiSummary({ transcriptPath, reloadToken, selectedModelId, style, onOpenSettings, onSeek }: Props) {
   // ── Transcript text (timestamped, model-friendly) ────────────────
   const [raw, setRaw] = useState<string | null>(null);
   const loadKey = transcriptPath ? `${transcriptPath}#${reloadToken ?? 0}` : null;
@@ -194,23 +200,38 @@ export function AiSummary({ transcriptPath, reloadToken, selectedModelId, style,
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Built once per transcript: timestamped plain text, trimmed to ctx budget.
+  // Rebuild the model context when speaker names/aliases change — the transcript
+  // panel + caption overlay fire SPEAKERS_CHANGED_EVENT on every rename/merge.
+  const [speakersTick, setSpeakersTick] = useState(0);
+  useEffect(() => {
+    const onChange = () => setSpeakersTick((t) => t + 1);
+    window.addEventListener(SPEAKERS_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(SPEAKERS_CHANGED_EVENT, onChange);
+  }, []);
+
+  // Built per transcript: timestamped plain text, trimmed to ctx budget. When
+  // diarization has run, each line is prefixed with the speaker's RESOLVED
+  // display name (the same renames the panel/captions show) so the model can
+  // attribute points by name — works for any model.
   const transcriptForModel = useMemo(() => {
     if (!raw) return null;
     let turns;
     try { turns = groupIntoTurns(parseSrt(raw)); } catch { return null; }
     if (!turns.length) return null;
+    const overrides = loadSpeakerOverrides(transcriptPath);
+    const hasSpeakers = turns.some((t) => !!t.speaker);
     const lines = turns.map((t) => {
-      const who = t.speaker ? `${t.speaker}: ` : "";
+      const name = t.speaker ? resolveSpeakerName(t.speaker, overrides) : null;
+      const who = name ? `${name}: ` : "";
       return `[${fmtTime(t.start)}] ${who}${t.cues.map((c) => c.text).join(" ")}`;
     });
     const text = lines.join("\n");
     // Budget: ~3.5 chars/token, keep ~65% of ctx for the transcript, rest for chat.
     const ctx = server?.ctx ?? 16384;
     const budget = Math.floor(ctx * 3.5 * 0.65);
-    if (text.length <= budget) return { text, truncated: false };
-    return { text: text.slice(0, budget), truncated: true };
-  }, [raw, server?.ctx]);
+    const truncated = text.length > budget;
+    return { text: truncated ? text.slice(0, budget) : text, truncated, hasSpeakers };
+  }, [raw, server?.ctx, transcriptPath, speakersTick]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -232,7 +253,7 @@ export function AiSummary({ transcriptPath, reloadToken, selectedModelId, style,
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     const payload: ChatMessage[] = [
-      { role: "system", content: buildSystemPrompt(transcriptForModel.text, transcriptForModel.truncated, style ?? DEFAULT_STYLE) },
+      { role: "system", content: buildSystemPrompt(transcriptForModel.text, transcriptForModel.truncated, style ?? DEFAULT_STYLE, transcriptForModel.hasSpeakers) },
       ...history,
     ];
     try {
@@ -483,7 +504,7 @@ export function AiSummary({ transcriptPath, reloadToken, selectedModelId, style,
             <div className="cp-ai-msg-body">
               {m.role === "assistant"
                 ? (m.content
-                    ? <Markdown source={m.content} />
+                    ? <Markdown source={m.content} onSeek={onSeek} />
                     : (streaming && i === messages.length - 1
                         ? <span className="cp-ai-typing"><span /><span /><span /></span>
                         : null))

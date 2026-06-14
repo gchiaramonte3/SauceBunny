@@ -224,18 +224,18 @@ export function CaptionOverlay({ path, reloadToken, currentSec, enabled, style }
   const speakerHue = speakerName
     ? resolveSpeakerColor(active?.speaker ?? null, overrides)
     : undefined;
-  // Two clause-broken lines, with the first line's budget reduced by the
-  // speaker prefix so "Tom Jonathan: …" doesn't overflow.
-  const firstMax = speakerName ? Math.max(12, MAX_LINE - (speakerName.length + 2)) : MAX_LINE;
-  const lines = splitCaptionLines(text, firstMax);
+  // The speaker label now sits on its own line ABOVE the text, so both caption
+  // lines get the full budget — no more lonely single-word lines from the
+  // prefix eating into line one.
+  const lines = splitCaptionLines(text, MAX_LINE);
 
   return (
     <div className="cp-caption-overlay" aria-live="polite">
       <span className="cp-caption-cue" style={cueStyle}>
-        <span className="cp-caption-line">
-          {speakerName && <b className="cp-caption-speaker" style={{ color: speakerHue }}>{speakerName}: </b>}
-          {lines[0]}
-        </span>
+        {speakerName && (
+          <span className="cp-caption-speaker" style={{ color: speakerHue }}>{speakerName}</span>
+        )}
+        <span className="cp-caption-line">{lines[0]}</span>
         {lines[1] && <span className="cp-caption-line">{lines[1]}</span>}
       </span>
     </div>
