@@ -158,6 +158,26 @@
 /* Adds breathing room above a stacked sub-section head (e.g. the second
    group in the merged Commands & Shortcuts pane). */
 .cp-pane-subhead-gap { margin-top: 22px; }
+
+/* Top-level Settings sections reuse the sidebar's collapsible chevron
+   (.cp-section.collapsible, styled in sidebar.css). That styling indents the
+   head + body 18px to sit in the narrow rail; in the wider Settings pane we want
+   them flush with the pane title and reading as a tight, divider-separated list
+   of section headers (collapsed by default). Scoped to the DIRECT children of
+   each tab's <section> so the NESTED engine collapsibles (Whisper / Parakeet
+   inside "Transcription engine") keep their indented, hierarchical look. */
+.cp-modal-content > section > .cp-section.collapsible > .cp-section-head {
+  padding-left: 0;
+  padding-right: 0;
+}
+.cp-modal-content > section > .cp-section.collapsible > .cp-section-body {
+  padding-left: 0;
+  padding-right: 0;
+}
+/* No trailing divider under the final section in a tab. */
+.cp-modal-content > section > .cp-section.collapsible:last-child {
+  border-bottom: none;
+}
 .cp-pane-row {
   display: grid;
   grid-template-columns: 220px 1fr;
@@ -649,7 +669,8 @@
   line-height: 1.4;
   text-align: center;
   text-shadow: 0 1px 3px rgba(0,0,0,0.95);
-  font-size: calc(clamp(12px, 2vw, 22px) * var(--cap-scale, 1));
+  /* WYSIWYG: the preview uses the exact px the overlay will render at. */
+  font-size: var(--cap-size, 18px);
 }
 .cp-cap-range {
   display: flex;
@@ -657,9 +678,43 @@
   gap: 10px;
 }
 .cp-cap-range input[type="range"] {
-  width: 170px;
+  width: 150px;
   accent-color: var(--accent);
 }
+/* Editable numeric companion to the Size slider (type an exact px value). */
+.cp-cap-size-num {
+  width: 54px;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--bg-0, #0c0c0e);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.cp-cap-size-num:focus { outline: none; border-color: var(--accent); }
+/* Caption font picker — themed <select>. */
+.cp-cap-font-select {
+  min-width: 200px;
+  height: 30px;
+  padding: 0 30px 0 11px;
+  background: var(--bg-0, #0c0c0e);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 7px;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  cursor: pointer;
+  /* Custom chevron so it matches the app's dark chrome instead of the OS look. */
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.cp-cap-font-select:focus { outline: none; border-color: var(--accent); }
 .cp-cap-range-val {
   font-size: 12px;
   color: var(--fg-3);
@@ -694,3 +749,74 @@
   background: transparent;
   cursor: pointer;
 }
+
+/* ── Editable keyboard shortcuts (Settings → Commands) ── */
+.cp-keybinds { display: flex; flex-direction: column; gap: 16px; }
+.cp-keybind-group { display: flex; flex-direction: column; }
+.cp-keybind-group-title {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--fg-4);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin: 0 0 6px;
+}
+.cp-keybind-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 34px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.cp-keybind-row:hover { background: rgba(255,255,255,0.025); }
+.cp-keybind-row.capturing {
+  background: rgba(var(--accent-rgb), 0.08);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.35);
+}
+.cp-keybind-label {
+  flex: 1;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+.cp-keybind-keys {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 132px;
+  justify-content: flex-end;
+}
+.cp-keybind-chip {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-1);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 6px;
+  padding: 2px 8px;
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,0.25);
+}
+.cp-keybind-capture { font-size: 11.5px; color: var(--accent); font-weight: 600; }
+.cp-keybind-capture .hint { color: var(--fg-4); font-weight: 400; margin-left: 6px; }
+.cp-keybind-unbound { font-size: 11.5px; color: var(--fg-4); font-style: italic; }
+.cp-keybind-actions { display: flex; gap: 6px; min-width: 130px; justify-content: flex-end; }
+.cp-keybind-note {
+  margin-top: 4px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  color: var(--color-accent-green, #7bdcb5);
+}
+.cp-keybind-foot {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Backup & reset actions (Settings → General) */
+.cp-backup-actions { display: flex; gap: 8px; }

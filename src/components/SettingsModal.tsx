@@ -4,10 +4,19 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
  *  index + segment count CSS vars the .cp-segmented pill animates from. */
 const segStyle = (active: number, count: number, extra?: CSSProperties): CSSProperties =>
   ({ ...extra, ["--seg-active"]: Math.max(0, active), ["--seg-count"]: count } as CSSProperties);
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { IconChevronDown, IconReveal, IconSparkles, IconInfo } from "./Icons";
+import { loadJson, saveJson } from "../lib/storage";
+import { KeybindingEditor } from "./KeybindingEditor";
+import { loadKeybindings, KEYBINDINGS_STORAGE_KEY, type KeybindingOverrides } from "../lib/keybindings";
+
+// localStorage keys an export/import round-trips. Mirror App's DEFAULTS_KEY +
+// the section store; kept here (not imported from App) to avoid a settings↔App
+// import cycle. Stable strings.
+const DEFAULTS_LS_KEY = "cp-defaults-v2";
+const SECTIONS_LS_KEY = "saucebunny.settingsSections.v1";
 import type {
   ExportOpts, FormatId, ModelDownloadEvent, WhisperModel, DoneEvent,
   CacheStats,
@@ -110,10 +119,10 @@ export type Defaults = {
    */
   transcriptLibrary: string;
   // ── On-video caption appearance (the transport CC overlay) ──
-  /** Caption text size multiplier (1 = base responsive size). 0.6–1.6. */
-  captionScale: number;
-  /** Caption font family. */
-  captionFont: "sans" | "serif" | "mono";
+  /** Caption text size in pixels (absolute). Clamped 12–48. */
+  captionSizePx: number;
+  /** Caption font family — keyed into CAP_FONTS. */
+  captionFont: CaptionFontKey;
   /** Opacity of the caption's dark backing pill, 0 (none) – 1 (solid). */
   captionBgOpacity: number;
   /** Caption text colour (hex). */
@@ -138,6 +147,9 @@ type Props = {
   cacheExcludePaths?: string[];
   defaults: Defaults;
   setDefaults: (d: Defaults) => void;
+  /** User keyboard-shortcut overrides + setter (Settings → Commands). */
+  keybindings: KeybindingOverrides;
+  setKeybindings: (next: KeybindingOverrides) => void;
   /** Apply current defaults to the in-flight export form. */
   onApplyToCurrent?: (patch: Partial<ExportOpts>) => void;
   /** Optional initial tab to open on. */
@@ -168,54 +180,6 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "about",         label: "About" },
 ];
 
-const SHORTCUTS: { category: string; items: { label: string; keys: string[] }[] }[] = [
-  {
-    category: "Transport",
-    items: [
-      { label: "Play / pause",       keys: ["Space"] },
-      { label: "Play / pause (alt)", keys: ["K"] },
-      { label: "Skip back 5s",       keys: ["J"] },
-      { label: "Skip forward 5s",    keys: ["L"] },
-      { label: "Step 1 frame back",  keys: [",", "←"] },
-      { label: "Step 1 frame forward", keys: [".", "→"] },
-      { label: "Step 1 second back", keys: ["⇧", "←"] },
-      { label: "Step 1 second forward", keys: ["⇧", "→"] },
-      { label: "Jump to start",      keys: ["Home"] },
-      { label: "Jump to end",        keys: ["End"] },
-    ],
-  },
-  {
-    category: "Marking",
-    items: [
-      { label: "Mark in",            keys: ["I"] },
-      { label: "Mark out",           keys: ["O"] },
-      { label: "Clear marks",        keys: ["G"] },
-      { label: "Go to in",           keys: ["Q"] },
-      { label: "Go to out",          keys: ["W"] },
-    ],
-  },
-  {
-    category: "Source",
-    items: [
-      { label: "Fetch URL",          keys: ["⌘", "↩"] },
-    ],
-  },
-  {
-    category: "Export",
-    items: [
-      { label: "Export clip",        keys: ["⌥", "E"] },
-    ],
-  },
-  {
-    category: "Window",
-    items: [
-      { label: "Toggle pipeline log",keys: ["⌘", "\\"] },
-      { label: "Open settings",      keys: ["⌘", ","] },
-      { label: "Close settings",     keys: ["Esc"] },
-    ],
-  },
-];
-
 const FORMATS: { id: FormatId; label: string }[] = [
   { id: "4k",    label: "4K" },
   { id: "1080",  label: "1080p" },
@@ -223,19 +187,33 @@ const FORMATS: { id: FormatId; label: string }[] = [
   { id: "audio", label: "Audio" },
 ];
 
-// Caption-appearance presets (Settings → General → Captions).
-const CAP_SIZES: { label: string; scale: number }[] = [
-  { label: "S",  scale: 0.7 },
-  { label: "M",  scale: 0.85 },
-  { label: "L",  scale: 1.0 },
-  { label: "XL", scale: 1.3 },
-];
-const CAP_FONTS: Record<Defaults["captionFont"], string> = {
-  sans: "'Nunito Sans', system-ui, sans-serif",
-  serif: "Georgia, 'Times New Roman', serif",
-  mono: "ui-monospace, 'SF Mono', Menlo, monospace",
+// Caption fonts (Settings → Captions). All are macOS system fonts (no bundling)
+// chosen for caption legibility per broadcast/accessibility guidance: wide,
+// high-x-height sans faces lead (Verdana is the default — designed for screen
+// legibility and on the British Dyslexia Association's even-spaced list), with
+// serif/mono and the app's own Nunito Sans rounding out the set.
+// MUST stay in sync with FONT_STACK in CaptionOverlay.tsx (same keys + stacks).
+export type CaptionFontKey =
+  | "verdana" | "helvetica" | "arial" | "tahoma" | "trebuchet" | "georgia" | "courier" | "nunito";
+const CAP_FONTS: Record<CaptionFontKey, string> = {
+  verdana: "Verdana, Geneva, sans-serif",
+  helvetica: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+  arial: "Arial, 'Helvetica Neue', sans-serif",
+  tahoma: "Tahoma, Geneva, Verdana, sans-serif",
+  trebuchet: "'Trebuchet MS', 'Helvetica Neue', sans-serif",
+  georgia: "Georgia, 'Times New Roman', serif",
+  courier: "'Courier New', Courier, monospace",
+  nunito: "'Nunito Sans', system-ui, sans-serif",
+};
+const CAP_FONT_LABELS: Record<CaptionFontKey, string> = {
+  verdana: "Verdana", helvetica: "Helvetica", arial: "Arial", tahoma: "Tahoma",
+  trebuchet: "Trebuchet MS", georgia: "Georgia", courier: "Courier", nunito: "Nunito Sans",
 };
 const CAP_COLORS = ["#ffffff", "#ffe14d", "#7be8ff", "#7bdcb5", "#ff8a8a"];
+const CAP_SIZE_MIN = 12;
+const CAP_SIZE_MAX = 48;
+const clampCaptionSize = (n: number) =>
+  Math.max(CAP_SIZE_MIN, Math.min(CAP_SIZE_MAX, Math.round(Number.isFinite(n) ? n : CAP_SIZE_MIN)));
 
 function formatMB(bytes: number): string {
   if (!isFinite(bytes) || bytes <= 0) return "—";
@@ -337,7 +315,8 @@ function ModelInfoPopover({ id }: { id: string }) {
 
 export function SettingsModal(props: Props) {
   const {
-    open, onClose, defaults, setDefaults, onApplyToCurrent, initialTab, commands,
+    open, onClose, defaults, setDefaults, keybindings, setKeybindings,
+    onApplyToCurrent, initialTab, commands,
     diarizerReady, diarizerPrepareState, diarizerPrepareError,
     onPrepareDiarizerModels, onCancelDiarizerPrepare,
   } = props;
@@ -363,9 +342,25 @@ export function SettingsModal(props: Props) {
     total: number;
   } | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  // Transcription-engine tree (host → models). Whisper open by default.
+  // Collapsible Settings sections (chevron headers). Collapsed by default so a
+  // tab opens tight; each section's open/closed state is remembered per id so a
+  // user can expand the ones they care about and have it persist.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(
+    () => loadJson<Record<string, boolean>>("saucebunny.settingsSections.v1", {}),
+  );
+  // Open by default — a section stays open unless the user has explicitly
+  // collapsed it (persisted in saucebunny.settingsSections.v1).
+  const sectionOpen = useCallback((id: string) => openSections[id] ?? true, [openSections]);
+  const toggleSection = useCallback((id: string) => {
+    setOpenSections((prev) => {
+      const next = { ...prev, [id]: !(prev[id] ?? true) };
+      saveJson("saucebunny.settingsSections.v1", next);
+      return next;
+    });
+  }, []);
+  // Transcription-engine tree (host → models). Both open by default.
   const [whisperOpen, setWhisperOpen] = useState(true);
-  const [parakeetOpen, setParakeetOpen] = useState(false);
+  const [parakeetOpen, setParakeetOpen] = useState(true);
   // Parakeet engine state. null = not yet checked. The model downloads via the
   // diarize sidecar (--prepare-asr-models), which has no byte-level progress, so
   // this is a simple busy/ready flag rather than the percent bar Whisper uses.
@@ -386,12 +381,85 @@ export function SettingsModal(props: Props) {
     try {
       const id = await invoke<string>("new_job_id");
       await invoke("download_parakeet_model", { jobId: id });
-      setParakeetReady(true);
+      // Confirm against disk rather than assuming success, so the row never
+      // shows "Installed/In use" without the model actually being present.
+      setParakeetReady(await invoke<boolean>("parakeet_model_downloaded").catch(() => true));
     } catch (e) {
       setParakeetError(formatError(e));
     } finally {
       setParakeetBusy(false);
     }
+  }, []);
+
+  const deleteParakeet = useCallback(async () => {
+    setParakeetError(null);
+    try {
+      await invoke("delete_parakeet_model");
+      setParakeetReady(false);
+      // If Parakeet was the active engine, fall back to Whisper so there's
+      // always a usable engine selected.
+      if (defaults.transcriptionEngine === "parakeet") {
+        setDefaults({ ...defaults, transcriptionEngine: "whisper" });
+      }
+    } catch (e) {
+      setParakeetError(formatError(e));
+    }
+  }, [defaults, setDefaults]);
+
+  // ── Backup: export / import / reset all settings (Settings → General) ──
+  const [backupMsg, setBackupMsg] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  const exportSettings = useCallback(async () => {
+    setBackupMsg(null);
+    try {
+      const path = await saveDialog({
+        defaultPath: "sauce-bunny-settings.json",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!path) return;
+      const payload = {
+        app: "sauce-bunny", kind: "settings", version: 1,
+        defaults,
+        keybindings: loadKeybindings(),
+        sections: loadJson<Record<string, boolean>>(SECTIONS_LS_KEY, {}),
+      };
+      const bytes = Array.from(new TextEncoder().encode(JSON.stringify(payload, null, 2)));
+      await invoke("write_bytes_to_path", { path, bytes });
+      setBackupMsg(`Saved to ${path.split("/").pop()}`);
+    } catch (e) {
+      setBackupMsg(formatError(e));
+    }
+  }, [defaults]);
+
+  const importSettings = useCallback(async () => {
+    setBackupMsg(null);
+    try {
+      const picked = await openDialog({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] });
+      if (typeof picked !== "string" || !picked) return;
+      const text = await invoke<string>("read_text_file_capped", { path: picked, maxBytes: 4 * 1024 * 1024 });
+      const parsed = JSON.parse(text) as { kind?: string; defaults?: unknown; keybindings?: unknown; sections?: unknown };
+      if (parsed.kind !== "settings") {
+        setBackupMsg("That file isn't a Sauce Bunny settings export.");
+        return;
+      }
+      if (parsed.defaults && typeof parsed.defaults === "object") saveJson(DEFAULTS_LS_KEY, parsed.defaults);
+      if (parsed.keybindings && typeof parsed.keybindings === "object") saveJson(KEYBINDINGS_STORAGE_KEY, parsed.keybindings);
+      if (parsed.sections && typeof parsed.sections === "object") saveJson(SECTIONS_LS_KEY, parsed.sections);
+      // Reload so every useState initializer re-reads the imported values.
+      window.location.reload();
+    } catch (e) {
+      setBackupMsg(formatError(e));
+    }
+  }, []);
+
+  const resetSettings = useCallback(() => {
+    try {
+      localStorage.removeItem(DEFAULTS_LS_KEY);
+      localStorage.removeItem(KEYBINDINGS_STORAGE_KEY);
+      localStorage.removeItem(SECTIONS_LS_KEY);
+    } catch { /* ignore */ }
+    window.location.reload();
   }, []);
 
   const refreshModels = useCallback(async () => {
@@ -527,7 +595,9 @@ export function SettingsModal(props: Props) {
   }
 
   function chooseModel(modelId: string) {
-    setDefaults({ ...defaults, whisperModel: modelId });
+    // Picking a Whisper model also makes Whisper the active engine — exactly one
+    // engine is ever "in use" at a time (mirrors Parakeet's "Use as default").
+    setDefaults({ ...defaults, whisperModel: modelId, transcriptionEngine: "whisper" });
   }
 
   // Close on Esc.
@@ -594,8 +664,7 @@ export function SettingsModal(props: Props) {
                   them as the starting point for the next URL you fetch.
                 </p>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Output</div>
+                <CollapsibleSection id="gen-output" label="Output" open={sectionOpen("gen-output")} onToggle={() => toggleSection("gen-output")}>
                   <div className="cp-pane-row">
                     <div className="k">
                       Default folder
@@ -641,10 +710,9 @@ export function SettingsModal(props: Props) {
                       />
                     </div>
                   </div>
-                </div>
+                </CollapsibleSection>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Local playback</div>
+                <CollapsibleSection id="gen-local-playback" label="Local playback" open={sectionOpen("gen-local-playback")} onToggle={() => toggleSection("gen-local-playback")}>
                   <div className="cp-pane-row">
                     <div className="k">
                       WebCodecs decoder (experimental)
@@ -658,10 +726,9 @@ export function SettingsModal(props: Props) {
                     </div>
                   </div>
                   <CacheControls excludePaths={props.cacheExcludePaths} />
-                </div>
+                </CollapsibleSection>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Web playback</div>
+                <CollapsibleSection id="gen-web-playback" label="Web playback" open={sectionOpen("gen-web-playback")} onToggle={() => toggleSection("gen-web-playback")}>
                   <div className="cp-pane-row">
                     <div className="k">
                       Stream while you watch
@@ -674,10 +741,9 @@ export function SettingsModal(props: Props) {
                       />
                     </div>
                   </div>
-                </div>
+                </CollapsibleSection>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Timecode</div>
+                <CollapsibleSection id="gen-timecode" label="Timecode" open={sectionOpen("gen-timecode")} onToggle={() => toggleSection("gen-timecode")}>
                   <div className="cp-pane-row">
                     <div className="k">
                       Frame rate fallback
@@ -697,7 +763,36 @@ export function SettingsModal(props: Props) {
                       </div>
                     </div>
                   </div>
-                </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection id="gen-backup" label="Backup & reset" open={sectionOpen("gen-backup")} onToggle={() => toggleSection("gen-backup")}>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Settings file
+                      <span className="desc">Save all your preferences + shortcuts to a file, or load them back (e.g. on another Mac).</span>
+                    </div>
+                    <div className="v cp-backup-actions">
+                      <button className="btn btn-ghost" onClick={exportSettings}>Export…</button>
+                      <button className="btn btn-ghost" onClick={importSettings}>Import…</button>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Reset everything
+                      <span className="desc">Restore every setting, shortcut, and panel to its default. Doesn't touch your transcripts or exports.</span>
+                    </div>
+                    <div className="v">
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => { if (confirmReset) resetSettings(); else setConfirmReset(true); }}
+                        onBlur={() => setConfirmReset(false)}
+                      >
+                        {confirmReset ? "Click again to confirm" : "Reset to defaults"}
+                      </button>
+                    </div>
+                  </div>
+                  {backupMsg && <div className="cp-source-hint muted" style={{ marginTop: 10 }}>{backupMsg}</div>}
+                </CollapsibleSection>
 
                 {onApplyToCurrent && (
                   <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end" }}>
@@ -717,7 +812,7 @@ export function SettingsModal(props: Props) {
                   Captions are kept to two lines at the broadcast-standard ~42 characters per line.
                   Changes apply live.
                 </p>
-                <div className="cp-pane-section">
+                <CollapsibleSection id="cap-style" label="Caption style" open={sectionOpen("cap-style")} onToggle={() => toggleSection("cap-style")}>
                   <div className="cp-pane-row">
                     <div className="k">
                       Preview
@@ -728,7 +823,7 @@ export function SettingsModal(props: Props) {
                         <span
                           className="cp-cap-preview-cue"
                           style={{
-                            ["--cap-scale" as string]: String(defaults.captionScale),
+                            ["--cap-size" as string]: `${defaults.captionSizePx}px`,
                             fontFamily: CAP_FONTS[defaults.captionFont],
                             color: defaults.captionColor,
                             background: `rgba(0,0,0,${defaults.captionBgOpacity})`,
@@ -740,35 +835,48 @@ export function SettingsModal(props: Props) {
                     </div>
                   </div>
                   <div className="cp-pane-row">
-                    <div className="k">Size</div>
-                    <div className="v">
-                      <div className="cp-segmented" style={segStyle(CAP_SIZES.findIndex((s) => Math.abs(defaults.captionScale - s.scale) < 0.01), CAP_SIZES.length, { minWidth: 200 })}>
-                        {CAP_SIZES.map((s) => (
-                          <button
-                            key={s.label}
-                            className={Math.abs(defaults.captionScale - s.scale) < 0.01 ? "active" : ""}
-                            onClick={() => setDefaults({ ...defaults, captionScale: s.scale })}
-                          >
-                            {s.label}
-                          </button>
-                        ))}
-                      </div>
+                    <div className="k">
+                      Size
+                      <span className="desc">Caption text size in pixels — drag or type a number.</span>
+                    </div>
+                    <div className="v cp-cap-range">
+                      <input
+                        type="range"
+                        min={CAP_SIZE_MIN}
+                        max={CAP_SIZE_MAX}
+                        step={1}
+                        value={defaults.captionSizePx}
+                        onChange={(e) => setDefaults({ ...defaults, captionSizePx: Number(e.target.value) })}
+                      />
+                      <input
+                        type="number"
+                        className="cp-cap-size-num"
+                        min={CAP_SIZE_MIN}
+                        max={CAP_SIZE_MAX}
+                        step={1}
+                        value={defaults.captionSizePx}
+                        onChange={(e) => setDefaults({ ...defaults, captionSizePx: clampCaptionSize(Number(e.target.value)) })}
+                      />
+                      <span className="cp-cap-range-val">px</span>
                     </div>
                   </div>
                   <div className="cp-pane-row">
-                    <div className="k">Font</div>
+                    <div className="k">
+                      Font
+                      <span className="desc">System fonts picked for caption legibility.</span>
+                    </div>
                     <div className="v">
-                      <div className="cp-segmented" style={segStyle(["sans", "serif", "mono"].indexOf(defaults.captionFont), 3, { minWidth: 200 })}>
-                        {(["sans", "serif", "mono"] as const).map((fnt) => (
-                          <button
-                            key={fnt}
-                            className={defaults.captionFont === fnt ? "active" : ""}
-                            onClick={() => setDefaults({ ...defaults, captionFont: fnt })}
-                          >
-                            {fnt[0].toUpperCase() + fnt.slice(1)}
-                          </button>
+                      <select
+                        className="cp-select cp-cap-font-select"
+                        value={defaults.captionFont}
+                        onChange={(e) => setDefaults({ ...defaults, captionFont: e.target.value as CaptionFontKey })}
+                      >
+                        {(Object.keys(CAP_FONTS) as CaptionFontKey[]).map((key) => (
+                          <option key={key} value={key} style={{ fontFamily: CAP_FONTS[key] }}>
+                            {CAP_FONT_LABELS[key]}
+                          </option>
                         ))}
-                      </div>
+                      </select>
                     </div>
                   </div>
                   <div className="cp-pane-row">
@@ -806,12 +914,12 @@ export function SettingsModal(props: Props) {
                       />
                     </div>
                   </div>
-                </div>
+                </CollapsibleSection>
               </section>
             )}
 
             {tab === "youtube" && (
-              <YouTubeSettings defaults={defaults} setDefaults={setDefaults} />
+              <YouTubeSettings defaults={defaults} setDefaults={setDefaults} sectionOpen={sectionOpen} toggleSection={toggleSection} />
             )}
 
             {tab === "transcription" && (
@@ -823,13 +931,12 @@ export function SettingsModal(props: Props) {
                   extracted with yt-dlp + ffmpeg; nothing ever leaves your machine.
                 </p>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Transcription engine</div>
+                <CollapsibleSection id="tx-engine" label="Transcription engine" open={sectionOpen("tx-engine")} onToggle={() => toggleSection("tx-engine")}>
                   <CollapsibleSection
                     id="eng-whisper"
                     label="Whisper"
-                    meta="whisper.cpp · local models"
-                    summary="whisper.cpp · local models"
+                    meta={defaults.transcriptionEngine === "whisper" ? "In use" : "whisper.cpp · local"}
+                    summary={defaults.transcriptionEngine === "whisper" ? "In use" : "whisper.cpp · local"}
                     open={whisperOpen}
                     onToggle={() => setWhisperOpen((o) => !o)}
                   >
@@ -850,9 +957,13 @@ export function SettingsModal(props: Props) {
                       const isDownloading = downloadingId === m.id;
                       const progress = isDownloading && downloadProgress?.modelId === m.id ? downloadProgress : null;
                       const isSelected = defaults.whisperModel === m.id;
+                      // "Active" = this is the selected model AND Whisper is the
+                      // engine in use. Cross-engine exclusivity: when Parakeet is
+                      // active, no Whisper row shows "In use".
+                      const isActive = isSelected && defaults.transcriptionEngine === "whisper";
                       const isRecommended = m.id === RECOMMENDED_MODEL;
                       return (
-                        <div key={m.id} className={"cp-model-row" + (isSelected ? " selected" : "")}>
+                        <div key={m.id} className={"cp-model-row" + (isActive ? " selected" : "")}>
                           <div className="cp-model-info-wrap">
                             <div className="cp-model-head">
                               <IconSparkles size={13} stroke="var(--fg-4)" />
@@ -860,7 +971,7 @@ export function SettingsModal(props: Props) {
                               <span className="size">{formatMB(m.size_bytes)}</span>
                               {isRecommended && <span className="badge recommended">Recommended</span>}
                               {m.downloaded && <span className="badge installed">Installed</span>}
-                              {isSelected && m.downloaded && <span className="badge selected">Default</span>}
+                              {isActive && m.downloaded && <span className="badge selected">In use</span>}
                               <ModelInfoPopover id={m.id} />
                             </div>
                             {progress && (
@@ -883,7 +994,7 @@ export function SettingsModal(props: Props) {
                                 {isDownloading ? "Downloading…" : "Download"}
                               </button>
                             )}
-                            {m.downloaded && !isSelected && (
+                            {m.downloaded && !isActive && (
                               <button className="btn btn-ghost" onClick={() => chooseModel(m.id)}>
                                 Use as default
                               </button>
@@ -911,14 +1022,8 @@ export function SettingsModal(props: Props) {
                   <CollapsibleSection
                     id="eng-parakeet"
                     label="Parakeet"
-                    meta={
-                      defaults.transcriptionEngine === "parakeet"
-                        ? "NVIDIA · in use"
-                        : parakeetReady
-                          ? "NVIDIA · downloaded"
-                          : "NVIDIA · word-level timing"
-                    }
-                    summary="NVIDIA · word-level timing"
+                    meta={defaults.transcriptionEngine === "parakeet" ? "In use" : "NVIDIA · word-level"}
+                    summary={defaults.transcriptionEngine === "parakeet" ? "In use" : "NVIDIA · word-level"}
                     open={parakeetOpen}
                     onToggle={() => setParakeetOpen((o) => !o)}
                   >
@@ -928,16 +1033,19 @@ export function SettingsModal(props: Props) {
                       multilingual, with tighter caption sync than Whisper's segment timing.
                       One-time download is about 0.5 GB.
                     </div>
-                    <div className={"cp-model-row" + (defaults.transcriptionEngine === "parakeet" ? " selected" : "")}>
+                    {(() => {
+                      // Parakeet has a single model; "active" mirrors the Whisper
+                      // row — installed AND the engine in use.
+                      const parakeetActive = parakeetReady === true && defaults.transcriptionEngine === "parakeet";
+                      return (
+                    <div className={"cp-model-row" + (parakeetActive ? " selected" : "")}>
                       <div className="cp-model-info-wrap">
                         <div className="cp-model-head">
                           <IconSparkles size={13} stroke="var(--fg-4)" />
                           <span className="name">Parakeet TDT v3</span>
                           <span className="size">≈0.5 GB</span>
                           {parakeetReady && <span className="badge installed">Installed</span>}
-                          {defaults.transcriptionEngine === "parakeet" && (
-                            <span className="badge selected">Default</span>
-                          )}
+                          {parakeetActive && <span className="badge selected">In use</span>}
                         </div>
                       </div>
                       <div className="cp-model-actions">
@@ -945,30 +1053,35 @@ export function SettingsModal(props: Props) {
                           <span className="size">checking…</span>
                         ) : !parakeetReady ? (
                           <button
-                            className="btn btn-primary"
+                            className="btn btn-ghost"
                             onClick={downloadParakeet}
                             disabled={parakeetBusy}
                           >
                             {parakeetBusy ? "Downloading…" : "Download"}
                           </button>
-                        ) : defaults.transcriptionEngine === "parakeet" ? (
-                          <button
-                            className="btn btn-ghost"
-                            onClick={() => setDefaults({ ...defaults, transcriptionEngine: "whisper" })}
-                            title="Switch transcription back to Whisper"
-                          >
-                            Use Whisper
-                          </button>
                         ) : (
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => setDefaults({ ...defaults, transcriptionEngine: "parakeet" })}
-                          >
-                            Use as default
-                          </button>
+                          <>
+                            {!parakeetActive && (
+                              <button
+                                className="btn btn-ghost"
+                                onClick={() => setDefaults({ ...defaults, transcriptionEngine: "parakeet" })}
+                              >
+                                Use as default
+                              </button>
+                            )}
+                            <button
+                              className="btn btn-ghost"
+                              onClick={deleteParakeet}
+                              title="Remove the Parakeet model from disk"
+                            >
+                              Delete
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
+                      );
+                    })()}
                     {parakeetBusy && (
                       <div className="cp-source-hint muted" style={{ marginTop: 10 }}>
                         Downloading the Parakeet model — this runs once and can take a few
@@ -981,10 +1094,9 @@ export function SettingsModal(props: Props) {
                       </div>
                     )}
                   </CollapsibleSection>
-                </div>
+                </CollapsibleSection>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Transcript library</div>
+                <CollapsibleSection id="tx-library" label="Transcript library" open={sectionOpen("tx-library")} onToggle={() => toggleSection("tx-library")}>
                   <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: "0 0 10px" }}>
                     All generated transcripts (Whisper output + downloaded YouTube
                     captions) land here, sub-organized by month. Decoupled from your
@@ -1040,10 +1152,9 @@ export function SettingsModal(props: Props) {
                       Reset
                     </button>
                   </div>
-                </div>
+                </CollapsibleSection>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Speaker diarization</div>
+                <CollapsibleSection id="tx-diarization" label="Speaker diarization" open={sectionOpen("tx-diarization")} onToggle={() => toggleSection("tx-diarization")}>
                   <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: "0 0 10px" }}>
                     When <em>Detect speakers</em> is on in the sidebar, Sauce Bunny also runs the
                     FluidAudio Swift sidecar after Whisper and stitches speaker labels into the SRT
@@ -1086,17 +1197,16 @@ export function SettingsModal(props: Props) {
                       {diarizerPrepareError}
                     </div>
                   )}
-                </div>
+                </CollapsibleSection>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">How it works</div>
+                <CollapsibleSection id="tx-how" label="How it works" open={sectionOpen("tx-how")} onToggle={() => toggleSection("tx-how")}>
                   <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: 0 }}>
                     Click <em>Generate transcript</em> on the source card. yt-dlp grabs the audio for
                     your in→out range only (not the whole video), pipes it through ffmpeg, and
                     whisper-cli writes <code>&lt;filename&gt;.srt</code> next to where your clip would
                     save. Larger models = better accuracy, longer transcribe time.
                   </p>
-                </div>
+                </CollapsibleSection>
               </section>
             )}
 
@@ -1109,8 +1219,7 @@ export function SettingsModal(props: Props) {
                   Pick the model that fits your Mac's memory below.
                 </p>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Model</div>
+                <CollapsibleSection id="ai-model" label="Model" open={sectionOpen("ai-model")} onToggle={() => toggleSection("ai-model")}>
                   <div className="cp-model-list">
                     {llmModels.map((m) => {
                       const isSel = defaults.llmSummarizationModel === m.id;
@@ -1160,10 +1269,9 @@ export function SettingsModal(props: Props) {
                     })}
                   </div>
                   {downloadError && <div className="cp-source-hint err" style={{ marginTop: 12 }}>{downloadError}</div>}
-                </div>
+                </CollapsibleSection>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Summary style</div>
+                <CollapsibleSection id="ai-style" label="Summary style" open={sectionOpen("ai-style")} onToggle={() => toggleSection("ai-style")}>
                   <div className="cp-pane-row">
                     <div className="k">
                       Format
@@ -1202,7 +1310,7 @@ export function SettingsModal(props: Props) {
                       </div>
                     </div>
                   </div>
-                </div>
+                </CollapsibleSection>
               </section>
             )}
 
@@ -1216,30 +1324,14 @@ export function SettingsModal(props: Props) {
                   it can't drift out of sync with what actually runs.
                 </p>
 
-                {/* Source-monitor keymap (transport/marking keys, modelled on
-                    Premiere / Resolve — includes keys that aren't standalone
-                    commands, e.g. frame-step). Editing the URL or a timecode
-                    field temporarily releases these. */}
-                <div className="cp-pane-section-label">Keyboard shortcuts</div>
-                <div className="cp-shortcuts-grid">
-                  {SHORTCUTS.map((cat) => (
-                    <div className="cp-shortcut-cat" key={cat.category}>
-                      <div className="cp-shortcut-cat-title">{cat.category}</div>
-                      {cat.items.map((s, i) => (
-                        <div className="cp-shortcut-row" key={i}>
-                          <span className="lbl">{s.label}</span>
-                          <span className="keys">
-                            {s.keys.map((k, j) => (
-                              <kbd key={j} className={k.length > 1 ? "sym" : ""}>{k}</kbd>
-                            ))}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
+                {/* Editable keymap — Record re-binds any action; transport &
+                    marking keys release while a text field or the timecode HUD
+                    is focused so typing never scrubs the video. */}
+                <CollapsibleSection id="cmd-shortcuts" label="Keyboard shortcuts" open={sectionOpen("cmd-shortcuts")} onToggle={() => toggleSection("cmd-shortcuts")}>
+                  <KeybindingEditor overrides={keybindings} onChange={setKeybindings} />
+                </CollapsibleSection>
 
-                <div className="cp-pane-section-label cp-pane-subhead-gap">All commands</div>
+                <CollapsibleSection id="cmd-all" label="All commands" open={sectionOpen("cmd-all")} onToggle={() => toggleSection("cmd-all")}>
                 {(() => {
                   const list = commands ?? [];
                   if (list.length === 0) {
@@ -1286,6 +1378,7 @@ export function SettingsModal(props: Props) {
                     </div>
                   );
                 })()}
+                </CollapsibleSection>
               </section>
             )}
 

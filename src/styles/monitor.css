@@ -78,11 +78,11 @@
   padding: 4px 12px;
   border-radius: 6px;
   /* Inline style overrides these from Settings → Captions; the values here
-     are the fallback when no prefs are passed. `--cap-scale` multiplies the
-     responsive base so the size control is resolution-independent. */
-  background: rgba(0,0,0,0.55);
+     are the fallback when no prefs are passed. `--cap-size` is the absolute
+     px font size set by the Captions Size control. */
+  background: rgba(0,0,0,0.75);
   color: #fff;
-  font-size: calc(clamp(12px, 2vw, 22px) * var(--cap-scale, 1));
+  font-size: var(--cap-size, 18px);
   font-weight: 600;
   line-height: 1.4;
   text-align: left;

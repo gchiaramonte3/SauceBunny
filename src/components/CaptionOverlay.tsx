@@ -12,10 +12,11 @@ import {
 
 /** User-tunable caption appearance (Settings → Captions). */
 export type CaptionStyle = {
-  /** Font-size multiplier on the base responsive size (1 = base). */
-  scale: number;
-  /** Font family. */
-  font: "sans" | "serif" | "mono";
+  /** Absolute font size in pixels. */
+  sizePx: number;
+  /** Font family key — see FONT_STACK (kept in sync with CAP_FONTS in SettingsModal). */
+  font:
+    | "verdana" | "helvetica" | "arial" | "tahoma" | "trebuchet" | "georgia" | "courier" | "nunito";
   /** Opacity of the dark backing pill, 0–1. */
   bgOpacity: number;
   /** Text colour (hex). */
@@ -29,10 +30,16 @@ export type CaptionStyle = {
   syncSec?: number;
 };
 
+// MUST stay in sync with CAP_FONTS in SettingsModal.tsx (same keys + stacks).
 const FONT_STACK: Record<CaptionStyle["font"], string> = {
-  sans: "'Nunito Sans', system-ui, sans-serif",
-  serif: "Georgia, 'Times New Roman', serif",
-  mono: "ui-monospace, 'SF Mono', Menlo, monospace",
+  verdana: "Verdana, Geneva, sans-serif",
+  helvetica: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+  arial: "Arial, 'Helvetica Neue', sans-serif",
+  tahoma: "Tahoma, Geneva, Verdana, sans-serif",
+  trebuchet: "'Trebuchet MS', 'Helvetica Neue', sans-serif",
+  georgia: "Georgia, 'Times New Roman', serif",
+  courier: "'Courier New', Courier, monospace",
+  nunito: "'Nunito Sans', system-ui, sans-serif",
 };
 
 const MAX_LINE = 42; // BBC/Netflix Latin-script line length
@@ -199,10 +206,10 @@ export function CaptionOverlay({ path, reloadToken, currentSec, enabled, style }
   const text = active?.text?.trim();
   if (!text) return null;
 
-  // Apply user prefs as inline overrides; CSS holds the responsive base
-  // (`--cap-scale` multiplies the clamped base font size).
+  // Apply user prefs as inline overrides; `--cap-size` is the absolute px font
+  // size (CSS falls back to a default when no prefs are passed).
   const cueStyle: CSSProperties | undefined = style && {
-    ["--cap-scale" as string]: String(style.scale),
+    ["--cap-size" as string]: `${style.sizePx}px`,
     fontFamily: FONT_STACK[style.font],
     color: style.color,
     background: `rgba(0, 0, 0, ${style.bgOpacity})`,

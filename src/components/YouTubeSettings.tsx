@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
+import { CollapsibleSection } from "./CollapsibleSection";
 import type { Defaults } from "./SettingsModal";
 
 /** Mirrors the Rust `YtdlpStatus` struct returned by ytdlp_version/update_ytdlp. */
@@ -30,9 +31,13 @@ function browserLabel(b: string): string {
 export function YouTubeSettings({
   defaults,
   setDefaults,
+  sectionOpen,
+  toggleSection,
 }: {
   defaults: Defaults;
   setDefaults: (d: Defaults) => void;
+  sectionOpen: (id: string) => boolean;
+  toggleSection: (id: string) => void;
 }) {
   const [status, setStatus] = useState<YtdlpStatus | null>(null);
   const [busy, setBusy] = useState<"idle" | "checking" | "updating" | "resetting">("checking");
@@ -106,8 +111,7 @@ export function YouTubeSettings({
         nothing leaves your Mac.
       </p>
 
-      <div className="cp-pane-section">
-        <div className="cp-pane-section-label">Sign in</div>
+      <CollapsibleSection id="web-signin" label="Sign in" open={sectionOpen("web-signin")} onToggle={() => toggleSection("web-signin")}>
         <div className="cp-pane-row">
           <div className="k">
             Browser cookies
@@ -156,10 +160,9 @@ export function YouTubeSettings({
             </button>
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="cp-pane-section">
-        <div className="cp-pane-section-label">Preview</div>
+      <CollapsibleSection id="web-preview" label="Preview" open={sectionOpen("web-preview")} onToggle={() => toggleSection("web-preview")}>
         <div className="cp-pane-row">
           <div className="k">
             Preview quality
@@ -185,10 +188,9 @@ export function YouTubeSettings({
             </div>
           </div>
         </div>
-      </div>
+      </CollapsibleSection>
 
-      <div className="cp-pane-section">
-        <div className="cp-pane-section-label">Engine</div>
+      <CollapsibleSection id="web-engine" label="Engine" open={sectionOpen("web-engine")} onToggle={() => toggleSection("web-engine")}>
         <div className="cp-pane-row">
           <div className="k">
             yt-dlp version
@@ -212,7 +214,7 @@ export function YouTubeSettings({
           </div>
         </div>
         {msg && <p className="cp-ytdlp-msg">{msg}</p>}
-      </div>
+      </CollapsibleSection>
     </section>
   );
 }

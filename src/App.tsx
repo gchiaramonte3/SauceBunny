@@ -17,7 +17,7 @@ import { Transport } from "./components/Transport";
 import { Timeline } from "./components/Timeline";
 import { ViewOptions } from "./components/ViewOptions";
 import { LogsPanel } from "./components/LogsPanel";
-import { SettingsModal, type Defaults } from "./components/SettingsModal";
+import { SettingsModal, type Defaults, type CaptionFontKey } from "./components/SettingsModal";
 import { YouTubeAuthModal } from "./components/YouTubeAuthModal";
 import type { PlayerHandle } from "./components/player-handle";
 import type {
@@ -39,6 +39,10 @@ import {
 } from "./lib/transcript-history";
 import type { Command } from "./lib/commands";
 import { buildCommands } from "./lib/commands";
+import {
+  loadKeybindings, saveKeybindings, buildComboMap, bindingsFor, formatCombo, eventToCombo,
+  KEY_ACTION_BY_ID, type KeyActionId, type KeybindingOverrides,
+} from "./lib/keybindings";
 import { migrateLegacyStorageKeys } from "./lib/migrate-storage";
 import { loadJson, saveJson } from "./lib/storage";
 import {
@@ -74,6 +78,19 @@ function isMissingCommandError(err: unknown): boolean {
 }
 function staleBinaryMessage(commandName: string): string {
   return `${commandName} hasn't been compiled into the running dev server yet. Stop and restart \`npm run tauri dev\` so cargo rebuilds the Rust backend.`;
+}
+
+// Map a stored captionFont pref to a current key. Old builds stored
+// "sans"/"serif"/"mono"; new builds store named system fonts. Unknown/missing →
+// "verdana" (the legibility default). Keeps a pre-existing pref meaningful.
+const CAPTION_FONT_KEYS = ["verdana", "helvetica", "arial", "tahoma", "trebuchet", "georgia", "courier", "nunito"];
+function migrateCaptionFont(raw: unknown): CaptionFontKey {
+  const legacy: Record<string, CaptionFontKey> = { sans: "nunito", serif: "georgia", mono: "courier" };
+  if (typeof raw === "string") {
+    if (raw in legacy) return legacy[raw];
+    if (CAPTION_FONT_KEYS.includes(raw)) return raw as CaptionFontKey;
+  }
+  return "verdana";
 }
 
 // v2 bump: re-encode default flipped from ON to OFF. Older v1 settings are
@@ -137,11 +154,12 @@ export default function App() {
       // Empty string here = "ask backend for the default and persist
       // it on first app boot." See the resolver effect just below.
       transcriptLibrary: stored.transcriptLibrary ?? "",
-      // On-video caption look. Defaults: a touch smaller than before, a
-      // semi-transparent backing, white sans text.
-      captionScale: stored.captionScale ?? 0.85,
-      captionFont: stored.captionFont ?? "sans",
-      captionBgOpacity: stored.captionBgOpacity ?? 0.55,
+      // On-video caption look. Defaults: small (18px) white Verdana on a 75%
+      // dark backing. captionFont migrates the old sans/serif/mono keys to the
+      // named system fonts so a pre-existing pref still resolves.
+      captionSizePx: stored.captionSizePx ?? 18,
+      captionFont: migrateCaptionFont((stored as Record<string, unknown>).captionFont),
+      captionBgOpacity: stored.captionBgOpacity ?? 0.75,
       captionColor: stored.captionColor ?? "#ffffff",
       // 480 by default: the preview is throwaway (scrub/mark only), so we
       // optimise for fast download over sharpness. Export uses real quality.
@@ -155,6 +173,17 @@ export default function App() {
       return next;
     });
   }, []);
+
+  // ── Editable keyboard shortcuts (Settings → Commands) ──
+  // Overrides only; an action with no override uses its defaults. The keydown
+  // handler matches against `comboToAction`; the command registry overlays its
+  // cosmetic hotkeys from the same source so the palette never drifts.
+  const [keybindings, setKeybindingsState] = useState<KeybindingOverrides>(() => loadKeybindings());
+  const setKeybindings = useCallback((next: KeybindingOverrides) => {
+    setKeybindingsState(next);
+    saveKeybindings(next);
+  }, []);
+  const comboToAction = useMemo(() => buildComboMap(keybindings), [keybindings]);
 
   // Lazily populate transcriptLibrary with the OS-correct default on
   // first boot. The default is `~/Documents/Sauce Bunny/Transcripts/` but
@@ -2304,7 +2333,22 @@ export default function App() {
       setTranscriptError("Transcript library isn't set up yet — open Settings → Transcription and pick a folder.");
       return;
     }
-    if (!selectedModel?.downloaded) {
+    // Engine gate — mirrors handleGenerateTranscript so re-timing works with
+    // whichever engine is active (Parakeet has no Whisper model, so the old
+    // Whisper-only check always bounced Parakeet users to Settings).
+    const engine = defaults.transcriptionEngine;
+    if (engine === "parakeet") {
+      const ready = await invoke<boolean>("parakeet_model_downloaded").catch(() => false);
+      if (!ready) {
+        setTranscriptState("error");
+        setTranscriptError("The Parakeet model isn't downloaded yet. Opening Settings → Transcription.");
+        setSettingsInitialTab("transcription");
+        setSettingsOpen(true);
+        return;
+      }
+    } else if (!selectedModel?.downloaded) {
+      setTranscriptState("error");
+      setTranscriptError(`Whisper model "${defaults.whisperModel}" is not downloaded. Opening Settings → Transcription.`);
       setSettingsInitialTab("transcription");
       setSettingsOpen(true);
       return;
@@ -2313,7 +2357,8 @@ export default function App() {
     setTranscriptError(null);
     setTranscriptProgress(0);
     setTranscriptPhase(null);
-    appendLog("info", "whisper", "Fixing caption timing with Whisper (reusing the cached audio)…");
+    const engineLabel = engine === "parakeet" ? "Parakeet" : "Whisper";
+    appendLog("info", "whisper", `Re-transcribing for accurate caption timing with ${engineLabel} (reusing the cached audio)…`);
     try {
       const id = await invoke<string>("new_job_id");
       setTranscriptJobId(id);
@@ -2327,6 +2372,7 @@ export default function App() {
           output_dir: outDir,
           filename: sanitizeFilename(exportOpts.filename || "transcript"),
           model_id: defaults.whisperModel,
+          engine,
           job_id: id,
           cookies_browser: cookiesBrowserOrNone(),
           detect_speakers: defaults.detectSpeakers,
@@ -2336,10 +2382,11 @@ export default function App() {
     } catch (err) {
       setTranscriptState("error");
       setTranscriptError(formatError(err));
-      appendLog("warn", "whisper", `Caption-timing fix failed (${formatError(err)}); keeping YouTube's captions.`);
+      appendLog("warn", "whisper", `Caption-timing fix failed (${formatError(err)}); keeping the existing captions.`);
     }
   }, [metadata, metadataLoading, exportOpts.folder, exportOpts.filename, resolveTranscriptOutDir, selectedModel,
-      durationFrames, fps, defaults.whisperModel, defaults.detectSpeakers, defaults.expectedSpeakers, appendLog]);
+      durationFrames, fps, defaults.whisperModel, defaults.transcriptionEngine, defaults.detectSpeakers,
+      defaults.expectedSpeakers, appendLog]);
 
   const handleOpenTranscriptionSettings = useCallback(() => {
     setSettingsInitialTab("transcription");
@@ -2745,52 +2792,59 @@ export default function App() {
   }, [durationFrames, fps, exitShuttle]);
 
   // ====== Keyboard ======
+  // Data-driven: the live event is serialized to a combo and matched against the
+  // user-editable binding map (Settings → Commands). The three things that aren't
+  // simple action triggers — the timecode-entry HUD, Esc-closes-Settings, and
+  // bare-digit-opens-HUD — stay hand-coded around the dispatch.
   useEffect(() => {
+    // Run a matched action with the exact behavior of its hand-coded predecessor
+    // (double-tap shuttle on back/fwd, the export status gate, etc.).
+    function runAction(id: KeyActionId, e: KeyboardEvent) {
+      e.preventDefault();
+      switch (id) {
+        case "app.palette":  setPaletteOpen((p) => !p); break;
+        case "app.settings": setSettingsOpen((p) => !p); break;
+        case "src.fetch":    handleFetch(); break;
+        case "view.logs":    setLogsOpen((p) => !p); break;
+        case "queue.add":    handleAddToQueue(); break;
+        case "queue.toggle": setQueueOpen((p) => !p); break;
+        case "export.clip":  if (status === "loaded") handleExport(); break;
+        case "play.toggle":  onPlayToggle(); break;
+        case "play.back5": {
+          // Double-tap → rewind shuttle; single tap → back 5s.
+          const now = Date.now();
+          if (now - dblTapRef.current.j < 350) { dblTapRef.current.j = 0; applyShuttle(-2); }
+          else { dblTapRef.current.j = now; seekBySeconds(-5); }
+          break;
+        }
+        case "play.fwd5": {
+          // Double-tap → fast-forward shuttle; single tap → forward 5s.
+          const now = Date.now();
+          if (now - dblTapRef.current.l < 350) { dblTapRef.current.l = 0; applyShuttle(2); }
+          else { dblTapRef.current.l = now; seekBySeconds(5); }
+          break;
+        }
+        case "mark.in":      onMarkIn(); break;
+        case "mark.out":     onMarkOut(); break;
+        case "mark.clear":   onClearMarks(); break;
+        case "mark.gotoIn":  onGotoIn(); break;
+        case "mark.gotoOut": onGotoOut(); break;
+        case "play.frameBack":  onStep(-1); break;
+        case "play.frameFwd":   onStep(1); break;
+        case "play.secondBack": onStep(-Math.round(fps)); break;
+        case "play.secondFwd":  onStep(Math.round(fps)); break;
+        case "play.toStart": onSeek(0); break;
+        case "play.toEnd":   onSeek(Math.max(0, durationFrames - 1)); break;
+      }
+    }
+
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement;
       const inField = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
-      const cmd = e.metaKey || e.ctrlKey;
 
-      // ⌘K — command palette toggle. Highest-priority shortcut (works
-      // even when focus is in the URL bar / filename field) because the
-      // palette is the universal escape hatch.
-      if (cmd && (e.key === "k" || e.key === "K")) {
-        e.preventDefault();
-        setPaletteOpen((p) => !p);
-        return;
-      }
-      if (cmd && e.key === ",")     { e.preventDefault(); setSettingsOpen((p) => !p); return; }
-      if (e.key === "Escape" && settingsOpen) { e.preventDefault(); setSettingsOpen(false); return; }
-      if (cmd && e.key === "Enter") { e.preventDefault(); handleFetch(); return; }
-      if (cmd && e.key === "\\")    { e.preventDefault(); setLogsOpen((p) => !p); return; }
-      // ⌘⇧A — add the current active selection to the queue (the modifier
-      // separates this from the bare I/O keys used to mark in/out).
-      if (cmd && e.shiftKey && (e.key === "A" || e.key === "a")) {
-        e.preventDefault();
-        handleAddToQueue();
-        return;
-      }
-      // ⌘⇧Q — toggle the queue drawer.
-      if (cmd && e.shiftKey && (e.key === "Q" || e.key === "q")) {
-        e.preventDefault();
-        setQueueOpen((p) => !p);
-        return;
-      }
-      // ⌥E — export. On macOS Option+E is the acute-accent dead key, so
-      // e.key is "Dead", not "e" — match on e.code instead. !inField keeps
-      // Option+E composition (typing é) working in text inputs.
-      if (e.altKey && !cmd && e.code === "KeyE" && !inField && !settingsOpen) {
-        if (status === "loaded") { e.preventDefault(); handleExport(); }
-        return;
-      }
-
-      if (inField || settingsOpen) return;
-
-      // ── Timecode entry HUD ──
-      // While open: digits append, Backspace deletes, Return snaps the
-      // playhead, Esc cancels; everything else is swallowed so transport
-      // keys can't fire mid-entry. While closed: a bare number key opens it
-      // (seeded with that digit) as long as a source with a duration is up.
+      // ── Timecode entry HUD (modal text entry; not rebindable) ──
+      // While open: digits append, Backspace deletes, Return snaps the playhead,
+      // Esc cancels; everything else is swallowed so shortcuts can't fire mid-entry.
       if (tcEntryRef.current != null) {
         if (e.key >= "0" && e.key <= "9") { e.preventDefault(); setTcEntry((s) => ((s ?? "") + e.key).slice(-8)); return; }
         if (e.key === "Backspace")        { e.preventDefault(); setTcEntry((s) => (s ?? "").slice(0, -1)); return; }
@@ -2806,48 +2860,33 @@ export default function App() {
         }
         return;
       }
+
+      // ── Esc closes Settings (universal; not rebindable) ──
+      if (e.key === "Escape" && settingsOpen) { e.preventDefault(); setSettingsOpen(false); return; }
+
+      // ── Rebindable shortcuts ──
+      // global actions (⌘-combos) fire even in a field / with Settings open;
+      // transport & marking only when neither is true (so typing never scrubs).
+      const combo = eventToCombo(e);
+      const actionId = combo ? comboToAction.get(combo) : undefined;
+      if (actionId) {
+        const action = KEY_ACTION_BY_ID[actionId];
+        if (action.global || (!inField && !settingsOpen)) { runAction(actionId, e); return; }
+      }
+
+      if (inField || settingsOpen) return;
+
+      // ── Bare number opens the TC-entry HUD (seeded with the digit) ──
       if (e.key >= "0" && e.key <= "9" && durationFrames > 0) {
         e.preventDefault();
         setTcEntry(e.key);
         return;
       }
-
-      switch (e.key) {
-        case " ": e.preventDefault(); onPlayToggle(); break;
-        case "k": case "K": onPlayToggle(); break;
-        case "j": case "J": {
-          // Double-tap J → rewind shuttle; single tap → back 5s (exits shuttle).
-          const now = Date.now();
-          if (now - dblTapRef.current.j < 350) { dblTapRef.current.j = 0; applyShuttle(-2); }
-          else { dblTapRef.current.j = now; seekBySeconds(-5); }
-          break;
-        }
-        case "l": case "L": {
-          // Double-tap L → fast-forward shuttle; single tap → forward 5s.
-          const now = Date.now();
-          if (now - dblTapRef.current.l < 350) { dblTapRef.current.l = 0; applyShuttle(2); }
-          else { dblTapRef.current.l = now; seekBySeconds(5); }
-          break;
-        }
-        case "i": case "I": onMarkIn(); break;
-        case "o": case "O": onMarkOut(); break;
-        case "g": case "G": onClearMarks(); break;
-        case "q": case "Q": onGotoIn(); break;
-        case "w": case "W": onGotoOut(); break;
-        // With Shift held the key is "<" / ">" (US layout), so include those
-        // labels — otherwise the 1-second (Shift) jump never matched.
-        case ",": case "<": onStep(e.shiftKey ? -Math.round(fps) : -1); break;
-        case ".": case ">": onStep(e.shiftKey ?  Math.round(fps) :  1); break;
-        case "ArrowLeft":  onStep(e.shiftKey ? -Math.round(fps) : -1); break;
-        case "ArrowRight": onStep(e.shiftKey ?  Math.round(fps) :  1); break;
-        case "Home": onSeek(0); break;
-        case "End":  onSeek(Math.max(0, durationFrames - 1)); break;
-      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
-    handleFetch, handleExport, handleAddToQueue, status, fps, durationFrames, settingsOpen,
+    comboToAction, handleFetch, handleExport, handleAddToQueue, status, fps, durationFrames, settingsOpen,
     onPlayToggle, seekBySeconds, onMarkIn, onMarkOut, onClearMarks,
     onGotoIn, onGotoOut, onStep, onSeek, applyShuttle,
   ]);
@@ -2950,6 +2989,14 @@ export default function App() {
         pushNotification("error", "Diarizer probe failed", formatError(e));
       }
     },
+    // Overlay the live (user-editable) hotkey onto each rebindable command so the
+    // palette + Settings list always show the real binding, never a stale literal.
+  }).map((c) => {
+    if (c.id in KEY_ACTION_BY_ID) {
+      const combos = bindingsFor(c.id as KeyActionId, keybindings);
+      return { ...c, hotkey: combos[0] ? formatCombo(combos[0]) : undefined };
+    }
+    return c;
   }), [
     url, hasSource, isPlaying, inFrames, outFrames, durationFrames,
     captionsOn, logsOpen, clipQueue.length, queueRunning, activeTranscript,
@@ -2958,7 +3005,7 @@ export default function App() {
     onStep, onSeek, onMarkIn, onMarkOut, onClearMarks, onGotoIn, onGotoOut,
     handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
     handleQueueClearAll, handleGenerateTranscript, handleDownloadCaptions, handleImportTranscript,
-    handleStop,
+    handleStop, keybindings,
   ]);
 
   // ====== Side-panel pop-out (r44.B + r52 extract) ======
@@ -3230,7 +3277,7 @@ export default function App() {
                  offset — the audio-master clock keeps captions on the heard
                  audio across every path. */
               captionStyle={{
-                scale: defaults.captionScale,
+                sizePx: defaults.captionSizePx,
                 font: defaults.captionFont,
                 bgOpacity: defaults.captionBgOpacity,
                 color: defaults.captionColor,
@@ -3374,6 +3421,8 @@ export default function App() {
         ].filter((p): p is string => !!p)}
         defaults={defaults}
         setDefaults={setDefaults}
+        keybindings={keybindings}
+        setKeybindings={setKeybindings}
         initialTab={settingsInitialTab}
         commands={commands}
         diarizerReady={diarizerReady}

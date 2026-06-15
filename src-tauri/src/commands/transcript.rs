@@ -89,16 +89,39 @@ fn parakeet_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// True when the Parakeet model dir holds compiled Core ML bundles (.mlmodelc).
+/// Where FluidAudio ACTUALLY writes the Parakeet v3 Core ML bundles.
+///
+/// `AsrModels.download(to:)` / `load(from:)` both transform the dir we pass
+/// (`--models-dir <…/models/parakeet>`) into `parent.appendingPathComponent(repo.folderName)`
+/// — i.e. `<…/models/parakeet-tdt-0.6b-v3>`, a SIBLING of the dir we pass, not a
+/// child. So the model lands beside `parakeet/`, and any readiness check has to
+/// look there (this mismatch is why a downloaded model previously read as
+/// "not downloaded" and bounced the user to Settings).
+fn parakeet_repo_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let models = parakeet_models_dir(app)?; // ensures <…/models> exists
+    let parent = models.parent().ok_or_else(|| "parakeet models dir has no parent".to_string())?;
+    Ok(parent.join("parakeet-tdt-0.6b-v3"))
+}
+
+/// True when the Parakeet repo dir holds the compiled Core ML bundles. We require
+/// both the Encoder and Decoder `.mlmodelc` (stable names across v3) so a
+/// half-finished download doesn't read as ready.
 #[tauri::command]
 pub fn parakeet_model_downloaded(app: AppHandle) -> bool {
-    let Ok(dir) = parakeet_models_dir(&app) else { return false };
-    std::fs::read_dir(&dir)
-        .map(|rd| rd.flatten().any(|e| {
-            e.path().extension().map(|x| x == "mlmodelc").unwrap_or(false)
-                || (e.path().is_dir() && e.file_name().to_string_lossy().ends_with(".mlmodelc"))
-        }))
-        .unwrap_or(false)
+    let Ok(dir) = parakeet_repo_dir(&app) else { return false };
+    dir.join("Encoder.mlmodelc").is_dir() && dir.join("Decoder.mlmodelc").is_dir()
+}
+
+/// Remove the downloaded Parakeet model (frees ~0.5 GB). Mirrors
+/// `delete_whisper_model`; the Settings "Delete" button calls this.
+#[tauri::command]
+pub fn delete_parakeet_model(app: AppHandle) -> Result<(), crate::AppError> {
+    let dir = parakeet_repo_dir(&app)?;
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir)
+            .map_err(|e| format!("failed to delete Parakeet model: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Download + compile the Parakeet Core ML model into the app-managed dir.

@@ -1092,7 +1092,7 @@ export function TranscriptViewer({
       {turns.length > 0 && origin === "captions" && sourceKind === "youtube" && canRegenerate && !!onFixCaptionTiming && !timingFixDismissed && (
         <div
           className="cp-tx-hint"
-          title="Re-transcribes the cached audio locally with Whisper for exact timing — a few minutes for long clips. Your current captions stay until it finishes."
+          title="Re-transcribes the cached audio locally with your transcription engine for exact timing — a few minutes for long clips. Your current captions stay until it finishes."
         >
           <svg className="cp-tx-hint-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <circle cx="12" cy="12" r="9" />
@@ -1105,9 +1105,9 @@ export function TranscriptViewer({
             className="cp-tx-hint-action"
             onClick={onFixCaptionTiming}
             disabled={regenerateBusy}
-            title="Re-time captions to the audio with Whisper (local, exact)"
+            title="Re-time captions to the audio with your transcription engine (local, exact)"
           >
-            {regenerateBusy ? "Re-timing…" : "Fix timing with Whisper"}
+            {regenerateBusy ? "Re-timing…" : "Fix timing"}
           </button>
           <button
             className="cp-tx-hint-close"

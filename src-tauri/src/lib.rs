@@ -142,6 +142,7 @@ pub fn run() {
             commands::delete_whisper_model,
             commands::parakeet_model_downloaded,
             commands::download_parakeet_model,
+            commands::delete_parakeet_model,
             commands::generate_transcript,
             commands::list_llm_models,
             commands::download_llm_model,
