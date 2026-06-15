@@ -818,6 +818,11 @@ export default function App() {
   captionsJobIdRef.current = captionsJobId;
   const transcriptJobIdRef = useRef<string | null>(null);
   transcriptJobIdRef.current = transcriptJobId;
+  // Pipeline-log channel label for transcription ("whisper" | "parakeet"), in a
+  // ref so the long-lived transcript-log listener tags lines with the engine
+  // that's actually running rather than a hardcoded "whisper".
+  const txChannelRef = useRef<"whisper" | "parakeet">("whisper");
+  txChannelRef.current = defaults.transcriptionEngine === "parakeet" ? "parakeet" : "whisper";
   // Snapshot of the source's title/thumbnail taken when a SINGLE clip export
   // starts, so the Recent entry is attributed to the source that was exported
   // even if the user switches sources before clip-done fires (the listener
@@ -948,7 +953,7 @@ export default function App() {
       });
       const g = await listen<LogEvent>("transcript-log", (e) => {
         if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
-        appendLog(asLogTag(e.payload.tag), "whisper", e.payload.line);
+        appendLog(asLogTag(e.payload.tag), txChannelRef.current, e.payload.line);
       });
       const h = await listen<DoneEvent>("transcript-done", (e) => {
         if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
@@ -957,8 +962,8 @@ export default function App() {
           setTranscriptError(null);
           setTranscriptProgress(100);
           setTranscriptPhase(null);
-          const filename = e.payload.path.split("/").pop() ?? "Whisper finished.";
-          appendLog("ok", "whisper", `Transcript saved → ${e.payload.path}`);
+          const filename = e.payload.path.split("/").pop() ?? "Transcript ready.";
+          appendLog("ok", txChannelRef.current, `Transcript saved → ${e.payload.path}`);
           // Load into the Transcript tab (same pulse-and-switch behavior
           // as the captions path above).
           setActiveTranscript({ path: e.payload.path, origin: "whisper" });
@@ -990,13 +995,13 @@ export default function App() {
           setTranscriptError(null);
           setTranscriptProgress(0);
           setTranscriptPhase(null);
-          appendLog("warn", "whisper", "Transcription cancelled");
+          appendLog("warn", txChannelRef.current, "Transcription cancelled");
         } else {
           setTranscriptState("error");
           setTranscriptPhase(null);
-          const msg = e.payload.error ?? "Whisper transcription failed";
+          const msg = e.payload.error ?? "Transcription failed";
           setTranscriptError(msg);
-          appendLog("err", "whisper", msg);
+          appendLog("err", txChannelRef.current, msg);
           notify("Transcript failed", msg);
           pushNotification("error", "Transcript failed", msg);
         }
@@ -2179,8 +2184,9 @@ export default function App() {
     setTranscriptProgress(0);
     setTranscriptPhase(null); // backend emits "whisper"/"parakeet" then "diarize-*"
     const engineLabel = engine === "parakeet" ? "Parakeet" : (selectedModel?.name ?? "Whisper");
+    const txChannel = engine === "parakeet" ? "parakeet" : "whisper";
     const srcLabel = sourceKind === "file" ? metadata.title : `${exportOpts.inTc || "00:00:00:00"} → ${exportOpts.outTc || "end"}`;
-    appendLog("info", "whisper", `Transcribing ${srcLabel} with ${engineLabel}…`);
+    appendLog("info", txChannel, `Transcribing ${srcLabel} with ${engineLabel}…`);
     try {
       const id = await invoke<string>("new_job_id");
       setTranscriptJobId(id);
@@ -2198,7 +2204,7 @@ export default function App() {
           ? await extractAudioAsWav16k(localFilePath).catch(() => null)
           : null;
         if (wavBlob) {
-          appendLog("info", "whisper",
+          appendLog("info", txChannel,
             `Audio extracted via mediabunny (${(wavBlob.size / 1_000_000).toFixed(1)} MB WAV) — skipping ffmpeg.`);
           const bytes = Array.from(new Uint8Array(await wavBlob.arrayBuffer()));
           await invoke<string>("transcribe_prepared_wav", {
@@ -2214,7 +2220,7 @@ export default function App() {
           });
         } else {
           if (engine !== "parakeet") {
-            appendLog("info", "whisper", "Mediabunny can't decode this audio codec — falling back to ffmpeg.");
+            appendLog("info", txChannel, "Mediabunny can't decode this audio codec — falling back to ffmpeg.");
           }
           await invoke<string>("transcribe_local_file", {
             args: {
@@ -2255,7 +2261,7 @@ export default function App() {
       const msg = formatError(err);
       setTranscriptState("error");
       setTranscriptError(msg);
-      appendLog("err", "whisper", msg);
+      appendLog("err", txChannel, msg);
     }
   }, [metadata, metadataLoading, exportOpts, fps, selectedModel, defaults.whisperModel,
       defaults.transcriptionEngine, defaults.useWebCodecsDecoder,
@@ -2358,7 +2364,8 @@ export default function App() {
     setTranscriptProgress(0);
     setTranscriptPhase(null);
     const engineLabel = engine === "parakeet" ? "Parakeet" : "Whisper";
-    appendLog("info", "whisper", `Re-transcribing for accurate caption timing with ${engineLabel} (reusing the cached audio)…`);
+    const txChannel = engine === "parakeet" ? "parakeet" : "whisper";
+    appendLog("info", txChannel, `Re-transcribing for accurate caption timing with ${engineLabel} (reusing the cached audio)…`);
     try {
       const id = await invoke<string>("new_job_id");
       setTranscriptJobId(id);
@@ -2382,7 +2389,7 @@ export default function App() {
     } catch (err) {
       setTranscriptState("error");
       setTranscriptError(formatError(err));
-      appendLog("warn", "whisper", `Caption-timing fix failed (${formatError(err)}); keeping the existing captions.`);
+      appendLog("warn", txChannel, `Caption-timing fix failed (${formatError(err)}); keeping the existing captions.`);
     }
   }, [metadata, metadataLoading, exportOpts.folder, exportOpts.filename, resolveTranscriptOutDir, selectedModel,
       durationFrames, fps, defaults.whisperModel, defaults.transcriptionEngine, defaults.detectSpeakers,
