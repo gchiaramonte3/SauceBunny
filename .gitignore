@@ -27,3 +27,7 @@ src-tauri/binaries/*
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
+
+# Editor/agent-local config (machine-specific, not shared)
+.claude/launch.json
+.claude/settings.local.json

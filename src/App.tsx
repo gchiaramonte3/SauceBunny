@@ -2977,7 +2977,7 @@ export default function App() {
   // its current state + handlers. The dependency array below is unchanged from
   // when the array was inline, so memoization behaves identically.
   const commands: Command[] = useMemo(() => buildCommands({
-    url, hasSource, isPlaying, inFrames, outFrames, durationFrames,
+    url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
     captionsOn, logsOpen, clipQueueLength: clipQueue.length, queueRunning,
     activeTranscriptPath: activeTranscript?.path ?? null,
     exportFolder: exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
@@ -3005,7 +3005,7 @@ export default function App() {
     }
     return c;
   }), [
-    url, hasSource, isPlaying, inFrames, outFrames, durationFrames,
+    url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
     captionsOn, logsOpen, clipQueue.length, queueRunning, activeTranscript,
     exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
     handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds,

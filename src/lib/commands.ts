@@ -67,6 +67,8 @@ export type CommandDeps = {
   inFrames: number | null;
   outFrames: number | null;
   durationFrames: number;
+  /** Frames-per-second of the active source — for the 1-second step commands. */
+  fps: number;
   captionsOn: boolean;
   logsOpen: boolean;
   clipQueueLength: number;
@@ -140,6 +142,10 @@ export function buildCommands(d: CommandDeps): Command[] {
       hotkey: "←", disabled: !d.hasSource, run: () => d.onStep(-1) },
     { id: "play.frameFwd",  label: "Step 1 frame forward", group: "Playback",
       hotkey: "→", disabled: !d.hasSource, run: () => d.onStep(1) },
+    { id: "play.secondBack", label: "Step 1 second back",    group: "Playback",
+      hotkey: "⇧←", disabled: !d.hasSource, run: () => d.onStep(-Math.round(d.fps)) },
+    { id: "play.secondFwd",  label: "Step 1 second forward", group: "Playback",
+      hotkey: "⇧→", disabled: !d.hasSource, run: () => d.onStep(Math.round(d.fps)) },
     { id: "play.toStart",  label: "Jump to start", group: "Playback",
       hotkey: "Home", disabled: !d.hasSource, run: () => d.onSeek(0) },
     { id: "play.toEnd",    label: "Jump to end",   group: "Playback",

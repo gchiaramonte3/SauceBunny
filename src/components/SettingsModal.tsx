@@ -17,6 +17,9 @@ import { loadKeybindings, KEYBINDINGS_STORAGE_KEY, type KeybindingOverrides } fr
 // import cycle. Stable strings.
 const DEFAULTS_LS_KEY = "cp-defaults-v2";
 const SECTIONS_LS_KEY = "saucebunny.settingsSections.v1";
+// Bump when the export payload's shape changes incompatibly; import refuses a
+// file whose version is higher than this (forward-compat guard).
+const SETTINGS_EXPORT_VERSION = 1;
 import type {
   ExportOpts, FormatId, ModelDownloadEvent, WhisperModel, DoneEvent,
   CacheStats,
@@ -419,7 +422,7 @@ export function SettingsModal(props: Props) {
       });
       if (!path) return;
       const payload = {
-        app: "sauce-bunny", kind: "settings", version: 1,
+        app: "sauce-bunny", kind: "settings", version: SETTINGS_EXPORT_VERSION,
         defaults,
         keybindings: loadKeybindings(),
         sections: loadJson<Record<string, boolean>>(SECTIONS_LS_KEY, {}),
@@ -438,14 +441,29 @@ export function SettingsModal(props: Props) {
       const picked = await openDialog({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] });
       if (typeof picked !== "string" || !picked) return;
       const text = await invoke<string>("read_text_file_capped", { path: picked, maxBytes: 4 * 1024 * 1024 });
-      const parsed = JSON.parse(text) as { kind?: string; defaults?: unknown; keybindings?: unknown; sections?: unknown };
+      const parsed = JSON.parse(text) as { kind?: string; version?: number; defaults?: unknown; keybindings?: unknown; sections?: unknown };
       if (parsed.kind !== "settings") {
         setBackupMsg("That file isn't a Sauce Bunny settings export.");
         return;
       }
-      if (parsed.defaults && typeof parsed.defaults === "object") saveJson(DEFAULTS_LS_KEY, parsed.defaults);
-      if (parsed.keybindings && typeof parsed.keybindings === "object") saveJson(KEYBINDINGS_STORAGE_KEY, parsed.keybindings);
-      if (parsed.sections && typeof parsed.sections === "object") saveJson(SECTIONS_LS_KEY, parsed.sections);
+      // Forward-compat guard: refuse a file written by a newer schema rather
+      // than silently importing fields this build doesn't understand.
+      if (typeof parsed.version === "number" && parsed.version > SETTINGS_EXPORT_VERSION) {
+        setBackupMsg(`This file was exported by a newer version of Sauce Bunny (v${parsed.version}). Update the app, then import.`);
+        return;
+      }
+      // Only accept plain objects (reject arrays / null) per field; a malformed
+      // shape is skipped rather than written, so a bad file can't corrupt prefs.
+      const isObj = (v: unknown): v is Record<string, unknown> =>
+        typeof v === "object" && v !== null && !Array.isArray(v);
+      const wrote: string[] = [];
+      if (isObj(parsed.defaults)) { saveJson(DEFAULTS_LS_KEY, parsed.defaults); wrote.push("preferences"); }
+      if (isObj(parsed.keybindings)) { saveJson(KEYBINDINGS_STORAGE_KEY, parsed.keybindings); wrote.push("shortcuts"); }
+      if (isObj(parsed.sections)) { saveJson(SECTIONS_LS_KEY, parsed.sections); wrote.push("section layout"); }
+      if (wrote.length === 0) {
+        setBackupMsg("That export didn't contain any settings to import.");
+        return;
+      }
       // Reload so every useState initializer re-reads the imported values.
       window.location.reload();
     } catch (e) {
