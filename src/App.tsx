@@ -986,6 +986,14 @@ export default function App() {
           // the result landed, so the body text was redundant chrome.
           notify("Transcript ready", filename);
           pushNotification("success", "Transcript ready", "", e.payload.path);
+          // Diarization is non-fatal: on success the backend still puts a note
+          // in `error` if speaker detection was skipped. Surface it so a user
+          // who asked for speakers isn't left wondering why there are none —
+          // previously this only appeared in the pipeline log.
+          if (e.payload.error) {
+            appendLog("warn", txChannelRef.current, e.payload.error);
+            pushNotification("info", "Speakers not detected", e.payload.error);
+          }
         } else if (e.payload.error === "Cancelled") {
           // User Stop — the Rust Terminated handlers map signal-kills to
           // "Cancelled", so a bare exit-code message is a REAL crash (corrupt

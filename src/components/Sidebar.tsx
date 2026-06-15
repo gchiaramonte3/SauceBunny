@@ -101,6 +101,10 @@ function phaseLabel(phase: string | null, percent: number): string {
     case "diarize-prepare": return "Loading speaker models…";
     case "diarize-process": return "Detecting speakers…";
     case "diarize-merge":   return "Merging speaker labels…";
+    // Parakeet's transcribe() is one shot — no percent — so we label by phase
+    // instead of showing a frozen 0%.
+    case "parakeet-load":   return "Loading Parakeet model…";
+    case "parakeet":        return "Transcribing with Parakeet…";
     case "whisper":
     default:
       return `Transcribing… ${Math.round(percent)}%`;

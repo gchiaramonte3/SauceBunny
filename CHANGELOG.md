@@ -15,17 +15,19 @@ r1–r86). Highlights, newest first:
   fragmented-MP4 remux → MSE (the only WKWebView path with sound), with
   seek-anywhere, scrub-freeze, frame-accurate WebCodecs scrub preview, and an
   automatic download-to-cache fallback.
-- Audio-master caption clock: streaming captions lock to the audio you hear
-  (hidden native `<audio>` playing the cached track is the clock; the muted
-  picture is playbackRate-slaved to it).
-- "Fix timing with Whisper" — one click re-times loose YouTube auto-captions
-  from the same cached audio.
+- Single-clock A/V/caption sync: the streamed muxed `<video>` is the one clock
+  for audio, picture, and captions, so the transcript highlight and on-video
+  captions stay locked to what you hear by construction.
+- "Fix timing" — one click re-times loose YouTube auto-captions from the same
+  cached audio with your active engine (Whisper or Parakeet).
 - ffprobe sidecar bundled so HLS/DASH downloads remux correctly.
 - J-K-L variable-speed shuttle, type-a-timecode HUD, aspect controls,
   fullscreen, frame stepping, in/out marks with full-clip default.
 
 ### Transcription & speakers
-- Local Whisper (whisper.cpp) with model manager, or one-click source-caption
+- Two transcription engines: local Whisper (whisper.cpp) with model manager, or
+  NVIDIA Parakeet TDT v3 (on-device Core ML, word-level timing) — exactly one
+  active engine at a time, picked in Settings. Or one-click source-caption
   download (speaker voice tags preserved, best-track ranking).
 - On-device diarization: SpeakerKit primary, FluidAudio fallback; speaker
   editor with rename, drag-to-merge, per-turn overrides, color-coded roster.
@@ -36,6 +38,16 @@ r1–r86). Highlights, newest first:
 ### Export
 - Lossless cuts or re-encodes, MP3 audio export, export queue, snapshots at
   source resolution, transcript-driven burned captions.
+
+### Shortcuts & settings
+- AI Summary: chat with / summarize a transcript via a local llama.cpp model
+  (speaker-aware, markdown, clickable timecodes, PDF/text export).
+- Fully editable keyboard shortcuts — rebind any transport/marking/app action
+  in Settings → Commands; the ⌘K palette reflects live bindings.
+- Settings backup: export / import all preferences + shortcuts to a JSON file,
+  plus reset-to-defaults. Collapsible chevron sections across every tab.
+- Caption controls: legible system-font dropdown (default Verdana), numeric px
+  size, background opacity, text colour; speaker label above, left-aligned.
 
 ### Security & hardening
 - Per-session capability token on the loopback media proxy (SSRF/local-snoop

@@ -198,9 +198,21 @@ async fn run_parakeet_asr(
                 let raw = String::from_utf8_lossy(&b).to_string();
                 for line in raw.lines() {
                     let t = line.trim();
+                    // FluidAudio's transcribe() is one shot — no per-segment
+                    // percent — so we drive the UI by PHASE instead of a fake
+                    // bar: emit transcript-phase so the button shows an honest
+                    // "Transcribing with Parakeet…" rather than a frozen 0%.
                     if t.contains("\"phase\":\"process\"") {
+                        let _ = app.emit(
+                            "transcript-phase",
+                            TranscriptPhaseEvent { job_id: job_id.to_string(), phase: "parakeet".into() },
+                        );
                         emit_transcript_log(app, job_id, "info", "Transcribing with Parakeet…".into());
                     } else if t.contains("\"phase\":\"prepare\"") {
+                        let _ = app.emit(
+                            "transcript-phase",
+                            TranscriptPhaseEvent { job_id: job_id.to_string(), phase: "parakeet-load".into() },
+                        );
                         emit_transcript_log(app, job_id, "info", "Loading Parakeet model…".into());
                     }
                 }
