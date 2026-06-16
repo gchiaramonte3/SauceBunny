@@ -120,6 +120,13 @@ export const IconBrainTab = (p: IconProps) => (
     <path d="M12 5a3 3 0 0 1 3 3 3 3 0 0 1 1 5.8V16a2 2 0 0 1-4 0" />
   </Icon>
 );
+
+// Speech bubble — the Review tab (timecoded comments).
+export const IconReview = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5z" />
+  </Icon>
+);
 export const IconMarkIn = (p: IconProps) => (
   <Icon {...p} strokeWidth={2}>
     <path d="M7 4v16" strokeLinecap="square" />

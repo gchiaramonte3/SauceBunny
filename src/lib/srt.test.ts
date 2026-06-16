@@ -130,6 +130,67 @@ describe("groupIntoTurns", () => {
   });
 });
 
+describe("leading punctuation relocation", () => {
+  // Whisper segments sometimes start with the period that closes the PREVIOUS
+  // segment's sentence, surfacing as a stray ". " on the next cue / next speaker.
+  const PUNCT_SRT = `1
+00:00:00,000 --> 00:00:05,000
+[SPEAKER_00]: how to build something
+
+2
+00:00:05,000 --> 00:00:10,000
+[SPEAKER_00]: . And so it kind of just worked out
+
+3
+00:00:19,000 --> 00:00:25,000
+[SPEAKER_01]: . I love everything Zach said`;
+
+  it("moves a leading period onto the end of the previous cue", () => {
+    const cues = parseSrt(PUNCT_SRT);
+    expect(cues[0].text).toBe("how to build something.");
+    // cue[1] loses its own leading ".", then gains cue[2]'s relocated "." —
+    // both periods land on the word that ends each sentence.
+    expect(cues[1].text).toBe("And so it kind of just worked out.");
+  });
+  it("fixes a period spilling across a speaker change", () => {
+    const cues = parseSrt(PUNCT_SRT);
+    expect(cues[2].speaker).toBe("SPEAKER_01");
+    expect(cues[2].text).toBe("I love everything Zach said");
+    expect(cues[1].text.endsWith(".")).toBe(true);
+  });
+  it("does not double punctuation when the previous cue already ends in it", () => {
+    const cues = parseSrt(`1
+00:00:00,000 --> 00:00:02,000
+Already done.
+
+2
+00:00:02,000 --> 00:00:04,000
+. Next part`);
+    expect(cues[0].text).toBe("Already done.");
+    expect(cues[1].text).toBe("Next part");
+  });
+  it("leaves a punctuation-only cue intact (no backtrack into the previous cue)", () => {
+    // A standalone "..." or "?!" continuation cue must NOT be split: the greedy
+    // run would otherwise donate all-but-one mark to the previous cue, and a
+    // "?!" attributed to speaker B would bleed "?" onto speaker A.
+    const cues = parseSrt(`1
+00:00:00,000 --> 00:00:02,000
+[SPEAKER_00]: so anyway
+
+2
+00:00:02,000 --> 00:00:04,000
+[SPEAKER_00]: ...
+
+3
+00:00:04,000 --> 00:00:06,000
+[SPEAKER_01]: ?!`);
+    expect(cues[0].text).toBe("so anyway");
+    expect(cues[1].text).toBe("...");
+    expect(cues[2].text).toBe("?!");
+    expect(cues[2].speaker).toBe("SPEAKER_01");
+  });
+});
+
 describe("fmtTime", () => {
   it("formats h:mm:ss and m:ss", () => {
     expect(fmtTime(0)).toMatch(/0:00/);

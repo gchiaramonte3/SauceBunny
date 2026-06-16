@@ -213,7 +213,38 @@ export function parseSrt(blob: string): Cue[] {
   }
 
   const cues = resolveSpeakers(raws);
-  return rolling ? dedupeRollingCaptions(cues) : cues;
+  const deduped = rolling ? dedupeRollingCaptions(cues) : cues;
+  return relocateLeadingPunctuation(deduped);
+}
+
+/**
+ * Whisper (and some diarizers) occasionally emit a segment whose text begins
+ * with the punctuation that actually CLOSES the previous segment's sentence —
+ * e.g. cue N = "…how to build something", cue N+1 = ". And so it…". Rendered
+ * per-cue (the karaoke highlight, the on-video caption), that surfaces as a
+ * stray leading ". " — and across a speaker change the period looks like it
+ * spilled onto the next speaker. Move any leading sentence punctuation onto the
+ * end of the previous cue so it sits with the word it belongs to. Timing is
+ * untouched (punctuation has no audio); only the display text moves.
+ */
+function relocateLeadingPunctuation(cues: Cue[]): Cue[] {
+  if (cues.length < 2) return cues;
+  const out = cues.map((c) => ({ ...c }));
+  for (let i = 1; i < out.length; i++) {
+    // Leading run of sentence punctuation followed by real text. A cue that is
+    // ONLY punctuation (e.g. a standalone "..." or "?!" continuation cue) must
+    // be left alone: the greedy run would otherwise backtrack and donate
+    // all-but-one mark to the previous cue (and across a speaker change),
+    // corrupting the transcript. Require the trailing text to contain an actual
+    // letter or number before relocating.
+    const m = out[i].text.match(/^([.,;:!?]+)\s*(\S[\s\S]*)$/);
+    if (!m || !/[\p{L}\p{N}]/u.test(m[2])) continue;
+    out[i].text = m[2];
+    const prev = out[i - 1].text.replace(/\s+$/, "");
+    // Don't double up if the previous cue already ends in sentence punctuation.
+    out[i - 1].text = /[.,;:!?]$/.test(prev) ? prev : prev + m[1];
+  }
+  return out;
 }
 
 /**

@@ -29,6 +29,8 @@
     "@tauri-apps/plugin-opener": "^2.2.6",
     "@tauri-apps/plugin-shell": "^2.2.0",
     "mediabunny": "^1.45.3",
+    "opus-decoder": "^0.7.11",
+    "perfect-freehand": "^1.2.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

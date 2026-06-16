@@ -2,6 +2,8 @@ import { forwardRef, useLayoutEffect, useRef, useState } from "react";
 import { IconAlert } from "./Icons";
 import { CanvasToast, type ToastKind } from "./CanvasToast";
 import { CaptionOverlay, type CaptionStyle } from "./CaptionOverlay";
+import { AnnotationOverlay } from "./AnnotationOverlay";
+import type { AnnotationStrokes } from "../lib/review";
 import { LocalMediaPlayer } from "./LocalMediaPlayer";
 import { MediaBunnyPlayer } from "./MediaBunnyPlayer";
 import { MSEStreamPlayer } from "./MSEStreamPlayer";
@@ -86,6 +88,14 @@ type Props = {
   captionStyle?: CaptionStyle;
   /** Live HH:MM:SS:FF for the type-a-timecode HUD; null hides it. */
   tcOverlay?: string | null;
+  /** Review drawing annotation to render over the frame (draft or saved). */
+  annotation?: AnnotationStrokes | null;
+  /** True while the Review panel is in draw mode (overlay captures input). */
+  annotationDrawing?: boolean;
+  /** Read-only display opacity (proximity fade); 1 when drawing/pinned. */
+  annotationOpacity?: number;
+  onAnnotationChange?: (a: AnnotationStrokes) => void;
+  onAnnotationDismiss?: () => void;
 };
 
 /**
@@ -132,6 +142,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     toast, onToastDismiss,
     onPlayerTimeUpdate, onPlayerStateChange, onPlayerReady, onSurfaceClick,
     transcriptPath, transcriptReloadToken, currentSec, captionsOn, captionStyle, tcOverlay,
+    annotation, annotationDrawing, annotationOpacity, onAnnotationChange, onAnnotationDismiss,
   } = props;
 
   const natural = metadata?.width && metadata?.height ? metadata.width / metadata.height : 16 / 9;
@@ -292,6 +303,16 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
           currentSec={currentSec ?? 0}
           enabled={!!captionsOn}
           style={captionStyle}
+        />
+
+        {/* Review drawing annotations — draw on the frame (draft) or view a
+            saved one. Pointer-transparent unless actively drawing. */}
+        <AnnotationOverlay
+          annotation={annotation ?? null}
+          drawing={!!annotationDrawing}
+          opacity={annotationOpacity ?? 1}
+          onChange={onAnnotationChange ?? (() => {})}
+          onDismiss={onAnnotationDismiss}
         />
 
         {/* Type-a-timecode HUD — appears the moment the user types a digit

@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  IconStack, IconReveal, IconTrash, IconCheck, IconAlert, IconSparkles, IconBrainTab,
+  IconStack, IconReveal, IconTrash, IconCheck, IconAlert, IconSparkles, IconBrainTab, IconReview,
 } from "./Icons";
 import type { QueuedClip } from "../types";
 import { secondsToHms } from "../lib/timecode";
 import { TranscriptViewer } from "./TranscriptViewer";
 import { AiSummary, type SummaryStyle } from "./AiSummary";
+import { ReviewPanel } from "./ReviewPanel";
+import type { AnnotationStrokes } from "../lib/review";
 import type { TranscriptHistoryEntry } from "../lib/transcript-history";
 
 /**
@@ -14,7 +16,7 @@ import type { TranscriptHistoryEntry } from "../lib/transcript-history";
  * in the TABS array + one body case below. We deliberately avoid
  * shipping "Soon" placeholder tabs (UI bloat).
  */
-type TabId = "queue" | "transcript" | "ai";
+type TabId = "queue" | "transcript" | "ai" | "review";
 type TabDef = {
   id: TabId;
   label: string;
@@ -76,6 +78,22 @@ type Props = {
   aiStyle?: SummaryStyle;
   /** Open Settings → AI Summary (manage/download/switch the model). */
   onOpenAiSettings?: () => void;
+  /** Review tab: stable id for the current source (local path / URL), or null. */
+  reviewSourceKey?: string | null;
+  /** Review tab: human label for the source (title/filename). */
+  reviewSourceTitle?: string | null;
+  /** Review drawing: true while draw mode is on (overlay captures input). */
+  reviewDrawActive?: boolean;
+  /** Review drawing: the live draft strokes drawn over the frame. */
+  reviewDraft?: AnnotationStrokes | null;
+  /** Toggle draw mode on/off. */
+  onToggleReviewDraw?: () => void;
+  /** Called once the draft has been attached to a comment (clears + exits draw). */
+  onReviewDraftConsumed?: () => void;
+  /** Show a saved annotation read-only over the frame (null to hide). */
+  onShowAnnotation?: (a: AnnotationStrokes | null) => void;
+  /** Re-open a past-review source (local path or URL) from the history popover. */
+  onOpenReviewSource?: (path: string) => void;
   /**
    * Pop the drawer out into its own native OS window (r44.B). When
    * undefined, the pop-out button doesn't render — the floating window
@@ -134,6 +152,9 @@ export function QueueDrawer({
   onRedetectSpeakers, canRedetect,
   onImportTranscript, sourceKind, onFixCaptionTiming,
   aiModelId, aiStyle, onOpenAiSettings,
+  reviewSourceKey, reviewSourceTitle,
+  reviewDrawActive, reviewDraft, onToggleReviewDraw, onReviewDraftConsumed, onShowAnnotation,
+  onOpenReviewSource,
   onPopOut, embedded = false,
 }: Props) {
   const counts = queue.reduce(
@@ -220,6 +241,7 @@ export function QueueDrawer({
     { id: "queue", label: "Queue", icon: IconStack, badge: queue.length },
     { id: "transcript", label: "Transcript", icon: IconSparkles },
     { id: "ai", label: "AI Summary", icon: IconBrainTab },
+    { id: "review", label: "Review", icon: IconReview },
   ];
 
   // ── User-reorderable tab order ─────────────────────────────────
@@ -233,7 +255,7 @@ export function QueueDrawer({
       const raw = localStorage.getItem(TAB_ORDER_KEY);
       const stored: unknown = raw ? JSON.parse(raw) : null;
       if (Array.isArray(stored)) {
-        const valid = stored.filter((x): x is TabId => x === "queue" || x === "transcript" || x === "ai");
+        const valid = stored.filter((x): x is TabId => x === "queue" || x === "transcript" || x === "ai" || x === "review");
         const defaults: TabId[] = TABS.map((t) => t.id);
         // Drop any stored ids that no longer exist + append any
         // brand-new tab ids that weren't in storage.
@@ -636,6 +658,21 @@ export function QueueDrawer({
           style={aiStyle}
           onOpenSettings={onOpenAiSettings}
           onSeek={onTranscriptSeek}
+        />
+      )}
+      {activeTab === "review" && (
+        <ReviewPanel
+          sourceKey={reviewSourceKey ?? null}
+          sourceTitle={reviewSourceTitle}
+          currentSec={transcriptPlayhead}
+          fps={fps}
+          onSeek={onTranscriptSeek}
+          drawActive={!!reviewDrawActive}
+          draft={reviewDraft ?? null}
+          onToggleDraw={onToggleReviewDraw}
+          onDraftConsumed={onReviewDraftConsumed}
+          onShowAnnotation={onShowAnnotation}
+          onOpenReview={onOpenReviewSource}
         />
       )}
     </aside>
