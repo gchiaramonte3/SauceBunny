@@ -267,6 +267,75 @@ pub(crate) struct DictateDoneEvent {
     pub(crate) note: Option<String>,
 }
 
+/// Live mic level (0..1) emitted ~20×/s while recording, for the waveform UI.
+#[derive(Serialize, Clone, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct DictateLevelEvent {
+    pub(crate) job_id: String,
+    pub(crate) level: f64,
+}
+
+/// Turn an ASR failure into plain language for the composer. The raw sidecar
+/// error (exit codes, "no token timings", etc.) is for the logs, not the user.
+fn humanize_dictation_error(raw: &str) -> String {
+    let r = raw.to_lowercase();
+    if r.contains("no transcript") || r.contains("no token") || r.contains("empty") {
+        "I didn't catch any words. Make sure the right microphone is picked (Settings → Transcription) and try again.".to_string()
+    } else if r.contains("not downloaded") || r.contains("no transcription model") {
+        "No transcription model is ready. Download Parakeet or a Whisper model in Settings → Transcription first.".to_string()
+    } else {
+        "Something went wrong transcribing that. Give it another try.".to_string()
+    }
+}
+
+/// An avfoundation audio input the user can dictate from (for the mic chooser).
+#[derive(Serialize, Clone, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct AudioInputDevice {
+    /// avfoundation enumeration index, as a string (e.g. "0").
+    pub(crate) index: String,
+    pub(crate) name: String,
+}
+
+/// Enumerate avfoundation audio inputs for the mic chooser. Runs
+/// `ffmpeg -f avfoundation -list_devices true -i ""`, which prints the device
+/// list to stderr and exits non-zero by design — so we read stderr regardless
+/// of the exit code.
+#[tauri::command]
+pub async fn list_audio_input_devices(app: AppHandle) -> Result<Vec<AudioInputDevice>, crate::AppError> {
+    let cmd = app
+        .shell()
+        .sidecar("ffmpeg")
+        .map_err(|e| format!("ffmpeg sidecar not found: {e}"))?;
+    let out = cmd
+        .args(["-hide_banner", "-f", "avfoundation", "-list_devices", "true", "-i", ""])
+        .output()
+        .await
+        .map_err(|e| format!("failed to list audio devices: {e}"))?;
+    let text = String::from_utf8_lossy(&out.stderr);
+    let mut devices = Vec::new();
+    let mut in_audio = false;
+    for line in text.lines() {
+        let l = line.trim();
+        if l.contains("AVFoundation video devices") { in_audio = false; continue; }
+        if l.contains("AVFoundation audio devices") { in_audio = true; continue; }
+        if !in_audio { continue; }
+        // "[AVFoundation indev @ 0x…] [1] MacBook Pro Microphone" → drop the
+        // logger prefix, then parse the "[idx] name" tail.
+        let rest = match l.find("] ") { Some(i) => l[i + 2..].trim(), None => l };
+        if let Some(body) = rest.strip_prefix('[') {
+            if let Some(close) = body.find(']') {
+                let idx = &body[..close];
+                let name = body[close + 1..].trim();
+                if !idx.is_empty() && idx.chars().all(|c| c.is_ascii_digit()) && !name.is_empty() {
+                    devices.push(AudioInputDevice { index: idx.to_string(), name: name.to_string() });
+                }
+            }
+        }
+    }
+    Ok(devices)
+}
+
 /// ASR engine resolved for a dictation request.
 enum DictEngine {
     Parakeet,
@@ -363,13 +432,15 @@ async fn run_whisper_dictation(
     Ok(())
 }
 
-/// Start recording the default microphone for voice dictation. Spawns the
-/// bundled ffmpeg (avfoundation) → 16 kHz mono WAV, registers it under
-/// `job_id`, and kicks off a background task that — once recording stops —
-/// transcribes the WAV and emits a `dictate-done` event. Fails fast if no
-/// ASR model is available (so the UI never starts a pointless recording).
+/// Start recording the microphone for voice dictation. Spawns the bundled
+/// ffmpeg (avfoundation) → 16 kHz mono WAV, registers it under `job_id`, and
+/// kicks off a background task that streams live mic levels (`dictate-level`)
+/// while recording and — once recording stops — transcribes the WAV and emits
+/// `dictate-done`. `device` is the avfoundation audio index ("0", "1", …) or
+/// None/"default" for the system default input. Fails fast if no ASR model is
+/// available (so the UI never starts a pointless recording).
 #[tauri::command]
-pub async fn dictate_start(app: AppHandle, job_id: String) -> Result<(), crate::AppError> {
+pub async fn dictate_start(app: AppHandle, job_id: String, device: Option<String>) -> Result<(), crate::AppError> {
     // Resolve the engine up front so a "no model" error surfaces before we
     // ever turn on the mic.
     let engine = pick_dictation_engine(&app)?;
@@ -379,21 +450,28 @@ pub async fn dictate_start(app: AppHandle, job_id: String) -> Result<(), crate::
     let wav = cache.join(format!("saucebunny-dictate-{job_id}.wav"));
     let wav_str = wav.to_string_lossy().to_string();
 
+    // avfoundation input: ":default" (system default) or ":<index>" for a
+    // user-chosen device. The `:` with no video half means audio-only.
+    let dev = device.as_deref().unwrap_or("default");
+    let input = if dev.is_empty() || dev == "default" { ":default".to_string() } else { format!(":{dev}") };
+    // Mic-level metering for the waveform: astats prints per-frame RMS to the log
+    // (passed through untouched, so the recorded WAV is unaffected). The drain
+    // task parses these and emits `dictate-level`.
+    const LEVEL_AF: &str = "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level";
+
     let ff = app
         .shell()
         .sidecar("ffmpeg")
         .map_err(|e| format!("ffmpeg sidecar not found: {e}"))?;
-    // `-i :default` = the system DEFAULT audio input, no video (a bare `:0`
-    // would pick avfoundation device *index* 0 — often a capture card / virtual
-    // / aggregate device, not the user's mic). `-t 300` caps a runaway recording
-    // at 5 min (the drain task flags it so the UI can tell the user it was cut).
-    // NOTE: do not add `-nostdin` — we need stdin open so `dictate_stop` can send
-    // `q` for a graceful finalize.
+    // `-t 300` caps a runaway recording at 5 min (the drain task flags it so the
+    // UI can tell the user it was cut). NOTE: do not add `-nostdin` — we need
+    // stdin open so `dictate_stop` can send `q` for a graceful finalize.
     let (mut rx, child) = ff
         .args([
             "-hide_banner",
             "-f", "avfoundation",
-            "-i", ":default",
+            "-i", &input,
+            "-af", LEVEL_AF,
             "-ac", "1",
             "-ar", "16000",
             "-t", "300",
@@ -408,14 +486,38 @@ pub async fn dictate_start(app: AppHandle, job_id: String) -> Result<(), crate::
     tokio::spawn(async move {
         let mut tail = String::new();
         let mut killed = false;
+        let mut last_level = std::time::Instant::now();
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stderr(b) | CommandEvent::Stdout(b) => {
-                    tail.push_str(&String::from_utf8_lossy(&b));
-                    if tail.len() > 4096 {
-                        let mut cut = tail.len() - 2048;
-                        while cut < tail.len() && !tail.is_char_boundary(cut) { cut += 1; }
-                        tail = tail[cut..].to_string();
+                    let chunk = String::from_utf8_lossy(&b);
+                    for line in chunk.lines() {
+                        // Mic level → throttled (~20 Hz) dictate-level events. The
+                        // ametadata print carries an av_log prefix
+                        // ("[Parsed_ametadata_1 @ 0x…] lavfi.astats…=-21.0"), so we
+                        // match the value by substring, not prefix.
+                        if let Some(pos) = line.find("RMS_level=") {
+                            if let Ok(dbv) = line[pos + "RMS_level=".len()..].trim().parse::<f64>() {
+                                // dBFS → 0..1: ~-50 dB floor (quiet) → 0, -10 dB → 1.
+                                let lvl = ((dbv + 50.0) / 40.0).clamp(0.0, 1.0);
+                                if last_level.elapsed().as_millis() >= 50 {
+                                    last_level = std::time::Instant::now();
+                                    let _ = app2.emit("dictate-level", DictateLevelEvent { job_id: job2.clone(), level: lvl });
+                                }
+                            }
+                            continue;
+                        }
+                        // Skip the metering filter's own log lines; keep real ffmpeg
+                        // output so the error tail stays meaningful.
+                        let t = line.trim();
+                        if t.is_empty() || t.contains("Parsed_ametadata") || t.contains("Parsed_astats") { continue; }
+                        tail.push_str(t);
+                        tail.push('\n');
+                        if tail.len() > 4096 {
+                            let mut cut = tail.len() - 2048;
+                            while cut < tail.len() && !tail.is_char_boundary(cut) { cut += 1; }
+                            tail = tail[cut..].to_string();
+                        }
                     }
                 }
                 CommandEvent::Terminated(payload) => {
@@ -491,7 +593,7 @@ pub async fn dictate_start(app: AppHandle, job_id: String) -> Result<(), crate::
             }
             Err(e) => {
                 let _ = std::fs::remove_file(&srt);
-                emit_err(e.to_string());
+                emit_err(humanize_dictation_error(&e.to_string()));
             }
         }
     });

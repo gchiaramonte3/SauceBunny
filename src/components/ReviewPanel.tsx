@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import type { DictateDoneEvent } from "../types";
+import type { DictateDoneEvent, DictateLevelEvent } from "../types";
+import { DictationWave } from "./DictationWave";
 import { secondsToTc } from "../lib/timecode";
 import { loadJson, saveJson } from "../lib/storage";
 import { formatError } from "../lib/error-format";
@@ -125,11 +126,15 @@ export function ReviewPanel({
   const [dictError, setDictError] = useState<string | null>(null);
   const [dictNote, setDictNote] = useState<string | null>(null);
   const dictJobRef = useRef<string | null>(null);
+  // Latest mic level (0..1) for the waveform — a ref so 20 Hz updates from the
+  // backend never re-render React; DictationWave reads it in its rAF loop.
+  const micLevelRef = useRef(0);
 
   useEffect(() => {
-    const un = listen<DictateDoneEvent>("dictate-done", (e) => {
+    const unDone = listen<DictateDoneEvent>("dictate-done", (e) => {
       if (e.payload.job_id !== dictJobRef.current) return;
       dictJobRef.current = null;
+      micLevelRef.current = 0;
       setRecording(false);
       setTranscribing(false);
       if (e.payload.success) {
@@ -143,7 +148,10 @@ export function ReviewPanel({
         setDictError(e.payload.error);
       }
     });
-    return () => { un.then((f) => f()); };
+    const unLevel = listen<DictateLevelEvent>("dictate-level", (e) => {
+      if (e.payload.job_id === dictJobRef.current) micLevelRef.current = e.payload.level;
+    });
+    return () => { unDone.then((f) => f()); unLevel.then((f) => f()); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -199,10 +207,13 @@ export function ReviewPanel({
     }
     setDictError(null);
     setDictNote(null);
+    micLevelRef.current = 0;
     try {
       const job = await invoke<string>("new_job_id");
       dictJobRef.current = job;
-      await invoke("dictate_start", { jobId: job });
+      // Mic chosen in Settings → Transcription ("default" = system default input).
+      const device = loadJson<string>("saucebunny.dictation.device", "default");
+      await invoke("dictate_start", { jobId: job, device });
       setRecording(true);
     } catch (e) {
       dictJobRef.current = null;
@@ -405,6 +416,7 @@ export function ReviewPanel({
         dictError={dictError} clearDictError={() => setDictError(null)}
         dictNote={dictNote} clearDictNote={() => setDictNote(null)}
         toggleDictation={toggleDictation}
+        levelRef={micLevelRef}
         text={text} setText={setText}
         composerRef={composerRef} autosize={autosizeComposer}
         submit={submit} hasDraft={!!draft && draft.strokes.length > 0}
@@ -566,7 +578,7 @@ function ReviewComposer({
   drawActive, onToggleDraw, ensureNamed,
   recording, transcribing,
   dictError, clearDictError, dictNote, clearDictNote,
-  toggleDictation,
+  toggleDictation, levelRef,
   text, setText, composerRef, autosize,
   submit, hasDraft, currentSec, fps,
 }: {
@@ -580,6 +592,7 @@ function ReviewComposer({
   dictNote: string | null;
   clearDictNote: () => void;
   toggleDictation: () => void;
+  levelRef: React.RefObject<number>;
   text: string;
   setText: (s: string) => void;
   composerRef: React.RefObject<HTMLTextAreaElement>;
@@ -597,8 +610,9 @@ function ReviewComposer({
         </div>
       )}
       {recording && (
-        <div className="cp-review-drawhint recording">
-          ● Recording — tap the mic again to transcribe.
+        <div className="cp-review-recbar">
+          <DictationWave levelRef={levelRef} active={recording} />
+          <span className="cp-review-reclabel">Listening… tap the mic to finish</span>
         </div>
       )}
       {transcribing && (

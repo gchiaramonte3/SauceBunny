@@ -22,7 +22,7 @@ const SECTIONS_LS_KEY = "saucebunny.settingsSections.v1";
 const SETTINGS_EXPORT_VERSION = 1;
 import type {
   ExportOpts, FormatId, ModelDownloadEvent, WhisperModel, DoneEvent,
-  CacheStats,
+  CacheStats, AudioInputDevice,
 } from "../types";
 import type { Command } from "../lib/commands";
 import type { LlmModel } from "../bindings/LlmModel";
@@ -490,6 +490,16 @@ export function SettingsModal(props: Props) {
     }
   }, []);
 
+  // ── Dictation microphone chooser (avfoundation inputs) ──
+  const DICTATION_DEVICE_KEY = "saucebunny.dictation.device";
+  const [audioInputs, setAudioInputs] = useState<AudioInputDevice[]>([]);
+  const [dictDevice, setDictDevice] = useState<string>(() => loadJson<string>(DICTATION_DEVICE_KEY, "default"));
+  const refreshAudioInputs = useCallback(async () => {
+    try { setAudioInputs(await invoke<AudioInputDevice[]>("list_audio_input_devices")); }
+    catch (err) { console.warn("list_audio_input_devices failed", err); }
+  }, []);
+  const pickDictDevice = useCallback((d: string) => { setDictDevice(d); saveJson(DICTATION_DEVICE_KEY, d); }, []);
+
   // ── AI Summary (local LLM) models — share the whisper download channel ──
   const [llmModels, setLlmModels] = useState<LlmModel[]>([]);
   const refreshLlmModels = useCallback(async () => {
@@ -523,8 +533,8 @@ export function SettingsModal(props: Props) {
   }, [refreshLlmModels, defaults, setDefaults, llmModels]);
 
   useEffect(() => {
-    if (open) { refreshModels(); refreshLlmModels(); }
-  }, [open, refreshModels, refreshLlmModels]);
+    if (open) { refreshModels(); refreshLlmModels(); refreshAudioInputs(); }
+  }, [open, refreshModels, refreshLlmModels, refreshAudioInputs]);
 
   // Listen for download events. Mounted ONCE — filtering goes through
   // downloadJobIdRef so a new job never has to wait for a re-subscription
@@ -1169,6 +1179,35 @@ export function SettingsModal(props: Props) {
                     >
                       Reset
                     </button>
+                  </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection id="tx-dictation" label="Dictation microphone" open={sectionOpen("tx-dictation")} onToggle={() => toggleSection("tx-dictation")}>
+                  <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: "0 0 10px" }}>
+                    The mic the review composer records from when you dictate a comment.
+                    Leave on <em>System default</em> unless that's picking up the wrong
+                    input (e.g. a capture card) — then choose your real mic here.
+                  </p>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Microphone
+                      <span className="desc">avfoundation audio input.</span>
+                    </div>
+                    <div className="v" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <select
+                        className="cp-select"
+                        value={dictDevice}
+                        onChange={(e) => pickDictDevice(e.target.value)}
+                      >
+                        <option value="default">System default</option>
+                        {audioInputs.map((d) => (
+                          // Store by NAME (avfoundation matches names too) — indices
+                          // shift between launches, names don't.
+                          <option key={d.index} value={d.name}>{d.name}</option>
+                        ))}
+                      </select>
+                      <button className="btn btn-ghost" onClick={refreshAudioInputs} title="Rescan audio inputs">Rescan</button>
+                    </div>
                   </div>
                 </CollapsibleSection>
 

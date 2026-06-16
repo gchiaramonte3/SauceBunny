@@ -145,6 +145,7 @@ pub fn run() {
             commands::delete_parakeet_model,
             commands::dictate_start,
             commands::dictate_stop,
+            commands::list_audio_input_devices,
             commands::generate_transcript,
             commands::list_llm_models,
             commands::download_llm_model,
