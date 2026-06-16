@@ -35,6 +35,20 @@ impl JobRegistry {
     pub(crate) fn take(&self, id: &str) -> Option<CommandChild> {
         self.children.lock().ok()?.remove(id)
     }
+    /// Write to a live child's stdin WITHOUT removing it from the registry.
+    /// Used by voice dictation to send ffmpeg the interactive `q` command,
+    /// which makes it finalize the WAV header and exit GRACEFULLY (a plain
+    /// `.kill()`/SIGKILL would truncate the RIFF header → unreadable WAV).
+    /// The child stays registered until its drain task sees Terminated and
+    /// `take()`s it. Returns false if no such job is live.
+    pub(crate) fn write_stdin(&self, id: &str, buf: &[u8]) -> bool {
+        if let Ok(mut g) = self.children.lock() {
+            if let Some(child) = g.get_mut(id) {
+                return child.write(buf).is_ok();
+            }
+        }
+        false
+    }
     /// Snapshot of currently-active job IDs. Used by `clear_all_cache`
     /// to skip files belonging to in-flight jobs (would otherwise pull
     /// the file out from under an ffmpeg/yt-dlp child mid-write).
@@ -326,7 +340,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-06-15-r92-parakeet-progress";
+pub const BACKEND_BUILD_ID: &str = "2026-06-15-r93-voice-dictation";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

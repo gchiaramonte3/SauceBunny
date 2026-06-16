@@ -245,6 +245,269 @@ async fn run_parakeet_asr(
     Ok(())
 }
 
+// ── Voice dictation (r91) ───────────────────────────────────────────
+// Mic → text for the Review composer. We capture the mic with the
+// bundled ffmpeg (avfoundation) rather than the WebView's getUserMedia
+// (WKWebView's capture-permission path is unreliable on this stack), then
+// reuse the existing ASR sidecars (Parakeet preferred, Whisper fallback)
+// to turn the WAV into text. The recording is registered in the
+// JobRegistry under `job_id`; `dictate_stop` sends ffmpeg an interactive
+// `q` (clean WAV finalize) and a background drain task runs ASR and emits
+// `dictate-done`. Mic access needs NSMicrophoneUsageDescription in the
+// bundle's Info.plist (the ffmpeg child inherits the app's TCC grant).
+
+#[derive(Serialize, Clone, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct DictateDoneEvent {
+    pub(crate) job_id: String,
+    pub(crate) success: bool,
+    pub(crate) text: Option<String>,
+    pub(crate) error: Option<String>,
+    /// Non-error advisory shown to the user (e.g. recording hit the time cap).
+    pub(crate) note: Option<String>,
+}
+
+/// ASR engine resolved for a dictation request.
+enum DictEngine {
+    Parakeet,
+    Whisper(PathBuf),
+}
+
+/// First Whisper model present on disk (WHISPER_MODELS is ordered
+/// smallest→largest, so this prefers the fastest model — ideal for short
+/// dictation clips). None if no model is downloaded.
+fn first_downloaded_whisper(app: &AppHandle) -> Option<PathBuf> {
+    let dir = whisper_models_dir(app).ok()?;
+    for (id, _, _) in WHISPER_MODELS {
+        let p = dir.join(format!("ggml-{id}.bin"));
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Pick an ASR engine for dictation: Parakeet if its Core ML bundle is
+/// downloaded (best quality + ANE-fast), else any downloaded Whisper model.
+fn pick_dictation_engine(app: &AppHandle) -> Result<DictEngine, crate::AppError> {
+    if parakeet_model_downloaded(app.clone()) {
+        return Ok(DictEngine::Parakeet);
+    }
+    if let Some(m) = first_downloaded_whisper(app) {
+        return Ok(DictEngine::Whisper(m));
+    }
+    Err("No transcription model is downloaded. Open Settings → Transcription and download Parakeet or a Whisper model first.".into())
+}
+
+/// Strip SRT cue indices + timestamp lines, leaving just the spoken text
+/// joined into a single line — what the composer wants.
+fn srt_to_text(srt: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for line in srt.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.contains("-->") || t.parse::<u32>().is_ok() {
+            continue;
+        }
+        parts.push(t);
+    }
+    parts.join(" ").trim().to_string()
+}
+
+/// Run whisper-cli on a WAV → `<srt_base>.srt`. Minimal flags (no VAD) —
+/// dictation clips are short. Registered under `job_id` so Stop cancels it.
+async fn run_whisper_dictation(
+    app: &AppHandle, job_id: &str, wav: &std::path::Path, srt_base: &str, model: &std::path::Path,
+) -> Result<(), crate::AppError> {
+    let wsp = app
+        .shell()
+        .sidecar("whisper-cli")
+        .map_err(|e| format!("whisper-cli sidecar not found: {e}"))?;
+    let (mut rx, child) = wsp
+        .args([
+            "-m", &model.to_string_lossy(),
+            "-f", &wav.to_string_lossy(),
+            "-osrt", "-of", srt_base,
+            "-l", "en", "-bs", "5", "-bo", "5",
+        ])
+        .spawn()
+        .map_err(|e| format!("whisper-cli failed to spawn: {e}"))?;
+    app.state::<JobRegistry>().insert(job_id.to_string(), child);
+    let mut tail = String::new();
+    let mut cancelled = false;
+    while let Some(event) = rx.recv().await {
+        match event {
+            CommandEvent::Stderr(b) | CommandEvent::Stdout(b) => {
+                tail.push_str(&String::from_utf8_lossy(&b));
+                if tail.len() > 4096 {
+                    let mut cut = tail.len() - 2048;
+                    while cut < tail.len() && !tail.is_char_boundary(cut) { cut += 1; }
+                    tail = tail[cut..].to_string();
+                }
+            }
+            CommandEvent::Terminated(payload) => {
+                let _ = app.state::<JobRegistry>().take(job_id);
+                if payload.signal.is_some() { cancelled = true; }
+                if payload.code != Some(0) {
+                    if cancelled { return Err("Cancelled".into()); }
+                    return Err(crate::AppError::SidecarFailed {
+                        name: "whisper-cli".into(),
+                        exit_code: payload.code,
+                        tail: tail.trim().to_string(),
+                    });
+                }
+                break;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Start recording the default microphone for voice dictation. Spawns the
+/// bundled ffmpeg (avfoundation) → 16 kHz mono WAV, registers it under
+/// `job_id`, and kicks off a background task that — once recording stops —
+/// transcribes the WAV and emits a `dictate-done` event. Fails fast if no
+/// ASR model is available (so the UI never starts a pointless recording).
+#[tauri::command]
+pub async fn dictate_start(app: AppHandle, job_id: String) -> Result<(), crate::AppError> {
+    // Resolve the engine up front so a "no model" error surfaces before we
+    // ever turn on the mic.
+    let engine = pick_dictation_engine(&app)?;
+
+    let cache = app.path().app_cache_dir().map_err(|e| format!("app_cache_dir: {e}"))?;
+    std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
+    let wav = cache.join(format!("saucebunny-dictate-{job_id}.wav"));
+    let wav_str = wav.to_string_lossy().to_string();
+
+    let ff = app
+        .shell()
+        .sidecar("ffmpeg")
+        .map_err(|e| format!("ffmpeg sidecar not found: {e}"))?;
+    // `-i :default` = the system DEFAULT audio input, no video (a bare `:0`
+    // would pick avfoundation device *index* 0 — often a capture card / virtual
+    // / aggregate device, not the user's mic). `-t 300` caps a runaway recording
+    // at 5 min (the drain task flags it so the UI can tell the user it was cut).
+    // NOTE: do not add `-nostdin` — we need stdin open so `dictate_stop` can send
+    // `q` for a graceful finalize.
+    let (mut rx, child) = ff
+        .args([
+            "-hide_banner",
+            "-f", "avfoundation",
+            "-i", ":default",
+            "-ac", "1",
+            "-ar", "16000",
+            "-t", "300",
+            "-y", &wav_str,
+        ])
+        .spawn()
+        .map_err(|e| format!("ffmpeg failed to spawn: {e}"))?;
+    app.state::<JobRegistry>().insert(job_id.clone(), child);
+
+    let app2 = app.clone();
+    let job2 = job_id.clone();
+    tokio::spawn(async move {
+        let mut tail = String::new();
+        let mut killed = false;
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stderr(b) | CommandEvent::Stdout(b) => {
+                    tail.push_str(&String::from_utf8_lossy(&b));
+                    if tail.len() > 4096 {
+                        let mut cut = tail.len() - 2048;
+                        while cut < tail.len() && !tail.is_char_boundary(cut) { cut += 1; }
+                        tail = tail[cut..].to_string();
+                    }
+                }
+                CommandEvent::Terminated(payload) => {
+                    let _ = app2.state::<JobRegistry>().take(&job2);
+                    // SIGKILL (cancel) → discard; a clean `q` stop exits 0.
+                    if payload.signal.is_some() { killed = true; }
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        let emit_err = |msg: String| {
+            let _ = app2.emit("dictate-done", DictateDoneEvent {
+                job_id: job2.clone(), success: false, text: None, error: Some(msg), note: None,
+            });
+        };
+
+        if killed {
+            let _ = std::fs::remove_file(&wav);
+            emit_err("Cancelled".into());
+            return;
+        }
+        // A graceful stop leaves a finalized WAV; require some captured audio.
+        // 16 kHz mono s16 = 32000 bytes/s, so <1 KB ≈ a sub-30 ms clip.
+        let captured = std::fs::metadata(&wav).map(|m| m.len()).unwrap_or(0);
+        if captured < 1024 {
+            let _ = std::fs::remove_file(&wav);
+            // Distinguish a real mic-access failure (ffmpeg's avfoundation open
+            // erroring out) from a recording that was simply too short. NOTE:
+            // `-hide_banner` does NOT empty stderr (stream info + progress still
+            // print), so we must inspect the tail for actual permission errors.
+            let t = tail.to_lowercase();
+            let blocked = t.contains("operation not permitted")
+                || t.contains("input/output error")
+                || t.contains("permission denied")
+                || t.contains("abort");
+            emit_err(if blocked {
+                "Microphone access was blocked. Allow it in System Settings → Privacy & Security → Microphone, then try again.".into()
+            } else {
+                "Recording too short — hold the mic button a moment longer.".into()
+            });
+            return;
+        }
+        // ffmpeg self-exits at the `-t` cap with code 0 (no signal), so a clean
+        // stop and a hit-the-limit stop look the same; flag the latter by length.
+        let approx_secs = captured.saturating_sub(44) / 32_000;
+        let cap_note = if approx_secs >= 299 {
+            Some("Recording reached the 5-minute limit and was cut off.".to_string())
+        } else {
+            None
+        };
+
+        // Transcribe the WAV with the engine resolved at start.
+        let srt = wav.with_extension("srt");
+        let srt_str = srt.to_string_lossy().to_string();
+        let srt_base = wav.with_extension("");
+        let asr = match engine {
+            DictEngine::Parakeet => run_parakeet_asr(&app2, &job2, &wav, &srt_str).await,
+            DictEngine::Whisper(model) => {
+                run_whisper_dictation(&app2, &job2, &wav, &srt_base.to_string_lossy(), &model).await
+            }
+        };
+        let _ = std::fs::remove_file(&wav);
+
+        match asr {
+            Ok(()) => {
+                let text = std::fs::read_to_string(&srt).map(|s| srt_to_text(&s)).unwrap_or_default();
+                let _ = std::fs::remove_file(&srt);
+                let _ = app2.emit("dictate-done", DictateDoneEvent {
+                    job_id: job2.clone(), success: true, text: Some(text), error: None, note: cap_note,
+                });
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&srt);
+                emit_err(e.to_string());
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// Stop an in-progress dictation recording GRACEFULLY by sending ffmpeg the
+/// interactive `q` command (finalizes the WAV header). The background task
+/// from `dictate_start` then transcribes and emits `dictate-done`. Returns
+/// false if no recording is live.
+#[tauri::command]
+pub fn dictate_stop(registry: State<'_, JobRegistry>, job_id: String) -> bool {
+    registry.write_stdin(&job_id, b"q")
+}
+
 #[tauri::command]
 pub fn list_whisper_models(app: AppHandle) -> Result<Vec<WhisperModel>, crate::AppError> {
     let dir = whisper_models_dir(&app)?;

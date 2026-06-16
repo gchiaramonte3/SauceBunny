@@ -143,6 +143,8 @@ pub fn run() {
             commands::parakeet_model_downloaded,
             commands::download_parakeet_model,
             commands::delete_parakeet_model,
+            commands::dictate_start,
+            commands::dictate_stop,
             commands::generate_transcript,
             commands::list_llm_models,
             commands::download_llm_model,
