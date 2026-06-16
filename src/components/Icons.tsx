@@ -114,10 +114,27 @@ export const IconSparkles = (p: IconProps) => (
     <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.5 5.5l2 2M16.5 16.5l2 2M5.5 18.5l2-2M16.5 7.5l2-2" />
   </Icon>
 );
-export const IconBrainTab = (p: IconProps) => (
+// Sparkles — the AI Summary tab (one bold 4-point sparkle + two accents).
+export const IconAiSummary = (p: IconProps) => (
   <Icon {...p}>
-    <path d="M12 5a3 3 0 0 0-3 3 3 3 0 0 0-1 5.8V16a2 2 0 0 0 4 0" />
-    <path d="M12 5a3 3 0 0 1 3 3 3 3 0 0 1 1 5.8V16a2 2 0 0 1-4 0" />
+    <path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.14 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0Z" />
+    <path d="M20 3v4M22 5h-4M4 17v2M5 18H3" />
+  </Icon>
+);
+// Document with text lines — the Transcript tab.
+export const IconTranscript = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+    <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+    <path d="M10 9H8M16 13H8M16 17H8" />
+  </Icon>
+);
+// Docked right panel — the toolbar's side-panel toggle (replaces the Queue
+// stack glyph so it doesn't collide with the Queue tab).
+export const IconPanelRight = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M15 4v16" />
   </Icon>
 );
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  IconStack, IconReveal, IconTrash, IconCheck, IconAlert, IconSparkles, IconBrainTab, IconReview,
+  IconStack, IconReveal, IconTrash, IconCheck, IconAlert, IconTranscript, IconAiSummary, IconReview,
 } from "./Icons";
 import type { QueuedClip } from "../types";
 import { secondsToHms } from "../lib/timecode";
@@ -239,8 +239,8 @@ export function QueueDrawer({
 
   const TABS: TabDef[] = [
     { id: "queue", label: "Queue", icon: IconStack, badge: queue.length },
-    { id: "transcript", label: "Transcript", icon: IconSparkles },
-    { id: "ai", label: "AI Summary", icon: IconBrainTab },
+    { id: "transcript", label: "Transcript", icon: IconTranscript },
+    { id: "ai", label: "AI Summary", icon: IconAiSummary },
     { id: "review", label: "Review", icon: IconReview },
   ];
 

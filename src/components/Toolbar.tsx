@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
-import { IconLink, IconClipboard, IconSettings, IconImport, IconStack } from "./Icons";
+import { IconLink, IconClipboard, IconSettings, IconImport, IconPanelRight } from "./Icons";
 import { NotificationBell, type Notif } from "./NotificationBell";
 import type { AppStatus } from "../types";
 
@@ -135,10 +135,10 @@ export function Toolbar({
       <button
         type="button"
         className={"btn-icon cp-queue-toggle" + (queueCount > 0 ? " has-items" : "") + (queueOpen ? " active" : "")}
-        title={`Clips queue (${queueCount}) — ⌘⇧Q`}
+        title={`Side panel (${queueCount} queued) — ⌘⇧Q`}
         onClick={onToggleQueue}
       >
-        <IconStack size={15} />
+        <IconPanelRight size={15} />
         {queueCount > 0 && <span className="cp-queue-badge">{queueCount}</span>}
       </button>
       <NotificationBell
