@@ -44,6 +44,7 @@ import {
   KEY_ACTION_BY_ID, type KeyActionId, type KeybindingOverrides,
 } from "./lib/keybindings";
 import { migrateLegacyStorageKeys } from "./lib/migrate-storage";
+import { loadReview, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
 import { loadJson, saveJson } from "./lib/storage";
 import {
   durationToTc, framesToTc, secondsToTc,
@@ -52,7 +53,7 @@ import {
 import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, prettyHost } from "./lib/validation";
 import { sanitizeFilename, stripExt, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
-import { extractFrameAsBlob } from "./lib/mediabunny-helpers";
+import { extractFrameAsBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
 import { exportLocalClipViaMediabunny } from "./lib/mediabunny-export";
 import { extractAudioAsWav16k } from "./lib/mediabunny-audio";
 
@@ -154,10 +155,10 @@ export default function App() {
       // Empty string here = "ask backend for the default and persist
       // it on first app boot." See the resolver effect just below.
       transcriptLibrary: stored.transcriptLibrary ?? "",
-      // On-video caption look. Defaults: small (18px) white Verdana on a 75%
+      // On-video caption look. Defaults: small (13px) white Verdana on a 75%
       // dark backing. captionFont migrates the old sans/serif/mono keys to the
       // named system fonts so a pre-existing pref still resolves.
-      captionSizePx: stored.captionSizePx ?? 18,
+      captionSizePx: stored.captionSizePx ?? 13,
       captionFont: migrateCaptionFont((stored as Record<string, unknown>).captionFont),
       captionBgOpacity: stored.captionBgOpacity ?? 0.75,
       captionColor: stored.captionColor ?? "#ffffff",
@@ -351,6 +352,9 @@ export default function App() {
   // YouTube source vs imported local file. Most paths key off this.
   const [sourceKind, setSourceKind] = useState<SourceKind>("youtube");
   const [localFilePath, setLocalFilePath] = useState<string | null>(null);
+  // Byte size of the imported local file — folded into the review fingerprint so
+  // two distinct same-length, same-dimension clips don't collide onto one review.
+  const [localFileSize, setLocalFileSize] = useState<number | null>(null);
   /**
    * Path of the ffmpeg-normalised playback copy (WKWebView-compatible MP4 /
    * MP3). When set, the LocalMediaPlayer uses this; otherwise it falls back
@@ -397,6 +401,18 @@ export default function App() {
    * mediabunny again. Cleared by resetForNewSource.
    */
   const [webCodecsFallbackForImport, setWebCodecsFallbackForImport] = useState(false);
+
+  /**
+   * Which player the current local import resolved to (r93 — mediabunny-first
+   * default). Set by `loadLocalPath` after a capability probe:
+   *  - "native"    → LocalMediaPlayer (<video>) — native-friendly codecs, or
+   *                  the ffmpeg-transcoded copy when mediabunny can't decode.
+   *  - "mediabunny"→ MediaBunnyPlayer (WebCodecs video + in-app/WASM audio) —
+   *                  plays the ORIGINAL with no transcode (AV1+Opus etc.).
+   * Independent of the useWebCodecsDecoder toggle so mediabunny-first is the
+   * default for everyone. Only governs local files; the web path is untouched.
+   */
+  const [localPlayer, setLocalPlayer] = useState<"native" | "mediabunny">("native");
 
   // Effective fps and duration in frames.
   const fps = metadata?.fps && metadata.fps > 0 ? metadata.fps : fallbackFps;
@@ -1188,11 +1204,13 @@ export default function App() {
     setIsPlaying(false);
     setSourceKind("youtube");
     setLocalFilePath(null);
+    setLocalFileSize(null);
     setPlaybackPath(null);
     setPlaybackPrepBusy(false);
     setPlaybackPrepJobId(null);
     setPlaybackPrepProgress(0);
     setWebCodecsFallbackForImport(false);
+    setLocalPlayer("native");
     // Tear down the web-playback machine (cancels any in-flight resolve/
     // download + watchdog, → inactive). r80.
     resetWebPlayback();
@@ -1633,21 +1651,11 @@ export default function App() {
     }
   }, [appendLog, pushNotification]);
 
-  const handleImportFile = useCallback(async () => {
+  // Load a local file by absolute path — the import core, shared by the
+  // file-picker import and the Review version switcher (which loads a chosen
+  // version's file straight into the existing player; A/B toggle compare).
+  const loadLocalPath = useCallback(async (picked: string) => {
     try {
-      const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
-        m.open({
-          multiple: false,
-          directory: false,
-          filters: [
-            { name: "Video", extensions: ["mp4", "mov", "m4v", "mkv", "webm", "avi"] },
-            { name: "Audio", extensions: ["mp3", "m4a", "wav", "flac", "ogg", "aac"] },
-            { name: "All", extensions: ["*"] },
-          ],
-        })
-      );
-      if (typeof picked !== "string") return;
-
       resetForNewSource();
       const seq = ++sourceSeqRef.current;
       setStatus("fetching");
@@ -1718,6 +1726,7 @@ export default function App() {
       }
       setSourceKind("file");
       setLocalFilePath(lf.path);
+      setLocalFileSize(lf.size_bytes ?? null);
       setUrl("");
       setPlayheadFrames(0);
       setInFrames(null);
@@ -1787,21 +1796,31 @@ export default function App() {
         : ["mp3", "m4a", "aac", "wav", "mp4", "m4v", "mov"].includes(ext);
 
       if (videoNative && audioNative && containerOk) {
+        setLocalPlayer("native");
         appendLog("ok", "import", "Codecs natively supported — playing original file (no transcode).");
         return;
       }
 
-      // WebCodecs path — only fires for non-native files. Mediabunny will
-      // try to decode; if it can't, onMediaError triggers runPlaybackPrep
-      // as the final fallback (per-import, doesn't flip Settings).
-      if (defaults.useWebCodecsDecoder) {
-        appendLog("info", "import",
-          `Non-native codecs (${vc || "?"} / ${ac || "?"}) — trying WebCodecs decoder.`);
+      // Mediabunny-first (r93): probe whether WebCodecs — plus our registered
+      // WASM audio decoders (libopus) — can decode this file IN-APP. If so,
+      // play the original directly via MediaBunnyPlayer with NO ffmpeg
+      // transcode. This is the common win for AV1+Opus YouTube downloads:
+      // WKWebView decodes AV1 video via WebCodecs, and libopus covers the
+      // Opus audio that WKWebView's (absent) AudioDecoder can't.
+      const canMb = await canMediabunnyDecode(lf.path);
+      if (sourceSeqRef.current !== seq) return;
+      if (canMb) {
+        setLocalPlayer("mediabunny");
+        appendLog("ok", "import",
+          `In-app decode via mediabunny (${vc || "?"} / ${ac || "?"}) — no transcode.`);
         return;
       }
 
-      // ffmpeg-prep path. Surface what we're transcoding and why so the
-      // user understands the wait.
+      // Mediabunny can't decode this file here (e.g. a codec WebCodecs lacks
+      // and we don't polyfill). Fall back to the ffmpeg-prep + <video> path.
+      setLocalPlayer("native");
+
+      // Surface what we're transcoding and why so the user understands the wait.
       const reasonParts: string[] = [];
       if (!videoNative) reasonParts.push(`video ${vc || "?"} → h264`);
       if (!audioNative) reasonParts.push(`audio ${ac || "?"} → aac`);
@@ -1816,6 +1835,29 @@ export default function App() {
       setStatus("error");
     }
   }, [appendLog, defaults.folder, defaults.useWebCodecsDecoder, resetForNewSource, runPlaybackPrep]);
+
+  const handleImportFile = useCallback(async () => {
+    const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
+      m.open({
+        multiple: false,
+        directory: false,
+        filters: [
+          { name: "Video", extensions: ["mp4", "mov", "m4v", "mkv", "webm", "avi"] },
+          { name: "Audio", extensions: ["mp3", "m4a", "wav", "flac", "ogg", "aac"] },
+          { name: "All", extensions: ["*"] },
+        ],
+      })
+    );
+    if (typeof picked === "string") await loadLocalPath(picked);
+  }, [loadLocalPath]);
+
+  // Re-open a clip from the review history popover — local path via the import
+  // core, a web source via the URL fetch. Its notes load automatically (the
+  // fingerprint / URL resolves to the same review).
+  const handleOpenReviewSource = useCallback((path: string) => {
+    if (/^https?:\/\//i.test(path)) { setUrl(path); void handleFetch(path); }
+    else void loadLocalPath(path);
+  }, [handleFetch, loadLocalPath]);
 
   const handleStop = useCallback(async () => {
     const ids = [jobId, transcriptJobId, playbackPrepJobId].filter((x): x is string => !!x);
@@ -3036,6 +3078,64 @@ export default function App() {
   const transcriptPlayhead = hasSource
     ? playheadFrames / Math.max(1, Math.round(fps))
     : null;
+
+  // Review comment markers for the monitor timeline — re-read whenever the
+  // source changes or the Review panel mutates (REVIEW_CHANGED_EVENT, mirrors
+  // the speaker-overrides bus). Keeps the timeline dots in sync with the panel
+  // without sharing state across the two components.
+  // Reviews are keyed by source, but a clip's content fingerprint (filename +
+  // duration + dims, location-independent) maps to a prior review's key — so
+  // re-opening a clip you've reviewed before (even moved/renamed folder)
+  // re-loads its notes. Falls back to the path on first encounter.
+  const reviewSourceKey = (sourceKind === "file" && localFilePath && metadata)
+    ? (resolveByFingerprint(reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize)) ?? localFilePath)
+    : (metadata?.webpage_url ?? null);
+  const [reviewMarkers, setReviewMarkers] = useState<{ id: string; time: number; resolved: boolean; color: string; initials: string }[]>([]);
+  const [reviewAnnotations, setReviewAnnotations] = useState<{ id: string; time: number; strokes: AnnotationStrokes }[]>([]);
+  // Drawing-annotation state: draw mode + the live draft (attached to the next
+  // comment) + a saved annotation being viewed read-only over the frame.
+  const [reviewDrawActive, setReviewDrawActive] = useState(false);
+  const [reviewDraft, setReviewDraft] = useState<AnnotationStrokes | null>(null);
+  const [annotationDisplay, setAnnotationDisplay] = useState<AnnotationStrokes | null>(null);
+  useEffect(() => {
+    // New source → drop any in-flight drawing + viewed annotation.
+    setReviewDrawActive(false);
+    setReviewDraft(null);
+    setAnnotationDisplay(null);
+    if (!reviewSourceKey) { setReviewMarkers([]); setReviewAnnotations([]); return; }
+    const reload = () => {
+      const d = loadReview(reviewSourceKey);
+      const me = loadReviewer();
+      const markers = reviewMarkersOf(d, d.activeVersionId);
+      setReviewMarkers(markers.map((m) => ({
+        id: m.id, time: m.time, resolved: m.resolved,
+        color: reviewerColorFor(m.author, me), initials: initialsOf(m.author),
+      })));
+      setReviewAnnotations(annotationsOf(d, d.activeVersionId));
+      // Once a clip has notes, record it in history + link its fingerprint so
+      // re-opening it (anywhere) reloads this review. Read metadata via the ref —
+      // this closure outlives a setMetadata that keeps the same reviewSourceKey
+      // (e.g. a web "Loading…" stub resolving to its real title), so the lexical
+      // `metadata` would otherwise write a stale title to history.
+      const md = metadataRef.current;
+      if (markers.length > 0 && reviewSourceKey) {
+        const title = md?.title ?? localFilePath ?? reviewSourceKey;
+        const path = localFilePath ?? md?.webpage_url ?? reviewSourceKey;
+        upsertReviewHistory({ key: reviewSourceKey, title, path, updatedAt: Date.now(), count: markers.length });
+        if (sourceKind === "file" && md) {
+          linkFingerprint(reviewFingerprint(title, md.duration ?? 0, md.width, md.height, localFileSize), reviewSourceKey);
+        }
+      }
+    };
+    reload();
+    const onChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ sourceKey?: string }>).detail;
+      if (!detail || detail.sourceKey === reviewSourceKey) reload();
+    };
+    window.addEventListener(REVIEW_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(REVIEW_CHANGED_EVENT, onChanged);
+  }, [reviewSourceKey]);
+
   const { handlePopOut: handlePopOutPanel } = usePanelBus({
     panelDetached,
     setPanelDetached,
@@ -3080,6 +3180,27 @@ export default function App() {
   // ====== Derived ======
   const playheadTc = framesToTc(playheadFrames, fps);
   const playheadSec = playheadFrames / Math.max(1, Math.round(fps));
+
+  // Review drawing shown on the frame, picked in priority order:
+  //   1. live draft while drawing   2. a comment's drawing pinned via click
+  //   3. proximity fade — the nearest saved drawing as the playhead passes it,
+  //      opacity ramping with distance so it appears then fades while scrubbing.
+  const ANNOT_PROX_WINDOW = 0.6; // seconds on either side of the drawing's time
+  let proxStrokes: AnnotationStrokes | null = null;
+  let proxOpacity = 0;
+  if (!reviewDrawActive && !annotationDisplay && reviewAnnotations.length) {
+    let bestDist = Infinity;
+    for (const a of reviewAnnotations) {
+      const d = Math.abs(a.time - playheadSec);
+      if (d < bestDist) { bestDist = d; proxStrokes = a.strokes; }
+    }
+    proxOpacity = bestDist <= ANNOT_PROX_WINDOW ? Math.max(0, 1 - bestDist / ANNOT_PROX_WINDOW) : 0;
+    if (proxOpacity <= 0) proxStrokes = null;
+  }
+  const annDrawing = reviewDrawActive;
+  const annStrokes = annDrawing ? reviewDraft : (annotationDisplay ?? proxStrokes);
+  const annOpacity = annDrawing || annotationDisplay ? 1 : proxOpacity;
+  const annPinned = !annDrawing && !!annotationDisplay;
   // Live HH:MM:SS:FF for the timecode-entry HUD (right-aligned digit fill).
   const tcOverlay = tcEntry == null ? null
     : (() => { const d = tcEntry.slice(-8).padStart(8, "0"); return `${d.slice(0, 2)}:${d.slice(2, 4)}:${d.slice(4, 6)}:${d.slice(6, 8)}`; })();
@@ -3234,7 +3355,7 @@ export default function App() {
                  path as the Pipeline Stop, so cancel semantics are
                  identical wherever the user clicks. */
               onCancelPlaybackPrep={handleStop}
-              useWebCodecs={defaults.useWebCodecsDecoder && !webCodecsFallbackForImport}
+              useWebCodecs={localPlayer === "mediabunny" && !webCodecsFallbackForImport}
               onMediaError={(msg) => {
                 // MediaBunnyPlayer prefixes codec-incompatibility errors
                 // with `[WEBCODECS_UNSUPPORTED]` — that's our signal to
@@ -3299,6 +3420,13 @@ export default function App() {
               }}
               /* Type-a-timecode HUD: digits build this string, Return snaps. */
               tcOverlay={tcOverlay}
+              /* Review drawing annotations — draft while drawing, else the
+                 saved one being viewed. */
+              annotation={annStrokes}
+              annotationDrawing={annDrawing}
+              annotationOpacity={annOpacity}
+              onAnnotationChange={setReviewDraft}
+              onAnnotationDismiss={annPinned ? () => setAnnotationDisplay(null) : undefined}
             />
             <Transport
               status={status}
@@ -3335,6 +3463,7 @@ export default function App() {
                 outFrames: c.outFrames,
                 status: c.status,
               }))}
+              commentMarkers={reviewMarkers}
               onSeek={onSeek}
             />
             {/* Status line under the timeline. Stays present so setting or
@@ -3420,6 +3549,17 @@ export default function App() {
           aiModelId={defaults.llmSummarizationModel}
           aiStyle={{ format: defaults.summaryFormat, length: defaults.summaryLength }}
           onOpenAiSettings={() => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); }}
+          reviewSourceKey={reviewSourceKey}
+          reviewSourceTitle={metadata?.title ?? null}
+          reviewDrawActive={reviewDrawActive}
+          reviewDraft={reviewDraft}
+          onToggleReviewDraw={() => {
+            setAnnotationDisplay(null);
+            setReviewDrawActive((on) => { if (on) setReviewDraft(null); return !on; });
+          }}
+          onReviewDraftConsumed={() => { setReviewDraft(null); setReviewDrawActive(false); }}
+          onShowAnnotation={(a) => { setReviewDrawActive(false); setReviewDraft(null); setAnnotationDisplay(a); }}
+          onOpenReviewSource={handleOpenReviewSource}
         />}
       </div>
 

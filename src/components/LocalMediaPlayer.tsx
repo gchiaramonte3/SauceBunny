@@ -39,29 +39,69 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
   // currentTime scan (the whole local file is buffered, so it's smooth).
   const shuttleRateRef = useRef(0);
   const shuttleTimerRef = useRef(0);
+  // Scrub hardening: while the playhead is being dragged we pause the element
+  // so continuous playback can't fight the seek, then resume once seeks settle.
+  // (The streaming player has had this since r66; the local <video> never did,
+  // which is why local scrubbing stuttered/stalled on WKWebView.)
+  const scrubbingRef = useRef(false);
+  const wasPlayingRef = useRef(false);
+  const settleTimerRef = useRef(0);
+  const retriedLoadRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
   useImperativeHandle(ref, () => ({
     play: () => {
       const el = mediaRef.current;
       if (!el) return;
+      // Explicit play cancels any pending scrub-resume so it can't double-fire.
+      scrubbingRef.current = false;
+      if (settleTimerRef.current) { window.clearTimeout(settleTimerRef.current); settleTimerRef.current = 0; }
       el.play().catch((err) => {
         // NotAllowedError → autoplay blocked (need user gesture)
         // NotSupportedError → codec/source issue
         onError?.(`Playback failed: ${err?.name ?? "Error"} — ${err?.message ?? String(err)}`);
       });
     },
-    pause: () => { mediaRef.current?.pause(); },
+    pause: () => {
+      // Explicit pause cancels the scrub-resume so we don't restart playback.
+      scrubbingRef.current = false;
+      wasPlayingRef.current = false;
+      if (settleTimerRef.current) { window.clearTimeout(settleTimerRef.current); settleTimerRef.current = 0; }
+      const el = mediaRef.current;
+      const alreadyPaused = !el || el.paused;
+      el?.pause();
+      // If the element was already paused (e.g. the scrub path paused it mid-
+      // drag), no native 'pause' event fires, so onPause won't run and App would
+      // stay isPlaying=true. Notify directly to keep the play-state honest.
+      if (alreadyPaused) {
+        playingRef.current = false;
+        setIsPlaying(false);
+        onPlayStateChange?.(false);
+      }
+    },
     seekTo: (s) => {
       const el = mediaRef.current;
       if (!el) return;
       const target = Math.max(0, s);
+      // First seek of a drag opens a scrub window: pause so playback can't
+      // race the playhead. Each subsequent seek just resets the settle timer;
+      // we resume (only if we were playing) once seeks stop arriving. The
+      // paused <video> still repaints the frame at each currentTime, so the
+      // drag previews frame-by-frame instead of fighting the decoder.
+      if (!scrubbingRef.current) {
+        scrubbingRef.current = true;
+        wasPlayingRef.current = !el.paused;
+        if (!el.paused) { try { el.pause(); } catch { /* ignore */ } }
+      }
       el.currentTime = target;
-      // Diagnostic: native seek is el.currentTime = seconds. If this lands
-      // wrong, it's the file duration vs the timeline (el.duration here is the
-      // real file length; if it's shorter than `s`, the seek clamps to the end).
       onDiagRef.current?.("info",
         `seek → ${target.toFixed(1)}s (file duration ${(el.duration || 0).toFixed(1)}s, landed ${el.currentTime.toFixed(1)}s)`);
+      if (settleTimerRef.current) window.clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = window.setTimeout(() => {
+        settleTimerRef.current = 0;
+        scrubbingRef.current = false;
+        if (wasPlayingRef.current) mediaRef.current?.play().catch(() => { /* ignore */ });
+      }, 200);
     },
     getCurrentTime: () => mediaRef.current?.currentTime ?? 0,
     getDuration: () => mediaRef.current?.duration ?? 0,
@@ -109,6 +149,15 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     if (!el) return;
     el.volume = Math.max(0, Math.min(1, initialVolume));
     const onLoaded = () => {
+      // Duration didn't parse (transient header read over asset://). Retry the
+      // resource load once before accepting it; otherwise the timeline reads 0
+      // and scrubbing is dead (seekFromX bails when durationFrames<=0).
+      if ((!el.duration || !isFinite(el.duration)) && !retriedLoadRef.current) {
+        retriedLoadRef.current = true;
+        onDiagRef.current?.("warn", "duration unread — retrying native load once");
+        try { el.load(); } catch { /* ignore */ }
+        return;
+      }
       readyRef.current = true;
       onReady?.(el.duration);
       onDiagRef.current?.("ok", `native player loaded · file duration ${(el.duration || 0).toFixed(1)}s`);
@@ -126,9 +175,12 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     const reportTime = () => onTimeUpdate?.(el.currentTime);
     const tick = () => { rafId = 0; if (!playingRef.current) return; reportTime(); rafId = requestAnimationFrame(tick); };
     const startTick = () => { if (!rafId) rafId = requestAnimationFrame(tick); };
-    const onPlay  = () => { playingRef.current = true;  setIsPlaying(true);  onPlayStateChange?.(true); startTick(); };
+    // While scrubbing we pause/resume the element internally — don't surface
+    // those transitions to App, or the transport play/pause icon would flicker.
+    const onPlay  = () => { playingRef.current = true;  setIsPlaying(true);  if (!scrubbingRef.current) onPlayStateChange?.(true); startTick(); };
     const onPause = () => {
-      playingRef.current = false; setIsPlaying(false); onPlayStateChange?.(false);
+      playingRef.current = false; setIsPlaying(false);
+      if (!scrubbingRef.current) onPlayStateChange?.(false);
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     };
     const onTime  = () => reportTime(); // backstop while paused / on seek landing
@@ -152,7 +204,12 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
       if (shuttleTimerRef.current) { window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0; }
+      if (settleTimerRef.current) { window.clearTimeout(settleTimerRef.current); settleTimerRef.current = 0; }
       shuttleRateRef.current = 0;
+      // New source → reset scrub bookkeeping + the one-shot duration retry.
+      scrubbingRef.current = false;
+      wasPlayingRef.current = false;
+      retriedLoadRef.current = false;
       el.removeEventListener("loadedmetadata", onLoaded);
       el.removeEventListener("play",  onPlay);
       el.removeEventListener("pause", onPause);
