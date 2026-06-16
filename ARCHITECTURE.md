@@ -143,6 +143,25 @@ saucebunny-diarize --input audio.wav --output turns.json --backend speakerkit|fl
 
 This lets us swap backends without touching Rust or JS. The Swift sidecar is the abstraction boundary.
 
+## Voice dictation
+
+The Review composer's mic button turns speech into comment text, entirely on-device:
+
+```
+dictate_start ─► ffmpeg -f avfoundation -i :default → 16 kHz mono WAV
+              (registered in the JobRegistry under job_id; a detached
+               tokio task drains its output)
+dictate_stop  ─► JobRegistry::write_stdin(job_id, "q")   # graceful finalize
+              └► drain task: ffmpeg exits 0 → run ASR on the WAV
+                 (Parakeet if its model is present, else any Whisper model)
+              └► emit `dictate-done` { text, error, note }  → the composer
+```
+
+Key points:
+- **Capture is via ffmpeg, not the WebView's `getUserMedia`** (WKWebView's media-capture permission path is unreliable on this stack). `:default` selects the system default input — a bare `:0` would pick avfoundation device *index* 0 (often a capture card / virtual device).
+- **Graceful stop matters.** `dictate_stop` writes `q` to ffmpeg's stdin so it finalizes the WAV header; a `kill()`/SIGKILL would truncate it. `JobRegistry::write_stdin` exists for exactly this (it writes without removing the child, so the drain task still sees the clean exit). `cancel_job` (SIGKILL) is used only to discard a recording (e.g. the panel unmounts mid-record).
+- **Microphone permission** comes from `NSMicrophoneUsageDescription` in `src-tauri/Info.plist`, which the macOS bundler auto-merges into the generated plist (dev + `.dmg`). The ffmpeg child inherits the app's TCC grant. **Dev caveat:** a stale `tauri dev` binary (build-ID mismatch) or a denied TCC prompt makes capture fail — restart the dev build and allow the mic prompt when testing dictation.
+
 ## State management
 
 `App.tsx` owns most application state via `useState`. Preferences and history persist to `localStorage` under the `saucebunny.*` namespace:

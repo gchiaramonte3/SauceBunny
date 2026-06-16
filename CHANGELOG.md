@@ -5,6 +5,27 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Review workspace
+- Local-first review tab (Frame.io-style): timecoded threaded comments anchored
+  to the playhead with click-to-seek, resolve/reopen, edit, and replies, plus a
+  reviewer identity (name + pickable avatar colour). Timeline markers are tinted
+  to the reviewer's colour and expand to show initials on hover.
+- Freehand drawing annotations over the frame (perfect-freehand) saved per
+  comment and faded in as the playhead nears their timecode.
+- Past-reviews history + a content fingerprint (filename + duration + dimensions
+  + byte size) so reopening a clip you've reviewed before — even moved or renamed
+  — reloads its notes; distinct clips no longer collide.
+- Export to Markdown notes, a CSV marker sheet (formula-injection-safe), and a
+  CMX3600 EDL for Resolve/Premiere.
+
+### Voice dictation
+- Mic button in the review composer: records the system default input via the
+  bundled ffmpeg (avfoundation) and transcribes on-device with the active ASR
+  engine (Parakeet preferred, Whisper fallback), then drops the text into the
+  comment box. Recording stops gracefully (clean WAV finalize), caps at 5 min,
+  and is torn down if the panel closes. Requires microphone permission
+  (NSMicrophoneUsageDescription, supplied by `src-tauri/Info.plist`).
+
 ## [0.1.0] — first public release (in preparation)
 
 Everything below shipped during the pre-release arc (internal revisions
