@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { CollapsibleSection } from "./CollapsibleSection";
+import { GenerateButton } from "./GenerateButton";
 import {
   IconFilm, IconCaptions, IconReveal,
   IconDownload, IconSparkles, IconPlus,
@@ -390,21 +391,21 @@ export function Sidebar(props: Props) {
                       </select>
                     </label>
                   )}
-                  <button
-                    type="button"
-                    className="btn btn-ghost cp-source-action"
+                  <GenerateButton
+                    className="cp-source-action"
+                    loading={transcriptState === "running"}
+                    progress={transcriptProgress}
                     onClick={onGenerateTranscript}
                     disabled={transcriptState === "running"}
                     title={`Local Whisper transcription · model: ${whisperModelLabel ?? "?"}`}
-                  >
-                    <IconSparkles size={13} />
-                    {transcriptState === "running"
-                      ? phaseLabel(transcriptPhase, transcriptProgress)
-                      : transcriptState === "done"  ? "Generate transcript · run again"
+                    idleLabel={
+                      transcriptState === "done"  ? "Generate transcript · run again"
                       : transcriptState === "error" ? "Generate transcript · retry"
                       : detectSpeakers ? "Generate transcript + speakers"
-                      : "Generate transcript"}
-                  </button>
+                      : "Generate transcript"
+                    }
+                    loadingLabel={phaseLabel(transcriptPhase, transcriptProgress)}
+                  />
                   {transcriptState === "running" && transcriptPhase?.startsWith("diarize") && (
                     /* Mini phase tracker so the user sees we're past
                        Whisper even though the percent bar is pinned. */
