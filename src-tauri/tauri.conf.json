@@ -55,6 +55,11 @@
       "binaries/saucebunny-diarize",
       "binaries/llama-server"
     ],
+    "resources": {
+      "../LICENSE": "licenses/",
+      "../THIRD-PARTY-LICENSES.md": "licenses/",
+      "../licenses/GPLv3.txt": "licenses/"
+    },
     "macOS": {
       "minimumSystemVersion": "13.0",
       "entitlements": "entitlements.plist"

@@ -13,18 +13,31 @@ ships inside a released `.dmg`.
 
 ---
 
-## ⚠️ Bundled ffmpeg / ffprobe are GPL
+## ⚠️ Bundled ffmpeg / ffprobe are GPL — compliance terms
 
-The ffmpeg and ffprobe binaries are the **GPL** static builds from
+The ffmpeg and ffprobe binaries are the **GPLv3** static builds from
 [osxexperts.net](https://www.osxexperts.net/) (see `scripts/fetch-ffmpeg.sh` /
-`scripts/fetch-ffprobe.sh`). Because they are GPL-licensed and redistributed
-inside the released `.dmg`, that distribution must satisfy GPLv3 for the ffmpeg
-component: ship a copy of the GPLv3 text and provide the corresponding source
-(or a written offer for it). ffmpeg runs as an isolated subprocess, so it does
-**not** relicense Sauce Bunny's own MIT source — but anyone cutting a public
-release should either (a) keep the GPL build and meet the above obligation, or
-(b) switch `scripts/fetch-ffmpeg.sh` to an explicitly **LGPL** ffmpeg build
-(no `--enable-gpl` / `--enable-nonfree`) to avoid it. See
+`scripts/fetch-ffprobe.sh`). They run as isolated subprocesses, so they do
+**not** relicense Sauce Bunny's own MIT source. Because the GPL binaries are
+redistributed inside the released `.dmg`, that distribution complies with GPLv3
+as follows:
+
+- **License text** — the full GNU GPL v3 ships with the app at
+  `Sauce Bunny.app/Contents/Resources/licenses/GPLv3.txt` (source:
+  [`licenses/GPLv3.txt`](licenses/GPLv3.txt)) and a copy of this notice ships
+  alongside it.
+- **Written offer for corresponding source (GPLv3 §6)** — the complete
+  corresponding source for the bundled ffmpeg/ffprobe and their GPL-licensed
+  dependencies is published by the FFmpeg project at
+  [ffmpeg.org/download.html](https://ffmpeg.org/download.html) (and the
+  respective upstreams). For the exact version bundled in a given release (the
+  build version is recorded by `scripts/fetch-ffmpeg.sh` at fetch time), a copy
+  of that corresponding source is available for at least three years on request
+  by opening an issue at
+  [github.com/gchiaramonte3/SauceBunny/issues](https://github.com/gchiaramonte3/SauceBunny/issues).
+
+To avoid the GPL obligation entirely, switch `scripts/fetch-ffmpeg.sh` to an
+explicitly **LGPL** ffmpeg build (no `--enable-gpl` / `--enable-nonfree`); see
 [ffmpeg.org/legal.html](https://ffmpeg.org/legal.html).
 
 ---

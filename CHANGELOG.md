@@ -5,6 +5,12 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+_Nothing yet — 0.1.0 is the current release._
+
+## [0.1.0] — 2026-06-16
+
+First public release of Sauce Bunny. Highlights, grouped by area (newest first):
+
 ### UI polish
 - URL bar focus is now a subtle neutral edge instead of a saturated accent
   outline.
@@ -16,7 +22,10 @@ All notable changes to Sauce Bunny. Format loosely follows
 ### Docs & licensing
 - Added `THIRD-PARTY-LICENSES.md` disclosing every bundled binary, library,
   font, and runtime-downloaded model and its license (notably: the bundled
-  ffmpeg is a GPL build), linked from the README.
+  ffmpeg is a GPL build), linked from the README. The released `.dmg` now ships
+  the project MIT license, this notice, and the full GPLv3 text under
+  `Resources/licenses/`, with a written offer for the ffmpeg corresponding
+  source — satisfying GPLv3 for the bundled ffmpeg/ffprobe.
 - Truth-up of ARCHITECTURE/CONTRIBUTING/SECURITY: six sidecars (llama-server
   was undocumented), the `commands/` module split, and removal of the stale
   `commands.rs` / `docs/` references.
@@ -44,10 +53,7 @@ All notable changes to Sauce Bunny. Format loosely follows
   and is torn down if the panel closes. Requires microphone permission
   (NSMicrophoneUsageDescription, supplied by `src-tauri/Info.plist`).
 
-## [0.1.0] — first public release (in preparation)
-
-Everything below shipped during the pre-release arc (internal revisions
-r1–r86). Highlights, newest first:
+### Pre-release arc (internal revisions r1–r86)
 
 ### Web playback & captions
 - Instant streaming playback for web sources: loopback proxy → ffmpeg
