@@ -354,10 +354,7 @@ export function Sidebar(props: Props) {
                       disabled={transcriptState === "running"}
                     />
                     <span className="lbl">
-                      Detect speakers <span className="beta">beta</span>
-                      {diarizerReady && detectSpeakers && (
-                        <span className="cp-hint-ok" title="Models cached locally — no first-run download">✓ cached</span>
-                      )}
+                      Detect speakers
                     </span>
                   </label>
                   {detectSpeakers && (

@@ -3492,6 +3492,7 @@ export default function App() {
             transcriptState={transcriptState}
             transcriptProgress={transcriptProgress}
             transcriptPhase={transcriptPhase}
+            transcriptEngine={defaults.transcriptionEngine === "parakeet" ? "parakeet" : "whisper"}
             metadataLoading={metadataLoading}
             playbackPrepBusy={playbackPrepBusy}
             canStop={status === "exporting" || transcriptState === "running" || playbackPrepBusy}

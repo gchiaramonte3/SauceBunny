@@ -17,6 +17,9 @@ type Props = {
    *  "DOWNLOADING" during the audio pull and "WHISPER" during transcription
    *  (both share transcriptState === "running"). */
   transcriptPhase?: string | null;
+  /** Active ASR engine — so the pill says "TRANSCRIBING" (Parakeet, one-shot,
+   *  no %) vs "WHISPER · NN%" rather than defaulting everything to Whisper. */
+  transcriptEngine?: "whisper" | "parakeet";
   /**
    * Background phases that show in the pipeline pill without blocking the
    * canvas. metadataLoading = yt-dlp still resolving manifests after the
@@ -41,19 +44,26 @@ function pillFor(status: AppStatus): { label: string; cls: string } {
   }
 }
 
-function transcriptPillLabel(phase: string | null | undefined, pct: number): string {
+function transcriptPillLabel(
+  phase: string | null | undefined, pct: number, engine?: "whisper" | "parakeet",
+): string {
   switch (phase) {
-    case "download":        return `DOWNLOADING · ${pct}%`;
-    case "diarize-prepare": return "LOADING SPEAKERS";
-    case "diarize-process": return "DETECTING SPEAKERS";
-    case "diarize-merge":   return "MERGING SPEAKERS";
-    default:                return `WHISPER · ${pct}%`;
+    case "download":          return `DOWNLOADING · ${pct}%`;
+    case "diarize-prepare":   return "LOADING SPEAKERS";
+    case "diarize-process":   return "DETECTING SPEAKERS";
+    case "diarize-merge":     return "MERGING SPEAKERS";
+    case "parakeet-download": return `DOWNLOADING MODEL · ${pct}%`;
+    case "parakeet-load":     return "LOADING PARAKEET";
+    case "parakeet":          return "TRANSCRIBING";
   }
+  // No explicit stage yet (startup window) — label by engine. Parakeet is
+  // one-shot (no per-segment %), so it gets a plain "TRANSCRIBING".
+  return engine === "parakeet" ? "TRANSCRIBING" : `WHISPER · ${pct}%`;
 }
 
 export function LogsPanel({
   open, onToggle, status, progress, lines, onClear, onCopy,
-  transcriptState, transcriptProgress, transcriptPhase,
+  transcriptState, transcriptProgress, transcriptPhase, transcriptEngine,
   metadataLoading, playbackPrepBusy,
   canStop, onStop,
 }: Props) {
@@ -75,13 +85,17 @@ export function LogsPanel({
   const pill = status === "exporting"
     ? { label: `EXPORTING · ${Math.round(progress)}%`, cls: "working" }
     : whisperRunning
-      ? { label: transcriptPillLabel(transcriptPhase, Math.round(transcriptProgress ?? 0)), cls: "working" }
+      ? { label: transcriptPillLabel(transcriptPhase, Math.round(transcriptProgress ?? 0), transcriptEngine), cls: "working" }
       : playbackPrepBusy
         ? { label: "PREPARING PLAYBACK", cls: "working" }
         : metadataLoading
           ? { label: "RESOLVING METADATA", cls: "working" }
           : pillFor(status);
-  const showProgress = whisperRunning || status === "exporting";
+  // Parakeet is one-shot (no per-segment %), so don't show a pinned 0% bar for
+  // it — except the model download, which does report bytes. Whisper + export
+  // keep their real progress bars.
+  const parakeetNoPct = transcriptEngine === "parakeet" && transcriptPhase !== "parakeet-download";
+  const showProgress = (whisperRunning && !parakeetNoPct) || status === "exporting";
   const shownProgress = whisperRunning ? (transcriptProgress ?? 0) : progress;
 
   return (
