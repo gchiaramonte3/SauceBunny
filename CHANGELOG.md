@@ -31,6 +31,9 @@ First public release of Sauce Bunny. Highlights, grouped by area (newest first):
   `commands.rs` / `docs/` references.
 - Untracked the machine-local `.claude/settings.local.json` (it was committed
   before the ignore rule and leaked local absolute paths).
+- README: CI/license/platform badges, feature list brought up to the shipped
+  set (AI Summary, Review workspace, voice dictation), real clone URL, and a
+  Development section with the pre-PR gate.
 
 ### Review workspace
 - Local-first review tab (Frame.io-style): timecoded threaded comments anchored

@@ -1,5 +1,10 @@
 # Sauce Bunny 🐰
 
+[![CI](https://github.com/gchiaramonte3/SauceBunny/actions/workflows/ci.yml/badge.svg)](https://github.com/gchiaramonte3/SauceBunny/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platform: macOS 13+ · Apple Silicon](https://img.shields.io/badge/platform-macOS%2013%2B%20·%20Apple%20Silicon-black)
+![Built with Tauri 2 · React 18](https://img.shields.io/badge/built%20with-Tauri%202%20·%20React%2018-24C8DB)
+
 **Local-first macOS app for pulling, transcribing, and clipping video — no cloud, no accounts, no telemetry.**
 
 Paste a URL (YouTube, Vimeo, TikTok, X, Reddit, Instagram, or any page with embedded video) or import a local file. Watch it instantly, mark in/out points frame-accurately, export lossless clips or MP3s, and generate speaker-labeled transcripts — everything runs on your machine.
@@ -10,8 +15,10 @@ Paste a URL (YouTube, Vimeo, TikTok, X, Reddit, Instagram, or any page with embe
 - **Transcription** — local Whisper (whisper.cpp) with downloadable models, or pull the source's own captions in one click. Captions stay locked to the audio you hear — the streamed video is the single clock for audio, picture, and captions; a "Fix timing with Whisper" button re-times loose YouTube auto-captions.
 - **Speaker diarization** — on-device speaker detection (SpeakerKit, FluidAudio fallback) with a full speaker editor: rename, drag-to-merge, per-turn overrides, color-coded roster.
 - **Transcript workspace** — searchable karaoke-highlighted reader, click any line to jump the video, pop it out to its own floating window, export TXT/MD/SRT/PDF.
+- **AI Summary** — a local LLM (llama.cpp) summarizes the transcript on-device, speaker-aware, with clickable timecodes that jump the video.
+- **Review workspace** — Frame.io-style timecoded threaded comments, freehand frame annotations, and on-device **voice dictation** (mic → text); export notes to Markdown, a CSV marker sheet, or a CMX3600 EDL.
 - **Clip export** — lossless cuts or re-encodes, full-clip or marked range, MP3 audio export, an export queue, on-video captions drawn from your transcript.
-- **Command palette** (⌘K), customizable defaults, dark editorial UI.
+- **Command palette** (⌘K), rebindable shortcuts, customizable defaults, dark editorial UI.
 
 ## Privacy & local-first
 
@@ -26,7 +33,7 @@ Use it on content you have the rights to clip.
 Grab the notarized `.dmg` from [Releases](../../releases) — or build from source:
 
 ```bash
-git clone <repo-url> "Sauce Bunny"
+git clone https://github.com/gchiaramonte3/SauceBunny.git "Sauce Bunny"
 cd "Sauce Bunny"
 npm install
 npm run setup        # fetches/builds the sidecar binaries (one-time)
@@ -35,9 +42,31 @@ npm run tauri dev
 
 Build prerequisites: Xcode Command Line Tools, Rust 1.77+, Node 20+, Swift 5.9+. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full dev guide.
 
+## Development
+
+```bash
+npm run tauri dev        # run the app — hot-reload frontend + Rust
+npm test                 # vitest: SRT/timecode/proxy/validation units
+npm run check:release    # audit sidecars + entitlements + signing before a build
+```
+
+Before opening a PR, run the full gate (CI runs the same on every push):
+
+```bash
+npx tsc --noEmit                                              # types
+npm test                                                     # frontend units
+( cd src-tauri && cargo check && cargo test --lib && cargo clippy --lib )
+( cd swift-sidecar && swift build )                          # diarizer
+```
+
+`cargo test --lib` also regenerates the `ts-rs` TypeScript bindings in
+`src/bindings/` from the Rust structs — keep it green when you touch a
+cross-boundary type. Architecture tour: [ARCHITECTURE.md](ARCHITECTURE.md);
+engineering rules: [CLAUDE.md](CLAUDE.md).
+
 ## How it works
 
-Tauri 2 shell (Rust) + React 18 frontend in WKWebView. Media work is done by bundled, self-contained sidecars — yt-dlp, ffmpeg/ffprobe, whisper.cpp, and our own Swift diarizer — orchestrated by thin Rust commands (argument arrays, never shell strings). Web playback streams through a token-gated `127.0.0.1` proxy that remuxes to fragmented MP4 for MSE (the only path WKWebView plays web video with sound). The full tour lives in [ARCHITECTURE.md](ARCHITECTURE.md); the project's engineering rules live in [CLAUDE.md](CLAUDE.md).
+Tauri 2 shell (Rust) + React 18 frontend in WKWebView. Media and ML work is done by bundled, self-contained sidecars — yt-dlp, ffmpeg/ffprobe, whisper.cpp, llama.cpp (the AI Summary's local LLM, served over a token-gated loopback port), and our own Swift diarizer — orchestrated by thin Rust commands (argument arrays, never shell strings). Web playback streams through a token-gated `127.0.0.1` proxy that remuxes to fragmented MP4 for MSE (the only path WKWebView plays web video with sound). The full tour lives in [ARCHITECTURE.md](ARCHITECTURE.md); the project's engineering rules live in [CLAUDE.md](CLAUDE.md).
 
 ## Contributing
 
