@@ -26,17 +26,17 @@ What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Ever
 ├── src-tauri/                 # Rust backend (Tauri shell + sidecar orchestration)
 │   ├── src/
 │   │   ├── lib.rs             # Tauri command registration + cache-sweep startup hook
-│   │   ├── main.rs            # 5-line entrypoint
-│   │   └── commands.rs        # All Tauri commands (~4k lines; split is on the roadmap)
-│   ├── binaries/              # Bundled sidecar executables
+│   │   ├── main.rs            # tiny entrypoint shim → sauce_bunny_lib::run()
+│   │   ├── commands/          # Tauri commands by domain (download, media, transcript, system, llm)
+│   │   └── stream_proxy.rs    # loopback fMP4 media proxy for web playback
+│   ├── binaries/              # Bundled sidecar executables (gitignored; fetched by `npm run setup`)
 │   ├── capabilities/          # Tauri permission lists
 │   └── tauri.conf.json        # Bundle config + window settings
 ├── swift-sidecar/             # Swift package that builds saucebunny-diarize
 │   ├── Package.swift
 │   └── Sources/saucebunny-diarize/main.swift
 ├── scripts/                   # Build + maintenance scripts
-├── .github/                   # Issue templates + CI workflow
-└── docs/                      # Per-feature deep dives (sidecars, diarization, …)
+└── .github/                   # Issue templates + CI workflow
 ```
 
 ## Data flow
@@ -110,7 +110,7 @@ Generate transcript:
 
 ## Sidecars
 
-Five executables ship in `src-tauri/binaries/`, using the platform-tuple naming convention (`<name>-aarch64-apple-darwin`). The app invokes `yt-dlp`, `ffmpeg`, `whisper-cli`, and `saucebunny-diarize` directly (via `app.shell().sidecar(name)` / a resolved path). `ffprobe` is the exception — the app never spawns it; it ships beside `ffmpeg` so yt-dlp can discover it (yt-dlp derives `ffprobe-<triple>` from the `--ffmpeg-location` path it's given).
+Six executables ship in `src-tauri/binaries/`, using the platform-tuple naming convention (`<name>-aarch64-apple-darwin`). The app invokes `yt-dlp`, `ffmpeg`, `whisper-cli`, `saucebunny-diarize`, and `llama-server` directly (via `app.shell().sidecar(name)` / a resolved path). `ffprobe` is the exception — the app never spawns it; it ships beside `ffmpeg` so yt-dlp can discover it (yt-dlp derives `ffprobe-<triple>` from the `--ffmpeg-location` path it's given).
 
 | Sidecar | What it does | Where it comes from |
 |---|---|---|
@@ -119,6 +119,7 @@ Five executables ship in `src-tauri/binaries/`, using the platform-tuple naming 
 | `ffprobe` | yt-dlp's HLS fixup (`aac_adtstoasc`) + media metadata. Not spawned by the app — found by yt-dlp beside ffmpeg. | ffmpeg.martin-riedl.de static arm64 build via `npm run refresh:ffprobe`. Required for playable HLS/live downloads. |
 | `whisper-cli` | Whisper.cpp speech-to-text | Build whisper.cpp from source, copy the `whisper-cli` binary. Stable. |
 | `saucebunny-diarize` | Speaker diarization (SpeakerKit primary, FluidAudio fallback) | Built locally via `npm run build:diarizer`. We own this code (`swift-sidecar/`). |
+| `llama-server` | Local LLM for the AI Summary tab (loopback HTTP, token-gated) | Build llama.cpp from source via `npm run build:llama`. Static + Metal. |
 
 ## Diarizer architecture
 

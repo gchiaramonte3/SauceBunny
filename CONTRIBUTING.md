@@ -13,7 +13,7 @@ From a clean machine:
 git clone <repo-url> "Sauce Bunny"
 cd "Sauce Bunny"
 npm install
-npm run setup       # fetch/build all five sidecar binaries (one-time)
+npm run setup       # fetch/build all six sidecar binaries (one-time)
 npm run tauri dev
 ```
 
@@ -37,10 +37,10 @@ sidecar for diarization. Read `ARCHITECTURE.md` for the full tour with a
 data-flow diagram.
 
 Sidecar binaries are **not** checked into git (they were ~150 MB of blobs).
-`npm run setup` assembles all five into `src-tauri/binaries/`: yt-dlp, ffmpeg,
-and ffprobe are downloaded as static builds; whisper-cli is compiled from
-whisper.cpp source; `saucebunny-diarize` is ours — its source lives in
-`swift-sidecar/` and builds via `npm run build:diarizer`. Every install path
+`npm run setup` assembles all six into `src-tauri/binaries/`: yt-dlp, ffmpeg,
+and ffprobe are downloaded as static builds; whisper-cli and llama-server are
+compiled from whisper.cpp / llama.cpp source; `saucebunny-diarize` is ours — its
+source lives in `swift-sidecar/` and builds via `npm run build:diarizer`. Every install path
 runs an `otool -L` guard that refuses binaries with non-system dylib
 references, so what you bundle runs on any Mac.
 

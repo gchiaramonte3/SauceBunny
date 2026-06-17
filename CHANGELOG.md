@@ -5,6 +5,24 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### UI polish
+- URL bar focus is now a subtle neutral edge instead of a saturated accent
+  outline.
+- The pipeline pill reads accurately per ASR engine — Parakeet shows
+  "TRANSCRIBING" (one-shot, no spurious 0%) rather than "WHISPER · 0%".
+- "Detect speakers" row trimmed: dropped the "beta" tag and the "✓ cached"
+  indicator.
+
+### Docs & licensing
+- Added `THIRD-PARTY-LICENSES.md` disclosing every bundled binary, library,
+  font, and runtime-downloaded model and its license (notably: the bundled
+  ffmpeg is a GPL build), linked from the README.
+- Truth-up of ARCHITECTURE/CONTRIBUTING/SECURITY: six sidecars (llama-server
+  was undocumented), the `commands/` module split, and removal of the stale
+  `commands.rs` / `docs/` references.
+- Untracked the machine-local `.claude/settings.local.json` (it was committed
+  before the ignore rule and leaked local absolute paths).
+
 ### Review workspace
 - Local-first review tab (Frame.io-style): timecoded threaded comments anchored
   to the playhead with click-to-seek, resolve/reopen, edit, and replies, plus a

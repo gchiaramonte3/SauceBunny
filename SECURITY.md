@@ -37,7 +37,8 @@ transmits them. Turning the setting to "none" disables this entirely.
 
 ### 3. Bundled sidecar binaries
 
-yt-dlp, ffmpeg, ffprobe, whisper-cli, and saucebunny-diarize run as
+yt-dlp, ffmpeg, ffprobe, whisper-cli, saucebunny-diarize, and llama-server
+(loopback HTTP for the AI Summary tab, token-gated) run as
 subprocesses with argument arrays (never shell strings). They are
 self-contained static builds; the fetch/build scripts enforce with `otool -L`
 that no binary references non-system dylib paths. Sidecars are spawned only

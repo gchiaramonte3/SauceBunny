@@ -7,7 +7,7 @@ Paste a URL (YouTube, Vimeo, TikTok, X, Reddit, Instagram, or any page with embe
 ## Features
 
 - **Instant web playback** — streams web sources straight into the player (no full download wait) via a loopback ffmpeg→MSE pipeline, with an automatic download-to-cache fallback. Seek anywhere; J-K-L shuttle; frame-accurate scrubbing with a WebCodecs preview.
-- **Transcription** — local Whisper (whisper.cpp) with downloadable models, or pull the source's own captions in one click. Captions stay locked to the audio you hear via an audio-master clock; a "Fix timing with Whisper" button re-times loose YouTube auto-captions.
+- **Transcription** — local Whisper (whisper.cpp) with downloadable models, or pull the source's own captions in one click. Captions stay locked to the audio you hear — the streamed video is the single clock for audio, picture, and captions; a "Fix timing with Whisper" button re-times loose YouTube auto-captions.
 - **Speaker diarization** — on-device speaker detection (SpeakerKit, FluidAudio fallback) with a full speaker editor: rename, drag-to-merge, per-turn overrides, color-coded roster.
 - **Transcript workspace** — searchable karaoke-highlighted reader, click any line to jump the video, pop it out to its own floating window, export TXT/MD/SRT/PDF.
 - **Clip export** — lossless cuts or re-encodes, full-clip or marked range, MP3 audio export, an export queue, on-video captions drawn from your transcript.
@@ -45,4 +45,4 @@ PRs welcome — read [CONTRIBUTING.md](CONTRIBUTING.md) first (setup, checks, co
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Sauce Bunny bundles third-party binaries (yt-dlp, ffmpeg, whisper.cpp, llama.cpp, …) and libraries under their own licenses — see [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md). Note the bundled ffmpeg is a **GPL** build; review that file before cutting a public release.
