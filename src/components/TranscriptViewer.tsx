@@ -3,24 +3,26 @@ import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { IconReveal, IconAlert, IconChevronDown } from "./Icons";
 import { parseSrt, groupIntoTurns, fmtTime, type Turn } from "../lib/srt";
+import { secondsToTc } from "../lib/timecode";
+import { formatError } from "../lib/error-format";
 import {
   getHistory,
   removeEntry,
   type TranscriptHistoryEntry,
 } from "../lib/transcript-history";
 import { RenamePopover, type RenameState } from "./transcript/RenamePopover";
-import {
-  MergeConfirmPopover,
-  type MergeConfirmState,
-} from "./transcript/MergeConfirmPopover";
+import { SpeakerRosterModal } from "./transcript/SpeakerRosterModal";
+import { SpeakerColorPicker } from "./SpeakerColorPicker";
 import { HistoryPopover } from "./transcript/HistoryPopover";
 import {
   escapeHtml,
   highlightMatch,
-  humaniseSpeakerTag,
+  humanizeSpeakerTag,
   resolveAliasChain,
   speakerColor,
+  speakerTextColor,
   speakerInitials,
+  SPEAKERS_CHANGED_EVENT,
 } from "./transcript/helpers";
 
 type Props = {
@@ -29,6 +31,10 @@ type Props = {
    * empty state. When changed, we reload + reparse.
    */
   path: string | null;
+  /** Bumped by App on every transcript arrival. Regenerate / Fix-timing
+   *  overwrite the SAME path, so this is what forces a re-read of the file
+   *  when only its contents changed. Optional: the popped-out panel omits it. */
+  reloadToken?: number;
   /**
    * Current playhead position in seconds. Drives the karaoke highlight.
    * Pass `null` when no source is loaded.
@@ -57,6 +63,11 @@ type Props = {
    * to hunt back to the Sidebar for the Generate button.
    */
   onRegenerate: () => void;
+  /** Re-run ONLY speaker diarization on the current transcript (no Whisper
+   *  re-run) — fast on long sources. Optional: omitted on the pop-out panel. */
+  onRedetectSpeakers?: () => void;
+  /** True when re-detecting speakers is possible (a transcript + a source). */
+  canRedetect?: boolean;
   /** Open a .srt / .vtt from disk into the viewer (and add to history). */
   onImportTranscript: () => void;
   /**
@@ -70,6 +81,19 @@ type Props = {
    * visible — in that case the button hides rather than failing.
    */
   canRegenerate: boolean;
+  /**
+   * Frame rate of the loaded source, so the per-turn timestamps render in
+   * the same SMPTE HH:MM:SS:FF the player/transport show. Falls back to 30
+   * when no source is loaded (an imported transcript with no video).
+   */
+  fps?: number;
+  /** r84: source kind — the "fix caption timing" banner only applies to web
+   *  sources (YouTube auto-caption ASR timing is the loose case). */
+  sourceKind?: "youtube" | "file";
+  /** r84: re-time the loose YouTube captions with Whisper (full range, reusing
+   *  the cached audio). When omitted (e.g. the popped-out panel), the banner
+   *  is hidden rather than showing a dead button. */
+  onFixCaptionTiming?: () => void;
 };
 
 /**
@@ -88,10 +112,11 @@ type Props = {
  * etc. The rename UI works identically in both worlds.
  */
 export function TranscriptViewer({
-  path, playheadSeconds, onSeek, origin: _origin,
+  path, reloadToken, playheadSeconds, onSeek, origin,
   onClearTranscript, onLoadFromHistory,
-  onRegenerate, regenerateBusy, canRegenerate,
-  onImportTranscript,
+  onRegenerate, regenerateBusy, canRegenerate, fps = 30,
+  onRedetectSpeakers, canRedetect,
+  onImportTranscript, sourceKind, onFixCaptionTiming,
 }: Props) {
   const [raw, setRaw] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -117,13 +142,14 @@ export function TranscriptViewer({
     global: Record<string, string>;
     turn: Record<string, string>;
     aliases: Record<string, string>;
+    colors: Record<string, string>; // canonical tag → custom hex pip colour
   };
   const storageKey = path ? `saucebunny.speakerNames.${path}` : null;
-  const [overrides, setOverrides] = useState<Overrides>({ global: {}, turn: {}, aliases: {} });
+  const [overrides, setOverrides] = useState<Overrides>({ global: {}, turn: {}, aliases: {}, colors: {} });
 
   // Load overrides when the path changes.
   useEffect(() => {
-    if (!storageKey) { setOverrides({ global: {}, turn: {}, aliases: {} }); return; }
+    if (!storageKey) { setOverrides({ global: {}, turn: {}, aliases: {}, colors: {} }); return; }
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
@@ -133,27 +159,42 @@ export function TranscriptViewer({
           global:  typeof parsed.global  === "object" && parsed.global  ? parsed.global  : {},
           turn:    typeof parsed.turn    === "object" && parsed.turn    ? parsed.turn    : {},
           aliases: typeof parsed.aliases === "object" && parsed.aliases ? parsed.aliases : {},
+          colors:  typeof parsed.colors  === "object" && parsed.colors  ? parsed.colors  : {},
         });
       } else {
-        setOverrides({ global: {}, turn: {}, aliases: {} });
+        setOverrides({ global: {}, turn: {}, aliases: {}, colors: {} });
       }
     } catch {
-      setOverrides({ global: {}, turn: {}, aliases: {} });
+      setOverrides({ global: {}, turn: {}, aliases: {}, colors: {} });
     }
   }, [storageKey]);
 
-  // Persist on every change. Skip the no-op (empty + key absent) write.
+  // The storageKey the persist effect last ran against. CRITICAL: on the render
+  // where the key CHANGES (source swap, or the popped-out window mounting and
+  // receiving its path), `overrides` still holds the OLD value while the load
+  // effect above repopulates it this same commit. Persisting here would write
+  // that stale (usually empty) value — and because both app windows share
+  // localStorage, that empties out a sibling window's saved speaker names (the
+  // "pop out → close → names reset" bug). So we skip the write on the
+  // key-change render and only persist real edits made against a loaded key.
+  const persistKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!storageKey) return;
+    if (!storageKey) { persistKeyRef.current = storageKey; return; }
+    if (persistKeyRef.current !== storageKey) { persistKeyRef.current = storageKey; return; }
     const empty = Object.keys(overrides.global).length === 0
                && Object.keys(overrides.turn).length === 0
-               && Object.keys(overrides.aliases).length === 0;
+               && Object.keys(overrides.aliases).length === 0
+               && Object.keys(overrides.colors).length === 0;
     if (empty) {
       localStorage.removeItem(storageKey);
     } else {
       try { localStorage.setItem(storageKey, JSON.stringify(overrides)); } catch { /* quota */ }
     }
-  }, [storageKey, overrides]);
+    // Tell live consumers (the on-video caption overlay) to re-read, so a
+    // rename shows up on the video immediately. Same-window: the native
+    // `storage` event won't fire here, so we dispatch our own.
+    window.dispatchEvent(new CustomEvent(SPEAKERS_CHANGED_EVENT, { detail: { path } }));
+  }, [storageKey, overrides, path]);
 
   /**
    * Walk the alias chain to find the canonical tag a speaker should
@@ -170,6 +211,10 @@ export function TranscriptViewer({
   }, [overrides.aliases]);
 
   // ── Load the file whenever the path changes ──────────────────────
+  // `reloadToken` is also a dep: Regenerate / Fix-timing overwrite the SAME
+  // .srt path, so a path-only key would keep showing the old transcript after
+  // a "Transcript ready" — the user would wait through a whole Whisper run and
+  // see nothing change. App bumps the token on every transcript arrival.
   useEffect(() => {
     let cancelled = false;
     if (!path) {
@@ -194,7 +239,7 @@ export function TranscriptViewer({
       }
     })();
     return () => { cancelled = true; };
-  }, [path]);
+  }, [path, reloadToken]);
 
   // ── Parse + group whenever the raw text changes ──────────────────
   const turns: Turn[] = useMemo(() => {
@@ -208,18 +253,25 @@ export function TranscriptViewer({
   );
 
   // ── Active row from playhead ─────────────────────────────────────
+  // Click-to-jump seeks to cue.start, but App floors seconds→frames, landing
+  // the playhead up to one frame BEFORE the cue begins. Without tolerance the
+  // search then reads `playhead < cue.start` and snaps to the PREVIOUS cue —
+  // at a turn boundary that's the prior speaker's last line ("click 'Know',
+  // highlights 'Let's roll it.'"). Snap a playhead within one frame of a cue's
+  // start up to that cue so the clicked chunk is the one selected.
   const activeCueIdx = useMemo(() => {
     if (playheadSeconds == null || flatCues.length === 0) return -1;
+    const eps = 1 / Math.max(1, Math.round(fps)); // one frame, in seconds
     let lo = 0, hi = flatCues.length - 1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
       const c = flatCues[mid].cue;
-      if (playheadSeconds < c.start) hi = mid - 1;
+      if (playheadSeconds < c.start - eps) hi = mid - 1;
       else if (playheadSeconds > c.end) lo = mid + 1;
       else return mid;
     }
     return Math.max(-1, hi);
-  }, [playheadSeconds, flatCues]);
+  }, [playheadSeconds, flatCues, fps]);
 
   useEffect(() => {
     if (!autoScroll || activeCueIdx < 0 || !scrollRef.current) return;
@@ -234,6 +286,15 @@ export function TranscriptViewer({
     if (delta > 80) setAutoScroll(false);
   }
 
+  // True when at least one turn carries a real (non-null) speaker tag. When so,
+  // a turn the diarizer left UNassigned (null tag) reads "Unknown speaker"
+  // instead of a bare "Speaker" that looks like a numbered peer. For a fully
+  // un-diarized transcript this is false → plain "Speaker" (and chips are hidden).
+  const hasIdentifiedSpeakers = useMemo(
+    () => turns.some((t) => resolveAlias(t.speaker) != null),
+    [turns, resolveAlias],
+  );
+
   // ── Speaker display name resolution ──────────────────────────────
   // Hoisted above the search block (r43) so `matches` in speaker mode
   // can call it. The full block (rename + merge + roster) still lives
@@ -245,11 +306,12 @@ export function TranscriptViewer({
     const tagKey = resolved ?? "__NULL__";
     const globalOverride = overrides.global[tagKey];
     if (globalOverride) return globalOverride;
-    // Humanise the model-emitted tag for display. SPEAKER_00 → Speaker 1
+    // Humanize the model-emitted tag for display. SPEAKER_00 → Speaker 1
     // (1-indexed, since humans don't say "speaker zero"). Custom tags
-    // (already-renamed, or non-diarized null) pass through unchanged.
-    return humaniseSpeakerTag(resolved);
-  }, [overrides, resolveAlias]);
+    // (already-renamed, or non-diarized null) pass through unchanged. A
+    // null tag amid real speakers → "Unknown speaker" (the diarizer skipped it).
+    return humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers });
+  }, [overrides, resolveAlias, hasIdentifiedSpeakers]);
 
   // ── Search ──────────────────────────────────────────────────────
   // Two modes today:
@@ -354,6 +416,7 @@ export function TranscriptViewer({
         global:  { ...prev.global },
         turn:    { ...prev.turn },
         aliases: { ...prev.aliases, [sourceTag]: canonicalTarget },
+        colors:  { ...prev.colors },
       };
       // Drop a now-unused global rename on the source (its tag
       // resolves elsewhere, so the rename would never display anyway).
@@ -362,21 +425,38 @@ export function TranscriptViewer({
     });
   }, []);
 
-  const unmergeSpeaker = useCallback((sourceTag: string) => {
+  // Global rename keyed on the canonical (alias-resolved) tag — the form the
+  // roster already exposes as `tag`. Used by the Speakers modal. ("Speaker"
+  // sentinel = the untagged group → the "__NULL__" override key.)
+  const renameSpeaker = useCallback((canonicalTag: string, name: string) => {
+    const trimmed = name.trim();
+    const key = canonicalTag === "Speaker" ? "__NULL__" : canonicalTag;
+    const resolved = key === "__NULL__" ? null : key;
     setOverrides((prev) => {
-      if (!prev.aliases[sourceTag]) return prev;
-      const next = { ...prev, aliases: { ...prev.aliases } };
-      delete next.aliases[sourceTag];
+      const next: Overrides = {
+        global: { ...prev.global }, turn: { ...prev.turn }, aliases: { ...prev.aliases }, colors: { ...prev.colors },
+      };
+      if (trimmed && trimmed !== humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers })) {
+        next.global[key] = trimmed;
+      } else {
+        delete next.global[key];
+      }
       return next;
     });
-  }, []);
+  }, [hasIdentifiedSpeakers]);
 
   // ── Roster: unique speakers (post-alias) + their stats ──────────
   // Used by the roster panel above the transcript body AND drives the
   // drop-target set for the drag-to-merge interaction.
   type RosterEntry = {
-    /** Canonical tag — after alias resolution. */
+    /** Canonical tag — after alias resolution. The untagged group uses the
+     *  literal "Speaker" sentinel (can't key a Map on null). */
     tag: string;
+    /** Null-preserving resolved tag used ONLY for colour, so the roster pip
+     *  matches the turn-bubble + caption hue for the SAME speaker. The bubble
+     *  colours from resolveAlias(speaker) (null for untagged); keying colour
+     *  off `tag` instead would hash the "Speaker" sentinel to a different hue. */
+    colorTag: string | null;
     /** Display name (after rename). */
     name: string;
     /** Number of turns assigned to this canonical tag. */
@@ -393,12 +473,19 @@ export function TranscriptViewer({
     const orderMap = new Map<string, number>();
     for (let ti = 0; ti < turns.length; ti++) {
       const t = turns[ti];
-      const canonical = resolveAlias(t.speaker) ?? "Speaker";
+      const resolved = resolveAlias(t.speaker);
+      const canonical = resolved ?? "Speaker";
       let entry = byCanonical.get(canonical);
       if (!entry) {
         entry = {
           tag: canonical,
-          name: displayNameFor(ti, t.speaker),
+          colorTag: resolved,
+          // Global rename or the humanized default — NOT displayNameFor, which
+          // applies per-turn overrides first: a one-off rename on the group's
+          // first turn would mislabel the whole roster chip (and the
+          // merge-confirm dialog) with that turn's name.
+          name: overrides.global[resolved ?? "__NULL__"]
+            ?? humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers }),
           turnCount: 0,
           sourceTags: [],
         };
@@ -413,19 +500,41 @@ export function TranscriptViewer({
     const list = Array.from(byCanonical.values());
     list.sort((a, b) => (orderMap.get(a.tag)! - orderMap.get(b.tag)!));
     return list;
-  }, [turns, resolveAlias, displayNameFor]);
+  }, [turns, resolveAlias, overrides.global, hasIdentifiedSpeakers]);
 
-  // Drag-to-merge: track the dragged source tag in a ref so handlers
-  // can read it inside React without re-render thrash. Hover state
-  // for visual feedback lives in component state.
-  const dragTagRef = useRef<string | null>(null);
-  const [dragHoverTag, setDragHoverTag] = useState<string | null>(null);
+  // True when the transcript actually carries speaker identity — either
+  // more than one speaker, or a single one that's been labeled (not the
+  // generic fallback "Speaker"). When false (un-diarized whisper output,
+  // or a caption file with no <v> voice tags) we drop the repeated
+  // "Speaker" chip above every bubble and render clean reading prose with
+  // just a quiet paragraph timestamp — the chip was pure noise there, and
+  // the user called it out as bad UX ("Speaker above the other text").
+  const hasRealSpeakers =
+    roster.length > 1 || (roster.length === 1 && roster[0].tag !== "Speaker");
 
-  // Merge-confirm popover — opens at the drop site when the user
-  // releases a chip on top of another. Confirmed merges call
-  // mergeSpeaker; cancellation just dismisses. Component + type live in
-  // ./transcript/MergeConfirmPopover.tsx.
-  const [mergeConfirm, setMergeConfirm] = useState<MergeConfirmState | null>(null);
+  // Speaker colour picker — which speaker (canonical colour key) is being
+  // recoloured + the pip rect to anchor the popover. Opened from the modal.
+  const [colorPick, setColorPick] = useState<{ key: string; rect: DOMRect } | null>(null);
+
+  // Resolve a speaker's pip colour: a user override (set via the picker) wins,
+  // else the auto palette colour. Keyed on the resolved tag (null = untagged) —
+  // the same key the caption overlay reads — so a custom colour shows in the
+  // transcript bubbles, the Speakers modal, AND on-video captions.
+  const speakerDisplayColor = useCallback(
+    (colorTag: string | null) =>
+      overrides.colors[colorTag ?? "__NULL__"] || speakerColor(colorTag),
+    [overrides.colors],
+  );
+  const setSpeakerColor = useCallback((key: string, hex: string) => {
+    setOverrides((p) => ({ ...p, colors: { ...p.colors, [key]: hex } }));
+  }, []);
+  const resetSpeakerColor = useCallback((key: string) => {
+    setOverrides((p) => {
+      const colors = { ...p.colors };
+      delete colors[key];
+      return { ...p, colors };
+    });
+  }, []);
 
   // Rename popover state — tracks which turn the user is editing.
   // Anchored to the speaker chip rect so the popover appears next to
@@ -453,10 +562,19 @@ export function TranscriptViewer({
         global:  { ...prev.global },
         turn:    { ...prev.turn },
         aliases: { ...prev.aliases },
+        colors:  { ...prev.colors },
       };
-      const tagKey = rename.originalTag ?? "__NULL__";
+      // Key the GLOBAL rename on the alias-RESOLVED tag — displayNameFor reads
+      // overrides under the resolved key, and mergeSpeaker deletes globals
+      // keyed under merged-away tags. Without resolving, renaming a turn whose
+      // original tag was merged into another speaker writes a key nobody reads:
+      // the popover closes and nothing changes on screen.
+      const resolvedTag = resolveAliasChain(rename.originalTag, prev.aliases);
+      const tagKey = resolvedTag ?? "__NULL__";
       if (scope === "all") {
-        if (trimmed && trimmed !== (rename.originalTag ?? "Speaker")) {
+        // Clearing = typing back the DEFAULT display name of the resolved tag
+        // (not rename.currentName, which may itself be an existing override).
+        if (trimmed && trimmed !== humanizeSpeakerTag(resolvedTag, { unknownWhenNull: hasIdentifiedSpeakers })) {
           next.global[tagKey] = trimmed;
         } else {
           delete next.global[tagKey];
@@ -487,13 +605,43 @@ export function TranscriptViewer({
     setRename(null);
   }
 
+  // Jump to the FIRST appearance of the speaker being renamed — handy for
+  // identifying an "Unknown speaker" before naming it. Resolves through the
+  // alias chain (so a merged or untagged speaker is matched by canonical key),
+  // seeks + scrolls to that turn's first cue, and closes the popover. Reuses
+  // the same seek/scroll idiom as search-jump and cue-click.
+  const goToSpeaker = useCallback(() => {
+    if (!rename) return;
+    const targetKey = resolveAlias(rename.originalTag) ?? "__NULL__";
+    const turnIdx = turns.findIndex(
+      (t) => (resolveAlias(t.speaker) ?? "__NULL__") === targetKey,
+    );
+    setRename(null);
+    if (turnIdx < 0) return;
+    const cueIdx = flatCues.findIndex((f) => f.turnIdx === turnIdx && f.cueIdx === 0);
+    if (cueIdx < 0) return;
+    setAutoScroll(false);
+    onSeek(flatCues[cueIdx].cue.start);
+    scrollRef.current
+      ?.querySelector<HTMLElement>(`[data-cue-idx="${cueIdx}"]`)
+      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [rename, resolveAlias, turns, flatCues, onSeek]);
+
   function resetAllRenames() {
-    setOverrides({ global: {}, turn: {}, aliases: {} });
+    setOverrides({ global: {}, turn: {}, aliases: {}, colors: {} });
     setRename(null);
   }
 
   // ── Download menu state ──────────────────────────────────────────
   const [dlOpen, setDlOpen] = useState(false);
+  // Write-failure message for downloadAs (the menu is already closed when the
+  // write fails, so the error renders next to the Download button). Auto-clears.
+  const [dlError, setDlError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!dlError) return;
+    const t = window.setTimeout(() => setDlError(null), 8000);
+    return () => window.clearTimeout(t);
+  }, [dlError]);
   const dlRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!dlOpen) return;
@@ -504,12 +652,27 @@ export function TranscriptViewer({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [dlOpen]);
 
+  // ── Tools menu state ─────────────────────────────────────────────
+  // Groups the secondary toolbar actions (re-detect speakers, history) so the
+  // primary actions stay visible and the bar scales as features are added.
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const toolsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!toolsOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (!toolsRef.current?.contains(e.target as Node)) setToolsOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [toolsOpen]);
+
   // ── History popover state ────────────────────────────────────────
   // Anchored to the History button. Closes on outside-click or Esc.
   // Re-reads localStorage on each open so the list reflects entries
   // recorded by other components / other open windows.
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyBtnRef = useRef<HTMLButtonElement>(null);
+  const [speakerModalOpen, setSpeakerModalOpen] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<TranscriptHistoryEntry[]>([]);
 
   // Dismissal state for the "No speakers" diagnostic, persisted per-
@@ -531,6 +694,22 @@ export function TranscriptViewer({
       else   localStorage.removeItem(noticeStorageKey);
     } catch { /* quota */ }
   }, [noticeStorageKey]);
+  // r84: separate dismissal for the "fix caption timing" banner, per SRT path,
+  // so it doesn't fight the speaker-labels notice above.
+  const timingFixKey = path ? `saucebunny.timingFixDismissed.${path}` : null;
+  const [timingFixDismissed, setTimingFixDismissedState] = useState(false);
+  useEffect(() => {
+    if (!timingFixKey) { setTimingFixDismissedState(false); return; }
+    setTimingFixDismissedState(localStorage.getItem(timingFixKey) === "1");
+  }, [timingFixKey]);
+  const setTimingFixDismissed = useCallback((v: boolean) => {
+    setTimingFixDismissedState(v);
+    if (!timingFixKey) return;
+    try {
+      if (v) localStorage.setItem(timingFixKey, "1");
+      else   localStorage.removeItem(timingFixKey);
+    } catch { /* quota */ }
+  }, [timingFixKey]);
   useEffect(() => {
     if (!historyOpen) return;
     setHistoryEntries(getHistory());
@@ -592,8 +771,12 @@ export function TranscriptViewer({
       }
       const bytes = Array.from(new TextEncoder().encode(content));
       await invoke("write_bytes_to_path", { path: dest, bytes });
+      setDlError(null);
     } catch (e) {
       console.error("transcript download failed:", e);
+      // Surface it — read-only folder / disk-full failures were silent: the
+      // menu closed and the user believed the file saved.
+      setDlError(formatError(e));
     }
   }
 
@@ -757,20 +940,39 @@ export function TranscriptViewer({
               <span>{regenerateBusy ? "Regenerating…" : "Regenerate"}</span>
             </button>
           )}
-          <button
-            className={"btn btn-ghost cp-tx-iconbtn" + (historyOpen ? " active" : "")}
-            onClick={() => setHistoryOpen((p) => !p)}
-            title="Re-open a previous transcript"
-            ref={historyBtnRef}
-          >
-            {/* Inline clock glyph — bare SVG keeps the icon file from
-                growing every time we need a one-off. */}
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="9" />
-              <polyline points="12 7 12 12 15 14" />
-            </svg>
-            <span>History</span>
-          </button>
+          {/* Secondary actions live in a Tools menu so the bar stays compact
+              and scales as features are added. The menu is anchored via
+              historyBtnRef so the History popover opens beneath it. */}
+          <div className="cp-tx-tools" ref={toolsRef}>
+            <button
+              className={"btn btn-ghost cp-tx-iconbtn" + (toolsOpen || historyOpen ? " active" : "")}
+              onClick={() => setToolsOpen((p) => !p)}
+              title="More transcript tools"
+              ref={historyBtnRef}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /><circle cx="5" cy="12" r="1.5" />
+              </svg>
+              <span>Tools</span>
+              <IconChevronDown size={10} />
+            </button>
+            {toolsOpen && (
+              <div className="cp-tx-dl-menu" role="menu">
+                {canRedetect && onRedetectSpeakers && (
+                  <button
+                    role="menuitem"
+                    disabled={regenerateBusy}
+                    onClick={() => { setToolsOpen(false); onRedetectSpeakers(); }}
+                  >
+                    {regenerateBusy ? "Detecting speakers…" : "Re-detect speakers"}
+                  </button>
+                )}
+                <button role="menuitem" onClick={() => { setToolsOpen(false); setHistoryOpen(true); }}>
+                  Transcript history…
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <div className="cp-tx-head-actions" ref={dlRef}>
           <button
@@ -790,6 +992,11 @@ export function TranscriptViewer({
               <button role="menuitem" onClick={downloadAsPdf}>Print / Save as PDF…</button>
               <div className="cp-tx-dl-sep" />
               <button role="menuitem" onClick={onReveal}>Reveal original in Finder</button>
+            </div>
+          )}
+          {dlError && (
+            <div className="cp-tx-dl-error" role="alert" title={dlError}>
+              Save failed: {dlError}
             </div>
           )}
         </div>
@@ -821,7 +1028,8 @@ export function TranscriptViewer({
         </div>
         <input
           className="cp-tx-search-input"
-          placeholder={searchMode === "speakers" ? "Find a speaker…" : "Search transcript…  (⌘G next · ⇧⌘G prev)"}
+          placeholder={searchMode === "speakers" ? "Find a speaker…" : "Search transcript…"}
+          title={searchMode === "speakers" ? "Search by speaker name" : "Search the transcript — ⌘G next · ⇧⌘G previous"}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onSearchKey}
@@ -878,15 +1086,49 @@ export function TranscriptViewer({
       {/* Slim, muted, one-line hint (r65) — was a full-width yellow
           paragraph shown right out the gate, which read as a warning. Now
           it's a quiet info strip with an inline Regenerate and a dismiss. */}
+      {/* r84: loose YouTube ASR caption timing → offer an exact Whisper re-time.
+          Same quiet cp-tx-hint pattern; self-dismisses once origin flips to
+          "whisper" (handleFixCaptionTiming swaps it). Web sources only. */}
+      {turns.length > 0 && origin === "captions" && sourceKind === "youtube" && canRegenerate && !!onFixCaptionTiming && !timingFixDismissed && (
+        <div
+          className="cp-tx-hint"
+          title="Re-transcribes the cached audio locally with your transcription engine for exact timing — a few minutes for long clips. Your current captions stay until it finishes."
+        >
+          <svg className="cp-tx-hint-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+          <span className="cp-tx-hint-text">
+            Captions are auto-timed by YouTube and can run late.
+          </span>
+          <button
+            className="cp-tx-hint-action"
+            onClick={onFixCaptionTiming}
+            disabled={regenerateBusy}
+            title="Re-time captions to the audio with your transcription engine (local, exact)"
+          >
+            {regenerateBusy ? "Re-timing…" : "Fix timing"}
+          </button>
+          <button
+            className="cp-tx-hint-close"
+            onClick={() => setTimingFixDismissed(true)}
+            title="Dismiss (won't show again for this transcript)"
+            aria-label="Dismiss"
+          >×</button>
+        </div>
+      )}
       {turns.length > 0 && roster.length === 1 && roster[0].tag === "Speaker" && canRegenerate && !noticeDismissed && (
-        <div className="cp-tx-hint">
+        <div
+          className="cp-tx-hint"
+          title="Sauce Bunny uses a source's own caption speaker labels automatically when they exist (e.g. YouTube/Vimeo creator captions) — this one's captions didn't carry any. Detect speakers runs diarization to add them."
+        >
           <svg className="cp-tx-hint-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <circle cx="12" cy="12" r="9" />
             <path d="M12 16v-4" />
             <path d="M12 8h.01" />
           </svg>
           <span className="cp-tx-hint-text">
-            No speaker labels — enable <em>Detect speakers</em> in Settings, then regenerate.
+            No speaker labels — turn on <em>Detect speakers</em> to add them.
           </span>
           <button
             className="cp-tx-hint-action"
@@ -909,94 +1151,14 @@ export function TranscriptViewer({
         <div className="cp-tx-roster" role="toolbar" aria-label="Speakers in this transcript">
           <div className="cp-tx-roster-label">
             {roster.length} speaker{roster.length === 1 ? "" : "s"}
-            <span className="cp-tx-roster-hint">drag to merge</span>
-          </div>
-          <div className="cp-tx-roster-chips">
-            {roster.map((r) => {
-              const isDropHover = dragHoverTag === r.tag;
-              const isDragSource = dragTagRef.current === r.tag;
-              return (
-                <div
-                  key={r.tag}
-                  className={
-                    "cp-tx-roster-chip" +
-                    (isDropHover ? " drop-hover" : "") +
-                    (isDragSource ? " dragging" : "")
-                  }
-                  draggable
-                  onDragStart={(e) => {
-                    dragTagRef.current = r.tag;
-                    e.dataTransfer.effectAllowed = "move";
-                    e.dataTransfer.setData("application/x-cp-speaker", r.tag);
-                  }}
-                  onDragEnd={() => { dragTagRef.current = null; setDragHoverTag(null); }}
-                  onDragOver={(e) => {
-                    const src = dragTagRef.current;
-                    if (!src || src === r.tag) return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    if (dragHoverTag !== r.tag) setDragHoverTag(r.tag);
-                  }}
-                  onDragLeave={(e) => {
-                    if (e.currentTarget === e.target) setDragHoverTag(null);
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const src = dragTagRef.current
-                              ?? e.dataTransfer.getData("application/x-cp-speaker");
-                    setDragHoverTag(null);
-                    dragTagRef.current = null;
-                    if (!src || src === r.tag) return;
-                    // Open confirm popover; commit happens there.
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const srcEntry = roster.find((x) => x.tag === src || x.sourceTags.includes(src));
-                    setMergeConfirm({
-                      sourceTag: src,
-                      sourceName: srcEntry?.name ?? src,
-                      targetTag: r.tag,
-                      targetName: r.name,
-                      rect,
-                    });
-                  }}
-                  onClick={(e) => {
-                    // Click-to-rename on roster chip — find any turn
-                    // whose canonical tag matches and pass it as the
-                    // anchor turn index. The rename popover treats
-                    // "rename all" as "rename this canonical tag", so
-                    // any matching turnIdx works.
-                    const anyTurnIdx = turns.findIndex((t) => (resolveAlias(t.speaker) ?? "Speaker") === r.tag);
-                    if (anyTurnIdx >= 0) openRename(e, anyTurnIdx, r.tag);
-                  }}
-                  title={`${r.name} · ${r.turnCount} turn${r.turnCount === 1 ? "" : "s"}\nClick to rename · drag onto another speaker to merge`}
-                >
-                  <span
-                    className="cp-tx-roster-pip"
-                    style={{ background: speakerColor(r.tag) }}
-                  >
-                    {speakerInitials(r.name)}
-                  </span>
-                  <span className="cp-tx-roster-name">{r.name}</span>
-                  <span className="cp-tx-roster-count">{r.turnCount}</span>
-                  {r.sourceTags.length > 1 && (
-                    <button
-                      className="cp-tx-roster-unmerge"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        // Unmerge the most-recent alias pointing here.
-                        // Cheap approximation of "undo last merge for
-                        // this canonical" — pop the first sourceTag
-                        // that isn't the canonical itself.
-                        const peel = r.sourceTags.find((s) => s !== r.tag);
-                        if (peel) unmergeSpeaker(peel);
-                      }}
-                      title={`Merged from ${r.sourceTags.length} original speakers — click to peel one off`}
-                    >
-                      ⌥{r.sourceTags.length}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
+            <button
+              type="button"
+              className="cp-tx-roster-manage"
+              onClick={() => setSpeakerModalOpen(true)}
+              title="See all speakers · rename · recolour · merge"
+            >
+              Manage speakers
+            </button>
           </div>
         </div>
       )}
@@ -1008,24 +1170,19 @@ export function TranscriptViewer({
           const displayName = displayNameFor(ti, turn.speaker);
           const hasOverride =
             !!overrides.turn[String(ti)] ||
-            !!overrides.global[turn.speaker ?? "__NULL__"];
+            // Resolve the alias chain — globals are keyed on the RESOLVED tag,
+            // so a merged-then-renamed turn must check its canonical key.
+            !!overrides.global[resolveAlias(turn.speaker) ?? "__NULL__"];
           return (
             <div className="cp-tx-turn" key={ti}>
-              <div className="cp-tx-turn-head">
+              <div className={"cp-tx-turn-head" + (hasRealSpeakers ? "" : " no-speaker")}>
+                {hasRealSpeakers && (<>
                 <span
                   className={"cp-tx-speaker" + (hasOverride ? " renamed" : "")}
-                  style={{ background: speakerColor(resolveAlias(turn.speaker)) }}
+                  style={{ background: speakerDisplayColor(resolveAlias(turn.speaker)) }}
                   onClick={(e) => openRename(e, ti, turn.speaker)}
                   onContextMenu={(e) => openRename(e, ti, turn.speaker)}
-                  title="Click or right-click to rename · drag onto a speaker in the roster to merge"
-                  draggable={!!turn.speaker}
-                  onDragStart={(e) => {
-                    if (!turn.speaker) return;
-                    dragTagRef.current = resolveAlias(turn.speaker) ?? turn.speaker;
-                    e.dataTransfer.effectAllowed = "move";
-                    e.dataTransfer.setData("application/x-cp-speaker", dragTagRef.current);
-                  }}
-                  onDragEnd={() => { dragTagRef.current = null; setDragHoverTag(null); }}
+                  title="Click or right-click to rename · use Manage speakers to recolour or merge"
                 >
                   {speakerInitials(displayName)}
                 </span>
@@ -1038,12 +1195,13 @@ export function TranscriptViewer({
                 >
                   {displayName}
                 </span>
+                </>)}
                 <button
                   className="cp-tx-jump"
                   onClick={() => { setAutoScroll(true); onSeek(turn.start); }}
                   title="Jump to this turn"
                 >
-                  {fmtTime(turn.start)}
+                  {secondsToTc(turn.start, fps)}
                 </button>
               </div>
               <div className="cp-tx-turn-body">
@@ -1063,7 +1221,7 @@ export function TranscriptViewer({
                         (isActiveMatch ? " match-active" : "")
                       }
                       onClick={() => { setAutoScroll(true); onSeek(cue.start); }}
-                      title={`${fmtTime(cue.start)} — click to jump`}
+                      title={`${secondsToTc(cue.start, fps)} — click to jump`}
                     >
                       {/* In speaker mode, don't highlight the body —
                           the query targets the speaker name, not the
@@ -1105,16 +1263,31 @@ export function TranscriptViewer({
           state={rename}
           onCancel={() => setRename(null)}
           onApply={applyRename}
+          onGoToSpeaker={goToSpeaker}
         />
       )}
-      {mergeConfirm && (
-        <MergeConfirmPopover
-          state={mergeConfirm}
-          onCancel={() => setMergeConfirm(null)}
-          onConfirm={() => {
-            mergeSpeaker(mergeConfirm.sourceTag, mergeConfirm.targetTag);
-            setMergeConfirm(null);
-          }}
+      {speakerModalOpen && (
+        <SpeakerRosterModal
+          roster={roster}
+          onRename={renameSpeaker}
+          onMerge={mergeSpeaker}
+          colorOf={(item) => speakerDisplayColor(item.colorTag)}
+          onPickColor={(item, rect) => setColorPick({ key: item.colorTag ?? "__NULL__", rect })}
+          onClose={() => setSpeakerModalOpen(false)}
+        />
+      )}
+      {colorPick && (
+        <SpeakerColorPicker
+          value={
+            overrides.colors[colorPick.key]
+            || speakerTextColor(colorPick.key === "__NULL__" ? null : colorPick.key)
+          }
+          anchorRect={colorPick.rect}
+          onCommit={(hex) => setSpeakerColor(colorPick.key, hex)}
+          onReset={overrides.colors[colorPick.key]
+            ? () => { resetSpeakerColor(colorPick.key); setColorPick(null); }
+            : undefined}
+          onClose={() => setColorPick(null)}
         />
       )}
       {historyOpen && historyBtnRef.current && (

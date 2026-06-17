@@ -155,6 +155,29 @@
   letter-spacing: 0.1em;
   margin: 0 0 10px;
 }
+/* Adds breathing room above a stacked sub-section head (e.g. the second
+   group in the merged Commands & Shortcuts pane). */
+.cp-pane-subhead-gap { margin-top: 22px; }
+
+/* Top-level Settings sections reuse the sidebar's collapsible chevron
+   (.cp-section.collapsible, styled in sidebar.css). That styling indents the
+   head + body 18px to sit in the narrow rail; in the wider Settings pane we want
+   them flush with the pane title and reading as a tight, divider-separated list
+   of section headers (collapsed by default). Scoped to the DIRECT children of
+   each tab's <section> so the NESTED engine collapsibles (Whisper / Parakeet
+   inside "Transcription engine") keep their indented, hierarchical look. */
+.cp-modal-content > section > .cp-section.collapsible > .cp-section-head {
+  padding-left: 0;
+  padding-right: 0;
+}
+.cp-modal-content > section > .cp-section.collapsible > .cp-section-body {
+  padding-left: 0;
+  padding-right: 0;
+}
+/* No trailing divider under the final section in a tab. */
+.cp-modal-content > section > .cp-section.collapsible:last-child {
+  border-bottom: none;
+}
 .cp-pane-row {
   display: grid;
   grid-template-columns: 220px 1fr;
@@ -185,12 +208,38 @@
   gap: 8px;
   justify-content: flex-end;
 }
+/* Contextual note under a setting (e.g. the per-browser cookie hint). A slim,
+   neutral strip — folds conditional rows into one line that changes with the
+   selection. */
+.cp-pane-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -2px 0 12px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--fg-3);
+}
+.cp-pane-note span { flex: 1; min-width: 0; }
+.cp-pane-note .btn { flex-shrink: 0; }
 
 /* ── Whisper model list (Settings → Transcription) ── */
 .cp-models {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.cp-model-list { display: flex; flex-direction: column; gap: 8px; }
+.cp-model-blurb {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-4);
 }
 .cp-model-row {
   display: flex;
@@ -204,8 +253,13 @@
   transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
 .cp-model-row.selected {
-  border-color: rgba(var(--accent-rgb), 0.5);
-  background: rgba(var(--accent-rgb), 0.05);
+  border-color: rgba(108, 255, 141, 0.40);
+  background: rgba(108, 255, 141, 0.05);
+  box-shadow: var(--ring-green);
+}
+.cp-model-row:not(.selected):hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.035);
 }
 .cp-model-info-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .cp-model-head {
@@ -565,3 +619,204 @@
   border-color: rgba(108,255,141,0.30);
 }
 .cp-ytauth-browser.recommended .cp-ytauth-browser-hint { color: var(--color-accent-green); }
+
+/* YouTube Settings tab — yt-dlp engine row */
+.cp-ytdlp-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.cp-ytdlp-version {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--fg-3);
+  background: var(--bg-2);
+  border: 1px solid var(--stroke-1);
+  border-radius: 6px;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+.cp-ytdlp-msg {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--fg-3);
+}
+
+/* ── Caption appearance controls (General → Captions) ── */
+.cp-cap-preview {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  min-width: 240px;
+  padding: 14px 10px;
+  border-radius: 8px;
+  /* A checkerboard hints at transparency so the background-opacity slider
+     reads clearly even over a flat panel. */
+  background:
+    linear-gradient(45deg, rgba(255,255,255,0.05) 25%, transparent 25%) 0 0 / 14px 14px,
+    linear-gradient(-45deg, rgba(255,255,255,0.05) 25%, transparent 25%) 0 7px / 14px 14px,
+    var(--bg-0, #0c0c0e);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.cp-cap-preview-cue {
+  display: inline-block;
+  padding: 3px 11px;
+  border-radius: 6px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.95);
+  /* WYSIWYG: the preview uses the exact px the overlay will render at. */
+  font-size: var(--cap-size, 18px);
+}
+.cp-cap-range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cp-cap-range input[type="range"] {
+  width: 150px;
+  accent-color: var(--accent);
+}
+/* Editable numeric companion to the Size slider (type an exact px value). */
+.cp-cap-size-num {
+  width: 54px;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--bg-0, #0c0c0e);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.cp-cap-size-num:focus { outline: none; border-color: var(--accent); }
+/* Caption font picker — themed <select>. */
+.cp-cap-font-select {
+  min-width: 200px;
+  height: 30px;
+  padding: 0 30px 0 11px;
+  background: var(--bg-0, #0c0c0e);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 7px;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  cursor: pointer;
+  /* Custom chevron so it matches the app's dark chrome instead of the OS look. */
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.cp-cap-font-select:focus { outline: none; border-color: var(--accent); }
+.cp-cap-range-val {
+  font-size: 12px;
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+}
+.cp-cap-colors {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cp-cap-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.18);
+  cursor: pointer;
+  padding: 0;
+  transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.cp-cap-swatch:hover { transform: scale(1.12); }
+.cp-cap-swatch.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.3);
+}
+.cp-cap-color-custom {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* ── Editable keyboard shortcuts (Settings → Commands) ── */
+.cp-keybinds { display: flex; flex-direction: column; gap: 16px; }
+.cp-keybind-group { display: flex; flex-direction: column; }
+.cp-keybind-group-title {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--fg-4);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin: 0 0 6px;
+}
+.cp-keybind-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 34px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.cp-keybind-row:hover { background: rgba(255,255,255,0.025); }
+.cp-keybind-row.capturing {
+  background: rgba(var(--accent-rgb), 0.08);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.35);
+}
+.cp-keybind-label {
+  flex: 1;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+.cp-keybind-keys {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 132px;
+  justify-content: flex-end;
+}
+.cp-keybind-chip {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-1);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 6px;
+  padding: 2px 8px;
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,0.25);
+}
+.cp-keybind-capture { font-size: 11.5px; color: var(--accent); font-weight: 600; }
+.cp-keybind-capture .hint { color: var(--fg-4); font-weight: 400; margin-left: 6px; }
+.cp-keybind-unbound { font-size: 11.5px; color: var(--fg-4); font-style: italic; }
+.cp-keybind-actions { display: flex; gap: 6px; min-width: 130px; justify-content: flex-end; }
+.cp-keybind-note {
+  margin-top: 4px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  color: var(--color-accent-green, #7bdcb5);
+}
+.cp-keybind-foot {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Backup & reset actions (Settings → General) */
+.cp-backup-actions { display: flex; gap: 8px; }

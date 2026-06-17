@@ -91,11 +91,11 @@ if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
       ;;
   esac
 else
-  warn "APPLE_SIGNING_IDENTITY env var is not set — tauri build will produce an ad-hoc-signed .dmg that won't notarize"
+  fatal "APPLE_SIGNING_IDENTITY env var is not set — tauri build will produce an ad-hoc-signed .dmg that won't notarize"
 fi
 
 if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_PASSWORD:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ]; then
-  warn "APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID env vars missing — needed for notarytool (see DISTRIBUTION.md)"
+  fatal "APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID env vars missing — needed for notarytool (see DISTRIBUTION.md)"
 else
   pass "notarytool env vars present (APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID)"
 fi

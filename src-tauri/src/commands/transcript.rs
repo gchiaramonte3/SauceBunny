@@ -77,6 +77,539 @@ fn model_path(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
     Ok(whisper_models_dir(app)?.join(format!("ggml-{id}.bin")))
 }
 
+// ── Parakeet ASR engine (r90) ───────────────────────────────────────
+// FluidAudio's Parakeet TDT v3 (Core ML), run via the saucebunny-diarize
+// sidecar's --asr mode. The ~0.5 GB model lives in an app-managed dir
+// (mirrors whisper_models_dir); Settings downloads it on demand.
+
+fn parakeet_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| format!("app_data_dir: {e}"))?;
+    let dir = base.join("models").join("parakeet");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir parakeet models: {e}"))?;
+    Ok(dir)
+}
+
+/// Where FluidAudio ACTUALLY writes the Parakeet v3 Core ML bundles.
+///
+/// `AsrModels.download(to:)` / `load(from:)` both transform the dir we pass
+/// (`--models-dir <…/models/parakeet>`) into `parent.appendingPathComponent(repo.folderName)`
+/// — i.e. `<…/models/parakeet-tdt-0.6b-v3>`, a SIBLING of the dir we pass, not a
+/// child. So the model lands beside `parakeet/`, and any readiness check has to
+/// look there (this mismatch is why a downloaded model previously read as
+/// "not downloaded" and bounced the user to Settings).
+fn parakeet_repo_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let models = parakeet_models_dir(app)?; // ensures <…/models> exists
+    let parent = models.parent().ok_or_else(|| "parakeet models dir has no parent".to_string())?;
+    Ok(parent.join("parakeet-tdt-0.6b-v3"))
+}
+
+/// True when the Parakeet repo dir holds the compiled Core ML bundles. We require
+/// both the Encoder and Decoder `.mlmodelc` (stable names across v3) so a
+/// half-finished download doesn't read as ready.
+#[tauri::command]
+pub fn parakeet_model_downloaded(app: AppHandle) -> bool {
+    let Ok(dir) = parakeet_repo_dir(&app) else { return false };
+    dir.join("Encoder.mlmodelc").is_dir() && dir.join("Decoder.mlmodelc").is_dir()
+}
+
+/// Remove the downloaded Parakeet model (frees ~0.5 GB). Mirrors
+/// `delete_whisper_model`; the Settings "Delete" button calls this.
+#[tauri::command]
+pub fn delete_parakeet_model(app: AppHandle) -> Result<(), crate::AppError> {
+    let dir = parakeet_repo_dir(&app)?;
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir)
+            .map_err(|e| format!("failed to delete Parakeet model: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Download + compile the Parakeet Core ML model into the app-managed dir.
+/// Drives the Settings "Download" button; cancellable via the JobRegistry.
+#[tauri::command]
+pub async fn download_parakeet_model(app: AppHandle, job_id: String) -> Result<(), crate::AppError> {
+    let dir = parakeet_models_dir(&app)?;
+    let dir_str = dir.to_string_lossy().to_string();
+    let cmd = app
+        .shell()
+        .sidecar("saucebunny-diarize")
+        .map_err(|e| format!("saucebunny-diarize sidecar not bundled: {e}. Run `npm run build:diarizer`."))?;
+    let (mut rx, child) = cmd
+        .args(["--prepare-asr-models", "--models-dir", &dir_str, "--emit-progress"])
+        .spawn()
+        .map_err(|e| format!("failed to spawn saucebunny-diarize: {e}"))?;
+    app.state::<JobRegistry>().insert(job_id.clone(), child);
+    let _ = app.emit(
+        "transcript-phase",
+        TranscriptPhaseEvent { job_id: job_id.clone(), phase: "parakeet-download".into() },
+    );
+    emit_transcript_log(&app, &job_id, "info", "Downloading Parakeet model (~0.5 GB, first run only)…".into());
+    let mut stderr_tail = String::new();
+    while let Some(event) = rx.recv().await {
+        match event {
+            CommandEvent::Stderr(b) => {
+                let raw = String::from_utf8_lossy(&b).to_string();
+                stderr_tail.push_str(&raw);
+                if stderr_tail.len() > 4096 {
+                    let mut cut = stderr_tail.len() - 2048;
+                    while cut < stderr_tail.len() && !stderr_tail.is_char_boundary(cut) { cut += 1; }
+                    stderr_tail = stderr_tail[cut..].to_string();
+                }
+            }
+            CommandEvent::Terminated(payload) => {
+                let _ = app.state::<JobRegistry>().take(&job_id);
+                if payload.code != Some(0) {
+                    return Err(crate::AppError::SidecarFailed {
+                        name: "saucebunny-diarize".into(),
+                        exit_code: payload.code,
+                        tail: stderr_tail.trim().to_string(),
+                    });
+                }
+                break;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Run Parakeet ASR on a 16 kHz WAV → SRT (same contract as whisper-cli).
+/// Registered under `job_id` so Stop cancels it.
+async fn run_parakeet_asr(
+    app: &AppHandle, job_id: &str, wav_path: &std::path::Path, srt_path: &str,
+) -> Result<(), crate::AppError> {
+    let dir = parakeet_models_dir(app)?;
+    let dir_str = dir.to_string_lossy().to_string();
+    let wav_str = wav_path.to_string_lossy().to_string();
+    let cmd = app
+        .shell()
+        .sidecar("saucebunny-diarize")
+        .map_err(|e| format!("saucebunny-diarize sidecar not bundled: {e}"))?;
+    let (mut rx, child) = cmd
+        .args(["--asr", "--input", &wav_str, "--output", srt_path, "--models-dir", &dir_str, "--emit-progress"])
+        .spawn()
+        .map_err(|e| format!("failed to spawn saucebunny-diarize --asr: {e}"))?;
+    app.state::<JobRegistry>().insert(job_id.to_string(), child);
+    let mut stderr_tail = String::new();
+    let mut cancelled = false;
+    while let Some(event) = rx.recv().await {
+        match event {
+            CommandEvent::Stdout(b) => {
+                let raw = String::from_utf8_lossy(&b).to_string();
+                for line in raw.lines() {
+                    let t = line.trim();
+                    // FluidAudio's transcribe() is one shot — no per-segment
+                    // percent — so we drive the UI by PHASE instead of a fake
+                    // bar: emit transcript-phase so the button shows an honest
+                    // "Transcribing with Parakeet…" rather than a frozen 0%.
+                    if t.contains("\"phase\":\"process\"") {
+                        let _ = app.emit(
+                            "transcript-phase",
+                            TranscriptPhaseEvent { job_id: job_id.to_string(), phase: "parakeet".into() },
+                        );
+                        emit_transcript_log(app, job_id, "info", "Transcribing with Parakeet…".into());
+                    } else if t.contains("\"phase\":\"prepare\"") {
+                        let _ = app.emit(
+                            "transcript-phase",
+                            TranscriptPhaseEvent { job_id: job_id.to_string(), phase: "parakeet-load".into() },
+                        );
+                        emit_transcript_log(app, job_id, "info", "Loading Parakeet model…".into());
+                    }
+                }
+            }
+            CommandEvent::Stderr(b) => {
+                let raw = String::from_utf8_lossy(&b).to_string();
+                stderr_tail.push_str(&raw);
+                if stderr_tail.len() > 4096 {
+                    let mut cut = stderr_tail.len() - 2048;
+                    while cut < stderr_tail.len() && !stderr_tail.is_char_boundary(cut) { cut += 1; }
+                    stderr_tail = stderr_tail[cut..].to_string();
+                }
+            }
+            CommandEvent::Terminated(payload) => {
+                let _ = app.state::<JobRegistry>().take(job_id);
+                if payload.signal.is_some() { cancelled = true; }
+                if payload.code != Some(0) {
+                    if cancelled { return Err("Cancelled".into()); }
+                    return Err(crate::AppError::SidecarFailed {
+                        name: "saucebunny-diarize --asr".into(),
+                        exit_code: payload.code,
+                        tail: stderr_tail.trim().to_string(),
+                    });
+                }
+                break;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+// ── Voice dictation (r91) ───────────────────────────────────────────
+// Mic → text for the Review composer. We capture the mic with the
+// bundled ffmpeg (avfoundation) rather than the WebView's getUserMedia
+// (WKWebView's capture-permission path is unreliable on this stack), then
+// reuse the existing ASR sidecars (Parakeet preferred, Whisper fallback)
+// to turn the WAV into text. The recording is registered in the
+// JobRegistry under `job_id`; `dictate_stop` sends ffmpeg an interactive
+// `q` (clean WAV finalize) and a background drain task runs ASR and emits
+// `dictate-done`. Mic access needs NSMicrophoneUsageDescription in the
+// bundle's Info.plist (the ffmpeg child inherits the app's TCC grant).
+
+#[derive(Serialize, Clone, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct DictateDoneEvent {
+    pub(crate) job_id: String,
+    pub(crate) success: bool,
+    pub(crate) text: Option<String>,
+    pub(crate) error: Option<String>,
+    /// Non-error advisory shown to the user (e.g. recording hit the time cap).
+    pub(crate) note: Option<String>,
+}
+
+/// Live mic level (0..1) emitted ~20×/s while recording, for the waveform UI.
+#[derive(Serialize, Clone, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct DictateLevelEvent {
+    pub(crate) job_id: String,
+    pub(crate) level: f64,
+}
+
+/// Turn an ASR failure into plain language for the composer. The raw sidecar
+/// error (exit codes, "no token timings", etc.) is for the logs, not the user.
+fn humanize_dictation_error(raw: &str) -> String {
+    let r = raw.to_lowercase();
+    if r.contains("no transcript") || r.contains("no token") || r.contains("empty") {
+        "I didn't catch any words. Make sure the right microphone is picked (Settings → Transcription) and try again.".to_string()
+    } else if r.contains("not downloaded") || r.contains("no transcription model") {
+        "No transcription model is ready. Download Parakeet or a Whisper model in Settings → Transcription first.".to_string()
+    } else {
+        "Something went wrong transcribing that. Give it another try.".to_string()
+    }
+}
+
+/// An avfoundation audio input the user can dictate from (for the mic chooser).
+#[derive(Serialize, Clone, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct AudioInputDevice {
+    /// avfoundation enumeration index, as a string (e.g. "0").
+    pub(crate) index: String,
+    pub(crate) name: String,
+}
+
+/// Enumerate avfoundation audio inputs for the mic chooser. Runs
+/// `ffmpeg -f avfoundation -list_devices true -i ""`, which prints the device
+/// list to stderr and exits non-zero by design — so we read stderr regardless
+/// of the exit code.
+#[tauri::command]
+pub async fn list_audio_input_devices(app: AppHandle) -> Result<Vec<AudioInputDevice>, crate::AppError> {
+    let cmd = app
+        .shell()
+        .sidecar("ffmpeg")
+        .map_err(|e| format!("ffmpeg sidecar not found: {e}"))?;
+    let out = cmd
+        .args(["-hide_banner", "-f", "avfoundation", "-list_devices", "true", "-i", ""])
+        .output()
+        .await
+        .map_err(|e| format!("failed to list audio devices: {e}"))?;
+    let text = String::from_utf8_lossy(&out.stderr);
+    let mut devices = Vec::new();
+    let mut in_audio = false;
+    for line in text.lines() {
+        let l = line.trim();
+        if l.contains("AVFoundation video devices") { in_audio = false; continue; }
+        if l.contains("AVFoundation audio devices") { in_audio = true; continue; }
+        if !in_audio { continue; }
+        // "[AVFoundation indev @ 0x…] [1] MacBook Pro Microphone" → drop the
+        // logger prefix, then parse the "[idx] name" tail.
+        let rest = match l.find("] ") { Some(i) => l[i + 2..].trim(), None => l };
+        if let Some(body) = rest.strip_prefix('[') {
+            if let Some(close) = body.find(']') {
+                let idx = &body[..close];
+                let name = body[close + 1..].trim();
+                if !idx.is_empty() && idx.chars().all(|c| c.is_ascii_digit()) && !name.is_empty() {
+                    devices.push(AudioInputDevice { index: idx.to_string(), name: name.to_string() });
+                }
+            }
+        }
+    }
+    Ok(devices)
+}
+
+/// ASR engine resolved for a dictation request.
+enum DictEngine {
+    Parakeet,
+    Whisper(PathBuf),
+}
+
+/// First Whisper model present on disk (WHISPER_MODELS is ordered
+/// smallest→largest, so this prefers the fastest model — ideal for short
+/// dictation clips). None if no model is downloaded.
+fn first_downloaded_whisper(app: &AppHandle) -> Option<PathBuf> {
+    let dir = whisper_models_dir(app).ok()?;
+    for (id, _, _) in WHISPER_MODELS {
+        let p = dir.join(format!("ggml-{id}.bin"));
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Pick an ASR engine for dictation: Parakeet if its Core ML bundle is
+/// downloaded (best quality + ANE-fast), else any downloaded Whisper model.
+fn pick_dictation_engine(app: &AppHandle) -> Result<DictEngine, crate::AppError> {
+    if parakeet_model_downloaded(app.clone()) {
+        return Ok(DictEngine::Parakeet);
+    }
+    if let Some(m) = first_downloaded_whisper(app) {
+        return Ok(DictEngine::Whisper(m));
+    }
+    Err("No transcription model is downloaded. Open Settings → Transcription and download Parakeet or a Whisper model first.".into())
+}
+
+/// Strip SRT cue indices + timestamp lines, leaving just the spoken text
+/// joined into a single line — what the composer wants.
+fn srt_to_text(srt: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for line in srt.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.contains("-->") || t.parse::<u32>().is_ok() {
+            continue;
+        }
+        parts.push(t);
+    }
+    parts.join(" ").trim().to_string()
+}
+
+/// Run whisper-cli on a WAV → `<srt_base>.srt`. Minimal flags (no VAD) —
+/// dictation clips are short. Registered under `job_id` so Stop cancels it.
+async fn run_whisper_dictation(
+    app: &AppHandle, job_id: &str, wav: &std::path::Path, srt_base: &str, model: &std::path::Path,
+) -> Result<(), crate::AppError> {
+    let wsp = app
+        .shell()
+        .sidecar("whisper-cli")
+        .map_err(|e| format!("whisper-cli sidecar not found: {e}"))?;
+    let (mut rx, child) = wsp
+        .args([
+            "-m", &model.to_string_lossy(),
+            "-f", &wav.to_string_lossy(),
+            "-osrt", "-of", srt_base,
+            "-l", "en", "-bs", "5", "-bo", "5",
+        ])
+        .spawn()
+        .map_err(|e| format!("whisper-cli failed to spawn: {e}"))?;
+    app.state::<JobRegistry>().insert(job_id.to_string(), child);
+    let mut tail = String::new();
+    let mut cancelled = false;
+    while let Some(event) = rx.recv().await {
+        match event {
+            CommandEvent::Stderr(b) | CommandEvent::Stdout(b) => {
+                tail.push_str(&String::from_utf8_lossy(&b));
+                if tail.len() > 4096 {
+                    let mut cut = tail.len() - 2048;
+                    while cut < tail.len() && !tail.is_char_boundary(cut) { cut += 1; }
+                    tail = tail[cut..].to_string();
+                }
+            }
+            CommandEvent::Terminated(payload) => {
+                let _ = app.state::<JobRegistry>().take(job_id);
+                if payload.signal.is_some() { cancelled = true; }
+                if payload.code != Some(0) {
+                    if cancelled { return Err("Cancelled".into()); }
+                    return Err(crate::AppError::SidecarFailed {
+                        name: "whisper-cli".into(),
+                        exit_code: payload.code,
+                        tail: tail.trim().to_string(),
+                    });
+                }
+                break;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Start recording the microphone for voice dictation. Spawns the bundled
+/// ffmpeg (avfoundation) → 16 kHz mono WAV, registers it under `job_id`, and
+/// kicks off a background task that streams live mic levels (`dictate-level`)
+/// while recording and — once recording stops — transcribes the WAV and emits
+/// `dictate-done`. `device` is the avfoundation audio index ("0", "1", …) or
+/// None/"default" for the system default input. Fails fast if no ASR model is
+/// available (so the UI never starts a pointless recording).
+#[tauri::command]
+pub async fn dictate_start(app: AppHandle, job_id: String, device: Option<String>) -> Result<(), crate::AppError> {
+    // Resolve the engine up front so a "no model" error surfaces before we
+    // ever turn on the mic.
+    let engine = pick_dictation_engine(&app)?;
+
+    let cache = app.path().app_cache_dir().map_err(|e| format!("app_cache_dir: {e}"))?;
+    std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
+    let wav = cache.join(format!("saucebunny-dictate-{job_id}.wav"));
+    let wav_str = wav.to_string_lossy().to_string();
+
+    // avfoundation input: ":default" (system default) or ":<index>" for a
+    // user-chosen device. The `:` with no video half means audio-only.
+    let dev = device.as_deref().unwrap_or("default");
+    let input = if dev.is_empty() || dev == "default" { ":default".to_string() } else { format!(":{dev}") };
+    // Mic-level metering for the waveform: astats prints per-frame RMS to the log
+    // (passed through untouched, so the recorded WAV is unaffected). The drain
+    // task parses these and emits `dictate-level`.
+    const LEVEL_AF: &str = "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level";
+
+    let ff = app
+        .shell()
+        .sidecar("ffmpeg")
+        .map_err(|e| format!("ffmpeg sidecar not found: {e}"))?;
+    // `-t 300` caps a runaway recording at 5 min (the drain task flags it so the
+    // UI can tell the user it was cut). NOTE: do not add `-nostdin` — we need
+    // stdin open so `dictate_stop` can send `q` for a graceful finalize.
+    let (mut rx, child) = ff
+        .args([
+            "-hide_banner",
+            "-f", "avfoundation",
+            "-i", &input,
+            "-af", LEVEL_AF,
+            "-ac", "1",
+            "-ar", "16000",
+            "-t", "300",
+            "-y", &wav_str,
+        ])
+        .spawn()
+        .map_err(|e| format!("ffmpeg failed to spawn: {e}"))?;
+    app.state::<JobRegistry>().insert(job_id.clone(), child);
+
+    let app2 = app.clone();
+    let job2 = job_id.clone();
+    tokio::spawn(async move {
+        let mut tail = String::new();
+        let mut killed = false;
+        let mut last_level = std::time::Instant::now();
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stderr(b) | CommandEvent::Stdout(b) => {
+                    let chunk = String::from_utf8_lossy(&b);
+                    for line in chunk.lines() {
+                        // Mic level → throttled (~20 Hz) dictate-level events. The
+                        // ametadata print carries an av_log prefix
+                        // ("[Parsed_ametadata_1 @ 0x…] lavfi.astats…=-21.0"), so we
+                        // match the value by substring, not prefix.
+                        if let Some(pos) = line.find("RMS_level=") {
+                            if let Ok(dbv) = line[pos + "RMS_level=".len()..].trim().parse::<f64>() {
+                                // dBFS → 0..1: ~-50 dB floor (quiet) → 0, -10 dB → 1.
+                                let lvl = ((dbv + 50.0) / 40.0).clamp(0.0, 1.0);
+                                if last_level.elapsed().as_millis() >= 50 {
+                                    last_level = std::time::Instant::now();
+                                    let _ = app2.emit("dictate-level", DictateLevelEvent { job_id: job2.clone(), level: lvl });
+                                }
+                            }
+                            continue;
+                        }
+                        // Skip the metering filter's own log lines; keep real ffmpeg
+                        // output so the error tail stays meaningful.
+                        let t = line.trim();
+                        if t.is_empty() || t.contains("Parsed_ametadata") || t.contains("Parsed_astats") { continue; }
+                        tail.push_str(t);
+                        tail.push('\n');
+                        if tail.len() > 4096 {
+                            let mut cut = tail.len() - 2048;
+                            while cut < tail.len() && !tail.is_char_boundary(cut) { cut += 1; }
+                            tail = tail[cut..].to_string();
+                        }
+                    }
+                }
+                CommandEvent::Terminated(payload) => {
+                    let _ = app2.state::<JobRegistry>().take(&job2);
+                    // SIGKILL (cancel) → discard; a clean `q` stop exits 0.
+                    if payload.signal.is_some() { killed = true; }
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        let emit_err = |msg: String| {
+            let _ = app2.emit("dictate-done", DictateDoneEvent {
+                job_id: job2.clone(), success: false, text: None, error: Some(msg), note: None,
+            });
+        };
+
+        if killed {
+            let _ = std::fs::remove_file(&wav);
+            emit_err("Cancelled".into());
+            return;
+        }
+        // A graceful stop leaves a finalized WAV; require some captured audio.
+        // 16 kHz mono s16 = 32000 bytes/s, so <1 KB ≈ a sub-30 ms clip.
+        let captured = std::fs::metadata(&wav).map(|m| m.len()).unwrap_or(0);
+        if captured < 1024 {
+            let _ = std::fs::remove_file(&wav);
+            // Distinguish a real mic-access failure (ffmpeg's avfoundation open
+            // erroring out) from a recording that was simply too short. NOTE:
+            // `-hide_banner` does NOT empty stderr (stream info + progress still
+            // print), so we must inspect the tail for actual permission errors.
+            let t = tail.to_lowercase();
+            let blocked = t.contains("operation not permitted")
+                || t.contains("input/output error")
+                || t.contains("permission denied")
+                || t.contains("abort");
+            emit_err(if blocked {
+                "Microphone access was blocked. Allow it in System Settings → Privacy & Security → Microphone, then try again.".into()
+            } else {
+                "Recording too short — hold the mic button a moment longer.".into()
+            });
+            return;
+        }
+        // ffmpeg self-exits at the `-t` cap with code 0 (no signal), so a clean
+        // stop and a hit-the-limit stop look the same; flag the latter by length.
+        let approx_secs = captured.saturating_sub(44) / 32_000;
+        let cap_note = if approx_secs >= 299 {
+            Some("Recording reached the 5-minute limit and was cut off.".to_string())
+        } else {
+            None
+        };
+
+        // Transcribe the WAV with the engine resolved at start.
+        let srt = wav.with_extension("srt");
+        let srt_str = srt.to_string_lossy().to_string();
+        let srt_base = wav.with_extension("");
+        let asr = match engine {
+            DictEngine::Parakeet => run_parakeet_asr(&app2, &job2, &wav, &srt_str).await,
+            DictEngine::Whisper(model) => {
+                run_whisper_dictation(&app2, &job2, &wav, &srt_base.to_string_lossy(), &model).await
+            }
+        };
+        let _ = std::fs::remove_file(&wav);
+
+        match asr {
+            Ok(()) => {
+                let text = std::fs::read_to_string(&srt).map(|s| srt_to_text(&s)).unwrap_or_default();
+                let _ = std::fs::remove_file(&srt);
+                let _ = app2.emit("dictate-done", DictateDoneEvent {
+                    job_id: job2.clone(), success: true, text: Some(text), error: None, note: cap_note,
+                });
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&srt);
+                emit_err(humanize_dictation_error(&e.to_string()));
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// Stop an in-progress dictation recording GRACEFULLY by sending ffmpeg the
+/// interactive `q` command (finalizes the WAV header). The background task
+/// from `dictate_start` then transcribes and emits `dictate-done`. Returns
+/// false if no recording is live.
+#[tauri::command]
+pub fn dictate_stop(registry: State<'_, JobRegistry>, job_id: String) -> bool {
+    registry.write_stdin(&job_id, b"q")
+}
+
 #[tauri::command]
 pub fn list_whisper_models(app: AppHandle) -> Result<Vec<WhisperModel>, crate::AppError> {
     let dir = whisper_models_dir(&app)?;
@@ -202,7 +735,7 @@ pub async fn download_whisper_model(
     Ok(args.job_id)
 }
 
-async fn download_with_progress(
+pub(crate) async fn download_with_progress(
     app: &AppHandle,
     url: &str,
     dest: &PathBuf,
@@ -257,6 +790,33 @@ async fn download_with_progress(
     Ok(())
 }
 
+/// Ensure the Silero VAD model whisper-cli's `--vad` needs is on disk, fetching
+/// it once (~865 KB) into the models dir. Returns its path, or `None` on any
+/// failure (offline, HTTP error) so transcription cleanly falls back to no-VAD
+/// instead of breaking. VAD trims silence before decoding, which cuts Whisper's
+/// silence-hallucinations and tightens segment timing — a real accuracy win.
+async fn ensure_vad_model(app: &AppHandle) -> Option<PathBuf> {
+    let path = whisper_models_dir(app).ok()?.join("ggml-silero-v5.1.2.bin");
+    if path.exists() && path.metadata().map(|m| m.len() > 1000).unwrap_or(false) {
+        return Some(path);
+    }
+    let url = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin";
+    let res = reqwest::get(url).await.ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    let bytes = res.bytes().await.ok()?;
+    if bytes.len() < 1000 {
+        return None;
+    }
+    // Write to a temp then rename so a killed download can't leave a truncated
+    // model that whisper-cli would choke on.
+    let tmp = path.with_extension("part");
+    tokio::fs::write(&tmp, &bytes).await.ok()?;
+    tokio::fs::rename(&tmp, &path).await.ok()?;
+    Some(path)
+}
+
 #[derive(Deserialize)]
 pub struct GenerateTranscriptArgs {
     pub url: String,
@@ -275,6 +835,10 @@ pub struct GenerateTranscriptArgs {
     /// None / 0 → let the model auto-estimate. See `run_diarize_and_merge`.
     #[serde(default)]
     pub expected_speakers: Option<u32>,
+    /// Transcription engine: None / "whisper" → whisper-cli (default);
+    /// "parakeet" → FluidAudio Parakeet via the diarize sidecar's --asr mode.
+    #[serde(default)]
+    pub engine: Option<String>,
 }
 
 fn emit_transcript_done(
@@ -362,6 +926,13 @@ pub async fn generate_transcript(
     }
 
     let section = format!("*{:.3}-{:.3}", start_s, end_s);
+    // Bundled ffmpeg for the section cut below — resolved here (the fn returns
+    // AppError) so the move-closure owns it; without it yt-dlp falls back to
+    // PATH/Homebrew, absent on a distributed app (DISTRIBUTION.md).
+    let ffmpeg_for = sidecar_path("ffmpeg")?
+        .to_str()
+        .ok_or_else(|| crate::AppError::internal("ffmpeg path not utf-8"))?
+        .to_string();
     let job_id = args.job_id.clone();
     let job_for = job_id.clone();
     let app_for = app.clone();
@@ -375,7 +946,21 @@ pub async fn generate_transcript(
     let expected_speakers = args.expected_speakers;
 
     tokio::spawn(async move {
-        // ─── Phase 1: yt-dlp downloads raw bestaudio (no post-processing) ───
+        // ─── Phase 1: obtain the source audio ───
+        // Prefer the cached FULL track (already downloaded for the audio-master
+        // playback clock): no re-download, AND Whisper transcribes the exact
+        // audio the captions are clocked against, so they're aligned by
+        // construction. Phase 2 cuts the [start,end] section from it. Otherwise
+        // yt-dlp downloads just the section (the original path).
+        let cached_full = find_audio_in_cache(&cache_for, &source_audio_prefix(&args.url))
+            .filter(|p| p.metadata().map(|m| m.len() > 0).unwrap_or(false));
+        let (raw_path, cut_section, keep_raw) = if let Some(cached) = cached_full {
+            emit_transcript_log(
+                &app_for, &job_for, "info",
+                "Using the cached source audio (already downloaded for playback) — no re-download.".into(),
+            );
+            (cached, true, true)
+        } else {
         emit_transcript_log(
             &app_for,
             &job_for,
@@ -383,7 +968,7 @@ pub async fn generate_transcript(
             format!("Downloading audio for {} → {}…", args.start, args.end),
         );
 
-        let yt = match app_for.shell().sidecar("yt-dlp") {
+        let yt = match ytdlp(&app_for) {
             Ok(c) => c,
             Err(e) => {
                 emit_transcript_done(
@@ -397,6 +982,7 @@ pub async fn generate_transcript(
         let mut yt_args: Vec<String> = vec![
             "--download-sections".into(),
             section.clone(),
+            "--ffmpeg-location".into(), ffmpeg_for,
             "-f".into(), "bestaudio/best".into(),
             "--no-playlist".into(),
             "--no-part".into(),
@@ -408,8 +994,17 @@ pub async fn generate_transcript(
         yt_args.extend(cookies_args(args.cookies_browser.as_deref()));
         yt_args.push(args.url.clone());
 
-        let yt_out = match yt.env("PATH", HOMEBREW_PATH).args(yt_args).output().await {
-            Ok(o) => o,
+        // Stream the audio download instead of blocking on `.output()`. The
+        // blocking call pulled the WHOLE audio track (minutes on a long video)
+        // with no streamed output, so the UI sat frozen at 0% the entire time
+        // — which read as "Whisper is stuck" even though Whisper hadn't even
+        // started. Streaming gives a live % and lets STOP cancel the download.
+        let _ = app_for.emit(
+            "transcript-phase",
+            TranscriptPhaseEvent { job_id: job_for.clone(), phase: "download".into() },
+        );
+        let (mut yt_rx, yt_child) = match yt.args(yt_args).spawn() {
+            Ok(c) => c,
             Err(e) => {
                 emit_transcript_done(
                     &app_for, &job_for, false, None, None,
@@ -418,17 +1013,47 @@ pub async fn generate_transcript(
                 return;
             }
         };
-
-        if !yt_out.status.success() {
-            let stderr = String::from_utf8_lossy(&yt_out.stderr);
-            // humanize_ytdlp_error maps "Sign in to confirm you're not a
-            // bot" / age-restricted / video-unavailable to actionable text
-            // pointing at Settings → YouTube auth. Falls through to the
-            // first non-empty stderr line for anything else.
-            emit_transcript_done(
-                &app_for, &job_for, false, yt_out.status.code(), None,
-                Some(humanize_ytdlp_error(&stderr)),
-            );
+        // Register so STOP can kill the download (was uncancellable before).
+        app_for.state::<JobRegistry>().insert(job_for.clone(), yt_child);
+        let mut yt_code: Option<i32> = None;
+        let mut yt_log = String::new();
+        let mut last_dl_log = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        while let Some(event) = yt_rx.recv().await {
+            match event {
+                CommandEvent::Stdout(b) | CommandEvent::Stderr(b) => {
+                    let raw = String::from_utf8_lossy(&b).to_string();
+                    for line in raw.lines() {
+                        let line = line.trim_end();
+                        if line.is_empty() { continue; }
+                        yt_log.push_str(line);
+                        yt_log.push('\n');
+                        if let Some(pct) = regex_lite_percent(line) {
+                            let _ = app_for.emit(
+                                "transcript-progress",
+                                ProgressEvent { job_id: job_for.clone(), percent: pct },
+                            );
+                            // Throttle the noisy per-chunk [download] % lines.
+                            if last_dl_log.elapsed().as_millis() < 500 { continue; }
+                            last_dl_log = std::time::Instant::now();
+                        }
+                        emit_transcript_log(&app_for, &job_for, "info", line.to_string());
+                    }
+                }
+                CommandEvent::Terminated(p) => { yt_code = p.code; break; }
+                _ => {}
+            }
+        }
+        let _ = app_for.state::<JobRegistry>().take(&job_for);
+        if yt_code != Some(0) {
+            // code None ⇒ killed via STOP ⇒ surface as a clean cancel; otherwise
+            // humanize_ytdlp_error maps bot-check / age-gate / unavailable to
+            // actionable text pointing at Settings → YouTube auth.
+            let err = if yt_code.is_none() {
+                "Cancelled".to_string()
+            } else {
+                humanize_ytdlp_error(&yt_log)
+            };
+            emit_transcript_done(&app_for, &job_for, false, yt_code, None, Some(err));
             return;
         }
 
@@ -443,6 +1068,9 @@ pub async fn generate_transcript(
                 return;
             }
         };
+        (raw_path, false, false)
+        };
+
         let raw_mb = raw_path
             .metadata()
             .map(|m| m.len() as f64 / 1_000_000.0)
@@ -468,15 +1096,22 @@ pub async fn generate_transcript(
                 return;
             }
         };
-        let ff_out = ff
-            .args([
-                "-y", "-i", &raw_path_str,
-                "-vn", "-ar", "16000", "-ac", "1",
-                &wav_path_str,
-            ])
-            .output()
-            .await;
-        let _ = std::fs::remove_file(&raw_path); // raw no longer needed
+        // When reusing the cached FULL track, cut the [start,end] section here
+        // (yt-dlp already cut it in the download path). Input-side -ss/-t is
+        // fast and sample-accurate enough for speech.
+        let start_arg = format!("{start_s:.3}");
+        let dur_arg = format!("{:.3}", (end_s - start_s).max(0.0));
+        let mut ff_args: Vec<&str> = vec!["-y"];
+        if cut_section {
+            ff_args.extend(["-ss", start_arg.as_str(), "-i", &raw_path_str, "-t", dur_arg.as_str()]);
+        } else {
+            ff_args.extend(["-i", &raw_path_str]);
+        }
+        ff_args.extend(["-vn", "-ar", "16000", "-ac", "1", &wav_path_str]);
+        let ff_out = ff.args(ff_args).output().await;
+        if !keep_raw {
+            let _ = std::fs::remove_file(&raw_path); // temp download — keep the shared cache
+        }
         let ff_out = match ff_out {
             Ok(o) => o,
             Err(e) => {
@@ -501,6 +1136,48 @@ pub async fn generate_transcript(
                 &app_for, &job_for, false, None, None,
                 Some(format!("WAV conversion produced no file at {}", wav_path_for.display())),
             );
+            return;
+        }
+
+        // ─── Phase 3 (Parakeet branch, r90) ───
+        // When the user picked Parakeet, the diarize sidecar's --asr mode
+        // produces the .srt instead of whisper-cli; the finalize steps
+        // (optional diarization + section-cut re-base + emit) are identical.
+        if args.engine.as_deref() == Some("parakeet") {
+            emit_transcript_log(
+                &app_for, &job_for, "ok",
+                "Audio ready — transcribing with Parakeet…".into(),
+            );
+            let srt = format!("{}.srt", out_dir_for.join(&safe_for).to_string_lossy());
+            if let Err(e) = run_parakeet_asr(&app_for, &job_for, &wav_path_for, &srt).await {
+                let _ = std::fs::remove_file(&wav_path_for);
+                let msg = e.to_string();
+                if msg.contains("Cancelled") {
+                    emit_transcript_done(&app_for, &job_for, false, None, None, Some("Cancelled".into()));
+                } else {
+                    emit_transcript_done(&app_for, &job_for, false, None, None,
+                        Some(format!("Parakeet transcription failed — {msg}")));
+                }
+                return;
+            }
+            let mut warn_note: Option<String> = None;
+            if detect_speakers {
+                if let Err(e) = run_diarize_and_merge(
+                    &app_for, &job_for, &wav_path_for, std::path::Path::new(&srt), expected_speakers,
+                ).await {
+                    emit_transcript_log(&app_for, &job_for, "warn",
+                        format!("Speaker detection failed — transcript saved without speaker labels. ({e})"));
+                    warn_note = Some(format!("Diarization skipped: {e}"));
+                }
+            }
+            if cut_section {
+                if let Err(e) = shift_srt_file(std::path::Path::new(&srt), start_s) {
+                    emit_transcript_log(&app_for, &job_for, "warn",
+                        format!("Caption time re-base failed ({e})."));
+                }
+            }
+            let _ = std::fs::remove_file(&wav_path_for);
+            emit_transcript_done(&app_for, &job_for, true, Some(0), Some(srt), warn_note);
             return;
         }
 
@@ -536,27 +1213,36 @@ pub async fn generate_transcript(
             }
         };
 
-        // Safety net for the dyld @rpath issue: whisper-cli is built with
-        // rpath `@loader_path/../lib`, which only resolves correctly when
-        // the binary lives in /opt/homebrew/bin. If the bundled copy lost
-        // its patched rpath for any reason, this env var still lets dyld
-        // find libwhisper.dylib in the Homebrew prefix.
-        let spawn = wsp
-            .env("DYLD_LIBRARY_PATH", "/opt/homebrew/lib")
-            .env("DYLD_FALLBACK_LIBRARY_PATH", "/opt/homebrew/lib")
-            .args([
-                "-m",
-                &model_str,
-                "-f",
-                &wav_path_str,
-                "-osrt",
-                "-of",
-                &output_base_str,
-                "-l",
-                "en",
-                "-pp", // print progress
-            ])
-            .spawn();
+        // No DYLD_LIBRARY_PATH override: build-whisper.sh static-links ggml
+        // (`-DBUILD_SHARED_LIBS=OFF`), so the bundled whisper-cli depends only
+        // on system frameworks (`otool -L` shows no Homebrew dylibs). Forcing
+        // /opt/homebrew/lib onto the dyld search path was not a safety net —
+        // it could shadow the system libc++/libobjc with a mismatched Homebrew
+        // copy and hang the process, and it broke self-contained distribution.
+        // Best-effort Silero VAD (accuracy: trims silence → fewer
+        // hallucinations + tighter timing). Downloaded once; None ⇒ no-VAD.
+        let vad_model = ensure_vad_model(&app_for).await
+            .map(|p| p.to_string_lossy().to_string());
+        if vad_model.is_some() {
+            emit_transcript_log(&app_for, &job_for, "info",
+                "Voice-activity detection on (Silero VAD).".into());
+        }
+        let mut wcmd = wsp.args([
+            "-m", &model_str,
+            "-f", &wav_path_str,
+            "-osrt",
+            "-of", &output_base_str,
+            "-l", "en",
+            // Accuracy + caption-grade segmentation (researched): pin max
+            // beam/best-of, and split-on-word at ~2-line length so each cue
+            // fits the on-video overlay without breaking mid-word.
+            "-bs", "5", "-bo", "5", "-sow", "-ml", "84",
+            "-pp", // print progress
+        ]);
+        if let Some(ref vm) = vad_model {
+            wcmd = wcmd.args(["--vad", "-vm", vm.as_str()]);
+        }
+        let spawn = wcmd.spawn();
 
         let (mut rx, child) = match spawn {
             Ok(c) => c,
@@ -643,6 +1329,19 @@ pub async fn generate_transcript(
                                 warn_note = Some(format!("Diarization skipped: {e}"));
                             }
                         }
+                        // Re-base sub-range cues onto the FULL source timeline.
+                        // The cut WAV (and so the whisper SRT, and the diarize
+                        // merge above which works on that same 0-based WAV) start
+                        // at the mark-in; the player runs on absolute time, so
+                        // shift the FINAL SRT by +start_s. No-op when start_s==0.
+                        if cut_section {
+                            if let Err(e) = shift_srt_file(std::path::Path::new(&srt), start_s) {
+                                emit_transcript_log(
+                                    &app_for, &job_for, "warn",
+                                    format!("Caption time re-base failed ({e}); cues may be offset by the mark-in."),
+                                );
+                            }
+                        }
                         let _ = std::fs::remove_file(&wav_path_for);
                         emit_transcript_done(
                             &app_for,
@@ -655,7 +1354,11 @@ pub async fn generate_transcript(
                     } else {
                         let _ = std::fs::remove_file(&wav_path_for);
                         let msg = if !success {
-                            format!("whisper-cli exited with code {:?}", payload.code)
+                            if payload.signal.is_some() {
+                                "Cancelled".to_string() // user Stop → SIGKILL, code is None
+                            } else {
+                                format!("whisper-cli exited with code {:?}", payload.code)
+                            }
                         } else {
                             format!("Transcript not produced at {}", srt)
                         };
@@ -714,6 +1417,122 @@ fn parse_whisper_progress_line(line: &str) -> Option<f64> {
 }
 
 #[derive(Deserialize)]
+pub struct ReDiarizeArgs {
+    /// The existing saved SRT to re-diarize IN PLACE.
+    pub transcript_path: String,
+    pub job_id: String,
+    /// Speaker-count hint; None/0 → auto-estimate (the recommended default).
+    #[serde(default)]
+    pub expected_speakers: Option<u32>,
+    /// Web source URL — locates the cached source audio (download_audio_track).
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Local file path — used directly for a local-file transcript.
+    #[serde(default)]
+    pub input_path: Option<String>,
+}
+
+/// Re-run ONLY speaker diarization on an existing transcript — no Whisper pass.
+/// Reuses the cached source audio (web) or the local file, extracts a 16 kHz
+/// WAV, runs the diarizer, and merges fresh speaker labels into the EXISTING
+/// SRT in place. On a long source this is seconds vs. re-transcribing minutes.
+/// Emits the same transcript-phase/-progress/-done events as a full run, so the
+/// frontend's existing listeners drive the UI + reload the transcript.
+#[tauri::command]
+pub async fn re_diarize_transcript(
+    app: AppHandle,
+    args: ReDiarizeArgs,
+) -> Result<String, crate::AppError> {
+    let srt_path = PathBuf::from(&args.transcript_path);
+    if !srt_path.exists() {
+        return Err(format!("Transcript not found: {}", args.transcript_path).into());
+    }
+
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("app_cache_dir: {e}"))?;
+    std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
+
+    // Resolve the audio source: an explicit local file, else the cached web
+    // source audio (download_audio_track pre-stages it, keyed by URL hash).
+    let audio_src: PathBuf = if let Some(p) = args.input_path.as_deref().filter(|s| !s.is_empty()) {
+        let pb = PathBuf::from(p);
+        if !pb.exists() {
+            return Err(format!("Audio source not found: {p}").into());
+        }
+        pb
+    } else if let Some(url) = args.url.as_deref().filter(|s| !s.is_empty()) {
+        validate_source_url(url)?;
+        find_audio_in_cache(&cache, &source_audio_prefix(url))
+            .filter(|p| p.metadata().map(|m| m.len() > 0).unwrap_or(false))
+            .ok_or_else(|| crate::AppError::not_found(
+                "Source audio isn't cached — use Regenerate to transcribe and detect speakers.",
+            ))?
+    } else {
+        return Err("No audio source provided for re-diarization".into());
+    };
+
+    let wav_path = cache.join(format!("saucebunny-{}.wav", args.job_id));
+    let job_id = args.job_id.clone();
+    let job_for = job_id.clone();
+    let app_for = app.clone();
+    let wav_path_for = wav_path.clone();
+    let srt_for = srt_path.clone();
+    let audio_str = audio_src.to_string_lossy().to_string();
+    let wav_str = wav_path.to_string_lossy().to_string();
+    let expected = args.expected_speakers;
+    let transcript_path_out = args.transcript_path.clone();
+
+    tokio::spawn(async move {
+        emit_transcript_log(
+            &app_for, &job_for, "info",
+            "Re-detecting speakers (reusing the existing transcript — no re-transcription)…".into(),
+        );
+        // Extract a 16 kHz mono WAV (the diarizer's input) from the source audio.
+        let ff = match app_for.shell().sidecar("ffmpeg") {
+            Ok(c) => c,
+            Err(e) => {
+                emit_transcript_done(&app_for, &job_for, false, None, None,
+                    Some(format!("ffmpeg sidecar not found: {e}")));
+                return;
+            }
+        };
+        let ff_out = ff
+            .args(["-y", "-i", &audio_str, "-vn", "-ar", "16000", "-ac", "1", &wav_str])
+            .output()
+            .await;
+        match ff_out {
+            Ok(o) if o.status.success() && wav_path_for.exists() => {}
+            Ok(o) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                let _ = std::fs::remove_file(&wav_path_for);
+                emit_transcript_done(&app_for, &job_for, false, o.status.code(), None,
+                    Some(format!("Audio conversion failed — {}", short_err(&stderr))));
+                return;
+            }
+            Err(e) => {
+                emit_transcript_done(&app_for, &job_for, false, None, None,
+                    Some(format!("ffmpeg failed to run: {e}")));
+                return;
+            }
+        }
+        // Diarize + merge fresh speaker labels into the existing SRT in place.
+        let result = run_diarize_and_merge(&app_for, &job_for, &wav_path_for, &srt_for, expected).await;
+        let _ = std::fs::remove_file(&wav_path_for);
+        match result {
+            Ok(()) => emit_transcript_done(
+                &app_for, &job_for, true, Some(0), Some(transcript_path_out), None),
+            Err(e) => emit_transcript_done(
+                &app_for, &job_for, false, None, None,
+                Some(format!("Speaker detection failed: {e}"))),
+        }
+    });
+
+    Ok(job_id)
+}
+
+#[derive(Deserialize)]
 pub struct TranscribeLocalArgs {
     pub input_path: String,
     pub output_dir: String,
@@ -730,6 +1549,10 @@ pub struct TranscribeLocalArgs {
     /// Speaker-count hint forwarded to the diarizer when present.
     #[serde(default)]
     pub expected_speakers: Option<u32>,
+    /// Transcription engine: None / "whisper" → whisper-cli; "parakeet" →
+    /// FluidAudio Parakeet via the diarize sidecar's --asr mode.
+    #[serde(default)]
+    pub engine: Option<String>,
 }
 
 /// Frontend-provided pre-normalised audio (16 kHz mono WAV bytes). Lets
@@ -750,6 +1573,8 @@ pub struct TranscribePreparedWavArgs {
     /// Speaker-count hint forwarded to the diarizer when present.
     #[serde(default)]
     pub expected_speakers: Option<u32>,
+    // NB: no `engine` field — Parakeet local-file runs route through
+    // transcribe_local_file (ffmpeg WAV), not this WebCodecs fast-path.
 }
 
 #[tauri::command]
@@ -819,18 +1644,29 @@ pub async fn transcribe_prepared_wav(
                 return;
             }
         };
-        let spawn = wsp
-            .env("DYLD_LIBRARY_PATH", "/opt/homebrew/lib")
-            .env("DYLD_FALLBACK_LIBRARY_PATH", "/opt/homebrew/lib")
+        let vad_model = ensure_vad_model(&app_for).await
+            .map(|p| p.to_string_lossy().to_string());
+        if vad_model.is_some() {
+            emit_transcript_log(&app_for, &job_for, "info",
+                "Voice-activity detection on (Silero VAD).".into());
+        }
+        let mut wcmd = wsp
+            // No DYLD override — whisper-cli is statically linked (see the
+            // generate_transcript spawn for the full rationale).
             .args([
                 "-m", &model_str,
                 "-f", &wav_path_str,
                 "-osrt",
                 "-of", &output_base_str,
                 "-l", "en",
+                // Accuracy + caption-grade segmentation (see generate_transcript).
+                "-bs", "5", "-bo", "5", "-sow", "-ml", "84",
                 "-pp",
-            ])
-            .spawn();
+            ]);
+        if let Some(ref vm) = vad_model {
+            wcmd = wcmd.args(["--vad", "-vm", vm.as_str()]);
+        }
+        let spawn = wcmd.spawn();
         let (mut rx, child) = match spawn {
             Ok(c) => c,
             Err(e) => {
@@ -972,6 +1808,7 @@ pub async fn transcribe_local_file(
     let wav_path_for = wav_path.clone();
     let detect_speakers = args.detect_speakers;
     let expected_speakers = args.expected_speakers;
+    let engine = args.engine.clone().unwrap_or_default();
 
     tokio::spawn(async move {
         // Phase 1: ffmpeg → 16 kHz mono WAV (works for any video or audio in).
@@ -1026,6 +1863,37 @@ pub async fn transcribe_local_file(
             return;
         }
 
+        // Phase 2 (Parakeet branch, r90) — see generate_transcript for rationale.
+        if engine == "parakeet" {
+            emit_transcript_log(&app_for, &job_for, "ok",
+                "Audio ready — transcribing with Parakeet…".into());
+            let srt = format!("{}.srt", output_base_str);
+            if let Err(e) = run_parakeet_asr(&app_for, &job_for, &wav_path_for, &srt).await {
+                let _ = std::fs::remove_file(&wav_path_for);
+                let msg = e.to_string();
+                if msg.contains("Cancelled") {
+                    emit_transcript_done(&app_for, &job_for, false, None, None, Some("Cancelled".into()));
+                } else {
+                    emit_transcript_done(&app_for, &job_for, false, None, None,
+                        Some(format!("Parakeet transcription failed — {msg}")));
+                }
+                return;
+            }
+            let mut warn_note: Option<String> = None;
+            if detect_speakers {
+                if let Err(e) = run_diarize_and_merge(
+                    &app_for, &job_for, &wav_path_for, std::path::Path::new(&srt), expected_speakers,
+                ).await {
+                    emit_transcript_log(&app_for, &job_for, "warn",
+                        format!("Speaker detection failed — transcript saved without speaker labels. ({e})"));
+                    warn_note = Some(format!("Diarization skipped: {e}"));
+                }
+            }
+            let _ = std::fs::remove_file(&wav_path_for);
+            emit_transcript_done(&app_for, &job_for, true, Some(0), Some(srt), warn_note);
+            return;
+        }
+
         emit_transcript_log(
             &app_for, &job_for, "ok",
             "Audio ready — transcribing with Whisper…".into(),
@@ -1047,18 +1915,29 @@ pub async fn transcribe_local_file(
                 return;
             }
         };
-        let spawn = wsp
-            .env("DYLD_LIBRARY_PATH", "/opt/homebrew/lib")
-            .env("DYLD_FALLBACK_LIBRARY_PATH", "/opt/homebrew/lib")
+        let vad_model = ensure_vad_model(&app_for).await
+            .map(|p| p.to_string_lossy().to_string());
+        if vad_model.is_some() {
+            emit_transcript_log(&app_for, &job_for, "info",
+                "Voice-activity detection on (Silero VAD).".into());
+        }
+        let mut wcmd = wsp
+            // No DYLD override — whisper-cli is statically linked (see the
+            // generate_transcript spawn for the full rationale).
             .args([
                 "-m", &model_str,
                 "-f", &wav_path_str,
                 "-osrt",
                 "-of", &output_base_str,
                 "-l", "en",
+                // Accuracy + caption-grade segmentation (see generate_transcript).
+                "-bs", "5", "-bo", "5", "-sow", "-ml", "84",
                 "-pp",
-            ])
-            .spawn();
+            ]);
+        if let Some(ref vm) = vad_model {
+            wcmd = wcmd.args(["--vad", "-vm", vm.as_str()]);
+        }
+        let spawn = wcmd.spawn();
         let (mut rx, child) = match spawn {
             Ok(c) => c,
             Err(e) => {
@@ -1128,7 +2007,11 @@ pub async fn transcribe_local_file(
                     } else {
                         let _ = std::fs::remove_file(&wav_path_for);
                         let msg = if !success {
-                            format!("whisper-cli exited with code {:?}", payload.code)
+                            if payload.signal.is_some() {
+                                "Cancelled".to_string() // user Stop → SIGKILL, code is None
+                            } else {
+                                format!("whisper-cli exited with code {:?}", payload.code)
+                            }
                         } else {
                             format!("Transcript not produced at {}", srt)
                         };
@@ -1219,6 +2102,90 @@ fn seconds_to_srt_tc(secs: f64) -> String {
     let s  = (total_ms / 1000) % 60;
     let ms = total_ms % 1000;
     format!("{:02}:{:02}:{:02},{:03}", h, m, s, ms)
+}
+
+/// Re-base every cue timestamp in an SRT by `offset_s` seconds and return the
+/// rewritten text. When a sub-range is cut for transcription (an in/out mark on
+/// a web source, i.e. `generate_transcript`'s `cut_section` path), whisper writes
+/// cue times relative to the cut, so the SRT starts at the mark-in instead of the
+/// true source start. The player runs on the FULL source timeline, so captions,
+/// the transcript highlight, and click-to-seek would all land off by exactly the
+/// mark-in. Re-basing the cues to absolute source time fixes it on every playback
+/// path. Identity when `offset_s <= 0` (full-source and "Fix accuracy" runs
+/// already start at zero).
+fn shift_srt_text(text: &str, offset_s: f64) -> String {
+    if offset_s <= 0.0 {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    // split_inclusive keeps each line's trailing "\n" (or "\r\n") so non-timing
+    // lines (numbers, text, blanks) pass through byte-for-byte.
+    for line in text.split_inclusive('\n') {
+        if let Some(arrow) = line.find(" --> ") {
+            let after = &line[arrow + 5..]; // the second timestamp + any trailing
+            let first = srt_tc_to_seconds(line[..arrow].trim());
+            let second = after.get(..12).and_then(srt_tc_to_seconds);
+            if let (Some(a), Some(b)) = (first, second) {
+                out.push_str(&seconds_to_srt_tc(a + offset_s));
+                out.push_str(" --> ");
+                out.push_str(&seconds_to_srt_tc(b + offset_s));
+                out.push_str(&after[12..]); // newline / VTT position metadata, kept
+                continue;
+            }
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+fn shift_srt_file(path: &std::path::Path, offset_s: f64) -> std::io::Result<()> {
+    if offset_s <= 0.0 {
+        return Ok(());
+    }
+    let text = std::fs::read_to_string(path)?;
+    std::fs::write(path, shift_srt_text(&text, offset_s))
+}
+
+#[cfg(test)]
+mod srt_shift_tests {
+    use super::{seconds_to_srt_tc, shift_srt_text, srt_tc_to_seconds};
+
+    #[test]
+    fn srt_tc_roundtrip() {
+        assert_eq!(srt_tc_to_seconds("00:00:01,500"), Some(1.5));
+        assert_eq!(srt_tc_to_seconds("01:02:03,004"), Some(3723.004));
+        assert_eq!(seconds_to_srt_tc(1.5), "00:00:01,500");
+        assert_eq!(seconds_to_srt_tc(3723.004), "01:02:03,004");
+    }
+
+    #[test]
+    fn shift_zero_or_negative_is_identity() {
+        let srt = "1\n00:00:00,000 --> 00:00:02,000\nhello\n";
+        assert_eq!(shift_srt_text(srt, 0.0), srt);
+        assert_eq!(shift_srt_text(srt, -5.0), srt);
+    }
+
+    #[test]
+    fn shift_rebases_cue_times_to_absolute() {
+        // A sub-range transcript whose cues start at 0 is pushed forward by the
+        // mark-in (10s) — both ends of every cue; text/numbers/blanks untouched.
+        let srt = "1\n00:00:00,000 --> 00:00:02,500\nfirst line\n\n2\n00:00:02,500 --> 00:00:05,000\nsecond line\n";
+        let shifted = shift_srt_text(srt, 10.0);
+        assert!(shifted.contains("00:00:10,000 --> 00:00:12,500"));
+        assert!(shifted.contains("00:00:12,500 --> 00:00:15,000"));
+        assert!(shifted.contains("first line"));
+        assert!(shifted.contains("second line"));
+        assert!(shifted.starts_with("1\n"));
+        assert!(shifted.contains("\n\n2\n"));
+    }
+
+    #[test]
+    fn shift_handles_hour_rollover_and_crlf() {
+        let srt = "1\r\n00:59:59,000 --> 01:00:01,000\r\ntext\r\n";
+        let shifted = shift_srt_text(srt, 2.0);
+        assert!(shifted.contains("01:00:01,000 --> 01:00:03,000"));
+        assert!(shifted.contains("\r\ntext\r\n"));
+    }
 }
 
 /// Walk the SRT cue by cue, stamp the best-overlap speaker on each,
@@ -1428,7 +2395,11 @@ async fn run_diarize_and_merge(
                 let raw = String::from_utf8_lossy(&b).to_string();
                 stderr_tail.push_str(&raw);
                 if stderr_tail.len() > 4096 {
-                    let cut = stderr_tail.len() - 2048;
+                    // Round to a char boundary — from_utf8_lossy chunks can split
+                    // a multibyte char (Swift '…' progress, etc.); byte-slicing
+                    // mid-codepoint panics and hangs the diarize task.
+                    let mut cut = stderr_tail.len() - 2048;
+                    while cut < stderr_tail.len() && !stderr_tail.is_char_boundary(cut) { cut += 1; }
                     stderr_tail = stderr_tail[cut..].to_string();
                 }
             }
@@ -1621,7 +2592,7 @@ pub async fn run_diarizer(app: AppHandle, args: DiarizeArgs) -> Result<String, c
              Run `npm run build:diarizer` from the project root."
         ))?;
 
-    let (mut rx, _child) = cmd
+    let (mut rx, child) = cmd
         .args([
             "--input", &args.input_wav,
             "--output", &args.output_json,
@@ -1629,6 +2600,9 @@ pub async fn run_diarizer(app: AppHandle, args: DiarizeArgs) -> Result<String, c
         ])
         .spawn()
         .map_err(|e| format!("failed to spawn saucebunny-diarize: {e}"))?;
+    // Register so Stop can cancel — first run downloads hundreds of MB of Core
+    // ML models, then diarization runs 10-60s (mirrors run_diarize_and_merge).
+    app.state::<JobRegistry>().insert(args.job_id.clone(), child);
 
     let job_id = args.job_id.clone();
     let job_for = job_id.clone();
@@ -1672,6 +2646,7 @@ pub async fn run_diarizer(app: AppHandle, args: DiarizeArgs) -> Result<String, c
                     }
                 }
                 CommandEvent::Terminated(payload) => {
+                    let _ = app_for.state::<JobRegistry>().take(&job_for);
                     let success = payload.code == Some(0);
                     let error = if success {
                         None
@@ -1754,7 +2729,10 @@ pub async fn prepare_diarizer_models(app: AppHandle, job_id: String) -> Result<S
                     let raw = String::from_utf8_lossy(&b).to_string();
                     stderr_tail.push_str(&raw);
                     if stderr_tail.len() > 4096 {
-                        let cut = stderr_tail.len() - 2048;
+                        // Round to a char boundary (see run_diarize_and_merge) —
+                        // mid-codepoint byte-slicing panics and hangs the task.
+                        let mut cut = stderr_tail.len() - 2048;
+                        while cut < stderr_tail.len() && !stderr_tail.is_char_boundary(cut) { cut += 1; }
                         stderr_tail = stderr_tail[cut..].to_string();
                     }
                 }

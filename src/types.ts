@@ -18,6 +18,9 @@
 export type { AppError } from "./bindings/AppError";
 export type { CacheStats } from "./bindings/CacheStats";
 export type { DiarizeProgressEvent } from "./bindings/DiarizeProgressEvent";
+export type { DictateDoneEvent } from "./bindings/DictateDoneEvent";
+export type { DictateLevelEvent } from "./bindings/DictateLevelEvent";
+export type { AudioInputDevice } from "./bindings/AudioInputDevice";
 export type { DoneEvent } from "./bindings/DoneEvent";
 export type { LocalFileMeta } from "./bindings/LocalFileMeta";
 export type { LogEvent } from "./bindings/LogEvent";

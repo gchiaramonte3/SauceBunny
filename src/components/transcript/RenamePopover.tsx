@@ -29,9 +29,12 @@ type Props = {
   state: RenameState;
   onCancel: () => void;
   onApply: (name: string, scope: "all" | "turn") => void;
+  /** Jump the transcript to where this speaker first appears, then close.
+   *  Optional so any caller without a viewport stays valid. */
+  onGoToSpeaker?: () => void;
 };
 
-export function RenamePopover({ state, onCancel, onApply }: Props) {
+export function RenamePopover({ state, onCancel, onApply, onGoToSpeaker }: Props) {
   const [name, setName] = useState(state.currentName);
   const [scope, setScope] = useState<"all" | "turn">("all");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -61,7 +64,7 @@ export function RenamePopover({ state, onCancel, onApply }: Props) {
 
   // Clamp inside the viewport so the popover never spills off-screen
   // when the chip is near a corner.
-  const POP_W = 260;
+  const POP_W = 288;
   const POP_H = 150;
   const top = Math.min(window.innerHeight - POP_H - 8, state.rect.bottom + 6);
   const left = Math.max(
@@ -76,7 +79,9 @@ export function RenamePopover({ state, onCancel, onApply }: Props) {
       style={{ top, left, width: POP_W }}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="cp-tx-rename-label">Rename speaker</div>
+      <div className="cp-tx-rename-label">
+        Rename <span className="cp-tx-rename-target">{state.currentName}</span>
+      </div>
       <input
         ref={inputRef}
         className="cp-tx-rename-input"
@@ -111,7 +116,7 @@ export function RenamePopover({ state, onCancel, onApply }: Props) {
           />
           <span>
             Apply to every{" "}
-            <strong>{state.originalTag ?? "Speaker"}</strong> in this transcript
+            <strong>{state.currentName}</strong> in this transcript
           </span>
         </label>
         <label>
@@ -124,6 +129,15 @@ export function RenamePopover({ state, onCancel, onApply }: Props) {
         </label>
       </div>
       <div className="cp-tx-rename-actions">
+        {onGoToSpeaker && (
+          <button
+            className="btn btn-ghost cp-tx-rename-goto"
+            onClick={onGoToSpeaker}
+            title="Jump to where this speaker first appears"
+          >
+            Go to speaker
+          </button>
+        )}
         <button className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>

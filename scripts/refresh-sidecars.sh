@@ -48,26 +48,31 @@ mv "${YT_DLP_TMP}" "${YT_DLP_DST}"
 echo "✓ ${YT_DLP_DST}"
 
 # Record the refresh so we have a trail of what versions shipped when.
-# First row gets a header; subsequent runs append below it.
+# SIDECAR-VERSIONS.md uses the `## section` format shared with
+# fetch-ffmpeg.sh / fetch-ffprobe.sh / build-whisper.sh — the old
+# line-7 table insert corrupted that file (its line 7 is prose now).
+DATE_UTC="$(date -u +%Y-%m-%d)"
 if [[ ! -f "${VERSIONS_FILE}" ]]; then
   cat > "${VERSIONS_FILE}" <<'EOF'
 # Bundled sidecar versions
 
-Append a row here every time you refresh a sidecar binary. Newest at top.
+This file tracks the version of every binary we ship under
+`src-tauri/binaries/`. Updated by the refresh scripts; do not edit by hand.
 
-| Date (UTC) | Sidecar | Version | Notes |
-|---|---|---|---|
 EOF
 fi
-
-DATE_UTC="$(date -u +%Y-%m-%d)"
-# Insert AFTER the table header (line 7) so newest sits at the top.
-TMP_VERSIONS="$(mktemp)"
-awk -v row="| ${DATE_UTC} | yt-dlp | ${NEW_VERSION} | refresh-sidecars.sh |" '
-  NR==7 { print; print row; next }
-  { print }
-' "${VERSIONS_FILE}" > "${TMP_VERSIONS}"
-mv "${TMP_VERSIONS}" "${VERSIONS_FILE}"
+# Idempotent in-place update: drop any previous "## yt-dlp" block, append fresh.
+python3 - "${VERSIONS_FILE}" "${NEW_VERSION}" "${DATE_UTC}" <<'PY'
+import sys, re
+path, version, date = sys.argv[1], sys.argv[2], sys.argv[3]
+text = open(path).read()
+text = re.sub(r'## yt-dlp\b.*?(?=\n## |\Z)', '', text, flags=re.DOTALL)
+text = text.rstrip() + '\n\n## yt-dlp\n'
+text += f'- version: {version}\n'
+text += f'- source: https://github.com/yt-dlp/yt-dlp (official single-file macOS static build)\n'
+text += f'- refreshed: {date}\n'
+open(path, 'w').write(text)
+PY
 
 echo "→ Recorded refresh in ${VERSIONS_FILE}"
 echo

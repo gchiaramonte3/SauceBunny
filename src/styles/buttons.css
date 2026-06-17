@@ -80,6 +80,59 @@
   box-shadow: var(--bevel-raised);
 }
 
+/* Hero export CTA — the app's single most important action gets its own
+   identity: a violet→indigo gradient (the brand purple, --color-accent-purple
+   #6D52ED, sits mid-stop) with a top sheen for depth, white text, and a layered
+   purple glow. Overrides the green .btn-primary it's layered on; defined after
+   it so equal-specificity base rules lose on source order. */
+.cp-export-cta {
+  background:
+    radial-gradient(135% 120% at 50% -15%, rgba(255,255,255,0.22), rgba(255,255,255,0) 55%),
+    linear-gradient(143deg, #9D7BFF 0%, #6D52ED 50%, #5A39D6 100%);
+  color: #fff;
+  border-color: transparent;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.30),
+    inset 0 -1px 0 rgba(0,0,0,0.22),
+    0 1px 2px rgba(0,0,0,0.45),
+    0 0 0 1px rgba(157,117,250,0.30),
+    0 6px 20px -2px rgba(109,82,237,0.50),
+    0 0 28px rgba(157,117,250,0.26);
+  transition: box-shadow var(--dur-fast) var(--ease-out),
+              filter var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.cp-export-cta:hover:not(:disabled) {
+  filter: brightness(1.06) saturate(1.04);
+  background:
+    radial-gradient(135% 120% at 50% -15%, rgba(255,255,255,0.26), rgba(255,255,255,0) 55%),
+    linear-gradient(143deg, #9D7BFF 0%, #6D52ED 50%, #5A39D6 100%);
+  border-color: transparent;
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.35),
+    inset 0 -1px 0 rgba(0,0,0,0.22),
+    0 1px 2px rgba(0,0,0,0.45),
+    0 0 0 1px rgba(157,117,250,0.45),
+    0 9px 28px -2px rgba(109,82,237,0.60),
+    0 0 40px rgba(157,117,250,0.40);
+}
+.cp-export-cta:active:not(:disabled) {
+  transform: translateY(0);
+  filter: brightness(0.97);
+  box-shadow:
+    inset 0 1px 2px rgba(0,0,0,0.28),
+    0 0 0 1px rgba(157,117,250,0.35),
+    0 2px 8px rgba(109,82,237,0.35);
+}
+.cp-export-cta:disabled {
+  background: rgba(157,117,250,0.14);
+  color: var(--fg-4);
+  text-shadow: none;
+  box-shadow: var(--bevel-raised);
+}
+
 .btn-icon {
   width: 30px;
   height: 30px;
@@ -168,3 +221,140 @@
   border-radius: 5px;
 }
 
+
+/* ──────────────────────────────────────────────────────────────────
+   Generate CTA (.cp-gen-btn) — transcription's primary action.
+   Beveled + green-glow (the app's CTA language), with a letter-by-letter
+   idle shimmer, a flickering sparkle, and a loading state that crossfades
+   to "Generating…" over a green progress underfill. Hand-rolled port of a
+   styled-components concept; driven by a real `loading` class, not :focus.
+   ────────────────────────────────────────────────────────────────── */
+.cp-gen-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 14px;
+  overflow: hidden;
+  isolation: isolate;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--fg-2);
+  background: var(--bg-2);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  cursor: pointer;
+  /* Bevel: inset top highlight + dropped base. */
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.10),
+    inset 0 2px 6px rgba(255, 255, 255, 0.04),
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    0 6px 16px rgba(0, 0, 0, 0.35);
+  transition:
+    border-color 0.35s var(--ease-out),
+    box-shadow 0.35s var(--ease-out),
+    background 0.35s var(--ease-out),
+    transform 0.12s var(--ease-out);
+}
+.cp-gen-btn:disabled { cursor: default; }
+/* Top highlight glow — hidden at rest, blooms on hover / while loading. */
+.cp-gen-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.45),
+    rgba(var(--accent-rgb), 0.55),
+    rgba(var(--accent-rgb), 0) 24%
+  );
+  transition: opacity 0.35s var(--ease-out);
+}
+.cp-gen-btn:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  transform: translateY(-1px);
+}
+.cp-gen-btn:hover:not(:disabled)::after { opacity: 0.5; }
+.cp-gen-btn:active:not(:disabled) { transform: translateY(0); }
+.cp-gen-btn.loading {
+  border-color: rgba(var(--accent-rgb), 0.5);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.10),
+    0 0 0 1px rgba(var(--accent-rgb), 0.25),
+    0 0 18px rgba(var(--accent-rgb), 0.18),
+    0 6px 16px rgba(0, 0, 0, 0.35);
+}
+.cp-gen-btn.loading::after { opacity: 0.6; }
+
+/* Green progress underfill (loading only). */
+.cp-gen-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.05), rgba(var(--accent-rgb), 0.16));
+  box-shadow: inset -1px 0 8px rgba(var(--accent-rgb), 0.35);
+  transition: width 0.35s var(--ease-out);
+}
+
+/* Sparkle — flickers at rest, brightens to accent on hover / loading. */
+.cp-gen-svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  z-index: 2;
+  color: var(--fg-3);
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.4));
+  animation: cp-gen-flicker 2.4s linear infinite;
+  transition: color 0.35s var(--ease-out), filter 0.35s var(--ease-out);
+}
+.cp-gen-btn:hover:not(:disabled) .cp-gen-svg,
+.cp-gen-btn.loading .cp-gen-svg {
+  color: var(--accent);
+  filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.8));
+}
+.cp-gen-btn.loading .cp-gen-svg { animation-duration: 1s; }
+@keyframes cp-gen-flicker { 48%, 52% { opacity: 0.4; } }
+
+/* Text layers — idle (per-letter shimmer) crossfades to the loading label. */
+.cp-gen-txt {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.2em;
+}
+.cp-gen-idle { transition: opacity 0.3s var(--ease-out); }
+.cp-gen-load {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.3s var(--ease-out);
+}
+.cp-gen-btn.loading .cp-gen-idle { opacity: 0; }
+.cp-gen-btn.loading .cp-gen-load { opacity: 1; }
+.cp-gen-letter {
+  display: inline-block;
+  white-space: pre;
+  animation: cp-gen-shimmer 2s ease-in-out infinite;
+}
+@keyframes cp-gen-shimmer {
+  50% { color: var(--fg-1); text-shadow: 0 0 4px rgba(255, 255, 255, 0.35); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-gen-svg, .cp-gen-letter { animation: none; }
+  .cp-gen-btn:hover:not(:disabled) { transform: none; }
+}

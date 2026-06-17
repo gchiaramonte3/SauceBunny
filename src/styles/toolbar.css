@@ -93,9 +93,8 @@
   margin: 0 auto;
 }
 .cp-url:focus-within {
-  border-color: rgba(var(--accent-rgb), 0.5);
-  background: rgba(0,0,0,0.55);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.55);
 }
 .cp-url input {
   flex: 1;

@@ -92,3 +92,62 @@ export function hostnameOf(raw: string): string {
     return "web";
   }
 }
+
+/**
+ * True when an error came from YouTube's "Sign in to confirm you're not a bot"
+ * challenge — either the raw yt-dlp text or our humanized backend hint
+ * (download.rs `YT_AUTH_HINT`). Drives the contextual auth modal.
+ */
+export function isYouTubeBotError(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    m.includes("not a bot") ||
+    m.includes("confirm you're not a bot") ||
+    m.includes("sign in to confirm") ||
+    m.includes("youtube auth")
+  );
+}
+
+/**
+ * True when a fetch failed because the SOURCE needs the user's login cookies —
+ * YouTube's bot-check, or any login-gated site (Reddit now requires it, others
+ * may follow). Catches both raw yt-dlp text and our humanized backend hints.
+ * Drives the contextual cookie reminder for ANY site, not just YouTube.
+ */
+export function needsCookiesError(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    isYouTubeBotError(msg) ||
+    m.includes("account authentication is required") ||
+    m.includes("requires you to be signed in") ||
+    m.includes("--cookies-from-browser") ||
+    m.includes("use --cookies") ||
+    m.includes("reuses those cookies")
+  );
+}
+
+/** Human-friendly site name from a hostname, for cookie-reminder copy.
+ *  "www.reddit.com" → "Reddit", "youtu.be" → "YouTube". */
+export function prettyHost(host: string): string {
+  const h = host.replace(/^www\./, "").toLowerCase();
+  const known: Record<string, string> = {
+    "reddit.com": "Reddit",
+    "youtube.com": "YouTube",
+    "youtu.be": "YouTube",
+    "vimeo.com": "Vimeo",
+    "tiktok.com": "TikTok",
+    "twitter.com": "X",
+    "x.com": "X",
+    "instagram.com": "Instagram",
+    "facebook.com": "Facebook",
+    "twitch.tv": "Twitch",
+  };
+  // Match by registrable-domain suffix, not exact host — otherwise
+  // old.reddit.com → "Old" and mobile.twitter.com → "Mobile" in the
+  // sign-in reminder copy.
+  for (const [k, v] of Object.entries(known)) {
+    if (h === k || h.endsWith("." + k)) return v;
+  }
+  const label = h.split(".")[0] || h;
+  return label ? label.charAt(0).toUpperCase() + label.slice(1) : "this site";
+}

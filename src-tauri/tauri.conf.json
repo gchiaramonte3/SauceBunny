@@ -25,7 +25,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: https: http:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:*; media-src 'self' https: http: blob: asset: http://asset.localhost http://127.0.0.1:* http://localhost:*",
+      "csp": "default-src 'self'; img-src 'self' data: https: http:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:* asset: http://asset.localhost https://asset.localhost; media-src 'self' https: http: blob: asset: http://asset.localhost http://127.0.0.1:* http://localhost:*",
       "assetProtocol": {
         "enable": true,
         "scope": [
@@ -50,9 +50,16 @@
     "externalBin": [
       "binaries/yt-dlp",
       "binaries/ffmpeg",
+      "binaries/ffprobe",
       "binaries/whisper-cli",
-      "binaries/saucebunny-diarize"
+      "binaries/saucebunny-diarize",
+      "binaries/llama-server"
     ],
+    "resources": {
+      "../LICENSE": "licenses/",
+      "../THIRD-PARTY-LICENSES.md": "licenses/",
+      "../licenses/GPLv3.txt": "licenses/"
+    },
     "macOS": {
       "minimumSystemVersion": "13.0",
       "entitlements": "entitlements.plist"

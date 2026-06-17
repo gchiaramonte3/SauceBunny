@@ -8,11 +8,15 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "setup": "bash scripts/setup.sh",
+    "test": "vitest run",
     "build:diarizer": "bash scripts/build-diarizer.sh",
     "build:diarizer:universal": "bash scripts/build-diarizer.sh --universal",
     "refresh:sidecars": "bash scripts/refresh-sidecars.sh",
     "refresh:ffmpeg": "bash scripts/fetch-ffmpeg.sh",
+    "refresh:ffprobe": "bash scripts/fetch-ffprobe.sh",
     "build:whisper": "bash scripts/build-whisper.sh",
+    "build:llama": "bash scripts/build-llama.sh",
     "check:release": "bash scripts/check-notarization-ready.sh"
   },
   "dependencies": {
@@ -25,6 +29,8 @@
     "@tauri-apps/plugin-opener": "^2.2.6",
     "@tauri-apps/plugin-shell": "^2.2.0",
     "mediabunny": "^1.45.3",
+    "opus-decoder": "^0.7.11",
+    "perfect-freehand": "^1.2.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -35,6 +41,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.7.2",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^4.1.8"
   }
 }

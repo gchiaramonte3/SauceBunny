@@ -1,6 +1,9 @@
 import { forwardRef, useLayoutEffect, useRef, useState } from "react";
 import { IconAlert } from "./Icons";
 import { CanvasToast, type ToastKind } from "./CanvasToast";
+import { CaptionOverlay, type CaptionStyle } from "./CaptionOverlay";
+import { AnnotationOverlay } from "./AnnotationOverlay";
+import type { AnnotationStrokes } from "../lib/review";
 import { LocalMediaPlayer } from "./LocalMediaPlayer";
 import { MediaBunnyPlayer } from "./MediaBunnyPlayer";
 import { MSEStreamPlayer } from "./MSEStreamPlayer";
@@ -26,6 +29,16 @@ type Props = {
    * branch was removed in r53; see DISTRIBUTION.md for the rationale.
    */
   webStreamUrl?: string | null;
+  /** Pipeline/seek diagnostics → the Pipeline log (channel "seek"). */
+  onDiag?: (tag: string, message: string) => void;
+  /** r75: RAW audio-track CDN URL for DASH-split sources (Reddit, YouTube
+   *  >360p). Passed to the proxy's fMP4 route so video+audio are merged on the
+   *  fly → the source streams with sound instead of downloading first. */
+  audioStreamUrl?: string | null;
+  /** r79: resolver codec strings forwarded to MSEStreamPlayer so it can build
+   *  the MSE MIME directly and skip the fragile raw-stream probe. */
+  streamVideoCodec?: string | null;
+  streamAudioCodec?: string | null;
   /** Initial volume for the LocalMediaPlayer when it mounts. */
   initialVolume: number;
   /**
@@ -56,12 +69,33 @@ type Props = {
   useWebCodecs?: boolean;
   onMediaError?: (msg: string) => void;
   /** Transient toast — auto-fades after a few seconds. */
-  toast: { kind: ToastKind; title: string; body?: string } | null;
+  toast: { id: number; kind: ToastKind; title: string; body?: string } | null;
   onToastDismiss: () => void;
   onPlayerTimeUpdate?: (seconds: number) => void;
   onPlayerStateChange?: (playing: boolean) => void;
   onPlayerReady?: (duration: number) => void;
   onSurfaceClick?: () => void;
+  /** Active transcript path (SRT/VTT) for the on-video caption overlay. */
+  transcriptPath?: string | null;
+  /** Bumped on every transcript arrival — forces a cue re-read when a
+   *  regeneration overwrote the SAME path. */
+  transcriptReloadToken?: number;
+  /** Current playhead position in seconds — picks which caption cue shows. */
+  currentSec?: number;
+  /** Whether the transport-bar captions toggle is on. */
+  captionsOn?: boolean;
+  /** User-tunable caption appearance (Settings → Captions). */
+  captionStyle?: CaptionStyle;
+  /** Live HH:MM:SS:FF for the type-a-timecode HUD; null hides it. */
+  tcOverlay?: string | null;
+  /** Review drawing annotation to render over the frame (draft or saved). */
+  annotation?: AnnotationStrokes | null;
+  /** True while the Review panel is in draw mode (overlay captures input). */
+  annotationDrawing?: boolean;
+  /** Read-only display opacity (proximity fade); 1 when drawing/pinned. */
+  annotationOpacity?: number;
+  onAnnotationChange?: (a: AnnotationStrokes) => void;
+  onAnnotationDismiss?: () => void;
 };
 
 /**
@@ -102,11 +136,13 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     status, metadata,
     errorDetail,
     aspect,
-    sourceKind, localFilePath, webStreamUrl, initialVolume, onMediaError,
+    sourceKind, localFilePath, webStreamUrl, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs,
     streamLoadingPhase,
     toast, onToastDismiss,
     onPlayerTimeUpdate, onPlayerStateChange, onPlayerReady, onSurfaceClick,
+    transcriptPath, transcriptReloadToken, currentSec, captionsOn, captionStyle, tcOverlay,
+    annotation, annotationDrawing, annotationOpacity, onAnnotationChange, onAnnotationDismiss,
   } = props;
 
   const natural = metadata?.width && metadata?.height ? metadata.width / metadata.height : 16 / 9;
@@ -198,6 +234,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               onPlayStateChange={onPlayerStateChange}
               onReady={onPlayerReady}
               onError={onMediaError}
+              onDiag={onDiag}
               onSurfaceClick={onSurfaceClick}
             />
           )
@@ -220,6 +257,16 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               path={webStreamUrl}
               filename={metadata?.title}
               hasVideo
+              /* r75: separate audio track → proxy merges it into the fMP4 so
+                 DASH-split sources (Reddit, YouTube >360p) stream with sound. */
+              onDiag={onDiag}
+              audioStreamUrl={audioStreamUrl ?? undefined}
+              /* r79: known codecs → MSEStreamPlayer skips the raw-stream probe. */
+              videoCodec={streamVideoCodec ?? undefined}
+              audioCodec={streamAudioCodec ?? undefined}
+              /* Authoritative duration so far seeks don't clamp to a short
+                 stream-probe value (was sending 19:40 to 15:12). */
+              knownDuration={metadata?.duration ?? undefined}
               initialVolume={initialVolume}
               onTimeUpdate={onPlayerTimeUpdate}
               onPlayStateChange={onPlayerStateChange}
@@ -238,11 +285,45 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               onPlayStateChange={onPlayerStateChange}
               onReady={onPlayerReady}
               onError={onMediaError}
+              onDiag={onDiag}
               onSurfaceClick={onSurfaceClick}
             />
           )
         ) : metadata?.thumbnail && (
           <img className="cp-monitor-img" src={metadata.thumbnail} alt={metadata.title} referrerPolicy="no-referrer" />
+        )}
+
+        {/* On-video subtitle overlay — driven by our own transcript, so it
+            works for any source (web stream / local file) regardless of
+            WKWebView's native <track> support. Self-contained: loads the
+            cues itself when captions are toggled on. */}
+        <CaptionOverlay
+          path={transcriptPath ?? null}
+          reloadToken={transcriptReloadToken}
+          currentSec={currentSec ?? 0}
+          enabled={!!captionsOn}
+          style={captionStyle}
+        />
+
+        {/* Review drawing annotations — draw on the frame (draft) or view a
+            saved one. Pointer-transparent unless actively drawing. */}
+        <AnnotationOverlay
+          annotation={annotation ?? null}
+          drawing={!!annotationDrawing}
+          opacity={annotationOpacity ?? 1}
+          onChange={onAnnotationChange ?? (() => {})}
+          onDismiss={onAnnotationDismiss}
+        />
+
+        {/* Type-a-timecode HUD — appears the moment the user types a digit
+            over the player; Return snaps the playhead, Esc cancels. Driven
+            entirely by App's keyboard handler + state. */}
+        {tcOverlay && (
+          <div className="cp-tc-hud">
+            <div className="cp-tc-hud-label">Go to timecode</div>
+            <div className="cp-tc-hud-value">{tcOverlay}</div>
+            <div className="cp-tc-hud-hint">Return to snap · Esc to cancel</div>
+          </div>
         )}
 
         {/* Non-blocking prep banner — sits at the bottom-left of the canvas
@@ -310,9 +391,16 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             bell up in the toolbar — the canvas stays clean. */}
         {toast && (
           <CanvasToast
+            /* Keyed on the monotonic id: replacing a visible toast remounts
+               with a FRESH countdown instead of inheriting the old timer. */
+            key={toast.id}
             kind={toast.kind}
             title={toast.title}
             body={toast.body}
+            /* When the bottom-left prep banner is up (e.g. the web-preview
+               download), lift the centered toast above it so the two don't
+               collide in the same bottom band. */
+            className={playbackPrepBusy ? "cp-canvas-toast--above-banner" : undefined}
             onDismiss={onToastDismiss}
           />
         )}

@@ -25,12 +25,15 @@ type Props = {
   fps: number;
   /** Ranges already in the queue (or completed) — drawn under the active selection. */
   queuedRanges?: TimelineRange[];
+  /** Review comment markers (seconds) — Frame.io-style dots on the track,
+   *  tinted to the reviewer's colour, expanding to their initials on hover. */
+  commentMarkers?: { id: string; time: number; resolved: boolean; color: string; initials: string }[];
   onSeek: (f: number) => void;
 };
 
 export function Timeline({
   status, durationFrames, playheadFrames, inFrames, outFrames, fps,
-  queuedRanges, onSeek,
+  queuedRanges, commentMarkers, onSeek,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -143,6 +146,21 @@ export function Timeline({
             {outFrames != null && inFrames == null && (
               <div className="cp-track-mark out" style={{ left: `${pct(outFrames)}%` }} title="Mark out" />
             )}
+            {/* Review comment markers — click a dot to jump to that note. */}
+            {commentMarkers?.map((m) => {
+              const r = Math.max(1, Math.round(fps));
+              return (
+                <div
+                  key={m.id}
+                  className={"cp-track-comment" + (m.resolved ? " resolved" : "")}
+                  style={{ left: `${pct(m.time * r)}%`, ["--marker-color" as string]: m.color }}
+                  title="Review comment — click to jump"
+                  onMouseDown={(e) => { e.stopPropagation(); onSeek(Math.floor(m.time * r)); }}
+                >
+                  <span className="cp-track-comment-ini">{m.initials}</span>
+                </div>
+              );
+            })}
             <div
               className="cp-playhead"
               style={{ left: `${pct(playheadFrames)}%` }}

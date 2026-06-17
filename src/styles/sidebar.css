@@ -439,9 +439,10 @@
 
 /* Format segmented */
 .cp-segmented {
+  position: relative;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
+  grid-template-columns: repeat(var(--seg-count, 4), 1fr);
+  gap: 0;
   padding: 3px;
   /* Sunken track effect — inset shadow pulls the panel "into" the
      surface so the active pill clearly "raises out" of it. */
@@ -452,7 +453,33 @@
     inset 0 1px 2px rgba(0,0,0,0.45),
     inset 0 -1px 0 rgba(255,255,255,0.02);
 }
+/* Sliding pill — ONE element that animates between segments (Linear/iOS
+   feel) instead of the highlight snapping between buttons. Position is
+   driven by --seg-active (0-based index) and --seg-count, set per call
+   site. Falls back to the first cell if a caller omits them. */
+.cp-segmented::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / var(--seg-count, 4));
+  border-radius: 5px;
+  background: linear-gradient(180deg, rgba(108,255,141,0.18), rgba(108,255,141,0.08));
+  border: 1px solid rgba(108,255,141,0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.10),
+    inset 0 -1px 0 rgba(0,0,0,0.20),
+    0 0 0 1px rgba(108,255,141,0.10),
+    0 0 12px rgba(108,255,141,0.18);
+  transform: translateX(calc(var(--seg-active, 0) * 100%));
+  transition: transform var(--dur-base) var(--ease-out);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) { .cp-segmented::before { transition: none; } }
 .cp-segmented button {
+  position: relative;
+  z-index: 1;
   background: transparent;
   border: 1px solid transparent;
   color: var(--fg-3);
@@ -463,25 +490,15 @@
   padding: 5px 0;
   border-radius: 5px;
   cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-out);
+  transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
   font-variant-numeric: tabular-nums;
 }
-.cp-segmented button:hover {
+.cp-segmented button:hover:not(.active) {
   color: var(--fg-1);
   background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
 }
-.cp-segmented button.active {
-  /* Active = raised green-tinted pill with the cta glow stack, scaled
-     down for the smaller surface. */
-  background: linear-gradient(180deg, rgba(108,255,141,0.18), rgba(108,255,141,0.08));
-  color: var(--color-accent-green);
-  border-color: rgba(108,255,141,0.35);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.10),
-    inset 0 -1px 0 rgba(0,0,0,0.20),
-    0 0 0 1px rgba(108,255,141,0.10),
-    0 0 12px rgba(108,255,141,0.18);
-}
+.cp-segmented button.active { color: var(--color-accent-green); }
+.cp-segmented button:active { transform: translateY(0.5px); }
 .cp-segmented button:disabled { opacity: 0.3; cursor: not-allowed; }
 
 /* Recents */

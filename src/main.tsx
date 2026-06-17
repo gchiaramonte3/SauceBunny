@@ -23,6 +23,13 @@ import "@fontsource/nunito-sans/800.css";
 import { registerMp3Encoder } from "@mediabunny/mp3-encoder";
 registerMp3Encoder();
 
+// Custom mediabunny decoders (WASM libopus) so local playback can be
+// mediabunny-first even where WKWebView lacks a WebCodecs AudioDecoder —
+// e.g. AV1+Opus YouTube downloads play in-app with no ffmpeg transcode.
+// Decode-only; does not touch the web-streaming (MSE/proxy) path.
+import { registerLocalAudioDecoders } from "./lib/mediabunny-decoders";
+registerLocalAudioDecoders();
+
 import "./styles/app.css";
 
 // Single-bundle multi-window: the floating side-panel window loads the

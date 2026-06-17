@@ -33,11 +33,13 @@ let package = Package(
       url: "https://github.com/argmaxinc/argmax-oss-swift.git",
       from: "1.0.0"
     ),
-    // FluidAudio — fallback. 0.x; we use Mirror reflection to absorb
-    // property renames between releases.
+    // FluidAudio — diarizer fallback AND the Parakeet ASR engine (r90).
+    // Pinned EXACT: the ASR API (AsrManager.transcribe(_:decoderState:)) is
+    // 0.15.x and the 0.x line churns, so we lock the version and re-verify on
+    // any bump. Diarizer result-parsing uses Mirror reflection to stay robust.
     .package(
       url: "https://github.com/FluidInference/FluidAudio.git",
-      from: "0.14.0"
+      exact: "0.15.3"
     ),
   ],
   targets: [

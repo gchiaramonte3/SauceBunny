@@ -51,6 +51,23 @@ export function secondsToHms(seconds: number): string {
   return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
 
+/** Parse a coarse "m:ss" / "h:mm:ss" (or bare "ss") string to seconds. Returns
+ *  null on malformed input. Used to make the AI summary's [m:ss] timecodes
+ *  clickable (seek-to-region). */
+export function hmsToSeconds(hms: string): number | null {
+  const parts = hms.trim().split(":");
+  if (parts.length < 1 || parts.length > 3) return null;
+  const nums: number[] = [];
+  for (const p of parts) {
+    if (!/^\d+$/.test(p)) return null;
+    nums.push(parseInt(p, 10));
+  }
+  while (nums.length < 3) nums.unshift(0);
+  const [h, m, s] = nums;
+  if (m >= 60 || s >= 60) return null;
+  return h * 3600 + m * 60 + s;
+}
+
 export function isValidTc(tc: string, fps: number): boolean {
   return tcToFrames(tc, fps) !== null;
 }

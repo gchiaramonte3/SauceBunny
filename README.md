@@ -1,46 +1,77 @@
-# Sauce Bunny
+# Sauce Bunny 🐰
 
-A Mac-first local desktop app for clipping a section of a YouTube video into an MP4. Tauri 2 + React + bundled `yt-dlp` and `ffmpeg`.
+[![CI](https://github.com/gchiaramonte3/SauceBunny/actions/workflows/ci.yml/badge.svg)](https://github.com/gchiaramonte3/SauceBunny/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platform: macOS 13+ · Apple Silicon](https://img.shields.io/badge/platform-macOS%2013%2B%20·%20Apple%20Silicon-black)
+![Built with Tauri 2 · React 18](https://img.shields.io/badge/built%20with-Tauri%202%20·%20React%2018-24C8DB)
 
-## Personal-use only
+**Local-first macOS app for pulling, transcribing, and clipping video — no cloud, no accounts, no telemetry.**
 
-This is a local utility — no cloud, no accounts. Use it on content you have the rights to clip.
+Paste a URL (YouTube, Vimeo, TikTok, X, Reddit, Instagram, or any page with embedded video) or import a local file. Watch it instantly, mark in/out points frame-accurately, export lossless clips or MP3s, and generate speaker-labeled transcripts — everything runs on your machine.
 
-## Dev
+## Features
 
-```
+- **Instant web playback** — streams web sources straight into the player (no full download wait) via a loopback ffmpeg→MSE pipeline, with an automatic download-to-cache fallback. Seek anywhere; J-K-L shuttle; frame-accurate scrubbing with a WebCodecs preview.
+- **Transcription** — local Whisper (whisper.cpp) with downloadable models, or pull the source's own captions in one click. Captions stay locked to the audio you hear — the streamed video is the single clock for audio, picture, and captions; a "Fix timing with Whisper" button re-times loose YouTube auto-captions.
+- **Speaker diarization** — on-device speaker detection (SpeakerKit, FluidAudio fallback) with a full speaker editor: rename, drag-to-merge, per-turn overrides, color-coded roster.
+- **Transcript workspace** — searchable karaoke-highlighted reader, click any line to jump the video, pop it out to its own floating window, export TXT/MD/SRT/PDF.
+- **AI Summary** — a local LLM (llama.cpp) summarizes the transcript on-device, speaker-aware, with clickable timecodes that jump the video.
+- **Review workspace** — Frame.io-style timecoded threaded comments, freehand frame annotations, and on-device **voice dictation** (mic → text); export notes to Markdown, a CSV marker sheet, or a CMX3600 EDL.
+- **Clip export** — lossless cuts or re-encodes, full-clip or marked range, MP3 audio export, an export queue, on-video captions drawn from your transcript.
+- **Command palette** (⌘K), rebindable shortcuts, customizable defaults, dark editorial UI.
+
+## Privacy & local-first
+
+Everything happens on your Mac. The only network traffic is the content **you** ask it to fetch (the video/captions) and model downloads **you** trigger. Optional: sign-in-gated sources can use your browser's cookies via yt-dlp's `--cookies-from-browser` — off by default, configured in Settings. See [SECURITY.md](SECURITY.md) for the threat model (including the loopback media proxy).
+
+Use it on content you have the rights to clip.
+
+## Install
+
+**Requirements:** macOS 13+ (14+ recommended for diarization), Apple Silicon.
+
+Grab the notarized `.dmg` from [Releases](../../releases) — or build from source:
+
+```bash
+git clone https://github.com/gchiaramonte3/SauceBunny.git "Sauce Bunny"
+cd "Sauce Bunny"
 npm install
+npm run setup        # fetches/builds the sidecar binaries (one-time)
 npm run tauri dev
 ```
 
-First build pulls all Rust dependencies and takes a while.
+Build prerequisites: Xcode Command Line Tools, Rust 1.77+, Node 20+, Swift 5.9+. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full dev guide.
 
-## Bundled binaries
+## Development
 
-`src-tauri/binaries/` ships two sidecars, both suffixed with the Mac arm64 target triple Tauri expects:
-
-- `yt-dlp-aarch64-apple-darwin` — official macOS yt-dlp release
-- `ffmpeg-aarch64-apple-darwin` — copied from Homebrew (`/opt/homebrew/bin/ffmpeg`)
-
-The Homebrew ffmpeg dynamically links against dylibs under `/opt/homebrew/Cellar/...`, so the resulting `.app` is not portable to other Macs without those dylibs. For personal use on the build machine this is fine; for distribution, replace with a static ffmpeg build.
-
-## Architecture
-
-- `src/` — React UI. Single window: URL → metadata → Mark In / Mark Out → output folder → Pull Clip.
-- `src-tauri/src/commands.rs` — Rust commands: `fetch_metadata`, `create_clip`, `reveal_in_finder`, `new_job_id`. All argument arrays — never raw shell strings.
-- `src-tauri/capabilities/default.json` — sidecar allow-list (only the two binaries we ship).
-
-## Clip flow
-
-```
-yt-dlp \
-  --download-sections "*HH:MM:SS-HH:MM:SS" \
-  -f "bv*+ba/b" \
-  --merge-output-format mp4 \
-  --ffmpeg-location <bundled ffmpeg> \
-  --no-playlist --no-part --newline --progress \
-  -o <output path> \
-  <url>
+```bash
+npm run tauri dev        # run the app — hot-reload frontend + Rust
+npm test                 # vitest: SRT/timecode/proxy/validation units
+npm run check:release    # audit sidecars + entitlements + signing before a build
 ```
 
-Progress is streamed back as `clip-log` events; completion fires `clip-done`.
+Before opening a PR, run the full gate (CI runs the same on every push):
+
+```bash
+npx tsc --noEmit                                              # types
+npm test                                                     # frontend units
+( cd src-tauri && cargo check && cargo test --lib && cargo clippy --lib )
+( cd swift-sidecar && swift build )                          # diarizer
+```
+
+`cargo test --lib` also regenerates the `ts-rs` TypeScript bindings in
+`src/bindings/` from the Rust structs — keep it green when you touch a
+cross-boundary type. Architecture tour: [ARCHITECTURE.md](ARCHITECTURE.md);
+engineering rules: [CLAUDE.md](CLAUDE.md).
+
+## How it works
+
+Tauri 2 shell (Rust) + React 18 frontend in WKWebView. Media and ML work is done by bundled, self-contained sidecars — yt-dlp, ffmpeg/ffprobe, whisper.cpp, llama.cpp (the AI Summary's local LLM, served over a token-gated loopback port), and our own Swift diarizer — orchestrated by thin Rust commands (argument arrays, never shell strings). Web playback streams through a token-gated `127.0.0.1` proxy that remuxes to fragmented MP4 for MSE (the only path WKWebView plays web video with sound). The full tour lives in [ARCHITECTURE.md](ARCHITECTURE.md); the project's engineering rules live in [CLAUDE.md](CLAUDE.md).
+
+## Contributing
+
+PRs welcome — read [CONTRIBUTING.md](CONTRIBUTING.md) first (setup, checks, conventions). Bugs and ideas go through the [issue templates](.github/ISSUE_TEMPLATE/); include the pipeline log (⌘\ → Copy) in bug reports.
+
+## License
+
+[MIT](LICENSE). Sauce Bunny bundles third-party binaries (yt-dlp, ffmpeg, whisper.cpp, llama.cpp, …) and libraries under their own licenses — see [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md). Note the bundled ffmpeg is a **GPL** build; review that file before cutting a public release.

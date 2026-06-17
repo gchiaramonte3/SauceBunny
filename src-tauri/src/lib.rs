@@ -131,6 +131,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .manage(commands::JobRegistry::default())
+        .manage(commands::LlmServer::default())
         .invoke_handler(tauri::generate_handler![
             commands::fetch_metadata,
             commands::create_clip,
@@ -139,16 +140,30 @@ pub fn run() {
             commands::list_whisper_models,
             commands::download_whisper_model,
             commands::delete_whisper_model,
+            commands::parakeet_model_downloaded,
+            commands::download_parakeet_model,
+            commands::delete_parakeet_model,
+            commands::dictate_start,
+            commands::dictate_stop,
+            commands::list_audio_input_devices,
             commands::generate_transcript,
+            commands::list_llm_models,
+            commands::download_llm_model,
+            commands::delete_llm_model,
+            commands::start_llm_server,
+            commands::stop_llm_server,
+            commands::llm_server_status,
             commands::probe_local_file,
             commands::prepare_local_for_playback,
             commands::extract_local_frame,
             commands::generate_local_thumbnail,
             commands::transcribe_local_file,
             commands::transcribe_prepared_wav,
+            commands::re_diarize_transcript,
             commands::extract_frame,
             commands::get_direct_stream_url,
             commands::download_web_preview,
+            commands::download_audio_track,
             commands::cancel_job,
             commands::reveal_in_finder,
             commands::write_bytes_to_path,
@@ -164,6 +179,11 @@ pub fn run() {
             commands::clear_all_cache,
             commands::get_backend_build_id,
             commands::get_stream_proxy_base,
+            commands::ytdlp_version,
+            commands::update_ytdlp,
+            commands::reset_ytdlp,
+            commands::open_youtube_signin,
+            commands::open_full_disk_access,
             commands::open_panel_window,
             commands::close_panel_window,
         ])
@@ -174,12 +194,13 @@ pub fn run() {
             // stream_proxy.rs for the full rationale. Non-fatal if it
             // fails to bind — the app falls back to the download path.
             match stream_proxy::start() {
-                Ok(base) => eprintln!("[startup] media proxy listening on {base}"),
+                // Don't log the base — it carries the per-session capability token.
+                Ok(_) => eprintln!("[startup] media proxy listening (loopback, token-gated)"),
                 Err(e) => eprintln!("[startup] media proxy failed to start: {e}"),
             }
 
             // Build + install the native menu bar.
-            let menu = build_menu(&app.handle())?;
+            let menu = build_menu(app.handle())?;
             app.set_menu(menu)?;
             // Fan menu clicks out as `menu:<id>` window events. The React
             // layer subscribes via the standard `listen()` API so menu
@@ -220,6 +241,13 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Kill the resident llama-server on quit — it holds a multi-GB
+            // model in memory and would otherwise survive as an orphan.
+            if let tauri::RunEvent::Exit = event {
+                app.state::<commands::LlmServer>().shutdown();
+            }
+        });
 }

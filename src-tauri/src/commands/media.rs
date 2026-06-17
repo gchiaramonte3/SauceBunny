@@ -203,7 +203,6 @@ async fn spawn_video_clip(
         // connection overhead in TLS / TCP handshake.
         "--http-chunk-size".into(), "10M".into(),
     ];
-    cmd_args.extend(cookies_args(args.cookies_browser.as_deref()));
     if let Some((s, e)) = section_secs {
         cmd_args.push("--download-sections".into());
         cmd_args.push(format!("*{:.3}-{:.3}", s, e));
@@ -241,28 +240,97 @@ async fn spawn_video_clip(
             "srt".into(),
         ]);
     }
-    cmd_args.push(args.url);
-
-    let cmd = app
-        .shell()
-        .sidecar("yt-dlp")
-        .map_err(|e| format!("sidecar yt-dlp not found: {e}"))?;
-    let (mut rx, child) = cmd
-        .env("PATH", HOMEBREW_PATH)
-        .args(cmd_args)
-        .spawn()
-        .map_err(|e| format!("failed to spawn yt-dlp: {e}"))?;
-    app.state::<JobRegistry>().insert(job_id.clone(), child);
-
-    let app_for = app.clone();
-    let job_for = job_id.clone();
-    let output_for = output_str.clone();
+    // `cmd_args` is now the cookie-free, URL-free base; each attempt appends the
+    // cookie flag (or not) + the URL so we can retry public on a cookied failure.
     let total_seconds = section_secs.map(|(s, e)| (e - s).max(0.0)).unwrap_or(0.0);
+    let url = args.url.clone();
+    let cookies_browser = args.cookies_browser.clone();
+    let cookied = !cookies_args(cookies_browser.as_deref()).is_empty();
 
     tokio::spawn(async move {
-        run_clip_loop(&app_for, &job_for, &mut rx, total_seconds, &output_for).await;
+        let with = |cookies: Option<&str>| {
+            let mut a = cmd_args.clone();
+            a.extend(cookies_args(cookies));
+            a.push(url.clone());
+            a
+        };
+        // Cookies-first (YouTube bot-checks / private content); on a GENUINE
+        // failure (not a user Stop) when cookies were applied, retry WITHOUT
+        // them — some sites (LinkedIn) serve a logged-in page yt-dlp can't
+        // parse. Mirrors the stream resolver's cookie-fallback.
+        let mut outcome =
+            run_video_attempt(&app, &job_id, with(cookies_browser.as_deref()), total_seconds).await;
+        if !outcome.success && !outcome.signalled && cookied {
+            emit_clip_log(&app, &job_id, "info",
+                "Export failed with sign-in cookies — retrying without…".into());
+            // Clear the partial output + yt-dlp format intermediates so the
+            // no-cookie retry starts clean. Otherwise --continue resumes the
+            // cookied attempt's half-file, and the no-cookie resolve can pick a
+            // DIFFERENT format → spliced/corrupt output (or a size-complete file
+            // makes yt-dlp print "already downloaded" and exit 0 over junk).
+            let _ = std::fs::remove_file(&output_str);
+            let _ = std::fs::remove_file(format!("{output_str}.part"));
+            let out_path = std::path::Path::new(&output_str);
+            if let (Some(dir), Some(stem)) =
+                (out_path.parent(), out_path.file_stem().and_then(|s| s.to_str()))
+            {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        // `<stem>.fNNN.<ext>` format intermediates (clip.f399.mp4)
+                        if name.starts_with(stem) && name[stem.len()..].starts_with(".f") {
+                            let _ = std::fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+            outcome = run_video_attempt(&app, &job_id, with(None), total_seconds).await;
+        }
+        let success = outcome.success;
+        if success {
+            let _ = app.emit("clip-progress", ProgressEvent {
+                job_id: job_id.clone(), percent: 100.0,
+            });
+        }
+        let error = if success {
+            None
+        } else if outcome.signalled {
+            Some("Cancelled".into())
+        } else if outcome.saw_auth_error {
+            Some(YT_AUTH_HINT.into())
+        } else {
+            Some(format!("yt-dlp exited with code {:?}", outcome.code))
+        };
+        let path = if success { Some(output_str.clone()) } else { None };
+        emit_clip_done(&app, &job_id, success, outcome.code, path, error);
     });
     Ok(())
+}
+
+/// Spawn one yt-dlp video attempt, register it for cancellation, and run the
+/// streaming loop. Returns the terminal outcome (spawn failures included).
+async fn run_video_attempt(
+    app: &AppHandle,
+    job_id: &str,
+    cmd_args: Vec<String>,
+    total_seconds: f64,
+) -> ClipOutcome {
+    let cmd = match ytdlp(app) {
+        Ok(c) => c,
+        Err(e) => {
+            emit_clip_log(app, job_id, "err", format!("yt-dlp unavailable: {e}"));
+            return ClipOutcome { success: false, code: None, signalled: false, saw_auth_error: false };
+        }
+    };
+    let (mut rx, child) = match cmd.args(cmd_args).spawn() {
+        Ok(v) => v,
+        Err(e) => {
+            emit_clip_log(app, job_id, "err", format!("failed to spawn yt-dlp: {e}"));
+            return ClipOutcome { success: false, code: None, signalled: false, saw_auth_error: false };
+        }
+    };
+    app.state::<JobRegistry>().insert(job_id.to_string(), child);
+    run_clip_loop(app, job_id, &mut rx, total_seconds).await
 }
 
 async fn spawn_audio_clip(
@@ -271,7 +339,7 @@ async fn spawn_audio_clip(
     url: String,
     section_secs: Option<(f64, f64)>,
     output_str: String,
-    _ffmpeg_str: String,
+    ffmpeg_str: String,
     cookies_browser: Option<String>,
 ) -> Result<(), String> {
     // Phase 1: yt-dlp downloads raw bestaudio to cache.
@@ -289,6 +357,11 @@ async fn spawn_audio_clip(
     let mut yt_args: Vec<String> = vec![
         "-f".into(),
         "bestaudio/best".into(),
+        // Cut the section with the BUNDLED ffmpeg, not whatever's on PATH.
+        // Without this yt-dlp falls back to /opt/homebrew/bin/ffmpeg, which
+        // isn't present on a distributed app (DISTRIBUTION.md: self-contained).
+        "--ffmpeg-location".into(),
+        ffmpeg_str,
         "--no-playlist".into(),
         "--no-part".into(),
         "--newline".into(),
@@ -309,12 +382,8 @@ async fn spawn_audio_clip(
     }
     yt_args.push(url);
 
-    let cmd = app
-        .shell()
-        .sidecar("yt-dlp")
-        .map_err(|e| format!("sidecar yt-dlp not found: {e}"))?;
+    let cmd = ytdlp(&app)?;
     let (mut rx, child) = cmd
-        .env("PATH", HOMEBREW_PATH)
         .args(yt_args)
         .spawn()
         .map_err(|e| format!("failed to spawn yt-dlp: {e}"))?;
@@ -469,15 +538,30 @@ async fn spawn_audio_clip(
     Ok(())
 }
 
+/// Terminal outcome of one yt-dlp clip attempt, returned by `run_clip_loop`
+/// so the caller can decide whether to retry (e.g. WITHOUT cookies) before
+/// emitting the single `clip-done` event.
+struct ClipOutcome {
+    success: bool,
+    code: Option<i32>,
+    /// The child was killed by a signal (user Stop) — a REAL cancellation, not
+    /// a failure. We key cancellation off this, NOT off a missing output file:
+    /// a genuine extraction failure (e.g. LinkedIn with auth cookies) also exits
+    /// non-zero and writes no file, and mislabelling that as "Cancelled" both
+    /// confuses the user and defeats the cookie-retry below.
+    signalled: bool,
+    saw_auth_error: bool,
+}
+
 /// The streaming receiver loop used by the video clip path. Parses progress
-/// (% and ffmpeg time=) and throttles chatty log lines.
+/// (% and ffmpeg time=) and throttles chatty log lines. Returns the terminal
+/// outcome WITHOUT emitting `clip-done` — the caller owns that so it can retry.
 async fn run_clip_loop(
     app: &AppHandle,
     job_id: &str,
     rx: &mut tokio::sync::mpsc::Receiver<CommandEvent>,
     total_seconds: f64,
-    output_path: &str,
-) {
+) -> ClipOutcome {
     let mut last_log_at = std::time::Instant::now() - std::time::Duration::from_secs(1);
     // Track auth-failure markers as they stream — if we hit one and the
     // process then exits non-zero, swap the generic "exited with code X"
@@ -514,25 +598,18 @@ async fn run_clip_loop(
             }
             CommandEvent::Terminated(payload) => {
                 let _ = app.state::<JobRegistry>().take(job_id);
-                let success = payload.code == Some(0);
-                let path = if success { Some(output_path.to_string()) } else { None };
-                let cancelled = matches!(payload.code, Some(c) if c != 0)
-                    && std::path::Path::new(output_path).metadata().is_err();
-                let error = if success {
-                    None
-                } else if cancelled {
-                    Some("Cancelled".into())
-                } else if saw_auth_error {
-                    Some(YT_AUTH_HINT.into())
-                } else {
-                    Some(format!("yt-dlp exited with code {:?}", payload.code))
+                return ClipOutcome {
+                    success: payload.code == Some(0),
+                    code: payload.code,
+                    signalled: payload.signal.is_some(),
+                    saw_auth_error,
                 };
-                emit_clip_done(app, job_id, success, payload.code, path, error);
-                break;
             }
             _ => {}
         }
     }
+    // Channel closed without a Terminated event — treat as a failure.
+    ClipOutcome { success: false, code: None, signalled: false, saw_auth_error }
 }
 
 // Crude classifier: tag every line so the UI can color it.
@@ -546,11 +623,9 @@ pub(crate) fn classify_line(line: &str) -> String {
         "muxer".into()
     } else if l.starts_with("[download]") && l.contains("100%") {
         "ok".into()
-    } else if l.starts_with("[download]") {
-        "info".into()
-    } else if l.starts_with("[") {
-        "info".into()
     } else {
+        // [download] progress, other [bracketed] sources, and plain lines
+        // all render as plain info.
         "info".into()
     }
 }
@@ -641,10 +716,7 @@ pub async fn extract_frame(app: AppHandle, args: ExtractFrameArgs) -> Result<Ext
     //   • `--print` twice — line 1 is the URL ffmpeg consumes, line 2 is
     //     human-readable proof of what we picked. Logged to pipeline.
     //   • No height cap — 8K snapshots are fine if YouTube serves them.
-    let yt = app
-        .shell()
-        .sidecar("yt-dlp")
-        .map_err(|e| format!("sidecar yt-dlp not found: {e}"))?;
+    let yt = ytdlp(&app)?;
     let mut yt_invocation: Vec<String> = vec![
         "--no-playlist".into(),
         "--no-warnings".into(),
@@ -661,7 +733,6 @@ pub async fn extract_frame(app: AppHandle, args: ExtractFrameArgs) -> Result<Ext
     yt_invocation.extend(cookies_args(args.cookies_browser.as_deref()));
     yt_invocation.push(args.url.clone());
     let yt_out = yt
-        .env("PATH", HOMEBREW_PATH)
         .args(yt_invocation)
         .output()
         .await
@@ -776,13 +847,13 @@ fn parse_ffmpeg_video(stderr: &str) -> (Option<u32>, Option<u32>, Option<f64>, O
         // codec lives between "Video: " and the next " " or "("
         let codec = line
             .split("Video: ").nth(1)
-            .and_then(|s| s.split(|c: char| c == ' ' || c == ',' || c == '(').next())
+            .and_then(|s| s.split([' ', ',', '(']).next())
             .map(|s| s.to_string());
         // WxH
         let mut w: Option<u32> = None;
         let mut h: Option<u32> = None;
         // Scan tokens for "WxH" where W,H are digits
-        for tok in line.split(|c: char| c == ' ' || c == ',' || c == '[' || c == ']') {
+        for tok in line.split([' ', ',', '[', ']']) {
             if let Some((a, b)) = tok.split_once('x') {
                 if let (Ok(aw), Ok(bh)) = (a.parse::<u32>(), b.parse::<u32>()) {
                     if aw >= 16 && bh >= 16 && aw <= 16384 && bh <= 16384 {
@@ -813,7 +884,7 @@ fn parse_ffmpeg_audio(stderr: &str) -> Option<String> {
         }
         return line
             .split("Audio: ").nth(1)
-            .and_then(|s| s.split(|c: char| c == ' ' || c == ',' || c == '(').next())
+            .and_then(|s| s.split([' ', ',', '(']).next())
             .map(|s| s.to_string());
     }
     None
@@ -1008,7 +1079,7 @@ pub async fn generate_local_thumbnail(
     }
 
     let ts_secs = match args.duration_seconds {
-        Some(d) if d > 0.0 => (d * 0.10).min(5.0).max(0.0),
+        Some(d) if d > 0.0 => (d * 0.10).clamp(0.0, 5.0),
         _ => 0.0,
     };
     let ts = format!("{:.3}", ts_secs);

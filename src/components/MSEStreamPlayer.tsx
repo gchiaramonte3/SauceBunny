@@ -4,6 +4,7 @@ import {
 import { Input, UrlSource, CanvasSink, ALL_FORMATS } from "mediabunny";
 import { IconFilm } from "./Icons";
 import type { PlayerHandle } from "./player-handle";
+import { base64UrlEncode } from "../lib/stream-proxy";
 
 /**
  * Streams a web source (YouTube/Vimeo/…) into a NATIVE `<video>` element via
@@ -39,6 +40,28 @@ type Props = {
   onReady?: (duration: number) => void;
   onError?: (message: string) => void;
   onSurfaceClick?: () => void;
+  /** Authoritative duration (seconds) from yt-dlp metadata. Preferred over the
+   *  stream probe, which can read short and make far seeks clamp early. */
+  knownDuration?: number;
+  /** r75 — DASH-split sources (Reddit, YouTube >360p) have no muxed progressive
+   *  URL. When present, this is the RAW audio-track CDN URL; the player passes
+   *  it to the proxy's fMP4 route as `?audio=<b64>` so ffmpeg merges video +
+   *  audio on the fly and the source STREAMS (with sound) instead of falling
+   *  back to a full download. Native muxed playback then keeps A/V in sync and
+   *  currentTime tracks the heard audio, so captions stay married to it. */
+  audioStreamUrl?: string;
+  /** r79 — codec strings from yt-dlp's resolver (`get_direct_stream_url`), e.g.
+   *  "avc1.640028" / "mp4a.40.2". When the video codec is H.264 we build the
+   *  MSE MIME directly from these and SKIP the mediabunny probe of the raw
+   *  stream — that probe was a fragile extra round-trip that turned a transient
+   *  CDN hiccup into an instant "Load failed" → full-download fallback. If the
+   *  codecs are absent/unsupported we fall back to probing (then to download). */
+  videoCodec?: string;
+  audioCodec?: string;
+  /** Low-volume pipeline diagnostics → the Pipeline log (channel "seek"), so
+   *  seek/rebuild behaviour is inspectable without DevTools. Logged only on
+   *  actual seeks/rebuilds (not per-frame), so it stays quiet. */
+  onDiag?: (tag: string, message: string) => void;
 };
 
 /** Seconds to stay buffered ahead of the playhead before pausing reads —
@@ -46,7 +69,7 @@ type Props = {
 const BUFFER_AHEAD_SECONDS = 30;
 
 export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSEStreamPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick },
+  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration, audioStreamUrl, videoCodec, audioCodec, onDiag },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -57,6 +80,32 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const baseTimeRef = useRef(0);
   const totalDurationRef = useRef(0);
   const mimeRef = useRef<string | null>(null);
+  // Origin of the fMP4 timeline (buffered.start(0) of the current pipeline).
+  // The proxy can emit a non-zero start PTS / encoder-priming, which made
+  // <video>.currentTime sit BEHIND real media time and captions lag. We
+  // capture it once per pipeline and subtract it so the reported playhead
+  // tracks real media time. Re-captured on every rebuild (seek).
+  const clockOriginRef = useRef(0);
+  const clockOriginSetRef = useRef(false);
+  // Authoritative total from yt-dlp metadata. The mediabunny probe of the
+  // fragmented proxy stream can read short, which made `seekTo` clamp far
+  // seeks early (e.g. 19:40 landing at 15:12). Metadata wins when present.
+  const knownDurationRef = useRef(0);
+  useEffect(() => {
+    const d = knownDuration && isFinite(knownDuration) && knownDuration > 0 ? knownDuration : 0;
+    knownDurationRef.current = d;
+    if (d > 0) totalDurationRef.current = d;
+  }, [knownDuration]);
+
+  // r79: codec strings from the resolver, kept in refs so buildPipeline reads
+  // the current values without re-running its effect (mirrors knownDurationRef).
+  // Declared before the pipeline effect so they're set first on a source switch.
+  const videoCodecRef = useRef<string | null>(null);
+  const audioCodecRef = useRef<string | null>(null);
+  useEffect(() => { videoCodecRef.current = videoCodec ?? null; }, [videoCodec]);
+  useEffect(() => { audioCodecRef.current = audioCodec ?? null; }, [audioCodec]);
+  const onDiagRef = useRef<Props["onDiag"]>(undefined);
+  useEffect(() => { onDiagRef.current = onDiag; }, [onDiag]);
 
   const msRef = useRef<MediaSource | null>(null);
   const sbRef = useRef<SourceBuffer | null>(null);
@@ -76,6 +125,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   // Scrubbing = pause playback so it can't fight the playhead; resume on
   // settle (no seek for ~300ms). Fires after the last seek of a gesture.
   const seekSettleRef = useRef<number | null>(null);
+  // Shuttle (J-K-L): forward uses native playbackRate; reverse runs a backward
+  // currentTime scan on this interval (no native reverse in WebKit).
+  const shuttleRateRef = useRef(0);
+  const shuttleTimerRef = useRef(0);
   // Frame-accurate scrub preview (r68). While dragging, a WebCodecs
   // CanvasSink decodes the exact frame under the cursor onto an overlay
   // canvas — instant + every frame, vs the <video>'s laggy native seek.
@@ -93,6 +146,12 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   // the pre-seek position — the "scrubbing won't go past here" wrestling).
   const seekingRef = useRef(false);
 
+  // Per-source once-guard: a single decode/append failure can fire several error
+  // signals (SourceBuffer 'error', appendBuffer throw, <video> 'error') in
+  // back-to-back tasks. Only the first should reach onError — the rest would
+  // surface a spurious error toast after the fallback already took over.
+  const failedRef = useRef(false);
+
   // ─── Imperative handle ──────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
     play: () => {
@@ -102,13 +161,25 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         onError?.(`Playback failed: ${err?.name ?? "Error"} — ${err?.message ?? String(err)}`);
       });
     },
-    pause: () => { videoRef.current?.pause(); },
+    pause: () => {
+      videoRef.current?.pause();
+    },
     seekTo: (s) => {
       const v = videoRef.current;
       const sb = sbRef.current;
-      const total = totalDurationRef.current || 0;
+      // Clamp to the AUTHORITATIVE duration: max of the (possibly short) stream
+      // probe and yt-dlp's known metadata duration. A short probe value here is
+      // exactly what made far seeks land backward ("19:40 → 15:12"); never let
+      // it clamp a valid forward seek.
+      const total = Math.max(totalDurationRef.current || 0, knownDurationRef.current || 0);
       const target = Math.max(0, total > 0 ? Math.min(total, s) : s);
+      const co = clockOriginRef.current;
       const rel = target - baseTimeRef.current;
+      // Diagnostic (Pipeline log, channel "seek"): if a forward seek lands
+      // earlier than requested, this shows WHERE — a `total` smaller than `s`
+      // clamps `target` backward; otherwise the branch/rel/clockOrigin reveal it.
+      onDiagRef.current?.("info",
+        `seek req ${s.toFixed(1)} → target ${target.toFixed(1)} (base ${baseTimeRef.current.toFixed(1)}, total ${total.toFixed(1)}, rel ${rel.toFixed(1)}, clockOrigin ${co.toFixed(2)})`);
 
       // ── Gesture bookkeeping ──────────────────────────────────────────
       // A scrub fires seekTo() many times. On the FIRST of a gesture,
@@ -141,12 +212,18 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       }, 300);
 
       // ── In-buffer → instant native seek ─────────────────────────────
+      // Buffered ranges + el.currentTime live in the pipeline's LOCAL timeline,
+      // which starts at clockOrigin (the fMP4 start-PTS). The absolute target
+      // maps to local time `rel + clockOrigin`; compare + seek in that space so
+      // a non-zero start-PTS can't offset the landing.
       if (v && sb && rel >= 0) {
+        const localTarget = rel + co;
         for (let i = 0; i < sb.buffered.length; i++) {
-          if (rel >= sb.buffered.start(i) - 0.25 && rel <= sb.buffered.end(i) + 0.25) {
+          if (localTarget >= sb.buffered.start(i) - 0.25 && localTarget <= sb.buffered.end(i) + 0.25) {
             if (rebuildTimerRef.current != null) { window.clearTimeout(rebuildTimerRef.current); rebuildTimerRef.current = null; }
             pendingSeekRef.current = null;
-            try { v.currentTime = rel; } catch { /* ignore */ }
+            try { v.currentTime = localTarget; } catch { /* ignore */ }
+            onDiagRef.current?.("ok", `seek in-buffer → currentTime ${localTarget.toFixed(1)}`);
             return;
           }
         }
@@ -161,23 +238,67 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         pendingSeekRef.current = null;
         if (t == null) return;
         baseTimeRef.current = t;
+        onDiagRef.current?.("info", `seek out-of-buffer → rebuilding from ${t.toFixed(1)}s`);
         teardownRef.current?.();
         rebuildRef.current?.(t);
       }, 280);
     },
     // While a seek is resolving, report the TARGET (not the old/paused
     // video's time) so nothing reading this can snap the playhead back.
-    getCurrentTime: () =>
-      (seekingRef.current && pendingSeekRef.current != null)
-        ? pendingSeekRef.current
-        : baseTimeRef.current + (videoRef.current?.currentTime ?? 0),
+    getCurrentTime: () => {
+      if (seekingRef.current && pendingSeekRef.current != null) return pendingSeekRef.current;
+      // The native <video> is the single clock; clockOrigin subtracts the
+      // fMP4 start-PTS so the reported playhead tracks real media time.
+      return baseTimeRef.current + Math.max(0, (videoRef.current?.currentTime ?? 0) - clockOriginRef.current);
+    },
     getDuration: () => totalDurationRef.current || 0,
     isReady: () => readyRef.current,
     isPlaying: () => playingRef.current,
-    setVolume: (v) => { if (videoRef.current) videoRef.current.volume = Math.max(0, Math.min(1, v)); },
+    setVolume: (v) => {
+      const c = Math.max(0, Math.min(1, v));
+      if (videoRef.current) videoRef.current.volume = c;
+    },
     getVolume: () => videoRef.current?.volume ?? 1,
-    setMuted: (m) => { if (videoRef.current) videoRef.current.muted = m; },
+    setMuted: (m) => {
+      if (videoRef.current) videoRef.current.muted = m;
+    },
     isMuted: () => videoRef.current?.muted ?? false,
+    setShuttle: (rate) => {
+      const v = videoRef.current;
+      if (!v) return;
+      if (shuttleTimerRef.current) { window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0; }
+      shuttleRateRef.current = rate;
+      if (rate === 0) {
+        v.playbackRate = 1;
+        return;
+      }
+      if (rate > 0) {
+        // Native fast-forward — smooth; the <video> carries its own audio.
+        v.playbackRate = rate;
+        v.play().catch(() => { /* ignore */ });
+        return;
+      }
+      // Reverse: <video> can't play backward, so scan currentTime within the
+      // buffered segment. Smooth where buffered; clamps at the segment start
+      // (going further back would need a full stream rebuild).
+      v.playbackRate = 1;
+      try { v.pause(); } catch { /* ignore */ }
+      const stepMs = 60;
+      shuttleTimerRef.current = window.setInterval(() => {
+        const vv = videoRef.current;
+        if (!vv) return;
+        const next = vv.currentTime + rate * (stepMs / 1000); // rate<0 → backward
+        if (next <= 0) {
+          try { vv.currentTime = 0; } catch { /* ignore */ }
+          window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0;
+          shuttleRateRef.current = 0;
+          setIsPlaying(false);
+          return;
+        }
+        try { vv.currentTime = next; } catch { /* ignore */ }
+        onTimeUpdate?.(baseTimeRef.current + Math.max(0, next - clockOriginRef.current));
+      }, stepMs);
+    },
   }), [onError, onTimeUpdate]);
 
   // ─── Pipeline lifecycle ─────────────────────────────────────────────
@@ -190,9 +311,13 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     baseTimeRef.current = 0;
     mimeRef.current = null;
     seekingRef.current = false;
+    failedRef.current = false;
     setScrubPreview(false);
 
-    const fail = (msg: string) => { if (!disposed) onError?.(msg); };
+    // One failure typically emits several error signals; only the first reaches
+    // onError (App's fallback owns the rest), so a single fault can't surface a
+    // spurious "Playback error" toast after the download fallback already began.
+    const fail = (msg: string) => { if (disposed || failedRef.current) return; failedRef.current = true; onError?.(msg); };
 
     // ── Scrub-preview decoder (r68) ──────────────────────────────────
     // A second, read-only mediabunny pipeline over the RAW proxy stream,
@@ -308,8 +433,33 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
 
       void (async () => {
         try {
+          // r79 FAST PATH: build the MIME from the resolver's codec strings and
+          // skip the raw-stream probe entirely. That probe (mediabunny reading
+          // the moov over the loopback proxy) is the one fragile pre-check that
+          // turned a transient CDN hiccup into an instant "Load failed" + a
+          // full-video download. We already know the codecs; the robust ffmpeg
+          // /fmp4 path does the real work. Only H.264 video qualifies (what the
+          // resolver targets + what WKWebView decodes); anything else falls
+          // through to the probe below (which falls through to download).
+          if (!mimeRef.current && videoCodecRef.current && /^(avc1|avc3|h264)/i.test(videoCodecRef.current)) {
+            const aCodec = audioCodecRef.current && /(mp4a|aac)/i.test(audioCodecRef.current)
+              ? audioCodecRef.current
+              : "mp4a.40.2";
+            const candidate = `video/mp4; codecs="${videoCodecRef.current}, ${aCodec}"`;
+            const MSx: typeof MediaSource | undefined =
+              (typeof MediaSource !== "undefined" ? MediaSource : undefined) ??
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (window as any).ManagedMediaSource;
+            if (MSx && typeof MSx.isTypeSupported === "function" && MSx.isTypeSupported(candidate)) {
+              mimeRef.current = candidate;
+              // Metadata duration (0 ⇒ filled when metadata lands via the
+              // knownDuration effect; seek clamping uses knownDurationRef too).
+              totalDurationRef.current = knownDurationRef.current;
+            }
+          }
           // Probe codecs + total duration once (same source across seeks).
-          // Reads the RAW proxy stream's moov; cheap.
+          // Reads the RAW proxy stream's moov; cheap. Only runs when the fast
+          // path above didn't already establish the MIME.
           if (!mimeRef.current) {
             const input = new Input({ source: new UrlSource(path), formats: ALL_FORMATS });
             probeInputRef.current = input;
@@ -325,7 +475,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             ]);
             if (disposed || gen !== genRef.current) return;
             mimeRef.current = `video/mp4; codecs="${[vCodec, aCodec].filter(Boolean).join(", ")}"`;
-            totalDurationRef.current = dur && isFinite(dur) ? dur : 0;
+            // Prefer the authoritative metadata duration; only trust the probe
+            // when metadata didn't give us one (the probe can read short).
+            totalDurationRef.current = knownDurationRef.current > 0
+              ? knownDurationRef.current
+              : (dur && isFinite(dur) ? dur : 0);
           }
           const mime = mimeRef.current;
           const total = totalDurationRef.current;
@@ -357,9 +511,23 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             catch (err) { fail(`addSourceBuffer(${mime}) failed: ${err instanceof Error ? err.message : String(err)}`); return; }
             sb.mode = "segments";
             sbRef.current = sb;
+            clockOriginSetRef.current = false; // re-capture for this pipeline
             const localDur = total > fromSeconds ? total - fromSeconds : 0;
             if (localDur > 0) { try { ms.duration = localDur; } catch { /* ignore */ } }
             sb.addEventListener("updateend", () => {
+              // Capture the timeline origin from the first buffered range (later
+              // ranges shift forward as old data is evicted, so capture ONCE).
+              if (!clockOriginSetRef.current && sb.buffered.length > 0) {
+                clockOriginSetRef.current = true;
+                clockOriginRef.current = sb.buffered.start(0);
+              }
+              // First real media data is in the buffer → the pipeline genuinely
+              // delivered. NOW fire onReady so the watchdog covered the full path
+              // through first bytes, not just the MediaSource attach.
+              if (!readyOnceRef.current && sb.buffered.length > 0) {
+                readyOnceRef.current = true;
+                onReady?.(total);
+              }
               const c = currentRef.current;
               currentRef.current = null;
               c?.resolve();
@@ -368,11 +536,17 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             sb.addEventListener("error", () => fail("SourceBuffer error during append"));
 
             readyRef.current = true;
-            if (!readyOnceRef.current) { readyOnceRef.current = true; onReady?.(total); }
+            // onReady (which clears App's 15s stall watchdog + drops the
+            // "Starting playback…" overlay) fires from the FIRST successful
+            // append below, not here at sourceopen — sourceopen happens the
+            // instant the MediaSource attaches, before any bytes arrive, so
+            // firing here would disarm the watchdog during the exact data-
+            // delivery phase it exists to guard.
             // New pipeline is positioned at baseTime (video.currentTime 0) —
             // safe to report time again, and resume if we were playing.
             seekingRef.current = false;
             onTimeUpdate?.(baseTimeRef.current);
+            onDiagRef.current?.("ok", `pipeline open at ${fromSeconds.toFixed(1)}s → playhead ${baseTimeRef.current.toFixed(1)}s`);
             if (wantPlayRef.current) {
               wantPlayRef.current = false;
               video.play().catch(() => { /* gesture/autoplay — ignore */ });
@@ -384,9 +558,14 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
           const startFetch = async (from: number, g: number) => {
             try {
               // path is the RAW proxy URL …/v1/<b64>; the fMP4 route is the
-              // same b64 under /fmp4/v1/ with an optional ?start= seek.
+              // same b64 under /fmp4/v1/ with an optional ?start= seek, plus an
+              // optional ?audio=<b64> second input for DASH-split sources so the
+              // proxy merges video+audio into one fMP4 (full audio, no download).
+              const qs: string[] = [];
+              if (from > 0) qs.push(`start=${from.toFixed(3)}`);
+              if (audioStreamUrl) qs.push(`audio=${base64UrlEncode(audioStreamUrl)}`);
               const fmp4Url = path.replace("/v1/", "/fmp4/v1/")
-                + (from > 0 ? `?start=${Math.floor(from)}` : "");
+                + (qs.length ? `?${qs.join("&")}` : "");
               const resp = await fetch(fmp4Url);
               if (disposed || g !== genRef.current) { try { await resp.body?.cancel(); } catch { /* ignore */ } return; }
               if (!resp.ok || !resp.body) { fail(`fMP4 stream HTTP ${resp.status}`); return; }
@@ -451,15 +630,67 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     const el = videoRef.current;
     if (!el) return;
     el.volume = Math.max(0, Math.min(1, initialVolume));
-    const onPlay = () => { playingRef.current = true; setIsPlaying(true); onPlayStateChange?.(true); };
-    const onPause = () => { playingRef.current = false; setIsPlaying(false); onPlayStateChange?.(false); };
-    const onTime = () => {
-      // While an out-of-buffer seek is resolving, the old/transitional video
-      // would report a stale position and fight the playhead — suppress it.
-      if (seekingRef.current) return;
-      onTimeUpdate?.(baseTimeRef.current + el.currentTime);
+    // Drive the playhead from requestAnimationFrame (~display refresh) while
+    // playing, NOT the <video>'s 'timeupdate' event. Browsers throttle
+    // 'timeupdate' to ~4Hz, so on 15-30fps content the playhead visibly skips
+    // ~4 frames per update ("playing in chunks"). rAF reads currentTime every
+    // frame, so the playhead advances frame-by-frame. App floors to a frame
+    // number and React bails when it's unchanged, so this only re-renders when
+    // the frame actually advances — cheap.
+    let rafId = 0;
+    let rvfcId = 0;
+    type RVFCVideo = HTMLVideoElement & {
+      requestVideoFrameCallback: (cb: () => void) => number;
+      cancelVideoFrameCallback: (id: number) => void;
     };
+    const rvfc = el as RVFCVideo;
+    const hasRVFC = typeof rvfc.requestVideoFrameCallback === "function";
+    // SINGLE-CLOCK MODEL: the native muxed <video> is the one clock for audio,
+    // picture AND captions — WebKit keeps A/V locked inside it, so captions
+    // (which read this same playhead) can't drift from the audio you hear. The
+    // proxy can leave a non-zero start PTS / encoder priming on the fMP4, which
+    // would make <video>.currentTime sit behind real media time and captions
+    // lag; clockOrigin (= buffered.start(0), captured once per pipeline)
+    // subtracts it. baseTime is the current pipeline's absolute media time
+    // (set on rebuild/seek), so corrected() tracks true source time.
+    const corrected = (raw: number) =>
+      baseTimeRef.current + Math.max(0, raw - clockOriginRef.current);
+    const reportTime = () => {
+      // Suppress while an out-of-buffer seek resolves — the old/transitional
+      // video reports a stale position that would fight the playhead.
+      if (!seekingRef.current) onTimeUpdate?.(corrected(el.currentTime));
+    };
+    // Drive the playhead from currentTime every frame via
+    // requestVideoFrameCallback (smooth, ~display refresh); rAF is the fallback
+    // when rVFC is throttled/occluded.
+    const onFrame = () => {
+      rvfcId = 0;
+      if (!playingRef.current) return;
+      reportTime();
+      rvfcId = rvfc.requestVideoFrameCallback(onFrame);
+    };
+    const tick = () => {
+      rafId = 0;
+      if (!playingRef.current) return;
+      reportTime();
+      rafId = requestAnimationFrame(tick);
+    };
+    const startTick = () => {
+      if (hasRVFC) { if (!rvfcId) rvfcId = rvfc.requestVideoFrameCallback(onFrame); }
+      else if (!rafId) rafId = requestAnimationFrame(tick);
+    };
+    const onPlay = () => { playingRef.current = true; setIsPlaying(true); onPlayStateChange?.(true); startTick(); };
+    const onPause = () => {
+      playingRef.current = false; setIsPlaying(false); onPlayStateChange?.(false);
+      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+      if (rvfcId) { try { rvfc.cancelVideoFrameCallback(rvfcId); } catch { /* ignore */ } rvfcId = 0; }
+    };
+    // 'timeupdate' (≈4Hz) stays as the playhead signal while PAUSED — e.g. a
+    // seek landing — and as a backstop if the frame callbacks are throttled.
+    const onTime = () => reportTime();
     const onErr = () => {
+      if (failedRef.current) return; // first error already reported for this source
+      failedRef.current = true;
       const me = el.error;
       const map: Record<number, string> = {
         1: "MEDIA_ERR_ABORTED", 2: "MEDIA_ERR_NETWORK", 3: "MEDIA_ERR_DECODE", 4: "MEDIA_ERR_SRC_NOT_SUPPORTED",
@@ -471,15 +702,29 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     // an active drag the settle timer is armed, so per-tick 'seeked's don't
     // prematurely reveal the laggy video.
     const onSettled = () => { if (seekSettleRef.current == null) setScrubPreview(false); };
+    // Also hide the overlay the instant real playback resumes. The
+    // out-of-buffer REBUILD path can fire 'loadeddata' while the settle
+    // timer is still armed (so onSettled bails), then resume the rebuilt
+    // <video> with no further 'seeked' — leaving the preview canvas frozen
+    // over a playing video (audio but no picture). 'playing' can't fire
+    // mid-scrub (we pause on every seek tick), so clearing here is always
+    // correct: if the video is genuinely playing, show it, not a stale frame.
+    const onResume = () => setScrubPreview(false);
     el.addEventListener("play", onPlay);
     el.addEventListener("pause", onPause);
+    el.addEventListener("playing", onResume);
     el.addEventListener("timeupdate", onTime);
     el.addEventListener("error", onErr);
     el.addEventListener("seeked", onSettled);
     el.addEventListener("loadeddata", onSettled);
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      if (rvfcId) { try { rvfc.cancelVideoFrameCallback(rvfcId); } catch { /* ignore */ } rvfcId = 0; }
+      if (shuttleTimerRef.current) { window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0; }
+      shuttleRateRef.current = 0;
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
+      el.removeEventListener("playing", onResume);
       el.removeEventListener("timeupdate", onTime);
       el.removeEventListener("error", onErr);
       el.removeEventListener("seeked", onSettled);

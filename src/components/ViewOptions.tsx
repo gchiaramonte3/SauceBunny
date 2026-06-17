@@ -30,7 +30,22 @@ export function ViewOptions({ aspect, onAspectChange }: Props) {
         if (mounted) setFullscreen(fs);
       } catch { /* ignore */ }
     })();
-    return () => { mounted = false; };
+    // Re-read on every resize: fullscreen can also be entered/exited via the
+    // View menu or the green traffic-light, which this component never sees —
+    // without this the button shows the wrong icon and needs two clicks.
+    let unlisten: (() => void) | null = null;
+    (async () => {
+      try {
+        unlisten = await getCurrentWindow().onResized(async () => {
+          try {
+            const fs = await getCurrentWindow().isFullscreen();
+            if (mounted) setFullscreen(fs);
+          } catch { /* ignore */ }
+        });
+        if (!mounted) { unlisten(); unlisten = null; }
+      } catch { /* ignore */ }
+    })();
+    return () => { mounted = false; unlisten?.(); };
   }, []);
 
   useEffect(() => {
@@ -52,9 +67,11 @@ export function ViewOptions({ aspect, onAspectChange }: Props) {
   async function toggleFullscreen() {
     try {
       const w = getCurrentWindow();
-      const next = !fullscreen;
-      await w.setFullscreen(next);
-      setFullscreen(next);
+      // Query-then-toggle against REAL window state, not our possibly-stale
+      // local flag (menu / traffic-light fullscreen bypasses this component).
+      const cur = await w.isFullscreen();
+      await w.setFullscreen(!cur);
+      setFullscreen(!cur);
     } catch (err) {
       console.warn("fullscreen toggle failed", err);
     }

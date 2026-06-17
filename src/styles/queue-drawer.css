@@ -138,7 +138,12 @@ body.cp-resizing-drawer iframe { pointer-events: none; }
    driven by JS with `transition: none` so it tracks the cursor 1:1. */
 .cp-tab.dragging {
   cursor: grabbing;
-  background: rgba(108,255,141,0.10);
+  /* SOLID base under the green tint — the dragged tab must fully OCCLUDE the
+     tabs/content it sweeps over (a translucent bg let you see through it). The
+     gradient layer is the accent tint; var(--bg-3) is the opaque surface. */
+  background:
+    linear-gradient(rgba(108,255,141,0.12), rgba(108,255,141,0.12)),
+    var(--bg-3);
   border-color: rgba(108,255,141,0.25);
   box-shadow:
     0 6px 18px rgba(0,0,0,0.32),

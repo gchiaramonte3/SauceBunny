@@ -33,6 +33,8 @@ pub mod media;
 pub use media::*;
 pub mod transcript;
 pub use transcript::*;
+pub mod llm;
+pub use llm::*;
 
 
 
@@ -64,9 +66,14 @@ fn short_err(stderr: &str) -> String {
         .unwrap_or(stderr.trim())
         .trim()
         .to_string();
-    // Cap absurdly long URLs etc. so the UI hint stays scannable.
+    // Cap absurdly long URLs etc. so the UI hint stays scannable. Truncate on a
+    // CHAR boundary — yt-dlp/ffmpeg error lines carry multibyte UTF-8 (CJK/emoji
+    // titles, curly quotes), and byte-slicing mid-codepoint panics, which would
+    // kill the spawned task right as it tries to report a failure (UI hangs).
     if trimmed.len() > 400 {
-        format!("{}…", &trimmed[..400])
+        let mut end = 400;
+        while end > 0 && !trimmed.is_char_boundary(end) { end -= 1; }
+        format!("{}…", &trimmed[..end])
     } else {
         trimmed
     }
@@ -97,7 +104,18 @@ fn sidecar_path(name: &str) -> Result<PathBuf, crate::AppError> {
     } else {
         let exe = std::env::current_exe()?;
         let dir = exe.parent().ok_or_else(|| crate::AppError::internal("exe has no parent"))?;
-        Ok(dir.join(filename))
+        // Tauri STRIPS the target triple when copying externalBin next to the
+        // executable, so the bundled file is the PLAIN name (`ffmpeg`, not
+        // `ffmpeg-aarch64-apple-darwin`). Prefer the plain name; fall back to
+        // the suffixed name only for layouts that keep it. Without this, every
+        // sidecar call (export / transcription / download) hard-fails in the
+        // packaged .dmg while dev (debug branch, suffixed repo binaries) works.
+        let plain = dir.join(name);
+        if plain.is_file() {
+            Ok(plain)
+        } else {
+            Ok(dir.join(filename))
+        }
     }
 }
 
@@ -263,3 +281,39 @@ pub(crate) struct DoneEvent {
 
 
 
+
+#[cfg(test)]
+mod tests {
+    use super::short_err;
+
+    #[test]
+    fn short_err_picks_last_meaningful_line() {
+        let blob = "WARNING: something benign\nERROR: the real problem\n\n";
+        assert_eq!(short_err(blob), "ERROR: the real problem");
+    }
+
+    #[test]
+    fn short_err_falls_back_to_whole_blob_when_all_warnings() {
+        let blob = "WARNING: only warnings here";
+        assert_eq!(short_err(blob), blob);
+    }
+
+    // Regression: byte-slicing at 400 mid-codepoint panicked, killing the
+    // task right as it tried to report a failure (UI hung forever).
+    #[test]
+    fn short_err_truncates_multibyte_on_char_boundary() {
+        // 200 × '→' (3 bytes each) = 600 bytes; byte 400 lands mid-codepoint.
+        let long: String = "→".repeat(200);
+        let out = short_err(&long);
+        assert!(out.ends_with('…'));
+        assert!(out.len() <= 404); // ≤400 content bytes + the ellipsis
+        // Must be valid UTF-8 end to end (would have panicked before the fix).
+        assert!(out.chars().all(|c| c == '→' || c == '…'));
+    }
+
+    #[test]
+    fn short_err_leaves_short_messages_alone() {
+        assert_eq!(short_err("tiny"), "tiny");
+        assert_eq!(short_err(""), "");
+    }
+}

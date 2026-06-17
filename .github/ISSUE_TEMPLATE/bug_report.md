@@ -1,35 +1,30 @@
 ---
 name: Bug report
-about: Something went wrong while using Sauce Bunny
+about: Something broke or behaves wrong
 labels: bug
 ---
 
-## What happened
+**What happened**
+A clear description of the bug.
 
-A clear description of what went wrong, and what you expected instead.
+**Steps to reproduce**
+1. Paste URL / import file '…'
+2. Click '…'
+3. See error
 
-## Environment
+**Expected behavior**
 
-- **macOS version:** (e.g. 14.4)
-- **Sauce Bunny build:** (Settings → About — paste the version + commit hash if you have a custom build)
-- **Source:** local file, YouTube URL, Vimeo URL, etc. — paste the URL if it's public
-- **Whisper model:** (tiny.en / base.en / small.en / medium.en — or none)
-- **Detect speakers:** on / off, and the "Expected speakers" value if on
-
-## Reproduction
-
-1. …
-2. …
-3. …
-
-## Pipeline log
-
-The single most useful thing you can paste. Hit ⌘\\ to expand the pipeline panel, then click **Copy** in its footer. Paste here:
+**Pipeline log**
+Press `⌘\` in the app to open the Pipeline panel, click **Copy**, paste here:
 
 ```
-(paste log)
+(log output)
 ```
 
-## Screenshots / video (optional)
+**Source** (if web): the URL, or at least the site — YouTube breakage in
+particular moves fast and the URL lets us reproduce against the same extractor.
 
-Drag here if helpful.
+**Environment**
+- macOS version:
+- App version (Settings → About):
+- yt-dlp version (Settings → About):

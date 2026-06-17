@@ -17,7 +17,7 @@ import { Transport } from "./components/Transport";
 import { Timeline } from "./components/Timeline";
 import { ViewOptions } from "./components/ViewOptions";
 import { LogsPanel } from "./components/LogsPanel";
-import { SettingsModal, type Defaults } from "./components/SettingsModal";
+import { SettingsModal, type Defaults, type CaptionFontKey } from "./components/SettingsModal";
 import { YouTubeAuthModal } from "./components/YouTubeAuthModal";
 import type { PlayerHandle } from "./components/player-handle";
 import type {
@@ -28,6 +28,7 @@ import type {
 import { asLogTag } from "./types";
 import { formatError } from "./lib/error-format";
 import { usePanelBus } from "./hooks/use-panel-bus";
+import { useWebPlayback } from "./hooks/use-web-playback";
 import { QueueDrawer } from "./components/QueueDrawer";
 import { CommandPalette } from "./components/CommandPalette";
 import {
@@ -37,15 +38,22 @@ import {
   type TranscriptHistoryEntry,
 } from "./lib/transcript-history";
 import type { Command } from "./lib/commands";
+import { buildCommands } from "./lib/commands";
+import {
+  loadKeybindings, saveKeybindings, buildComboMap, bindingsFor, formatCombo, eventToCombo,
+  KEY_ACTION_BY_ID, type KeyActionId, type KeybindingOverrides,
+} from "./lib/keybindings";
+import { migrateLegacyStorageKeys } from "./lib/migrate-storage";
+import { loadReview, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
+import { loadJson, saveJson } from "./lib/storage";
 import {
   durationToTc, framesToTc, secondsToTc,
   tcToFrames, tcToSeconds,
 } from "./lib/timecode";
-import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl } from "./lib/validation";
-import { buildProxyUrl } from "./lib/stream-proxy";
+import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, prettyHost } from "./lib/validation";
 import { sanitizeFilename, stripExt, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
-import { extractFrameAsBlob } from "./lib/mediabunny-helpers";
+import { extractFrameAsBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
 import { exportLocalClipViaMediabunny } from "./lib/mediabunny-export";
 import { extractAudioAsWav16k } from "./lib/mediabunny-audio";
 
@@ -73,20 +81,17 @@ function staleBinaryMessage(commandName: string): string {
   return `${commandName} hasn't been compiled into the running dev server yet. Stop and restart \`npm run tauri dev\` so cargo rebuilds the Rust backend.`;
 }
 
-function loadJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) return JSON.parse(raw) as T;
-  } catch (err) {
-    // Don't crash on a corrupt persisted blob — but do log it so we can
-    // diagnose "my settings keep resetting" reports.
-    console.warn(`loadJson(${key}) failed:`, err);
+// Map a stored captionFont pref to a current key. Old builds stored
+// "sans"/"serif"/"mono"; new builds store named system fonts. Unknown/missing →
+// "verdana" (the legibility default). Keeps a pre-existing pref meaningful.
+const CAPTION_FONT_KEYS = ["verdana", "helvetica", "arial", "tahoma", "trebuchet", "georgia", "courier", "nunito"];
+function migrateCaptionFont(raw: unknown): CaptionFontKey {
+  const legacy: Record<string, CaptionFontKey> = { sans: "nunito", serif: "georgia", mono: "courier" };
+  if (typeof raw === "string") {
+    if (raw in legacy) return legacy[raw];
+    if (CAPTION_FONT_KEYS.includes(raw)) return raw as CaptionFontKey;
   }
-  return fallback;
-}
-function saveJson(key: string, v: unknown) {
-  try { localStorage.setItem(key, JSON.stringify(v)); }
-  catch (err) { console.warn(`saveJson(${key}) failed:`, err); }
+  return "verdana";
 }
 
 // v2 bump: re-encode default flipped from ON to OFF. Older v1 settings are
@@ -95,47 +100,11 @@ const DEFAULTS_KEY  = "cp-defaults-v2";
 const RECENTS_KEY   = "cp-recents";
 const ASPECT_KEY    = "cp-aspect";
 
-// ─── One-shot rebrand migration (clippull.* → saucebunny.*) ─────────────
-// Runs once at module load (before App renders). For every localStorage
-// key starting with `clippull.`, copy its value to the equivalent
-// `saucebunny.` key when that target doesn't yet exist. Old keys are
-// left in place — users can clean them up manually. This preserves
-// transcript history + diarizer-ready state across the Sauce Bunny rename.
-(function migrateClippullLocalStorageKeys() {
-  try {
-    const toCopy: Array<[string, string]> = [];
-    for (let i = 0; i < localStorage.length; i += 1) {
-      const key = localStorage.key(i);
-      if (!key || !key.startsWith("clippull.")) continue;
-      const rest = key.slice("clippull.".length);
-      const newKey = `saucebunny.${rest}`;
-      if (localStorage.getItem(newKey) === null) {
-        const v = localStorage.getItem(key);
-        if (v !== null) toCopy.push([newKey, v]);
-      }
-    }
-    for (const [k, v] of toCopy) {
-      try { localStorage.setItem(k, v); } catch { /* quota — best-effort */ }
-    }
-  } catch {
-    // localStorage unavailable (private mode quirks) — non-fatal.
-  }
-})();
+// One-shot rebrand migration (clippull.* → saucebunny.*). Runs at module load,
+// before App renders so the default-loading useState initializers see the
+// migrated keys. Body lives in lib/migrate-storage.ts.
+migrateLegacyStorageKeys();
 
-/**
- * True when an error came from YouTube's "Sign in to confirm you're not a
- * bot" challenge — either the raw yt-dlp text or our humanized backend hint
- * (download.rs `YT_AUTH_HINT`). Drives the contextual auth modal.
- */
-function isYouTubeBotError(msg: string): boolean {
-  const m = msg.toLowerCase();
-  return (
-    m.includes("not a bot") ||
-    m.includes("confirm you're not a bot") ||
-    m.includes("sign in to confirm") ||
-    m.includes("youtube auth")
-  );
-}
 
 export default function App() {
   // ====== Persisted defaults (used to seed new fetches + Settings tab) ======
@@ -149,7 +118,15 @@ export default function App() {
       reencode: stored.reencode ?? false,
       captions: stored.captions ?? false,
       timecode: stored.timecode ?? "24",
-      whisperModel: stored.whisperModel ?? "base.en",
+      whisperModel: stored.whisperModel ?? "small.en",
+      // Whisper is the bundled default; Parakeet is opt-in once its model is
+      // downloaded (Settings → Transcription). Persisted across sessions.
+      transcriptionEngine: stored.transcriptionEngine ?? "whisper",
+      // AI Summary: default to the recommended small model; the user can
+      // download + switch to a larger one in Settings → AI Summary.
+      llmSummarizationModel: stored.llmSummarizationModel ?? "qwen3-4b-instruct",
+      summaryFormat: stored.summaryFormat ?? "bullets",
+      summaryLength: stored.summaryLength ?? "standard",
       // Default ON: mediabunny/WebCodecs is the faster import path. If
       // it ever causes regressions the user can toggle back to the
       // ffmpeg-prep + <video> path via Settings → Local playback.
@@ -169,18 +146,45 @@ export default function App() {
       // Default off — diarization adds 10–60s per transcript and the
       // first-run model download is hundreds of MB. Opt-in via Sidebar.
       detectSpeakers: stored.detectSpeakers ?? false,
-      // 0 = auto. Other values pass through as --num-speakers to the
-      // Swift sidecar; pyannote clustering then skips estimation.
-      expectedSpeakers: stored.expectedSpeakers ?? 0,
+      // 0 = auto. ALWAYS start at auto each launch (never restore a stored
+      // count): a sticky wrong count — e.g. 2 when the source has 4 speakers —
+      // silently and severely degrades diarization. The Sidebar picker is a
+      // per-session override only; auto is the reliable default the diarizer
+      // estimates from the audio. (>0 still passes through as --num-speakers.)
+      expectedSpeakers: 0,
       // Empty string here = "ask backend for the default and persist
       // it on first app boot." See the resolver effect just below.
       transcriptLibrary: stored.transcriptLibrary ?? "",
+      // On-video caption look. Defaults: small (13px) white Verdana on a 75%
+      // dark backing. captionFont migrates the old sans/serif/mono keys to the
+      // named system fonts so a pre-existing pref still resolves.
+      captionSizePx: stored.captionSizePx ?? 13,
+      captionFont: migrateCaptionFont((stored as Record<string, unknown>).captionFont),
+      captionBgOpacity: stored.captionBgOpacity ?? 0.75,
+      captionColor: stored.captionColor ?? "#ffffff",
+      // 480 by default: the preview is throwaway (scrub/mark only), so we
+      // optimise for fast download over sharpness. Export uses real quality.
+      previewMaxHeight: stored.previewMaxHeight ?? 480,
     };
   });
-  const setDefaults = useCallback((d: Defaults) => {
-    setDefaultsState(d);
-    saveJson(DEFAULTS_KEY, d);
+  const setDefaults = useCallback((d: Defaults | ((prev: Defaults) => Defaults)) => {
+    setDefaultsState((prev) => {
+      const next = typeof d === "function" ? (d as (p: Defaults) => Defaults)(prev) : d;
+      saveJson(DEFAULTS_KEY, next);
+      return next;
+    });
   }, []);
+
+  // ── Editable keyboard shortcuts (Settings → Commands) ──
+  // Overrides only; an action with no override uses its defaults. The keydown
+  // handler matches against `comboToAction`; the command registry overlays its
+  // cosmetic hotkeys from the same source so the palette never drifts.
+  const [keybindings, setKeybindingsState] = useState<KeybindingOverrides>(() => loadKeybindings());
+  const setKeybindings = useCallback((next: KeybindingOverrides) => {
+    setKeybindingsState(next);
+    saveKeybindings(next);
+  }, []);
+  const comboToAction = useMemo(() => buildComboMap(keybindings), [keybindings]);
 
   // Lazily populate transcriptLibrary with the OS-correct default on
   // first boot. The default is `~/Documents/Sauce Bunny/Transcripts/` but
@@ -192,7 +196,10 @@ export default function App() {
     (async () => {
       try {
         const p = await invoke<string>("default_transcript_library_path");
-        if (p) setDefaults({ ...defaults, transcriptLibrary: p });
+        // Functional update: this resolves asynchronously, so merge against the
+        // LATEST defaults — a stale-snapshot spread would clobber any change made
+        // meanwhile (e.g. the hybrid-migration latch or a Settings toggle).
+        if (p) setDefaults((prev) => prev.transcriptLibrary ? prev : { ...prev, transcriptLibrary: p });
       } catch { /* user can still set it manually from Settings */ }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -203,22 +210,57 @@ export default function App() {
   // user's own Web-playback toggle is respected afterward.
   useEffect(() => {
     if (defaults.hybridMigrated) return;
-    setDefaults({ ...defaults, streamPreview: true, hybridMigrated: true });
+    setDefaults((prev) => prev.hybridMigrated ? prev : { ...prev, streamPreview: true, hybridMigrated: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fallbackFps = DEFAULT_FPS_FALLBACK[defaults.timecode] ?? 24;
+
+  // Live mirror of `defaults` for closures that outlive the render they were
+  // created in. The cookie helpers below are captured by useCallbacks whose dep
+  // arrays don't list ytCookiesBrowser, so reading `defaults` directly would
+  // pin them to a stale value — connecting a browser in Settings then wouldn't
+  // take effect for export/captions/transcript/snapshot. The ref is always current.
+  const defaultsRef = useRef(defaults);
+  defaultsRef.current = defaults;
 
   /**
    * Returns the configured cookies-browser identifier, or undefined when
    * the user has it disabled. Threaded into every yt-dlp invoke so we
    * authenticate consistently across fetch / clip / captions / snapshot
    * / transcript. Backend treats undefined / "none" identically.
+   * Reads defaultsRef so stale callback closures still see the live setting.
    */
   const cookiesBrowserOrNone = (): string | undefined =>
-    defaults.ytCookiesBrowser && defaults.ytCookiesBrowser !== "none"
-      ? defaults.ytCookiesBrowser
+    defaultsRef.current.ytCookiesBrowser && defaultsRef.current.ytCookiesBrowser !== "none"
+      ? defaultsRef.current.ytCookiesBrowser
       : undefined;
+
+  /**
+   * Run a cookie-taking yt-dlp command, then RETRY once WITHOUT cookies if it
+   * failed while cookies were actually applied. Public social posts (LinkedIn,
+   * many Reddit/IG/X) break when yt-dlp is handed auth cookies — it fetches a
+   * logged-in page it can't parse ("Unable to extract video") — while the
+   * public page resolves fine. Mirrors the backend resolver's cookie-fallback
+   * (get_direct_stream_url / fetch_metadata) for the awaited download/export
+   * commands. Cancellations are never retried. `buildArgs` is called with the
+   * cookie value to use so the same arg shape serves both attempts.
+   */
+  async function invokeWithCookieRetry<T>(
+    cmd: string,
+    buildArgs: (cookies: string | undefined) => Record<string, unknown>,
+  ): Promise<T> {
+    const cookies = cookiesBrowserOrNone();
+    try {
+      return await invoke<T>(cmd, buildArgs(cookies));
+    } catch (err) {
+      if (cookies && !formatError(err).toLowerCase().includes("cancel")) {
+        appendLog("info", "yt-dlp", `${cmd} failed with sign-in cookies — retrying without…`);
+        return await invoke<T>(cmd, buildArgs(undefined));
+      }
+      throw err;
+    }
+  }
 
   // ====== YouTube sign-in (cookies-from-browser) — r71 ======
   // One modal (YouTubeAuthModal), three surfaces driven by `ytAuthMode`:
@@ -236,7 +278,14 @@ export default function App() {
   // re-runs handleFetch once a browser is picked (after defaults update, so
   // no stale closure).
   const [ytAuthOpen, setYtAuthOpen] = useState(false);
-  const [ytAuthMode, setYtAuthMode] = useState<"welcome" | "blocked" | "severed">("blocked");
+  const [ytAuthMode, setYtAuthMode] = useState<"welcome" | "blocked" | "severed" | "site-login">("blocked");
+  // Which site the cookie reminder is about ("YouTube", "Reddit", …). The
+  // picker is identical (cookies are read per-browser, not per-site) — only the
+  // copy changes so the reminder reads right for whatever the user just fetched.
+  const [ytAuthSite, setYtAuthSite] = useState("YouTube");
+  // Committed source URL, set SYNCHRONOUSLY at fetch time so the reminder can
+  // name the host even within the same fetch (the state version would be stale).
+  const activeSourceUrlRef = useRef<string | null>(null);
   const [ytAuthRetry, setYtAuthRetry] = useState(0);
   const ytAuthPromptedSeqRef = useRef(-1);
 
@@ -250,11 +299,28 @@ export default function App() {
   }, []);
 
   const maybePromptYtAuth = useCallback((msg: string, seq: number) => {
-    if (!isYouTubeBotError(msg)) return;
+    // Fire for ANY login-gated source (YouTube bot-check OR Reddit/other sites
+    // that now require cookies) — that's the "remind me about cookies when
+    // appropriate" behavior.
+    if (!needsCookiesError(msg)) return;
     if (ytAuthPromptedSeqRef.current === seq) return; // one prompt per source load
     ytAuthPromptedSeqRef.current = seq;
-    // Already picked a browser but STILL bot-checked = the sign-in got severed.
-    setYtAuthMode(defaults.ytCookiesBrowser !== "none" ? "severed" : "blocked");
+    const host = hostnameOf(activeSourceUrlRef.current ?? "");
+    // Decide by HOST first. The error text can contain "YouTube auth" (that's
+    // the name of the cookies setting) even for a Reddit failure, so sniffing
+    // the message would wrongly show the YouTube modal. Only fall back to the
+    // message when we genuinely don't know the host.
+    const isYouTube = host
+      ? /youtube\.com|youtu\.be/.test(host)
+      : isYouTubeBotError(msg);
+    if (isYouTube) {
+      setYtAuthSite("YouTube");
+      // Already picked a browser but STILL bot-checked = the sign-in got severed.
+      setYtAuthMode(defaults.ytCookiesBrowser !== "none" ? "severed" : "blocked");
+    } else {
+      setYtAuthSite(prettyHost(host));
+      setYtAuthMode("site-login");
+    }
     setYtAuthOpen(true);
   }, [defaults.ytCookiesBrowser]);
 
@@ -286,6 +352,9 @@ export default function App() {
   // YouTube source vs imported local file. Most paths key off this.
   const [sourceKind, setSourceKind] = useState<SourceKind>("youtube");
   const [localFilePath, setLocalFilePath] = useState<string | null>(null);
+  // Byte size of the imported local file — folded into the review fingerprint so
+  // two distinct same-length, same-dimension clips don't collide onto one review.
+  const [localFileSize, setLocalFileSize] = useState<number | null>(null);
   /**
    * Path of the ffmpeg-normalised playback copy (WKWebView-compatible MP4 /
    * MP3). When set, the LocalMediaPlayer uses this; otherwise it falls back
@@ -293,37 +362,28 @@ export default function App() {
    * `transcribe_local_file` / export pipelines.
    */
   const [playbackPath, setPlaybackPath] = useState<string | null>(null);
+  // (r80) Web-source stream/cache/codecs/download state now lives in the
+  // useWebPlayback state machine (see the hook call above). Read its read-model
+  // (webPlayback.streamUrl / cachePath / videoCodec / downloading / …).
   /**
-   * For non-YouTube web sources (Vimeo, TikTok, Twitter/X, etc.): the
-   * signed direct-stream URL yt-dlp resolved via `-g`. We hand this
-   * straight to <video src> — Safari does range-fetch to the CDN itself,
-   * no download wait, no disk usage. Null for YouTube (uses IFrame) and
-   * for local files.
+   * Pre-cached source audio (r76): asset:// URL of the full audio track we
+   * download in the background for a STREAMING web source. Playback is native
+   * (the proxy-merged fMP4 carries the audio), so this is NOT used for playback
+   * — it's a head start for Whisper (the same source-keyed file the transcript
+   * pipeline reuses). Doubles as the per-source "already cached" guard so we
+   * don't re-download. Null = not streaming / cached-to-disk / local file.
    */
-  const [webStreamUrl, setWebStreamUrl] = useState<string | null>(null);
-  /**
-   * Per-import fallback for web sources whose CDN rejects cross-origin
-   * fetches (LinkedIn, X, Instagram, FB — most major social platforms
-   * check the Referer header). When `<video>` errors trying to load
-   * `webStreamUrl`, we download via yt-dlp into the app cache and swap
-   * the player to this local path. Cleared by resetForNewSource.
-   */
-  const [webCachePath, setWebCachePath] = useState<string | null>(null);
-  /** True while the web-preview download is in flight. */
-  const [webPreviewDownloading, setWebPreviewDownloading] = useState(false);
+  const [webAudioCachedSrc, setWebAudioCachedSrc] = useState<string | null>(null);
+  /** The COMMITTED source page URL of the current fetch (what yt-dlp resolves),
+   *  captured at fetch time. The audio-master effect keys off THIS, not the
+   *  live `url` input — editing the input box mid-playback must not repoint the
+   *  cached audio at a different (or empty) URL. Cleared by resetForNewSource. */
+  const [activeSourceUrl, setActiveSourceUrl] = useState<string | null>(null);
   /** True once the active player has reported ready (loadedmetadata /
    *  SourceBuffer open). Drives the r62 "resolving / starting playback"
    *  overlay so the user sees a clear status over the poster during the
    *  yt-dlp resolve + MSE buffer window. Reset on every new source. */
   const [playerReady, setPlayerReady] = useState(false);
-  /**
-   * Watchdog timer ID for the direct-stream load. Many social-CDN 403s
-   * never surface as <video> error events — Safari just stalls silently.
-   * We start this timer when we mount a web stream and clear it when
-   * onPlayerReady fires. If it expires, we trigger the download fallback
-   * the same way an explicit error would.
-   */
-  const webStreamWatchdogRef = useRef<number | null>(null);
   /**
    * True while yt-dlp is still resolving the highest-quality stream URL in
    * the background. The IFrame player is already mounted and playable; this
@@ -341,6 +401,18 @@ export default function App() {
    * mediabunny again. Cleared by resetForNewSource.
    */
   const [webCodecsFallbackForImport, setWebCodecsFallbackForImport] = useState(false);
+
+  /**
+   * Which player the current local import resolved to (r93 — mediabunny-first
+   * default). Set by `loadLocalPath` after a capability probe:
+   *  - "native"    → LocalMediaPlayer (<video>) — native-friendly codecs, or
+   *                  the ffmpeg-transcoded copy when mediabunny can't decode.
+   *  - "mediabunny"→ MediaBunnyPlayer (WebCodecs video + in-app/WASM audio) —
+   *                  plays the ORIGINAL with no transcode (AV1+Opus etc.).
+   * Independent of the useWebCodecsDecoder toggle so mediabunny-first is the
+   * default for everyone. Only governs local files; the web path is untouched.
+   */
+  const [localPlayer, setLocalPlayer] = useState<"native" | "mediabunny">("native");
 
   // Effective fps and duration in frames.
   const fps = metadata?.fps && metadata.fps > 0 ? metadata.fps : fallbackFps;
@@ -366,7 +438,10 @@ export default function App() {
     inTc: "",
     outTc: "",
     filename: "clip",
-    folder: defaults.folder,
+    // Prefer the Settings default; fall back to the last sidebar-picked folder
+    // (persisted under "cp-folder" below) so a folder chosen only from the
+    // sidebar survives relaunch instead of leaving Export disabled.
+    folder: defaults.folder ?? (() => { try { return localStorage.getItem("cp-folder"); } catch { return null; } })(),
     format: defaults.format,
     captions: defaults.captions,
     reencode: defaults.reencode,
@@ -567,7 +642,7 @@ export default function App() {
 
   // ====== Settings modal ======
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "shortcuts" | "commands" | "about">("general");
+  const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "commands" | "about">("general");
 
   // ====== Active transcript ======
   // The Transcript tab in the right drawer reads from here. We track the
@@ -602,7 +677,12 @@ export default function App() {
   // The notification bell holds a session history of completion events; the
   // toast is the transient confirmation that pops over the canvas.
   const [notifications, setNotifications] = useState<Notif[]>([]);
-  const [toast, setToast] = useState<{ kind: ToastKind; title: string; body?: string } | null>(null);
+  // `id` is a monotonic counter so Monitor can KEY the CanvasToast on it —
+  // replacing a visible toast then remounts (fresh countdown) instead of
+  // reusing the old instance's nearly-expired timer (which made the new
+  // toast flash and vanish).
+  const [toast, setToast] = useState<{ id: number; kind: ToastKind; title: string; body?: string } | null>(null);
+  const toastIdRef = useRef(0);
 
   const pushNotification = useCallback(
     (kind: ToastKind, title: string, body: string, path?: string) => {
@@ -616,7 +696,7 @@ export default function App() {
         read: false,
       };
       setNotifications((prev) => [n, ...prev].slice(0, 20));
-      setToast({ kind, title, body });
+      setToast({ id: ++toastIdRef.current, kind, title, body });
       if (kind === "success") playSuccess();
       else if (kind === "error") playError();
       else playInfo();
@@ -635,10 +715,54 @@ export default function App() {
 
   // ====== Append log ======
   const logIdRef = useRef(0);
+  // A "progress" line is one carrying a percentage (yt-dlp `[download] 12.3%`,
+  // ffmpeg/whisper `... 47%`). Sidecars emit hundreds of these per second with
+  // `--newline`, which used to flood the Pipeline panel with a new row per tick.
+  // We collapse a run of progress lines from the SAME source into ONE row that
+  // updates in place (id preserved → React updates, doesn't remount), so the
+  // user sees a single live "downloading … 87%" line instead of thousands. Any
+  // non-progress line (start, "Cached preview ready", an error) appends normally
+  // and naturally ends the run.
   const appendLog = useCallback((tag: ClientLog["tag"], source: string, message: string) => {
-    logIdRef.current += 1;
-    setLogs((prev) => [...prev, { id: logIdRef.current, ts: nowHms(), tag, source, message }]);
+    const isProgress = /\d{1,3}(?:\.\d+)?%/.test(message);
+    setLogs((prev) => {
+      const last = prev[prev.length - 1];
+      if (
+        isProgress &&
+        last &&
+        last.source === source &&
+        /\d{1,3}(?:\.\d+)?%/.test(last.message)
+      ) {
+        const updated: ClientLog = { ...last, ts: nowHms(), tag, message };
+        return [...prev.slice(0, -1), updated];
+      }
+      logIdRef.current += 1;
+      return [...prev, { id: logIdRef.current, ts: nowHms(), tag, source, message }];
+    });
   }, []);
+
+  // ====== Web-source playback (r80) — stream ↔ download state machine ======
+  // Owns the entire web stream → resolve → download-fallback → watchdog →
+  // cache lifecycle that used to be ~300 lines of boolean/ref soup in this
+  // file. Exposes a read-model (streamUrl/cachePath/codecs/downloading/…) the
+  // Monitor consumes, plus stable actions. See src/hooks/use-web-playback.ts.
+  const webPlayback = useWebPlayback({
+    appendLog,
+    pushNotification,
+    maybePromptYtAuth,
+    cookiesBrowser: cookiesBrowserOrNone,
+    previewMaxHeight: defaults.previewMaxHeight,
+  });
+  const {
+    loadWeb: loadWebPlayback,
+    reset: resetWebPlayback,
+    stop: stopWebPlayback,
+    onPlayerReady: webOnPlayerReady,
+    onMediaError: webOnMediaError,
+  } = webPlayback;
+  // True while actively MSE-streaming a web source (not yet downloaded to
+  // cache). Gates the audio pre-cache, caption auto-fetch, caption-sync offset.
+  const webStreaming = webPlayback.state.kind === "streaming";
 
   // ====== Backend build check ======
   // Runs once on mount. If the running Rust binary's BACKEND_BUILD_ID
@@ -710,6 +834,16 @@ export default function App() {
   captionsJobIdRef.current = captionsJobId;
   const transcriptJobIdRef = useRef<string | null>(null);
   transcriptJobIdRef.current = transcriptJobId;
+  // Pipeline-log channel label for transcription ("whisper" | "parakeet"), in a
+  // ref so the long-lived transcript-log listener tags lines with the engine
+  // that's actually running rather than a hardcoded "whisper".
+  const txChannelRef = useRef<"whisper" | "parakeet">("whisper");
+  txChannelRef.current = defaults.transcriptionEngine === "parakeet" ? "parakeet" : "whisper";
+  // Snapshot of the source's title/thumbnail taken when a SINGLE clip export
+  // starts, so the Recent entry is attributed to the source that was exported
+  // even if the user switches sources before clip-done fires (the listener
+  // guards only on job_id, which we must keep live to resolve the queue).
+  const clipJobMetaRef = useRef<{ title: string; thumbnail: RecentClip["thumbnail"] } | null>(null);
   const diarizerPrepareJobIdRef = useRef<string | null>(null);
   diarizerPrepareJobIdRef.current = diarizerPrepareJobId;
   // Ref for transcript-history bookkeeping — captions/whisper listeners
@@ -764,7 +898,9 @@ export default function App() {
           const filename = e.payload.path.split("/").pop() ?? "Done.";
           pushNotification("success", "Clip exported", filename, e.payload.path);
           notify("Clip exported", filename);
-          const m = metadataRef.current;
+          // Title/thumbnail snapshot from export start — NOT metadataRef, which
+          // may now point at a different source the user switched to mid-export.
+          const m = clipJobMetaRef.current;
           const f = fpsRef.current;
           const opts = exportOptsRef.current;
           if (m) {
@@ -821,7 +957,9 @@ export default function App() {
               origin: "captions",
             });
           } catch { /* localStorage quota — non-fatal */ }
-          invoke("reveal_in_finder", { path: e.payload.path }).catch(() => { /* ignore */ });
+          // (No Finder reveal — the transcript loads into the panel; popping
+          // Finder on every download was intrusive, especially on the auto
+          // fetch from the CC toggle.)
         } else {
           setCaptionsState("error");
           const msg = e.payload.error ?? "Caption download failed";
@@ -831,7 +969,7 @@ export default function App() {
       });
       const g = await listen<LogEvent>("transcript-log", (e) => {
         if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
-        appendLog(asLogTag(e.payload.tag), "whisper", e.payload.line);
+        appendLog(asLogTag(e.payload.tag), txChannelRef.current, e.payload.line);
       });
       const h = await listen<DoneEvent>("transcript-done", (e) => {
         if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
@@ -840,8 +978,8 @@ export default function App() {
           setTranscriptError(null);
           setTranscriptProgress(100);
           setTranscriptPhase(null);
-          const filename = e.payload.path.split("/").pop() ?? "Whisper finished.";
-          appendLog("ok", "whisper", `Transcript saved → ${e.payload.path}`);
+          const filename = e.payload.path.split("/").pop() ?? "Transcript ready.";
+          appendLog("ok", txChannelRef.current, `Transcript saved → ${e.payload.path}`);
           // Load into the Transcript tab (same pulse-and-switch behavior
           // as the captions path above).
           setActiveTranscript({ path: e.payload.path, origin: "whisper" });
@@ -864,19 +1002,30 @@ export default function App() {
           // the result landed, so the body text was redundant chrome.
           notify("Transcript ready", filename);
           pushNotification("success", "Transcript ready", "", e.payload.path);
-        } else if (e.payload.error === "Cancelled" || e.payload.error?.startsWith("whisper-cli exited with code")) {
-          // Whisper exits non-zero when killed via SIGTERM — treat as cancel.
+          // Diarization is non-fatal: on success the backend still puts a note
+          // in `error` if speaker detection was skipped. Surface it so a user
+          // who asked for speakers isn't left wondering why there are none —
+          // previously this only appeared in the pipeline log.
+          if (e.payload.error) {
+            appendLog("warn", txChannelRef.current, e.payload.error);
+            pushNotification("info", "Speakers not detected", e.payload.error);
+          }
+        } else if (e.payload.error === "Cancelled") {
+          // User Stop — the Rust Terminated handlers map signal-kills to
+          // "Cancelled", so a bare exit-code message is a REAL crash (corrupt
+          // model, unreadable WAV, OOM) and must fall through to the error
+          // branch, not be silently absorbed as a cancel.
           setTranscriptState("idle");
           setTranscriptError(null);
           setTranscriptProgress(0);
           setTranscriptPhase(null);
-          appendLog("warn", "whisper", "Transcription cancelled");
+          appendLog("warn", txChannelRef.current, "Transcription cancelled");
         } else {
           setTranscriptState("error");
           setTranscriptPhase(null);
-          const msg = e.payload.error ?? "Whisper transcription failed";
+          const msg = e.payload.error ?? "Transcription failed";
           setTranscriptError(msg);
-          appendLog("err", "whisper", msg);
+          appendLog("err", txChannelRef.current, msg);
           notify("Transcript failed", msg);
           pushNotification("error", "Transcript failed", msg);
         }
@@ -971,12 +1120,9 @@ export default function App() {
   }, []);
 
   const onPlayerReady = useCallback((dur: number) => {
-    // Player loaded metadata successfully — disarm the web-stream stall
-    // watchdog so we don't trigger an unnecessary download fallback.
-    if (webStreamWatchdogRef.current != null) {
-      window.clearTimeout(webStreamWatchdogRef.current);
-      webStreamWatchdogRef.current = null;
-    }
+    // Player opened — tell the web machine (disarms its stall watchdog so we
+    // don't trigger an unnecessary download fallback). No-op for local files.
+    webOnPlayerReady();
     // Player is up → drop the resolving/buffering overlay (r62).
     setPlayerReady(true);
     // Apply persisted volume + mute as soon as a player becomes ready.
@@ -998,7 +1144,7 @@ export default function App() {
         return { ...prev, duration: dur };
       });
     }
-  }, [volume, muted]);
+  }, [volume, muted, webOnPlayerReady]);
 
   // ====== Actions ======
   /**
@@ -1024,6 +1170,17 @@ export default function App() {
       playbackPrepResolverRef.current.reject(new Error("Source changed"));
       playbackPrepResolverRef.current = null;
     }
+    // Cancel AND disown any in-flight captions/transcript job from the previous
+    // source. The long-lived 'captions-done'/'transcript-done' listeners guard
+    // only on job_id, so without NULLING these refs an OLD job completing after
+    // a source switch would load the wrong SRT over the new source AND record it
+    // in transcript history against the new URL (poisoning its auto-load).
+    const staleCap = captionsJobIdRef.current;
+    if (staleCap) invoke("cancel_job", { jobId: staleCap }).catch(() => { /* best-effort */ });
+    setCaptionsJobId(null);
+    const staleTx = transcriptJobIdRef.current;
+    if (staleTx) invoke("cancel_job", { jobId: staleTx }).catch(() => { /* best-effort */ });
+    setTranscriptJobId(null);
     setMetadata(null);
     setErrorDetail(null);
     setLogs([]);
@@ -1047,19 +1204,20 @@ export default function App() {
     setIsPlaying(false);
     setSourceKind("youtube");
     setLocalFilePath(null);
+    setLocalFileSize(null);
     setPlaybackPath(null);
     setPlaybackPrepBusy(false);
     setPlaybackPrepJobId(null);
     setPlaybackPrepProgress(0);
     setWebCodecsFallbackForImport(false);
-    setWebStreamUrl(null);
-    setWebCachePath(null);
-    setWebPreviewDownloading(false);
+    setLocalPlayer("native");
+    // Tear down the web-playback machine (cancels any in-flight resolve/
+    // download + watchdog, → inactive). r80.
+    resetWebPlayback();
+    webAudioCachedPathRef.current = null;
+    setWebAudioCachedSrc(null);
+    setActiveSourceUrl(null);
     setPlayerReady(false);
-    if (webStreamWatchdogRef.current != null) {
-      window.clearTimeout(webStreamWatchdogRef.current);
-      webStreamWatchdogRef.current = null;
-    }
     // Cancel any in-flight mediabunny local export tied to the previous
     // source — without this, switching sources mid-export would leave
     // the Conversion writing into a buffer for a file the user no
@@ -1069,12 +1227,16 @@ export default function App() {
       localExportCancelRef.current.cancelled = true;
       localExportCancelRef.current = null;
     }
-  }, []);
+  }, [resetWebPlayback]);
 
   const handleFetch = useCallback(async (urlOverride?: string) => {
     // `urlOverride` lets callers (e.g. paste-and-fetch) pass the URL directly
     // instead of relying on the `url` state having committed — avoids the
     // race where a freshly-pasted URL hasn't landed in state yet.
+    // Empty URL bar → do nothing. Without this, ⌘Enter (which the raw key
+    // binding doesn't gate the way the command registry does) would flip status
+    // to "error" and kill a currently-loaded source's transport.
+    if (!(urlOverride ?? url).trim()) return;
     const full = normalizeUrl(urlOverride ?? url);
     if (!isLikelyVideoUrl(full)) {
       setErrorDetail("Paste a video URL (YouTube, Vimeo, TikTok, Twitter/X, Reddit, Instagram, or any page with embedded video).");
@@ -1082,6 +1244,11 @@ export default function App() {
       return;
     }
     resetForNewSource();
+    // Committed source URL for the audio-master cache (keyed off this, not the
+    // live `url` input, which can change without a re-fetch). The ref mirror is
+    // set synchronously so the cookie reminder can name the host mid-fetch.
+    activeSourceUrlRef.current = full;
+    setActiveSourceUrl(full);
     // Capture this load's sequence — any await continuation below must
     // re-check the ref before calling setState to avoid clobbering a newer
     // source the user has since started.
@@ -1119,10 +1286,10 @@ export default function App() {
     setPlayheadFrames(0);
     setInFrames(null);
     setOutFrames(null);
-    // Auto-load any previously-generated transcript for this URL.
-    // No await — runs in the background; if found, the Transcript tab
-    // pulses + auto-opens via the standard arrivedTick flow.
-    void tryAutoLoadTranscript({ sourceUrl: full });
+    // NOTE: we deliberately do NOT auto-load a prior transcript on fetch.
+    // resetForNewSource() above clears it, so every fetch starts with a clean
+    // transcript panel — no holdover from the previous video. A past transcript
+    // is still one click away via the Transcript tab's History popover.
     // Seed a sensible filename from the URL right away; replaced once title arrives.
     setExportOpts((prev) => ({
       ...prev,
@@ -1152,60 +1319,21 @@ export default function App() {
     //   HTTP proxy: WKWebView streams http://127.0.0.1 natively through
     //   WebKit's Range/206 path. The Content-Length framing (not chunked)
     //   was the key — see src-tauri/src/stream_proxy.rs.
-    // ─── Web-source playback path (r72: HYBRID, stream-first by default) ──
-    // Stream instantly so the user can WATCH and mark in/out without waiting
-    // for a full download (critical on long videos). Export then downloads
-    // ONLY the marked clip (create_clip's section download). If streaming
-    // fails at any point, onMediaError / the watchdog fall back to the
-    // reliable download-to-cache path — so it's fast when it works, reliable
-    // when it doesn't. Turn `streamPreview` OFF (Settings → Web playback) for
-    // the download-first path (slower, max reliability on flaky connections).
-    if (defaults.streamPreview) {
-      // ── STREAM-FIRST (default): MSE via the loopback proxy, download fallback. ──
-      void (async () => {
-        try {
-          appendLog("info", "yt-dlp", `Resolving stream URL for ${hostnameOf(full)}…`);
-          const stream = await invoke<{ url: string; width: number | null; height: number | null; vcodec: string | null }>(
-            "get_direct_stream_url",
-            { url: full, cookiesBrowser: cookiesBrowserOrNone() },
-          );
-          if (sourceSeqRef.current !== seq) return;
-          // base is null only if the proxy failed to bind at startup — then
-          // we hand the raw CDN URL through (won't play; watchdog → download).
-          const proxyBase = await invoke<string | null>("get_stream_proxy_base").catch(() => null);
-          if (sourceSeqRef.current !== seq) return;
-          const proxied = buildProxyUrl(proxyBase, stream.url);
-          setWebStreamUrl(proxied);
-          appendLog("ok", "yt-dlp",
-            `Direct stream ready · ${stream.width ?? "?"}×${stream.height ?? "?"} ${stream.vcodec ?? ""} · via 127.0.0.1 proxy`.trim());
-          // Stall watchdog: if the proxy/MSE pipeline doesn't open in 15s,
-          // fall back to the reliable download path.
-          if (webStreamWatchdogRef.current != null) window.clearTimeout(webStreamWatchdogRef.current);
-          webStreamWatchdogRef.current = window.setTimeout(() => {
-            webStreamWatchdogRef.current = null;
-            if (sourceSeqRef.current !== seq) return;
-            if (webCachePath || webPreviewDownloading) return;
-            appendLog("warn", "media", "Stream didn't open in 15s — falling back to download.");
-            pushNotification("info", "Downloading preview…",
-              "Fetching the file via yt-dlp so you can scrub and mark in-app.");
-            void runWebPreviewDownload(full, seq);
-          }, 15000);
-        } catch (err) {
-          if (sourceSeqRef.current !== seq) return;
-          const sErr = formatError(err);
-          appendLog("warn", "yt-dlp", `Direct stream failed: ${sErr} — falling back to download.`);
-          maybePromptYtAuth(sErr, seq);
-          void runWebPreviewDownload(full, seq);
-        }
-      })();
-    } else {
-      // ── DOWNLOAD-FIRST (default, reliable): fetch the file to cache, then
-      //    LocalMediaPlayer plays it natively. Failures (e.g. YouTube bot-
-      //    check) surface as a clean "download failed" + the auth modal,
-      //    not a broken player. ──
-      appendLog("info", "yt-dlp", `Downloading ${hostnameOf(full)} for in-app playback…`);
-      void runWebPreviewDownload(full, seq);
-    }
+    // ─── Web-source playback path (r72 HYBRID; r80 state machine) ──
+    // The whole stream → resolve → download-fallback → watchdog → cache
+    // lifecycle lives in the `useWebPlayback` state machine now. Here we just
+    // kick it off in the user's chosen mode; the hook logs its own progress
+    // and exposes a read-model the Monitor consumes (see webPlayback.* below).
+    // `streamPreview` ON = stream-first (instant, fall back to download on any
+    // failure); OFF = download-first (slower, max reliability on flaky links).
+    appendLog(
+      "info",
+      "yt-dlp",
+      defaults.streamPreview
+        ? `Resolving stream URL for ${hostnameOf(full)}…`
+        : `Downloading ${hostnameOf(full)} for in-app playback…`,
+    );
+    loadWebPlayback(full, defaults.streamPreview ? "stream-first" : "download-first", seq);
 
     // ─── Background metadata hydration ───────────────────────────────────
     // If this fails we leave the player visible (the user is probably already
@@ -1253,7 +1381,7 @@ export default function App() {
     } finally {
       if (sourceSeqRef.current === seq) setMetadataLoading(false);
     }
-  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth]);
+  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, loadWebPlayback]);
 
   // Re-run the current fetch after the user picks a browser in the YouTube
   // auth modal. By the time this fires, `defaults.ytCookiesBrowser` (and thus
@@ -1397,10 +1525,18 @@ export default function App() {
     try {
       const id = await invoke<string>("new_job_id");
       setJobId(id);
+      // Attribute the Recent entry to THIS source now (see clipJobMetaRef) so a
+      // source switch before clip-done can't stamp the new source's title on it.
+      clipJobMetaRef.current = metadataRef.current
+        ? { title: metadataRef.current.title, thumbnail: metadataRef.current.thumbnail }
+        : null;
       // Marks may be null (full-clip export) — pass null through, the
       // backend skips --download-sections so yt-dlp just grabs the whole stream.
       const startStr = inFrames  != null ? framesToTc(inFrames,  fps) : null;
       const endStr   = outFrames != null ? framesToTc(outFrames, fps) : null;
+      // create_clip is fire-and-forget (reports via the clip-done event), so a
+      // frontend cookie-retry can't observe its failure — the backend owns the
+      // cookie-fallback for the clip download (see spawn_video_clip).
       await invoke<string>("create_clip", {
         args: {
           url: metadata.webpage_url,
@@ -1515,77 +1651,11 @@ export default function App() {
     }
   }, [appendLog, pushNotification]);
 
-  /**
-   * Web-source fallback: when LocalMediaPlayer fails to load a Referer-
-   * gated CDN URL (LinkedIn licdn, X twimg, IG cdninstagram, FB fbcdn —
-   * all 403 cross-origin requests), download the file via yt-dlp into
-   * the app cache and swap the player to the local asset:// URL. Reuses
-   * the playback-prep event channels for progress/done so the pipeline
-   * UI lights up the same way as a local-file ffmpeg prep.
-   */
-  const runWebPreviewDownload = useCallback(async (url: string, seq: number) => {
-    if (webPreviewDownloading) return;
+  // Load a local file by absolute path — the import core, shared by the
+  // file-picker import and the Review version switcher (which loads a chosen
+  // version's file straight into the existing player; A/B toggle compare).
+  const loadLocalPath = useCallback(async (picked: string) => {
     try {
-      setWebPreviewDownloading(true);
-      setPlaybackPrepBusy(true);
-      setPlaybackPrepProgress(0);
-      const jobId = await invoke<string>("new_job_id");
-      setPlaybackPrepJobId(jobId);
-      appendLog("info", "web-preview", "CDN rejected cross-origin fetch — downloading via yt-dlp…");
-      const cachePath = await new Promise<string>((resolve, reject) => {
-        playbackPrepResolverRef.current = { resolve, reject };
-        invoke("download_web_preview", {
-          args: {
-            url,
-            job_id: jobId,
-            cookies_browser: cookiesBrowserOrNone(),
-          },
-        }).catch((err) => {
-          if (playbackPrepResolverRef.current) {
-            playbackPrepResolverRef.current = null;
-            reject(err);
-          }
-        });
-      });
-      if (sourceSeqRef.current !== seq) return;
-      setWebCachePath(cachePath);
-      appendLog("ok", "web-preview", `Cached preview ready → ${cachePath}`);
-    } catch (err) {
-      if (sourceSeqRef.current !== seq) return;
-      const msg = formatError(err);
-      if (msg.includes("Source changed")) return;
-      if (msg.includes("Cancelled")) {
-        appendLog("warn", "web-preview", "Preview download cancelled");
-      } else {
-        appendLog("err", "web-preview", `Preview download failed: ${msg}`);
-        pushNotification("error", "Preview unavailable", msg);
-        maybePromptYtAuth(msg, seq);
-      }
-    } finally {
-      if (sourceSeqRef.current === seq) {
-        setWebPreviewDownloading(false);
-        setPlaybackPrepBusy(false);
-        setPlaybackPrepJobId(null);
-        setPlaybackPrepProgress(0);
-      }
-    }
-  }, [webPreviewDownloading, appendLog, pushNotification, maybePromptYtAuth]);
-
-  const handleImportFile = useCallback(async () => {
-    try {
-      const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
-        m.open({
-          multiple: false,
-          directory: false,
-          filters: [
-            { name: "Video", extensions: ["mp4", "mov", "m4v", "mkv", "webm", "avi"] },
-            { name: "Audio", extensions: ["mp3", "m4a", "wav", "flac", "ogg", "aac"] },
-            { name: "All", extensions: ["*"] },
-          ],
-        })
-      );
-      if (typeof picked !== "string") return;
-
       resetForNewSource();
       const seq = ++sourceSeqRef.current;
       setStatus("fetching");
@@ -1656,6 +1726,7 @@ export default function App() {
       }
       setSourceKind("file");
       setLocalFilePath(lf.path);
+      setLocalFileSize(lf.size_bytes ?? null);
       setUrl("");
       setPlayheadFrames(0);
       setInFrames(null);
@@ -1682,8 +1753,10 @@ export default function App() {
         } · ${lf.duration?.toFixed(1) ?? "?"}s`
       );
       // Auto-load any prior transcript we generated for this exact file
-      // path. Silent miss — first-time imports proceed normally.
-      void tryAutoLoadTranscript({ sourcePath: picked });
+      // path. Silent miss — first-time imports proceed normally. seq-guarded
+      // so a source switch mid-probe can't attach this file's transcript to
+      // the next source.
+      void tryAutoLoadTranscript({ sourcePath: picked }, seq);
       setStatus("loaded");
 
       // ─── Playback prep ─────────────────────────────────────────────
@@ -1723,21 +1796,31 @@ export default function App() {
         : ["mp3", "m4a", "aac", "wav", "mp4", "m4v", "mov"].includes(ext);
 
       if (videoNative && audioNative && containerOk) {
+        setLocalPlayer("native");
         appendLog("ok", "import", "Codecs natively supported — playing original file (no transcode).");
         return;
       }
 
-      // WebCodecs path — only fires for non-native files. Mediabunny will
-      // try to decode; if it can't, onMediaError triggers runPlaybackPrep
-      // as the final fallback (per-import, doesn't flip Settings).
-      if (defaults.useWebCodecsDecoder) {
-        appendLog("info", "import",
-          `Non-native codecs (${vc || "?"} / ${ac || "?"}) — trying WebCodecs decoder.`);
+      // Mediabunny-first (r93): probe whether WebCodecs — plus our registered
+      // WASM audio decoders (libopus) — can decode this file IN-APP. If so,
+      // play the original directly via MediaBunnyPlayer with NO ffmpeg
+      // transcode. This is the common win for AV1+Opus YouTube downloads:
+      // WKWebView decodes AV1 video via WebCodecs, and libopus covers the
+      // Opus audio that WKWebView's (absent) AudioDecoder can't.
+      const canMb = await canMediabunnyDecode(lf.path);
+      if (sourceSeqRef.current !== seq) return;
+      if (canMb) {
+        setLocalPlayer("mediabunny");
+        appendLog("ok", "import",
+          `In-app decode via mediabunny (${vc || "?"} / ${ac || "?"}) — no transcode.`);
         return;
       }
 
-      // ffmpeg-prep path. Surface what we're transcoding and why so the
-      // user understands the wait.
+      // Mediabunny can't decode this file here (e.g. a codec WebCodecs lacks
+      // and we don't polyfill). Fall back to the ffmpeg-prep + <video> path.
+      setLocalPlayer("native");
+
+      // Surface what we're transcoding and why so the user understands the wait.
       const reasonParts: string[] = [];
       if (!videoNative) reasonParts.push(`video ${vc || "?"} → h264`);
       if (!audioNative) reasonParts.push(`audio ${ac || "?"} → aac`);
@@ -1753,13 +1836,40 @@ export default function App() {
     }
   }, [appendLog, defaults.folder, defaults.useWebCodecsDecoder, resetForNewSource, runPlaybackPrep]);
 
+  const handleImportFile = useCallback(async () => {
+    const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
+      m.open({
+        multiple: false,
+        directory: false,
+        filters: [
+          { name: "Video", extensions: ["mp4", "mov", "m4v", "mkv", "webm", "avi"] },
+          { name: "Audio", extensions: ["mp3", "m4a", "wav", "flac", "ogg", "aac"] },
+          { name: "All", extensions: ["*"] },
+        ],
+      })
+    );
+    if (typeof picked === "string") await loadLocalPath(picked);
+  }, [loadLocalPath]);
+
+  // Re-open a clip from the review history popover — local path via the import
+  // core, a web source via the URL fetch. Its notes load automatically (the
+  // fingerprint / URL resolves to the same review).
+  const handleOpenReviewSource = useCallback((path: string) => {
+    if (/^https?:\/\//i.test(path)) { setUrl(path); void handleFetch(path); }
+    else void loadLocalPath(path);
+  }, [handleFetch, loadLocalPath]);
+
   const handleStop = useCallback(async () => {
     const ids = [jobId, transcriptJobId, playbackPrepJobId].filter((x): x is string => !!x);
     const hasLocalExport = !!localExportCancelRef.current;
     const hadPlaybackPrep = !!playbackPrepJobId;
-    if (ids.length === 0 && !hasLocalExport) return;
+    const webDownloading = webPlayback.downloading;
+    if (ids.length === 0 && !hasLocalExport && !webDownloading) return;
     appendLog("warn", "control",
-      `Stopping ${ids.length + (hasLocalExport ? 1 : 0)} job(s)…`);
+      `Stopping ${ids.length + (hasLocalExport ? 1 : 0) + (webDownloading ? 1 : 0)} job(s)…`);
+    // Cancel an in-flight web-preview download (the hook SIGKILLs its yt-dlp
+    // job + resets the machine). No-op for streaming/cached/local.
+    if (webDownloading) stopWebPlayback();
     // Flip the cancel-token for the in-browser mediabunny export — its
     // poll loop sees the flip within 150ms and triggers Conversion.cancel().
     if (hasLocalExport) localExportCancelRef.current!.cancelled = true;
@@ -1778,7 +1888,6 @@ export default function App() {
       setPlaybackPrepBusy(false);
       setPlaybackPrepJobId(null);
       setPlaybackPrepProgress(0);
-      setWebPreviewDownloading(false);
     }
     for (const id of ids) {
       try {
@@ -1787,7 +1896,7 @@ export default function App() {
         appendLog("err", "control", `Cancel failed: ${formatError(err)}`);
       }
     }
-  }, [jobId, transcriptJobId, playbackPrepJobId, appendLog]);
+  }, [jobId, transcriptJobId, playbackPrepJobId, appendLog, webPlayback.downloading, stopWebPlayback]);
 
   /** Add the current active selection as a new queued item, then clear marks. */
   const handleAddToQueue = useCallback(() => {
@@ -1805,13 +1914,18 @@ export default function App() {
       pushNotification("error", "Invalid range", "Mark out must be after Mark in.");
       return;
     }
-    const nextIndex = clipQueueRef.current.length + 1;
     const baseName = sanitizeFilename(exportOpts.filename || "clip");
+    // Bump until unique WITHIN the queue — a bare length+1 collides after a
+    // remove-then-add (clip-1, clip-2; remove clip-1; add → length+1 = 2 →
+    // another clip-2) and Export All would silently overwrite the first file.
+    const nameFor = (n: number) => baseName === "clip" ? `clip-${n}` : `${baseName}-${n}`;
+    let nextIndex = clipQueueRef.current.length + 1;
+    while (clipQueueRef.current.some((c) => c.filename === nameFor(nextIndex))) nextIndex++;
     const item: QueuedClip = {
       id: Math.random().toString(36).slice(2),
       inFrames,
       outFrames,
-      filename: baseName === "clip" ? `clip-${nextIndex}` : `${baseName}-${nextIndex}`,
+      filename: nameFor(nextIndex),
       format: exportOpts.format,
       reencode: exportOpts.reencode,
       captions: exportOpts.captions,
@@ -1849,32 +1963,48 @@ export default function App() {
       if (!clipQueueRef.current.some((c) => c.id === item.id)) continue;
       setClipQueue((prev) => prev.map((c) => c.id === item.id ? { ...c, status: "running" } : c));
       setProgress(0);
-      const jobId = await invoke<string>("new_job_id");
-      setJobId(jobId);
       appendLog("info", "queue", `Exporting ${item.filename} (${framesToTc(item.inFrames, fps)} → ${framesToTc(item.outFrames, fps)})…`);
-      const result = await new Promise<{ success: boolean; path?: string; error?: string }>((resolve) => {
-        queueResolverRef.current = resolve;
-        invoke("create_clip", {
-          args: {
-            url: metadata.webpage_url,
-            start: framesToTc(item.inFrames, fps),
-            end: framesToTc(item.outFrames, fps),
-            fps,
-            output_dir: exportOpts.folder,
-            filename: item.filename,
-            job_id: jobId,
-            format: item.format,
-            reencode: item.reencode,
-            captions: item.captions,
-            cookies_browser: cookiesBrowserOrNone(),
-          },
-        }).catch((err) => {
-          if (queueResolverRef.current) {
-            queueResolverRef.current = null;
-            resolve({ success: false, error: formatError(err) });
-          }
+      // One clip attempt for a given cookie setting (fresh job id each time so
+      // cancellation tracks the live attempt). Resolves via the queue done-event
+      // resolver, or via the invoke's own rejection.
+      const runClip = (cookies: string | undefined) =>
+        new Promise<{ success: boolean; path?: string; error?: string }>((resolve) => {
+          void (async () => {
+            const jobId = await invoke<string>("new_job_id");
+            setJobId(jobId);
+            queueResolverRef.current = resolve;
+            invoke("create_clip", {
+              args: {
+                url: metadata.webpage_url,
+                start: framesToTc(item.inFrames, fps),
+                end: framesToTc(item.outFrames, fps),
+                fps,
+                output_dir: exportOpts.folder,
+                filename: item.filename,
+                job_id: jobId,
+                format: item.format,
+                reencode: item.reencode,
+                captions: item.captions,
+                cookies_browser: cookies,
+              },
+            }).catch((err) => {
+              if (queueResolverRef.current) {
+                queueResolverRef.current = null;
+                resolve({ success: false, error: formatError(err) });
+              }
+            });
+          })();
         });
-      });
+      let result = await runClip(cookiesBrowserOrNone());
+      // Public social posts (LinkedIn…) break with auth cookies — retry public.
+      if (
+        !result.success &&
+        cookiesBrowserOrNone() &&
+        !(result.error ?? "").toLowerCase().includes("cancel")
+      ) {
+        appendLog("info", "queue", "create_clip failed with sign-in cookies — retrying without…");
+        result = await runClip(undefined);
+      }
       if (result.error === "Cancelled") {
         cancelled = true;
         setClipQueue((prev) => prev.map((c) => c.id === item.id ? { ...c, status: "queued" } : c));
@@ -1983,14 +2113,14 @@ export default function App() {
           });
         }
       } else {
-        raw = await invoke("extract_frame", {
+        raw = await invokeWithCookieRetry("extract_frame", (cookies) => ({
           args: {
             url: metadata.webpage_url,
             timestamp_seconds: seconds,
             dest,
-            cookies_browser: cookiesBrowserOrNone(),
+            cookies_browser: cookies,
           },
-        });
+        }));
       }
       const result = (raw && typeof raw === "object" ? raw : {}) as {
         path?: string;
@@ -2060,6 +2190,17 @@ export default function App() {
       setTranscriptError("Load a source URL first.");
       return;
     }
+    // Web sources with no out-mark transcribe up to the source duration. If
+    // the user clicks Transcribe during the optimistic-mount window (duration
+    // not hydrated → durationFrames 0), start == end == 00:00:00:00 and the
+    // backend rejects it with a baffling "Mark out must be after mark in".
+    if (sourceKind !== "file" && outFrames == null && durationFrames === 0) {
+      setTranscriptState("error");
+      setTranscriptError(metadataLoading
+        ? "Source info is still loading — try again in a moment."
+        : "This source has no known duration — set an out-mark to transcribe a range.");
+      return;
+    }
     // Resolve the per-month transcript-library subdir. Falls back to
     // exportOpts.folder for the brief moment between first launch and
     // the library-default-resolver effect landing.
@@ -2069,7 +2210,19 @@ export default function App() {
       setTranscriptError("Transcript library isn't set up yet — open Settings → Transcription and pick a folder.");
       return;
     }
-    if (!selectedModel?.downloaded) {
+    // Engine gate — Parakeet needs its Core ML model on disk; Whisper needs
+    // the selected ggml model. Either way, missing → bounce to Settings.
+    const engine = defaults.transcriptionEngine;
+    if (engine === "parakeet") {
+      const ready = await invoke<boolean>("parakeet_model_downloaded").catch(() => false);
+      if (!ready) {
+        setTranscriptState("error");
+        setTranscriptError("The Parakeet model isn't downloaded yet. Opening Settings → Transcription.");
+        setSettingsInitialTab("transcription");
+        setSettingsOpen(true);
+        return;
+      }
+    } else if (!selectedModel?.downloaded) {
       setTranscriptState("error");
       setTranscriptError(`Whisper model "${defaults.whisperModel}" is not downloaded. Opening Settings → Transcription.`);
       setSettingsInitialTab("transcription");
@@ -2079,9 +2232,11 @@ export default function App() {
     setTranscriptState("running");
     setTranscriptError(null);
     setTranscriptProgress(0);
-    setTranscriptPhase(null); // backend will emit "whisper" then "diarize-*"
+    setTranscriptPhase(null); // backend emits "whisper"/"parakeet" then "diarize-*"
+    const engineLabel = engine === "parakeet" ? "Parakeet" : (selectedModel?.name ?? "Whisper");
+    const txChannel = engine === "parakeet" ? "parakeet" : "whisper";
     const srcLabel = sourceKind === "file" ? metadata.title : `${exportOpts.inTc || "00:00:00:00"} → ${exportOpts.outTc || "end"}`;
-    appendLog("info", "whisper", `Transcribing ${srcLabel} with ${selectedModel.name}…`);
+    appendLog("info", txChannel, `Transcribing ${srcLabel} with ${engineLabel}…`);
     try {
       const id = await invoke<string>("new_job_id");
       setTranscriptJobId(id);
@@ -2093,11 +2248,13 @@ export default function App() {
         //     the audio extraction step.
         //   • ffmpeg fallback: existing transcribe_local_file which
         //     handles the ffmpeg subprocess + whisper-cli inline.
-        const wavBlob = defaults.useWebCodecsDecoder
+        // Parakeet runs only via transcribe_local_file (ffmpeg WAV); the
+        // WebCodecs prepared-WAV fast-path is whisper-only.
+        const wavBlob = (engine !== "parakeet" && defaults.useWebCodecsDecoder)
           ? await extractAudioAsWav16k(localFilePath).catch(() => null)
           : null;
         if (wavBlob) {
-          appendLog("info", "whisper",
+          appendLog("info", txChannel,
             `Audio extracted via mediabunny (${(wavBlob.size / 1_000_000).toFixed(1)} MB WAV) — skipping ffmpeg.`);
           const bytes = Array.from(new Uint8Array(await wavBlob.arrayBuffer()));
           await invoke<string>("transcribe_prepared_wav", {
@@ -2112,7 +2269,9 @@ export default function App() {
             },
           });
         } else {
-          appendLog("info", "whisper", "Mediabunny can't decode this audio codec — falling back to ffmpeg.");
+          if (engine !== "parakeet") {
+            appendLog("info", txChannel, "Mediabunny can't decode this audio codec — falling back to ffmpeg.");
+          }
           await invoke<string>("transcribe_local_file", {
             args: {
               input_path: localFilePath,
@@ -2122,6 +2281,7 @@ export default function App() {
               job_id: id,
               detect_speakers: defaults.detectSpeakers,
               expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
+              engine,
             },
           });
         }
@@ -2143,6 +2303,7 @@ export default function App() {
             cookies_browser: cookiesBrowserOrNone(),
             detect_speakers: defaults.detectSpeakers,
             expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
+            engine,
           },
         });
       }
@@ -2150,12 +2311,139 @@ export default function App() {
       const msg = formatError(err);
       setTranscriptState("error");
       setTranscriptError(msg);
-      appendLog("err", "whisper", msg);
+      appendLog("err", txChannel, msg);
     }
-  }, [metadata, exportOpts, fps, selectedModel, defaults.whisperModel,
+  }, [metadata, metadataLoading, exportOpts, fps, selectedModel, defaults.whisperModel,
+      defaults.transcriptionEngine, defaults.useWebCodecsDecoder,
       defaults.detectSpeakers, defaults.expectedSpeakers,
       appendLog, resolveTranscriptOutDir, localFilePath, sourceKind,
       durationFrames, inFrames, outFrames]);
+
+  // Re-detect speakers WITHOUT re-transcribing: reuses the cached source audio
+  // (web) or the local file + the EXISTING SRT, runs only the diarizer, and
+  // merges fresh speaker labels in place. Seconds instead of a full Whisper
+  // pass on a long source. Reuses the same transcript-* event listeners (set up
+  // via setTranscriptJobId), so progress + reload-on-done are already handled.
+  const handleRediarize = useCallback(async () => {
+    const tx = activeTranscript;
+    if (!tx) return;
+    if (!metadata) { setTranscriptState("error"); setTranscriptError("Load a source first."); return; }
+    const isFile = sourceKind === "file";
+    const url = metadata.webpage_url ?? null;
+    if (!isFile && !url) {
+      setTranscriptState("error");
+      setTranscriptError("No source to re-detect speakers against.");
+      return;
+    }
+    setTranscriptState("running");
+    setTranscriptError(null);
+    setTranscriptProgress(0);
+    setTranscriptPhase(null);
+    appendLog("info", "diarize", "Re-detecting speakers (reusing the existing transcript)…");
+    try {
+      const id = await invoke<string>("new_job_id");
+      setTranscriptJobId(id);
+      await invoke<string>("re_diarize_transcript", {
+        args: {
+          transcript_path: tx.path,
+          job_id: id,
+          // Auto by default; only pass a count if the user set one this session.
+          expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
+          url: isFile ? null : url,
+          input_path: isFile ? localFilePath : null,
+        },
+      });
+    } catch (err) {
+      const msg = formatError(err);
+      setTranscriptState("error");
+      setTranscriptError(msg);
+      appendLog("err", "diarize", msg);
+    }
+  }, [activeTranscript, metadata, sourceKind, localFilePath, defaults.expectedSpeakers, appendLog]);
+
+  // r84: "Fix accuracy" — manually re-time loose YouTube captions with Whisper.
+  // YouTube auto-caption cue times are ASR-biased ~150–700ms late and variable
+  // (the caption-sync research proved our clock is correct; the offset is in the
+  // cue data). This re-derives word-accurate timing from the SAME cached audio
+  // the player uses (start_time 0 → onset matches the heard speech), over the
+  // FULL video (ignores in/out marks — captions cover the whole clip, unlike the
+  // marked-range export transcript). The whisper-done handler swaps
+  // activeTranscript origin "captions" → "whisper", so the banner self-dismisses
+  // and captions snap into sync. Surfaced via the TranscriptViewer banner.
+  const handleFixCaptionTiming = useCallback(async () => {
+    if (!metadata?.webpage_url) return;
+    // Full-range re-time needs a real duration — see handleGenerateTranscript's
+    // identical guard (start == end would be rejected as a marks error).
+    if (durationFrames === 0) {
+      setTranscriptState("error");
+      setTranscriptError(metadataLoading
+        ? "Source info is still loading — try again in a moment."
+        : "This source has no known duration — captions can't be re-timed.");
+      return;
+    }
+    const outDir = await resolveTranscriptOutDir() ?? exportOpts.folder;
+    if (!outDir) {
+      // Must flip state to "error" too — the Sidebar only renders transcriptError
+      // when transcriptState === "error" (matches handleGenerateTranscript).
+      setTranscriptState("error");
+      setTranscriptError("Transcript library isn't set up yet — open Settings → Transcription and pick a folder.");
+      return;
+    }
+    // Engine gate — mirrors handleGenerateTranscript so re-timing works with
+    // whichever engine is active (Parakeet has no Whisper model, so the old
+    // Whisper-only check always bounced Parakeet users to Settings).
+    const engine = defaults.transcriptionEngine;
+    if (engine === "parakeet") {
+      const ready = await invoke<boolean>("parakeet_model_downloaded").catch(() => false);
+      if (!ready) {
+        setTranscriptState("error");
+        setTranscriptError("The Parakeet model isn't downloaded yet. Opening Settings → Transcription.");
+        setSettingsInitialTab("transcription");
+        setSettingsOpen(true);
+        return;
+      }
+    } else if (!selectedModel?.downloaded) {
+      setTranscriptState("error");
+      setTranscriptError(`Whisper model "${defaults.whisperModel}" is not downloaded. Opening Settings → Transcription.`);
+      setSettingsInitialTab("transcription");
+      setSettingsOpen(true);
+      return;
+    }
+    setTranscriptState("running");
+    setTranscriptError(null);
+    setTranscriptProgress(0);
+    setTranscriptPhase(null);
+    const engineLabel = engine === "parakeet" ? "Parakeet" : "Whisper";
+    const txChannel = engine === "parakeet" ? "parakeet" : "whisper";
+    appendLog("info", txChannel, `Re-transcribing for accurate caption timing with ${engineLabel} (reusing the cached audio)…`);
+    try {
+      const id = await invoke<string>("new_job_id");
+      setTranscriptJobId(id);
+      const dur = durationFrames > 0 ? durationFrames - 1 : 0;
+      await invoke<string>("generate_transcript", {
+        args: {
+          url: metadata.webpage_url,
+          start: framesToTc(0, fps),
+          end: framesToTc(dur, fps),
+          fps,
+          output_dir: outDir,
+          filename: sanitizeFilename(exportOpts.filename || "transcript"),
+          model_id: defaults.whisperModel,
+          engine,
+          job_id: id,
+          cookies_browser: cookiesBrowserOrNone(),
+          detect_speakers: defaults.detectSpeakers,
+          expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
+        },
+      });
+    } catch (err) {
+      setTranscriptState("error");
+      setTranscriptError(formatError(err));
+      appendLog("warn", txChannel, `Caption-timing fix failed (${formatError(err)}); keeping the existing captions.`);
+    }
+  }, [metadata, metadataLoading, exportOpts.folder, exportOpts.filename, resolveTranscriptOutDir, selectedModel,
+      durationFrames, fps, defaults.whisperModel, defaults.transcriptionEngine, defaults.detectSpeakers,
+      defaults.expectedSpeakers, appendLog]);
 
   const handleOpenTranscriptionSettings = useCallback(() => {
     setSettingsInitialTab("transcription");
@@ -2172,14 +2460,20 @@ export default function App() {
   const tryAutoLoadTranscript = useCallback(async (input: {
     sourcePath?: string | null;
     sourceUrl?: string | null;
-  }) => {
+  }, seq: number) => {
     const entry = findForSource(input);
     if (!entry) return;
     try {
-      // Probe existence with a tiny capped read. We don't keep the
-      // result — TranscriptViewer fetches the file itself when path
-      // changes; here we just need to know it's there.
-      await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 64 });
+      // Probe existence/readability. Use the SAME 8 MB cap the viewer
+      // reads with — read_text_file_capped *errors* when a file exceeds
+      // the cap, so a tiny cap (the old 64 bytes) rejected every real
+      // transcript with "File too large". We don't keep the result; the
+      // viewer fetches the file itself when the path changes.
+      await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 8 * 1024 * 1024 });
+      // The probe is an awaited IPC disk read — if the user switched sources
+      // meanwhile, attaching the OLD source's transcript to the NEW source
+      // (and pulsing the Transcript tab open over it) would be wrong.
+      if (sourceSeqRef.current !== seq) return;
       setActiveTranscript({
         path: entry.srtPath,
         origin: entry.origin === "captions" ? "captions"
@@ -2224,7 +2518,7 @@ export default function App() {
       // Probe — read_text_file_capped errors clearly if the file is
       // missing / too large. We don't load the bytes here; the viewer
       // will read them itself on the path change.
-      await invoke<string>("read_text_file_capped", { path: picked, maxBytes: 64 });
+      await invoke<string>("read_text_file_capped", { path: picked, maxBytes: 8 * 1024 * 1024 });
       const title = picked.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "Imported transcript";
       recordTranscript({
         srtPath: picked,
@@ -2243,7 +2537,7 @@ export default function App() {
 
   const handleLoadFromHistory = useCallback(async (entry: TranscriptHistoryEntry) => {
     try {
-      await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 64 });
+      await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 8 * 1024 * 1024 });
       setActiveTranscript({
         path: entry.srtPath,
         origin: entry.origin === "captions" ? "captions"
@@ -2323,6 +2617,11 @@ export default function App() {
     try {
       const id = await invoke<string>("new_job_id");
       setCaptionsJobId(id);
+      // Plain invoke, no frontend cookie-retry wrapper: download_captions is
+      // fire-and-forget (resolves at spawn, reports via captions-done), so a
+      // wrapper could never observe the real failure. The BACKEND retries
+      // without cookies inside its monitor task when the cookied attempt
+      // writes no caption files.
       await invoke<string>("download_captions", {
         args: {
           url: metadata.webpage_url,
@@ -2342,6 +2641,85 @@ export default function App() {
     // of the playback/transcription state matters here.
   }, [metadata, exportOpts.folder, exportOpts.filename, appendLog, resolveTranscriptOutDir]);
 
+  // Captions are "active" (button green) only when they're actually on
+  // SCREEN — toggled on AND a transcript is loaded to draw from. A bare
+  // captionsOn flag with no transcript shows nothing, so it shouldn't read
+  // as active.
+  const captionsActive = captionsOn && !!activeTranscript;
+
+  // The toggle operates on what the user SEES: live captions → turn off;
+  // otherwise turn on and auto-fetch a transcript if we don't have one. Web
+  // sources pull their own captions (fast, carries creator speaker labels);
+  // we don't auto-run Whisper here (heavy multi-minute job) — just nudge.
+  const onToggleCaptions = useCallback(() => {
+    if (captionsActive) { setCaptionsOn(false); return; }
+    setCaptionsOn(true);
+    // Captions ride the single native <video> clock (audio + picture + captions
+    // share it), so on-video captions track the audio you hear by construction.
+    if (activeTranscript || captionsState === "running") return;
+    if (sourceKind === "youtube" && metadata) {
+      pushNotification("info", "Fetching captions…",
+        "Grabbing this source's transcript so captions can show on the video.");
+      void handleDownloadCaptions();
+    } else if (sourceKind === "file") {
+      pushNotification("info", "No transcript yet",
+        "Generate a transcript (Transcribe) to show captions for this file.");
+    }
+  }, [captionsActive, activeTranscript, captionsState, sourceKind, metadata, pushNotification, handleDownloadCaptions]);
+
+  // ── Pre-stage the source audio for Whisper (r74 → r76) ──────────────
+  // For every streaming web source we download + cache the full audio track in
+  // the background. Playback itself is NATIVE (the proxy-merged fMP4 carries the
+  // audio, and the <video>'s currentTime tracks it — see MSEStreamPlayer), so
+  // this cache is purely a HEAD START for transcription: it's source-keyed and
+  // persistent, so when you hit Transcribe the audio is already on disk and the
+  // Whisper transcript is clocked against the exact track you heard. See
+  // download_audio_track / generate_transcript (source_audio_prefix) sharing.
+  const audioCacheJobRef = useRef<string | null>(null);
+  // Raw fs path of the cached audio-master track (webAudioCachedSrc holds only
+  // the asset:// URL). Clear-cache passes this as an exclusion so it can't
+  // delete the file the streaming clock is playing from.
+  const webAudioCachedPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!webStreaming || !activeSourceUrl) {
+      webAudioCachedPathRef.current = null;
+      setWebAudioCachedSrc(null);
+      return;
+    }
+    if (webAudioCachedSrc) return; // already cached for this source
+    let cancelled = false;
+    const seq = sourceSeqRef.current;
+    (async () => {
+      try {
+        const jobId = await invoke<string>("new_job_id");
+        if (cancelled || sourceSeqRef.current !== seq) return;
+        audioCacheJobRef.current = jobId;
+        appendLog("info", "audio-cache", "Pre-caching the audio track for fast, aligned transcription…");
+        const path = await invokeWithCookieRetry<string>("download_audio_track", (cookies) => ({
+          args: { url: activeSourceUrl, job_id: jobId, cookies_browser: cookies },
+        }));
+        if (cancelled || sourceSeqRef.current !== seq) return;
+        const { convertFileSrc } = await import("@tauri-apps/api/core");
+        // Keep the RAW fs path too — Clear cache excludes the files the
+        // current session is playing from, and it matches on raw paths.
+        webAudioCachedPathRef.current = path;
+        setWebAudioCachedSrc(convertFileSrc(path));
+        appendLog("ok", "audio-cache", "Audio cached — Transcribe will be instant for this source.");
+      } catch (err) {
+        if (cancelled || sourceSeqRef.current !== seq) return;
+        appendLog("warn", "audio-cache",
+          `Audio pre-cache skipped (${formatError(err)}) — Transcribe will fetch it on demand.`);
+      } finally {
+        audioCacheJobRef.current = null;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      const j = audioCacheJobRef.current;
+      if (j) { audioCacheJobRef.current = null; invoke("cancel_job", { jobId: j }).catch(() => { /* best-effort */ }); }
+    };
+  }, [webStreaming, activeSourceUrl, webAudioCachedSrc, appendLog]);
+
   const handleClearLogs = useCallback(() => setLogs([]), []);
   const handleCopyLogs = useCallback(() => {
     const text = logs.map((l) => `${l.ts} ${l.source.padEnd(8)} ${l.message}`).join("\n");
@@ -2359,7 +2737,32 @@ export default function App() {
   }, [appendLog]);
 
   // ====== Transport ======
+  // ── Variable-speed shuttle (J-K-L double-tap) ───────────────────────
+  // rate: 0 = normal · >0 = fast-forward × · <0 = rewind ×. Routed to the live
+  // player, which honors it per-engine (MediaBunny does true smooth reverse;
+  // WebKit fast-forwards natively + scans backward — see PlayerHandle).
+  const shuttleRateRef = useRef(0);
+  const dblTapRef = useRef({ l: 0, j: 0 });
+
+  // ── Timecode entry HUD (type digits → snap playhead) ──
+  // Raw digits typed so far; null = HUD closed. A bare number key opens it;
+  // digits fill right-to-left into HH:MM:SS:FF (last two = frames), Return
+  // snaps the playhead, Esc cancels. Mirrored into a ref so the window
+  // keydown handler reads the live value without re-binding every keystroke.
+  const [tcEntry, setTcEntry] = useState<string | null>(null);
+  const tcEntryRef = useRef<string | null>(null);
+  useEffect(() => { tcEntryRef.current = tcEntry; }, [tcEntry]);
+  const applyShuttle = useCallback((rate: number) => {
+    shuttleRateRef.current = rate;
+    playerRef.current?.setShuttle?.(rate);
+  }, []);
+  const exitShuttle = useCallback(() => {
+    if (shuttleRateRef.current !== 0) applyShuttle(0);
+  }, [applyShuttle]);
+
   const onPlayToggle = useCallback(() => {
+    // K / Space / the play button while shuttling → just stop the shuttle.
+    if (shuttleRateRef.current !== 0) { applyShuttle(0); return; }
     if (status !== "loaded" && status !== "exporting" && status !== "success") return;
     const p = playerRef.current;
     if (p && p.isReady()) {
@@ -2368,9 +2771,10 @@ export default function App() {
     } else {
       setIsPlaying((x) => !x);
     }
-  }, [status, isPlaying]);
+  }, [status, isPlaying, applyShuttle]);
 
   const onStep = useCallback((delta: number) => {
+    exitShuttle();
     const p = playerRef.current;
     const r = Math.max(1, Math.round(fps));
     setPlayheadFrames((f) => {
@@ -2381,16 +2785,17 @@ export default function App() {
       }
       return next;
     });
-  }, [durationFrames, fps]);
+  }, [durationFrames, fps, exitShuttle]);
 
   const seekBySeconds = useCallback((deltaSec: number) => {
+    exitShuttle();
     const r = Math.max(1, Math.round(fps));
     const p = playerRef.current;
     const currentSec = p?.isReady() ? (p.getCurrentTime?.() ?? 0) : playheadFrames / r;
     const targetSec = Math.max(0, Math.min((durationFrames - 1) / r, currentSec + deltaSec));
     setPlayheadFrames(Math.floor(targetSec * r));
     if (p?.isReady()) p.seekTo(targetSec);
-  }, [fps, playheadFrames, durationFrames]);
+  }, [fps, playheadFrames, durationFrames, exitShuttle]);
 
   const onMarkIn = useCallback(() => {
     const r = Math.max(1, Math.round(fps));
@@ -2421,88 +2826,126 @@ export default function App() {
 
   const onGotoIn = useCallback(() => {
     if (inFrames == null) return;
+    exitShuttle();
     const r = Math.max(1, Math.round(fps));
     setPlayheadFrames(inFrames);
     playerRef.current?.seekTo?.(inFrames / r);
-  }, [inFrames, fps]);
+  }, [inFrames, fps, exitShuttle]);
 
   const onGotoOut = useCallback(() => {
     if (outFrames == null) return;
+    exitShuttle();
     const r = Math.max(1, Math.round(fps));
     setPlayheadFrames(outFrames);
     playerRef.current?.seekTo?.(outFrames / r);
-  }, [outFrames, fps]);
+  }, [outFrames, fps, exitShuttle]);
 
   const onSeek = useCallback((f: number) => {
+    exitShuttle();
     const r = Math.max(1, Math.round(fps));
     const clamped = Math.max(0, Math.min(Math.max(0, durationFrames - 1), f));
     setPlayheadFrames(clamped);
     playerRef.current?.seekTo?.(clamped / r);
-  }, [durationFrames, fps]);
+  }, [durationFrames, fps, exitShuttle]);
 
   // ====== Keyboard ======
+  // Data-driven: the live event is serialized to a combo and matched against the
+  // user-editable binding map (Settings → Commands). The three things that aren't
+  // simple action triggers — the timecode-entry HUD, Esc-closes-Settings, and
+  // bare-digit-opens-HUD — stay hand-coded around the dispatch.
   useEffect(() => {
+    // Run a matched action with the exact behavior of its hand-coded predecessor
+    // (double-tap shuttle on back/fwd, the export status gate, etc.).
+    function runAction(id: KeyActionId, e: KeyboardEvent) {
+      e.preventDefault();
+      switch (id) {
+        case "app.palette":  setPaletteOpen((p) => !p); break;
+        case "app.settings": setSettingsOpen((p) => !p); break;
+        case "src.fetch":    handleFetch(); break;
+        case "view.logs":    setLogsOpen((p) => !p); break;
+        case "queue.add":    handleAddToQueue(); break;
+        case "queue.toggle": setQueueOpen((p) => !p); break;
+        case "export.clip":  if (status === "loaded") handleExport(); break;
+        case "play.toggle":  onPlayToggle(); break;
+        case "play.back5": {
+          // Double-tap → rewind shuttle; single tap → back 5s.
+          const now = Date.now();
+          if (now - dblTapRef.current.j < 350) { dblTapRef.current.j = 0; applyShuttle(-2); }
+          else { dblTapRef.current.j = now; seekBySeconds(-5); }
+          break;
+        }
+        case "play.fwd5": {
+          // Double-tap → fast-forward shuttle; single tap → forward 5s.
+          const now = Date.now();
+          if (now - dblTapRef.current.l < 350) { dblTapRef.current.l = 0; applyShuttle(2); }
+          else { dblTapRef.current.l = now; seekBySeconds(5); }
+          break;
+        }
+        case "mark.in":      onMarkIn(); break;
+        case "mark.out":     onMarkOut(); break;
+        case "mark.clear":   onClearMarks(); break;
+        case "mark.gotoIn":  onGotoIn(); break;
+        case "mark.gotoOut": onGotoOut(); break;
+        case "play.frameBack":  onStep(-1); break;
+        case "play.frameFwd":   onStep(1); break;
+        case "play.secondBack": onStep(-Math.round(fps)); break;
+        case "play.secondFwd":  onStep(Math.round(fps)); break;
+        case "play.toStart": onSeek(0); break;
+        case "play.toEnd":   onSeek(Math.max(0, durationFrames - 1)); break;
+      }
+    }
+
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement;
       const inField = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
-      const cmd = e.metaKey || e.ctrlKey;
 
-      // ⌘K — command palette toggle. Highest-priority shortcut (works
-      // even when focus is in the URL bar / filename field) because the
-      // palette is the universal escape hatch.
-      if (cmd && (e.key === "k" || e.key === "K")) {
-        e.preventDefault();
-        setPaletteOpen((p) => !p);
+      // ── Timecode entry HUD (modal text entry; not rebindable) ──
+      // While open: digits append, Backspace deletes, Return snaps the playhead,
+      // Esc cancels; everything else is swallowed so shortcuts can't fire mid-entry.
+      if (tcEntryRef.current != null) {
+        if (e.key >= "0" && e.key <= "9") { e.preventDefault(); setTcEntry((s) => ((s ?? "") + e.key).slice(-8)); return; }
+        if (e.key === "Backspace")        { e.preventDefault(); setTcEntry((s) => (s ?? "").slice(0, -1)); return; }
+        if (e.key === "Escape")           { e.preventDefault(); setTcEntry(null); return; }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const d = (tcEntryRef.current || "0").slice(-8).padStart(8, "0");
+          const r = Math.max(1, Math.round(fps));
+          const frames = ((+d.slice(0, 2) * 3600 + +d.slice(2, 4) * 60 + +d.slice(4, 6)) * r) + +d.slice(6, 8);
+          setTcEntry(null);
+          onSeek(frames);
+          return;
+        }
         return;
       }
-      if (cmd && e.key === ",")     { e.preventDefault(); setSettingsOpen((p) => !p); return; }
+
+      // ── Esc closes Settings (universal; not rebindable) ──
       if (e.key === "Escape" && settingsOpen) { e.preventDefault(); setSettingsOpen(false); return; }
-      if (cmd && e.key === "Enter") { e.preventDefault(); handleFetch(); return; }
-      if (cmd && e.key === "\\")    { e.preventDefault(); setLogsOpen((p) => !p); return; }
-      // ⌘⇧A — add the current active selection to the queue (the modifier
-      // separates this from the bare I/O keys used to mark in/out).
-      if (cmd && e.shiftKey && (e.key === "A" || e.key === "a")) {
-        e.preventDefault();
-        handleAddToQueue();
-        return;
-      }
-      // ⌘⇧Q — toggle the queue drawer.
-      if (cmd && e.shiftKey && (e.key === "Q" || e.key === "q")) {
-        e.preventDefault();
-        setQueueOpen((p) => !p);
-        return;
-      }
-      if (e.altKey && (e.key === "e" || e.key === "E")) {
-        if (status === "loaded") { e.preventDefault(); handleExport(); }
-        return;
+
+      // ── Rebindable shortcuts ──
+      // global actions (⌘-combos) fire even in a field / with Settings open;
+      // transport & marking only when neither is true (so typing never scrubs).
+      const combo = eventToCombo(e);
+      const actionId = combo ? comboToAction.get(combo) : undefined;
+      if (actionId) {
+        const action = KEY_ACTION_BY_ID[actionId];
+        if (action.global || (!inField && !settingsOpen)) { runAction(actionId, e); return; }
       }
 
       if (inField || settingsOpen) return;
 
-      switch (e.key) {
-        case " ": e.preventDefault(); onPlayToggle(); break;
-        case "k": case "K": onPlayToggle(); break;
-        case "j": case "J": seekBySeconds(-5); break;
-        case "l": case "L": seekBySeconds(5); break;
-        case "i": case "I": onMarkIn(); break;
-        case "o": case "O": onMarkOut(); break;
-        case "g": case "G": onClearMarks(); break;
-        case "q": case "Q": onGotoIn(); break;
-        case "w": case "W": onGotoOut(); break;
-        case ",": onStep(e.shiftKey ? -Math.round(fps) : -1); break;
-        case ".": onStep(e.shiftKey ?  Math.round(fps) :  1); break;
-        case "ArrowLeft":  onStep(e.shiftKey ? -Math.round(fps) : -1); break;
-        case "ArrowRight": onStep(e.shiftKey ?  Math.round(fps) :  1); break;
-        case "Home": onSeek(0); break;
-        case "End":  onSeek(Math.max(0, durationFrames - 1)); break;
+      // ── Bare number opens the TC-entry HUD (seeded with the digit) ──
+      if (e.key >= "0" && e.key <= "9" && durationFrames > 0) {
+        e.preventDefault();
+        setTcEntry(e.key);
+        return;
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
-    handleFetch, handleExport, handleAddToQueue, status, fps, durationFrames, settingsOpen,
+    comboToAction, handleFetch, handleExport, handleAddToQueue, status, fps, durationFrames, settingsOpen,
     onPlayToggle, seekBySeconds, onMarkIn, onMarkOut, onClearMarks,
-    onGotoIn, onGotoOut, onStep, onSeek,
+    onGotoIn, onGotoOut, onStep, onSeek, applyShuttle,
   ]);
 
   // ── Native menubar event wiring ─────────────────────────────────
@@ -2580,142 +3023,119 @@ export default function App() {
   // same checks the toolbar/sidebar buttons would use, so the palette
   // never offers actions that wouldn't work.
   const hasSource = status === "loaded" || status === "exporting" || status === "success";
-  const commands: Command[] = useMemo(() => [
-    // ── Source ───────────────────────────────────────────────────
-    { id: "src.fetch", label: "Fetch URL", group: "Source",
-      hotkey: "⌘↵", description: "Resolve the URL in the address bar",
-      disabled: !url, run: () => handleFetch() },
-    { id: "src.import", label: "Import local file…", group: "Source",
-      description: "Pick a video or audio file from disk",
-      run: () => handleImportFile() },
-    { id: "src.clear", label: "Clear source", group: "Source",
-      description: "Unload the current video", disabled: !hasSource,
-      run: () => handleClear() },
-    // ── Playback ────────────────────────────────────────────────
-    { id: "play.toggle", label: isPlaying ? "Pause" : "Play",
-      group: "Playback", hotkey: "Space", disabled: !hasSource,
-      run: () => onPlayToggle() },
-    { id: "play.back5",    label: "Back 5 seconds",    group: "Playback",
-      hotkey: "J", disabled: !hasSource, run: () => seekBySeconds(-5) },
-    { id: "play.fwd5",     label: "Forward 5 seconds", group: "Playback",
-      hotkey: "L", disabled: !hasSource, run: () => seekBySeconds(5) },
-    { id: "play.frameBack", label: "Step 1 frame back",    group: "Playback",
-      hotkey: "←", disabled: !hasSource, run: () => onStep(-1) },
-    { id: "play.frameFwd",  label: "Step 1 frame forward", group: "Playback",
-      hotkey: "→", disabled: !hasSource, run: () => onStep(1) },
-    { id: "play.toStart",  label: "Jump to start", group: "Playback",
-      hotkey: "Home", disabled: !hasSource, run: () => onSeek(0) },
-    { id: "play.toEnd",    label: "Jump to end",   group: "Playback",
-      hotkey: "End",
-      disabled: !hasSource,
-      run: () => onSeek(Math.max(0, durationFrames - 1)) },
-    // ── Marks ────────────────────────────────────────────────────
-    { id: "mark.in",   label: "Mark in",  group: "Marks", hotkey: "I",
-      disabled: !hasSource, run: () => onMarkIn() },
-    { id: "mark.out",  label: "Mark out", group: "Marks", hotkey: "O",
-      disabled: !hasSource, run: () => onMarkOut() },
-    { id: "mark.clear", label: "Clear marks", group: "Marks", hotkey: "G",
-      disabled: inFrames == null && outFrames == null,
-      run: () => onClearMarks() },
-    { id: "mark.gotoIn",  label: "Go to mark in",  group: "Marks", hotkey: "Q",
-      disabled: inFrames == null, run: () => onGotoIn() },
-    { id: "mark.gotoOut", label: "Go to mark out", group: "Marks", hotkey: "W",
-      disabled: outFrames == null, run: () => onGotoOut() },
-    // ── Export ──────────────────────────────────────────────────
-    { id: "export.clip", label: "Export clip", group: "Export",
-      hotkey: "⌥E",
-      description: hasSource ? "Save the current selection" : "Load a source first",
-      disabled: !hasSource || !exportOpts.folder,
-      run: () => handleExport() },
-    { id: "export.snapshot", label: "Snapshot frame", group: "Export",
-      description: "Save the current frame as a JPEG",
-      disabled: !hasSource, run: () => handleSnapshot() },
-    // ── Queue ───────────────────────────────────────────────────
-    { id: "queue.add",    label: "Add selection to queue", group: "Queue",
-      hotkey: "⌘⇧A",
-      disabled: !hasSource || inFrames == null || outFrames == null,
-      run: () => handleAddToQueue() },
-    { id: "queue.toggle", label: "Toggle queue panel", group: "Queue",
-      hotkey: "⌘⇧Q", keywords: ["clips", "drawer"],
-      run: () => setQueueOpen((p) => !p) },
-    { id: "queue.export", label: "Export all queued clips", group: "Queue",
-      disabled: clipQueue.length === 0 || queueRunning || !exportOpts.folder,
-      run: () => handleExportQueue() },
-    { id: "queue.clear",  label: "Clear queue", group: "Queue",
-      disabled: clipQueue.length === 0 || queueRunning,
-      run: () => handleQueueClearAll() },
-    // ── Transcript ──────────────────────────────────────────────
-    { id: "tx.import", label: "Import transcript from disk…", group: "Transcript",
-      description: "Open a .srt or .vtt file from anywhere on disk",
-      keywords: ["load", "open", "subtitle", "captions"],
-      run: () => handleImportTranscript() },
-    { id: "tx.open", label: "Open transcript panel", group: "Transcript",
-      description: activeTranscript
-        ? `View ${activeTranscript.path.split("/").pop()}`
-        : "The panel opens but is empty until you generate a transcript",
-      keywords: ["captions", "subtitles", "reader"],
-      run: () => {
-        setQueueOpen(true);
-        // Bumping arrivedTick is what the drawer listens for to switch
-        // to the Transcript tab; reuse it as our "show this tab now" lever.
-        setTranscriptArrivedTick((n) => n + 1);
-      } },
-    { id: "tx.generate", label: "Generate transcript (Whisper)", group: "Transcript",
-      disabled: !hasSource || !exportOpts.folder,
-      run: () => handleGenerateTranscript() },
-    { id: "tx.download", label: "Download YouTube captions", group: "Transcript",
-      description: "yt-dlp pulls the .srt file",
-      disabled: !hasSource || sourceKind === "file" || !exportOpts.folder,
-      run: () => handleDownloadCaptions() },
-    // ── Dev — diarizer smoke test ───────────────────────────────
-    // B.1 scaffolding only: this just runs `saucebunny-diarize --version`
-    // via the new Rust probe command and shows the result in a toast.
-    // Confirms the Swift binary is built, signed enough to spawn, and
-    // reachable through the Tauri sidecar plumbing. Real diarize-on-
-    // current-source UX lands in B.2.
-    { id: "tx.probe-diarizer", label: "Probe diarizer (dev)", group: "Transcript",
-      description: "Smoke-test the saucebunny-diarize Swift sidecar",
-      keywords: ["fluidaudio", "speakers", "swift"],
-      run: async () => {
-        try {
-          const ver = await invoke<string>("probe_diarizer");
-          pushNotification("success", "Diarizer ready", ver);
-        } catch (e) {
-          pushNotification("error", "Diarizer probe failed", formatError(e));
-        }
-      } },
-    // ── View ────────────────────────────────────────────────────
-    { id: "view.captions", label: captionsOn ? "Hide captions" : "Show captions",
-      group: "View", disabled: !hasSource,
-      run: () => setCaptionsOn((p) => !p) },
-    { id: "view.logs", label: logsOpen ? "Collapse pipeline" : "Expand pipeline",
-      group: "View", hotkey: "⌘\\",
-      run: () => setLogsOpen((p) => !p) },
-    // ── App ─────────────────────────────────────────────────────
-    { id: "app.settings", label: "Open settings", group: "App", hotkey: "⌘,",
-      run: () => setSettingsOpen(true) },
-    { id: "app.palette", label: "Show command palette", group: "App", hotkey: "⌘K",
-      run: () => setPaletteOpen(true) },
-    { id: "app.stop", label: "Stop running operation", group: "App",
-      description: "Cancel the in-flight export / transcript / prep",
-      disabled: status !== "exporting" && transcriptState !== "running" && !playbackPrepBusy,
-      run: () => handleStop() },
-  ], [
-    url, hasSource, isPlaying, inFrames, outFrames, durationFrames,
+  // Registry body lives in lib/commands.ts (buildCommands); App just injects
+  // its current state + handlers. The dependency array below is unchanged from
+  // when the array was inline, so memoization behaves identically.
+  const commands: Command[] = useMemo(() => buildCommands({
+    url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
+    captionsOn, logsOpen, clipQueueLength: clipQueue.length, queueRunning,
+    activeTranscriptPath: activeTranscript?.path ?? null,
+    exportFolder: exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
+    handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds,
+    onStep, onSeek, onMarkIn, onMarkOut, onClearMarks, onGotoIn, onGotoOut,
+    handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
+    handleQueueClearAll, handleImportTranscript, handleGenerateTranscript,
+    handleDownloadCaptions, handleStop,
+    setQueueOpen, setTranscriptArrivedTick, setCaptionsOn, setLogsOpen,
+    setSettingsOpen, setPaletteOpen,
+    onProbeDiarizer: async () => {
+      try {
+        const ver = await invoke<string>("probe_diarizer");
+        pushNotification("success", "Diarizer ready", ver);
+      } catch (e) {
+        pushNotification("error", "Diarizer probe failed", formatError(e));
+      }
+    },
+    // Overlay the live (user-editable) hotkey onto each rebindable command so the
+    // palette + Settings list always show the real binding, never a stale literal.
+  }).map((c) => {
+    if (c.id in KEY_ACTION_BY_ID) {
+      const combos = bindingsFor(c.id as KeyActionId, keybindings);
+      return { ...c, hotkey: combos[0] ? formatCombo(combos[0]) : undefined };
+    }
+    return c;
+  }), [
+    url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
     captionsOn, logsOpen, clipQueue.length, queueRunning, activeTranscript,
     exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
     handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds,
     onStep, onSeek, onMarkIn, onMarkOut, onClearMarks, onGotoIn, onGotoOut,
     handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
     handleQueueClearAll, handleGenerateTranscript, handleDownloadCaptions, handleImportTranscript,
-    handleStop,
+    handleStop, keybindings,
   ]);
 
   // ====== Side-panel pop-out (r44.B + r52 extract) ======
   // Cross-window state-sync bridge lives in src/hooks/use-panel-bus.ts.
   // We hand it the rendered snapshot + freshly-bound handlers; the hook
   // owns the listeners, the ref discipline, and the popout dispatch.
-  const transcriptPlayhead = hasSource ? playheadFrames / Math.max(1, Math.round(fps)) : null;
+  // r82: the playhead is now ONE clock across every path — the audio-master
+  // twin drives streaming time off the heard audio, and local/download use
+  // the native/AudioContext clock — so the transcript highlight, the on-video
+  // caption, the scrubber, and click-to-seek all read the same value with no
+  // offset. (This retired the captionSyncSec band-aid, whose highlight-only
+  // offset put highlight and click-to-seek in different time domains.)
+  const transcriptPlayhead = hasSource
+    ? playheadFrames / Math.max(1, Math.round(fps))
+    : null;
+
+  // Review comment markers for the monitor timeline — re-read whenever the
+  // source changes or the Review panel mutates (REVIEW_CHANGED_EVENT, mirrors
+  // the speaker-overrides bus). Keeps the timeline dots in sync with the panel
+  // without sharing state across the two components.
+  // Reviews are keyed by source, but a clip's content fingerprint (filename +
+  // duration + dims, location-independent) maps to a prior review's key — so
+  // re-opening a clip you've reviewed before (even moved/renamed folder)
+  // re-loads its notes. Falls back to the path on first encounter.
+  const reviewSourceKey = (sourceKind === "file" && localFilePath && metadata)
+    ? (resolveByFingerprint(reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize)) ?? localFilePath)
+    : (metadata?.webpage_url ?? null);
+  const [reviewMarkers, setReviewMarkers] = useState<{ id: string; time: number; resolved: boolean; color: string; initials: string }[]>([]);
+  const [reviewAnnotations, setReviewAnnotations] = useState<{ id: string; time: number; strokes: AnnotationStrokes }[]>([]);
+  // Drawing-annotation state: draw mode + the live draft (attached to the next
+  // comment) + a saved annotation being viewed read-only over the frame.
+  const [reviewDrawActive, setReviewDrawActive] = useState(false);
+  const [reviewDraft, setReviewDraft] = useState<AnnotationStrokes | null>(null);
+  const [annotationDisplay, setAnnotationDisplay] = useState<AnnotationStrokes | null>(null);
+  useEffect(() => {
+    // New source → drop any in-flight drawing + viewed annotation.
+    setReviewDrawActive(false);
+    setReviewDraft(null);
+    setAnnotationDisplay(null);
+    if (!reviewSourceKey) { setReviewMarkers([]); setReviewAnnotations([]); return; }
+    const reload = () => {
+      const d = loadReview(reviewSourceKey);
+      const me = loadReviewer();
+      const markers = reviewMarkersOf(d, d.activeVersionId);
+      setReviewMarkers(markers.map((m) => ({
+        id: m.id, time: m.time, resolved: m.resolved,
+        color: reviewerColorFor(m.author, me), initials: initialsOf(m.author),
+      })));
+      setReviewAnnotations(annotationsOf(d, d.activeVersionId));
+      // Once a clip has notes, record it in history + link its fingerprint so
+      // re-opening it (anywhere) reloads this review. Read metadata via the ref —
+      // this closure outlives a setMetadata that keeps the same reviewSourceKey
+      // (e.g. a web "Loading…" stub resolving to its real title), so the lexical
+      // `metadata` would otherwise write a stale title to history.
+      const md = metadataRef.current;
+      if (markers.length > 0 && reviewSourceKey) {
+        const title = md?.title ?? localFilePath ?? reviewSourceKey;
+        const path = localFilePath ?? md?.webpage_url ?? reviewSourceKey;
+        upsertReviewHistory({ key: reviewSourceKey, title, path, updatedAt: Date.now(), count: markers.length });
+        if (sourceKind === "file" && md) {
+          linkFingerprint(reviewFingerprint(title, md.duration ?? 0, md.width, md.height, localFileSize), reviewSourceKey);
+        }
+      }
+    };
+    reload();
+    const onChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ sourceKey?: string }>).detail;
+      if (!detail || detail.sourceKey === reviewSourceKey) reload();
+    };
+    window.addEventListener(REVIEW_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(REVIEW_CHANGED_EVENT, onChanged);
+  }, [reviewSourceKey]);
+
   const { handlePopOut: handlePopOutPanel } = usePanelBus({
     panelDetached,
     setPanelDetached,
@@ -2731,6 +3151,8 @@ export default function App() {
       transcriptArrivedTick,
       regenerateBusy: transcriptState === "running",
       canRegenerate: hasSource && !!selectedModel?.downloaded,
+      aiModelId: defaults.llmSummarizationModel,
+      aiStyle: { format: defaults.summaryFormat, length: defaults.summaryLength },
     },
     handlers: {
       onRemove: handleQueueRemove,
@@ -2751,11 +3173,37 @@ export default function App() {
       onLoadFromHistory: handleLoadFromHistory,
       onRegenerate: () => { void handleGenerateTranscript(); },
       onImportTranscript: () => { void handleImportTranscript(); },
+      onOpenAiSettings: () => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); },
     },
   });
 
   // ====== Derived ======
   const playheadTc = framesToTc(playheadFrames, fps);
+  const playheadSec = playheadFrames / Math.max(1, Math.round(fps));
+
+  // Review drawing shown on the frame, picked in priority order:
+  //   1. live draft while drawing   2. a comment's drawing pinned via click
+  //   3. proximity fade — the nearest saved drawing as the playhead passes it,
+  //      opacity ramping with distance so it appears then fades while scrubbing.
+  const ANNOT_PROX_WINDOW = 0.6; // seconds on either side of the drawing's time
+  let proxStrokes: AnnotationStrokes | null = null;
+  let proxOpacity = 0;
+  if (!reviewDrawActive && !annotationDisplay && reviewAnnotations.length) {
+    let bestDist = Infinity;
+    for (const a of reviewAnnotations) {
+      const d = Math.abs(a.time - playheadSec);
+      if (d < bestDist) { bestDist = d; proxStrokes = a.strokes; }
+    }
+    proxOpacity = bestDist <= ANNOT_PROX_WINDOW ? Math.max(0, 1 - bestDist / ANNOT_PROX_WINDOW) : 0;
+    if (proxOpacity <= 0) proxStrokes = null;
+  }
+  const annDrawing = reviewDrawActive;
+  const annStrokes = annDrawing ? reviewDraft : (annotationDisplay ?? proxStrokes);
+  const annOpacity = annDrawing || annotationDisplay ? 1 : proxOpacity;
+  const annPinned = !annDrawing && !!annotationDisplay;
+  // Live HH:MM:SS:FF for the timecode-entry HUD (right-aligned digit fill).
+  const tcOverlay = tcEntry == null ? null
+    : (() => { const d = tcEntry.slice(-8).padStart(8, "0"); return `${d.slice(0, 2)}:${d.slice(2, 4)}:${d.slice(4, 6)}:${d.slice(6, 8)}`; })();
   const titleSuffix = (status === "loaded" || status === "exporting" || status === "success") && exportOpts.filename
     ? ` — ${exportOpts.filename}`
     : "";
@@ -2865,22 +3313,38 @@ export default function App() {
                  original so the user still sees a player even if prep is
                  still running or failed. */
               localFilePath={playbackPath ?? localFilePath}
-              /* Prefer the cached local copy (from runWebPreviewDownload)
-                 over the direct stream — the cache is set only after the
-                 direct stream actually failed, so this swap = "we know
-                 the CDN was rejecting us, use the local bytes". */
-              webStreamUrl={webCachePath ?? webStreamUrl}
+              /* r80: web-playback read-model from useWebPlayback. cachePath
+                 (download fallback) wins over the live stream; both are null
+                 until the machine produces one. */
+              webStreamUrl={webPlayback.cachePath ?? webPlayback.streamUrl}
+              onDiag={(tag, msg) => appendLog(asLogTag(tag), "seek", msg)}
+              /* Audio track + codecs are meaningful only while STREAMING (the
+                 cached file is already muxed and sample-accurate). */
+              audioStreamUrl={webPlayback.audioUrl}
+              streamVideoCodec={webPlayback.videoCodec}
+              streamAudioCodec={webPlayback.audioCodec}
               initialVolume={muted ? 0 : volume}
-              playbackPrepBusy={playbackPrepBusy}
-              playbackPrepProgress={playbackPrepProgress}
+              /* Prep banner is shared with local-file ffmpeg prep — OR the two
+                 sources so the web download lights it up too. */
+              playbackPrepBusy={playbackPrepBusy || webPlayback.downloading}
+              playbackPrepProgress={webPlayback.downloading ? webPlayback.downloadProgress : playbackPrepProgress}
               /* r62: friendly "what's happening" overlay over the poster
                  while a web source resolves (yt-dlp ~8s) then buffers
                  (MSE). Null once the player is ready or for local files /
                  the download fallback (which has its own banner). */
               streamLoadingPhase={
+                /* Only while the machine is actually WORKING toward playback
+                   (resolving/streaming/cached). The terminal states — failed,
+                   or inactive after a user cancel — must clear the overlay, or
+                   the canvas stays under an infinite "Preparing your video…"
+                   spinner after the error/cancel toast fades. `downloading` has
+                   its own overlay with a Cancel button. */
                 sourceKind === "youtube" && status === "loaded" && !playerReady
-                  && !webPreviewDownloading && !playbackPrepBusy
-                  ? ((webStreamUrl || webCachePath) ? "Starting playback…" : "Resolving stream…")
+                  && !playbackPrepBusy
+                  && (webPlayback.state.kind === "resolving"
+                    || webPlayback.state.kind === "streaming"
+                    || webPlayback.state.kind === "cached")
+                  ? ((webPlayback.streamUrl || webPlayback.cachePath) ? "Starting playback…" : "Resolving stream…")
                   : null
               }
               /* r55: on-canvas Cancel for the web-preview download fallback.
@@ -2891,7 +3355,7 @@ export default function App() {
                  path as the Pipeline Stop, so cancel semantics are
                  identical wherever the user clicks. */
               onCancelPlaybackPrep={handleStop}
-              useWebCodecs={defaults.useWebCodecsDecoder && !webCodecsFallbackForImport}
+              useWebCodecs={localPlayer === "mediabunny" && !webCodecsFallbackForImport}
               onMediaError={(msg) => {
                 // MediaBunnyPlayer prefixes codec-incompatibility errors
                 // with `[WEBCODECS_UNSUPPORTED]` — that's our signal to
@@ -2923,31 +3387,12 @@ export default function App() {
                   return;
                 }
 
-                // Web-source playback fallback (r60): the web branch streams
-                // through MediaBunnyPlayer (WebCodecs over the loopback
-                // proxy). If mediabunny can't open/demux/decode the stream
-                // — "Failed to open file…", "[WEBCODECS_UNSUPPORTED]…",
-                // "Video/Audio decode failed…" — OR the old <video> path
-                // reports MEDIA_ERR_*, fall back to the yt-dlp download.
-                // We match on the web-source CONTEXT, not the message text,
-                // so any failure mode degrades gracefully to the path that
-                // always works. (No-op once we're already downloading or
-                // playing the cached local file.)
-                if (
-                  sourceKind === "youtube"            // i.e. web (not local file)
-                  && webStreamUrl                      // we WERE trying to stream
-                  && !webCachePath                     // not already in fallback
-                  && !webPreviewDownloading            // not already downloading
-                  && metadata
-                ) {
-                  appendLog("warn", "media",
-                    `Stream playback failed (${msg}) — falling back to download.`);
-                  pushNotification("info", "Downloading preview…",
-                    "Couldn't stream this source in-app. Sauce Bunny is fetching the file via yt-dlp so you can scrub and mark.");
-                  const seq = sourceSeqRef.current;
-                  void runWebPreviewDownload(metadata.webpage_url, seq);
-                  return;
-                }
+                // Web-source playback fallback (r80): delegate to the state
+                // machine. When it's mid-stream it logs, shows the toast, and
+                // transitions streaming → downloading (exactly once — the
+                // double-download race is gone) and returns true. Any other
+                // state returns false → fall through to the generic error.
+                if (webOnMediaError(msg)) return;
 
                 appendLog("err", "media", msg);
                 pushNotification("error", "Playback error", msg);
@@ -2958,13 +3403,39 @@ export default function App() {
               onPlayerStateChange={onPlayerStateChange}
               onPlayerReady={onPlayerReady}
               onSurfaceClick={onPlayToggle}
+              /* On-video captions (the transport CC toggle). Driven by the
+                 active transcript + playhead so they work for any source. */
+              transcriptPath={activeTranscript?.path ?? null}
+              transcriptReloadToken={transcriptArrivedTick}
+              currentSec={playheadSec}
+              captionsOn={captionsOn}
+              /* User-tunable caption look (Settings → Captions). r82: no sync
+                 offset — the audio-master clock keeps captions on the heard
+                 audio across every path. */
+              captionStyle={{
+                sizePx: defaults.captionSizePx,
+                font: defaults.captionFont,
+                bgOpacity: defaults.captionBgOpacity,
+                color: defaults.captionColor,
+              }}
+              /* Type-a-timecode HUD: digits build this string, Return snaps. */
+              tcOverlay={tcOverlay}
+              /* Review drawing annotations — draft while drawing, else the
+                 saved one being viewed. */
+              annotation={annStrokes}
+              annotationDrawing={annDrawing}
+              annotationOpacity={annOpacity}
+              onAnnotationChange={setReviewDraft}
+              onAnnotationDismiss={annPinned ? () => setAnnotationDisplay(null) : undefined}
             />
             <Transport
               status={status}
               isPlaying={isPlaying}
               playheadTc={playheadTc}
               durationTc={durationTc}
-              captionsOn={captionsOn}
+              /* Green only when captions are actually on-screen (toggled on
+                 AND a transcript is loaded), not just when the flag is set. */
+              captionsOn={captionsActive}
               snapshotBusy={snapshotBusy}
               canSnapshot={status === "loaded" || status === "exporting" || status === "success"}
               volume={volume}
@@ -2974,7 +3445,7 @@ export default function App() {
               onMarkIn={onMarkIn}
               onMarkOut={onMarkOut}
               onClearMarks={onClearMarks}
-              onToggleCaptions={() => setCaptionsOn((p) => !p)}
+              onToggleCaptions={onToggleCaptions}
               onSnapshot={handleSnapshot}
               onVolumeChange={handleVolumeChange}
               onMutedChange={handleMutedChange}
@@ -2992,6 +3463,7 @@ export default function App() {
                 outFrames: c.outFrames,
                 status: c.status,
               }))}
+              commentMarkers={reviewMarkers}
               onSeek={onSeek}
             />
             {/* Status line under the timeline. Stays present so setting or
@@ -3019,6 +3491,8 @@ export default function App() {
             onCopy={handleCopyLogs}
             transcriptState={transcriptState}
             transcriptProgress={transcriptProgress}
+            transcriptPhase={transcriptPhase}
+            transcriptEngine={defaults.transcriptionEngine === "parakeet" ? "parakeet" : "whisper"}
             metadataLoading={metadataLoading}
             playbackPrepBusy={playbackPrepBusy}
             canStop={status === "exporting" || transcriptState === "running" || playbackPrepBusy}
@@ -3050,7 +3524,8 @@ export default function App() {
           onStop={handleStop}
           transcriptPath={activeTranscript?.path ?? null}
           transcriptOrigin={activeTranscript?.origin ?? "unknown"}
-          transcriptPlayhead={hasSource ? playheadFrames / Math.max(1, Math.round(fps)) : null}
+          transcriptPlayhead={transcriptPlayhead}
+          transcriptFps={fps}
           onTranscriptSeek={(seconds) => {
             // Clamp to duration so a stale cue past the end doesn't put
             // the playhead in a no-man's-land that shows blank video.
@@ -3067,15 +3542,43 @@ export default function App() {
           onRegenerateTranscript={handleGenerateTranscript}
           regenerateBusy={transcriptState === "running"}
           canRegenerate={hasSource && !!selectedModel?.downloaded}
+          onRedetectSpeakers={() => { void handleRediarize(); }}
+          canRedetect={hasSource && !!activeTranscript}
           onImportTranscript={handleImportTranscript}
+          sourceKind={sourceKind}
+          onFixCaptionTiming={handleFixCaptionTiming}
+          aiModelId={defaults.llmSummarizationModel}
+          aiStyle={{ format: defaults.summaryFormat, length: defaults.summaryLength }}
+          onOpenAiSettings={() => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); }}
+          reviewSourceKey={reviewSourceKey}
+          reviewSourceTitle={metadata?.title ?? null}
+          reviewDrawActive={reviewDrawActive}
+          reviewDraft={reviewDraft}
+          onToggleReviewDraw={() => {
+            setAnnotationDisplay(null);
+            setReviewDrawActive((on) => { if (on) setReviewDraft(null); return !on; });
+          }}
+          onReviewDraftConsumed={() => { setReviewDraft(null); setReviewDrawActive(false); }}
+          onShowAnnotation={(a) => { setReviewDrawActive(false); setReviewDraft(null); setAnnotationDisplay(a); }}
+          onOpenReviewSource={handleOpenReviewSource}
         />}
       </div>
 
       <SettingsModal
         open={settingsOpen}
         onClose={() => { setSettingsOpen(false); refreshWhisperModels(); }}
+        /* Cache files the CURRENT session plays from — Clear cache must not
+           delete the video/audio that's on screen right now. Their jobs have
+           finished, so the JobRegistry guard alone doesn't protect them. */
+        cacheExcludePaths={[
+          webPlayback.cachePath,
+          playbackPath,
+          webAudioCachedPathRef.current,
+        ].filter((p): p is string => !!p)}
         defaults={defaults}
         setDefaults={setDefaults}
+        keybindings={keybindings}
+        setKeybindings={setKeybindings}
         initialTab={settingsInitialTab}
         commands={commands}
         diarizerReady={diarizerReady}
@@ -3091,6 +3594,7 @@ export default function App() {
       <YouTubeAuthModal
         open={ytAuthOpen}
         mode={ytAuthMode}
+        site={ytAuthSite}
         current={defaults.ytCookiesBrowser}
         onPick={handleYtAuthPick}
         onClose={handleYtAuthClose}

@@ -35,6 +35,20 @@ impl JobRegistry {
     pub(crate) fn take(&self, id: &str) -> Option<CommandChild> {
         self.children.lock().ok()?.remove(id)
     }
+    /// Write to a live child's stdin WITHOUT removing it from the registry.
+    /// Used by voice dictation to send ffmpeg the interactive `q` command,
+    /// which makes it finalize the WAV header and exit GRACEFULLY (a plain
+    /// `.kill()`/SIGKILL would truncate the RIFF header → unreadable WAV).
+    /// The child stays registered until its drain task sees Terminated and
+    /// `take()`s it. Returns false if no such job is live.
+    pub(crate) fn write_stdin(&self, id: &str, buf: &[u8]) -> bool {
+        if let Ok(mut g) = self.children.lock() {
+            if let Some(child) = g.get_mut(id) {
+                return child.write(buf).is_ok();
+            }
+        }
+        false
+    }
     /// Snapshot of currently-active job IDs. Used by `clear_all_cache`
     /// to skip files belonging to in-flight jobs (would otherwise pull
     /// the file out from under an ffmpeg/yt-dlp child mid-write).
@@ -118,8 +132,18 @@ pub fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppError> {
 /// active job ID are SKIPPED so we don't yank the rug out from under an
 /// in-flight ffmpeg playback prep / audio download / etc — those would
 /// otherwise complete and emit "saved" pointing at a file we just deleted.
+///
+/// `exclude`: full filesystem paths the CURRENT session is actively playing
+/// from (web download-cache file, audio-master track, playback-prep copy).
+/// Those were produced by jobs that already finished — the JobRegistry no
+/// longer knows about them — so without this list, Clear cache would delete
+/// the file backing the video that's on screen right now.
 #[tauri::command]
-pub fn clear_all_cache(app: AppHandle, registry: State<'_, JobRegistry>) -> Result<u32, crate::AppError> {
+pub fn clear_all_cache(
+    app: AppHandle,
+    registry: State<'_, JobRegistry>,
+    exclude: Option<Vec<String>>,
+) -> Result<u32, crate::AppError> {
     let cache = app
         .path()
         .app_cache_dir()
@@ -131,6 +155,7 @@ pub fn clear_all_cache(app: AppHandle, registry: State<'_, JobRegistry>) -> Resu
     // below. Holding the registry lock for the whole scan would be fine
     // (clear-cache is rare) but a snapshot is simpler and lock-free.
     let active: std::collections::HashSet<String> = registry.active_ids().into_iter().collect();
+    let excluded: std::collections::HashSet<String> = exclude.unwrap_or_default().into_iter().collect();
     let mut removed: u32 = 0;
     if let Ok(entries) = std::fs::read_dir(&cache) {
         for entry in entries.flatten() {
@@ -141,6 +166,10 @@ pub fn clear_all_cache(app: AppHandle, registry: State<'_, JobRegistry>) -> Resu
             if !name.starts_with("saucebunny-") { continue; }
             if active.iter().any(|jid| name.contains(jid)) {
                 // In-flight job is writing to this file — skip.
+                continue;
+            }
+            if excluded.contains(&entry.path().to_string_lossy().to_string()) {
+                // The current session is playing from this file — skip.
                 continue;
             }
             let meta = match entry.metadata() { Ok(m) => m, Err(_) => continue };
@@ -189,11 +218,10 @@ pub fn cleanup_stale_cache(app: AppHandle) -> Result<u32, crate::AppError> {
         }
         let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
         let age = now.duration_since(modified).unwrap_or_default();
-        if age.as_secs() > CACHE_TTL_SECONDS {
-            if std::fs::remove_file(&path).is_ok() {
+        if age.as_secs() > CACHE_TTL_SECONDS
+            && std::fs::remove_file(&path).is_ok() {
                 removed += 1;
             }
-        }
     }
     Ok(removed)
 }
@@ -312,7 +340,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-05-29-r63-ffmpeg-fmp4-remux";
+pub const BACKEND_BUILD_ID: &str = "2026-06-16-r94-dictation-mic-waveform";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

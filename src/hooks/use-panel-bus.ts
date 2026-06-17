@@ -39,6 +39,13 @@ export type PanelSnapshot = {
   transcriptArrivedTick: number;
   regenerateBusy: boolean;
   canRegenerate: boolean;
+  /** AI Summary: chosen model + output style, mirrored so the popped-out
+   *  panel's AI tab uses the same model/style as the docked view. */
+  aiModelId: string;
+  aiStyle: {
+    format: "bullets" | "numbered" | "prose";
+    length: "brief" | "standard" | "detailed";
+  };
 };
 
 export type PanelHandlers = {
@@ -51,7 +58,14 @@ export type PanelHandlers = {
   onLoadFromHistory: (entry: TranscriptHistoryEntry) => void;
   onRegenerate: () => void;
   onImportTranscript: () => void;
+  /** Panel asked to manage AI models — main opens Settings → AI Summary. */
+  onOpenAiSettings: () => void;
 };
+
+/** Shared key the main window writes the live snapshot to and the popped-out
+ *  panel reads. localStorage is shared across same-origin webviews, which makes
+ *  it a reliable channel even when cross-window Tauri events don't arrive. */
+export const PANEL_SNAPSHOT_KEY = "saucebunny.panelSnapshot";
 
 const INITIAL_SNAPSHOT: PanelSnapshot = {
   queue: [],
@@ -64,6 +78,8 @@ const INITIAL_SNAPSHOT: PanelSnapshot = {
   transcriptArrivedTick: 0,
   regenerateBusy: false,
   canRegenerate: false,
+  aiModelId: "qwen3-4b-instruct",
+  aiStyle: { format: "bullets", length: "standard" },
 };
 
 type Args = {
@@ -90,6 +106,33 @@ export function usePanelBus({
     if (!panelDetached) return;
     void emit("panel:state", snapshot);
   }, [panelDetached, snapshot]);
+
+  // Authoritative cross-window channel: mirror the snapshot to localStorage so
+  // the popped-out panel (a separate same-origin webview) can READ it directly
+  // — Tauri events to that window proved unreliable (it kept rendering the
+  // initial empty snapshot). Throttled with a leading timer so the per-frame
+  // playhead doesn't hammer storage; the timer always flushes the LATEST.
+  const lsTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (lsTimer.current != null) return;
+    lsTimer.current = window.setTimeout(() => {
+      lsTimer.current = null;
+      try { localStorage.setItem(PANEL_SNAPSHOT_KEY, JSON.stringify(snapshotRef.current)); } catch { /* quota */ }
+    }, 120);
+  }, [snapshot]);
+
+  // Just popped out: the brand-new panel webview may not have its
+  // `panel:state` listener wired when the emit above fires, so its
+  // `panel:request-state` is the only thing that delivers the initial
+  // snapshot — and if THAT races too, the window renders empty. Re-push a few
+  // times over the first ~600ms so a fresh window reliably gets populated.
+  useEffect(() => {
+    if (!panelDetached) return;
+    const timers = [120, 350, 650].map((ms) =>
+      window.setTimeout(() => { void emit("panel:state", snapshotRef.current); }, ms),
+    );
+    return () => { timers.forEach((t) => window.clearTimeout(t)); };
+  }, [panelDetached]);
 
   // Pin latest handlers into the ref so the listeners (registered
   // once below) always invoke fresh closures. Single ref assignment
@@ -139,6 +182,8 @@ export function usePanelBus({
           () => handlersRef.current.onRegenerate()),
         listen("panel:action:importTranscript",
           () => handlersRef.current.onImportTranscript()),
+        listen("panel:action:openAiSettings",
+          () => handlersRef.current.onOpenAiSettings()),
       ]);
       if (cancelled) { off.forEach((u) => u()); return; }
       unlistens = off;

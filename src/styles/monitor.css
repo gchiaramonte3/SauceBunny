@@ -51,6 +51,97 @@
   display: block;
 }
 
+/* On-video caption overlay (transport CC toggle). Burned-in subtitle look,
+   anchored to the bottom of the video box (.cp-monitor is position:relative).
+   pointer-events:none so it never eats a click meant for the player surface
+   (which toggles play/pause). */
+.cp-caption-overlay {
+  position: absolute;
+  left: 50%;
+  bottom: 4%;
+  transform: translateX(-50%);
+  max-width: 96%;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 6;
+}
+.cp-caption-cue {
+  /* The speaker label sits on its own line above the body; the body is at most
+     two clause-broken lines from splitCaptionLines() (Netflix/BBC ~42-char
+     convention). Left-aligned in a fixed-width box so wrapping is consistent
+     and nothing exceeds the box; `text-wrap: balance` (where supported) evens
+     the two lines so a single word never gets orphaned. */
+  display: inline-block;
+  overflow: hidden;
+  max-width: 42ch;
+  padding: 4px 12px;
+  border-radius: 6px;
+  /* Inline style overrides these from Settings → Captions; the values here
+     are the fallback when no prefs are passed. `--cap-size` is the absolute
+     px font size set by the Captions Size control. */
+  background: rgba(0,0,0,0.75);
+  color: #fff;
+  font-size: var(--cap-size, 18px);
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: left;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.95);
+  white-space: pre-wrap;
+}
+.cp-caption-line {
+  display: block;
+  text-wrap: balance;
+}
+.cp-caption-speaker {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--color-accent-green, #7bdcb5);
+  font-weight: 800;
+  font-size: 0.82em;
+  letter-spacing: 0.01em;
+}
+
+/* Type-a-timecode HUD — centered over the video. Keyboard-driven (App owns
+   the input), so it's pointer-events:none and never steals focus/clicks. */
+.cp-tc-hud {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 16px;
+  border-radius: 9px;
+  background: rgba(10, 10, 12, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+  z-index: 8;
+}
+.cp-tc-hud-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+.cp-tc-hud-value {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.cp-tc-hud-hint {
+  font-size: 8.5px;
+  color: var(--fg-4);
+}
+
 /* Empty state */
 .cp-empty {
   position: absolute; inset: 0;
@@ -580,6 +671,10 @@
   from { opacity: 0; transform: translate(-50%, 8px); }
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
+/* Stacked above the bottom-left prep banner (download/transcode in progress)
+   so the centered toast and the banner never overlap in the same bottom band.
+   The translateX(-50%) centering is preserved — only the bottom offset lifts. */
+.cp-canvas-toast.cp-canvas-toast--above-banner { bottom: 72px; }
 .cp-canvas-toast .icon {
   width: 26px; height: 26px;
   border-radius: 50%;
@@ -848,4 +943,92 @@
   max-width: 520px;
   word-break: break-word;
 }
+
+/* ============================================================
+   ANNOTATION OVERLAY (review drawing)
+   ============================================================ */
+.cp-annot {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  transition: opacity 110ms linear;
+}
+.cp-annot.drawing { cursor: crosshair; transition: none; }
+.cp-annot-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.cp-annot-tools {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(92%, 520px);
+  padding: 7px 10px;
+  background: rgba(20,20,23,0.92);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  backdrop-filter: blur(8px);
+}
+.cp-annot-swatches { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.cp-annot-swatch {
+  width: 17px; height: 17px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.35);
+  cursor: pointer;
+  padding: 0;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.cp-annot-swatch:hover { transform: scale(1.15); }
+.cp-annot-swatch.active { border-color: var(--fg-1); }
+.cp-annot-custom {
+  width: 19px; height: 19px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px dashed rgba(255,255,255,0.35);
+  cursor: pointer;
+  display: inline-flex;
+}
+.cp-annot-custom input { width: 200%; height: 200%; margin: -50%; border: none; padding: 0; background: none; cursor: pointer; }
+.cp-annot-divider { width: 1px; height: 18px; background: rgba(255,255,255,0.14); flex-shrink: 0; }
+.cp-annot-sizectl { display: inline-flex; align-items: center; gap: 7px; }
+.cp-annot-dot { display: block; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(0,0,0,0.35); }
+.cp-annot-sizectl input[type="range"] { width: 88px; }
+.cp-annot-clear {
+  border: 1px solid rgba(255,255,255,0.14);
+  background: transparent;
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cp-annot-clear:hover:not(:disabled) { background: rgba(255,255,255,0.08); color: var(--fg-1); }
+.cp-annot-clear:disabled { opacity: 0.4; cursor: not-allowed; }
+.cp-annot-hide {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(20,20,23,0.85);
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+.cp-annot-hide:hover { color: var(--fg-1); background: rgba(30,30,34,0.95); }
 

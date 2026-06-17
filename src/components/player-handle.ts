@@ -28,6 +28,20 @@ export type PlayerHandle = {
   setMuted: (m: boolean) => void;
   isMuted: () => boolean;
   /**
+   * Variable-speed "shuttle" playback (the J-K-L editor convention):
+   *   rate > 0   → fast-forward at that multiple (e.g. 2 = 2×)
+   *   rate < 0   → reverse / rewind at |rate|×
+   *   rate === 0 → exit shuttle, return to normal 1× playback
+   *
+   * Per-engine behaviour:
+   *   • MediaBunnyPlayer owns its own clock + decodes any frame on demand, so
+   *     it does TRUE smooth forward AND reverse.
+   *   • WebKit <video> players (MSE / local) can only fast-FORWARD natively
+   *     (playbackRate); they approximate reverse with a backward seek-scan
+   *     (smooth on local files, limited to the buffered range on streams).
+   */
+  setShuttle: (rate: number) => void;
+  /**
    * Optional — returns a JPEG/PNG blob of the frame at `seconds` if the
    * player can decode frames directly (MediaBunnyPlayer does, others
    * return null). Lets handleSnapshot skip the ffmpeg subprocess when

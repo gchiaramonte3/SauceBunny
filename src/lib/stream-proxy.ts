@@ -15,8 +15,10 @@
  *   http://127.0.0.1:<port>/v1/<urlsafe-base64-of-upstream-url>
  */
 
-/** URL-safe base64, no padding. Mirrors Rust's URL_SAFE_NO_PAD engine. */
-function base64UrlEncode(input: string): string {
+/** URL-safe base64, no padding. Mirrors Rust's URL_SAFE_NO_PAD engine.
+ *  Exported so the player can encode a second (audio) upstream URL into the
+ *  fMP4 route's `?audio=` param for DASH-split 2-input remuxing. */
+export function base64UrlEncode(input: string): string {
   const utf8 = new TextEncoder().encode(input);
   let bin = "";
   for (let i = 0; i < utf8.length; i++) bin += String.fromCharCode(utf8[i]);

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { CollapsibleSection } from "./CollapsibleSection";
+import { GenerateButton } from "./GenerateButton";
 import {
   IconFilm, IconCaptions, IconReveal,
   IconDownload, IconSparkles, IconPlus,
@@ -97,9 +98,14 @@ const FORMATS: { id: FormatId; label: string }[] = [
  */
 function phaseLabel(phase: string | null, percent: number): string {
   switch (phase) {
+    case "download":        return `Downloading audio… ${Math.round(percent)}%`;
     case "diarize-prepare": return "Loading speaker models…";
     case "diarize-process": return "Detecting speakers…";
     case "diarize-merge":   return "Merging speaker labels…";
+    // Parakeet's transcribe() is one shot — no percent — so we label by phase
+    // instead of showing a frozen 0%.
+    case "parakeet-load":   return "Loading Parakeet model…";
+    case "parakeet":        return "Transcribing with Parakeet…";
     case "whisper":
     default:
       return `Transcribing… ${Math.round(percent)}%`;
@@ -348,10 +354,7 @@ export function Sidebar(props: Props) {
                       disabled={transcriptState === "running"}
                     />
                     <span className="lbl">
-                      Detect speakers <span className="beta">beta</span>
-                      {diarizerReady && detectSpeakers && (
-                        <span className="cp-hint-ok" title="Models cached locally — no first-run download">✓ cached</span>
-                      )}
+                      Detect speakers
                     </span>
                   </label>
                   {detectSpeakers && (
@@ -385,22 +388,22 @@ export function Sidebar(props: Props) {
                       </select>
                     </label>
                   )}
-                  <button
-                    type="button"
-                    className="btn btn-ghost cp-source-action"
+                  <GenerateButton
+                    className="cp-source-action"
+                    loading={transcriptState === "running"}
+                    progress={transcriptProgress}
                     onClick={onGenerateTranscript}
                     disabled={transcriptState === "running"}
                     title={`Local Whisper transcription · model: ${whisperModelLabel ?? "?"}`}
-                  >
-                    <IconSparkles size={13} />
-                    {transcriptState === "running"
-                      ? phaseLabel(transcriptPhase, transcriptProgress)
-                      : transcriptState === "done"  ? "Generate transcript · run again"
+                    idleLabel={
+                      transcriptState === "done"  ? "Generate transcript · run again"
                       : transcriptState === "error" ? "Generate transcript · retry"
                       : detectSpeakers ? "Generate transcript + speakers"
-                      : "Generate transcript"}
-                  </button>
-                  {transcriptState === "running" && transcriptPhase && transcriptPhase !== "whisper" && (
+                      : "Generate transcript"
+                    }
+                    loadingLabel={phaseLabel(transcriptPhase, transcriptProgress)}
+                  />
+                  {transcriptState === "running" && transcriptPhase?.startsWith("diarize") && (
                     /* Mini phase tracker so the user sees we're past
                        Whisper even though the percent bar is pinned. */
                     <div className="cp-phase-track" aria-label={`Pipeline stage: ${transcriptPhase}`}>
@@ -539,7 +542,7 @@ export function Sidebar(props: Props) {
               {/* Use the source-aware availableFormats list (filtered
                   above) — drops Audio for local files so the user
                   doesn't click into a "coming soon" dead end. */}
-              <div className="cp-segmented" style={{ gridTemplateColumns: `repeat(${availableFormats.length}, 1fr)` }}>
+              <div className="cp-segmented" style={{ ["--seg-count"]: availableFormats.length, ["--seg-active"]: Math.max(0, availableFormats.findIndex((f) => f.id === exportOpts.format)) } as CSSProperties}>
                 {availableFormats.map((f) => (
                   <button
                     key={f.id}
@@ -594,7 +597,7 @@ export function Sidebar(props: Props) {
               ) : queueCount > 0 ? (
                 // Queue is the source of truth when it has items.
                 <button
-                  className="btn btn-primary"
+                  className="btn btn-primary cp-export-cta"
                   style={{ flex: 1, height: 36, fontSize: 13 }}
                   onClick={onExportQueue}
                   disabled={queueRunning || !exportOpts.folder}
@@ -603,7 +606,7 @@ export function Sidebar(props: Props) {
                 </button>
               ) : (
                 <button
-                  className="btn btn-primary"
+                  className="btn btn-primary cp-export-cta"
                   style={{ flex: 1, height: 36, fontSize: 13 }}
                   onClick={onExport}
                   disabled={!canExport}

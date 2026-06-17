@@ -71,28 +71,57 @@ export function resolveAliasChain(
   return cur;
 }
 
+// Shared speaker palette — the SINGLE source of truth for per-speaker hues,
+// consumed by the roster chips, the per-turn avatar (gradients), AND the
+// on-video caption label (solid). Index 0..5 maps a speaker to a hue; the
+// solid base and the gradient at the same index are the same family, so a
+// speaker's caption-label colour matches their sidebar chip.
+const SPEAKER_SOLIDS = ["#6CFF8D", "#6D52ED", "#C54AF7", "#52B5ED", "#F7B84A", "#F7714A"];
+const SPEAKER_GRADIENTS = [
+  "linear-gradient(180deg,#6CFF8D 0%,#3FCB6A 100%)", // green (brand)
+  "linear-gradient(180deg,#6D52ED 0%,#4F3BC7 100%)", // purple (marker)
+  "linear-gradient(180deg,#C54AF7 0%,#9C2EE0 100%)", // pink (brand)
+  "linear-gradient(180deg,#52B5ED 0%,#3B8DC7 100%)", // cyan
+  "linear-gradient(180deg,#F7B84A 0%,#E09B2E 100%)", // amber
+  "linear-gradient(180deg,#F7714A 0%,#E0512E 100%)", // coral
+];
+
 /**
- * Deterministic palette picker for a speaker tag. Hashes the tag into a
- * fixed-length palette so the same speaker keeps the same colour across
- * re-renders and sessions.
- *
- * The palette uses brand-aligned gradients (green/purple/pink primary,
- * cyan/amber/coral secondary). When `null`, returns the brand-green
- * default so the single un-diarised "Speaker" still feels intentional.
+ * Stable palette index for a speaker tag. The diarizer's raw tags carry a
+ * number (`SPEAKER_00`→0, `S1`→1), so colour by that number — deterministic
+ * and identical everywhere a speaker appears (sidebar, bubble, caption), with
+ * no hash collisions. `null` / non-numeric (`SPEAKER_UNK`, custom) fall back to
+ * a stable string hash. Callers MUST pass the alias-resolved RAW tag (never a
+ * humanized "Speaker N"), which every call site does.
  */
-export function speakerColor(speaker: string | null): string {
-  const palette = [
-    "linear-gradient(180deg,#6CFF8D 0%,#3FCB6A 100%)", // green (brand)
-    "linear-gradient(180deg,#6D52ED 0%,#4F3BC7 100%)", // purple (marker)
-    "linear-gradient(180deg,#C54AF7 0%,#9C2EE0 100%)", // pink (brand)
-    "linear-gradient(180deg,#52B5ED 0%,#3B8DC7 100%)", // cyan
-    "linear-gradient(180deg,#F7B84A 0%,#E09B2E 100%)", // amber
-    "linear-gradient(180deg,#F7714A 0%,#E0512E 100%)", // coral
-  ];
-  if (!speaker) return palette[0];
+export function speakerColorIndex(speaker: string | null): number {
+  if (!speaker) return 0;
+  const m = speaker.match(/(\d+)/);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (Number.isFinite(n)) return n;
+  }
   let h = 0;
   for (let i = 0; i < speaker.length; i++) h = (h * 31 + speaker.charCodeAt(i)) | 0;
-  return palette[Math.abs(h) % palette.length];
+  return Math.abs(h);
+}
+
+/**
+ * GRADIENT for a speaker — use as a `background` (roster pip, turn avatar).
+ * NOT valid as a CSS `color:` (it's a gradient); use {@link speakerTextColor}
+ * for text. When `null`, returns the brand-green default.
+ */
+export function speakerColor(speaker: string | null): string {
+  return SPEAKER_GRADIENTS[speakerColorIndex(speaker) % SPEAKER_GRADIENTS.length];
+}
+
+/**
+ * SOLID hue for a speaker — use as a CSS `color:` (the on-video caption label).
+ * Same index/family as {@link speakerColor}, so the caption label colour
+ * matches that speaker's sidebar chip gradient.
+ */
+export function speakerTextColor(speaker: string | null): string {
+  return SPEAKER_SOLIDS[speakerColorIndex(speaker) % SPEAKER_SOLIDS.length];
 }
 
 /**
@@ -102,15 +131,17 @@ export function speakerColor(speaker: string | null): string {
  *   SPEAKER_07   → "Speaker 8"
  *   S2           → "Speaker 3"
  *   SPEAKER_UNK  → "Unknown speaker"
- *   null / undiarised → "Speaker"
+ *   null / undiarized → "Speaker" (or "Unknown speaker" when other speakers
+ *                      ARE identified — i.e. this one turn the diarizer left
+ *                      unassigned; pass { unknownWhenNull: true } for that)
  *   anything custom (e.g. "Tom") → unchanged
  *
  * The diarizer's internal numbering is 0-indexed; humans expect
  * 1-indexed. We don't pad ("Speaker 01"): once we're in human-readable
  * land we follow human conventions.
  */
-export function humaniseSpeakerTag(tag: string | null): string {
-  if (!tag) return "Speaker";
+export function humanizeSpeakerTag(tag: string | null, opts?: { unknownWhenNull?: boolean }): string {
+  if (!tag) return opts?.unknownWhenNull ? "Unknown speaker" : "Speaker";
   if (tag === "SPEAKER_UNK") return "Unknown speaker";
   const m = tag.match(/^SPEAKER[_\s-]?(\d+)$/i) || tag.match(/^S(\d+)$/i);
   if (m) {
@@ -122,7 +153,7 @@ export function humaniseSpeakerTag(tag: string | null): string {
 
 /**
  * Two-letter chip label for a speaker. Uses "S1" / "S2" form for the
- * humanised "Speaker N" pattern, and first-letters-of-first-two-words
+ * humanized "Speaker N" pattern, and first-letters-of-first-two-words
  * for everything else. Single-word custom names fall back to the first
  * letter capitalised.
  */
@@ -149,4 +180,77 @@ export function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+// ── Shared speaker-override access (panel ⇄ on-video caption overlay) ──
+// The transcript panel owns the rename/merge UI and persists three layers to
+// localStorage keyed by transcript path. The caption overlay reads the SAME
+// store so a rename ("Speaker 1" → "Tom Jonathan") shows up live on the video.
+
+export type SpeakerOverrides = {
+  global: Record<string, string>;
+  turn: Record<string, string>;
+  aliases: Record<string, string>;
+  /** Per-speaker custom pip colour (canonical tag → hex). null group = "__NULL__". */
+  colors: Record<string, string>;
+};
+
+const EMPTY_OVERRIDES: SpeakerOverrides = { global: {}, turn: {}, aliases: {}, colors: {} };
+
+/** localStorage key the panel persists a transcript's speaker overrides under. */
+export function speakerOverridesKey(path: string): string {
+  return `saucebunny.speakerNames.${path}`;
+}
+
+/** Fired on `window` by the panel whenever overrides change, so live consumers
+ *  (the caption overlay) can re-read without polling. Same-window only —
+ *  the native `storage` event doesn't fire in the tab that wrote it. */
+export const SPEAKERS_CHANGED_EVENT = "saucebunny:speakers-changed";
+
+/** Read + shape-clamp the persisted overrides for a path. */
+export function loadSpeakerOverrides(path: string | null): SpeakerOverrides {
+  if (!path) return EMPTY_OVERRIDES;
+  try {
+    const raw = localStorage.getItem(speakerOverridesKey(path));
+    if (!raw) return EMPTY_OVERRIDES;
+    const p = JSON.parse(raw) as Partial<SpeakerOverrides>;
+    return {
+      global: p.global && typeof p.global === "object" ? p.global : {},
+      turn: p.turn && typeof p.turn === "object" ? p.turn : {},
+      aliases: p.aliases && typeof p.aliases === "object" ? p.aliases : {},
+      colors: p.colors && typeof p.colors === "object" ? p.colors : {},
+    };
+  } catch {
+    return EMPTY_OVERRIDES;
+  }
+}
+
+/**
+ * SOLID caption colour for a speaker, honouring a user override. The override
+ * is keyed on the alias-resolved tag (null group → "__NULL__"), matching the
+ * transcript panel's `overrides.colors`; falls back to the auto palette so the
+ * caption label always matches that speaker's sidebar pip.
+ */
+export function resolveSpeakerColor(
+  rawSpeaker: string | null,
+  overrides: SpeakerOverrides,
+): string {
+  const resolved = resolveAliasChain(rawSpeaker, overrides.aliases);
+  return overrides.colors[resolved ?? "__NULL__"] || speakerTextColor(resolved);
+}
+
+/**
+ * Resolve a raw speaker tag to its display name with the same layered rules as
+ * the panel: alias chain → global rename → humanized fallback. Per-turn
+ * overrides aren't applied (they're turn-indexed, not cue-indexed) — those are
+ * rare; the common "rename everywhere" path resolves correctly.
+ */
+export function resolveSpeakerName(
+  tag: string | null,
+  ov: SpeakerOverrides,
+  opts?: { unknownWhenNull?: boolean },
+): string {
+  const resolved = resolveAliasChain(tag, ov.aliases);
+  const key = resolved ?? "__NULL__";
+  return ov.global[key] ?? humanizeSpeakerTag(resolved, opts);
 }

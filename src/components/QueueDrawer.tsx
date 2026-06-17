@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  IconStack, IconReveal, IconTrash, IconCheck, IconAlert, IconSparkles,
+  IconStack, IconReveal, IconTrash, IconCheck, IconAlert, IconTranscript, IconAiSummary, IconReview,
 } from "./Icons";
 import type { QueuedClip } from "../types";
 import { secondsToHms } from "../lib/timecode";
 import { TranscriptViewer } from "./TranscriptViewer";
+import { AiSummary, type SummaryStyle } from "./AiSummary";
+import { ReviewPanel } from "./ReviewPanel";
+import type { AnnotationStrokes } from "../lib/review";
 import type { TranscriptHistoryEntry } from "../lib/transcript-history";
 
 /**
@@ -13,14 +16,12 @@ import type { TranscriptHistoryEntry } from "../lib/transcript-history";
  * in the TABS array + one body case below. We deliberately avoid
  * shipping "Soon" placeholder tabs (UI bloat).
  */
-type TabId = "queue" | "transcript";
+type TabId = "queue" | "transcript" | "ai" | "review";
 type TabDef = {
   id: TabId;
   label: string;
   icon: (props: { size?: number; stroke?: string }) => React.ReactElement;
   badge?: number;
-  /** Tiny dot next to the icon — used to signal "new content arrived". */
-  pulse?: boolean;
   disabled?: boolean;
 };
 
@@ -41,6 +42,8 @@ type Props = {
   transcriptOrigin: "captions" | "whisper" | "unknown";
   /** Playhead seconds for the karaoke highlight, or null. */
   transcriptPlayhead: number | null;
+  /** Source frame rate, so transcript timestamps render as SMPTE. */
+  transcriptFps?: number;
   /** Click-to-seek callback — receives seconds. */
   onTranscriptSeek: (seconds: number) => void;
   /**
@@ -59,8 +62,38 @@ type Props = {
   regenerateBusy: boolean;
   /** True if there's a source loaded that we COULD regenerate against. */
   canRegenerate: boolean;
+  /** Re-run ONLY speaker detection on the current transcript (no re-transcribe). */
+  onRedetectSpeakers?: () => void;
+  /** True when re-detecting speakers is possible (a transcript + a source). */
+  canRedetect?: boolean;
   /** Open a .srt / .vtt from disk (file picker). */
   onImportTranscript: () => void;
+  /** r84: source kind — gates the "fix caption timing" banner to web sources. */
+  sourceKind?: "youtube" | "file";
+  /** r84: re-time loose YouTube captions with Whisper. Optional (omitted in the
+   *  popped-out panel, where the banner is hidden rather than wired over the bus). */
+  onFixCaptionTiming?: () => void;
+  /** AI Summary: the summarization model + output style chosen in Settings. */
+  aiModelId?: string | null;
+  aiStyle?: SummaryStyle;
+  /** Open Settings → AI Summary (manage/download/switch the model). */
+  onOpenAiSettings?: () => void;
+  /** Review tab: stable id for the current source (local path / URL), or null. */
+  reviewSourceKey?: string | null;
+  /** Review tab: human label for the source (title/filename). */
+  reviewSourceTitle?: string | null;
+  /** Review drawing: true while draw mode is on (overlay captures input). */
+  reviewDrawActive?: boolean;
+  /** Review drawing: the live draft strokes drawn over the frame. */
+  reviewDraft?: AnnotationStrokes | null;
+  /** Toggle draw mode on/off. */
+  onToggleReviewDraw?: () => void;
+  /** Called once the draft has been attached to a comment (clears + exits draw). */
+  onReviewDraftConsumed?: () => void;
+  /** Show a saved annotation read-only over the frame (null to hide). */
+  onShowAnnotation?: (a: AnnotationStrokes | null) => void;
+  /** Re-open a past-review source (local path or URL) from the history popover. */
+  onOpenReviewSource?: (path: string) => void;
   /**
    * Pop the drawer out into its own native OS window (r44.B). When
    * undefined, the pop-out button doesn't render — the floating window
@@ -94,7 +127,10 @@ const DRAWER_WIDTH_KEY = "saucebunny.queueDrawerWidth";
 const TAB_ORDER_KEY    = "saucebunny.queueDrawerTabOrder";
 const DRAWER_WIDTH_MIN = 280;
 const DRAWER_WIDTH_MAX = 720;
-const DRAWER_WIDTH_DEFAULT = 360;
+// Wide enough that the transcript toolbar's primary actions + the Tools menu
+// fit without clipping, and the AI Summary reads comfortably. Users can still
+// drag-resize (persisted) or double-click the handle to reset to this.
+const DRAWER_WIDTH_DEFAULT = 440;
 
 function loadDrawerWidth(): number {
   try {
@@ -109,11 +145,16 @@ function loadDrawerWidth(): number {
 export function QueueDrawer({
   open, onClose, queue, fps, running, hasFolder,
   onRemove, onClearAll, onExportAll, onStop,
-  transcriptPath, transcriptOrigin, transcriptPlayhead,
+  transcriptPath, transcriptOrigin, transcriptPlayhead, transcriptFps,
   onTranscriptSeek, transcriptArrivedTick,
   onClearTranscript, onLoadFromHistory,
   onRegenerateTranscript, regenerateBusy, canRegenerate,
-  onImportTranscript,
+  onRedetectSpeakers, canRedetect,
+  onImportTranscript, sourceKind, onFixCaptionTiming,
+  aiModelId, aiStyle, onOpenAiSettings,
+  reviewSourceKey, reviewSourceTitle,
+  reviewDrawActive, reviewDraft, onToggleReviewDraw, onReviewDraftConsumed, onShowAnnotation,
+  onOpenReviewSource,
   onPopOut, embedded = false,
 }: Props) {
   const counts = queue.reduce(
@@ -168,26 +209,39 @@ export function QueueDrawer({
   const errorCount = counts.error ?? 0;
 
   const [activeTab, setActiveTab] = useState<TabId>("queue");
-  // Pulse the Transcript tab title when a NEW transcript arrives but
-  // the user is looking at another tab — drops the moment they switch in.
-  const [transcriptUnread, setTranscriptUnread] = useState(false);
+  // Seed with the MOUNT-TIME tick so a remount (re-dock after closing the
+  // pop-out panel) doesn't re-fire the auto-switch for a transcript that
+  // arrived long ago — only a NEW arrival (tick actually advancing while
+  // mounted) should yank the user to the Transcript tab.
+  const lastArrivedTickRef = useRef(transcriptArrivedTick);
   useEffect(() => {
-    if (transcriptArrivedTick === 0) return; // ignore the boot value
-    if (activeTab !== "transcript") {
-      setTranscriptUnread(true);
-      // Also auto-switch when the panel is already open — the user
-      // explicitly asked for that flow ("the result appears here").
-      if (open) setActiveTab("transcript");
-    }
+    if (transcriptArrivedTick === lastArrivedTickRef.current) return;
+    lastArrivedTickRef.current = transcriptArrivedTick;
+    // A new transcript arrived → show it. App opens the drawer on the first
+    // arrival, but that open() lands a render AFTER this effect, so the old
+    // `if (open)` gate saw open===false and left the drawer on Queue. Switch
+    // to the Transcript tab UNCONDITIONALLY — when the drawer then opens (or is
+    // already open / reopened) it's on the right tab.
+    if (activeTab !== "transcript") setActiveTab("transcript");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transcriptArrivedTick]);
+  // Popped-out window: the user popped this out to read the transcript, but
+  // arrivedTick doesn't change after pop-out, so the auto-switch above never
+  // fires and the window opens on the (often empty) Queue tab. Switch to the
+  // Transcript tab once a transcript path arrives over the panel bus.
+  const embeddedDidSwitch = useRef(false);
   useEffect(() => {
-    if (activeTab === "transcript") setTranscriptUnread(false);
-  }, [activeTab]);
+    if (embedded && transcriptPath && !embeddedDidSwitch.current) {
+      embeddedDidSwitch.current = true;
+      setActiveTab("transcript");
+    }
+  }, [embedded, transcriptPath]);
 
   const TABS: TabDef[] = [
     { id: "queue", label: "Queue", icon: IconStack, badge: queue.length },
-    { id: "transcript", label: "Transcript", icon: IconSparkles, pulse: transcriptUnread },
+    { id: "transcript", label: "Transcript", icon: IconTranscript },
+    { id: "ai", label: "AI Summary", icon: IconAiSummary },
+    { id: "review", label: "Review", icon: IconReview },
   ];
 
   // ── User-reorderable tab order ─────────────────────────────────
@@ -201,7 +255,7 @@ export function QueueDrawer({
       const raw = localStorage.getItem(TAB_ORDER_KEY);
       const stored: unknown = raw ? JSON.parse(raw) : null;
       if (Array.isArray(stored)) {
-        const valid = stored.filter((x): x is TabId => x === "queue" || x === "transcript");
+        const valid = stored.filter((x): x is TabId => x === "queue" || x === "transcript" || x === "ai" || x === "review");
         const defaults: TabId[] = TABS.map((t) => t.id);
         // Drop any stored ids that no longer exist + append any
         // brand-new tab ids that weren't in storage.
@@ -428,7 +482,6 @@ export function QueueDrawer({
               {t.badge != null && t.badge > 0 && (
                 <span className="cp-tab-badge">{t.badge}</span>
               )}
-              {t.pulse && <span className="cp-tab-pulse" aria-label="new content" />}
               {t.disabled && <span className="cp-tab-soon">Soon</span>}
             </button>
           );
@@ -445,14 +498,14 @@ export function QueueDrawer({
             title="Pop out into its own window"
             aria-label="Pop out"
           >
-            {/* Diagonal-arrow glyph: ⤢ Unicode would work but the
-                outlined SVG matches the visual weight of the other
-                tab-strip icons. */}
+            {/* "Open in new window" glyph (Feather external-link): a window
+                with an arrow leaving the top-right corner — the universally
+                recognized pop-out-to-its-own-window affordance. The old
+                diagonal double-arrow read as fullscreen/expand, not pop-out. */}
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
               <polyline points="15 3 21 3 21 9" />
-              <polyline points="9 21 3 21 3 15" />
-              <line x1="21" y1="3" x2="14" y2="10" />
-              <line x1="3" y1="21" x2="10" y2="14" />
+              <line x1="10" y1="14" x2="21" y2="3" />
             </svg>
           </button>
         )}
@@ -579,7 +632,10 @@ export function QueueDrawer({
       {activeTab === "transcript" && (
         <TranscriptViewer
           path={transcriptPath}
+          /* Same-path overwrites (Regenerate / Fix-timing) re-read via the tick. */
+          reloadToken={transcriptArrivedTick}
           playheadSeconds={transcriptPlayhead}
+          fps={transcriptFps}
           onSeek={onTranscriptSeek}
           origin={transcriptOrigin}
           onClearTranscript={onClearTranscript}
@@ -587,7 +643,36 @@ export function QueueDrawer({
           onRegenerate={onRegenerateTranscript}
           regenerateBusy={regenerateBusy}
           canRegenerate={canRegenerate}
+          onRedetectSpeakers={onRedetectSpeakers}
+          canRedetect={canRedetect}
           onImportTranscript={onImportTranscript}
+          sourceKind={sourceKind}
+          onFixCaptionTiming={onFixCaptionTiming}
+        />
+      )}
+      {activeTab === "ai" && (
+        <AiSummary
+          transcriptPath={transcriptPath}
+          reloadToken={transcriptArrivedTick}
+          selectedModelId={aiModelId}
+          style={aiStyle}
+          onOpenSettings={onOpenAiSettings}
+          onSeek={onTranscriptSeek}
+        />
+      )}
+      {activeTab === "review" && (
+        <ReviewPanel
+          sourceKey={reviewSourceKey ?? null}
+          sourceTitle={reviewSourceTitle}
+          currentSec={transcriptPlayhead}
+          fps={fps}
+          onSeek={onTranscriptSeek}
+          drawActive={!!reviewDrawActive}
+          draft={reviewDraft ?? null}
+          onToggleDraw={onToggleReviewDraw}
+          onDraftConsumed={onReviewDraftConsumed}
+          onShowAnnotation={onShowAnnotation}
+          onOpenReview={onOpenReviewSource}
         />
       )}
     </aside>

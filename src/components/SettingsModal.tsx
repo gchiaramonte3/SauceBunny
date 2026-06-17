@@ -1,16 +1,36 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+
+/** Style helper for the sliding-pill segmented control: drives the active
+ *  index + segment count CSS vars the .cp-segmented pill animates from. */
+const segStyle = (active: number, count: number, extra?: CSSProperties): CSSProperties =>
+  ({ ...extra, ["--seg-active"]: Math.max(0, active), ["--seg-count"]: count } as CSSProperties);
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { IconChevronDown, IconReveal, IconSparkles, IconInfo } from "./Icons";
+import { loadJson, saveJson } from "../lib/storage";
+import { KeybindingEditor } from "./KeybindingEditor";
+import { loadKeybindings, KEYBINDINGS_STORAGE_KEY, type KeybindingOverrides } from "../lib/keybindings";
+
+// localStorage keys an export/import round-trips. Mirror App's DEFAULTS_KEY +
+// the section store; kept here (not imported from App) to avoid a settings↔App
+// import cycle. Stable strings.
+const DEFAULTS_LS_KEY = "cp-defaults-v2";
+const SECTIONS_LS_KEY = "saucebunny.settingsSections.v1";
+// Bump when the export payload's shape changes incompatibly; import refuses a
+// file whose version is higher than this (forward-compat guard).
+const SETTINGS_EXPORT_VERSION = 1;
 import type {
   ExportOpts, FormatId, ModelDownloadEvent, WhisperModel, DoneEvent,
-  CacheStats,
+  CacheStats, AudioInputDevice,
 } from "../types";
 import type { Command } from "../lib/commands";
+import type { LlmModel } from "../bindings/LlmModel";
 import { formatError } from "../lib/error-format";
+import { CollapsibleSection } from "./CollapsibleSection";
+import { YouTubeSettings } from "./YouTubeSettings";
 
-type TabId = "general" | "transcription" | "shortcuts" | "commands" | "about";
+type TabId = "general" | "captions" | "transcription" | "youtube" | "ai-summary" | "commands" | "about";
 
 export type Defaults = {
   folder: string | null;
@@ -19,6 +39,21 @@ export type Defaults = {
   captions: boolean;
   timecode: "24" | "25" | "30";
   whisperModel: string; // e.g. "base.en"
+  /**
+   * Active transcription engine. "whisper" → whisper-cli (the bundled
+   * default, English-tuned). "parakeet" → FluidAudio's Parakeet TDT v3
+   * (Core ML, multilingual, word-level timings) run via the diarize
+   * sidecar's --asr mode; requires its ~0.5 GB model to be downloaded
+   * first (Settings → Transcription → Parakeet → Download). Both run
+   * 100% on-device.
+   */
+  transcriptionEngine: "whisper" | "parakeet";
+  /** AI Summary: chosen local llama.cpp model id (Settings → AI Summary). */
+  llmSummarizationModel: string;
+  /** AI Summary output shape — bullets, numbered list, or prose. */
+  summaryFormat: "bullets" | "numbered" | "prose";
+  /** AI Summary length target. */
+  summaryLength: "brief" | "standard" | "detailed";
   /**
    * When true, imported local files are played via mediabunny + WebCodecs
    * instead of the ffmpeg pre-encode path. Skips the 6–13s prep on import
@@ -86,13 +121,38 @@ export type Defaults = {
    * folders.
    */
   transcriptLibrary: string;
+  // ── On-video caption appearance (the transport CC overlay) ──
+  /** Caption text size in pixels (absolute). Clamped 12–48. */
+  captionSizePx: number;
+  /** Caption font family — keyed into CAP_FONTS. */
+  captionFont: CaptionFontKey;
+  /** Opacity of the caption's dark backing pill, 0 (none) – 1 (solid). */
+  captionBgOpacity: number;
+  /** Caption text colour (hex). */
+  captionColor: string;
+  /**
+   * Max height (px) for the web-preview download — the throwaway copy we
+   * fetch via yt-dlp so you can scrub/mark a web source in-app. Lower =
+   * far smaller file = faster time-to-play; the actual export still uses
+   * the quality you pick on the export form. 480 is plenty for finding
+   * clip points; bump to 720/1080 if you want a sharper preview.
+   */
+  previewMaxHeight: 480 | 720 | 1080;
 };
 
 type Props = {
   open: boolean;
   onClose: () => void;
+  /** Cache files the current session is actively playing from (web preview
+   *  download, audio-master track, playback-prep copy). Clear cache skips
+   *  these — their jobs already finished, so the backend's in-flight-job
+   *  guard alone would let the on-screen video's file be deleted. */
+  cacheExcludePaths?: string[];
   defaults: Defaults;
   setDefaults: (d: Defaults) => void;
+  /** User keyboard-shortcut overrides + setter (Settings → Commands). */
+  keybindings: KeybindingOverrides;
+  setKeybindings: (next: KeybindingOverrides) => void;
   /** Apply current defaults to the in-flight export form. */
   onApplyToCurrent?: (patch: Partial<ExportOpts>) => void;
   /** Optional initial tab to open on. */
@@ -115,58 +175,12 @@ type Props = {
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "general",       label: "General" },
+  { id: "captions",      label: "Captions" },
+  { id: "youtube",       label: "Web sources" },
   { id: "transcription", label: "Transcription" },
-  { id: "shortcuts",     label: "Shortcuts" },
-  { id: "commands",      label: "Commands" },
+  { id: "ai-summary",    label: "AI Summary" },
+  { id: "commands",      label: "Commands & Shortcuts" },
   { id: "about",         label: "About" },
-];
-
-const SHORTCUTS: { category: string; items: { label: string; keys: string[] }[] }[] = [
-  {
-    category: "Transport",
-    items: [
-      { label: "Play / pause",       keys: ["Space"] },
-      { label: "Play / pause (alt)", keys: ["K"] },
-      { label: "Skip back 5s",       keys: ["J"] },
-      { label: "Skip forward 5s",    keys: ["L"] },
-      { label: "Step 1 frame back",  keys: [",", "←"] },
-      { label: "Step 1 frame forward", keys: [".", "→"] },
-      { label: "Step 1 second back", keys: ["⇧", "←"] },
-      { label: "Step 1 second forward", keys: ["⇧", "→"] },
-      { label: "Jump to start",      keys: ["Home"] },
-      { label: "Jump to end",        keys: ["End"] },
-    ],
-  },
-  {
-    category: "Marking",
-    items: [
-      { label: "Mark in",            keys: ["I"] },
-      { label: "Mark out",           keys: ["O"] },
-      { label: "Clear marks",        keys: ["G"] },
-      { label: "Go to in",           keys: ["Q"] },
-      { label: "Go to out",          keys: ["W"] },
-    ],
-  },
-  {
-    category: "Source",
-    items: [
-      { label: "Fetch URL",          keys: ["⌘", "↩"] },
-    ],
-  },
-  {
-    category: "Export",
-    items: [
-      { label: "Export clip",        keys: ["⌥", "E"] },
-    ],
-  },
-  {
-    category: "Window",
-    items: [
-      { label: "Toggle pipeline log",keys: ["⌘", "\\"] },
-      { label: "Open settings",      keys: ["⌘", ","] },
-      { label: "Close settings",     keys: ["Esc"] },
-    ],
-  },
 ];
 
 const FORMATS: { id: FormatId; label: string }[] = [
@@ -176,13 +190,45 @@ const FORMATS: { id: FormatId; label: string }[] = [
   { id: "audio", label: "Audio" },
 ];
 
+// Caption fonts (Settings → Captions). All are macOS system fonts (no bundling)
+// chosen for caption legibility per broadcast/accessibility guidance: wide,
+// high-x-height sans faces lead (Verdana is the default — designed for screen
+// legibility and on the British Dyslexia Association's even-spaced list), with
+// serif/mono and the app's own Nunito Sans rounding out the set.
+// MUST stay in sync with FONT_STACK in CaptionOverlay.tsx (same keys + stacks).
+export type CaptionFontKey =
+  | "verdana" | "helvetica" | "arial" | "tahoma" | "trebuchet" | "georgia" | "courier" | "nunito";
+const CAP_FONTS: Record<CaptionFontKey, string> = {
+  verdana: "Verdana, Geneva, sans-serif",
+  helvetica: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+  arial: "Arial, 'Helvetica Neue', sans-serif",
+  tahoma: "Tahoma, Geneva, Verdana, sans-serif",
+  trebuchet: "'Trebuchet MS', 'Helvetica Neue', sans-serif",
+  georgia: "Georgia, 'Times New Roman', serif",
+  courier: "'Courier New', Courier, monospace",
+  nunito: "'Nunito Sans', system-ui, sans-serif",
+};
+const CAP_FONT_LABELS: Record<CaptionFontKey, string> = {
+  verdana: "Verdana", helvetica: "Helvetica", arial: "Arial", tahoma: "Tahoma",
+  trebuchet: "Trebuchet MS", georgia: "Georgia", courier: "Courier", nunito: "Nunito Sans",
+};
+const CAP_COLORS = ["#ffffff", "#ffe14d", "#7be8ff", "#7bdcb5", "#ff8a8a"];
+const CAP_SIZE_MIN = 12;
+const CAP_SIZE_MAX = 48;
+const clampCaptionSize = (n: number) =>
+  Math.max(CAP_SIZE_MIN, Math.min(CAP_SIZE_MAX, Math.round(Number.isFinite(n) ? n : CAP_SIZE_MIN)));
+
 function formatMB(bytes: number): string {
   if (!isFinite(bytes) || bytes <= 0) return "—";
   if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(2)} GB`;
   return `${Math.round(bytes / 1_000_000)} MB`;
 }
 
-const RECOMMENDED_MODEL = "base.en";
+// small.en is the accuracy sweet spot (~3.4% WER vs base's much higher rate)
+// and still fast on Apple Silicon. base.en was the old default but its word
+// errors were the top transcription complaint. medium.en / large are offered
+// for users who want maximum accuracy and will accept a slower pass.
+const RECOMMENDED_MODEL = "small.en";
 
 type ModelInfo = {
   tagline: string;
@@ -226,12 +272,20 @@ function ModelInfoPopover({ id }: { id: string }) {
     function onDown(e: MouseEvent) {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     }
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      // Capture + stop: Esc dismisses just the popover — without this it
+      // bubbles on to SettingsModal's and App's Escape handlers and closes
+      // the whole Settings window (CommandPalette uses the same pattern).
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      setOpen(false);
+    }
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
     return () => {
       document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
     };
   }, [open]);
 
@@ -264,7 +318,8 @@ function ModelInfoPopover({ id }: { id: string }) {
 
 export function SettingsModal(props: Props) {
   const {
-    open, onClose, defaults, setDefaults, onApplyToCurrent, initialTab, commands,
+    open, onClose, defaults, setDefaults, keybindings, setKeybindings,
+    onApplyToCurrent, initialTab, commands,
     diarizerReady, diarizerPrepareState, diarizerPrepareError,
     onPrepareDiarizerModels, onCancelDiarizerPrepare,
   } = props;
@@ -278,7 +333,11 @@ export function SettingsModal(props: Props) {
   // Whisper model state.
   const [models, setModels] = useState<WhisperModel[]>([]);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [downloadJobId, setDownloadJobId] = useState<string | null>(null);
+  // Set SYNCHRONOUSLY in startDownload before any await. The event
+  // listeners are mounted once and filter against this ref — re-subscribing on
+  // a state change (the old design) raced the backend: events emitted before
+  // the new listener attached were dropped, leaving "Downloading…" stuck.
+  const downloadJobIdRef = useRef<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<{
     modelId: string;
     percent: number;
@@ -286,6 +345,140 @@ export function SettingsModal(props: Props) {
     total: number;
   } | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  // Collapsible Settings sections (chevron headers). Collapsed by default so a
+  // tab opens tight; each section's open/closed state is remembered per id so a
+  // user can expand the ones they care about and have it persist.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(
+    () => loadJson<Record<string, boolean>>("saucebunny.settingsSections.v1", {}),
+  );
+  // Open by default — a section stays open unless the user has explicitly
+  // collapsed it (persisted in saucebunny.settingsSections.v1).
+  const sectionOpen = useCallback((id: string) => openSections[id] ?? true, [openSections]);
+  const toggleSection = useCallback((id: string) => {
+    setOpenSections((prev) => {
+      const next = { ...prev, [id]: !(prev[id] ?? true) };
+      saveJson("saucebunny.settingsSections.v1", next);
+      return next;
+    });
+  }, []);
+  // Transcription-engine tree (host → models). Both open by default.
+  const [whisperOpen, setWhisperOpen] = useState(true);
+  const [parakeetOpen, setParakeetOpen] = useState(true);
+  // Parakeet engine state. null = not yet checked. The model downloads via the
+  // diarize sidecar (--prepare-asr-models), which has no byte-level progress, so
+  // this is a simple busy/ready flag rather than the percent bar Whisper uses.
+  const [parakeetReady, setParakeetReady] = useState<boolean | null>(null);
+  const [parakeetBusy, setParakeetBusy] = useState(false);
+  const [parakeetError, setParakeetError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    invoke<boolean>("parakeet_model_downloaded")
+      .then(setParakeetReady)
+      .catch(() => setParakeetReady(false));
+  }, [open]);
+
+  const downloadParakeet = useCallback(async () => {
+    setParakeetBusy(true);
+    setParakeetError(null);
+    try {
+      const id = await invoke<string>("new_job_id");
+      await invoke("download_parakeet_model", { jobId: id });
+      // Confirm against disk rather than assuming success, so the row never
+      // shows "Installed/In use" without the model actually being present.
+      setParakeetReady(await invoke<boolean>("parakeet_model_downloaded").catch(() => true));
+    } catch (e) {
+      setParakeetError(formatError(e));
+    } finally {
+      setParakeetBusy(false);
+    }
+  }, []);
+
+  const deleteParakeet = useCallback(async () => {
+    setParakeetError(null);
+    try {
+      await invoke("delete_parakeet_model");
+      setParakeetReady(false);
+      // If Parakeet was the active engine, fall back to Whisper so there's
+      // always a usable engine selected.
+      if (defaults.transcriptionEngine === "parakeet") {
+        setDefaults({ ...defaults, transcriptionEngine: "whisper" });
+      }
+    } catch (e) {
+      setParakeetError(formatError(e));
+    }
+  }, [defaults, setDefaults]);
+
+  // ── Backup: export / import / reset all settings (Settings → General) ──
+  const [backupMsg, setBackupMsg] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  const exportSettings = useCallback(async () => {
+    setBackupMsg(null);
+    try {
+      const path = await saveDialog({
+        defaultPath: "sauce-bunny-settings.json",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!path) return;
+      const payload = {
+        app: "sauce-bunny", kind: "settings", version: SETTINGS_EXPORT_VERSION,
+        defaults,
+        keybindings: loadKeybindings(),
+        sections: loadJson<Record<string, boolean>>(SECTIONS_LS_KEY, {}),
+      };
+      const bytes = Array.from(new TextEncoder().encode(JSON.stringify(payload, null, 2)));
+      await invoke("write_bytes_to_path", { path, bytes });
+      setBackupMsg(`Saved to ${path.split("/").pop()}`);
+    } catch (e) {
+      setBackupMsg(formatError(e));
+    }
+  }, [defaults]);
+
+  const importSettings = useCallback(async () => {
+    setBackupMsg(null);
+    try {
+      const picked = await openDialog({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] });
+      if (typeof picked !== "string" || !picked) return;
+      const text = await invoke<string>("read_text_file_capped", { path: picked, maxBytes: 4 * 1024 * 1024 });
+      const parsed = JSON.parse(text) as { kind?: string; version?: number; defaults?: unknown; keybindings?: unknown; sections?: unknown };
+      if (parsed.kind !== "settings") {
+        setBackupMsg("That file isn't a Sauce Bunny settings export.");
+        return;
+      }
+      // Forward-compat guard: refuse a file written by a newer schema rather
+      // than silently importing fields this build doesn't understand.
+      if (typeof parsed.version === "number" && parsed.version > SETTINGS_EXPORT_VERSION) {
+        setBackupMsg(`This file was exported by a newer version of Sauce Bunny (v${parsed.version}). Update the app, then import.`);
+        return;
+      }
+      // Only accept plain objects (reject arrays / null) per field; a malformed
+      // shape is skipped rather than written, so a bad file can't corrupt prefs.
+      const isObj = (v: unknown): v is Record<string, unknown> =>
+        typeof v === "object" && v !== null && !Array.isArray(v);
+      const wrote: string[] = [];
+      if (isObj(parsed.defaults)) { saveJson(DEFAULTS_LS_KEY, parsed.defaults); wrote.push("preferences"); }
+      if (isObj(parsed.keybindings)) { saveJson(KEYBINDINGS_STORAGE_KEY, parsed.keybindings); wrote.push("shortcuts"); }
+      if (isObj(parsed.sections)) { saveJson(SECTIONS_LS_KEY, parsed.sections); wrote.push("section layout"); }
+      if (wrote.length === 0) {
+        setBackupMsg("That export didn't contain any settings to import.");
+        return;
+      }
+      // Reload so every useState initializer re-reads the imported values.
+      window.location.reload();
+    } catch (e) {
+      setBackupMsg(formatError(e));
+    }
+  }, []);
+
+  const resetSettings = useCallback(() => {
+    try {
+      localStorage.removeItem(DEFAULTS_LS_KEY);
+      localStorage.removeItem(KEYBINDINGS_STORAGE_KEY);
+      localStorage.removeItem(SECTIONS_LS_KEY);
+    } catch { /* ignore */ }
+    window.location.reload();
+  }, []);
 
   const refreshModels = useCallback(async () => {
     try {
@@ -297,17 +490,61 @@ export function SettingsModal(props: Props) {
     }
   }, []);
 
-  useEffect(() => {
-    if (open) refreshModels();
-  }, [open, refreshModels]);
+  // ── Dictation microphone chooser (avfoundation inputs) ──
+  const DICTATION_DEVICE_KEY = "saucebunny.dictation.device";
+  const [audioInputs, setAudioInputs] = useState<AudioInputDevice[]>([]);
+  const [dictDevice, setDictDevice] = useState<string>(() => loadJson<string>(DICTATION_DEVICE_KEY, "default"));
+  const refreshAudioInputs = useCallback(async () => {
+    try { setAudioInputs(await invoke<AudioInputDevice[]>("list_audio_input_devices")); }
+    catch (err) { console.warn("list_audio_input_devices failed", err); }
+  }, []);
+  const pickDictDevice = useCallback((d: string) => { setDictDevice(d); saveJson(DICTATION_DEVICE_KEY, d); }, []);
 
-  // Listen for download events.
+  // ── AI Summary (local LLM) models — share the whisper download channel ──
+  const [llmModels, setLlmModels] = useState<LlmModel[]>([]);
+  const refreshLlmModels = useCallback(async () => {
+    try { setLlmModels(await invoke<LlmModel[]>("list_llm_models")); }
+    catch (err) { console.warn("list_llm_models failed", err); }
+  }, []);
+  const startLlmDownload = useCallback(async (modelId: string) => {
+    setDownloadError(null);
+    setDownloadingId(modelId);
+    setDownloadProgress(null);
+    try {
+      const id = await invoke<string>("new_job_id");
+      downloadJobIdRef.current = id;
+      await invoke("download_llm_model", { args: { model_id: modelId, job_id: id } });
+    } catch (e) {
+      downloadJobIdRef.current = null;
+      setDownloadingId(null);
+      setDownloadError(formatError(e));
+    }
+  }, []);
+  const deleteLlmModel = useCallback(async (modelId: string) => {
+    try {
+      await invoke("delete_llm_model", { modelId });
+      if (defaults.llmSummarizationModel === modelId) {
+        const fallback = llmModels.find((m) => m.recommended && m.id !== modelId)
+          ?? llmModels.find((m) => m.id !== modelId);
+        if (fallback) setDefaults({ ...defaults, llmSummarizationModel: fallback.id });
+      }
+      refreshLlmModels();
+    } catch (e) { setDownloadError(formatError(e)); }
+  }, [refreshLlmModels, defaults, setDefaults, llmModels]);
+
+  useEffect(() => {
+    if (open) { refreshModels(); refreshLlmModels(); refreshAudioInputs(); }
+  }, [open, refreshModels, refreshLlmModels, refreshAudioInputs]);
+
+  // Listen for download events. Mounted ONCE — filtering goes through
+  // downloadJobIdRef so a new job never has to wait for a re-subscription
+  // round-trip (events fired during that gap were silently dropped).
   useEffect(() => {
     const unlistens: UnlistenFn[] = [];
     let mounted = true;
     (async () => {
       const a = await listen<ModelDownloadEvent>("model-download-progress", (e) => {
-        if (!mounted || e.payload.job_id !== downloadJobId) return;
+        if (!mounted || e.payload.job_id !== downloadJobIdRef.current) return;
         setDownloadProgress({
           modelId: e.payload.model_id,
           percent: e.payload.percent,
@@ -316,18 +553,18 @@ export function SettingsModal(props: Props) {
         });
       });
       const b = await listen<DoneEvent>("model-download-done", (e) => {
-        if (!mounted || e.payload.job_id !== downloadJobId) return;
+        if (!mounted || e.payload.job_id !== downloadJobIdRef.current) return;
+        downloadJobIdRef.current = null;
         if (e.payload.success) {
           setDownloadingId(null);
           setDownloadProgress(null);
-          setDownloadJobId(null);
           setDownloadError(null);
           refreshModels();
+          refreshLlmModels();
         } else {
           setDownloadError(e.payload.error ?? "Download failed");
           setDownloadingId(null);
           setDownloadProgress(null);
-          setDownloadJobId(null);
         }
       });
       unlistens.push(a, b);
@@ -336,7 +573,7 @@ export function SettingsModal(props: Props) {
       mounted = false;
       unlistens.forEach((u) => u());
     };
-  }, [downloadJobId, refreshModels]);
+  }, [refreshModels, refreshLlmModels]);
 
   // Auto-select first downloaded model if none selected.
   useEffect(() => {
@@ -356,12 +593,23 @@ export function SettingsModal(props: Props) {
     setDownloadingId(modelId);
     try {
       const id = await invoke<string>("new_job_id");
-      setDownloadJobId(id);
+      downloadJobIdRef.current = id; // sync, BEFORE the download can emit
       await invoke<string>("download_whisper_model", { args: { model_id: modelId, job_id: id } });
+      // The backend early-returns WITHOUT emitting any event when the model
+      // file already exists — resolve that here so "Downloading…" can't stick.
+      const fresh = await invoke<WhisperModel[]>("list_whisper_models").catch(() => null);
+      if (fresh) {
+        setModels(fresh);
+        if (fresh.some((m) => m.id === modelId && m.downloaded)) {
+          downloadJobIdRef.current = null;
+          setDownloadingId(null);
+          setDownloadProgress(null);
+        }
+      }
     } catch (err) {
+      downloadJobIdRef.current = null;
       setDownloadError(formatError(err));
       setDownloadingId(null);
-      setDownloadJobId(null);
     }
   }
 
@@ -375,7 +623,9 @@ export function SettingsModal(props: Props) {
   }
 
   function chooseModel(modelId: string) {
-    setDefaults({ ...defaults, whisperModel: modelId });
+    // Picking a Whisper model also makes Whisper the active engine — exactly one
+    // engine is ever "in use" at a time (mirrors Parakeet's "Use as default").
+    setDefaults({ ...defaults, whisperModel: modelId, transcriptionEngine: "whisper" });
   }
 
   // Close on Esc.
@@ -442,8 +692,7 @@ export function SettingsModal(props: Props) {
                   them as the starting point for the next URL you fetch.
                 </p>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Output</div>
+                <CollapsibleSection id="gen-output" label="Output" open={sectionOpen("gen-output")} onToggle={() => toggleSection("gen-output")}>
                   <div className="cp-pane-row">
                     <div className="k">
                       Default folder
@@ -464,7 +713,7 @@ export function SettingsModal(props: Props) {
                       <span className="desc">Which yt-dlp format selector to use by default.</span>
                     </div>
                     <div className="v">
-                      <div className="cp-segmented" style={{ minWidth: 260, gridTemplateColumns: "repeat(4, 1fr)" }}>
+                      <div className="cp-segmented" style={segStyle(FORMATS.findIndex((f) => f.id === defaults.format), FORMATS.length, { minWidth: 260 })}>
                         {FORMATS.map((f) => (
                           <button
                             key={f.id}
@@ -489,10 +738,9 @@ export function SettingsModal(props: Props) {
                       />
                     </div>
                   </div>
-                </div>
+                </CollapsibleSection>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Local playback</div>
+                <CollapsibleSection id="gen-local-playback" label="Local playback" open={sectionOpen("gen-local-playback")} onToggle={() => toggleSection("gen-local-playback")}>
                   <div className="cp-pane-row">
                     <div className="k">
                       WebCodecs decoder (experimental)
@@ -505,11 +753,10 @@ export function SettingsModal(props: Props) {
                       />
                     </div>
                   </div>
-                  <CacheControls />
-                </div>
+                  <CacheControls excludePaths={props.cacheExcludePaths} />
+                </CollapsibleSection>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Web playback</div>
+                <CollapsibleSection id="gen-web-playback" label="Web playback" open={sectionOpen("gen-web-playback")} onToggle={() => toggleSection("gen-web-playback")}>
                   <div className="cp-pane-row">
                     <div className="k">
                       Stream while you watch
@@ -522,41 +769,16 @@ export function SettingsModal(props: Props) {
                       />
                     </div>
                   </div>
-                </div>
+                </CollapsibleSection>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">YouTube auth</div>
-                  <div className="cp-pane-row">
-                    <div className="k">
-                      Cookies from browser
-                      <span className="desc">YouTube increasingly rejects unauthenticated requests with "Sign in to confirm you're not a bot". Pick the browser you're already logged into and yt-dlp will reuse those cookies.</span>
-                    </div>
-                    <div className="v">
-                      <div className="cp-segmented" style={{ minWidth: 320, gridTemplateColumns: "repeat(6, 1fr)" }}>
-                        {(["none","chrome","safari","firefox","brave","edge"] as const).map((b) => (
-                          <button
-                            key={b}
-                            className={defaults.ytCookiesBrowser === b ? "active" : ""}
-                            onClick={() => setDefaults({ ...defaults, ytCookiesBrowser: b })}
-                            title={b === "none" ? "Don't send cookies" : `Read YouTube cookies from ${b}`}
-                          >
-                            {b === "none" ? "Off" : b[0].toUpperCase() + b.slice(1)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Timecode</div>
+                <CollapsibleSection id="gen-timecode" label="Timecode" open={sectionOpen("gen-timecode")} onToggle={() => toggleSection("gen-timecode")}>
                   <div className="cp-pane-row">
                     <div className="k">
                       Frame rate fallback
                       <span className="desc">Used when the source doesn't report a frame rate.</span>
                     </div>
                     <div className="v">
-                      <div className="cp-segmented" style={{ minWidth: 200, gridTemplateColumns: "repeat(3, 1fr)" }}>
+                      <div className="cp-segmented" style={segStyle(["24", "25", "30"].indexOf(defaults.timecode), 3, { minWidth: 200 })}>
                         {(["24","25","30"] as const).map((f) => (
                           <button
                             key={f}
@@ -569,7 +791,36 @@ export function SettingsModal(props: Props) {
                       </div>
                     </div>
                   </div>
-                </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection id="gen-backup" label="Backup & reset" open={sectionOpen("gen-backup")} onToggle={() => toggleSection("gen-backup")}>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Settings file
+                      <span className="desc">Save all your preferences + shortcuts to a file, or load them back (e.g. on another Mac).</span>
+                    </div>
+                    <div className="v cp-backup-actions">
+                      <button className="btn btn-ghost" onClick={exportSettings}>Export…</button>
+                      <button className="btn btn-ghost" onClick={importSettings}>Import…</button>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Reset everything
+                      <span className="desc">Restore every setting, shortcut, and panel to its default. Doesn't touch your transcripts or exports.</span>
+                    </div>
+                    <div className="v">
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => { if (confirmReset) resetSettings(); else setConfirmReset(true); }}
+                        onBlur={() => setConfirmReset(false)}
+                      >
+                        {confirmReset ? "Click again to confirm" : "Reset to defaults"}
+                      </button>
+                    </div>
+                  </div>
+                  {backupMsg && <div className="cp-source-hint muted" style={{ marginTop: 10 }}>{backupMsg}</div>}
+                </CollapsibleSection>
 
                 {onApplyToCurrent && (
                   <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end" }}>
@@ -581,18 +832,142 @@ export function SettingsModal(props: Props) {
               </section>
             )}
 
+            {tab === "captions" && (
+              <section>
+                <h3 className="cp-pane-title">Captions</h3>
+                <p className="cp-pane-sub">
+                  How the on-video captions (the transport <strong>CC</strong> button) are drawn.
+                  Captions are kept to two lines at the broadcast-standard ~42 characters per line.
+                  Changes apply live.
+                </p>
+                <CollapsibleSection id="cap-style" label="Caption style" open={sectionOpen("cap-style")} onToggle={() => toggleSection("cap-style")}>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Preview
+                      <span className="desc">A sample caption styled with your current settings.</span>
+                    </div>
+                    <div className="v">
+                      <div className="cp-cap-preview">
+                        <span
+                          className="cp-cap-preview-cue"
+                          style={{
+                            ["--cap-size" as string]: `${defaults.captionSizePx}px`,
+                            fontFamily: CAP_FONTS[defaults.captionFont],
+                            color: defaults.captionColor,
+                            background: `rgba(0,0,0,${defaults.captionBgOpacity})`,
+                          } as React.CSSProperties}
+                        >
+                          The quick brown fox.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Size
+                      <span className="desc">Caption text size in pixels — drag or type a number.</span>
+                    </div>
+                    <div className="v cp-cap-range">
+                      <input
+                        type="range"
+                        min={CAP_SIZE_MIN}
+                        max={CAP_SIZE_MAX}
+                        step={1}
+                        value={defaults.captionSizePx}
+                        onChange={(e) => setDefaults({ ...defaults, captionSizePx: Number(e.target.value) })}
+                      />
+                      <input
+                        type="number"
+                        className="cp-cap-size-num"
+                        min={CAP_SIZE_MIN}
+                        max={CAP_SIZE_MAX}
+                        step={1}
+                        value={defaults.captionSizePx}
+                        onChange={(e) => setDefaults({ ...defaults, captionSizePx: clampCaptionSize(Number(e.target.value)) })}
+                      />
+                      <span className="cp-cap-range-val">px</span>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Font
+                      <span className="desc">System fonts picked for caption legibility.</span>
+                    </div>
+                    <div className="v">
+                      <select
+                        className="cp-select cp-cap-font-select"
+                        value={defaults.captionFont}
+                        onChange={(e) => setDefaults({ ...defaults, captionFont: e.target.value as CaptionFontKey })}
+                      >
+                        {(Object.keys(CAP_FONTS) as CaptionFontKey[]).map((key) => (
+                          <option key={key} value={key} style={{ fontFamily: CAP_FONTS[key] }}>
+                            {CAP_FONT_LABELS[key]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">Background</div>
+                    <div className="v cp-cap-range">
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={Math.round(defaults.captionBgOpacity * 100)}
+                        onChange={(e) => setDefaults({ ...defaults, captionBgOpacity: Number(e.target.value) / 100 })}
+                      />
+                      <span className="cp-cap-range-val">{Math.round(defaults.captionBgOpacity * 100)}%</span>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">Text colour</div>
+                    <div className="v cp-cap-colors">
+                      {CAP_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          className={"cp-cap-swatch" + (defaults.captionColor.toLowerCase() === c.toLowerCase() ? " active" : "")}
+                          style={{ background: c }}
+                          onClick={() => setDefaults({ ...defaults, captionColor: c })}
+                          title={c}
+                          aria-label={`Caption colour ${c}`}
+                        />
+                      ))}
+                      <input
+                        type="color"
+                        className="cp-cap-color-custom"
+                        value={defaults.captionColor}
+                        onChange={(e) => setDefaults({ ...defaults, captionColor: e.target.value })}
+                        title="Custom colour"
+                      />
+                    </div>
+                  </div>
+                </CollapsibleSection>
+              </section>
+            )}
+
+            {tab === "youtube" && (
+              <YouTubeSettings defaults={defaults} setDefaults={setDefaults} sectionOpen={sectionOpen} toggleSection={toggleSection} />
+            )}
+
             {tab === "transcription" && (
               <section>
                 <h3 className="cp-pane-title">Transcription</h3>
                 <p className="cp-pane-sub">
-                  Local-only transcription via <strong>whisper.cpp</strong>. Pick a model below and
-                  download it once — Sauce Bunny will use it to generate an .srt for the marked section
-                  of your next clip. Audio is extracted with yt-dlp + ffmpeg; nothing leaves your
-                  machine.
+                  Transcription runs <strong>100% on your Mac</strong> — choose an engine below,
+                  download a model once, and Sauce Bunny generates an .srt for your clips. Audio is
+                  extracted with yt-dlp + ffmpeg; nothing ever leaves your machine.
                 </p>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Whisper model</div>
+                <CollapsibleSection id="tx-engine" label="Transcription engine" open={sectionOpen("tx-engine")} onToggle={() => toggleSection("tx-engine")}>
+                  <CollapsibleSection
+                    id="eng-whisper"
+                    label="Whisper"
+                    meta={defaults.transcriptionEngine === "whisper" ? "In use" : "whisper.cpp · local"}
+                    summary={defaults.transcriptionEngine === "whisper" ? "In use" : "whisper.cpp · local"}
+                    open={whisperOpen}
+                    onToggle={() => setWhisperOpen((o) => !o)}
+                  >
                   <div className="cp-models">
                     {models.length === 0 && (
                       <div className="cp-source-hint muted">Loading models…</div>
@@ -610,9 +985,13 @@ export function SettingsModal(props: Props) {
                       const isDownloading = downloadingId === m.id;
                       const progress = isDownloading && downloadProgress?.modelId === m.id ? downloadProgress : null;
                       const isSelected = defaults.whisperModel === m.id;
+                      // "Active" = this is the selected model AND Whisper is the
+                      // engine in use. Cross-engine exclusivity: when Parakeet is
+                      // active, no Whisper row shows "In use".
+                      const isActive = isSelected && defaults.transcriptionEngine === "whisper";
                       const isRecommended = m.id === RECOMMENDED_MODEL;
                       return (
-                        <div key={m.id} className={"cp-model-row" + (isSelected ? " selected" : "")}>
+                        <div key={m.id} className={"cp-model-row" + (isActive ? " selected" : "")}>
                           <div className="cp-model-info-wrap">
                             <div className="cp-model-head">
                               <IconSparkles size={13} stroke="var(--fg-4)" />
@@ -620,7 +999,7 @@ export function SettingsModal(props: Props) {
                               <span className="size">{formatMB(m.size_bytes)}</span>
                               {isRecommended && <span className="badge recommended">Recommended</span>}
                               {m.downloaded && <span className="badge installed">Installed</span>}
-                              {isSelected && m.downloaded && <span className="badge selected">Default</span>}
+                              {isActive && m.downloaded && <span className="badge selected">In use</span>}
                               <ModelInfoPopover id={m.id} />
                             </div>
                             {progress && (
@@ -643,7 +1022,7 @@ export function SettingsModal(props: Props) {
                                 {isDownloading ? "Downloading…" : "Download"}
                               </button>
                             )}
-                            {m.downloaded && !isSelected && (
+                            {m.downloaded && !isActive && (
                               <button className="btn btn-ghost" onClick={() => chooseModel(m.id)}>
                                 Use as default
                               </button>
@@ -667,10 +1046,85 @@ export function SettingsModal(props: Props) {
                       {downloadError}
                     </div>
                   )}
-                </div>
+                  </CollapsibleSection>
+                  <CollapsibleSection
+                    id="eng-parakeet"
+                    label="Parakeet"
+                    meta={defaults.transcriptionEngine === "parakeet" ? "In use" : "NVIDIA · word-level"}
+                    summary={defaults.transcriptionEngine === "parakeet" ? "In use" : "NVIDIA · word-level"}
+                    open={parakeetOpen}
+                    onToggle={() => setParakeetOpen((o) => !o)}
+                  >
+                    <div className="cp-source-hint muted" style={{ lineHeight: 1.6, marginBottom: 12 }}>
+                      <strong>Parakeet TDT v3</strong> (NVIDIA) runs fully on-device on Apple
+                      Silicon via Core ML and emits <strong>word-level</strong> timestamps —
+                      multilingual, with tighter caption sync than Whisper's segment timing.
+                      One-time download is about 0.5 GB.
+                    </div>
+                    {(() => {
+                      // Parakeet has a single model; "active" mirrors the Whisper
+                      // row — installed AND the engine in use.
+                      const parakeetActive = parakeetReady === true && defaults.transcriptionEngine === "parakeet";
+                      return (
+                    <div className={"cp-model-row" + (parakeetActive ? " selected" : "")}>
+                      <div className="cp-model-info-wrap">
+                        <div className="cp-model-head">
+                          <IconSparkles size={13} stroke="var(--fg-4)" />
+                          <span className="name">Parakeet TDT v3</span>
+                          <span className="size">≈0.5 GB</span>
+                          {parakeetReady && <span className="badge installed">Installed</span>}
+                          {parakeetActive && <span className="badge selected">In use</span>}
+                        </div>
+                      </div>
+                      <div className="cp-model-actions">
+                        {parakeetReady === null ? (
+                          <span className="size">checking…</span>
+                        ) : !parakeetReady ? (
+                          <button
+                            className="btn btn-ghost"
+                            onClick={downloadParakeet}
+                            disabled={parakeetBusy}
+                          >
+                            {parakeetBusy ? "Downloading…" : "Download"}
+                          </button>
+                        ) : (
+                          <>
+                            {!parakeetActive && (
+                              <button
+                                className="btn btn-ghost"
+                                onClick={() => setDefaults({ ...defaults, transcriptionEngine: "parakeet" })}
+                              >
+                                Use as default
+                              </button>
+                            )}
+                            <button
+                              className="btn btn-ghost"
+                              onClick={deleteParakeet}
+                              title="Remove the Parakeet model from disk"
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                      );
+                    })()}
+                    {parakeetBusy && (
+                      <div className="cp-source-hint muted" style={{ marginTop: 10 }}>
+                        Downloading the Parakeet model — this runs once and can take a few
+                        minutes on the first go. You can keep using the app meanwhile.
+                      </div>
+                    )}
+                    {parakeetError && (
+                      <div className="cp-source-hint err" style={{ marginTop: 10 }}>
+                        {parakeetError}
+                      </div>
+                    )}
+                  </CollapsibleSection>
+                </CollapsibleSection>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Transcript library</div>
+                <CollapsibleSection id="tx-library" label="Transcript library" open={sectionOpen("tx-library")} onToggle={() => toggleSection("tx-library")}>
                   <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: "0 0 10px" }}>
                     All generated transcripts (Whisper output + downloaded YouTube
                     captions) land here, sub-organized by month. Decoupled from your
@@ -726,10 +1180,38 @@ export function SettingsModal(props: Props) {
                       Reset
                     </button>
                   </div>
-                </div>
+                </CollapsibleSection>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">Speaker diarization</div>
+                <CollapsibleSection id="tx-dictation" label="Dictation microphone" open={sectionOpen("tx-dictation")} onToggle={() => toggleSection("tx-dictation")}>
+                  <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: "0 0 10px" }}>
+                    The mic the review composer records from when you dictate a comment.
+                    Leave on <em>System default</em> unless that's picking up the wrong
+                    input (e.g. a capture card) — then choose your real mic here.
+                  </p>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Microphone
+                      <span className="desc">avfoundation audio input.</span>
+                    </div>
+                    <div className="v" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <select
+                        className="cp-select"
+                        value={dictDevice}
+                        onChange={(e) => pickDictDevice(e.target.value)}
+                      >
+                        <option value="default">System default</option>
+                        {audioInputs.map((d) => (
+                          // Store by NAME (avfoundation matches names too) — indices
+                          // shift between launches, names don't.
+                          <option key={d.index} value={d.name}>{d.name}</option>
+                        ))}
+                      </select>
+                      <button className="btn btn-ghost" onClick={refreshAudioInputs} title="Rescan audio inputs">Rescan</button>
+                    </div>
+                  </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection id="tx-diarization" label="Speaker diarization" open={sectionOpen("tx-diarization")} onToggle={() => toggleSection("tx-diarization")}>
                   <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: "0 0 10px" }}>
                     When <em>Detect speakers</em> is on in the sidebar, Sauce Bunny also runs the
                     FluidAudio Swift sidecar after Whisper and stitches speaker labels into the SRT
@@ -772,58 +1254,141 @@ export function SettingsModal(props: Props) {
                       {diarizerPrepareError}
                     </div>
                   )}
-                </div>
+                </CollapsibleSection>
 
-                <div className="cp-pane-section">
-                  <div className="cp-pane-section-label">How it works</div>
+                <CollapsibleSection id="tx-how" label="How it works" open={sectionOpen("tx-how")} onToggle={() => toggleSection("tx-how")}>
                   <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: 0 }}>
                     Click <em>Generate transcript</em> on the source card. yt-dlp grabs the audio for
                     your in→out range only (not the whole video), pipes it through ffmpeg, and
                     whisper-cli writes <code>&lt;filename&gt;.srt</code> next to where your clip would
                     save. Larger models = better accuracy, longer transcribe time.
                   </p>
-                </div>
+                </CollapsibleSection>
               </section>
             )}
 
-            {tab === "shortcuts" && (
+            {tab === "ai-summary" && (
               <section>
-                <h3 className="cp-pane-title">Keyboard shortcuts</h3>
+                <h3 className="cp-pane-title">AI Summary</h3>
                 <p className="cp-pane-sub">
-                  Source-monitor controls modelled on Premiere / Resolve. Editing the URL or a timecode
-                  field temporarily releases these shortcuts. For the full list of every action
-                  (including ones without a default hotkey), see the Commands tab or hit{" "}
-                  <kbd>⌘</kbd><kbd>K</kbd>.
+                  Summarize and chat with transcripts using a local AI model — runs entirely on
+                  your Mac via llama.cpp (Metal). No cloud, no account, nothing leaves the machine.
+                  Pick the model that fits your Mac's memory below.
                 </p>
-                <div className="cp-shortcuts-grid">
-                  {SHORTCUTS.map((cat) => (
-                    <div className="cp-shortcut-cat" key={cat.category}>
-                      <div className="cp-shortcut-cat-title">{cat.category}</div>
-                      {cat.items.map((s, i) => (
-                        <div className="cp-shortcut-row" key={i}>
-                          <span className="lbl">{s.label}</span>
-                          <span className="keys">
-                            {s.keys.map((k, j) => (
-                              <kbd key={j} className={k.length > 1 ? "sym" : ""}>{k}</kbd>
-                            ))}
-                          </span>
+
+                <CollapsibleSection id="ai-model" label="Model" open={sectionOpen("ai-model")} onToggle={() => toggleSection("ai-model")}>
+                  <div className="cp-model-list">
+                    {llmModels.map((m) => {
+                      const isSel = defaults.llmSummarizationModel === m.id;
+                      const prog = downloadProgress?.modelId === m.id ? downloadProgress : null;
+                      return (
+                        <div key={m.id} className={"cp-model-row" + (isSel && m.downloaded ? " selected" : "")}>
+                          <div className="cp-model-info-wrap">
+                            <div className="cp-model-head">
+                              <IconSparkles size={13} stroke="var(--fg-4)" />
+                              <span className="name">{m.name}</span>
+                              <span className="size">{formatMB(m.size_bytes)}</span>
+                              {m.recommended && <span className="badge recommended">Recommended</span>}
+                              {m.downloaded && <span className="badge installed">Installed</span>}
+                              {isSel && m.downloaded && <span className="badge selected">Default</span>}
+                            </div>
+                            <div className="cp-model-blurb">{m.blurb}</div>
+                            {prog && (
+                              <div className="cp-model-progress">
+                                <div className="bar"><span style={{ width: `${prog.percent}%` }} /></div>
+                                <span className="meta">
+                                  {prog.percent.toFixed(0)}%
+                                  {prog.total > 0 && ` · ${formatMB(prog.done)} / ${formatMB(prog.total)}`}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="cp-model-actions">
+                            {!m.downloaded ? (
+                              <button className="btn btn-primary" disabled={!!downloadingId} onClick={() => startLlmDownload(m.id)}>
+                                {downloadingId === m.id ? "Downloading…" : "Download"}
+                              </button>
+                            ) : isSel ? (
+                              <span className="cp-ytdlp-version">In use</span>
+                            ) : (
+                              <button className="btn btn-primary" onClick={() => setDefaults({ ...defaults, llmSummarizationModel: m.id })}>
+                                Use as default
+                              </button>
+                            )}
+                            {m.downloaded && (
+                              <button className="btn btn-ghost" onClick={() => deleteLlmModel(m.id)} title="Remove this model file from disk">
+                                Delete
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      ))}
+                      );
+                    })}
+                  </div>
+                  {downloadError && <div className="cp-source-hint err" style={{ marginTop: 12 }}>{downloadError}</div>}
+                </CollapsibleSection>
+
+                <CollapsibleSection id="ai-style" label="Summary style" open={sectionOpen("ai-style")} onToggle={() => toggleSection("ai-style")}>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Format
+                      <span className="desc">How answers are structured — real bullets / numbers, not asterisks.</span>
                     </div>
-                  ))}
-                </div>
+                    <div className="v">
+                      <div className="cp-segmented" style={segStyle(["bullets", "numbered", "prose"].indexOf(defaults.summaryFormat), 3, { minWidth: 270 })}>
+                        {(["bullets", "numbered", "prose"] as const).map((f) => (
+                          <button
+                            key={f}
+                            className={defaults.summaryFormat === f ? "active" : ""}
+                            onClick={() => setDefaults({ ...defaults, summaryFormat: f })}
+                          >
+                            {f === "bullets" ? "Bullets" : f === "numbered" ? "Numbered" : "Prose"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Length
+                      <span className="desc">Roughly how much detail the model includes.</span>
+                    </div>
+                    <div className="v">
+                      <div className="cp-segmented" style={segStyle(["brief", "standard", "detailed"].indexOf(defaults.summaryLength), 3, { minWidth: 270 })}>
+                        {(["brief", "standard", "detailed"] as const).map((l) => (
+                          <button
+                            key={l}
+                            className={defaults.summaryLength === l ? "active" : ""}
+                            onClick={() => setDefaults({ ...defaults, summaryLength: l })}
+                          >
+                            {l[0].toUpperCase() + l.slice(1)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </CollapsibleSection>
               </section>
             )}
 
             {tab === "commands" && (
               <section>
-                <h3 className="cp-pane-title">Commands</h3>
+                <h3 className="cp-pane-title">Commands &amp; shortcuts</h3>
                 <p className="cp-pane-sub">
-                  Every action Sauce Bunny exposes, grouped by domain. Open the palette anywhere
-                  with <kbd>⌘</kbd><kbd>K</kbd> to run any of these with fuzzy search.
-                  This list is generated from the same registry the palette uses — it can't
-                  drift out of sync with what actually runs.
+                  Every action Sauce Bunny exposes, plus the source-monitor keymap. Open the
+                  palette anywhere with <kbd>⌘</kbd><kbd>K</kbd> to run any command with fuzzy
+                  search. The command list is generated from the same registry the palette uses —
+                  it can't drift out of sync with what actually runs.
                 </p>
+
+                {/* Editable keymap — Record re-binds any action; transport &
+                    marking keys release while a text field or the timecode HUD
+                    is focused so typing never scrubs the video. */}
+                <CollapsibleSection id="cmd-shortcuts" label="Keyboard shortcuts" open={sectionOpen("cmd-shortcuts")} onToggle={() => toggleSection("cmd-shortcuts")}>
+                  <KeybindingEditor overrides={keybindings} onChange={setKeybindings} />
+                </CollapsibleSection>
+
+                <CollapsibleSection id="cmd-all" label="All commands" open={sectionOpen("cmd-all")} onToggle={() => toggleSection("cmd-all")}>
                 {(() => {
                   const list = commands ?? [];
                   if (list.length === 0) {
@@ -870,6 +1435,7 @@ export function SettingsModal(props: Props) {
                     </div>
                   );
                 })()}
+                </CollapsibleSection>
               </section>
             )}
 
@@ -933,7 +1499,7 @@ export function SettingsModal(props: Props) {
  * thumbnails, whisper wavs, audio raw downloads. Files NOT under that
  * prefix (e.g. whisper-models/) are never touched.
  */
-function CacheControls() {
+function CacheControls({ excludePaths }: { excludePaths?: string[] }) {
   // CacheStats now comes from the canonical Rust definition (r49 +
   // r50). The inline-anonymous-type pattern was a workaround from
   // before the bindings existed.
@@ -962,7 +1528,7 @@ function CacheControls() {
     if (!confirm(`Delete ${stats.file_count} cached file${stats.file_count === 1 ? "" : "s"} (${formatBytes(stats.bytes_total)})? This won't affect your exported clips.`)) return;
     setBusy(true);
     try {
-      await invoke<number>("clear_all_cache");
+      await invoke<number>("clear_all_cache", { exclude: excludePaths ?? [] });
     } catch (err) {
       console.warn("clear_all_cache failed", err);
     } finally {

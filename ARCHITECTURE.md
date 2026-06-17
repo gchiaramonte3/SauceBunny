@@ -26,17 +26,17 @@ What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Ever
 ├── src-tauri/                 # Rust backend (Tauri shell + sidecar orchestration)
 │   ├── src/
 │   │   ├── lib.rs             # Tauri command registration + cache-sweep startup hook
-│   │   ├── main.rs            # 5-line entrypoint
-│   │   └── commands.rs        # All Tauri commands (~4k lines; split is on the roadmap)
-│   ├── binaries/              # Bundled sidecar executables
+│   │   ├── main.rs            # tiny entrypoint shim → sauce_bunny_lib::run()
+│   │   ├── commands/          # Tauri commands by domain (download, media, transcript, system, llm)
+│   │   └── stream_proxy.rs    # loopback fMP4 media proxy for web playback
+│   ├── binaries/              # Bundled sidecar executables (gitignored; fetched by `npm run setup`)
 │   ├── capabilities/          # Tauri permission lists
 │   └── tauri.conf.json        # Bundle config + window settings
 ├── swift-sidecar/             # Swift package that builds saucebunny-diarize
 │   ├── Package.swift
 │   └── Sources/saucebunny-diarize/main.swift
 ├── scripts/                   # Build + maintenance scripts
-├── .github/                   # Issue templates + CI workflow
-└── docs/                      # Per-feature deep dives (sidecars, diarization, …)
+└── .github/                   # Issue templates + CI workflow
 ```
 
 ## Data flow
@@ -110,14 +110,16 @@ Generate transcript:
 
 ## Sidecars
 
-Four executables ship in `src-tauri/binaries/`. The Tauri shell invokes them via `app.shell().sidecar(name)` with the platform-tuple naming convention (`<name>-aarch64-apple-darwin`).
+Six executables ship in `src-tauri/binaries/`, using the platform-tuple naming convention (`<name>-aarch64-apple-darwin`). The app invokes `yt-dlp`, `ffmpeg`, `whisper-cli`, `saucebunny-diarize`, and `llama-server` directly (via `app.shell().sidecar(name)` / a resolved path). `ffprobe` is the exception — the app never spawns it; it ships beside `ffmpeg` so yt-dlp can discover it (yt-dlp derives `ffprobe-<triple>` from the `--ffmpeg-location` path it's given).
 
 | Sidecar | What it does | Where it comes from |
 |---|---|---|
 | `yt-dlp` | Resolves video URLs, downloads streams, fetches captions | Official static build from github.com/yt-dlp/yt-dlp/releases. Refresh via `scripts/refresh-sidecars.sh` (YouTube extractors rot weekly). |
-| `ffmpeg` | Audio extraction, video transcoding, frame extraction | Homebrew ffmpeg or static build. Stable; rebuild rarely. |
+| `ffmpeg` | Audio extraction, video transcoding, frame extraction | osxexperts.net static arm64 build via `npm run refresh:ffmpeg`. Stable; rebuild rarely. |
+| `ffprobe` | yt-dlp's HLS fixup (`aac_adtstoasc`) + media metadata. Not spawned by the app — found by yt-dlp beside ffmpeg. | ffmpeg.martin-riedl.de static arm64 build via `npm run refresh:ffprobe`. Required for playable HLS/live downloads. |
 | `whisper-cli` | Whisper.cpp speech-to-text | Build whisper.cpp from source, copy the `whisper-cli` binary. Stable. |
 | `saucebunny-diarize` | Speaker diarization (SpeakerKit primary, FluidAudio fallback) | Built locally via `npm run build:diarizer`. We own this code (`swift-sidecar/`). |
+| `llama-server` | Local LLM for the AI Summary tab (loopback HTTP, token-gated) | Build llama.cpp from source via `npm run build:llama`. Static + Metal. |
 
 ## Diarizer architecture
 
@@ -142,6 +144,25 @@ saucebunny-diarize --input audio.wav --output turns.json --backend speakerkit|fl
 
 This lets us swap backends without touching Rust or JS. The Swift sidecar is the abstraction boundary.
 
+## Voice dictation
+
+The Review composer's mic button turns speech into comment text, entirely on-device:
+
+```
+dictate_start ─► ffmpeg -f avfoundation -i :default → 16 kHz mono WAV
+              (registered in the JobRegistry under job_id; a detached
+               tokio task drains its output)
+dictate_stop  ─► JobRegistry::write_stdin(job_id, "q")   # graceful finalize
+              └► drain task: ffmpeg exits 0 → run ASR on the WAV
+                 (Parakeet if its model is present, else any Whisper model)
+              └► emit `dictate-done` { text, error, note }  → the composer
+```
+
+Key points:
+- **Capture is via ffmpeg, not the WebView's `getUserMedia`** (WKWebView's media-capture permission path is unreliable on this stack). `:default` selects the system default input — a bare `:0` would pick avfoundation device *index* 0 (often a capture card / virtual device).
+- **Graceful stop matters.** `dictate_stop` writes `q` to ffmpeg's stdin so it finalizes the WAV header; a `kill()`/SIGKILL would truncate it. `JobRegistry::write_stdin` exists for exactly this (it writes without removing the child, so the drain task still sees the clean exit). `cancel_job` (SIGKILL) is used only to discard a recording (e.g. the panel unmounts mid-record).
+- **Microphone permission** comes from `NSMicrophoneUsageDescription` in `src-tauri/Info.plist`, which the macOS bundler auto-merges into the generated plist (dev + `.dmg`). The ffmpeg child inherits the app's TCC grant. **Dev caveat:** a stale `tauri dev` binary (build-ID mismatch) or a denied TCC prompt makes capture fail — restart the dev build and allow the mic prompt when testing dictation.
+
 ## State management
 
 `App.tsx` owns most application state via `useState`. Preferences and history persist to `localStorage` under the `saucebunny.*` namespace:
@@ -157,7 +178,7 @@ A one-shot migration helper at app boot copies any leftover `clippull.*` keys to
 ## Build-ID handshake
 
 Both sides of the IPC carry a build-ID string:
-- `src-tauri/src/commands.rs` `BACKEND_BUILD_ID`
+- `src-tauri/src/commands/system.rs` `BACKEND_BUILD_ID`
 - `src/lib/build-id.ts` `EXPECTED_BACKEND_BUILD_ID`
 
 On launch, the frontend asks the backend for its ID and shows a red banner if they don't match. That's the unambiguous "you need to restart `npm run tauri dev`" signal — without it, mismatched Rust binaries would cause silent runtime mysteries.
@@ -166,10 +187,11 @@ Bump both whenever you change a Rust command's signature or add a new one.
 
 ## Roadmap
 
-The non-trivial items, roughly in priority order:
+Done since this list was written: the commands.rs split (r47 — `commands/{download,media,transcript,system}.rs`), the floating side-panel window (r44.B), typed errors via `AppError` (r50–51), generated TS bindings via ts-rs (r49), unit tests for the pure logic in CI (r86 — vitest + `cargo test --lib`). The `api.ts` wrapper experiment was retired in r86: the codebase calls `invoke()` directly, typed by the generated bindings.
 
-1. **Split `src-tauri/src/commands.rs`** into per-feature modules (`commands/yt_dlp.rs`, `commands/whisper.rs`, `commands/diarize.rs`, etc.) — the monolith is the single biggest barrier to drive-by contributions.
-2. **Migrate every `invoke()` call site through `src/lib/api.ts`** — the typed client wrapper landed in r40; existing direct calls are technical debt.
-3. **Real test harness** — cargo test for Rust unit tests, Playwright for UI smoke. Currently we rely on manual reproduction.
-4. **Float side panel to its own window** — Tauri 2 supports multi-window; the Transcript drawer would benefit (Premiere-style detach).
-5. **Linux / Windows builds** — macOS-first while we hit 1.0; cross-platform after.
+Remaining, roughly in priority order:
+
+1. **UI smoke harness** — unit tests cover the parsers/math; playback and the transcript pipeline are still verified manually. A Playwright (or tauri-driver) smoke run would close that gap.
+2. **First public release** — tagged v0.1.0 with a notarized .dmg (see DISTRIBUTION.md), plus an app-update story (tauri-plugin-updater) and a plan for yt-dlp staleness (YouTube breaks extractors faster than app releases ship).
+3. **Transcript render performance** — the karaoke highlight recomputes O(turns²) bookkeeping per playhead tick; fine for normal transcripts, measurable on multi-hour ones.
+4. **Linux / Windows builds** — macOS-first while we hit 1.0; cross-platform after.
