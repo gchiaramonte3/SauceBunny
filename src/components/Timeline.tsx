@@ -1,6 +1,12 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { AppStatus } from "../types";
 import { secondsToHms } from "../lib/timecode";
+import { filmstripCount, filmstripTimestamps } from "../lib/filmstrip";
+import { extractFilmstrip } from "../lib/mediabunny-helpers";
+
+/** Scrub-track height (px) when a filmstrip is shown — matches
+ *  `.cp-track.has-filmstrip` in transport.css; also sizes the decoded thumbs. */
+const FILMSTRIP_H = 44;
 
 /**
  * Single queued clip's range — rendered as a muted band on the track so
@@ -28,15 +34,21 @@ type Props = {
   /** Review comment markers (seconds) — Frame.io-style dots on the track,
    *  tinted to the reviewer's colour, expanding to their initials on hover. */
   commentMarkers?: { id: string; time: number; resolved: boolean; color: string; initials: string }[];
+  /** Local file path to build the thumbnail filmstrip from (mediabunny-decoded).
+   *  null for web/streaming sources or when there's no decodable local file. */
+  filmstripPath?: string | null;
   onSeek: (f: number) => void;
 };
 
 export function Timeline({
   status, durationFrames, playheadFrames, inFrames, outFrames, fps,
-  queuedRanges, commentMarkers, onSeek,
+  queuedRanges, commentMarkers, filmstripPath, onSeek,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [trackW, setTrackW] = useState(0);
+  const [filmstrip, setFilmstrip] = useState<(string | null)[]>([]);
+  const filmCacheRef = useRef<Map<string, (string | null)[]>>(new Map());
   const dim = status === "empty" || status === "fetching" || status === "error";
 
   const seekFromX = useCallback((clientX: number) => {
@@ -81,6 +93,48 @@ export function Timeline({
     };
   }, [dragging, seekFromX]);
 
+  // Measure the track width so the filmstrip picks a sensible thumbnail count.
+  // Bucketed to 24px so a stray 1px resize doesn't re-decode the whole strip.
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      setTrackW((prev) => (Math.abs(prev - w) >= 24 ? Math.round(w) : prev));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Build the thumbnail filmstrip from the local file (mediabunny, one pass).
+  // Depends on source/duration/width — NOT the playhead — so scrubbing never
+  // re-decodes. Cached per source+count; aborted on source/size change.
+  useEffect(() => {
+    const path = filmstripPath ?? null;
+    const durSec = fps > 0 ? durationFrames / fps : 0;
+    const count = filmstripCount(trackW);
+    if (dim || !path || durSec <= 0 || count <= 0) { setFilmstrip([]); return; }
+
+    const key = `${path}|${count}`;
+    const cached = filmCacheRef.current.get(key);
+    if (cached) { setFilmstrip(cached); return; }
+
+    const ctrl = new AbortController();
+    let alive = true;
+    void (async () => {
+      const ts = filmstripTimestamps(durSec, count);
+      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+      const strip = await extractFilmstrip(path, ts, {
+        height: Math.round(FILMSTRIP_H * dpr),
+        signal: ctrl.signal,
+      });
+      if (!alive || ctrl.signal.aborted) return;
+      if (strip.length > 0) filmCacheRef.current.set(key, strip);
+      setFilmstrip(strip);
+    })();
+    return () => { alive = false; ctrl.abort(); };
+  }, [filmstripPath, durationFrames, fps, trackW, dim]);
+
   const pct = (f: number) => durationFrames > 0 ? (f / durationFrames) * 100 : 0;
   const ticks = Array.from({ length: 11 }, (_, i) => i);
 
@@ -104,10 +158,21 @@ export function Timeline({
         })}
       </div>
       <div
-        className={"cp-track" + (dragging ? " dragging" : "")}
+        className={"cp-track" + (dragging ? " dragging" : "") + (filmstrip.length > 0 ? " has-filmstrip" : "")}
         ref={trackRef}
         onMouseDown={onMouseDown}
       >
+        {/* Thumbnail filmstrip — lowest layer; the fill above becomes a scrim so
+            the playhead + marks stay legible over the frames. */}
+        {filmstrip.length > 0 && (
+          <div className="cp-filmstrip" aria-hidden>
+            {filmstrip.map((u, i) => (
+              <div className="cp-filmstrip-cell" key={i}>
+                {u && <img src={u} alt="" draggable={false} />}
+              </div>
+            ))}
+          </div>
+        )}
         <div className="cp-track-fill" />
         {!dim && (
           <>

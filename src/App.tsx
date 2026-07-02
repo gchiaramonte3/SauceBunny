@@ -3464,6 +3464,7 @@ export default function App() {
                 status: c.status,
               }))}
               commentMarkers={reviewMarkers}
+              filmstripPath={sourceKind === "file" ? (playbackPath ?? localFilePath) : null}
               onSeek={onSeek}
             />
             {/* Status line under the timeline. Stays present so setting or

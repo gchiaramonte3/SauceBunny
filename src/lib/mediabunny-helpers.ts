@@ -97,3 +97,53 @@ export async function canMediabunnyDecode(localPath: string): Promise<boolean> {
     void input.dispose();
   }
 }
+
+/**
+ * Decode a strip of thumbnail frames from a local file for the timeline
+ * filmstrip scrubber. One `CanvasSink` + `canvasesAtTimestamps` decodes the
+ * whole (sorted) set in a single optimized pass — each packet at most once —
+ * far cheaper than N `getCanvas` calls or N `ffmpeg -ss` spawns. Rotation is
+ * applied from file metadata by the sink, so phone-shot verticals come out
+ * upright. Works on any codec mediabunny can decode here (now incl. ProRes via
+ * the registered decoder).
+ *
+ * Returns a JPEG data URL per input timestamp (index-aligned), `null` for a
+ * timestamp with no frame, or `[]` when mediabunny can't decode the file (the
+ * caller then just shows no filmstrip). Honours `signal` so an in-flight strip
+ * is abandoned when the source or track width changes.
+ */
+export async function extractFilmstrip(
+  localPath: string,
+  timestamps: number[],
+  opts?: { height?: number; quality?: number; signal?: AbortSignal },
+): Promise<(string | null)[]> {
+  if (timestamps.length === 0) return [];
+  const url = convertFileSrc(localPath);
+  const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
+  const out: (string | null)[] = [];
+  try {
+    const vt = await input.getPrimaryVideoTrack();
+    if (!vt || !(await vt.canDecode())) return [];
+    const height = Math.max(16, Math.round(opts?.height ?? 88));
+    const quality = opts?.quality ?? 0.68;
+    const sink = new CanvasSink(vt, { height, poolSize: 2 });
+    const tmp = document.createElement("canvas");
+    const ctx = tmp.getContext("2d");
+    if (!ctx) return [];
+    for await (const wrapped of sink.canvasesAtTimestamps(timestamps)) {
+      if (opts?.signal?.aborted) break;
+      if (!wrapped) { out.push(null); continue; }
+      const c = wrapped.canvas;
+      // Copy each pooled canvas out synchronously before the iterator reuses it.
+      tmp.width = c.width;
+      tmp.height = c.height;
+      ctx.drawImage(c as CanvasImageSource, 0, 0);
+      out.push(tmp.toDataURL("image/jpeg", quality));
+    }
+    return out;
+  } catch {
+    return out; // a partial strip on a mid-decode failure is fine
+  } finally {
+    void input.dispose();
+  }
+}
