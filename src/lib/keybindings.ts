@@ -17,6 +17,7 @@ export type KeyActionId =
   | "play.frameBack" | "play.frameFwd" | "play.secondBack" | "play.secondFwd"
   | "play.toStart" | "play.toEnd"
   | "mark.in" | "mark.out" | "mark.clear" | "mark.gotoIn" | "mark.gotoOut"
+  | "review.rangeIn" | "review.rangeOut"
   | "src.fetch" | "export.clip" | "queue.add" | "queue.toggle"
   | "view.logs" | "app.settings" | "app.palette";
 
@@ -39,8 +40,11 @@ export type KeyAction = {
 /** Order here drives both the editor layout and combo-map precedence. */
 export const KEY_ACTIONS: KeyAction[] = [
   { id: "play.toggle",     label: "Play / pause",          group: "Transport", defaults: ["space", "k"],            global: false },
-  { id: "play.back5",      label: "Back 5 seconds",        group: "Transport", defaults: ["j"],                     global: false },
-  { id: "play.fwd5",       label: "Forward 5 seconds",     group: "Transport", defaults: ["l"],                     global: false },
+  // NLE J-K-L transport (the ids keep their historical "back5"/"fwd5" names so
+  // stored user bindings survive; each press walks the 1-2-4-8× shuttle ladder,
+  // and with K held it frame-steps instead — see lib/shuttle.ts).
+  { id: "play.back5",      label: "Shuttle / step back (J)",    group: "Transport", defaults: ["j"],                global: false },
+  { id: "play.fwd5",       label: "Shuttle / step forward (L)", group: "Transport", defaults: ["l"],                global: false },
   { id: "play.frameBack",  label: "Step 1 frame back",     group: "Transport", defaults: [",", "left"],             global: false },
   { id: "play.frameFwd",   label: "Step 1 frame forward",  group: "Transport", defaults: [".", "right"],            global: false },
   { id: "play.secondBack", label: "Step 1 second back",    group: "Transport", defaults: ["shift+left", "shift+,"], global: false },
@@ -52,6 +56,11 @@ export const KEY_ACTIONS: KeyAction[] = [
   { id: "mark.clear",      label: "Clear marks",           group: "Marking",   defaults: ["g"],                     global: false },
   { id: "mark.gotoIn",     label: "Go to mark in",         group: "Marking",   defaults: ["q"],                     global: false },
   { id: "mark.gotoOut",    label: "Go to mark out",        group: "Marking",   defaults: ["w"],                     global: false },
+  // Review comment-range marks — the ⇧-flavored twins of I/O. Bare I/O set the
+  // orange clip-export marks; these set the reviewer-tinted span the NEXT
+  // review comment attaches to. Only live while the Review tab is in front.
+  { id: "review.rangeIn",  label: "Comment range: mark in",  group: "Marking", defaults: ["shift+i"],               global: false },
+  { id: "review.rangeOut", label: "Comment range: mark out", group: "Marking", defaults: ["shift+o"],               global: false },
   { id: "src.fetch",       label: "Fetch URL",             group: "Source & export", defaults: ["mod+enter"],       global: true },
   { id: "export.clip",     label: "Export clip",           group: "Source & export", defaults: ["alt+e"],           global: false },
   { id: "queue.add",       label: "Add selection to queue",group: "Source & export", defaults: ["mod+shift+a"],     global: true },

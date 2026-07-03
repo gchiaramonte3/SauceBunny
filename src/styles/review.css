@@ -31,15 +31,27 @@
 }
 .cp-review-whoami:hover { opacity: 1; box-shadow: 0 0 0 2px rgba(255,255,255,0.18); }
 
-/* Toolbar */
+/* Toolbar. flex-wrap: at narrow panel widths the right-hand cluster drops to
+   its own row instead of pushing the last controls (the whoami avatar) past
+   the panel edge, where they were clipped. */
 .cp-review-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
   padding: 8px 12px;
 }
-.cp-review-toolbar-right { display: flex; align-items: center; gap: 6px; }
+.cp-review-toolbar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  /* Stays right-aligned when the toolbar wraps it onto its own row. */
+  margin-left: auto;
+}
 /* Inline SVG glyphs inside flex buttons must not shrink. */
 .cp-review-glyph { flex-shrink: 0; }
 
@@ -48,8 +60,8 @@
   display: inline-flex;
   gap: 2px;
   background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
   padding: 2px;
 }
 .cp-review-filter button {
@@ -63,7 +75,7 @@
   font-size: 11px;
   font-weight: 600;
   padding: 3px 8px;
-  border-radius: 5px;
+  border-radius: 6px;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
@@ -85,18 +97,19 @@
   width: 26px;
   height: 26px;
   background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.10);
+  border: 1px solid var(--line-2);
   border-radius: 6px;
   color: var(--fg-3);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.cp-review-iconbtn:hover { background: rgba(255,255,255,0.09); color: var(--fg-1); }
+.cp-review-iconbtn:hover:not(:disabled) { background: rgba(255,255,255,0.09); color: var(--fg-1); }
 .cp-review-iconbtn.active {
   background: rgba(var(--accent-rgb), 0.16);
   border-color: rgba(var(--accent-rgb), 0.4);
   color: var(--accent);
 }
+.cp-review-iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Search bar (revealed by the magnifier). */
 .cp-review-search {
@@ -107,7 +120,7 @@
   padding: 0 10px;
   height: 30px;
   background: var(--bg-0, #0c0c0e);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
   color: var(--fg-4);
 }
@@ -125,36 +138,24 @@
 .cp-review-search-clear {
   border: none;
   background: transparent;
-  color: var(--fg-4);
+  color: var(--fg-3);
   font-size: 12px;
   cursor: pointer;
   padding: 2px;
 }
 .cp-review-search-clear:hover { color: var(--fg-1); }
+/* Export — the trigger is a shared .cp-review-iconbtn; this wrapper anchors
+   the dropdown menu to it. */
 .cp-review-export { position: relative; }
-.cp-review-export-btn {
-  height: 26px;
-  padding: 0 10px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 6px;
-  color: var(--fg-2);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.cp-review-export-btn:hover:not(:disabled) { background: rgba(255,255,255,0.09); color: var(--fg-1); }
-.cp-review-export-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .cp-review-export-menu {
   position: absolute;
   right: 0;
   top: calc(100% + 4px);
   z-index: 20;
   background: #1a1a1d;
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-card);
   padding: 4px;
   min-width: 180px;
   display: flex;
@@ -181,9 +182,9 @@
   top: calc(100% + 4px);
   z-index: 20;
   background: #1a1a1d;
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-card);
   padding: 4px;
   width: 280px;
   max-height: 320px;
@@ -229,12 +230,30 @@
   width: 24px;
   border: none;
   background: transparent;
-  color: var(--fg-4);
+  color: var(--fg-3);
   font-size: 11px;
   cursor: pointer;
   border-radius: 6px;
 }
 .cp-review-history-del:hover { background: rgba(255,138,138,0.14); color: #ff8a8a; }
+/* Bulk clear — a quiet text row pinned under the list, danger-tinted on hover
+   (same treatment as the per-row ✕). Only rendered when the list is non-empty. */
+.cp-review-history-clear {
+  margin-top: 2px;
+  padding: 6px 9px;
+  border: none;
+  border-top: 1px solid var(--line-2);
+  border-radius: 0 0 6px 6px;
+  background: transparent;
+  text-align: left;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-4);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.cp-review-history-clear:hover { background: rgba(255,138,138,0.14); color: #ff8a8a; }
 .cp-review-export-msg {
   padding: 6px 14px;
   font-family: var(--font-ui);
@@ -245,7 +264,7 @@
   height: 26px;
   padding: 0 8px;
   background: var(--bg-0, #0c0c0e);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--line-2);
   border-radius: 6px;
   color: var(--fg-2);
   font-family: var(--font-ui);
@@ -265,7 +284,7 @@
 .cp-review-hint { color: var(--fg-4); font-family: var(--font-ui); font-size: 12px; padding: 14px 6px; }
 
 .cp-review-comment {
-  border: 1px solid rgba(255,255,255,0.07);
+  border: 1px solid var(--line-2);
   border-radius: 11px;
   padding: 11px 12px;
   background: rgba(255,255,255,0.02);
@@ -273,13 +292,18 @@
 }
 .cp-review-comment.resolved { opacity: 0.5; }
 
-/* Avatar chip (initials on a per-name colour) — Frame.io-style identity. */
+/* Avatar chip (initials on a per-name colour) — Frame.io-style identity.
+   The hairline border + shadow lift it off dark toolbar chrome so it reads
+   as a chip (it used to vanish into the background at small sizes). */
 .cp-review-avatar {
   flex-shrink: 0;
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.35);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.45);
   color: #1a1410;
   font-family: var(--font-ui);
   font-weight: 800;
@@ -309,6 +333,17 @@
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .cp-review-actions button:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); }
+/* Like toggle — same quiet action style, plus the thumb glyph + count.
+   Liked-by-me = accent + a slightly bolder thumb. */
+.cp-review-actions .cp-review-like { display: inline-flex; align-items: center; gap: 4px; }
+.cp-review-actions .cp-review-like .cp-review-like-n {
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  font-weight: 700;
+}
+.cp-review-actions .cp-review-like.liked { color: var(--accent); }
+.cp-review-actions .cp-review-like.liked:hover { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
+.cp-review-actions .cp-review-like.liked .cp-review-glyph { stroke-width: 2.6; }
 
 /* Timecode chip row (blue marker pill + clock glyph, like the reference). */
 .cp-review-chiprow { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
@@ -323,7 +358,7 @@
   color: #6db3ff;
   background: rgba(77,171,247,0.14);
   border: none;
-  border-radius: 5px;
+  border-radius: 6px;
   padding: 2px 8px;
   cursor: pointer;
 }
@@ -347,13 +382,64 @@
 }
 .cp-review-replylink:hover { color: var(--fg-1); }
 
-/* Threaded replies — avatar + stacked name/time/body. */
-.cp-review-reply { display: flex; gap: 8px; margin: 8px 0 0 10px; }
-.cp-review-reply-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+/* Threaded replies (Reddit-style) — the reply block sits behind a thin
+   clickable thread-line that collapses/expands the whole thread. */
+.cp-review-thread-block { display: flex; margin-top: 4px; }
+/* The thread-line: a 2px vertical rule painted inside a wider button so the
+   click target has ~10px of slack (padding; background-clip keeps the paint
+   to the 2px content column). */
+.cp-review-thread {
+  flex-shrink: 0;
+  align-self: stretch;
+  width: 12px;
+  padding: 0 5px;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  background: rgba(255,255,255,0.10);
+  background-clip: content-box;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.cp-review-thread:hover { background: rgba(255,255,255,0.25); background-clip: content-box; }
+.cp-review-thread-replies { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* Collapsed thread — the one-line "▸ N replies" row (click to expand). */
+.cp-review-collapsed {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-4);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.cp-review-collapsed:hover { color: var(--fg-1); }
+/* One reply — avatar + stacked name/time/body (left indent now comes from the
+   thread-line button, not a margin). */
+.cp-review-reply { display: flex; gap: 8px; margin: 8px 0 0; }
+.cp-review-reply-main { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.cp-review-reply-head { display: flex; align-items: center; gap: 9px; }
 .cp-review-reply-main .cp-review-author { font-size: 11.5px; }
 .cp-review-reply-main .cp-review-body { margin-top: 2px; font-size: 12px; color: var(--fg-2); }
+/* Reply actions (Like / Edit / ×) are hover-quiet: invisible until the reply
+   is hovered or focused, same quiet style as the comment-header actions. The
+   fade is per-button (not on the cluster) so a liked reply's like button can
+   stay visible at a glance while its siblings keep hiding. */
+.cp-review-reply .cp-review-actions button { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
+.cp-review-reply:hover .cp-review-actions button,
+.cp-review-reply:focus-within .cp-review-actions button,
+.cp-review-reply .cp-review-actions .cp-review-like.has-likes { opacity: 1; }
 .cp-review-reply-input { margin: 8px 0 0 28px; display: flex; gap: 6px; }
 .cp-review-reply-input input { flex: 1; }
+/* The emoji tool inside the reply input / reply edit rows shrinks to the
+   28px input height (the composer's 34px square would overpower the row). */
+.cp-review-reply-input .cp-review-tool,
+.cp-review-edit .cp-review-tool { width: 28px; height: 28px; border-radius: 8px; }
 
 /* First-run name prompt — a panel-anchored modal shown before the first note. */
 .cp-review-namegate {
@@ -377,7 +463,7 @@
   max-width: 260px;
   padding: 22px 20px;
   background: #161619;
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--line-2);
   border-radius: 14px;
   box-shadow: 0 18px 50px rgba(0,0,0,0.55);
 }
@@ -401,7 +487,7 @@
   margin-top: 4px;
   padding: 0 12px;
   background: var(--bg-0, #0c0c0e);
-  border: 1px solid rgba(255,255,255,0.14);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
   color: var(--fg-1);
   font-family: var(--font-ui);
@@ -436,8 +522,8 @@
   height: 28px;
   padding: 0 10px;
   background: var(--bg-0, #0c0c0e);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 12px;
@@ -447,24 +533,36 @@
 }
 
 /* Composer — tool buttons sit at the bottom so they stay aligned as the
-   textarea grows. */
+   textarea grows. Single row (no wrap): the input takes the slack and the
+   tool/Post buttons keep their intrinsic width at any panel width. */
 .cp-review-composer {
+  position: relative; /* anchor the height drag handle */
   display: flex;
   align-items: flex-end;
+  flex-wrap: nowrap;
   gap: 8px;
   padding: 10px 12px;
-  border-top: 1px solid rgba(255,255,255,0.06);
+  border-top: 1px solid var(--line-1);
   background: linear-gradient(180deg, rgba(255,255,255,0.015), transparent);
+}
+.cp-review-composer .btn { flex-shrink: 0; }
+/* Composer height handle — placement only; visuals come from
+   .cp-resize-handle (resize.css). Straddles the composer's top hairline. */
+.cp-review-vresize {
+  left: 0;
+  right: 0;
+  top: -5px;
+  --rail-inset: 4px;
 }
 /* Expandable comment textarea — JS autosizes the height up to max-height. */
 .cp-review-input {
   flex: 1;
-  min-width: 0;
+  min-width: 120px;
   min-height: 34px;
   max-height: 140px;
   padding: 7px 10px;
   background: var(--bg-0, #0c0c0e);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
   color: var(--fg-1);
   font-family: var(--font-ui);
@@ -474,6 +572,56 @@
   overflow-y: auto;
 }
 .cp-review-input:focus { outline: none; border-color: var(--accent); }
+/* Placeholder truncates with an ellipsis instead of wrapping/clipping when the
+   panel is narrow (typed text still wraps normally). */
+.cp-review-input::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Comment range bar — reviewer-tinted pill above the composer, shown while a
+   comment range (in→out) is being set. Deliberately unlike the orange clip
+   in/out: it carries the reviewer's --marker-color. */
+.cp-review-rangebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--line-1);
+  font-size: 12px;
+}
+.cp-review-range-pill {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--marker-color, var(--accent));
+  background: color-mix(in srgb, var(--marker-color, var(--accent)) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--marker-color, var(--accent)) 45%, transparent);
+}
+.cp-review-range-arrow { opacity: 0.65; }
+.cp-review-range-pill .cp-review-glyph { opacity: 0.8; }
+/* The endpoint that still follows the playhead (not yet marked). */
+.cp-review-range-pill .live { opacity: 0.55; font-style: italic; }
+.cp-review-range-hint { flex: 1; min-width: 0; color: var(--fg-4); }
+.cp-review-range-x {
+  flex-shrink: 0;
+  width: 19px; height: 19px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 6px;
+  background: rgba(255,255,255,0.06);
+  color: var(--fg-3);
+  font-size: 14px; line-height: 1; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.cp-review-range-x:hover { background: rgba(255,255,255,0.12); color: var(--fg-1); }
+/* Range timecode chip in a comment row — tabular figures so in–out aligns. */
+.cp-review-tc.range { font-variant-numeric: tabular-nums; }
 
 /* Composer tool buttons (draw, mic) — square icon buttons. */
 .cp-review-tool {
@@ -484,7 +632,7 @@
   justify-content: center;
   color: var(--fg-3);
   background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
@@ -506,6 +654,115 @@
   0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.0); }
   50% { box-shadow: 0 0 0 4px rgba(255, 107, 107, 0.22); }
 }
+
+/* Emoji picker — fixed popover anchored above the composer's emoji tool, so it
+   escapes the panel's overflow clipping. Emojis render as native Apple Color
+   Emoji on macOS; no font dependency. */
+.cp-emoji-pop {
+  position: fixed;
+  z-index: 4500;
+  width: 324px;
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card), var(--shadow-inset-hair);
+  overflow: hidden;
+  transform-origin: bottom left;
+  animation: cp-emoji-in var(--dur-base) var(--ease-out);
+}
+@keyframes cp-emoji-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* Search head — an inset rounded field (clones the panel search bar's
+   pattern), NOT a bare strip: the wrapper carries the border + focus ring
+   so the borderless inner input never shows the global green focus box. */
+.cp-emoji-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 8px 6px;
+  height: 30px;
+  flex-shrink: 0; /* the overflowing emoji body must not squish the field */
+  padding: 0 10px;
+  background: var(--bg-0, #0c0c0e);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  color: var(--fg-4);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.cp-emoji-head:focus-within { border-color: rgba(255,255,255,0.35); color: var(--fg-2); }
+.cp-emoji-searchicon { color: var(--fg-4); flex-shrink: 0; }
+.cp-emoji-search {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+.cp-emoji-search::placeholder { color: var(--fg-4); }
+/* The rounded wrappers above carry the focus treatment — kill the global
+   green focus-visible box (base.css) on these borderless inner inputs. */
+.cp-emoji-search:focus-visible,
+.cp-review-search input:focus-visible { box-shadow: none; }
+.cp-emoji-body {
+  overflow-y: auto;
+  padding: 2px 6px 8px;
+  scrollbar-width: thin;
+}
+.cp-emoji-sect { margin-top: 2px; }
+.cp-emoji-label {
+  position: sticky;
+  top: 0;
+  margin: 0;
+  padding: 8px 6px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  background: var(--bg-3);
+}
+.cp-emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 1px;
+}
+.cp-emoji-cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  transition: background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.cp-emoji-cell:hover { background: rgba(255,255,255,0.10); transform: scale(1.18); }
+.cp-emoji-cell:active { transform: scale(0.95); }
+.cp-emoji-empty {
+  padding: 26px 12px;
+  text-align: center;
+  color: var(--fg-4);
+  font-size: 12.5px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-emoji-pop { animation: none; }
+  .cp-emoji-cell { transition: background var(--dur-fast) var(--ease-out); }
+  .cp-emoji-cell:hover { transform: none; }
+  .cp-emoji-cell:active { transform: none; }
+}
+
 .cp-review-drawhint {
   padding: 7px 14px;
   font-family: var(--font-ui);
@@ -564,7 +821,7 @@
   color: var(--accent);
   background: rgba(var(--accent-rgb), 0.12);
   border: none;
-  border-radius: 5px;
+  border-radius: 6px;
   padding: 3px 6px;
   cursor: pointer;
 }

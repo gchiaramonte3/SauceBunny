@@ -38,6 +38,9 @@ export type ReviewComment = {
   createdAt: number;
   updatedAt: number;
   annotation: AnnotationStrokes | null;
+  /** Reviewer names who liked this note. Optional so docs persisted before
+   *  likes existed parse unchanged (absent = no likes). */
+  likes?: string[];
 };
 
 export type ReviewVersion = {
@@ -78,7 +81,16 @@ export function emptyDoc(sourceKey: string): ReviewDoc {
 }
 
 export function loadReview(sourceKey: string): ReviewDoc {
-  return loadJson<ReviewDoc>(reviewKey(sourceKey), emptyDoc(sourceKey));
+  return ensureCommentIds(loadJson<ReviewDoc>(reviewKey(sourceKey), emptyDoc(sourceKey)));
+}
+
+/** Backward-compatible read repair: assign an id to any persisted comment that
+ *  lacks one (docs written before ids were guaranteed on replies), so ops that
+ *  address replies by id (editReply/removeReply) always have a stable handle.
+ *  Returns the doc untouched (same reference) when nothing needs repair. */
+export function ensureCommentIds(doc: ReviewDoc): ReviewDoc {
+  if (doc.comments.every((c) => !!c.id)) return doc;
+  return { ...doc, comments: doc.comments.map((c) => (c.id ? c : { ...c, id: newId() })) };
 }
 
 /** Fired after any review mutation so other views (e.g. the timeline markers)
@@ -181,6 +193,12 @@ export function removeReviewHistory(key: string): void {
   saveJson(HISTORY_KEY, loadJson<ReviewHistoryEntry[]>(HISTORY_KEY, []).filter((e) => e.key !== key));
 }
 
+/** Drop the whole past-reviews list in one go. History entries are only
+ *  pointers (key/title/path) — clearing them never deletes the review docs. */
+export function clearReviewHistory(): void {
+  saveJson(HISTORY_KEY, []);
+}
+
 // ── comments ─────────────────────────────────────────────────────────────────
 
 export type NewComment = {
@@ -222,6 +240,49 @@ export function deleteComment(doc: ReviewDoc, id: string): ReviewDoc {
   return {
     ...doc,
     comments: doc.comments.filter((c) => c.id !== id && c.parentId !== id),
+  };
+}
+
+/** Edit a reply's body. The reply is addressed through its full path
+ *  (version → parent comment → reply) so a stale/foreign id can't edit the
+ *  wrong note; any mismatch is a no-op (returns the doc unchanged). */
+export function editReply(
+  doc: ReviewDoc, versionId: string, commentId: string, replyId: string, newBody: string, now = Date.now(),
+): ReviewDoc {
+  const match = (c: ReviewComment) =>
+    c.id === replyId && c.parentId === commentId && c.versionId === versionId;
+  if (!doc.comments.some(match)) return doc;
+  return {
+    ...doc,
+    comments: doc.comments.map((c) => (match(c) ? { ...c, body: newBody, updatedAt: now } : c)),
+  };
+}
+
+/** Delete a single reply (parity with deleteComment for roots). Addressed by
+ *  full path like editReply; unknown ids are a no-op. */
+export function removeReply(
+  doc: ReviewDoc, versionId: string, commentId: string, replyId: string,
+): ReviewDoc {
+  const match = (c: ReviewComment) =>
+    c.id === replyId && c.parentId === commentId && c.versionId === versionId;
+  if (!doc.comments.some(match)) return doc;
+  return { ...doc, comments: doc.comments.filter((c) => !match(c)) };
+}
+
+/** Toggle `name` in a comment's likes. Roots and replies both live in the
+ *  flat comments array, so one op covers both. The name is trimmed; an empty
+ *  name or unknown id is a no-op (returns the doc unchanged). Deliberately
+ *  does NOT bump updatedAt — someone else's like isn't an edit of the note. */
+export function toggleLike(doc: ReviewDoc, commentId: string, name: string): ReviewDoc {
+  const who = name.trim();
+  if (!who || !doc.comments.some((c) => c.id === commentId)) return doc;
+  return {
+    ...doc,
+    comments: doc.comments.map((c) => {
+      if (c.id !== commentId) return c;
+      const likes = c.likes ?? [];
+      return { ...c, likes: likes.includes(who) ? likes.filter((n) => n !== who) : [...likes, who] };
+    }),
   };
 }
 
@@ -271,10 +332,10 @@ export function sortComments(list: ReviewComment[], sort: CommentSort): ReviewCo
  *  author so the dot can be tinted to that reviewer's colour + show initials. */
 export function commentMarkers(
   doc: ReviewDoc, versionId: string | null,
-): { id: string; time: number; resolved: boolean; author: string }[] {
+): { id: string; time: number; timeEnd: number | null; resolved: boolean; author: string }[] {
   return doc.comments
     .filter((c) => c.versionId === versionId && c.parentId === null)
-    .map((c) => ({ id: c.id, time: c.timeStart, resolved: c.resolved, author: c.author }));
+    .map((c) => ({ id: c.id, time: c.timeStart, timeEnd: c.timeEnd, resolved: c.resolved, author: c.author }));
 }
 
 // ── reviewer identity (name + avatar colour) ─────────────────────────────────
@@ -285,8 +346,10 @@ export function commentMarkers(
 export const AUTHOR_KEY = "saucebunny.review.author";
 export const AUTHOR_COLOR_KEY = "saucebunny.review.authorColor";
 
-/** Palette for avatar colours + the name-modal colour picker. */
-export const AVATAR_COLORS = ["#f5a623", "#7b61ff", "#2dd4bf", "#ff6b6b", "#4dabf7", "#e879f9", "#34d399", "#fb7185"];
+/** Palette for avatar colours + the name-modal colour picker. Index 0 is the
+ *  first-run default, so it leads with the panel's blue (#4dabf7 — the same
+ *  hue as the timecode chips); pink/magenta sit at the end of the list. */
+export const AVATAR_COLORS = ["#4dabf7", "#f5a623", "#7b61ff", "#2dd4bf", "#ff6b6b", "#34d399", "#e879f9", "#fb7185"];
 
 /** Stable per-name avatar colour (each person gets a consistent hue). */
 export function avatarColor(name: string): string {
@@ -303,10 +366,12 @@ export function initialsOf(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/** The current local reviewer (name + chosen colour) from localStorage. */
+/** The current local reviewer (name + chosen colour) from localStorage.
+ *  A first-run (unnamed) reviewer defaults to AVATAR_COLORS[0] (blue) rather
+ *  than a hash of a placeholder name, which used to land on pink. */
 export function loadReviewer(): { name: string; color: string } {
   const name = loadJson<string>(AUTHOR_KEY, "");
-  return { name, color: loadJson<string>(AUTHOR_COLOR_KEY, avatarColor(name || "You")) };
+  return { name, color: loadJson<string>(AUTHOR_COLOR_KEY, name ? avatarColor(name) : AVATAR_COLORS[0]) };
 }
 
 /** Resolve an author's avatar colour: the current reviewer's chosen colour for
