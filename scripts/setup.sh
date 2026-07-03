@@ -34,6 +34,9 @@ if have whisper-cli; then echo "already present — skipping (rebuild: npm run b
 step "saucebunny-diarize (Swift sidecar)"
 if have saucebunny-diarize; then echo "already present — skipping (rebuild: npm run build:diarizer)"; else bash scripts/build-diarizer.sh; fi
 
+step "saucebunny-dictate (Swift sidecar — on-device voice dictation)"
+if have saucebunny-dictate; then echo "already present — skipping (rebuild: npm run build:dictate)"; else bash scripts/build-dictate.sh; fi
+
 step "llama-server (compiles llama.cpp — a few minutes; powers the AI Summary tab)"
 if have llama-server; then echo "already present — skipping (rebuild: npm run build:llama)"; else bash scripts/build-llama.sh; fi
 

@@ -382,8 +382,10 @@ fn srt_to_text(srt: &str) -> String {
     parts.join(" ").trim().to_string()
 }
 
-/// Run whisper-cli on a WAV → `<srt_base>.srt`. Minimal flags (no VAD) —
-/// dictation clips are short. Registered under `job_id` so Stop cancels it.
+/// Run whisper-cli on a WAV → `<srt_base>.srt`. Greedy decode (`-bs 1 -bo 1`,
+/// no VAD) — for a one-or-two-sentence dictation clip a 5-beam search just burns
+/// ~5× the decode time for no accuracy gain on clean speech. Registered under
+/// `job_id` so Stop cancels it.
 async fn run_whisper_dictation(
     app: &AppHandle, job_id: &str, wav: &std::path::Path, srt_base: &str, model: &std::path::Path,
 ) -> Result<(), crate::AppError> {
@@ -396,7 +398,7 @@ async fn run_whisper_dictation(
             "-m", &model.to_string_lossy(),
             "-f", &wav.to_string_lossy(),
             "-osrt", "-of", srt_base,
-            "-l", "en", "-bs", "5", "-bo", "5",
+            "-l", "en", "-bs", "1", "-bo", "1",
         ])
         .spawn()
         .map_err(|e| format!("whisper-cli failed to spawn: {e}"))?;
@@ -608,6 +610,105 @@ pub async fn dictate_start(app: AppHandle, job_id: String, device: Option<String
 #[tauri::command]
 pub fn dictate_stop(registry: State<'_, JobRegistry>, job_id: String) -> bool {
     registry.write_stdin(&job_id, b"q")
+}
+
+/// Live interim transcript emitted while the user is still speaking (native
+/// path only). The composer replaces its in-progress dictation text with this
+/// on every event, so words appear in real time.
+#[derive(Serialize, Clone, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub(crate) struct DictatePartialEvent {
+    pub(crate) job_id: String,
+    pub(crate) text: String,
+}
+
+/// Native, on-device, LIVE-streaming dictation via the `saucebunny-dictate`
+/// Swift sidecar (Apple Speech / SFSpeechRecognizer). Unlike `dictate_start`
+/// (ffmpeg record → batch Whisper/Parakeet after stop), this streams partial
+/// transcripts as you speak: it emits `dictate-level` (waveform), repeated
+/// `dictate-partial` (interim text), and a final `dictate-done`. Stop it with
+/// the shared `dictate_stop` (it writes a stdin byte the sidecar reads as stop).
+#[tauri::command]
+pub async fn dictate_native_start(app: AppHandle, job_id: String, locale: Option<String>) -> Result<(), crate::AppError> {
+    let loc = locale.unwrap_or_else(|| "en-US".to_string());
+    let cmd = app
+        .shell()
+        .sidecar("saucebunny-dictate")
+        .map_err(|e| format!("saucebunny-dictate sidecar not found: {e}"))?;
+    let (mut rx, child) = cmd
+        .args([loc.as_str()])
+        .spawn()
+        .map_err(|e| format!("saucebunny-dictate failed to spawn: {e}"))?;
+    app.state::<JobRegistry>().insert(job_id.clone(), child);
+
+    let app2 = app.clone();
+    let job2 = job_id.clone();
+    tokio::spawn(async move {
+        let mut last_level = std::time::Instant::now();
+        let mut done = false; // a terminal dictate-done was already emitted
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stdout(b) => {
+                    let chunk = String::from_utf8_lossy(&b);
+                    for line in chunk.lines() {
+                        let line = line.trim();
+                        if line.is_empty() { continue; }
+                        let v: serde_json::Value = match serde_json::from_str(line) {
+                            Ok(v) => v,
+                            Err(_) => continue, // not a protocol line
+                        };
+                        if let Some(level) = v.get("level").and_then(|x| x.as_f64()) {
+                            if last_level.elapsed().as_millis() >= 50 {
+                                last_level = std::time::Instant::now();
+                                let _ = app2.emit("dictate-level", DictateLevelEvent { job_id: job2.clone(), level });
+                            }
+                            continue;
+                        }
+                        if let Some(msg) = v.get("error").and_then(|x| x.as_str()) {
+                            done = true;
+                            let _ = app2.emit("dictate-done", DictateDoneEvent {
+                                job_id: job2.clone(), success: false, text: None,
+                                error: Some(msg.to_string()), note: None,
+                            });
+                            continue;
+                        }
+                        if let Some(text) = v.get("partial").and_then(|x| x.as_str()) {
+                            if v.get("final").and_then(|x| x.as_bool()).unwrap_or(false) {
+                                done = true;
+                                let _ = app2.emit("dictate-done", DictateDoneEvent {
+                                    job_id: job2.clone(), success: true, text: Some(text.to_string()),
+                                    error: None, note: None,
+                                });
+                            } else {
+                                let _ = app2.emit("dictate-partial", DictatePartialEvent {
+                                    job_id: job2.clone(), text: text.to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+                CommandEvent::Terminated(payload) => {
+                    let _ = app2.state::<JobRegistry>().take(&job2);
+                    if !done {
+                        // Exited without a final/error line: SIGKILL (cancel) vs a
+                        // crash/no-speech finish.
+                        let (success, error) = if payload.signal.is_some() {
+                            (false, "Cancelled".to_string())
+                        } else {
+                            (false, "I didn't catch any words. Try again.".to_string())
+                        };
+                        let _ = app2.emit("dictate-done", DictateDoneEvent {
+                            job_id: job2.clone(), success, text: None, error: Some(error), note: None,
+                        });
+                    }
+                    break;
+                }
+                _ => {} // stderr / other — ignored; the protocol is on stdout
+            }
+        }
+    });
+
+    Ok(())
 }
 
 #[tauri::command]
