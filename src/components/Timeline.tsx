@@ -32,17 +32,28 @@ type Props = {
   /** Ranges already in the queue (or completed) — drawn under the active selection. */
   queuedRanges?: TimelineRange[];
   /** Review comment markers (seconds) — Frame.io-style dots on the track,
-   *  tinted to the reviewer's colour, expanding to their initials on hover. */
-  commentMarkers?: { id: string; time: number; resolved: boolean; color: string; initials: string }[];
+   *  tinted to the reviewer's colour, expanding to their initials on hover.
+   *  When `timeEnd` is set the marker also draws a reviewer-tinted RANGE bar in
+   *  the comment lane — deliberately unlike the orange clip in/out selection. */
+  commentMarkers?: { id: string; time: number; timeEnd?: number | null; resolved: boolean; color: string; initials: string }[];
+  /** Live preview of the range being set in the review composer — a dashed,
+   *  pulsing reviewer-tinted bracket so it reads as "setting a comment range",
+   *  distinct from both the orange clip marks and the saved comment ranges.
+   *  `live` = an end still follows the playhead; false = both marks locked
+   *  (renders solid with a one-shot flash). */
+  reviewRangeDraft?: { start: number; end: number; color: string; live: boolean } | null;
   /** Local file path to build the thumbnail filmstrip from (mediabunny-decoded).
    *  null for web/streaming sources or when there's no decodable local file. */
   filmstripPath?: string | null;
+  /** Speaker lanes from the diarized transcript — a thin strip of tinted
+   *  bands along the bottom of the track showing who talks when. */
+  speakerLanes?: { startMs: number; endMs: number; color: string; speaker: string | null }[];
   onSeek: (f: number) => void;
 };
 
 export function Timeline({
   status, durationFrames, playheadFrames, inFrames, outFrames, fps,
-  queuedRanges, commentMarkers, filmstripPath, onSeek,
+  queuedRanges, commentMarkers, reviewRangeDraft, filmstripPath, speakerLanes, onSeek,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -76,8 +87,29 @@ export function Timeline({
 
   useEffect(() => {
     if (!dragging) return;
-    function onMove(e: MouseEvent) { seekFromX(e.clientX); }
-    function onUp() { setDragging(false); }
+    // rAF-coalesce drag seeks: at most ONE seek per display frame. Raw
+    // mousemove can fire far faster than a decode completes, and the player's
+    // latest-wins guard then drops every in-flight frame — which is why
+    // fast-decoding all-intra sources (ProRes) looked like they skipped frames
+    // while scrubbing. One seek per vsync gives each decode a frame's worth of
+    // time to land, so the scrub shows every frame the display can show.
+    let rafId = 0;
+    let pendingX: number | null = null;
+    function onMove(e: MouseEvent) {
+      pendingX = e.clientX;
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        if (pendingX != null) seekFromX(pendingX);
+      });
+    }
+    function onUp(e: MouseEvent) {
+      // Land exactly where the pointer was released, then stop.
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = 0;
+      seekFromX(e.clientX);
+      setDragging(false);
+    }
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") setDragging(false); }
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -88,6 +120,7 @@ export function Timeline({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
       window.removeEventListener("keydown", onKey);
+      if (rafId) cancelAnimationFrame(rafId);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
@@ -173,6 +206,24 @@ export function Timeline({
             ))}
           </div>
         )}
+        {/* Speaker lanes — who talks when, as tinted bands hugging the bottom
+            edge. Pointer-events off in CSS so clicks still seek the track. */}
+        {speakerLanes && speakerLanes.length > 0 && !dim && (
+          <div className="cp-track-lanes" aria-hidden>
+            {speakerLanes.map((lane, i) => {
+              const r = Math.max(1, Math.round(fps));
+              const left = pct((lane.startMs / 1000) * r);
+              const width = Math.max(0, pct(((lane.endMs - lane.startMs) / 1000) * r));
+              return (
+                <div
+                  key={i}
+                  style={{ left: `${left}%`, width: `${width}%`, background: lane.color }}
+                  title={lane.speaker ?? "Unknown"}
+                />
+              );
+            })}
+          </div>
+        )}
         <div className="cp-track-fill" />
         {!dim && (
           <>
@@ -211,6 +262,37 @@ export function Timeline({
             {outFrames != null && inFrames == null && (
               <div className="cp-track-mark out" style={{ left: `${pct(outFrames)}%` }} title="Mark out" />
             )}
+            {/* Review comment RANGES — a thin reviewer-tinted bar with bracket
+                caps in the comment lane. Deliberately unlike the orange clip
+                selection: it sits low on the track and carries the note's
+                colour. Drawn before the dots so the anchor dot reads on top. */}
+            {commentMarkers?.map((m) => {
+              const r = Math.max(1, Math.round(fps));
+              if (m.timeEnd == null || m.timeEnd <= m.time) return null;
+              return (
+                <div
+                  key={"rng-" + m.id}
+                  className={"cp-track-comment-range" + (m.resolved ? " resolved" : "")}
+                  style={{ left: `${pct(m.time * r)}%`, width: `${Math.max(0.4, pct((m.timeEnd - m.time) * r))}%`, ["--marker-color" as string]: m.color }}
+                  title="Review range — click to jump to its start"
+                  onMouseDown={(e) => { e.stopPropagation(); onSeek(Math.floor(m.time * r)); }}
+                />
+              );
+            })}
+            {/* Live preview of the range being set in the composer — dashed +
+                pulsing so it reads as "setting", not a saved range. */}
+            {reviewRangeDraft && (() => {
+              const r = Math.max(1, Math.round(fps));
+              const a = Math.min(reviewRangeDraft.start, reviewRangeDraft.end) * r;
+              const b = Math.max(reviewRangeDraft.start, reviewRangeDraft.end) * r;
+              return (
+                <div
+                  className={"cp-track-range-draft" + (reviewRangeDraft.live ? "" : " locked")}
+                  style={{ left: `${pct(a)}%`, width: `${Math.max(0.4, pct(b - a))}%`, ["--marker-color" as string]: reviewRangeDraft.color }}
+                  title="New comment range"
+                />
+              );
+            })()}
             {/* Review comment markers — click a dot to jump to that note. */}
             {commentMarkers?.map((m) => {
               const r = Math.max(1, Math.round(fps));

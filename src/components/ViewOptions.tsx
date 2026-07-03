@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { IconAspect, IconFullscreen, IconFullscreenExit } from "./Icons";
+import { IconAspect, IconFullscreen, IconFullscreenExit, IconInfo } from "./Icons";
 import type { AspectId } from "./Monitor";
 
 type Props = {
   aspect: AspectId;
   onAspectChange: (a: AspectId) => void;
+  /** Opens the media-info inspector. Only provided when a local source
+   *  file is loaded — omitted, the button doesn't render. */
+  onShowMediaInfo?: () => void;
 };
 
 const ASPECTS: { id: AspectId; label: string; subtitle: string }[] = [
@@ -16,7 +19,7 @@ const ASPECTS: { id: AspectId; label: string; subtitle: string }[] = [
   { id: "2.39", label: "2.39 : 1",  subtitle: "anamorphic / cinemascope" },
 ];
 
-export function ViewOptions({ aspect, onAspectChange }: Props) {
+export function ViewOptions({ aspect, onAspectChange, onShowMediaInfo }: Props) {
   const [open, setOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -79,6 +82,16 @@ export function ViewOptions({ aspect, onAspectChange }: Props) {
 
   return (
     <div className="cp-view-options" ref={ref}>
+      {onShowMediaInfo && (
+        <button
+          type="button"
+          className="cp-view-trigger icon-only"
+          onClick={onShowMediaInfo}
+          title="Media info"
+        >
+          <IconInfo size={13} />
+        </button>
+      )}
       <button
         type="button"
         className={"cp-view-trigger" + (open ? " active" : "")}

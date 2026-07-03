@@ -34,8 +34,8 @@
   font-variant-numeric: tabular-nums;
   padding: 5px 9px;
   background: rgba(0,0,0,0.4);
-  border-radius: 5px;
-  border: 1px solid rgba(255,255,255,0.04);
+  border-radius: 6px;
+  border: 1px solid var(--line-1);
   min-width: 108px;
   text-align: center;
   user-select: none;
@@ -50,9 +50,9 @@
 .cp-transport-btn {
   width: 34px;
   height: 34px;
-  border-radius: 7px;
+  border-radius: 8px;
   background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--line-2);
   color: var(--fg-2);
   display: flex;
   align-items: center;
@@ -61,18 +61,18 @@
   padding: 0;
   transition: all var(--dur-fast) var(--ease-out);
 }
-.cp-transport-btn:hover { background: rgba(255,255,255,0.07); color: var(--fg-1); border-color: rgba(255,255,255,0.1); }
+.cp-transport-btn:hover { background: rgba(255,255,255,0.07); color: var(--fg-1); border-color: var(--line-3); }
 .cp-transport-btn.play {
   width: 46px;
   height: 36px;
   background: rgba(255,255,255,0.07);
-  border-color: rgba(255,255,255,0.1);
+  border-color: var(--line-2);
 }
 .cp-transport-btn.play.active {
   background: var(--accent);
   color: #0A0A0D;
   border-color: transparent;
-  box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.35);
+  box-shadow: 0 0 7px rgba(var(--accent-rgb), 0.18);
 }
 .cp-transport-btn:active { transform: scale(0.96); }
 
@@ -83,8 +83,8 @@
   gap: 2px;
   padding: 2px;
   background: rgba(0,0,0,0.3);
-  border: 1px solid rgba(255,255,255,0.05);
-  border-radius: 7px;
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
 }
 .cp-icon-btn {
   width: 30px;
@@ -92,7 +92,7 @@
   background: transparent;
   border: none;
   color: var(--fg-3);
-  border-radius: 5px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -111,7 +111,7 @@
   width: 32px;
   height: 30px;
   background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.05);
+  border: 1px solid var(--line-1);
 }
 .cp-icon-btn.cc:hover,
 .cp-icon-btn.snapshot:hover { background: rgba(255,255,255,0.06); }
@@ -131,14 +131,17 @@
 .cp-icon-divider {
   width: 1px;
   height: 18px;
-  background: rgba(255,255,255,0.08);
+  background: var(--line-1);
 }
 
 /* Timeline */
 .cp-timeline {
   margin-top: 14px;
   position: relative;
-  height: 44px;
+  /* Content-sized: the scrub track doubles to 44px when the filmstrip is
+     present, and a fixed 44px container made it overflow onto the hint text
+     below (text ghosting through the thumbnails). */
+  height: auto;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -177,13 +180,16 @@
   position: relative;
   height: 22px;
   background: #0A0A0D;
-  border: 1px solid rgba(255,255,255,0.05);
+  border: 1px solid var(--line-1);
   border-radius: 4px;
   margin-top: 2px;
   cursor: pointer;
 }
 .cp-track.dragging { cursor: grabbing; }
-.cp-track.dragging .cp-playhead { box-shadow: 0 0 10px rgba(255,255,255,0.6); }
+/* While scrubbing: a crisp white ring outside the dark halo — no blur. */
+.cp-track.dragging .cp-playhead {
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.55), 0 0 0 2px rgba(255,255,255,0.35);
+}
 .cp-track-fill {
   position: absolute;
   top: 0; bottom: 0; left: 0; right: 0;
@@ -219,62 +225,110 @@
 .cp-track.has-filmstrip .cp-track-fill {
   background: linear-gradient(180deg, rgba(0,0,0,0.04), rgba(0,0,0,0.30));
 }
+/* Speaker lanes — thin diarization strip hugging the bottom of the track:
+   one speaker-tinted band per turn, so "who talks when" reads at a glance.
+   `pointer-events:none` so clicks pass through to the scrub track. */
+.cp-track-lanes {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 5px;
+  z-index: 1;
+  pointer-events: none;
+}
+.cp-track-lanes > div {
+  position: absolute;
+  top: 0; bottom: 0;
+  border-radius: 2px;
+  opacity: 0.85;
+}
 .cp-track-selection {
   position: absolute;
-  top: -1px; bottom: -1px;
-  background: rgba(var(--marker-rgb), 0.18);
+  /* Pixel-tight: the band lives exactly inside the track — no bleed above
+     or below the filmstrip. */
+  top: 0; bottom: 0;
+  /* Liquid-glass fill: the film INSIDE the selection lifts (brighter, more
+     saturated) instead of hiding under a muddy tint — the selected section
+     reads like it's behind polished glass. */
+  background: rgba(var(--marker-rgb), 0.14);
+  backdrop-filter: brightness(1.3) saturate(1.4);
+  -webkit-backdrop-filter: brightness(1.3) saturate(1.4);
   border-left: 2px solid var(--marker);
   border-right: 2px solid var(--marker);
-  box-shadow: inset 0 0 0 1px rgba(var(--marker-rgb), 0.3);
+  /* Crisp inner highlight along the glass edges, no blur. */
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -1px 0 rgba(255,255,255,0.14);
   z-index: 2;
 }
-/* Already-queued ranges — drawn underneath the active orange selection so
-   the user can see at a glance which sections they've already added to the
-   queue (or completed) and not pick them again. Neutral gray, no glow. */
+/* Already-queued ranges — the section visibly RECEDES: the film beneath goes
+   dark + desaturated (backdrop-filter) under a scrim + faint hatching, with
+   bright edge posts. The old 10%-white wash was invisible over a filmstrip.
+   New bands pulse twice on arrival so "Add to queue" has obvious feedback. */
 .cp-track-queued {
   position: absolute;
   top: 0; bottom: 0;
-  background: rgba(255,255,255,0.10);
-  border-left: 1px solid rgba(255,255,255,0.28);
-  border-right: 1px solid rgba(255,255,255,0.28);
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(255,255,255,0.05) 0,
+      rgba(255,255,255,0.05) 6px,
+      transparent 6px,
+      transparent 12px
+    ),
+    rgba(8, 8, 10, 0.38);
+  backdrop-filter: grayscale(0.9) brightness(0.45);
+  -webkit-backdrop-filter: grayscale(0.9) brightness(0.45);
+  border-left: 1px solid rgba(255,255,255,0.55);
+  border-right: 1px solid rgba(255,255,255,0.55);
   z-index: 1;
-  /* Subtle diagonal stripe pattern so overlapping bands are visually distinct
-     from a single contiguous one. */
-  background-image: repeating-linear-gradient(
-    45deg,
-    rgba(255,255,255,0.04) 0,
-    rgba(255,255,255,0.04) 6px,
-    transparent 6px,
-    transparent 12px
-  );
+  animation: cp-queued-in 1.2s var(--ease-out) 1;
 }
 .cp-track-queued.done {
-  background: rgba(80,200,120,0.10);
-  border-color: rgba(80,200,120,0.30);
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(108,255,141,0.06) 0,
+      rgba(108,255,141,0.06) 6px,
+      transparent 6px,
+      transparent 12px
+    ),
+    rgba(8, 20, 12, 0.38);
+  border-color: rgba(108,255,141,0.55);
 }
 .cp-track-queued.running {
-  /* While exporting, give the band a soft pulse so the user can spot which
-     section is currently being processed. */
-  background: rgba(var(--marker-rgb), 0.12);
-  border-color: rgba(var(--marker-rgb), 0.45);
+  /* While exporting, tint with the marker colour + soft pulse so the user
+     can spot which section is currently being processed. */
+  background: rgba(var(--marker-rgb), 0.16);
+  border-color: rgba(var(--marker-rgb), 0.6);
   animation: cp-queued-pulse 1.6s ease-in-out infinite;
 }
 .cp-track-queued.error {
-  background: rgba(232,38,38,0.10);
-  border-color: rgba(232,38,38,0.35);
+  background: rgba(232,38,38,0.14);
+  border-color: rgba(232,38,38,0.55);
 }
 @keyframes cp-queued-pulse {
   0%, 100% { opacity: 0.6; }
   50%      { opacity: 1.0; }
 }
-/* Solo mark line — drawn when only one of in/out has been set. */
+/* Two quick pulses on mount, then settle solid. */
+@keyframes cp-queued-in {
+  0%   { opacity: 0.15; }
+  25%  { opacity: 1; }
+  50%  { opacity: 0.35; }
+  75%  { opacity: 1; }
+  100% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-track-queued { animation: none; }
+}
+/* Solo mark line — drawn when only one of in/out has been set. Pixel-tight
+   inside the track; a crisp 1px dark outline (not a glow) keeps it readable
+   over bright filmstrip frames. */
 .cp-track-mark {
   position: absolute;
-  top: -2px; bottom: -2px;
+  top: 0; bottom: 0;
   width: 2px;
   margin-left: -1px;
   background: var(--marker);
-  box-shadow: 0 0 8px rgba(var(--marker-rgb), 0.55);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.55);
 }
 /* Review comment markers — Frame.io-style dots on the track, tinted to the
    reviewer's colour (--marker-color). They sit centred on their timecode and
@@ -285,8 +339,12 @@
   width: 11px; height: 11px;
   border-radius: 999px;
   background: var(--marker-color, var(--accent));
-  border: 1.5px solid var(--bg-1, #131316);
+  border: 1px solid var(--bg-1, #131316);
   box-shadow: 0 0 6px color-mix(in srgb, var(--marker-color, var(--accent)) 60%, transparent);
+  /* Grow/shrink glides instead of snapping (hover expands 11 → 26px). */
+  transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+              height 220ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 180ms ease-out;
   color: #1a1410;
   cursor: pointer;
   pointer-events: auto;
@@ -315,27 +373,122 @@
 .cp-track-comment:hover {
   width: 26px; height: 26px;
   z-index: 6;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.45), 0 0 0 2px var(--bg-1, #131316);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45), 0 0 0 1px var(--bg-1, #131316);
 }
 .cp-track-comment:hover .cp-track-comment-ini { font-size: 10px; opacity: 1; }
 .cp-track-comment.resolved { opacity: 0.45; filter: saturate(0.6); }
 .cp-track-comment.resolved:hover { opacity: 1; filter: none; }
+
+/* Review comment RANGE (timeStart→timeEnd) — a reviewer-tinted band hugging
+   the bottom of the track. The tint paints OVER a near-black scrim so the band
+   reads as one deep, solid colour even on busy filmstrip thumbnails; the in/out
+   edge lines are exactly the band's height — tight, contained, no bleed. */
+.cp-track-comment-range {
+  position: absolute;
+  bottom: 2px;
+  height: 9px;
+  border-radius: 2px;
+  overflow: hidden; /* nothing paints outside the band */
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--marker-color, var(--accent)) 55%, transparent),
+      color-mix(in srgb, var(--marker-color, var(--accent)) 55%, transparent)
+    ),
+    rgba(0, 0, 0, 0.55);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--marker-color, var(--accent)) 80%, transparent);
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 2;
+  transition: background 140ms ease-out, box-shadow 140ms ease-out;
+}
+.cp-track-comment-range::before,
+.cp-track-comment-range::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 2px;
+  background: var(--marker-color, var(--accent));
+}
+.cp-track-comment-range::before { left: 0; }
+.cp-track-comment-range::after  { right: 0; }
+.cp-track-comment-range:hover {
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--marker-color, var(--accent)) 72%, transparent),
+      color-mix(in srgb, var(--marker-color, var(--accent)) 72%, transparent)
+    ),
+    rgba(0, 0, 0, 0.55);
+  box-shadow: inset 0 0 0 1px var(--marker-color, var(--accent)),
+              0 0 10px color-mix(in srgb, var(--marker-color, var(--accent)) 45%, transparent);
+}
+.cp-track-comment-range.resolved { opacity: 0.4; filter: saturate(0.6); }
+.cp-track-comment-range.resolved:hover { opacity: 1; filter: none; }
+
+/* Live preview of the range being set — same lane + geometry as a saved range
+   so nothing jumps on post. Dashed + pulsing while an end still follows the
+   playhead; `.locked` (both marks set) goes solid with a one-shot flash. */
+.cp-track-range-draft {
+  position: absolute;
+  bottom: 2px;
+  height: 9px;
+  border-radius: 2px;
+  border: 1px dashed var(--marker-color, var(--accent));
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--marker-color, var(--accent)) 34%, transparent),
+      color-mix(in srgb, var(--marker-color, var(--accent)) 34%, transparent)
+    ),
+    rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  z-index: 5;
+  animation: cp-range-pulse 1.2s ease-in-out infinite;
+}
+.cp-track-range-draft::before,
+.cp-track-range-draft::after {
+  content: "";
+  position: absolute;
+  top: -1px; bottom: -1px; /* border-box: lands exactly on the band's 9px, no bleed */
+  width: 2px;
+  background: var(--marker-color, var(--accent));
+}
+.cp-track-range-draft::before { left: -1px; }
+.cp-track-range-draft::after  { right: -1px; }
+.cp-track-range-draft.locked {
+  border-style: solid;
+  animation: cp-range-lock 420ms var(--ease-out) 1;
+}
+@keyframes cp-range-pulse {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
+}
+@keyframes cp-range-lock {
+  0%   { box-shadow: 0 0 0 4px color-mix(in srgb, var(--marker-color, var(--accent)) 35%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-track-range-draft, .cp-track-range-draft.locked { animation: none; opacity: 0.9; }
+}
 .cp-playhead {
   position: absolute;
-  top: -4px; bottom: -4px;
+  /* Pixel-perfect against the track: the line spans EXACTLY track top →
+     track bottom (no ±4px bleed), so over a filmstrip the triangle's top
+     edge sits on the strip's first pixel row and the line's last pixel is
+     the strip's last row. */
+  top: 0; bottom: 0;
   width: 1px;
   background: var(--fg-1);
-  /* Clickable so the triangle is also a drag handle; the ::before pseudo
-     expands the hit area above the track. */
+  /* Clickable so the triangle is also a drag handle; the ::after pseudo
+     expands the hit area around it. */
   pointer-events: auto;
   cursor: grab;
-  box-shadow: 0 0 6px rgba(255,255,255,0.4);
+  /* Crisp 1px dark halo (not a glow) so the white line reads over bright film. */
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.55);
 }
 .cp-playhead:active { cursor: grabbing; }
 .cp-playhead::before {
   content: '';
   position: absolute;
-  top: -5px;
+  top: 0;
   left: 50%;
   transform: translateX(-50%);
   width: 12px; height: 12px;
@@ -348,11 +501,11 @@
 .cp-playhead::after {
   content: '';
   position: absolute;
-  top: -8px;
+  top: -6px;
   left: 50%;
   transform: translateX(-50%);
   width: 22px;
-  height: 18px;
+  height: 22px;
 }
 .cp-track.dragging .cp-playhead { cursor: grabbing; }
 

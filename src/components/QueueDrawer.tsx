@@ -10,13 +10,20 @@ import { AiSummary, type SummaryStyle } from "./AiSummary";
 import { ReviewPanel } from "./ReviewPanel";
 import type { AnnotationStrokes } from "../lib/review";
 import type { TranscriptHistoryEntry } from "../lib/transcript-history";
+import {
+  type TabId, loadActiveTab, saveActiveTab, loadTabOrder, saveTabOrder,
+} from "../lib/tab-state";
 
 /**
  * Tab system for the right-docked panel. Adding a new tab is one row
- * in the TABS array + one body case below. We deliberately avoid
- * shipping "Soon" placeholder tabs (UI bloat).
+ * in the TABS array + one body case below (ids live in lib/tab-state).
+ * We deliberately avoid shipping "Soon" placeholder tabs (UI bloat).
+ *
+ * Tab STATE (active tab + order) persists via lib/tab-state, which is what
+ * keeps the docked drawer and the floating panel window in step: exactly one
+ * drawer is mounted at a time, so restoring persisted state on mount carries
+ * the user's tab across pop-out / re-dock / relaunch.
  */
-type TabId = "queue" | "transcript" | "ai" | "review";
 type TabDef = {
   id: TabId;
   label: string;
@@ -94,6 +101,17 @@ type Props = {
   onShowAnnotation?: (a: AnnotationStrokes | null) => void;
   /** Re-open a past-review source (local path or URL) from the history popover. */
   onOpenReviewSource?: (path: string) => void;
+  /** Live review-comment range being set → previewed on the App's timeline.
+   *  `live` = an end still follows the playhead; false = both marks locked. */
+  onReviewRangeDraft?: (r: { start: number; end: number; color: string; live: boolean } | null) => void;
+  /** ReviewPanel registers its ⇧I/⇧O range-mark handlers with App through
+   *  this (null on unmount) — see App's review-range keyboard dispatch. */
+  onRegisterRangeHotkeys?: (h: { markIn: () => void; markOut: () => void } | null) => void;
+  /** Rename one queued clip (double-click its name). Docked drawer only for
+   *  now — the floating panel's action bus doesn't carry these yet. */
+  onRenameClip?: (id: string, name: string) => void;
+  /** Bulk rename: every QUEUED item becomes base-1..N in queue order. */
+  onRenameAll?: (base: string) => void;
   /**
    * Pop the drawer out into its own native OS window (r44.B). When
    * undefined, the pop-out button doesn't render — the floating window
@@ -124,13 +142,21 @@ function statusLabel(s: QueuedClip["status"]): string {
 // drawer owns the resize gesture and the width is purely presentation
 // state (nothing else in the app cares how wide it is).
 const DRAWER_WIDTH_KEY = "saucebunny.queueDrawerWidth";
-const TAB_ORDER_KEY    = "saucebunny.queueDrawerTabOrder";
-const DRAWER_WIDTH_MIN = 280;
+// Floor raised 280 → 320 so the Review tab's toolbar (filter + icon cluster +
+// avatar) and composer row always have room to lay out without clipping.
+// Stored widths are deliberately NOT cleared/migrated — returning users keep
+// their chosen width; loadDrawerWidth only clamps a stored value below the
+// new floor up to it on read.
+const DRAWER_WIDTH_MIN = 320;
 const DRAWER_WIDTH_MAX = 720;
-// Wide enough that the transcript toolbar's primary actions + the Tools menu
-// fit without clipping, and the AI Summary reads comfortably. Users can still
-// drag-resize (persisted) or double-click the handle to reset to this.
+// First-run default (no stored value). Wide enough that the transcript
+// toolbar's primary actions + the Tools menu fit without clipping, the Review
+// toolbar stays on one row, and the AI Summary reads comfortably. Users can
+// still drag-resize (persisted) or double-click the handle to reset to this.
 const DRAWER_WIDTH_DEFAULT = 440;
+// Width at which the Review tab's toolbar (filter segments + icon cluster +
+// avatar) fits on one row; below it the toolbar wraps onto two lines.
+const REVIEW_COMFORT_WIDTH = 520;
 
 function loadDrawerWidth(): number {
   try {
@@ -154,7 +180,8 @@ export function QueueDrawer({
   aiModelId, aiStyle, onOpenAiSettings,
   reviewSourceKey, reviewSourceTitle,
   reviewDrawActive, reviewDraft, onToggleReviewDraw, onReviewDraftConsumed, onShowAnnotation,
-  onOpenReviewSource,
+  onOpenReviewSource, onReviewRangeDraft, onRegisterRangeHotkeys,
+  onRenameClip, onRenameAll,
   onPopOut, embedded = false,
 }: Props) {
   const counts = queue.reduce(
@@ -168,11 +195,14 @@ export function QueueDrawer({
   // a body-class so global cursors and pointer-events apply uniformly
   // (without that, hovering over an <iframe> would interrupt the drag).
   const [drawerWidth, setDrawerWidth] = useState<number>(loadDrawerWidth);
+  // Drives the shared handle's `.dragging` bright state (resize.css).
+  const [resizing, setResizing] = useState(false);
   const dragStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const onResizeMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     dragStateRef.current = { startX: e.clientX, startWidth: drawerWidth };
-    document.body.classList.add("cp-resizing-drawer");
+    setResizing(true);
+    document.body.classList.add("cp-resizing-ew");
     function onMove(ev: MouseEvent) {
       const st = dragStateRef.current;
       if (!st) return;
@@ -188,7 +218,8 @@ export function QueueDrawer({
     function onUp() {
       const st = dragStateRef.current;
       dragStateRef.current = null;
-      document.body.classList.remove("cp-resizing-drawer");
+      setResizing(false);
+      document.body.classList.remove("cp-resizing-ew");
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
       // Commit to localStorage once on release rather than on every
@@ -208,11 +239,57 @@ export function QueueDrawer({
   const doneCount = counts.done ?? 0;
   const errorCount = counts.error ?? 0;
 
-  const [activeTab, setActiveTab] = useState<TabId>("queue");
-  // Seed with the MOUNT-TIME tick so a remount (re-dock after closing the
-  // pop-out panel) doesn't re-fire the auto-switch for a transcript that
+  // ── Renaming (double-click a queued row's name; bulk via the foot) ──
+  // Enter commits, Esc/blur cancels. Only "queued" items rename — a running/
+  // done item's file may already exist on disk under the old name.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameAllOpen, setRenameAllOpen] = useState(false);
+  const [renameAllBase, setRenameAllBase] = useState("");
+  const commitRename = (id: string) => {
+    if (renameDraft.trim()) onRenameClip?.(id, renameDraft);
+    setRenamingId(null);
+  };
+  const commitRenameAll = () => {
+    if (renameAllBase.trim()) onRenameAll?.(renameAllBase);
+    setRenameAllOpen(false);
+  };
+
+  // Restore the last active tab on mount (pop-out, re-dock, and relaunch all
+  // land on the tab the user was on) and write every change straight through.
+  const [activeTab, setActiveTab] = useState<TabId>(() => loadActiveTab());
+  useEffect(() => { saveActiveTab(activeTab); }, [activeTab]);
+  // Review-tab comfort width. Below ~520px the review toolbar wraps onto two
+  // rows (filters row + icons row), which reads as clutter. When the user
+  // SWITCHES to the Review tab in a narrower drawer, nudge the width up once
+  // through the normal setDrawerWidth path (the settle-effect above persists
+  // it, exactly like a drag). Deliberately a one-time nudge per switch — NOT a
+  // clamp — so a user who consciously re-narrows afterward isn't fought within
+  // the session. Skipped in embedded (floating-window) mode, where drawerWidth
+  // isn't applied and nudging would only mutate the docked drawer's persisted
+  // width invisibly.
+  const prevTabRef = useRef<TabId>(activeTab);
+  useEffect(() => {
+    const prev = prevTabRef.current;
+    prevTabRef.current = activeTab;
+    if (embedded || activeTab !== "review" || prev === "review") return;
+    setDrawerWidth((w) => (w < REVIEW_COMFORT_WIDTH ? REVIEW_COMFORT_WIDTH : w));
+  }, [activeTab, embedded]);
+  // Keep-alive: a tab body mounts on first visit and stays mounted (hidden)
+  // afterward, so per-tab state — transcript search + scroll, an in-progress
+  // AI chat, a running dictation in Review — survives tab switches. Lazy so
+  // never-visited tabs cost nothing at drawer mount.
+  const [visited, setVisited] = useState<ReadonlySet<TabId>>(() => new Set([activeTab]));
+  useEffect(() => {
+    setVisited((prev) => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
+  }, [activeTab]);
+  // Seed with the MOUNT-TIME tick so a remount (pop-out, or re-dock after
+  // closing the panel) doesn't re-fire the auto-switch for a transcript that
   // arrived long ago — only a NEW arrival (tick actually advancing while
-  // mounted) should yank the user to the Transcript tab.
+  // mounted) should yank the user to the Transcript tab. The tick reaches the
+  // floating panel through the panel-bus snapshot, so this one effect covers
+  // BOTH windows; the old embedded-only "switch once a transcript path exists"
+  // fallback is gone — it overrode the restored tab on every pop-out.
   const lastArrivedTickRef = useRef(transcriptArrivedTick);
   useEffect(() => {
     if (transcriptArrivedTick === lastArrivedTickRef.current) return;
@@ -225,17 +302,6 @@ export function QueueDrawer({
     if (activeTab !== "transcript") setActiveTab("transcript");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transcriptArrivedTick]);
-  // Popped-out window: the user popped this out to read the transcript, but
-  // arrivedTick doesn't change after pop-out, so the auto-switch above never
-  // fires and the window opens on the (often empty) Queue tab. Switch to the
-  // Transcript tab once a transcript path arrives over the panel bus.
-  const embeddedDidSwitch = useRef(false);
-  useEffect(() => {
-    if (embedded && transcriptPath && !embeddedDidSwitch.current) {
-      embeddedDidSwitch.current = true;
-      setActiveTab("transcript");
-    }
-  }, [embedded, transcriptPath]);
 
   const TABS: TabDef[] = [
     { id: "queue", label: "Queue", icon: IconStack, badge: queue.length },
@@ -246,30 +312,12 @@ export function QueueDrawer({
 
   // ── User-reorderable tab order ─────────────────────────────────
   // Drag a tab onto another to swap. Order persists per-machine via
-  // localStorage; new tabs added in future TABS rows automatically
-  // append to the end (we union the stored order with the current
-  // TABS list so a code-level addition can't be hidden by a stale
-  // localStorage entry).
-  const [tabOrder, setTabOrderState] = useState<TabId[]>(() => {
-    try {
-      const raw = localStorage.getItem(TAB_ORDER_KEY);
-      const stored: unknown = raw ? JSON.parse(raw) : null;
-      if (Array.isArray(stored)) {
-        const valid = stored.filter((x): x is TabId => x === "queue" || x === "transcript" || x === "ai" || x === "review");
-        const defaults: TabId[] = TABS.map((t) => t.id);
-        // Drop any stored ids that no longer exist + append any
-        // brand-new tab ids that weren't in storage.
-        const merged: TabId[] = [];
-        for (const id of valid)    if (defaults.includes(id) && !merged.includes(id)) merged.push(id);
-        for (const id of defaults) if (!merged.includes(id)) merged.push(id);
-        return merged;
-      }
-    } catch { /* fall through */ }
-    return TABS.map((t) => t.id);
-  });
+  // lib/tab-state (stale ids dropped, brand-new tab ids appended, so a
+  // code-level addition can't be hidden by an old localStorage entry).
+  const [tabOrder, setTabOrderState] = useState<TabId[]>(() => loadTabOrder(TABS.map((t) => t.id)));
   const setTabOrder = (next: TabId[]) => {
     setTabOrderState(next);
-    try { localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(next)); } catch { /* quota */ }
+    saveTabOrder(next);
   };
   // Render order = persisted order, with tab defs looked up by id so
   // a stale order entry can't show wrong props.
@@ -431,7 +479,7 @@ export function QueueDrawer({
           handle in that case). */}
       {open && !embedded && (
         <div
-          className="cp-queue-resize"
+          className={"cp-queue-resize cp-resize-handle vertical" + (resizing ? " dragging" : "")}
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize transcript panel"
@@ -520,15 +568,18 @@ export function QueueDrawer({
         </button>
       </div>
 
-      {/* Active-tab body. Add a case here when wiring a new tab. */}
-      {activeTab === "queue" && (
-        <>
+      {/* Active-tab bodies — keep-alive wrappers: `visited` gates the mount,
+          `hidden` gates visibility, and per-tick props (playhead) are gated to
+          the ACTIVE tab so hidden bodies do no karaoke/timecode work while
+          keeping all their internal state. Add a case here for a new tab. */}
+      {visited.has("queue") && (
+        <div className="cp-tab-keep" hidden={activeTab !== "queue"}>
         {/* === existing queue body kept untouched below === */}
 
       <div className="cp-queue-list">
         {queue.length === 0 ? (
           <div className="cp-queue-empty">
-            <IconStack size={28} stroke="var(--fg-5)" />
+            <IconStack size={28} stroke="var(--fg-4)" />
             <div className="cp-queue-empty-title">No clips queued</div>
             <div className="cp-queue-empty-body">
               Mark a section in the timeline, then click <strong>+ Add to queue</strong> in the sidebar.
@@ -537,8 +588,9 @@ export function QueueDrawer({
           </div>
         ) : queue.map((c, i) => {
           // Compact display — HH:MM:SS only (drop frames) so the meta line
-          // never wraps inside the 340px drawer.
-          const r = Math.max(1, Math.round(fps));
+          // never wraps inside the 340px drawer. Each item carries the fps it
+          // was marked at — the live player fps may belong to another source.
+          const r = Math.max(1, Math.round(c.fps));
           const inS  = c.inFrames  / r;
           const outS = c.outFrames / r;
           const durS = Math.max(0, outS - inS);
@@ -551,7 +603,32 @@ export function QueueDrawer({
               <div className="cp-queue-num">{i + 1}</div>
               <div className="cp-queue-body">
                 <div className="cp-queue-row">
-                  <div className="cp-queue-name" title={c.filename}>{c.filename}</div>
+                  {renamingId === c.id ? (
+                    <input
+                      className="cp-queue-rename"
+                      autoFocus
+                      value={renameDraft}
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitRename(c.id);
+                        if (e.key === "Escape") setRenamingId(null);
+                      }}
+                      onBlur={() => setRenamingId(null)}
+                      aria-label="Rename queued clip"
+                    />
+                  ) : (
+                    <div
+                      className="cp-queue-name"
+                      title={onRenameClip && c.status === "queued" ? `${c.filename} — double-click to rename` : c.filename}
+                      onDoubleClick={() => {
+                        if (!onRenameClip || c.status !== "queued") return;
+                        setRenameDraft(c.filename);
+                        setRenamingId(c.id);
+                      }}
+                    >
+                      {c.filename}
+                    </div>
+                  )}
                   <div className={"cp-queue-status " + c.status}>
                     {Icon ? <Icon size={11} /> : null}
                     <span>{statusLabel(c.status)}</span>
@@ -564,7 +641,9 @@ export function QueueDrawer({
                   <span className="sep">·</span>
                   <span className="dur">{dur}</span>
                   <span className="sep">·</span>
-                  <span className="fmt">{c.format === "audio" ? "MP3" : c.format.toUpperCase()}</span>
+                  {/* Local items export source-resolution MP4 — the web
+                      quality caps (4K/1080/720) don't apply, so say "MP4". */}
+                  <span className="fmt">{c.format === "audio" ? "MP3" : c.source.kind === "file" ? "MP4" : c.format.toUpperCase()}</span>
                 </div>
                 {c.status === "error" && c.error && (
                   <div className="cp-queue-error">{c.error}</div>
@@ -603,6 +682,24 @@ export function QueueDrawer({
             {errorCount > 0 && <span className="err">{errorCount} failed</span>}
           </div>
         )}
+        {renameAllOpen && (
+          <div className="cp-queue-renameall">
+            <input
+              autoFocus
+              value={renameAllBase}
+              onChange={(e) => setRenameAllBase(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRenameAll();
+                if (e.key === "Escape") setRenameAllOpen(false);
+              }}
+              placeholder={`Base name — queued clips become name-1 … name-${queuedCount}`}
+              aria-label="Bulk rename base"
+            />
+            <button className="btn btn-ghost" onClick={commitRenameAll} disabled={!renameAllBase.trim()}>
+              Apply
+            </button>
+          </div>
+        )}
         <div className="cp-queue-foot-row">
           <button
             className="btn btn-ghost"
@@ -611,6 +708,16 @@ export function QueueDrawer({
           >
             Clear all
           </button>
+          {onRenameAll && (
+            <button
+              className="btn btn-ghost"
+              onClick={() => { setRenameAllBase(""); setRenameAllOpen((o) => !o); }}
+              disabled={queuedCount === 0 || running}
+              title="Rename every queued clip to base-1 … base-N"
+            >
+              Rename…
+            </button>
+          )}
           {running ? (
             <button className="btn cp-queue-stop" onClick={onStop}>
               Stop
@@ -627,14 +734,18 @@ export function QueueDrawer({
           )}
         </div>
       </div>
-      </>
+        </div>
       )}
-      {activeTab === "transcript" && (
+      {visited.has("transcript") && (
+        <div className="cp-tab-keep" hidden={activeTab !== "transcript"}>
         <TranscriptViewer
           path={transcriptPath}
           /* Same-path overwrites (Regenerate / Fix-timing) re-read via the tick. */
           reloadToken={transcriptArrivedTick}
-          playheadSeconds={transcriptPlayhead}
+          /* Playhead only while ACTIVE — a hidden transcript's karaoke
+             highlight + autoscroll stay frozen (null), then snap to the
+             current position on the next tick after re-show. */
+          playheadSeconds={activeTab === "transcript" ? transcriptPlayhead : null}
           fps={transcriptFps}
           onSeek={onTranscriptSeek}
           origin={transcriptOrigin}
@@ -649,8 +760,10 @@ export function QueueDrawer({
           sourceKind={sourceKind}
           onFixCaptionTiming={onFixCaptionTiming}
         />
+        </div>
       )}
-      {activeTab === "ai" && (
+      {visited.has("ai") && (
+        <div className="cp-tab-keep" hidden={activeTab !== "ai"}>
         <AiSummary
           transcriptPath={transcriptPath}
           reloadToken={transcriptArrivedTick}
@@ -659,12 +772,15 @@ export function QueueDrawer({
           onOpenSettings={onOpenAiSettings}
           onSeek={onTranscriptSeek}
         />
+        </div>
       )}
-      {activeTab === "review" && (
+      {visited.has("review") && (
+        <div className="cp-tab-keep" hidden={activeTab !== "review"}>
         <ReviewPanel
           sourceKey={reviewSourceKey ?? null}
           sourceTitle={reviewSourceTitle}
-          currentSec={transcriptPlayhead}
+          /* Playhead only while ACTIVE — see the transcript note above. */
+          currentSec={activeTab === "review" ? transcriptPlayhead : null}
           fps={fps}
           onSeek={onTranscriptSeek}
           drawActive={!!reviewDrawActive}
@@ -673,7 +789,10 @@ export function QueueDrawer({
           onDraftConsumed={onReviewDraftConsumed}
           onShowAnnotation={onShowAnnotation}
           onOpenReview={onOpenReviewSource}
+          onRangeDraft={onReviewRangeDraft}
+          onRegisterRangeHotkeys={onRegisterRangeHotkeys}
         />
+        </div>
       )}
     </aside>
   );

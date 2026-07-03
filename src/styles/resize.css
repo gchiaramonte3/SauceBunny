@@ -1,0 +1,92 @@
+/* Shared drag-to-resize affordance — the app-wide handle design system. */
+/* ============================================================
+   RESIZE HANDLES
+   The element itself is a generous invisible hit zone (10px).
+   ::after paints a 2px neon rail whose ends feather to
+   transparent; ::before is a blurred halo twin of the same
+   gradient (a box-shadow can't feather with the paint — it
+   follows the box). Idle: invisible. Hover: soft. `.dragging`
+   (toggled by the owning component while the gesture is live):
+   full bright.
+
+   Instances position the element (top/bottom/left/right +
+   --rail-inset) and add `.dragging`; everything visual lives
+   here so every resize affordance in the app reads the same.
+   ============================================================ */
+.cp-resize-handle {
+  position: absolute;
+  z-index: 5;
+  background: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.cp-resize-handle::before,
+.cp-resize-handle::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  border-radius: 999px;
+  opacity: 0;
+  transition: opacity 140ms var(--ease-out);
+}
+
+/* Vertical rail — spans top↔bottom, drag changes a width. */
+.cp-resize-handle.vertical { width: 10px; cursor: ew-resize; }
+.cp-resize-handle.vertical::after {
+  top: 0; bottom: 0;
+  left: var(--rail-inset, 4px);
+  width: 2px;
+  background: linear-gradient(180deg,
+    transparent,
+    rgba(var(--accent-rgb), 0.95) 12%,
+    rgba(var(--accent-rgb), 0.95) 88%,
+    transparent);
+}
+.cp-resize-handle.vertical::before {
+  top: 0; bottom: 0;
+  left: calc(var(--rail-inset, 4px) - 3px);
+  width: 8px;
+  background: linear-gradient(180deg,
+    transparent,
+    rgba(var(--accent-rgb), 0.45) 16%,
+    rgba(var(--accent-rgb), 0.45) 84%,
+    transparent);
+  filter: blur(4px);
+}
+
+/* Horizontal rail — spans left↔right, drag changes a height. */
+.cp-resize-handle.horizontal { height: 10px; cursor: ns-resize; }
+.cp-resize-handle.horizontal::after {
+  left: 10px; right: 10px;
+  top: var(--rail-inset, 4px);
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(var(--accent-rgb), 0.95) 12%,
+    rgba(var(--accent-rgb), 0.95) 88%,
+    transparent);
+}
+.cp-resize-handle.horizontal::before {
+  left: 10px; right: 10px;
+  top: calc(var(--rail-inset, 4px) - 3px);
+  height: 8px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(var(--accent-rgb), 0.45) 16%,
+    rgba(var(--accent-rgb), 0.45) 84%,
+    transparent);
+  filter: blur(4px);
+}
+
+.cp-resize-handle:hover::after     { opacity: 0.55; }
+.cp-resize-handle:hover::before    { opacity: 0.4; }
+.cp-resize-handle.dragging::after  { opacity: 1; }
+.cp-resize-handle.dragging::before { opacity: 0.85; }
+
+/* Cursor lock + iframe passthrough while any resize drag is live —
+   without these, crossing an <iframe> (the web player) mid-drag
+   would swallow the mousemove stream and drop the gesture. */
+body.cp-resizing-ew { cursor: ew-resize !important; }
+body.cp-resizing-ns { cursor: ns-resize !important; }
+body.cp-resizing-ew iframe,
+body.cp-resizing-ns iframe { pointer-events: none; }

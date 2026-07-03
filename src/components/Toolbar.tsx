@@ -1,8 +1,10 @@
 import { useRef } from "react";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
-import { IconLink, IconClipboard, IconSettings, IconImport, IconPanelRight } from "./Icons";
+import { IconLink, IconClipboard, IconSettings, IconImport, IconPanelRight, IconPanelLeft } from "./Icons";
 import { NotificationBell, type Notif } from "./NotificationBell";
+import { CoReviewPopover } from "./CoReviewPopover";
 import type { AppStatus } from "../types";
+import type { SessionState } from "../bindings/SessionState";
 
 type Props = {
   url: string;
@@ -13,6 +15,10 @@ type Props = {
   onToggleQueue: () => void;
   queueCount: number;
   queueOpen: boolean;
+  /** Left source/export sidebar visibility — the toggle rides the sidebar's
+   *  right-edge line in the toolbar, mirroring the right panel's toggle. */
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
   hasSource: boolean;
   status: AppStatus;
   onOpenSettings: () => void;
@@ -20,6 +26,11 @@ type Props = {
   onMarkAllRead: () => void;
   onClearNotifications: () => void;
   onDismissNotification: (id: string) => void;
+  /** Co-review (P2P watch party) session state + controls. */
+  coSession: SessionState;
+  onCoStart: () => void;
+  onCoJoin: (ticket: string, name: string) => void;
+  onCoLeave: () => void;
 };
 
 function stripScheme(s: string): string {
@@ -28,8 +39,10 @@ function stripScheme(s: string): string {
 
 export function Toolbar({
   url, onChange, onFetch, onClear, onImportFile, onToggleQueue, queueCount, queueOpen,
+  sidebarOpen, onToggleSidebar,
   hasSource, status, onOpenSettings,
   notifications, onMarkAllRead, onClearNotifications, onDismissNotification,
+  coSession, onCoStart, onCoJoin, onCoLeave,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const fetching = status === "fetching";
@@ -57,13 +70,27 @@ export function Toolbar({
 
   return (
     <div className="cp-toolbar">
-      <div className="cp-wordmark">
-        <span>sauce bunny</span>
-        <span className="dot" />
+      {/* Left cluster: wordmark + the sidebar toggle. When the sidebar is
+          open, the cluster is sized so the toggle sits exactly on the
+          sidebar's right-edge line — the mirror of the right panel toggle. */}
+      <div className={"cp-toolbar-left" + (sidebarOpen ? " sidebar-open" : "")}>
+        <div className="cp-wordmark">
+          <span>sauce bunny</span>
+          <span className="dot" />
+        </div>
+        <button
+          type="button"
+          className={"btn-icon cp-sidebar-toggle" + (sidebarOpen ? " active" : "")}
+          onClick={onToggleSidebar}
+          title={sidebarOpen ? "Hide source panel" : "Show source panel"}
+          aria-pressed={sidebarOpen}
+        >
+          <IconPanelLeft size={15} />
+        </button>
       </div>
 
       <div className="cp-url" onClick={() => inputRef.current?.focus()}>
-        <IconLink size={14} stroke="var(--fg-4)" />
+        <IconLink size={14} stroke="var(--fg-3)" />
         <span className="scheme">https://</span>
         <input
           ref={inputRef}
@@ -141,6 +168,12 @@ export function Toolbar({
         <IconPanelRight size={15} />
         {queueCount > 0 && <span className="cp-queue-badge">{queueCount}</span>}
       </button>
+      <CoReviewPopover
+        session={coSession}
+        onStart={onCoStart}
+        onJoin={onCoJoin}
+        onLeave={onCoLeave}
+      />
       <NotificationBell
         notifications={notifications}
         onMarkAllRead={onMarkAllRead}

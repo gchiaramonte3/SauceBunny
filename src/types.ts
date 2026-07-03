@@ -20,6 +20,7 @@ export type { CacheStats } from "./bindings/CacheStats";
 export type { DiarizeProgressEvent } from "./bindings/DiarizeProgressEvent";
 export type { DictateDoneEvent } from "./bindings/DictateDoneEvent";
 export type { DictateLevelEvent } from "./bindings/DictateLevelEvent";
+export type { DictatePartialEvent } from "./bindings/DictatePartialEvent";
 export type { AudioInputDevice } from "./bindings/AudioInputDevice";
 export type { DoneEvent } from "./bindings/DoneEvent";
 export type { LocalFileMeta } from "./bindings/LocalFileMeta";
@@ -81,13 +82,30 @@ export type TranscriptState = "idle" | "running" | "done" | "error";
 
 export type QueueStatus = "queued" | "running" | "done" | "error";
 
+/** Where a queued clip reads its media from — captured at ADD time so the
+ *  queue runner never depends on the currently-loaded source (the queue
+ *  survives source switches; mixed web+local queues just work). */
+export type QueueSource =
+  | { kind: "web"; url: string }
+  | { kind: "file"; path: string };
+
 export type QueuedClip = {
   id: string;
+  source: QueueSource;
+  /** Source fps at add time — ALL frames→seconds/tc math for this item must
+   *  use it, never the live player fps (which may belong to another source). */
+  fps: number;
+  /** Title + thumbnail at add time — recents attribution for mixed/stale queues. */
+  title: string;
+  thumbnail: string | null;
   inFrames: number;
   outFrames: number;
   filename: string;
   format: FormatId;
+  /** Web-only (yt-dlp re-encode); local items set false — mediabunny decides
+   *  passthrough vs re-encode itself. */
   reencode: boolean;
+  /** Web-only (yt-dlp subtitles); always false for file items. */
   captions: boolean;
   status: QueueStatus;
   path?: string;
