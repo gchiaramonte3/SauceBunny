@@ -3392,8 +3392,12 @@ export default function App() {
   const coFpsRef = useRef(30); coFpsRef.current = fps;
   const coRoleRef = useRef("off"); coRoleRef.current = coSession.role;
   const coLastHostPosRef = useRef<number | null>(null);
-  // Whether the CURRENT source can host — web-only (a local file can't reach peers).
-  const coCanHost = hasSource && sourceKind !== "file";
+  const coReadyRef = useRef(false); // has OUR player loaded the host's source yet?
+  // Session-first: a session can be hosted at any time — start it, then load a
+  // web source and it propagates to guests (the activeSourceUrl effect below).
+  // A local file is the one source guests can't receive yet, so flag it for a
+  // caveat in the popover rather than blocking the session.
+  const coLocalSourceLoaded = hasSource && sourceKind === "file";
 
   // Send a session message the right way for our role: the host broadcasts to
   // all peers; a peer sends up to the host, which relays it to everyone else.
@@ -3415,7 +3419,15 @@ export default function App() {
   coApplyRef.current = (m) => {
     switch (m.kind) {
       case "loadSource":
-        if (activeSourceUrlRef.current !== m.url) { setUrl(m.url); void handleFetch(m.url); }
+        if (activeSourceUrlRef.current !== m.url) {
+          // The source is changing under us — we're not synced to it until our
+          // own player reports ready for the NEW source. Re-arm here so a
+          // stale-ready old player can't apply the host's transport to the
+          // wrong video, and the snap-to-host fires on the first ready tick.
+          coReadyRef.current = false;
+          setUrl(m.url);
+          void handleFetch(m.url);
+        }
         return;
       case "reviewDoc":
         // MERGE, not blind-replace: the host re-broadcasts a full snapshot on
@@ -3442,6 +3454,14 @@ export default function App() {
         return;
       }
       case "transport": {
+        const p = playerRef.current;
+        // Session-first: hold the playhead chase until OUR player has actually
+        // loaded the source — sync activates once both sides have the video.
+        if (!p || !p.isReady()) { coReadyRef.current = false; return; }
+        // First tick after our source finished loading — snap to the host even
+        // when paused, so a late-loading guest lands on the shared frame.
+        const justLoaded = !coReadyRef.current;
+        coReadyRef.current = true;
         const r = Math.max(1, Math.round(coFpsRef.current));
         const expected = m.position + (m.playing ? (Math.max(0, Date.now() - m.atMs) / 1000) * m.rate : 0);
         const cur = coPlayheadRef.current / r;
@@ -3452,11 +3472,10 @@ export default function App() {
         // nearby frame without being yanked back on every heartbeat.
         if (m.playing) {
           if (Math.abs(cur - expected) > 0.5) onSeek(Math.floor(expected * r));
-        } else if (hostScrubbed && Math.abs(cur - expected) > 0.1) {
+        } else if (justLoaded || (hostScrubbed && Math.abs(cur - expected) > 0.1)) {
           onSeek(Math.floor(expected * r));
         }
-        const p = playerRef.current;
-        if (p && p.isReady() && m.playing !== coPlayingRef.current) {
+        if (m.playing !== coPlayingRef.current) {
           if (m.playing) p.play(); else p.pause();
         }
         return;
@@ -3484,6 +3503,7 @@ export default function App() {
       setSessionDoc(null);
       setCoGhosts([]);
       coLastHostPosRef.current = null;
+      coReadyRef.current = false;
     }
   }, [coSession.role, reviewSourceKey]);
   // Host → peers: current source whenever it changes (web only — a local file
@@ -3781,7 +3801,7 @@ export default function App() {
         onClearNotifications={onClearNotifications}
         onDismissNotification={onDismissNotification}
         coSession={coSession}
-        coCanHost={coCanHost}
+        coLocalSource={coLocalSourceLoaded}
         coScreening={screening}
         onCoToggleScreening={() => setScreening((s) => !s)}
         onCoStart={() => { void startCoReview(); }}

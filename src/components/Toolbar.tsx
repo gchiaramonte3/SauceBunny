@@ -28,8 +28,8 @@ type Props = {
   onDismissNotification: (id: string) => void;
   /** Co-review (P2P watch party) session state + controls. */
   coSession: SessionState;
-  /** Web-only: hosting is blocked while a local file is loaded (can't reach peers). */
-  coCanHost: boolean;
+  /** A local file is loaded — the popover warns guests can't receive it yet (hosting still allowed). */
+  coLocalSource: boolean;
   /** Screening (cinematic watch-party layout) on/off + toggle. */
   coScreening: boolean;
   onCoToggleScreening: () => void;
@@ -47,7 +47,7 @@ export function Toolbar({
   sidebarOpen, onToggleSidebar,
   hasSource, status, onOpenSettings,
   notifications, onMarkAllRead, onClearNotifications, onDismissNotification,
-  coSession, coCanHost, coScreening, onCoToggleScreening, onCoStart, onCoJoin, onCoLeave,
+  coSession, coLocalSource, coScreening, onCoToggleScreening, onCoStart, onCoJoin, onCoLeave,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const fetching = status === "fetching";
@@ -175,7 +175,8 @@ export function Toolbar({
       </button>
       <CoReviewPopover
         session={coSession}
-        canHost={coCanHost}
+        localSource={coLocalSource}
+        hasSource={hasSource}
         screening={coScreening}
         onToggleScreening={onCoToggleScreening}
         onStart={onCoStart}

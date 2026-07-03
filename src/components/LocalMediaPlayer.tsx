@@ -270,6 +270,10 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
   useEffect(() => {
     const el = mediaRef.current;
     if (!el) return;
+    // The new source isn't playable until it re-fires `loadeddata`, so report
+    // not-ready meanwhile — otherwise callers (e.g. co-review transport sync)
+    // act on the OLD source's stale ready state and seek the wrong video.
+    readyRef.current = false;
     try { el.load(); } catch { /* ignore — happens on torn-down element */ }
   }, [path]);
 

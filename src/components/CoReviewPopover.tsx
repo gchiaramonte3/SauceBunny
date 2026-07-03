@@ -17,10 +17,12 @@ import type { SessionState } from "../bindings/SessionState";
  * absolutely-positioned child (even at z-index:3000) renders UNDER the canvas
  * below. Portaling out of that context is the same fix NotificationBell uses.
  */
-export function CoReviewPopover({ session, canHost, screening, onToggleScreening, onStart, onJoin, onLeave }: {
+export function CoReviewPopover({ session, localSource, hasSource, screening, onToggleScreening, onStart, onJoin, onLeave }: {
   session: SessionState;
-  /** Web-only sessions: false while a local file is loaded (can't reach peers). */
-  canHost: boolean;
+  /** A local file is loaded — warn that guests can't receive it yet (hosting still allowed). */
+  localSource: boolean;
+  /** Any source loaded at all — drives the host's "load a video to start" hint. */
+  hasSource: boolean;
   /** Screening (cinematic watch-party layout) on/off + toggle. */
   screening: boolean;
   onToggleScreening: () => void;
@@ -105,7 +107,7 @@ export function CoReviewPopover({ session, canHost, screening, onToggleScreening
           style={{ position: "fixed", top: anchor.top, right: anchor.right }}
         >
           {session.role === "off" && (
-            <CoReviewJoinForm canHost={canHost} onStart={onStart} onJoin={onJoin} />
+            <CoReviewJoinForm localSource={localSource} onStart={onStart} onJoin={onJoin} />
           )}
           {session.role === "host" && (
             <>
@@ -117,6 +119,12 @@ export function CoReviewPopover({ session, canHost, screening, onToggleScreening
               <button className="btn btn-ghost" onClick={copyCode}>
                 {copied ? "Copied ✓" : "Copy join code"}
               </button>
+              {!hasSource && (
+                <div className="cp-coreview-hint">Paste a video URL up top — it loads for everyone in the session.</div>
+              )}
+              {hasSource && localSource && (
+                <div className="cp-coreview-hint">Guests can’t see your local file yet — load a web URL to screen it together.</div>
+              )}
               <button className="btn btn-ghost" onClick={onToggleScreening}>
                 {screening ? "Exit screening view" : "Screening view"}
               </button>

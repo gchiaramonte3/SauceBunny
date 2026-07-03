@@ -5,17 +5,15 @@ import { AUTHOR_KEY } from "../lib/review";
 /**
  * The "not in a session yet" face of the co-review popover: a host CTA and a
  * join-by-code form. Its own local state (display name, pasted ticket) lives
- * here. Kept intentionally sparse — the control should read at a glance, so
- * the host action stays primary and the join path sits quietly beneath it.
+ * here. Kept intentionally sparse — the control should read at a glance.
  *
- * The host button is disabled (not hidden) when the current source can't be
- * hosted, with a single-line hint. That keeps the layout stable for the coming
- * "start a session first, then load a source" flow, where the button is simply
- * always enabled.
+ * Session-first: hosting is always available. You start a session, then load a
+ * web source and it propagates to guests. A local file is the one thing guests
+ * can't receive yet, so it earns a caveat line — not a block.
  */
-export function CoReviewJoinForm({ canHost, onStart, onJoin }: {
-  /** Web-only sessions: false while a local file is loaded (can't reach peers). */
-  canHost: boolean;
+export function CoReviewJoinForm({ localSource, onStart, onJoin }: {
+  /** A local file is loaded — guests can't receive it yet (hosting still allowed). */
+  localSource: boolean;
   onStart: () => void;
   onJoin: (ticket: string, name: string) => void;
 }) {
@@ -28,11 +26,9 @@ export function CoReviewJoinForm({ canHost, onStart, onJoin }: {
       <div className="cp-coreview-title">Co-review</div>
       <p className="cp-coreview-sub">Watch together — guests follow your playhead.</p>
 
-      <button className="btn btn-primary" onClick={onStart} disabled={!canHost}>
-        Start a session
-      </button>
-      {!canHost && (
-        <div className="cp-coreview-hint">Load a web source to host — local files can’t reach guests yet.</div>
+      <button className="btn btn-primary" onClick={onStart}>Start a session</button>
+      {localSource && (
+        <div className="cp-coreview-hint">Guests can’t see a local file yet — load a web URL after starting to screen it together.</div>
       )}
 
       <div className="cp-coreview-sep">or join</div>
