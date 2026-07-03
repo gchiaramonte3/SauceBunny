@@ -80,6 +80,15 @@ pub enum SessionMsg {
         at_ms: f64,
         seq: u32,
     },
+    /// A shared review mutation. `op` is a frontend-serialized JSON string
+    /// (a ReviewOp) — OPAQUE to Rust, which only relays it. Flows
+    /// peer→host→(other peers + host frontend), and host→all peers.
+    ReviewOp { op: String },
+    /// Full review-doc snapshot (opaque JSON string) — host→peers, sent when a
+    /// peer joins so the newcomer converges on the shared doc.
+    ReviewDoc { doc: String },
+    /// Live playhead for a ghost cursor. position = seconds. Relayed like ReviewOp.
+    Presence { name: String, position: f64 },
 }
 
 #[derive(Clone, serde::Serialize, ts_rs::TS)]
@@ -140,10 +149,10 @@ enum Session {
         read_task: JoinHandle<()>,
         // Held so the QUIC stream/connection stay open for the session's
         // lifetime (dropping the send half would RESET the stream and the
-        // host would drop us). Unused in Phase 1 — peers only ever send
-        // the initial Hello.
+        // host would drop us). `send` is also written to by `session_send`
+        // (peer→host review ops / presence).
         _conn: Connection,
-        _send: SendStream,
+        send: SendStream,
     },
 }
 
@@ -279,7 +288,7 @@ pub async fn session_join(
         roster,
         read_task,
         _conn: conn,
-        _send: send,
+        send,
     };
 
     let snap = snapshot_state(&inner).await;
@@ -343,6 +352,24 @@ pub async fn session_broadcast(
         let _ = app.emit("session:state", &snap);
     }
     Ok(())
+}
+
+/// PEER only: send `msg` up to the host (which relays review ops / presence to
+/// everyone else). Errors if not a peer.
+#[tauri::command]
+pub async fn session_send(
+    state: State<'_, SessionManager>,
+    msg: SessionMsg,
+) -> Result<(), crate::AppError> {
+    let mut inner = state.inner.lock().await;
+    let Session::Peer { send, .. } = &mut inner.session else {
+        return Err(crate::AppError::invalid("Not in a co-review session"));
+    };
+    // Tiny line; the brief write under the manager lock mirrors how
+    // session_broadcast already writes under `inner`.
+    write_msg_line(send, &msg)
+        .await
+        .map_err(crate::AppError::internal)
 }
 
 // ============================================================
@@ -412,16 +439,24 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
     broadcast_peer_list(&shared).await;
     emit_state_now(&app).await;
 
-    // 3. Keep reading this peer's lines. Phase 1 defines no peer→host
-    //    traffic after Hello, but parse every line as a SessionMsg anyway
-    //    (future-proof: Phase 2 chat/reactions will slot in here) and use
-    //    EOF/error as the disconnect signal.
+    // 3. Keep reading this peer's lines. A peer sends review ops + presence
+    //    (Phase 2): apply them on the HOST frontend (session:msg) AND relay to
+    //    every OTHER peer so the whole star converges. EOF/error = disconnect.
     loop {
         let mut line = String::new();
         match reader.read_line(&mut line).await {
             Ok(0) => break, // clean EOF — peer left
             Ok(_) => {
-                let _ = serde_json::from_str::<SessionMsg>(line.trim());
+                if let Ok(msg) = serde_json::from_str::<SessionMsg>(line.trim()) {
+                    match msg {
+                        SessionMsg::ReviewOp { .. } | SessionMsg::Presence { .. } => {
+                            let _ = app.emit("session:msg", &msg);
+                            relay_to_others(&shared, id, &msg).await;
+                        }
+                        // A peer shouldn't originate the host-only kinds; ignore.
+                        _ => {}
+                    }
+                }
             }
             Err(_) => break, // reset / connection lost
         }
@@ -436,6 +471,26 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
     }
     broadcast_peer_list(&shared).await;
     emit_state_now(&app).await;
+}
+
+/// Relay one message to every peer EXCEPT the sender (host-side fan-out of a
+/// peer's review op / presence). Drops peers whose stream write fails.
+async fn relay_to_others(shared: &HostShared, sender_id: u64, msg: &SessionMsg) {
+    let Ok(mut line) = serde_json::to_string(msg) else { return };
+    line.push('\n');
+    let mut peers = shared.peers.lock().await;
+    let mut dead: Vec<u64> = Vec::new();
+    for p in peers.iter_mut() {
+        if p.id == sender_id {
+            continue;
+        }
+        if p.send.write_all(line.as_bytes()).await.is_err() {
+            dead.push(p.id);
+        }
+    }
+    if !dead.is_empty() {
+        peers.retain(|p| !dead.contains(&p.id));
+    }
 }
 
 /// Send the current roster (host name first) to every connected peer,
@@ -499,7 +554,11 @@ async fn peer_read_loop(
                         }
                         emit_state_now(&app).await;
                     }
-                    msg @ (SessionMsg::LoadSource { .. } | SessionMsg::Transport { .. }) => {
+                    msg @ (SessionMsg::LoadSource { .. }
+                    | SessionMsg::Transport { .. }
+                    | SessionMsg::ReviewOp { .. }
+                    | SessionMsg::ReviewDoc { .. }
+                    | SessionMsg::Presence { .. }) => {
                         let _ = app.emit("session:msg", &msg);
                     }
                     SessionMsg::Hello { .. } => {} // host never sends Hello
@@ -670,6 +729,23 @@ mod tests {
         let back: SessionMsg = serde_json::from_str(line.trim()).unwrap();
         match back {
             SessionMsg::LoadSource { url } => assert_eq!(url, "https://example.com/v"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn phase2_variant_tags_and_round_trip() {
+        let op = serde_json::to_string(&SessionMsg::ReviewOp { op: "{}".into() }).unwrap();
+        assert!(op.contains(r#""kind":"reviewOp""#), "json: {op}");
+        let doc = serde_json::to_string(&SessionMsg::ReviewDoc { doc: "{}".into() }).unwrap();
+        assert!(doc.contains(r#""kind":"reviewDoc""#), "json: {doc}");
+        let pres = serde_json::to_string(&SessionMsg::Presence { name: "Ada".into(), position: 3.5 }).unwrap();
+        assert!(pres.contains(r#""kind":"presence""#), "json: {pres}");
+        assert!(pres.contains(r#""position":3.5"#), "json: {pres}");
+        // Round-trip a relayed op line.
+        let back: SessionMsg = serde_json::from_str(op.trim()).unwrap();
+        match back {
+            SessionMsg::ReviewOp { op } => assert_eq!(op, "{}"),
             _ => panic!("wrong variant"),
         }
     }
