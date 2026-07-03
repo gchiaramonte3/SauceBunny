@@ -525,22 +525,29 @@ const STATUS_LABEL: Record<ReviewStatusState, string> = {
   pending: "Pending", approved: "Approved", changes: "Changes requested",
 };
 
+/** Keep exported comment text / names literal in Markdown: collapse newlines
+ *  (which would otherwise inject a stray heading, list item, or code fence) and
+ *  escape the inline formatters. These files are deliberately handed to others. */
+function mdInline(s: string): string {
+  return s.replace(/[\r\n]+/g, " ").replace(/[`*_\[\]]/g, "\\$&").trim();
+}
+
 /** Human-readable review notes for the active version. */
 export function reviewToMarkdown(doc: ReviewDoc, title = "Review"): string {
   const v = doc.versions.find((x) => x.id === doc.activeVersionId);
   const roots = rootComments(doc, doc.activeVersionId, "time");
   const st = statusOf(doc, doc.activeVersionId);
   const out: string[] = [
-    `# Review — ${title}`,
+    `# Review — ${mdInline(title)}`,
     "",
-    `**Status:** ${STATUS_LABEL[st.state]}${st.note ? ` — ${st.note}` : ""}`,
-    v ? `**Version:** ${v.label}` : "",
+    `**Status:** ${STATUS_LABEL[st.state]}${st.note ? ` — ${mdInline(st.note)}` : ""}`,
+    v ? `**Version:** ${mdInline(v.label)}` : "",
     `**Comments:** ${roots.length}`,
     "",
   ];
   for (const c of roots) {
-    out.push(`- **[${secondsToHms(c.timeStart)}]** ${c.body} — ${c.author}${c.resolved ? "  _(resolved)_" : ""}`);
-    for (const r of repliesOf(doc, c.id)) out.push(`  - ↳ ${r.body} — ${r.author}`);
+    out.push(`- **[${secondsToHms(c.timeStart)}]** ${mdInline(c.body)} — ${mdInline(c.author)}${c.resolved ? "  _(resolved)_" : ""}`);
+    for (const r of repliesOf(doc, c.id)) out.push(`  - ↳ ${mdInline(r.body)} — ${mdInline(r.author)}`);
   }
   return out.filter((l) => l !== "").join("\n") + "\n";
 }
@@ -565,7 +572,9 @@ export function reviewToCsv(doc: ReviewDoc, fps: number): string {
 
 /** CMX3600 EDL whose events carry the comments as timeline markers (Resolve/Premiere). */
 export function reviewToEdl(doc: ReviewDoc, fps: number, title = "Sauce Bunny Review"): string {
-  const lines = [`TITLE: ${title}`, "FCM: NON-DROP FRAME", ""];
+  // TITLE must be a single line per CMX3600 — strip newlines from the source name.
+  const safeTitle = title.replace(/[\r\n]+/g, " ");
+  const lines = [`TITLE: ${safeTitle}`, "FCM: NON-DROP FRAME", ""];
   let n = 1;
   for (const c of rootComments(doc, doc.activeVersionId, "time")) {
     const inTc = secondsToTc(c.timeStart, fps);
