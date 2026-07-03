@@ -125,10 +125,14 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   // Scrubbing = pause playback so it can't fight the playhead; resume on
   // settle (no seek for ~300ms). Fires after the last seek of a gesture.
   const seekSettleRef = useRef<number | null>(null);
-  // Shuttle (J-K-L): forward uses native playbackRate; reverse runs a backward
-  // currentTime scan on this interval (no native reverse in WebKit).
+  // Shuttle (J-K-L): forward uses native playbackRate (capped 4× — beyond that
+  // playback outruns the proxy's fMP4 remux); reverse runs a wall-clock rAF
+  // scan walking currentTime backward (no native reverse in WebKit), clamped
+  // to the buffered window. Audio mutes while |rate| > 2; the pre-shuttle
+  // muted state is stashed so exit restores what the user had.
   const shuttleRateRef = useRef(0);
-  const shuttleTimerRef = useRef(0);
+  const shuttleRafRef = useRef(0);
+  const preShuttleMutedRef = useRef<boolean | null>(null);
   // Frame-accurate scrub preview (r68). While dragging, a WebCodecs
   // CanvasSink decodes the exact frame under the cursor onto an overlay
   // canvas — instant + every frame, vs the <video>'s laggy native seek.
@@ -266,38 +270,62 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     setShuttle: (rate) => {
       const v = videoRef.current;
       if (!v) return;
-      if (shuttleTimerRef.current) { window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0; }
+      if (shuttleRafRef.current) { cancelAnimationFrame(shuttleRafRef.current); shuttleRafRef.current = 0; }
+      // Entering shuttle from rest → remember the user's muted state once;
+      // rate adjustments mid-shuttle keep the original value for restore.
+      if (rate !== 0 && shuttleRateRef.current === 0) preShuttleMutedRef.current = v.muted;
       shuttleRateRef.current = rate;
       if (rate === 0) {
         v.playbackRate = 1;
+        if (preShuttleMutedRef.current != null) { v.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
+        // Exit is a HARD STOP (K = freeze instantly); the L-ladder's +1 landing
+        // resumes real playback explicitly after this.
+        try { v.pause(); } catch { /* ignore */ }
         return;
       }
+      // Chipmunk audio above 2× is noise — mute there, audible at ≤2×.
+      v.muted = Math.abs(rate) > 2 ? true : (preShuttleMutedRef.current ?? v.muted);
       if (rate > 0) {
         // Native fast-forward — smooth; the <video> carries its own audio.
-        v.playbackRate = rate;
+        // Capped 4× so playback can't outrun the streaming remux.
+        v.playbackRate = Math.min(4, rate);
         v.play().catch(() => { /* ignore */ });
         return;
       }
-      // Reverse: <video> can't play backward, so scan currentTime within the
-      // buffered segment. Smooth where buffered; clamps at the segment start
-      // (going further back would need a full stream rebuild).
+      // Reverse: <video> can't play backward, so walk currentTime backward on
+      // a wall-clock rAF (scan speed = |rate|× real time regardless of frame
+      // cadence). Smooth where buffered; clamps at the buffered start (going
+      // further back would need a full stream rebuild).
       v.playbackRate = 1;
       try { v.pause(); } catch { /* ignore */ }
-      const stepMs = 60;
-      shuttleTimerRef.current = window.setInterval(() => {
+      let last = performance.now();
+      const tick = (now: number) => {
+        shuttleRafRef.current = 0;
         const vv = videoRef.current;
-        if (!vv) return;
-        const next = vv.currentTime + rate * (stepMs / 1000); // rate<0 → backward
-        if (next <= 0) {
-          try { vv.currentTime = 0; } catch { /* ignore */ }
-          window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0;
+        const r = shuttleRateRef.current;
+        if (!vv || r >= 0) return; // shuttle cancelled / direction changed
+        const dt = (now - last) / 1000;
+        last = now;
+        let next = vv.currentTime + r * dt; // r<0 → backward
+        // Clamp at the buffered window's start (the pipeline's local timeline
+        // begins at clockOrigin ≈ buffered.start(0), not 0).
+        let floor = 0;
+        try { if (vv.buffered.length > 0) floor = Math.max(0, vv.buffered.start(0)); } catch { /* ignore */ }
+        if (next <= floor) {
+          // Hit the buffered head — exit the shuttle, settle paused there.
+          next = floor;
+          try { vv.currentTime = next; } catch { /* ignore */ }
+          onTimeUpdate?.(baseTimeRef.current + Math.max(0, next - clockOriginRef.current));
           shuttleRateRef.current = 0;
+          if (preShuttleMutedRef.current != null) { vv.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
           setIsPlaying(false);
           return;
         }
         try { vv.currentTime = next; } catch { /* ignore */ }
         onTimeUpdate?.(baseTimeRef.current + Math.max(0, next - clockOriginRef.current));
-      }, stepMs);
+        shuttleRafRef.current = requestAnimationFrame(tick);
+      };
+      shuttleRafRef.current = requestAnimationFrame(tick);
     },
   }), [onError, onTimeUpdate]);
 
@@ -720,8 +748,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
       if (rvfcId) { try { rvfc.cancelVideoFrameCallback(rvfcId); } catch { /* ignore */ } rvfcId = 0; }
-      if (shuttleTimerRef.current) { window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0; }
+      if (shuttleRafRef.current) { cancelAnimationFrame(shuttleRafRef.current); shuttleRafRef.current = 0; }
       shuttleRateRef.current = 0;
+      // Mid-shuttle source swap: give the element back its pre-shuttle audio.
+      if (preShuttleMutedRef.current != null) { el.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
+      el.playbackRate = 1;
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
       el.removeEventListener("playing", onResume);
@@ -751,7 +782,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
           <video ref={(el) => { videoRef.current = el; }} style={{ display: "none" }} />
           <div className="cp-audio-card">
             <div className={"cp-audio-icon" + (isPlaying ? " playing" : "")}>
-              <IconFilm size={28} stroke="rgba(255,255,255,0.5)" />
+              <IconFilm size={32} stroke="rgba(255,255,255,0.6)" />
               {isPlaying && <div className="cp-eq"><span /><span /><span /><span /></div>}
             </div>
             <div className="cp-audio-name">{filename ?? "Streaming audio"}</div>

@@ -339,27 +339,16 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     setShuttle: (rate: number) => {
       if (!readyRef.current) return;
       if (rate === 0) {
-        // Exit shuttle: restore the clock at the shuttle position, then resume
-        // normal playback if we were playing when shuttle engaged.
+        // Exit shuttle: restore the clock at the shuttle position and HARD
+        // STOP. K after an 8× shuttle must freeze, not glide on at 1× — the
+        // L-ladder's landing-on-+1 path calls play() explicitly when real
+        // playback should resume. (The old was-playing resume is retired.)
         if (shuttleRafRef.current) { cancelAnimationFrame(shuttleRafRef.current); shuttleRafRef.current = 0; }
         if (shuttleRateRef.current !== 0) {
           shuttleRateRef.current = 0;
           startMediaTimeRef.current = shuttleTimeRef.current;
           onTimeUpdateRef.current?.(shuttleTimeRef.current);
-          if (shuttleWasPlayingRef.current) {
-            const ctx = audioCtxRef.current;
-            if (ctx) {
-              if (ctx.state === "suspended") ctx.resume().catch(() => { /* ignore */ });
-              cancelInFlight();
-              const gen = ++genRef.current;
-              startContextTimeRef.current = ctx.currentTime;
-              playingRef.current = true;
-              setIsPlaying(true);
-              onPlayStateChange?.(true);
-              runAudioLoop(startMediaTimeRef.current, gen);
-              runVideoLoop(startMediaTimeRef.current, gen);
-            }
-          } else {
+          {
             playingRef.current = false;
             setIsPlaying(false);
             onPlayStateChange?.(false);
@@ -546,7 +535,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       ) : (
         <div className="cp-audio-card">
           <div className={"cp-audio-icon" + (isPlaying ? " playing" : "")}>
-            <IconFilm size={28} stroke="rgba(255,255,255,0.5)" />
+            <IconFilm size={32} stroke="rgba(255,255,255,0.6)" />
             {isPlaying && (
               <div className="cp-eq">
                 <span /><span /><span /><span />

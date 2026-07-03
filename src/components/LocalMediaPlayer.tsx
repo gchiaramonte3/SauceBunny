@@ -35,10 +35,13 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
   const playingRef = useRef(false);
   const onDiagRef = useRef<Props["onDiag"]>(undefined);
   useEffect(() => { onDiagRef.current = onDiag; }, [onDiag]);
-  // Shuttle (J-K-L): forward = native playbackRate; reverse = backward
-  // currentTime scan (the whole local file is buffered, so it's smooth).
+  // Shuttle (J-K-L): forward = native playbackRate (capped 8×); reverse = a
+  // wall-clock rAF scan walking currentTime backward (the whole local file is
+  // buffered, so it's smooth). Audio is muted while |rate| > 2 — the
+  // pre-shuttle muted state is stashed so exit restores what the user had.
   const shuttleRateRef = useRef(0);
-  const shuttleTimerRef = useRef(0);
+  const shuttleRafRef = useRef(0);
+  const preShuttleMutedRef = useRef<boolean | null>(null);
   // Scrub hardening: while the playhead is being dragged we pause the element
   // so continuous playback can't fight the seek, then resume once seeks settle.
   // (The streaming player has had this since r66; the local <video> never did,
@@ -114,33 +117,55 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     setShuttle: (rate) => {
       const m = mediaRef.current;
       if (!m) return;
-      if (shuttleTimerRef.current) { window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0; }
+      if (shuttleRafRef.current) { cancelAnimationFrame(shuttleRafRef.current); shuttleRafRef.current = 0; }
+      // Entering shuttle from rest → remember the user's muted state once;
+      // rate adjustments mid-shuttle keep the original value for restore.
+      if (rate !== 0 && shuttleRateRef.current === 0) preShuttleMutedRef.current = m.muted;
       shuttleRateRef.current = rate;
-      if (rate === 0) { m.playbackRate = 1; return; }
+      if (rate === 0) {
+        m.playbackRate = 1;
+        if (preShuttleMutedRef.current != null) { m.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
+        // Exit is a HARD STOP: K after an 8× shuttle must freeze, not glide on
+        // at 1× ("slow motion"). The L-ladder's landing-on-+1 path explicitly
+        // calls play() after this, so real playback still resumes there.
+        try { m.pause(); } catch { /* ignore */ }
+        return;
+      }
+      // Chipmunk audio above 2× is noise — mute there, audible at ≤2×.
+      m.muted = Math.abs(rate) > 2 ? true : (preShuttleMutedRef.current ?? m.muted);
       if (rate > 0) {
-        m.playbackRate = rate;
+        m.playbackRate = Math.min(8, rate); // defensive cap — the App ladder tops out here
         m.play().catch(() => { /* ignore */ });
         return;
       }
-      // Reverse: <video> can't play backward; scan currentTime backward. The
-      // whole local file is buffered, so this is smooth across the clip.
+      // Reverse: <video> can't play backward; walk currentTime backward on a
+      // wall-clock rAF so the scan speed is |rate|× real time regardless of
+      // frame cadence. The whole local file is buffered, so it's smooth.
       m.playbackRate = 1;
       try { m.pause(); } catch { /* ignore */ }
-      const stepMs = 60;
-      shuttleTimerRef.current = window.setInterval(() => {
+      let last = performance.now();
+      const tick = (now: number) => {
+        shuttleRafRef.current = 0;
         const mm = mediaRef.current;
-        if (!mm) return;
-        const next = mm.currentTime + rate * (stepMs / 1000); // rate<0 → backward
+        const r = shuttleRateRef.current;
+        if (!mm || r >= 0) return; // shuttle cancelled / direction changed
+        const dt = (now - last) / 1000;
+        last = now;
+        const next = mm.currentTime + r * dt; // r<0 → backward
         if (next <= 0) {
+          // Hit the head — exit the shuttle, settle paused at 0.
           try { mm.currentTime = 0; } catch { /* ignore */ }
-          window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0;
+          onTimeUpdate?.(0);
           shuttleRateRef.current = 0;
+          if (preShuttleMutedRef.current != null) { mm.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
           setIsPlaying(false);
           return;
         }
         try { mm.currentTime = next; } catch { /* ignore */ }
         onTimeUpdate?.(next);
-      }, stepMs);
+        shuttleRafRef.current = requestAnimationFrame(tick);
+      };
+      shuttleRafRef.current = requestAnimationFrame(tick);
     },
   }), []);
 
@@ -203,9 +228,12 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     el.addEventListener("error", onErr);
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
-      if (shuttleTimerRef.current) { window.clearInterval(shuttleTimerRef.current); shuttleTimerRef.current = 0; }
+      if (shuttleRafRef.current) { cancelAnimationFrame(shuttleRafRef.current); shuttleRafRef.current = 0; }
       if (settleTimerRef.current) { window.clearTimeout(settleTimerRef.current); settleTimerRef.current = 0; }
       shuttleRateRef.current = 0;
+      // Mid-shuttle source swap: give the element back its pre-shuttle audio.
+      if (preShuttleMutedRef.current != null) { el.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
+      el.playbackRate = 1;
       // New source → reset scrub bookkeeping + the one-shot duration retry.
       scrubbingRef.current = false;
       wasPlayingRef.current = false;
@@ -298,7 +326,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
           {/* Visible card so the user can tell something is loaded and playing. */}
           <div className="cp-audio-card">
             <div className={"cp-audio-icon" + (isPlaying ? " playing" : "")}>
-              <IconFilm size={28} stroke="rgba(255,255,255,0.5)" />
+              <IconFilm size={32} stroke="rgba(255,255,255,0.6)" />
               {isPlaying && (
                 <div className="cp-eq">
                   <span /><span /><span /><span />
