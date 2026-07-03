@@ -29,7 +29,9 @@ export function ParticipantRail({ active, participants, onExit }: {
       <div className="cp-prail-list">
         {participants.map((p, i) => (
           <div
-            key={p.name + i}
+            /* Roster position is the only stable, collision-free key —
+               display names aren't unique (two guests can pick the same one). */
+            key={i}
             className={"cp-prail-row" + (p.isSelf ? " self" : "")}
             style={{ ["--pr-color" as string]: p.color, animationDelay: `${Math.min(i, 8) * 40}ms` }}
           >

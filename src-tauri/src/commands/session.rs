@@ -41,6 +41,11 @@ const ALPN: &[u8] = b"saucebunny/coreview/1";
 /// Star topology cap: host + 3 peers = 4 people per session (Phase 1).
 const MAX_PEERS: usize = 3;
 
+/// Hard cap on a single relayed control line. Peer→host traffic is tiny (one
+/// review op or a presence tick), so anything past this is abuse — drop it
+/// before it can be fanned out to every other peer (×N memory amplification).
+const MAX_MSG_BYTES: usize = 2 * 1024 * 1024;
+
 /// Host's roster display name. Phase-2 refinement: let `session_start` take
 /// a display name like `session_join` does.
 const HOST_NAME: &str = "Host";
@@ -447,9 +452,22 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
         match reader.read_line(&mut line).await {
             Ok(0) => break, // clean EOF — peer left
             Ok(_) => {
+                // Drop an abusively large control line before it can be fanned
+                // out to every other peer (×N memory amplification).
+                if line.len() > MAX_MSG_BYTES {
+                    continue;
+                }
                 if let Ok(msg) = serde_json::from_str::<SessionMsg>(line.trim()) {
                     match msg {
-                        SessionMsg::ReviewOp { .. } | SessionMsg::Presence { .. } => {
+                        SessionMsg::ReviewOp { .. } => {
+                            let _ = app.emit("session:msg", &msg);
+                            relay_to_others(&shared, id, &msg).await;
+                        }
+                        SessionMsg::Presence { name, position } => {
+                            // Presence names skip the Hello clean_name path, so
+                            // clamp here — otherwise a peer can flood an
+                            // unbounded ghost-cursor label to everyone.
+                            let msg = SessionMsg::Presence { name: clean_name(&name), position };
                             let _ = app.emit("session:msg", &msg);
                             relay_to_others(&shared, id, &msg).await;
                         }
@@ -544,6 +562,9 @@ async fn peer_read_loop(
                 return;
             }
             Ok(_) => {
+                if line.len() > MAX_MSG_BYTES {
+                    continue; // drop an abusively large line from the host
+                }
                 let Ok(msg) = serde_json::from_str::<SessionMsg>(line.trim()) else {
                     continue; // future-proof: skip lines we don't understand
                 };
@@ -678,10 +699,15 @@ async fn write_msg_line(send: &mut SendStream, msg: &SessionMsg) -> Result<(), S
 /// control characters, cap the length, and never let one be empty.
 fn clean_name(raw: &str) -> String {
     let cleaned: String = raw.trim().chars().filter(|c| !c.is_control()).take(40).collect();
-    if cleaned.trim().is_empty() {
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
         "Guest".to_string()
+    } else if trimmed.eq_ignore_ascii_case(HOST_NAME) {
+        // "Host" is reserved for the actual host — a guest can't grab the crown
+        // / roster-head slot (or spoof a ghost label) by choosing that name.
+        format!("{trimmed} (guest)")
     } else {
-        cleaned
+        trimmed.to_string()
     }
 }
 
@@ -756,5 +782,10 @@ mod tests {
         assert_eq!(clean_name("\u{0007}\u{0000}"), "Guest");
         assert_eq!(clean_name(""), "Guest");
         assert_eq!(clean_name(&"x".repeat(100)).len(), 40);
+        // "Host" is reserved for the actual host — a guest picking it (any
+        // case) is suffixed so it can't claim the crown / roster head.
+        assert_eq!(clean_name("Host"), "Host (guest)");
+        assert_eq!(clean_name("  host "), "host (guest)");
+        assert_eq!(clean_name("Hostess"), "Hostess"); // only exact match is reserved
     }
 }

@@ -3574,9 +3574,16 @@ export default function App() {
         ...coSession.peers.map((n) => ({ name: n, color: reviewerColorFor(n, me), isHost: false, isSelf: false })),
       ];
     }
-    return coSession.peers.map((n) => ({
-      name: n, color: reviewerColorFor(n, me), isHost: n === "Host", isSelf: n === myName,
-    }));
+    // Peer view: the host is always the roster head — session.rs builds the
+    // roster as [HOST_NAME, ...peers] — so identify it by POSITION, not a name
+    // string a guest could pick ("Host"). Claim "You" for only the FIRST name
+    // that matches ours, so a same-named guest can't also show the chip.
+    let selfSeen = false;
+    return coSession.peers.map((n, i) => {
+      const isSelf = !selfSeen && n === myName;
+      if (isSelf) selfSeen = true;
+      return { name: n, color: reviewerColorFor(n, me), isHost: i === 0, isSelf };
+    });
   }, [coSession.role, coSession.peers]);
   const [reviewAnnotations, setReviewAnnotations] = useState<{ id: string; time: number; strokes: AnnotationStrokes }[]>([]);
   // Drawing-annotation state: draw mode + the live draft (attached to the next

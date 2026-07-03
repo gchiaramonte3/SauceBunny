@@ -44,8 +44,18 @@ export function CoReviewPopover({ session, canHost, screening, onToggleScreening
       setAnchor({ top: r.bottom + 8, right: window.innerWidth - r.right });
     };
     compute();
-    window.addEventListener("resize", compute);
-    return () => window.removeEventListener("resize", compute);
+    // Coalesce resize bursts to one measurement per frame — a drag-resize
+    // fires dozens of events/sec, and each setAnchor re-renders the portal.
+    let raf = 0;
+    const onResize = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; compute(); });
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [open]);
 
   // Outside-click + Escape dismissal — must clear BOTH the trigger and the
