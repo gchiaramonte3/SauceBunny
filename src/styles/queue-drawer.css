@@ -22,9 +22,11 @@
   transition: border-color var(--dur-slow) var(--ease-in-out);
 }
 .cp-queue-drawer.open {
-  /* width is now set inline from React state (resize-drag persistence).
-     Border just animates on open/close. */
-  border-left-color: var(--line-1);
+  /* Floating rounded side panel (matches the sidebar + main viewport). width is
+     set inline from React state (resize-drag persistence). */
+  border: 1px solid var(--line-1);
+  border-radius: 16px;
+  margin: var(--s-2) var(--s-2) var(--s-2) 3px;
 }
 /* Embedded (r44.B) — drawer rendered inside its own native window.
    The OS window IS the resize handle, so we fill the parent fully
@@ -32,7 +34,10 @@
 .cp-queue-drawer.embedded {
   width: 100% !important; /* override the inline width from React state */
   height: 100%;
-  border-left-color: transparent; /* no docked-edge border in standalone window */
+  /* Fills its own OS window — no floating gutter/radius/border. */
+  margin: 0;
+  border: none;
+  border-radius: 0;
 }
 /* Keep-alive tab bodies — visited tabs stay mounted (hidden) so per-tab state
    (search, scroll, an AI chat, a running dictation) survives tab switches.

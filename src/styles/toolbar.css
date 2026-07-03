@@ -19,19 +19,22 @@
   50%      { opacity: 0.35; }
 }
 .cp-coreview-pop {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
-  z-index: 3000;
+  /* `position: fixed` + `top`/`right` come from inline style (the component
+     computes them off the trigger's bounding rect and PORTALS to
+     document.body — the toolbar's backdrop-filter would otherwise trap it
+     under the canvas). z-index 9999 matches the notification popover: above
+     the canvas + queue drawer, below the settings modal. Solid opaque bg. */
+  z-index: 9999;
   width: 280px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  background: var(--bg-3);
+  background: #15151a;
   border: 1px solid var(--line-2);
   border-radius: 12px;
-  box-shadow: var(--shadow-card);
+  box-shadow: 0 8px 12px rgba(0,0,0,0.55);
+  animation: cp-fade-in var(--dur-fast) var(--ease-out);
 }
 .cp-coreview-title {
   font-family: var(--font-ui);
@@ -85,6 +88,16 @@
   font-family: var(--font-ui);
   font-size: 11px;
   color: var(--fg-3);
+}
+.cp-coreview-note {
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-4);
 }
 .cp-coreview-leave:hover { color: #ff8a8a; border-color: rgba(255,138,138,0.4); }
 .cp-coreview-err {

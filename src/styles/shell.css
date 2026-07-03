@@ -82,13 +82,20 @@
   flex: 1;
   display: flex;
   min-height: 0;
-  background: var(--bg-1);
+  /* Darker gutter so the rounded panels read as floating cards (Louper feel). */
+  background: var(--bg-0);
 }
 .cp-main {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border-left: 1px solid var(--line-1);
+  /* Floating rounded viewport panel: full border + radius, clipping the video's
+     corners round. Portaled overlays (notifications, view popover) escape it. */
+  margin: var(--s-2) 3px;
+  border: 1px solid var(--line-1);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--bg-1);
 }
 

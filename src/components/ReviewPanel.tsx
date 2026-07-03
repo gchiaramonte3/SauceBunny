@@ -11,12 +11,12 @@ import { loadJson, saveJson } from "../lib/storage";
 import { formatError } from "../lib/error-format";
 import {
   loadReview, saveReview, ensureVersion,
-  addComment, editComment, deleteComment, editReply, removeReply,
-  toggleResolved, toggleLike, rootComments, repliesOf, openCount,
+  buildComment, insertComment, editComment, deleteComment, editReply, removeReply,
+  setResolved, setLike, rootComments, repliesOf, openCount,
   reviewToMarkdown, reviewToCsv, reviewToEdl,
   avatarColor, initialsOf, loadReviewer, AVATAR_COLORS, AUTHOR_KEY, AUTHOR_COLOR_KEY, REVIEW_CHANGED_EVENT,
   loadReviewHistory, removeReviewHistory, clearReviewHistory,
-  type ReviewDoc, type ReviewComment, type CommentSort, type AnnotationStrokes, type ReviewHistoryEntry,
+  type ReviewDoc, type ReviewComment, type CommentSort, type AnnotationStrokes, type ReviewHistoryEntry, type ReviewOp,
 } from "../lib/review";
 
 /**
@@ -106,6 +106,9 @@ export function ReviewPanel({
   onOpenReview,
   onRangeDraft,
   onRegisterRangeHotkeys,
+  sessionActive = false,
+  sessionDoc = null,
+  onSessionOp,
 }: {
   /** Stable id for the current source (local path or URL); null when none loaded. */
   sourceKey: string | null;
@@ -135,6 +138,17 @@ export function ReviewPanel({
   /** Register the ⇧I/⇧O range-mark handlers with App's keyboard dispatch
    *  (null on unmount). The range state stays local to this panel. */
   onRegisterRangeHotkeys?: (h: { markIn: () => void; markOut: () => void } | null) => void;
+  /** Co-review: true while a session is active. May be true BEFORE the doc
+   *  snapshot lands — the panel then shows "Connecting…" and blocks posting so
+   *  a comment can't be written into the void (would be lost when the snapshot
+   *  arrives). Drives `inSession` instead of doc-presence for exactly that reason. */
+  sessionActive?: boolean;
+  /** Co-review: the SHARED doc (arrives once the snapshot lands). While a
+   *  session is active the panel shows this instead of the local-by-sourceKey
+   *  doc and routes every mutation through `onSessionOp` (App applies + relays
+   *  over the P2P session) instead of localStorage. */
+  sessionDoc?: ReviewDoc | null;
+  onSessionOp?: (op: ReviewOp) => void;
 }) {
   const [doc, setDoc] = useState<ReviewDoc | null>(null);
   const [sort, setSort] = useState<CommentSort>("time");
@@ -475,7 +489,7 @@ export function ReviewPanel({
     setDoc(d);
   }, [sourceKey, sourceTitle]);
 
-  // One mutate helper: apply a pure op, persist, set state.
+  // One mutate helper: apply a pure op, persist, set state. (Solo path only.)
   const mutate = (fn: (d: ReviewDoc) => ReviewDoc) => {
     setDoc((prev) => {
       if (!prev) return prev;
@@ -485,12 +499,36 @@ export function ReviewPanel({
     });
   };
 
-  const versionId = doc?.activeVersionId ?? null;
+  // ── Co-review awareness ────────────────────────────────────────────
+  // In a session the SHARED doc is the source of truth for both display and
+  // mutation; solo, it's the local-by-sourceKey doc. `inSession` follows the
+  // session being ACTIVE (not the doc arriving) so a joined-but-connecting
+  // peer never falls back to the solo path and posts into the void. `dispatch`
+  // sends an op to the session (App applies + relays) or mutates locally.
+  const inSession = sessionActive;
+  const connecting = inSession && !sessionDoc;
+  const viewDoc = inSession ? sessionDoc : doc;
+  const dispatch = (op: ReviewOp, localFn: (d: ReviewDoc) => ReviewDoc) => {
+    if (inSession) onSessionOp?.(op);
+    else mutate(localFn);
+  };
+  // On leaving a session, reload the local doc — App persisted the merged
+  // collaborative doc to storage, so the panel must re-read it (its local
+  // `doc` state predates the session's comments).
+  const wasInSessionRef = useRef(false);
+  useEffect(() => {
+    const was = wasInSessionRef.current;
+    wasInSessionRef.current = inSession;
+    if (was && !inSession && sourceKey) setDoc(loadReview(sourceKey));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inSession, sourceKey]);
+
+  const versionId = viewDoc?.activeVersionId ?? null;
   const roots = useMemo(
-    () => (doc ? rootComments(doc, versionId, sort) : []),
-    [doc, versionId, sort],
+    () => (viewDoc ? rootComments(viewDoc, versionId, sort) : []),
+    [viewDoc, versionId, sort],
   );
-  const open = doc ? openCount(doc, versionId) : 0;
+  const open = viewDoc ? openCount(viewDoc, versionId) : 0;
   const resolved = roots.length - open;
 
   // The visible list = current open/resolved filter ∩ text search (body or author).
@@ -504,7 +542,15 @@ export function ReviewPanel({
     });
   }, [roots, filter, search]);
 
-  if (!sourceKey || !doc || !versionId) {
+  if (connecting) {
+    return (
+      <div className="cp-review-empty">
+        <p>Connecting to the session…</p>
+        <p className="sub">Loading the shared review from the host — comments will appear here.</p>
+      </div>
+    );
+  }
+  if (!viewDoc || !versionId || (!inSession && !sourceKey)) {
     return (
       <div className="cp-review-empty">
         <p>Load a source to start a review.</p>
@@ -536,14 +582,15 @@ export function ReviewPanel({
       if (rangeOut - start >= MIN_RANGE_SPAN) { timeStart = start; timeEnd = rangeOut; }
       else timeStart = rangeOut;
     }
-    mutate((d) => addComment(d, {
+    const comment = buildComment({
       versionId,
       timeStart,
       timeEnd,
       body: body || "(drawing)",
       author,
       annotation: hasDrawing ? draft : null,
-    }));
+    });
+    dispatch({ t: "add", comment }, (d) => insertComment(d, comment));
     setText("");
     clearRange();
     // Re-measure after React flushes the cleared text — collapses in auto
@@ -555,18 +602,19 @@ export function ReviewPanel({
     const body = replyDraft.trim();
     if (!body) return;
     if (!ensureNamed()) return; // gate like submit() — no empty-author replies
-    mutate((d) => addComment(d, { versionId, timeStart: atTime, body, author, parentId }));
+    const reply = buildComment({ versionId, timeStart: atTime, body, author, parentId });
+    dispatch({ t: "add", comment: reply }, (d) => insertComment(d, reply));
     setReplyDraft("");
     setReplyTo(null);
   };
 
   const doExport = async (kind: "md" | "csv" | "edl") => {
     setExportOpen(false);
-    if (!doc) return;
+    if (!viewDoc) return;
     const f = {
-      md:  { ext: "md",  name: "Markdown", text: reviewToMarkdown(doc, sourceTitle ?? "Review") },
-      csv: { ext: "csv", name: "CSV",      text: reviewToCsv(doc, fps) },
-      edl: { ext: "edl", name: "EDL",      text: reviewToEdl(doc, fps, sourceTitle ?? "Sauce Bunny Review") },
+      md:  { ext: "md",  name: "Markdown", text: reviewToMarkdown(viewDoc, sourceTitle ?? "Review") },
+      csv: { ext: "csv", name: "CSV",      text: reviewToCsv(viewDoc, fps) },
+      edl: { ext: "edl", name: "EDL",      text: reviewToEdl(viewDoc, fps, sourceTitle ?? "Sauce Bunny Review") },
     }[kind];
     const base = (sourceTitle ?? "review").replace(/[^\w.-]+/g, "-").slice(0, 60) || "review";
     try {
@@ -627,16 +675,16 @@ export function ReviewPanel({
             fps={fps}
             myName={author}
             myColor={authorColor}
-            replies={repliesOf(doc, c.id)}
+            replies={repliesOf(viewDoc, c.id)}
             onSeek={onSeek}
             onShowAnnotation={onShowAnnotation}
-            onResolve={() => mutate((d) => toggleResolved(d, c.id))}
-            onDelete={() => mutate((d) => deleteComment(d, c.id))}
-            onEdit={(body) => mutate((d) => editComment(d, c.id, body))}
-            onLike={() => { if (ensureNamed()) mutate((d) => toggleLike(d, c.id, author)); }}
-            onEditReply={(replyId, body) => mutate((d) => editReply(d, versionId, c.id, replyId, body))}
-            onDeleteReply={(replyId) => mutate((d) => removeReply(d, versionId, c.id, replyId))}
-            onLikeReply={(replyId) => { if (ensureNamed()) mutate((d) => toggleLike(d, replyId, author)); }}
+            onResolve={() => { const at = Date.now(), v = !c.resolved; dispatch({ t: "resolve", id: c.id, resolved: v, at }, (d) => setResolved(d, c.id, v, at)); }}
+            onDelete={() => dispatch({ t: "del", id: c.id }, (d) => deleteComment(d, c.id))}
+            onEdit={(body) => { const at = Date.now(); dispatch({ t: "edit", id: c.id, body, at }, (d) => editComment(d, c.id, body, at)); }}
+            onLike={() => { if (!ensureNamed()) return; const liked = !(c.likes ?? []).includes(author); dispatch({ t: "like", id: c.id, name: author, liked }, (d) => setLike(d, c.id, author, liked)); }}
+            onEditReply={(replyId, body) => { const at = Date.now(); dispatch({ t: "editReply", versionId, commentId: c.id, replyId, body, at }, (d) => editReply(d, versionId, c.id, replyId, body, at)); }}
+            onDeleteReply={(replyId) => dispatch({ t: "delReply", versionId, commentId: c.id, replyId }, (d) => removeReply(d, versionId, c.id, replyId))}
+            onLikeReply={(replyId) => { if (!ensureNamed()) return; const r = viewDoc.comments.find((x) => x.id === replyId); const liked = !(r?.likes ?? []).includes(author); dispatch({ t: "like", id: replyId, name: author, liked }, (d) => setLike(d, replyId, author, liked)); }}
             collapsed={collapsedThreads.has(c.id)}
             onToggleCollapse={() => toggleThread(c.id)}
             replyOpen={replyTo === c.id}

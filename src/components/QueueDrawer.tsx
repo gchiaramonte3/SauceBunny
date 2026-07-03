@@ -104,6 +104,14 @@ type Props = {
   /** Live review-comment range being set → previewed on the App's timeline.
    *  `live` = an end still follows the playhead; false = both marks locked. */
   onReviewRangeDraft?: (r: { start: number; end: number; color: string; live: boolean } | null) => void;
+  /** Co-review: true while a session is active (may precede the doc snapshot
+   *  arriving — the panel shows "Connecting…" and blocks posting until then). */
+  reviewSessionActive?: boolean;
+  /** Co-review: the shared session doc (non-null once the snapshot lands) + the
+   *  op sink. When active, the Review panel shows this doc and routes every
+   *  mutation as an op instead of writing to local storage. */
+  reviewSessionDoc?: import("../lib/review").ReviewDoc | null;
+  onReviewSessionOp?: (op: import("../lib/review").ReviewOp) => void;
   /** ReviewPanel registers its ⇧I/⇧O range-mark handlers with App through
    *  this (null on unmount) — see App's review-range keyboard dispatch. */
   onRegisterRangeHotkeys?: (h: { markIn: () => void; markOut: () => void } | null) => void;
@@ -181,6 +189,7 @@ export function QueueDrawer({
   reviewSourceKey, reviewSourceTitle,
   reviewDrawActive, reviewDraft, onToggleReviewDraw, onReviewDraftConsumed, onShowAnnotation,
   onOpenReviewSource, onReviewRangeDraft, onRegisterRangeHotkeys,
+  reviewSessionActive, reviewSessionDoc, onReviewSessionOp,
   onRenameClip, onRenameAll,
   onPopOut, embedded = false,
 }: Props) {
@@ -791,6 +800,9 @@ export function QueueDrawer({
           onOpenReview={onOpenReviewSource}
           onRangeDraft={onReviewRangeDraft}
           onRegisterRangeHotkeys={onRegisterRangeHotkeys}
+          sessionActive={!!reviewSessionActive}
+          sessionDoc={reviewSessionDoc ?? null}
+          onSessionOp={onReviewSessionOp}
         />
         </div>
       )}

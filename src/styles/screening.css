@@ -1,0 +1,152 @@
+/* Co-review screening mode — Louper-style cinematic watch-party layout. */
+/* ============================================================
+   SCREENING MODE
+   When .cp-body has .cp-screening: the source sidebar is swapped for the
+   participant rail, and the rounded floating panels (rail · viewport · comments)
+   read as a shared theater. Reflow only — the player is never remounted.
+   ============================================================ */
+.cp-screening .cp-sidebar { display: none; }
+/* A touch more cinematic separation around the video panel while screening. */
+.cp-screening .cp-main { background: var(--bg-0); }
+
+/* ── Participant rail — everyone in the session, so people see each other ── */
+.cp-prail {
+  width: 224px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-xl);
+  margin: var(--s-2) 3px var(--s-2) var(--s-2);
+  overflow: hidden;
+}
+.cp-prail-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-4) 10px;
+}
+.cp-prail-title {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.cp-prail-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+}
+.cp-prail-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: 2px var(--s-2) var(--s-2);
+}
+
+/* One participant row */
+.cp-prail-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 7px var(--s-2);
+  border-radius: var(--r-lg);
+  animation: cp-prail-in 260ms var(--ease-out) both;
+}
+.cp-prail-row.self { background: rgba(255,255,255,0.04); }
+@keyframes cp-prail-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Avatar: initials in a coloured ring (the reviewer's hue), with a live dot
+   and an optional host crown. */
+.cp-prail-av {
+  position: relative;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--pr-color, var(--accent)) 22%, var(--bg-3));
+  box-shadow: inset 0 0 0 2px var(--pr-color, var(--accent));
+}
+.cp-prail-initials {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--fg-0);
+  letter-spacing: 0.01em;
+  user-select: none;
+}
+.cp-prail-live {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 2.5px var(--bg-1);
+  animation: cp-prail-pulse 2.4s ease-in-out infinite;
+}
+@keyframes cp-prail-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+.cp-prail-crown {
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--gold);
+  display: flex;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5));
+}
+
+.cp-prail-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cp-prail-name {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cp-prail-you {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.cp-prail-exit {
+  flex-shrink: 0;
+  margin: var(--s-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-prail-row { animation: none; }
+  .cp-prail-live { animation: none; }
+}

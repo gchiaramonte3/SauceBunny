@@ -190,6 +190,39 @@
 .cp-track.dragging .cp-playhead {
   box-shadow: 0 0 0 1px rgba(0,0,0,0.55), 0 0 0 2px rgba(255,255,255,0.35);
 }
+
+/* Co-review ghost cursors — other participants' live playheads. A faint
+   tinted line (1px, no blur) with a small name chip; sits under the real
+   white playhead. Eases horizontally so a following guest glides. */
+.cp-ghost-playhead {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--ghost-color, var(--accent));
+  opacity: 0.7;
+  pointer-events: none;
+  z-index: 2;
+  transition: left 200ms linear;
+}
+.cp-ghost-chip {
+  position: absolute;
+  top: -16px;
+  left: 0;
+  transform: translateX(-50%);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--ghost-color, var(--accent));
+  color: #0a0a0d;
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .cp-track-fill {
   position: absolute;
   top: 0; bottom: 0; left: 0; right: 0;

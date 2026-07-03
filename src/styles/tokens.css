@@ -50,6 +50,7 @@
   --danger:   #E82626;
   --danger-2: #C2252D;
   --info:     #1969F5;
+  --gold:     #F5C451; /* host crown / winner accent — no status meaning */
 
   /* r99 design pass: shadows are for FLOATING layers (popovers, modals,
      toasts) — tight and dark, not big soft washes. In-flow chrome gets

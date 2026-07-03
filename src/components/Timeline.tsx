@@ -48,12 +48,15 @@ type Props = {
   /** Speaker lanes from the diarized transcript — a thin strip of tinted
    *  bands along the bottom of the track showing who talks when. */
   speakerLanes?: { startMs: number; endMs: number; color: string; speaker: string | null }[];
+  /** Co-review ghost cursors — other participants' live playheads, one faint
+   *  tinted line + name chip each (empty when not in a session). */
+  ghosts?: { name: string; frame: number; color: string }[];
   onSeek: (f: number) => void;
 };
 
 export function Timeline({
   status, durationFrames, playheadFrames, inFrames, outFrames, fps,
-  queuedRanges, commentMarkers, reviewRangeDraft, filmstripPath, speakerLanes, onSeek,
+  queuedRanges, commentMarkers, reviewRangeDraft, filmstripPath, speakerLanes, ghosts, onSeek,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -308,6 +311,18 @@ export function Timeline({
                 </div>
               );
             })}
+            {/* Co-review ghost cursors — other participants' live playheads.
+                Faint tinted lines with a name chip; behind the real playhead. */}
+            {ghosts?.map((g) => (
+              <div
+                key={"ghost-" + g.name}
+                className="cp-ghost-playhead"
+                style={{ left: `${pct(g.frame)}%`, ["--ghost-color" as string]: g.color }}
+                title={`${g.name} is here`}
+              >
+                <span className="cp-ghost-chip">{g.name}</span>
+              </div>
+            ))}
             <div
               className="cp-playhead"
               style={{ left: `${pct(playheadFrames)}%` }}

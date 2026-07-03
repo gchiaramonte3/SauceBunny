@@ -147,6 +147,12 @@ export const IconPanelLeft = (p: IconProps) => (
   </Icon>
 );
 
+// Crown — the co-review session host badge.
+export const IconCrown = (p: IconProps) => (
+  <Icon {...p} strokeWidth={2}>
+    <path d="M3 7l4.5 3.5L12 4l4.5 6.5L21 7l-1.6 11.5a1 1 0 0 1-1 .85H5.6a1 1 0 0 1-1-.85L3 7z" />
+  </Icon>
+);
 // Two people — the co-review (watch party) session toggle.
 export const IconUsers = (p: IconProps) => (
   <Icon {...p}>

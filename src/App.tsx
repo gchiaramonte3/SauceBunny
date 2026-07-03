@@ -9,6 +9,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { Toolbar } from "./components/Toolbar";
 import { Sidebar } from "./components/Sidebar";
+import { ParticipantRail } from "./components/ParticipantRail";
 import { Monitor, type AspectId } from "./components/Monitor";
 import type { Notif } from "./components/NotificationBell";
 import type { ToastKind } from "./components/CanvasToast";
@@ -52,7 +53,7 @@ import { parseSrt } from "./lib/srt";
 import { speakerLanes } from "./lib/speaker-stats";
 import { speakerColor } from "./components/transcript/helpers";
 import { MediaInfoModal } from "./components/MediaInfoModal";
-import { loadReview, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
+import { loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes, type ReviewDoc, type ReviewOp } from "./lib/review";
 import { loadJson, saveJson } from "./lib/storage";
 import {
   durationToTc, framesToTc, secondsToTc,
@@ -3369,33 +3370,96 @@ export default function App() {
   // Latest-value mirror for the keyboard effect's ⇧I/⇧O review-range gate.
   useEffect(() => { reviewRangeGateRef.current = { panelDetached, queueOpen, reviewSourceKey, hasSource }; });
 
-  // ── Co-review session (P2P watch party, Phase 1 — r100) ────────────
-  // Rust owns the iroh endpoint (commands/session.rs); the frontend is a
-  // pure event consumer. Host: broadcasts the loaded source + a 2 Hz
-  // transport heartbeat (covers play/pause/seek/scrub-settle in one
-  // mechanism). Peer: follows — loads the host's source, chases the host
-  // playhead (>0.5s divergence → seek), mirrors play/pause.
+  // ── Co-review session (P2P watch party — r100 transport, r101 live review) ──
+  // Rust owns the iroh endpoint (commands/session.rs) as a dumb relay; the
+  // frontend is the review source-of-truth. Host: broadcasts source + a 2 Hz
+  // transport heartbeat + a review-doc snapshot on each join + its own comment
+  // ops. Peer: follows the host playhead, adopts the shared doc, and sends its
+  // own comment ops up (the host relays them to everyone). WEB-ONLY — a local
+  // file can't be pushed to peers, so hosting is gated to web sources.
   const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], error: null });
+  const coSessionActive = coSession.role !== "off";
+  // The shared review doc while in a session (null = solo). The Review panel +
+  // timeline markers read THIS instead of the local-by-sourceKey doc.
+  const [sessionDoc, setSessionDoc] = useState<ReviewDoc | null>(null);
+  const sessionDocRef = useRef<ReviewDoc | null>(null); sessionDocRef.current = sessionDoc;
+  // Live peer playheads → ghost cursors on the timeline (excludes self; the
+  // relay never echoes your own presence back).
+  const [coGhosts, setCoGhosts] = useState<{ name: string; position: number; at: number }[]>([]);
   const coSeqRef = useRef(0);
   const coPlayheadRef = useRef(0); coPlayheadRef.current = playheadFrames;
   const coPlayingRef = useRef(false); coPlayingRef.current = isPlaying;
   const coFpsRef = useRef(30); coFpsRef.current = fps;
-  // Latest-closure ref so the once-registered listener never goes stale.
+  const coRoleRef = useRef("off"); coRoleRef.current = coSession.role;
+  const coLastHostPosRef = useRef<number | null>(null);
+  // Whether the CURRENT source can host — web-only (a local file can't reach peers).
+  const coCanHost = hasSource && sourceKind !== "file";
+
+  // Send a session message the right way for our role: the host broadcasts to
+  // all peers; a peer sends up to the host, which relays it to everyone else.
+  const sendSessionMsg = useCallback((msg: SessionMsg) => {
+    const cmd = coRoleRef.current === "host" ? "session_broadcast" : "session_send";
+    void invoke(cmd, { msg }).catch(() => {});
+  }, []);
+
+  // Apply a review op to the shared doc + relay it (called by the Review panel
+  // for every mutation while in session). Optimistic: apply locally now and
+  // send; the host relays to all-but-sender so we never receive our own op back.
+  const postSessionOp = useCallback((op: ReviewOp) => {
+    setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
+    sendSessionMsg({ kind: "reviewOp", op: JSON.stringify(op) });
+  }, [sendSessionMsg]);
+
+  // Latest-closure ref so the once-registered session:msg listener never stales.
   const coApplyRef = useRef<(m: SessionMsg) => void>(() => {});
   coApplyRef.current = (m) => {
-    if (m.kind === "loadSource") {
-      if (activeSourceUrlRef.current !== m.url) { setUrl(m.url); void handleFetch(m.url); }
-      return;
-    }
-    if (m.kind === "transport") {
-      const r = Math.max(1, Math.round(coFpsRef.current));
-      // Extrapolate where the host is NOW from their timestamped position.
-      const expected = m.position + (m.playing ? (Math.max(0, Date.now() - m.atMs) / 1000) * m.rate : 0);
-      const cur = coPlayheadRef.current / r;
-      if (Math.abs(cur - expected) > 0.5) onSeek(Math.floor(expected * r));
-      const p = playerRef.current;
-      if (p && p.isReady() && m.playing !== coPlayingRef.current) {
-        if (m.playing) p.play(); else p.pause();
+    switch (m.kind) {
+      case "loadSource":
+        if (activeSourceUrlRef.current !== m.url) { setUrl(m.url); void handleFetch(m.url); }
+        return;
+      case "reviewDoc":
+        // MERGE, not blind-replace: the host re-broadcasts a full snapshot on
+        // every join, and an existing peer may have an in-flight op not yet in
+        // that snapshot — mergeReviewDoc keeps it (and unions likes) so no
+        // comment/edit silently vanishes.
+        try {
+          const incoming = JSON.parse(m.doc) as ReviewDoc;
+          setSessionDoc((prev) => (prev ? mergeReviewDoc(prev, incoming) : incoming));
+        } catch { /* malformed snapshot */ }
+        return;
+      case "reviewOp":
+        try {
+          const op = JSON.parse(m.op) as ReviewOp;
+          setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
+        } catch { /* malformed op */ }
+        return;
+      case "presence": {
+        const now = Date.now();
+        setCoGhosts((prev) => [
+          ...prev.filter((g) => g.name !== m.name && now - g.at < 5000),
+          { name: m.name, position: m.position, at: now },
+        ]);
+        return;
+      }
+      case "transport": {
+        const r = Math.max(1, Math.round(coFpsRef.current));
+        const expected = m.position + (m.playing ? (Math.max(0, Date.now() - m.atMs) / 1000) * m.rate : 0);
+        const cur = coPlayheadRef.current / r;
+        const hostScrubbed = coLastHostPosRef.current === null || Math.abs(m.position - coLastHostPosRef.current) > 0.25;
+        coLastHostPosRef.current = m.position;
+        // Follow: while playing, chase drift > 0.5 s. While paused, only jump
+        // when the host actually scrubbed — so a paused guest can glance at a
+        // nearby frame without being yanked back on every heartbeat.
+        if (m.playing) {
+          if (Math.abs(cur - expected) > 0.5) onSeek(Math.floor(expected * r));
+        } else if (hostScrubbed && Math.abs(cur - expected) > 0.1) {
+          onSeek(Math.floor(expected * r));
+        }
+        const p = playerRef.current;
+        if (p && p.isReady() && m.playing !== coPlayingRef.current) {
+          if (m.playing) p.play(); else p.pause();
+        }
+        return;
       }
     }
   };
@@ -3404,12 +3468,44 @@ export default function App() {
     const unMsg = listen<SessionMsg>("session:msg", (e) => coApplyRef.current(e.payload));
     return () => { unState.then((f) => f()); unMsg.then((f) => f()); };
   }, []);
-  // Host → peers: current source (on session start + every source change).
+  // Host seeds the shared doc from its local review of the current source on
+  // start; persists the collaborative doc for everyone on end.
+  const prevCoRoleRef = useRef("off");
+  useEffect(() => {
+    const prev = prevCoRoleRef.current;
+    prevCoRoleRef.current = coSession.role;
+    if (coSession.role === "host" && prev !== "host" && reviewSourceKey) {
+      const { doc } = ensureVersion(loadReview(reviewSourceKey), reviewSourceKey, metadataRef.current?.title ?? undefined);
+      setSessionDoc(doc);
+    }
+    if (coSession.role === "off" && prev !== "off") {
+      const d = sessionDocRef.current;
+      if (d && d.comments.length > 0 && d.sourceKey) saveReview(d); // everyone keeps the review
+      setSessionDoc(null);
+      setCoGhosts([]);
+      coLastHostPosRef.current = null;
+    }
+  }, [coSession.role, reviewSourceKey]);
+  // Host → peers: current source whenever it changes (web only — a local file
+  // has no activeSourceUrl so nothing is pushed).
   useEffect(() => {
     if (coSession.role !== "host" || !activeSourceUrl) return;
     void invoke("session_broadcast", { msg: { kind: "loadSource", url: activeSourceUrl } }).catch(() => {});
   }, [coSession.role, activeSourceUrl]);
-  // Host → peers: 2 Hz transport heartbeat.
+  // Host → new joiner: source + a fresh doc snapshot when the peer count rises.
+  // Fanned to all; existing peers harmlessly re-adopt the identical doc.
+  const prevPeerCountRef = useRef(0);
+  useEffect(() => {
+    const prev = prevPeerCountRef.current;
+    prevPeerCountRef.current = coSession.peers.length;
+    if (coSession.role !== "host" || coSession.peers.length <= prev) return;
+    if (activeSourceUrlRef.current) {
+      void invoke("session_broadcast", { msg: { kind: "loadSource", url: activeSourceUrlRef.current } }).catch(() => {});
+    }
+    const d = sessionDocRef.current;
+    if (d) void invoke("session_broadcast", { msg: { kind: "reviewDoc", doc: JSON.stringify(d) } }).catch(() => {});
+  }, [coSession.role, coSession.peers.length]);
+  // Host → peers: 2 Hz transport heartbeat (play/pause/seek/scrub-settle).
   useEffect(() => {
     if (coSession.role !== "host") return;
     const send = () => {
@@ -3428,6 +3524,20 @@ export default function App() {
     const iv = window.setInterval(send, 500);
     return () => window.clearInterval(iv);
   }, [coSession.role]);
+  // Everyone broadcasts their own playhead ~3 Hz for ghost cursors + prunes
+  // stale ghosts (someone who stopped sending).
+  useEffect(() => {
+    if (!coSessionActive) return;
+    const send = () => {
+      const me = loadReviewer().name || (coRoleRef.current === "host" ? "Host" : "Guest");
+      const r = Math.max(1, Math.round(coFpsRef.current));
+      sendSessionMsg({ kind: "presence", name: me, position: coPlayheadRef.current / r });
+      const now = Date.now();
+      setCoGhosts((prev) => prev.filter((g) => now - g.at < 5000));
+    };
+    const iv = window.setInterval(send, 350);
+    return () => window.clearInterval(iv);
+  }, [coSessionActive, sendSessionMsg]);
   const startCoReview = useCallback(async () => {
     try { await invoke<string>("session_start"); }
     catch (e) { pushNotification("error", "Couldn't start co-review", formatError(e)); }
@@ -3437,6 +3547,37 @@ export default function App() {
     catch (e) { pushNotification("error", "Couldn't join session", formatError(e)); }
   }, [pushNotification]);
   const leaveCoReview = useCallback(() => { void invoke("session_leave").catch(() => {}); }, []);
+
+  // ── Screening mode (Louper-style cinematic watch-party layout) ──────
+  // A reflow of the EXISTING body (participant rail ← sidebar, cinematic
+  // viewport, comments) — never a new tree, so the player is not remounted
+  // and the session/playback keep running. Auto-enters when a session starts,
+  // auto-exits when it ends; the rail's "Exit" drops back to editing while the
+  // session stays live (re-enter from the co-review popover).
+  const [screening, setScreening] = useState(false);
+  const prevScreenSessionRef = useRef(false);
+  useEffect(() => {
+    const was = prevScreenSessionRef.current;
+    prevScreenSessionRef.current = coSessionActive;
+    if (coSessionActive && !was) { setScreening(true); setQueueOpen(true); }
+    if (!coSessionActive && was) setScreening(false);
+  }, [coSessionActive]);
+  // Everyone in the session, for the rail — so people see each other. Host's
+  // roster is peers-only (its own name is local); a peer's roster is the full
+  // list the host broadcast (Host + peers, self found by name).
+  const screeningParticipants = useMemo(() => {
+    const me = loadReviewer();
+    const myName = me.name || "You";
+    if (coSession.role === "host") {
+      return [
+        { name: myName, color: me.color, isHost: true, isSelf: true },
+        ...coSession.peers.map((n) => ({ name: n, color: reviewerColorFor(n, me), isHost: false, isSelf: false })),
+      ];
+    }
+    return coSession.peers.map((n) => ({
+      name: n, color: reviewerColorFor(n, me), isHost: n === "Host", isSelf: n === myName,
+    }));
+  }, [coSession.role, coSession.peers]);
   const [reviewAnnotations, setReviewAnnotations] = useState<{ id: string; time: number; strokes: AnnotationStrokes }[]>([]);
   // Drawing-annotation state: draw mode + the live draft (attached to the next
   // comment) + a saved annotation being viewed read-only over the frame.
@@ -3448,6 +3589,9 @@ export default function App() {
     setReviewDrawActive(false);
     setReviewDraft(null);
     setAnnotationDisplay(null);
+    // In a co-review session the SHARED doc drives markers (see the effect
+    // below) — don't let the local-by-sourceKey reload overwrite them.
+    if (coSessionActive) return;
     if (!reviewSourceKey) { setReviewMarkers([]); setReviewAnnotations([]); return; }
     const reload = () => {
       const d = loadReview(reviewSourceKey);
@@ -3480,7 +3624,31 @@ export default function App() {
     };
     window.addEventListener(REVIEW_CHANGED_EVENT, onChanged);
     return () => window.removeEventListener(REVIEW_CHANGED_EVENT, onChanged);
-  }, [reviewSourceKey]);
+  }, [reviewSourceKey, coSessionActive]);
+
+  // In a session, the shared doc drives the timeline markers + annotations
+  // (so everyone's live comments show on every timeline).
+  useEffect(() => {
+    if (!sessionDoc) return;
+    const me = loadReviewer();
+    const markers = reviewMarkersOf(sessionDoc, sessionDoc.activeVersionId);
+    setReviewMarkers(markers.map((m) => ({
+      id: m.id, time: m.time, timeEnd: m.timeEnd, resolved: m.resolved,
+      color: reviewerColorFor(m.author, me), initials: initialsOf(m.author),
+    })));
+    setReviewAnnotations(annotationsOf(sessionDoc, sessionDoc.activeVersionId));
+  }, [sessionDoc]);
+
+  // Ghost cursors for the timeline — peer playheads in frames, tinted per name.
+  const coGhostMarkers = useMemo(() => {
+    const r = Math.max(1, Math.round(fps));
+    const me = loadReviewer();
+    return coGhosts.map((g) => ({
+      name: g.name,
+      frame: Math.floor(g.position * r),
+      color: reviewerColorFor(g.name, me),
+    }));
+  }, [coGhosts, fps]);
 
   const { handlePopOut: handlePopOutPanel } = usePanelBus({
     panelDetached,
@@ -3606,12 +3774,22 @@ export default function App() {
         onClearNotifications={onClearNotifications}
         onDismissNotification={onDismissNotification}
         coSession={coSession}
+        coCanHost={coCanHost}
+        coScreening={screening}
+        onCoToggleScreening={() => setScreening((s) => !s)}
         onCoStart={() => { void startCoReview(); }}
         onCoJoin={(t, n) => { void joinCoReview(t, n); }}
         onCoLeave={leaveCoReview}
       />
 
-      <div className="cp-body">
+      <div className={"cp-body" + (screening ? " cp-screening" : "")}>
+        {/* Always mounted (stable sibling of <main>) so entering screening
+            never remounts the player; renders nothing when not screening. */}
+        <ParticipantRail
+          active={screening}
+          participants={screeningParticipants}
+          onExit={() => setScreening(false)}
+        />
         <Sidebar
           open={sidebarOpen}
           status={status}
@@ -3826,6 +4004,7 @@ export default function App() {
               reviewRangeDraft={reviewRangeDraft}
               filmstripPath={sourceKind === "file" ? (playbackPath ?? localFilePath) : null}
               speakerLanes={speakerLaneData}
+              ghosts={coGhostMarkers}
               onSeek={onSeek}
             />
             {/* Status line under the timeline. Stays present so setting or
@@ -3927,6 +4106,9 @@ export default function App() {
           onOpenReviewSource={handleOpenReviewSource}
           onReviewRangeDraft={setReviewRangeDraft}
           onRegisterRangeHotkeys={registerReviewRangeKeys}
+          reviewSessionActive={coSessionActive}
+          reviewSessionDoc={sessionDoc}
+          onReviewSessionOp={postSessionOp}
         />}
       </div>
 
