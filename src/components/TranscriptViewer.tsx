@@ -356,6 +356,24 @@ export function TranscriptViewer({
   // out-of-range cursor briefly points past the new match set.
   useEffect(() => { setMatchCursor(0); }, [query, searchMode]);
 
+  // ── Karaoke-body precomputes (perf) ──────────────────────────────
+  // The turns.map render runs on EVERY playhead tick (activeCueIdx changes).
+  // Hoist the O(turns²) cue-offset scan, the per-turn name/alias resolution,
+  // and the search-match lookup out of that hot loop so a tick only re-marks
+  // the active cue instead of recomputing all bookkeeping. Keyed so a rename
+  // (which changes the displayNameFor / resolveAlias callbacks) still refreshes.
+  const cueStartIndices = useMemo(() => {
+    const out: number[] = [];
+    let sum = 0;
+    for (const t of turns) { out.push(sum); sum += t.cues.length; }
+    return out;
+  }, [turns]);
+  const turnMeta = useMemo(
+    () => turns.map((t, ti) => ({ displayName: displayNameFor(ti, t.speaker), resolvedTag: resolveAlias(t.speaker) })),
+    [turns, displayNameFor, resolveAlias],
+  );
+  const matchSet = useMemo(() => new Set(matches), [matches]);
+
   const jumpToMatch = useCallback((delta: 1 | -1) => {
     if (matches.length === 0) return;
     const next = (matchCursor + delta + matches.length) % matches.length;
@@ -1193,20 +1211,20 @@ export function TranscriptViewer({
       {/* Body — one chat-bubble block per turn */}
       <div className="cp-tx-body" ref={scrollRef} onScroll={onScroll}>
         {turns.map((turn, ti) => {
-          const cueStartIdx = turns.slice(0, ti).reduce((n, t) => n + t.cues.length, 0);
-          const displayName = displayNameFor(ti, turn.speaker);
+          const cueStartIdx = cueStartIndices[ti];
+          const { displayName, resolvedTag } = turnMeta[ti];
           const hasOverride =
             !!overrides.turn[String(ti)] ||
             // Resolve the alias chain — globals are keyed on the RESOLVED tag,
             // so a merged-then-renamed turn must check its canonical key.
-            !!overrides.global[resolveAlias(turn.speaker) ?? "__NULL__"];
+            !!overrides.global[resolvedTag ?? "__NULL__"];
           return (
             <div className="cp-tx-turn" key={ti}>
               <div className={"cp-tx-turn-head" + (hasRealSpeakers ? "" : " no-speaker")}>
                 {hasRealSpeakers && (<>
                 <span
                   className={"cp-tx-speaker" + (hasOverride ? " renamed" : "")}
-                  style={{ background: speakerDisplayColor(resolveAlias(turn.speaker)) }}
+                  style={{ background: speakerDisplayColor(resolvedTag) }}
                   onClick={(e) => openRename(e, ti, turn.speaker)}
                   onContextMenu={(e) => openRename(e, ti, turn.speaker)}
                   title="Click or right-click to rename · use Manage speakers to recolour or merge"
@@ -1235,7 +1253,7 @@ export function TranscriptViewer({
                 {turn.cues.map((cue, ci) => {
                   const idx = cueStartIdx + ci;
                   const active = idx === activeCueIdx;
-                  const isMatch = matches.includes(idx);
+                  const isMatch = matchSet.has(idx);
                   const isActiveMatch = matches[matchCursor] === idx;
                   return (
                     <span
