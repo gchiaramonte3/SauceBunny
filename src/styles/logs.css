@@ -4,7 +4,7 @@
    ============================================================ */
 .cp-logs {
   flex-shrink: 0;
-  border-top: 1px solid rgba(255,255,255,0.05);
+  border-top: 1px solid var(--line-1);
   background: #08080A;
   display: flex;
   flex-direction: column;
@@ -33,7 +33,7 @@
 .cp-logs-header .chev {
   display: inline-block;
   transition: transform var(--dur-base) var(--ease-out);
-  color: var(--fg-4);
+  color: var(--fg-3);
 }
 .cp-logs-header .title { text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px; }
 .cp-logs-header .status-pill {
@@ -43,7 +43,7 @@
   color: var(--fg-3);
   background: rgba(255,255,255,0.04);
   padding: 2px 7px;
-  border-radius: 3px;
+  border-radius: 4px;
   letter-spacing: 0.05em;
   text-transform: none;
 }

@@ -28,7 +28,7 @@
   height: 86%;
   max-height: 720px;
   background: #121214;
-  border: 1px solid rgba(255,255,255,0.07);
+  border: 1px solid var(--line-2);
   border-radius: 12px;
   box-shadow: 0 0 0 0.5px rgba(255,255,255,0.05), 0 30px 90px rgba(0,0,0,0.6);
   display: flex;
@@ -42,7 +42,7 @@
   display: flex;
   align-items: center;
   padding: 0 18px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid var(--line-1);
   background: linear-gradient(180deg, rgba(255,255,255,0.015), transparent);
 }
 .cp-modal-header h2 {
@@ -59,7 +59,7 @@
   color: var(--fg-4);
   margin-left: 10px;
   padding-left: 10px;
-  border-left: 1px solid rgba(255,255,255,0.06);
+  border-left: 1px solid var(--line-1);
 }
 .cp-modal-header .filler { flex: 1; }
 .cp-modal-close {
@@ -67,7 +67,7 @@
   border-radius: 6px;
   background: transparent;
   border: 1px solid transparent;
-  color: var(--fg-4);
+  color: var(--fg-3);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -75,7 +75,7 @@
   transition: all var(--dur-fast) var(--ease-out);
   font-size: 14px;
 }
-.cp-modal-close:hover { background: rgba(255,255,255,0.04); color: var(--fg-1); border-color: rgba(255,255,255,0.06); }
+.cp-modal-close:hover { background: rgba(255,255,255,0.04); color: var(--fg-1); border-color: var(--line-2); }
 .cp-modal-body {
   flex: 1;
   display: flex;
@@ -84,7 +84,7 @@
 .cp-modal-tabs {
   width: 196px;
   flex-shrink: 0;
-  border-right: 1px solid rgba(255,255,255,0.05);
+  border-right: 1px solid var(--line-1);
   padding: 14px 10px;
   background: rgba(0,0,0,0.15);
   display: flex;
@@ -114,7 +114,7 @@
 .cp-modal-tab.active {
   background: rgba(255,255,255,0.05);
   color: var(--fg-1);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+  box-shadow: inset 0 0 0 1px var(--line-1);
 }
 .cp-modal-tab.active .tab-icon { color: var(--accent); }
 .cp-modal-tab .grow { flex: 1; }
@@ -184,7 +184,7 @@
   gap: 14px;
   padding: 12px 0;
   align-items: center;
-  border-bottom: 1px solid rgba(255,255,255,0.03);
+  border-bottom: 1px solid var(--line-1);
 }
 .cp-pane-row:last-child { border-bottom: none; }
 .cp-pane-row .k {
@@ -218,7 +218,7 @@
   margin: -2px 0 12px;
   padding: 8px 12px;
   background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
   font-family: var(--font-ui);
   font-size: 11.5px;
@@ -248,7 +248,7 @@
   gap: 14px;
   padding: 12px 14px;
   background: rgba(255,255,255,0.02);
-  border: 1px solid rgba(255,255,255,0.05);
+  border: 1px solid var(--line-1);
   border-radius: 8px;
   transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
@@ -258,7 +258,7 @@
   box-shadow: var(--ring-green);
 }
 .cp-model-row:not(.selected):hover {
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: var(--line-3);
   background: rgba(255, 255, 255, 0.035);
 }
 .cp-model-info-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -286,7 +286,7 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
 }
 .cp-model-head .badge.installed {
   color: var(--fg-2);
@@ -308,7 +308,7 @@
   height: 22px;
   background: transparent;
   border: none;
-  color: var(--fg-4);
+  color: var(--fg-3);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -324,9 +324,9 @@
   top: calc(100% + 6px);
   width: 320px;
   background: #15151a;
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
-  box-shadow: 0 16px 40px rgba(0,0,0,0.55);
+  box-shadow: var(--shadow-card);
   padding: 12px 14px;
   z-index: 30;
   animation: cp-fade-in var(--dur-fast) var(--ease-out);
@@ -415,7 +415,7 @@
   align-items: center;
   padding: 6px 8px;
   margin: 0 -8px;
-  border-radius: 5px;
+  border-radius: 6px;
 }
 .cp-shortcut-row:hover { background: rgba(255,255,255,0.025); }
 .cp-shortcut-row .lbl {
@@ -430,7 +430,7 @@
   font-weight: 600;
   color: var(--fg-2);
   background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.07);
+  border: 1px solid var(--line-2);
   border-bottom-width: 2px;
   padding: 2px 5px;
   min-width: 18px;
@@ -447,7 +447,7 @@
 /* About hero + grid */
 .cp-about-hero {
   background: linear-gradient(180deg, #18181b 0%, #121214 100%);
-  border: 1px solid rgba(255,255,255,0.05);
+  border: 1px solid var(--line-1);
   border-radius: 10px;
   padding: 22px 24px;
   display: flex;
@@ -467,7 +467,7 @@
   font-size: 22px;
   color: #0A0A0D;
   letter-spacing: -0.04em;
-  box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.25);
+  box-shadow: 0 6px 10px rgba(var(--accent-rgb), 0.12);
 }
 .cp-about-name {
   font-family: var(--font-sans);
@@ -509,6 +509,152 @@
 .cp-about-row .k { color: var(--fg-4); }
 .cp-about-row .v { color: var(--fg-2); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
+
+/* ── Media info modal (cp-mediainfo) ──────────────────────────────────────
+   Deep inspector for the loaded local source (probe_media_info / ffprobe).
+   Reuses the .cp-modal-backdrop / .cp-modal-header chrome but overrides the
+   large Settings sizing. Content: verdict badges + definition rows, each
+   with a toggleable plain-English hint (the ⓘ affordance). */
+.cp-modal.cp-mediainfo {
+  width: 92%;
+  max-width: 520px;
+  height: auto;
+  max-height: 80vh;
+}
+.cp-mediainfo-body {
+  padding: 14px 18px 18px;
+  overflow-y: auto;
+  font-family: var(--font-ui);
+}
+.cp-mediainfo-loading,
+.cp-mediainfo-error {
+  padding: 24px 0;
+  font-size: 12px;
+  color: var(--fg-4);
+  text-align: center;
+}
+.cp-mediainfo-error { color: var(--fg-3); }
+
+/* Verdict badges — each is a button that toggles its explanation below. */
+.cp-mediainfo-badgebar { margin-bottom: 14px; }
+.cp-mediainfo-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cp-mediainfo-badge {
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  color: var(--fg-3);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--line-2);
+  cursor: help;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.cp-mediainfo-badge.open { border-color: currentColor; }
+.cp-mediainfo-badge.accent {
+  color: var(--color-accent-green);
+  background: rgba(108,255,141,0.08);
+  border-color: rgba(108,255,141,0.2);
+}
+.cp-mediainfo-badge.accent.open { border-color: rgba(108,255,141,0.55); }
+.cp-mediainfo-badge.warn {
+  color: var(--color-warning);
+  background: rgba(255,181,69,0.08);
+  border-color: rgba(255,181,69,0.22);
+}
+.cp-mediainfo-badge.warn.open { border-color: rgba(255,181,69,0.55); }
+
+.cp-mediainfo-section { margin-bottom: 14px; }
+.cp-mediainfo-section:last-child { margin-bottom: 0; }
+.cp-mediainfo-section h3 {
+  margin: 0 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  border-bottom: 1px solid var(--line-1); /* hair divider between sections */
+  padding-bottom: 4px;
+}
+
+/* Definition rows: 150px muted label + ⓘ | right-aligned value stack.
+   The hint line spans the full row width below, styled as an annotation. */
+.cp-mediainfo-row {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 0 10px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.cp-mediainfo-row .k {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-4);
+}
+.cp-mediainfo-row.has-hint .k { cursor: help; }
+.cp-mediainfo-row .v {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.cp-mediainfo-row .v-primary {
+  color: var(--fg-1);
+  font-variant-numeric: tabular-nums;
+}
+.cp-mediainfo-row .v-secondary {
+  margin-top: 1px;
+  color: var(--fg-4);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The ⓘ affordance — quiet until hovered, accent while its hint is open. */
+.cp-mediainfo-info {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: none;
+  color: var(--fg-3);
+  font-family: inherit;
+  font-size: 9px;
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  opacity: 0.45;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.cp-mediainfo-row .k:hover .cp-mediainfo-info,
+.cp-mediainfo-info:hover { opacity: 1; }
+.cp-mediainfo-info.open {
+  opacity: 1;
+  color: var(--color-accent-green);
+}
+
+/* Inline explanation — full-width annotation under the row (or badge row). */
+.cp-mediainfo-hint {
+  grid-column: 1 / -1;
+  margin: 4px 0 3px;
+  padding: 8px;
+  border-left: 2px solid rgba(108,255,141,0.35);
+  background: rgba(255,255,255,0.02);
+  color: var(--fg-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+  text-align: left;
+}
+.cp-mediainfo-badgebar .cp-mediainfo-hint { margin-top: 8px; }
 
 /* ── YouTube auth modal (cp-ytauth) ───────────────────────────────────────
    Compact contextual sheet that pops on a YouTube bot-check. Reuses the
@@ -552,7 +698,7 @@
   font-weight: 600;
   color: var(--fg-2);
   background: rgba(255,255,255,0.025);
-  border: 1px solid rgba(255,255,255,0.07);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out),
@@ -561,7 +707,7 @@
 }
 .cp-ytauth-browser:hover {
   background: rgba(255,255,255,0.05);
-  border-color: rgba(255,255,255,0.14);
+  border-color: var(--line-3);
   color: var(--fg-1);
 }
 .cp-ytauth-browser.active {
@@ -570,7 +716,7 @@
   border-color: rgba(108,255,141,0.35);
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.10),
-    0 0 12px rgba(108,255,141,0.18);
+    0 0 6px rgba(108,255,141,0.09);
 }
 .cp-ytauth-browser-tag {
   font-size: 9.5px;
@@ -599,8 +745,8 @@
   font-weight: 600;
   color: var(--fg-3);
   background: transparent;
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
   padding: 8px 16px;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out),
@@ -659,7 +805,7 @@
     linear-gradient(45deg, rgba(255,255,255,0.05) 25%, transparent 25%) 0 0 / 14px 14px,
     linear-gradient(-45deg, rgba(255,255,255,0.05) 25%, transparent 25%) 0 7px / 14px 14px,
     var(--bg-0, #0c0c0e);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--line-2);
 }
 .cp-cap-preview-cue {
   display: inline-block;
@@ -687,7 +833,7 @@
   height: 26px;
   padding: 0 8px;
   background: var(--bg-0, #0c0c0e);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--line-2);
   border-radius: 6px;
   color: var(--fg-1);
   font-family: var(--font-ui);
@@ -701,8 +847,8 @@
   height: 30px;
   padding: 0 30px 0 11px;
   background: var(--bg-0, #0c0c0e);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 12px;
@@ -730,7 +876,7 @@
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  border: 2px solid rgba(255,255,255,0.18);
+  border: 2px solid var(--line-3);
   cursor: pointer;
   padding: 0;
   transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
@@ -744,7 +890,7 @@
   width: 26px;
   height: 26px;
   padding: 0;
-  border: 1px solid rgba(255,255,255,0.18);
+  border: 1px solid var(--line-3);
   border-radius: 6px;
   background: transparent;
   cursor: pointer;
@@ -768,7 +914,7 @@
   gap: 12px;
   min-height: 34px;
   padding: 3px 8px;
-  border-radius: 7px;
+  border-radius: 8px;
   transition: background var(--dur-fast) var(--ease-out);
 }
 .cp-keybind-row:hover { background: rgba(255,255,255,0.025); }
@@ -795,7 +941,7 @@
   font-weight: 600;
   color: var(--fg-1);
   background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.10);
+  border: 1px solid var(--line-2);
   border-radius: 6px;
   padding: 2px 8px;
   box-shadow: inset 0 -1px 0 rgba(0,0,0,0.25);
@@ -813,7 +959,7 @@
 .cp-keybind-foot {
   margin-top: 6px;
   padding-top: 12px;
-  border-top: 1px solid rgba(255,255,255,0.06);
+  border-top: 1px solid var(--line-1);
   display: flex;
   justify-content: flex-end;
 }

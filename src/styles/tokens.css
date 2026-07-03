@@ -36,55 +36,65 @@
   --stroke-3: #403F46;
   --stroke-green: rgba(108,255,141,0.6);
 
+  /* ── Line system (r99 design pass) — crisp 1px hairlines in three roles.
+        Component CSS used to hardcode white alphas from 0.02–0.12 for
+        borders, which read as mud on the dark bgs. Borders, dividers and
+        inset hairline rings now come from these three tokens; background
+        FILL alphas are a separate concern and keep their own values. ── */
+  --line-1: rgba(255,255,255,0.10); /* separators, hairline dividers */
+  --line-2: rgba(255,255,255,0.16); /* control borders — inputs, buttons, chips */
+  --line-3: rgba(255,255,255,0.28); /* hover / active / emphasized borders */
+
   --success:  #6CFF8D;
   --warning:  #E87826;
   --danger:   #E82626;
   --danger-2: #C2252D;
   --info:     #1969F5;
 
-  --shadow-soft:   0 2px 8px rgba(20,20,21,0.20);
-  --shadow-card:   0 8px 24px rgba(20,20,21,0.60);
-  --shadow-glow-green:  0 0 24px rgba(108,255,141,0.35);
-  --shadow-glow-purple: 0 0 32px rgba(134,39,255,0.45);
-  --shadow-inset-hair:  inset 0 0 0 1px rgba(255,255,255,0.04);
+  /* r99 design pass: shadows are for FLOATING layers (popovers, modals,
+     toasts) — tight and dark, not big soft washes. In-flow chrome gets
+     crisp 1px lines instead of blur. */
+  --shadow-soft:   0 1px 4px rgba(0,0,0,0.35);
+  --shadow-card:   0 4px 16px rgba(0,0,0,0.50);
+  --shadow-glow-green:  0 0 12px rgba(108,255,141,0.25);
+  --shadow-glow-purple: 0 0 16px rgba(134,39,255,0.32);
+  --shadow-inset-hair:  inset 0 0 0 1px rgba(255,255,255,0.08);
 
   /* ── Bevel shadow stacks — reused across buttons & cards.
-        Top inset highlight + bottom inset shadow + outer cast = depth
-        without committing to skeuomorphism. ── */
+        Crisp 1px insets + a tight cast; the old wide outer washes
+        (4-20px blurs) are gone — depth reads from the insets alone. ── */
   --bevel-raised:
-    inset 0 1px 0 rgba(255,255,255,0.10),
+    inset 0 1px 0 rgba(255,255,255,0.12),
     inset 0 -1px 0 rgba(0,0,0,0.35),
-    0 1px 2px rgba(0,0,0,0.30),
-    0 4px 12px rgba(0,0,0,0.20);
+    0 1px 2px rgba(0,0,0,0.30);
   --bevel-raised-hover:
-    inset 0 1px 0 rgba(255,255,255,0.16),
+    inset 0 1px 0 rgba(255,255,255,0.18),
     inset 0 -1px 0 rgba(0,0,0,0.40),
-    0 2px 4px rgba(0,0,0,0.35),
-    0 8px 20px rgba(0,0,0,0.28);
+    0 1px 3px rgba(0,0,0,0.35);
   --bevel-pressed:
     inset 0 1px 2px rgba(0,0,0,0.45),
     inset 0 -1px 0 rgba(255,255,255,0.04);
-  /* Green CTA — gradient + outer aura + inset shine. */
+  /* Green CTA — crisp 1px ring + inset shine; halo pulled in tight. */
   --glow-green-cta:
     inset 0 1px 0 rgba(255,255,255,0.30),
     inset 0 -1px 0 rgba(0,0,0,0.20),
-    0 0 0 1px rgba(108,255,141,0.50),
-    0 6px 18px rgba(108,255,141,0.30),
-    0 1px 3px rgba(0,0,0,0.40);
+    0 0 0 1px rgba(108,255,141,0.55),
+    0 0 8px rgba(108,255,141,0.22),
+    0 1px 2px rgba(0,0,0,0.40);
   --glow-green-cta-hover:
     inset 0 1px 0 rgba(255,255,255,0.40),
     inset 0 -1px 0 rgba(0,0,0,0.20),
-    0 0 0 1px rgba(108,255,141,0.65),
-    0 8px 24px rgba(108,255,141,0.45),
-    0 1px 3px rgba(0,0,0,0.40);
+    0 0 0 1px rgba(108,255,141,0.75),
+    0 0 10px rgba(108,255,141,0.32),
+    0 1px 2px rgba(0,0,0,0.40);
   /* Selected/active ring — used on sidebar items, toggles ON, queue
-     currently-exporting, etc. Subtle enough to layer over any bg. */
+     currently-exporting, etc. Crisp 1px ring, minimal halo. */
   --ring-green:
-    0 0 0 1px rgba(108,255,141,0.55),
-    0 0 14px rgba(108,255,141,0.22);
+    0 0 0 1px rgba(108,255,141,0.60),
+    0 0 8px rgba(108,255,141,0.18);
   --ring-purple:
-    0 0 0 1px rgba(109,82,237,0.55),
-    0 0 14px rgba(109,82,237,0.30);
+    0 0 0 1px rgba(109,82,237,0.60),
+    0 0 8px rgba(109,82,237,0.24);
 
   /* ── Semantic surface tokens — aliases over the existing bg-N / fg-N
         scale. Layered in so component CSS can opt into clearer names

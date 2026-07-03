@@ -23,11 +23,11 @@
   width: min(640px, 92vw);
   max-height: 70vh;
   background: var(--bg-2);
-  border: 1px solid rgba(255,255,255,0.10);
+  border: 1px solid var(--line-2);
   border-radius: 14px;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.08),
-    0 32px 80px rgba(0,0,0,0.65),
+    var(--shadow-card),
     0 0 0 1px rgba(108,255,141,0.08);
   display: flex;
   flex-direction: column;
@@ -43,7 +43,7 @@
   align-items: center;
   gap: 12px;
   padding: 14px 18px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid var(--line-1);
 }
 .cp-palette-search-icon {
   font-size: 14px;
@@ -100,7 +100,7 @@
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
-  border-radius: 7px;
+  border-radius: 8px;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out);
 }
@@ -147,7 +147,7 @@
   font-weight: 600;
   color: var(--fg-3);
   background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
-  border: 1px solid rgba(255,255,255,0.10);
+  border: 1px solid var(--line-2);
   border-radius: 4px;
   flex-shrink: 0;
   box-shadow: inset 0 -1px 0 rgba(0,0,0,0.25);
@@ -156,7 +156,7 @@
   display: flex;
   gap: 18px;
   padding: 10px 18px;
-  border-top: 1px solid rgba(255,255,255,0.05);
+  border-top: 1px solid var(--line-1);
   font-family: var(--font-ui);
   font-size: 10.5px;
   color: var(--fg-5);
@@ -167,8 +167,8 @@
   padding: 1px 5px;
   margin-right: 4px;
   background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 3px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
   font-family: var(--font-sans);
   font-size: 10px;
   color: var(--fg-3);

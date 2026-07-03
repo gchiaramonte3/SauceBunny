@@ -14,7 +14,7 @@
 .cp-titlebar {
   height: 36px;
   background: linear-gradient(180deg, #18181b 0%, #131316 100%);
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid var(--line-1);
   display: flex;
   align-items: center;
   padding: 0 14px 0 78px;     /* leave room for native macOS traffic lights */
@@ -33,7 +33,7 @@
   gap: 10px;
   padding: 8px 14px 8px 78px;
   background: linear-gradient(180deg, #5a1313 0%, #4a0f0f 100%);
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid var(--line-1);
   font-family: var(--font-ui);
   font-size: 11px;
   color: #ffdada;
@@ -47,7 +47,7 @@
   align-items: center;
   padding: 2px 6px;
   background: rgba(255,255,255,0.16);
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -89,6 +89,6 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border-left: 1px solid rgba(255,255,255,0.04);
+  border-left: 1px solid var(--line-1);
 }
 

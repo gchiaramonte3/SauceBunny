@@ -31,7 +31,7 @@
   max-width: 360px;
   margin-top: 12px;
   padding: 12px;
-  border: 1px solid rgba(255,255,255,0.10);
+  border: 1px solid var(--line-2);
   border-radius: 10px;
   background: rgba(255,255,255,0.02);
   display: flex;
@@ -113,7 +113,7 @@
   font-size: 12px;
   color: var(--fg-2);
   background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.09);
+  border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   padding: 8px 28px 8px 11px;
   cursor: pointer;
@@ -195,17 +195,16 @@
   display: flex;
   gap: 8px;
   padding: 10px 12px;
-  border-top: 1px solid rgba(255,255,255,0.06);
+  border-top: 1px solid var(--line-1);
   background: var(--bg-0);
-  box-shadow: 0 -8px 16px -12px rgba(0,0,0,0.6);
 }
 .cp-ai-input {
   flex: 1;
   height: 32px;
   padding: 0 11px;
   background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
   color: var(--fg-1);
   font-family: var(--font-sans);
   font-size: 12.5px;
@@ -229,7 +228,7 @@
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--line-1);
 }
 .cp-ai-model-pick {
   display: inline-flex;
@@ -238,8 +237,8 @@
   max-width: 60%;
   padding: 4px 9px;
   background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
   color: var(--fg-2);
   font-family: var(--font-ui);
   font-size: 11.5px;
@@ -262,7 +261,7 @@
   display: flex;
   flex-direction: column;
   background: var(--color-surface-elevated);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
 }
@@ -278,7 +277,7 @@
   cursor: pointer;
 }
 .cp-ai-export-menu button:hover { background: rgba(255, 255, 255, 0.07); color: var(--fg-1); }
-.cp-ai-export-sep { height: 1px; margin: 4px 6px; background: rgba(255, 255, 255, 0.07); }
+.cp-ai-export-sep { height: 1px; margin: 4px 6px; background: var(--line-1); }
 
 /* ── Rendered markdown (AI answers) ───────────────────────────────── */
 .cp-md { display: flex; flex-direction: column; gap: 8px; }
@@ -298,7 +297,7 @@
   padding: 1px 5px;
   border-radius: var(--r-xs);
   background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--line-2);
   color: var(--fg-1);
 }
 /* Timestamp citations — tabular mono in the brand accent so they read as
@@ -319,7 +318,7 @@
   border: none;
   background: none;
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: 4px;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 .cp-md-ts-btn:hover { opacity: 1; text-decoration: underline; }
