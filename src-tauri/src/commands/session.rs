@@ -1,0 +1,684 @@
+//! P2P co-review ("watch party") — Phase 1 backend (r100).
+//!
+//! Constitution compliance: this is a peer-to-peer collab PRIMITIVE in the
+//! same spirit as `stream_proxy.rs`, NOT an app backend. Nothing here serves
+//! app logic over a socket:
+//!
+//!   - Media NEVER transits peers. Every participant plays their own copy of
+//!     the source; only tiny JSON control lines (roster, load-source,
+//!     transport truth) cross the wire.
+//!   - Connections are iroh QUIC — dialed by endpoint public key, end-to-end
+//!     encrypted. n0's public discovery + relays are connect-assist only and
+//!     carry nothing but that E2E-encrypted control traffic.
+//!   - A relay-URL override setting + LAN-only mode is Phase 3.
+//!
+//! Topology: star. The host accepts up to `MAX_PEERS` peer connections; each
+//! peer opens ONE bi-directional stream and immediately sends `Hello`. The
+//! wire format is newline-delimited JSON — one `SessionMsg` per line (the
+//! messages are tiny; no binary framing needed in Phase 1).
+//!
+//! Frontend contract (do not drift — the UI is coded against these):
+//!   - event `session:state` → `SessionState`, on every membership / role /
+//!     error change, both roles.
+//!   - event `session:msg`   → `SessionMsg`, PEER side only, for
+//!     `LoadSource` + `Transport` received from the host.
+
+use super::*;
+use iroh::endpoint::{presets, Connection, SendStream};
+use iroh::Endpoint;
+use iroh_tickets::endpoint::EndpointTicket;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::Mutex as AsyncMutex;
+use tokio::task::JoinHandle;
+
+/// Protocol identifier, exchanged in the QUIC handshake. Bump the trailing
+/// version if the wire format ever changes incompatibly.
+const ALPN: &[u8] = b"saucebunny/coreview/1";
+
+/// Star topology cap: host + 3 peers = 4 people per session (Phase 1).
+const MAX_PEERS: usize = 3;
+
+/// Host's roster display name. Phase-2 refinement: let `session_start` take
+/// a display name like `session_join` does.
+const HOST_NAME: &str = "Host";
+
+/// How long a freshly-accepted connection gets to open its stream and send
+/// `Hello` before we drop it.
+const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// End-to-end budget for a peer joining (connect + open_bi + Hello).
+const JOIN_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// How long the host waits to become relay-reachable before minting the
+/// ticket anyway (LAN-only sessions still work off direct addresses).
+const ONLINE_TIMEOUT: Duration = Duration::from_secs(8);
+
+// ============================================================
+// CROSS-BOUNDARY TYPES — the frontend is coded against these
+// exact field names / tags. `cargo test --lib` regenerates
+// src/bindings/SessionMsg.ts + SessionState.ts.
+// ============================================================
+
+#[derive(Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum SessionMsg {
+    /// peer → host right after connect
+    Hello { name: String },
+    /// host → everyone whenever membership changes (includes host's own name first)
+    PeerList { peers: Vec<String> },
+    /// host → everyone: load this source (web URL Phase 1)
+    LoadSource { url: String },
+    /// host → everyone: transport truth. at_ms = host wall clock (ms since epoch).
+    Transport {
+        playing: bool,
+        position: f64,
+        rate: f64,
+        at_ms: f64,
+        seq: u32,
+    },
+}
+
+#[derive(Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct SessionState {
+    pub role: String,          // "off" | "host" | "peer"
+    pub code: Option<String>,  // host: the join ticket to share
+    pub peers: Vec<String>,    // host: connected peer names / peer: roster via PeerList
+    pub error: Option<String>, // last error, cleared on state change
+}
+
+// ============================================================
+// SESSION MANAGER — managed state (`.manage()` in lib.rs).
+//
+// Lock order (deadlock-free by construction): manager mutex FIRST,
+// then the host `peers` mutex. Connection tasks that only touch the
+// peers list must RELEASE it before calling `emit_state_now` (which
+// re-acquires manager → peers).
+// ============================================================
+
+pub struct SessionManager {
+    inner: AsyncMutex<Inner>,
+}
+
+impl Default for SessionManager {
+    fn default() -> Self {
+        Self {
+            inner: AsyncMutex::new(Inner {
+                session: Session::Off,
+                generation: 0,
+                last_error: None,
+            }),
+        }
+    }
+}
+
+struct Inner {
+    session: Session,
+    /// Bumped on every role transition. Failure-teardown tasks capture the
+    /// generation they belong to and no-op if the world moved on — so a
+    /// stale read-loop can never tear down a session it wasn't part of.
+    generation: u64,
+    last_error: Option<String>,
+}
+
+enum Session {
+    Off,
+    Host {
+        endpoint: Endpoint,
+        ticket: String,
+        shared: Arc<HostShared>,
+        accept_task: JoinHandle<()>,
+    },
+    Peer {
+        endpoint: Endpoint,
+        roster: Arc<Mutex<Vec<String>>>,
+        read_task: JoinHandle<()>,
+        // Held so the QUIC stream/connection stay open for the session's
+        // lifetime (dropping the send half would RESET the stream and the
+        // host would drop us). Unused in Phase 1 — peers only ever send
+        // the initial Hello.
+        _conn: Connection,
+        _send: SendStream,
+    },
+}
+
+/// Host-side state shared between the accept loop, per-peer connection
+/// tasks, and `session_broadcast`.
+#[derive(Default)]
+struct HostShared {
+    /// Send halves + names. tokio Mutex: broadcast writes are async.
+    peers: AsyncMutex<Vec<PeerConn>>,
+    /// Per-connection task handles, so `session_leave` can abort them.
+    /// std Mutex — never held across an await. Finished handles are pruned
+    /// as new connections arrive; aborting a finished task is a no-op.
+    tasks: Mutex<Vec<JoinHandle<()>>>,
+}
+
+struct PeerConn {
+    id: u64,
+    name: String,
+    send: SendStream,
+}
+
+static NEXT_PEER_ID: AtomicU64 = AtomicU64::new(1);
+
+// ============================================================
+// INVOKE COMMANDS
+// ============================================================
+
+/// Host a co-review session. Binds an iroh endpoint, spawns the accept
+/// loop, and returns the join ticket to share. Errors if any session
+/// (host or peer) is already active.
+#[tauri::command]
+pub async fn session_start(
+    app: AppHandle,
+    state: State<'_, SessionManager>,
+) -> Result<String, crate::AppError> {
+    let mut inner = state.inner.lock().await;
+    if !matches!(inner.session, Session::Off) {
+        return Err(crate::AppError::invalid("A co-review session is already active"));
+    }
+
+    let endpoint = Endpoint::builder(presets::N0)
+        .alpns(vec![ALPN.to_vec()])
+        .bind()
+        .await
+        .map_err(|e| crate::AppError::internal(format!("co-review endpoint bind: {e}")))?;
+
+    // Wait (bounded) until we're relay-reachable so the ticket works across
+    // NATs. On timeout we mint the ticket anyway — direct addresses still
+    // cover the LAN case, and n0 discovery can fill in the rest later.
+    let _ = tokio::time::timeout(ONLINE_TIMEOUT, endpoint.online()).await;
+
+    let ticket = EndpointTicket::new(endpoint.addr()).to_string();
+    let shared = Arc::new(HostShared::default());
+    let accept_task = tokio::spawn(accept_loop(app.clone(), endpoint.clone(), shared.clone()));
+
+    inner.generation += 1;
+    inner.last_error = None;
+    inner.session = Session::Host {
+        endpoint,
+        ticket: ticket.clone(),
+        shared,
+        accept_task,
+    };
+
+    let snap = snapshot_state(&inner).await;
+    let _ = app.emit("session:state", &snap);
+    Ok(ticket)
+}
+
+/// Join a hosted session as a peer: parse the ticket, connect, open the
+/// bi-stream, send `Hello`, and spawn the read loop that relays host
+/// messages to the frontend.
+#[tauri::command]
+pub async fn session_join(
+    app: AppHandle,
+    state: State<'_, SessionManager>,
+    ticket: String,
+    name: String,
+) -> Result<(), crate::AppError> {
+    let display_name = clean_name(&name);
+
+    let mut inner = state.inner.lock().await;
+    if !matches!(inner.session, Session::Off) {
+        return Err(crate::AppError::invalid("A co-review session is already active"));
+    }
+
+    let parsed: EndpointTicket = ticket
+        .trim()
+        .parse()
+        .map_err(|_| crate::AppError::invalid("That join code doesn't look valid"))?;
+
+    let endpoint = Endpoint::builder(presets::N0)
+        .bind()
+        .await
+        .map_err(|e| crate::AppError::internal(format!("co-review endpoint bind: {e}")))?;
+
+    let attempt = tokio::time::timeout(JOIN_TIMEOUT, async {
+        let conn = endpoint
+            .connect(parsed, ALPN)
+            .await
+            .map_err(|e| format!("connect: {e}"))?;
+        let (mut send, recv) = conn.open_bi().await.map_err(|e| format!("open stream: {e}"))?;
+        write_msg_line(
+            &mut send,
+            &SessionMsg::Hello { name: display_name.clone() },
+        )
+        .await?;
+        Ok::<_, String>((conn, send, recv))
+    })
+    .await;
+
+    let (conn, send, recv) = match attempt {
+        Ok(Ok(v)) => v,
+        Ok(Err(e)) => {
+            endpoint.close().await;
+            return Err(crate::AppError::Network(format!("Couldn't join session: {e}")));
+        }
+        Err(_) => {
+            endpoint.close().await;
+            return Err(crate::AppError::Network(
+                "Couldn't reach the host (timed out)".into(),
+            ));
+        }
+    };
+
+    inner.generation += 1;
+    inner.last_error = None;
+    let generation = inner.generation;
+    let roster: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let read_task = tokio::spawn(peer_read_loop(app.clone(), recv, roster.clone(), generation));
+    inner.session = Session::Peer {
+        endpoint,
+        roster,
+        read_task,
+        _conn: conn,
+        _send: send,
+    };
+
+    let snap = snapshot_state(&inner).await;
+    let _ = app.emit("session:state", &snap);
+    Ok(())
+}
+
+/// Leave / end the session (both roles). Idempotent: calling while "off"
+/// just clears any stale error and re-emits state.
+#[tauri::command]
+pub async fn session_leave(
+    app: AppHandle,
+    state: State<'_, SessionManager>,
+) -> Result<(), crate::AppError> {
+    let mut inner = state.inner.lock().await;
+    inner.generation += 1;
+    inner.last_error = None;
+    let old = std::mem::replace(&mut inner.session, Session::Off);
+    let snap = snapshot_state(&inner).await;
+    let _ = app.emit("session:state", &snap);
+    drop(inner);
+    shutdown_session(old).await;
+    Ok(())
+}
+
+/// HOST only: write `msg` as a JSON line to every connected peer. Peers
+/// whose stream write fails are dropped (removed + updated `PeerList` to
+/// survivors + `session:state` re-emitted).
+#[tauri::command]
+pub async fn session_broadcast(
+    app: AppHandle,
+    state: State<'_, SessionManager>,
+    msg: SessionMsg,
+) -> Result<(), crate::AppError> {
+    let inner = state.inner.lock().await;
+    let Session::Host { shared, .. } = &inner.session else {
+        return Err(crate::AppError::invalid("Not hosting a co-review session"));
+    };
+
+    let mut line = serde_json::to_string(&msg)?;
+    line.push('\n');
+
+    let mut dropped_any = false;
+    {
+        let mut peers = shared.peers.lock().await;
+        let mut dead: Vec<u64> = Vec::new();
+        for p in peers.iter_mut() {
+            if p.send.write_all(line.as_bytes()).await.is_err() {
+                dead.push(p.id);
+            }
+        }
+        if !dead.is_empty() {
+            peers.retain(|p| !dead.contains(&p.id));
+            dropped_any = true;
+        }
+    }
+
+    if dropped_any {
+        broadcast_peer_list(shared).await;
+        let snap = snapshot_state(&inner).await;
+        let _ = app.emit("session:state", &snap);
+    }
+    Ok(())
+}
+
+// ============================================================
+// HOST SIDE — accept loop + per-peer connection tasks
+// ============================================================
+
+async fn accept_loop(app: AppHandle, endpoint: Endpoint, shared: Arc<HostShared>) {
+    // Ends when the endpoint closes (accept() yields None) or the task is
+    // aborted by `session_leave` — no teardown of its own needed.
+    while let Some(incoming) = endpoint.accept().await {
+        let conn = match incoming.await {
+            Ok(c) => c,
+            Err(_) => continue, // handshake failure — never became a peer
+        };
+        let handle = tokio::spawn(handle_peer_conn(app.clone(), conn, shared.clone()));
+        if let Ok(mut tasks) = shared.tasks.lock() {
+            tasks.retain(|t| !t.is_finished());
+            tasks.push(handle);
+        }
+    }
+}
+
+/// Owns one peer connection end-to-end: Hello handshake → roster
+/// registration → read loop → removal on EOF/error.
+async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShared>) {
+    // 1. Handshake: the peer must open the bi-stream and send Hello promptly.
+    let handshake = tokio::time::timeout(HELLO_TIMEOUT, async {
+        let (send, recv) = conn.accept_bi().await.map_err(|e| e.to_string())?;
+        let mut reader = BufReader::new(recv);
+        let mut line = String::new();
+        let n = reader
+            .read_line(&mut line)
+            .await
+            .map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Err("stream closed before hello".to_string());
+        }
+        match serde_json::from_str::<SessionMsg>(line.trim()) {
+            Ok(SessionMsg::Hello { name }) => Ok((send, reader, name)),
+            Ok(_) => Err("expected hello".to_string()),
+            Err(e) => Err(format!("bad hello: {e}")),
+        }
+    })
+    .await;
+
+    let (send, mut reader, raw_name) = match handshake {
+        Ok(Ok(v)) => v,
+        _ => {
+            conn.close(1u32.into(), b"expected hello");
+            return;
+        }
+    };
+    let name = clean_name(&raw_name);
+
+    // 2. Register, enforcing the cap. Extras get a polite close instead of
+    //    a hang — the QUIC close reason is surfaced by the peer's read loop.
+    let id = NEXT_PEER_ID.fetch_add(1, Ordering::Relaxed);
+    {
+        let mut peers = shared.peers.lock().await;
+        if peers.len() >= MAX_PEERS {
+            drop(peers);
+            conn.close(1u32.into(), b"session is full");
+            return;
+        }
+        peers.push(PeerConn { id, name, send });
+    }
+    broadcast_peer_list(&shared).await;
+    emit_state_now(&app).await;
+
+    // 3. Keep reading this peer's lines. Phase 1 defines no peer→host
+    //    traffic after Hello, but parse every line as a SessionMsg anyway
+    //    (future-proof: Phase 2 chat/reactions will slot in here) and use
+    //    EOF/error as the disconnect signal.
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line).await {
+            Ok(0) => break, // clean EOF — peer left
+            Ok(_) => {
+                let _ = serde_json::from_str::<SessionMsg>(line.trim());
+            }
+            Err(_) => break, // reset / connection lost
+        }
+    }
+
+    // 4. Disconnect: remove from the roster (release the lock BEFORE
+    //    emit_state_now — see lock-order note on SessionManager), then
+    //    tell the survivors and the UI.
+    {
+        let mut peers = shared.peers.lock().await;
+        peers.retain(|p| p.id != id);
+    }
+    broadcast_peer_list(&shared).await;
+    emit_state_now(&app).await;
+}
+
+/// Send the current roster (host name first) to every connected peer,
+/// dropping any whose stream is dead. Loops until a pass completes with
+/// no drops so survivors always end up with an accurate list.
+async fn broadcast_peer_list(shared: &HostShared) {
+    let mut peers = shared.peers.lock().await;
+    loop {
+        let roster: Vec<String> = std::iter::once(HOST_NAME.to_string())
+            .chain(peers.iter().map(|p| p.name.clone()))
+            .collect();
+        let Ok(mut line) = serde_json::to_string(&SessionMsg::PeerList { peers: roster }) else {
+            return;
+        };
+        line.push('\n');
+
+        let mut dead: Vec<u64> = Vec::new();
+        for p in peers.iter_mut() {
+            if p.send.write_all(line.as_bytes()).await.is_err() {
+                dead.push(p.id);
+            }
+        }
+        if dead.is_empty() {
+            return;
+        }
+        peers.retain(|p| !dead.contains(&p.id));
+    }
+}
+
+// ============================================================
+// PEER SIDE — read loop
+// ============================================================
+
+async fn peer_read_loop(
+    app: AppHandle,
+    recv: iroh::endpoint::RecvStream,
+    roster: Arc<Mutex<Vec<String>>>,
+    generation: u64,
+) {
+    let mut reader = BufReader::new(recv);
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line).await {
+            Ok(0) => {
+                // Host closed the stream / ended the session.
+                tokio::spawn(fail_peer_to_off(
+                    app,
+                    generation,
+                    "The host ended the session".to_string(),
+                ));
+                return;
+            }
+            Ok(_) => {
+                let Ok(msg) = serde_json::from_str::<SessionMsg>(line.trim()) else {
+                    continue; // future-proof: skip lines we don't understand
+                };
+                match msg {
+                    SessionMsg::PeerList { peers } => {
+                        if let Ok(mut r) = roster.lock() {
+                            *r = peers;
+                        }
+                        emit_state_now(&app).await;
+                    }
+                    msg @ (SessionMsg::LoadSource { .. } | SessionMsg::Transport { .. }) => {
+                        let _ = app.emit("session:msg", &msg);
+                    }
+                    SessionMsg::Hello { .. } => {} // host never sends Hello
+                }
+            }
+            Err(e) => {
+                tokio::spawn(fail_peer_to_off(
+                    app,
+                    generation,
+                    format!("Connection to host lost: {e}"),
+                ));
+                return;
+            }
+        }
+    }
+}
+
+/// Peer-side failure teardown, spawned DETACHED from the read loop so the
+/// loop can return immediately (a task must never await its own abort —
+/// `shutdown_session` aborts `read_task`). The generation check makes a
+/// stale teardown a no-op if the user already left / started a new session.
+async fn fail_peer_to_off(app: AppHandle, generation: u64, error: String) {
+    let mgr = app.state::<SessionManager>();
+    let mut inner = mgr.inner.lock().await;
+    if inner.generation != generation {
+        return;
+    }
+    inner.generation += 1;
+    inner.last_error = Some(error);
+    let old = std::mem::replace(&mut inner.session, Session::Off);
+    let snap = snapshot_state(&inner).await;
+    let _ = app.emit("session:state", &snap);
+    drop(inner);
+    shutdown_session(old).await;
+}
+
+// ============================================================
+// SHARED HELPERS
+// ============================================================
+
+/// Abort a session's tasks and close its endpoint. Call with the manager
+/// lock RELEASED — `Endpoint::close` waits on the network.
+async fn shutdown_session(old: Session) {
+    match old {
+        Session::Off => {}
+        Session::Host {
+            endpoint,
+            shared,
+            accept_task,
+            ..
+        } => {
+            accept_task.abort();
+            if let Ok(mut tasks) = shared.tasks.lock() {
+                for t in tasks.drain(..) {
+                    t.abort();
+                }
+            }
+            endpoint.close().await;
+        }
+        Session::Peer {
+            endpoint,
+            read_task,
+            ..
+        } => {
+            read_task.abort();
+            endpoint.close().await;
+        }
+    }
+}
+
+/// Build the frontend-facing state from the manager's current truth.
+async fn snapshot_state(inner: &Inner) -> SessionState {
+    match &inner.session {
+        Session::Off => SessionState {
+            role: "off".into(),
+            code: None,
+            peers: Vec::new(),
+            error: inner.last_error.clone(),
+        },
+        Session::Host { ticket, shared, .. } => SessionState {
+            role: "host".into(),
+            code: Some(ticket.clone()),
+            peers: shared.peers.lock().await.iter().map(|p| p.name.clone()).collect(),
+            error: inner.last_error.clone(),
+        },
+        Session::Peer { roster, .. } => SessionState {
+            role: "peer".into(),
+            code: None,
+            peers: roster.lock().map(|r| r.clone()).unwrap_or_default(),
+            error: inner.last_error.clone(),
+        },
+    }
+}
+
+/// Emit `session:state` built from the manager's CURRENT state. Tasks call
+/// this instead of assembling state themselves so an emit that races
+/// `session_leave` serializes behind the manager lock and reports the
+/// post-leave truth (a duplicate "off" emit is harmless; a stale "host"
+/// emit would wedge the UI).
+async fn emit_state_now(app: &AppHandle) {
+    let mgr = app.state::<SessionManager>();
+    let inner = mgr.inner.lock().await;
+    let snap = snapshot_state(&inner).await;
+    let _ = app.emit("session:state", &snap);
+}
+
+/// Serialize one `SessionMsg` as a JSON line and write it to a stream.
+async fn write_msg_line(send: &mut SendStream, msg: &SessionMsg) -> Result<(), String> {
+    let mut line = serde_json::to_string(msg).map_err(|e| e.to_string())?;
+    line.push('\n');
+    send.write_all(line.as_bytes())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Display names come from the other side of the wire — trim, strip
+/// control characters, cap the length, and never let one be empty.
+fn clean_name(raw: &str) -> String {
+    let cleaned: String = raw.trim().chars().filter(|c| !c.is_control()).take(40).collect();
+    if cleaned.trim().is_empty() {
+        "Guest".to_string()
+    } else {
+        cleaned
+    }
+}
+
+// ============================================================
+// TESTS — lock the wire contract the frontend is coded against.
+// ============================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transport_wire_shape_matches_contract() {
+        let msg = SessionMsg::Transport {
+            playing: true,
+            position: 12.5,
+            rate: 1.0,
+            at_ms: 1_750_000_000_000.0,
+            seq: 7,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        // Tag + camelCase fields — the frontend switches on exactly these.
+        assert!(json.contains(r#""kind":"transport""#), "json: {json}");
+        assert!(json.contains(r#""atMs":"#), "json: {json}");
+        assert!(json.contains(r#""playing":true"#), "json: {json}");
+        assert!(json.contains(r#""position":12.5"#), "json: {json}");
+        assert!(json.contains(r#""rate":1.0"#), "json: {json}");
+        assert!(json.contains(r#""seq":7"#), "json: {json}");
+    }
+
+    #[test]
+    fn variant_tags_are_camel_case() {
+        let hello = serde_json::to_string(&SessionMsg::Hello { name: "Ada".into() }).unwrap();
+        assert!(hello.contains(r#""kind":"hello""#), "json: {hello}");
+        let list = serde_json::to_string(&SessionMsg::PeerList { peers: vec!["Host".into()] }).unwrap();
+        assert!(list.contains(r#""kind":"peerList""#), "json: {list}");
+        let load = serde_json::to_string(&SessionMsg::LoadSource { url: "https://x".into() }).unwrap();
+        assert!(load.contains(r#""kind":"loadSource""#), "json: {load}");
+    }
+
+    #[test]
+    fn session_msg_round_trips_line_protocol() {
+        let msg = SessionMsg::LoadSource { url: "https://example.com/v".into() };
+        let line = serde_json::to_string(&msg).unwrap();
+        let back: SessionMsg = serde_json::from_str(line.trim()).unwrap();
+        match back {
+            SessionMsg::LoadSource { url } => assert_eq!(url, "https://example.com/v"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn clean_name_guards_wire_input() {
+        assert_eq!(clean_name("  Ada \n"), "Ada");
+        assert_eq!(clean_name("\u{0007}\u{0000}"), "Guest");
+        assert_eq!(clean_name(""), "Guest");
+        assert_eq!(clean_name(&"x".repeat(100)).len(), 40);
+    }
+}

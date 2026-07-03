@@ -132,6 +132,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .manage(commands::JobRegistry::default())
         .manage(commands::LlmServer::default())
+        .manage(commands::SessionManager::default())
         .invoke_handler(tauri::generate_handler![
             commands::fetch_metadata,
             commands::create_clip,
@@ -144,6 +145,7 @@ pub fn run() {
             commands::download_parakeet_model,
             commands::delete_parakeet_model,
             commands::dictate_start,
+            commands::dictate_native_start,
             commands::dictate_stop,
             commands::list_audio_input_devices,
             commands::generate_transcript,
@@ -154,6 +156,7 @@ pub fn run() {
             commands::stop_llm_server,
             commands::llm_server_status,
             commands::probe_local_file,
+            commands::probe_media_info,
             commands::prepare_local_for_playback,
             commands::extract_local_frame,
             commands::generate_local_thumbnail,
@@ -186,8 +189,27 @@ pub fn run() {
             commands::open_full_disk_access,
             commands::open_panel_window,
             commands::close_panel_window,
+            commands::session_start,
+            commands::session_join,
+            commands::session_leave,
+            commands::session_broadcast,
         ])
         .setup(|app| {
+            // Fit the main window to the screen at launch. The static conf
+            // default (1400×900) reads cramped on large displays and would
+            // overflow small ones — so size to ~85%×90% of the monitor,
+            // clamped to sane bounds, and center. Best-effort: any failure
+            // leaves the conf default in place.
+            if let Some(win) = app.get_webview_window("main") {
+                if let Ok(Some(monitor)) = win.current_monitor() {
+                    let m = monitor.size().to_logical::<f64>(monitor.scale_factor());
+                    let w = (m.width * 0.85).clamp(1100.0, 2100.0);
+                    let h = (m.height * 0.90).clamp(700.0, 1300.0);
+                    let _ = win.set_size(tauri::LogicalSize::new(w, h));
+                    let _ = win.center();
+                }
+            }
+
             // Start the loopback media proxy (r58). WKWebView's <video>
             // can't stream googlevideo URLs directly or via custom URI
             // schemes; it CAN stream from http://127.0.0.1. See

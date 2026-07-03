@@ -53,6 +53,15 @@ base64 = "0.22"
 # `#[cfg(test)]`-gated, so the runtime binary carries no ts-rs code.
 # Run `cargo test` to refresh `src/bindings/*.ts`.
 ts-rs = "10"
+# r100: P2P co-review ("watch party") — commands/session.rs. iroh gives us
+# QUIC dialed by endpoint public key (hole-punching, E2E encryption) with
+# n0 public discovery + relays as connect-assist; iroh-tickets mints the
+# shareable join code. Like stream_proxy.rs this is a media-adjacent collab
+# PRIMITIVE, not an app backend: no media transits peers, relays only carry
+# E2E-encrypted control JSON. Heavy dep tree — accepted (r100 decision).
+# Both MIT/Apache-2.0. A relay-URL setting + LAN-only mode is Phase 3.
+iroh = "1"
+iroh-tickets = "1"
 
 [profile.release]
 panic = "abort"

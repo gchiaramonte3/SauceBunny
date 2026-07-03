@@ -13,15 +13,16 @@
     "windows": [
       {
         "title": "Sauce Bunny",
-        "width": 1400,
-        "height": 900,
+        "width": 1680,
+        "height": 1020,
         "minWidth": 1100,
         "minHeight": 700,
         "resizable": true,
         "fullscreen": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "backgroundColor": "#0E0E10"
+        "backgroundColor": "#0E0E10",
+        "center": true
       }
     ],
     "security": {
@@ -53,6 +54,7 @@
       "binaries/ffprobe",
       "binaries/whisper-cli",
       "binaries/saucebunny-diarize",
+      "binaries/saucebunny-dictate",
       "binaries/llama-server"
     ],
     "resources": {

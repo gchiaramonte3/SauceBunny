@@ -35,6 +35,8 @@ pub mod transcript;
 pub use transcript::*;
 pub mod llm;
 pub use llm::*;
+pub mod session;
+pub use session::*;
 
 
 
