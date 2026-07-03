@@ -50,14 +50,32 @@
   color: var(--fg-4);
 }
 .cp-coreview-sep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
   font-family: var(--font-ui);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--fg-5);
-  text-align: center;
-  margin-top: 2px;
+}
+.cp-coreview-sep::before,
+.cp-coreview-sep::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-1);
+}
+/* One-line host hint under a gated "Start a session" — replaces the old
+   bordered note box; a quiet line, not a card. */
+.cp-coreview-hint {
+  padding: 0 2px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--fg-4);
 }
 .cp-coreview-input {
   height: 28px;
@@ -88,16 +106,6 @@
   font-family: var(--font-ui);
   font-size: 11px;
   color: var(--fg-3);
-}
-.cp-coreview-note {
-  padding: 8px 10px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid var(--line-1);
-  border-radius: 8px;
-  font-family: var(--font-ui);
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--fg-4);
 }
 .cp-coreview-leave:hover { color: #ff8a8a; border-color: rgba(255,138,138,0.4); }
 .cp-coreview-err {
