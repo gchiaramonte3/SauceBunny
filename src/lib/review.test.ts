@@ -7,6 +7,7 @@ import {
   commentMarkers, openCount, reviewToMarkdown, reviewToCsv, reviewToEdl,
   reviewFingerprint, resolveByFingerprint, linkFingerprint,
   loadReviewHistory, upsertReviewHistory, removeReviewHistory, clearReviewHistory,
+  buildComment, insertComment, setResolved, setLike, applyReviewOp, mergeReviewDoc,
   type ReviewDoc, type ReviewComment,
 } from "./review";
 
@@ -14,6 +15,69 @@ function seed(): { doc: ReviewDoc; v: string } {
   const r = ensureVersion(emptyDoc("/clip.mp4"), "/clip.mp4", "V1", 1000);
   return { doc: r.doc, v: r.versionId };
 }
+
+describe("co-review op relay (applyReviewOp)", () => {
+  const mk = (v: string, id: string, at = 1000): ReviewComment =>
+    ({ ...buildComment({ versionId: v, timeStart: 1, body: "hi", author: "A" }, at), id });
+
+  it("insertComment is idempotent by id (add op replays safely)", () => {
+    const { doc, v } = seed();
+    const c = mk(v, "x1");
+    const once = insertComment(doc, c);
+    const twice = insertComment(once, c);
+    expect(once.comments).toHaveLength(1);
+    expect(twice.comments).toHaveLength(1); // no duplicate on replay
+  });
+
+  it("two peers' add ops commute to the same doc regardless of order", () => {
+    const { doc, v } = seed();
+    const a = mk(v, "a"); const b = mk(v, "b");
+    const ab = applyReviewOp(applyReviewOp(doc, { t: "add", comment: a }), { t: "add", comment: b });
+    const ba = applyReviewOp(applyReviewOp(doc, { t: "add", comment: b }), { t: "add", comment: a });
+    expect(ab.comments.map((c) => c.id).sort()).toEqual(ba.comments.map((c) => c.id).sort());
+    expect(ab.comments).toHaveLength(2);
+  });
+
+  it("resolve/like ops are SET (idempotent), not toggle", () => {
+    const { doc, v } = seed();
+    const d0 = insertComment(doc, mk(v, "x1"));
+    const r1 = applyReviewOp(d0, { t: "resolve", id: "x1", resolved: true, at: 2000 });
+    const r2 = applyReviewOp(r1, { t: "resolve", id: "x1", resolved: true, at: 2000 });
+    expect(r2.comments[0].resolved).toBe(true); // replay doesn't flip it back
+    const l1 = applyReviewOp(d0, { t: "like", id: "x1", name: "Sam", liked: true });
+    const l2 = applyReviewOp(l1, { t: "like", id: "x1", name: "Sam", liked: true });
+    expect(l2.comments[0].likes).toEqual(["Sam"]); // no double-add
+    expect(setLike(l2, "x1", "Sam", false).comments[0].likes).toEqual([]);
+  });
+
+  it("edit is last-writer-wins by timestamp (concurrent edits converge)", () => {
+    const { doc, v } = seed();
+    const d0 = insertComment(doc, mk(v, "x1", 1000));
+    // Apply the LATER edit first, then the EARLIER one — the later must win.
+    const late = applyReviewOp(d0, { t: "edit", id: "x1", body: "late", at: 3000 });
+    const both = applyReviewOp(late, { t: "edit", id: "x1", body: "early", at: 2000 });
+    expect(both.comments[0].body).toBe("late");
+    expect(setResolved(d0, "x1", true, 4000).comments[0].updatedAt).toBe(4000);
+  });
+
+  it("mergeReviewDoc keeps a local in-flight comment the snapshot lacks", () => {
+    const { doc, v } = seed();
+    const shared = insertComment(doc, mk(v, "host1"));      // host's doc (snapshot)
+    const local = insertComment(shared, mk(v, "mine"));      // + my not-yet-echoed comment
+    const merged = mergeReviewDoc(local, shared);            // adopt snapshot, keep mine
+    expect(merged.comments.map((c) => c.id).sort()).toEqual(["host1", "mine"]);
+  });
+
+  it("mergeReviewDoc keeps the newer edit + unions likes", () => {
+    const { doc, v } = seed();
+    const base = insertComment(doc, mk(v, "x1", 1000));
+    const incoming = setResolved(base, "x1", false, 1000);   // snapshot: unresolved
+    const local = setLike(setResolved(base, "x1", true, 2000), "x1", "Me", true); // mine: resolved + liked
+    const merged = mergeReviewDoc(local, incoming);
+    expect(merged.comments[0].resolved).toBe(true);          // newer local edit kept
+    expect(merged.comments[0].likes).toEqual(["Me"]);        // like survives (unioned)
+  });
+});
 
 describe("versions", () => {
   it("adds a version and makes the first one active", () => {

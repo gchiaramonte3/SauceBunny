@@ -211,8 +211,11 @@ export type NewComment = {
   annotation?: AnnotationStrokes | null;
 };
 
-export function addComment(doc: ReviewDoc, c: NewComment, now = Date.now()): ReviewDoc {
-  const comment: ReviewComment = {
+/** Build a fully-stamped comment (id + timestamps) WITHOUT inserting it. The
+ *  co-review path needs the finished comment up front so the SAME id/time is
+ *  carried in the op and applied identically on every peer. */
+export function buildComment(c: NewComment, now = Date.now()): ReviewComment {
+  return {
     id: newId(),
     versionId: c.versionId,
     parentId: c.parentId ?? null,
@@ -225,7 +228,18 @@ export function addComment(doc: ReviewDoc, c: NewComment, now = Date.now()): Rev
     updatedAt: now,
     annotation: c.annotation ?? null,
   };
+}
+
+/** Append a pre-built comment; a no-op if its id is already present (so
+ *  replaying/echoing an op can't duplicate it — the co-review convergence
+ *  guarantee for add-ops). */
+export function insertComment(doc: ReviewDoc, comment: ReviewComment): ReviewDoc {
+  if (doc.comments.some((c) => c.id === comment.id)) return doc;
   return { ...doc, comments: [...doc.comments, comment] };
+}
+
+export function addComment(doc: ReviewDoc, c: NewComment, now = Date.now()): ReviewDoc {
+  return insertComment(doc, buildComment(c, now));
 }
 
 export function editComment(doc: ReviewDoc, id: string, body: string, now = Date.now()): ReviewDoc {
@@ -292,6 +306,114 @@ export function toggleResolved(doc: ReviewDoc, id: string, now = Date.now()): Re
     comments: doc.comments.map((c) =>
       c.id === id ? { ...c, resolved: !c.resolved, updatedAt: now } : c),
   };
+}
+
+/** SET (not toggle) the resolved flag — the idempotent form the co-review op
+ *  relay needs so replaying/echoing an op converges instead of flip-flopping. */
+export function setResolved(doc: ReviewDoc, id: string, resolved: boolean, now = Date.now()): ReviewDoc {
+  return {
+    ...doc,
+    comments: doc.comments.map((c) => (c.id === id ? { ...c, resolved, updatedAt: now } : c)),
+  };
+}
+
+/** SET (not toggle) `name`'s membership in a comment's likes — the idempotent
+ *  form for the op relay (two applies land the same place). */
+export function setLike(doc: ReviewDoc, id: string, name: string, liked: boolean): ReviewDoc {
+  const who = name.trim();
+  if (!who) return doc;
+  return {
+    ...doc,
+    comments: doc.comments.map((c) => {
+      if (c.id !== id) return c;
+      const likes = c.likes ?? [];
+      const has = likes.includes(who);
+      if (liked && !has) return { ...c, likes: [...likes, who] };
+      if (!liked && has) return { ...c, likes: likes.filter((n) => n !== who) };
+      return c;
+    }),
+  };
+}
+
+// ── co-review op relay ───────────────────────────────────────────────────────
+// A ReviewOp is the serializable, order-independent unit that flows over the
+// P2P session (App applies it to the shared session doc; the host relays it to
+// peers). Design for convergence with a host-authoritative relay + 2-4 people:
+//   • `add` carries the FULLY-BUILT comment (id + timestamps stamped once by
+//     the author) so every peer inserts the identical row; idempotent by id.
+//   • `resolve` / `like` are SET (not toggle) so echoes/replays are idempotent.
+//   • `edit` / `resolve` / `editReply` guard on the carried timestamp (LWW) so
+//     the rare concurrent edit of the SAME comment converges to the later one
+//     instead of diverging per-peer.
+//   • `del` / `delReply` are naturally idempotent (filter).
+export type ReviewOp =
+  | { t: "add"; comment: ReviewComment }
+  | { t: "edit"; id: string; body: string; at: number }
+  | { t: "del"; id: string }
+  | { t: "resolve"; id: string; resolved: boolean; at: number }
+  | { t: "like"; id: string; name: string; liked: boolean }
+  | { t: "editReply"; versionId: string; commentId: string; replyId: string; body: string; at: number }
+  | { t: "delReply"; versionId: string; commentId: string; replyId: string };
+
+// LWW with a deterministic tiebreak: a stale op (older timestamp) is skipped;
+// a same-millisecond collision from two machines is broken by a value both
+// peers agree on (lexical body / resolved=true wins) so the result converges
+// regardless of the order the two ops happened to be applied in.
+function editLoses(op: { at: number; body: string }, cur: ReviewComment): boolean {
+  return op.at < cur.updatedAt || (op.at === cur.updatedAt && op.body <= cur.body);
+}
+
+/** Apply one op to the shared doc. Pure; safe to replay (idempotent adds/sets,
+ *  LWW-guarded edits). Unknown op shapes return the doc unchanged. */
+export function applyReviewOp(doc: ReviewDoc, op: ReviewOp): ReviewDoc {
+  switch (op.t) {
+    case "add":
+      return insertComment(doc, op.comment);
+    case "edit": {
+      const cur = doc.comments.find((c) => c.id === op.id);
+      if (cur && editLoses(op, cur)) return doc;
+      return editComment(doc, op.id, op.body, op.at);
+    }
+    case "del":
+      return deleteComment(doc, op.id);
+    case "resolve": {
+      const cur = doc.comments.find((c) => c.id === op.id);
+      // On a true timestamp tie, resolved=true wins deterministically.
+      if (cur && (op.at < cur.updatedAt || (op.at === cur.updatedAt && !op.resolved))) return doc;
+      return setResolved(doc, op.id, op.resolved, op.at);
+    }
+    case "like":
+      return setLike(doc, op.id, op.name, op.liked);
+    case "editReply": {
+      const cur = doc.comments.find((c) => c.id === op.replyId);
+      if (cur && editLoses(op, cur)) return doc;
+      return editReply(doc, op.versionId, op.commentId, op.replyId, op.body, op.at);
+    }
+    case "delReply":
+      return removeReply(doc, op.versionId, op.commentId, op.replyId);
+    default:
+      return doc;
+  }
+}
+
+/** Merge an incoming (authoritative) snapshot with the local doc so a local op
+ *  that hasn't been echoed back yet survives a snapshot re-adopt (the host
+ *  re-broadcasts a full doc on every join; without this an existing peer's
+ *  in-flight comment/edit would silently vanish). Starts from `incoming`;
+ *  re-folds any local-only comment (idempotent add), keeps the newer of a
+ *  shared comment by updatedAt, and UNIONs likes (which don't bump updatedAt)
+ *  so a not-yet-echoed like isn't dropped. */
+export function mergeReviewDoc(local: ReviewDoc, incoming: ReviewDoc): ReviewDoc {
+  const byId = new Map<string, ReviewComment>(incoming.comments.map((c) => [c.id, { ...c }]));
+  for (const lc of local.comments) {
+    const ic = byId.get(lc.id);
+    if (!ic) { byId.set(lc.id, lc); continue; } // local-only → keep it
+    const base = lc.updatedAt > ic.updatedAt ? { ...lc } : { ...ic };
+    const likes = Array.from(new Set([...(ic.likes ?? []), ...(lc.likes ?? [])]));
+    base.likes = likes.length ? likes : undefined;
+    byId.set(lc.id, base);
+  }
+  return { ...incoming, comments: Array.from(byId.values()) };
 }
 
 // ── approval status ──────────────────────────────────────────────────────────
