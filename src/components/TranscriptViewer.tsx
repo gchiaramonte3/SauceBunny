@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { IconReveal, IconAlert, IconChevronDown } from "./Icons";
+import { IconReveal, IconAlert, IconChevronDown, IconInfo } from "./Icons";
 import { parseSrt, groupIntoTurns, fmtTime, type Turn } from "../lib/srt";
+import { speakerStats } from "../lib/speaker-stats";
 import { secondsToTc } from "../lib/timecode";
 import { formatError } from "../lib/error-format";
 import {
@@ -14,6 +15,7 @@ import { RenamePopover, type RenameState } from "./transcript/RenamePopover";
 import { SpeakerRosterModal } from "./transcript/SpeakerRosterModal";
 import { SpeakerColorPicker } from "./SpeakerColorPicker";
 import { HistoryPopover } from "./transcript/HistoryPopover";
+import { InsightsPopover } from "./transcript/InsightsPopover";
 import {
   escapeHtml,
   highlightMatch,
@@ -666,6 +668,16 @@ export function TranscriptViewer({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [toolsOpen]);
 
+  // ── Speaker insights popover state ───────────────────────────────
+  // Anchored to the Insights header button (the DOMRect doubles as the
+  // open flag, same pattern as the colour picker). The stats derive
+  // straight from the loaded cues — recomputed only when turns change.
+  const [insightsAnchor, setInsightsAnchor] = useState<DOMRect | null>(null);
+  const insightStats = useMemo(
+    () => speakerStats(turns.flatMap((t) => t.cues)),
+    [turns],
+  );
+
   // ── History popover state ────────────────────────────────────────
   // Anchored to the History button. Closes on outside-click or Esc.
   // Re-reads localStorage on each open so the list reflects entries
@@ -973,6 +985,21 @@ export function TranscriptViewer({
               </div>
             )}
           </div>
+          <button
+            className={"btn btn-ghost cp-tx-iconbtn" + (insightsAnchor ? " active" : "")}
+            title="Speaker insights"
+            /* Swallow the mousedown so the open popover's outside-click
+               handler doesn't close it before this click re-opens it —
+               keeps the button a true toggle. */
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              setInsightsAnchor((prev) => (prev ? null : rect));
+            }}
+          >
+            <IconInfo size={13} />
+            <span>Insights</span>
+          </button>
         </div>
         <div className="cp-tx-head-actions" ref={dlRef}>
           <button
@@ -1288,6 +1315,14 @@ export function TranscriptViewer({
             ? () => { resetSpeakerColor(colorPick.key); setColorPick(null); }
             : undefined}
           onClose={() => setColorPick(null)}
+        />
+      )}
+      {insightsAnchor && (
+        <InsightsPopover
+          anchor={insightsAnchor}
+          stats={insightStats}
+          colorOf={(s) => speakerDisplayColor(resolveAlias(s))}
+          onClose={() => setInsightsAnchor(null)}
         />
       )}
       {historyOpen && historyBtnRef.current && (

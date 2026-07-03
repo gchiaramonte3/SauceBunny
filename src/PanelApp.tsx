@@ -78,14 +78,30 @@ function sendAction(kind: ActionKind, payload?: unknown) {
   void emit(`panel:action:${kind}`, payload ?? null);
 }
 
+/** Read the mirrored snapshot synchronously. Seeding the FIRST render with the
+ *  real state matters beyond avoiding a flash of empty panel: QueueDrawer's
+ *  auto-switch seeds a ref with the mount-time `transcriptArrivedTick`, so if
+ *  the first render carried INITIAL's tick 0 and the snapshot landed a beat
+ *  later, the tick would "advance" and spuriously yank the panel to the
+ *  Transcript tab on every pop-out. */
+function readSnapshotSync(): { raw: string | null; state: PanelState } {
+  try {
+    const raw = localStorage.getItem(PANEL_SNAPSHOT_KEY);
+    if (raw) return { raw, state: JSON.parse(raw) as PanelState };
+  } catch { /* corrupt/unavailable — fall through to INITIAL */ }
+  return { raw: null, state: INITIAL };
+}
+
 export default function PanelApp() {
-  const [state, setState] = useState<PanelState>(INITIAL);
+  const [boot] = useState(readSnapshotSync);
+  const [state, setState] = useState<PanelState>(boot.state);
 
   // PRIMARY channel: read the snapshot the main window mirrors to localStorage
-  // (shared across same-origin webviews). On mount + on the `storage` event +
-  // a slow poll backstop (in case WKWebView doesn't fire cross-window storage
-  // events). This is what makes the popped-out transcript actually populate.
-  const lastRawRef = useRef<string | null>(null);
+  // (shared across same-origin webviews). Seeded synchronously above; then
+  // re-read on the `storage` event + a slow poll backstop (in case WKWebView
+  // doesn't fire cross-window storage events). This is what makes the
+  // popped-out transcript actually populate and track main.
+  const lastRawRef = useRef<string | null>(boot.raw);
   useEffect(() => {
     const read = () => {
       try {
