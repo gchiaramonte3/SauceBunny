@@ -163,6 +163,42 @@ Key points:
 - **Graceful stop matters.** `dictate_stop` writes `q` to ffmpeg's stdin so it finalizes the WAV header; a `kill()`/SIGKILL would truncate it. `JobRegistry::write_stdin` exists for exactly this (it writes without removing the child, so the drain task still sees the clean exit). `cancel_job` (SIGKILL) is used only to discard a recording (e.g. the panel unmounts mid-record).
 - **Microphone permission** comes from `NSMicrophoneUsageDescription` in `src-tauri/Info.plist`, which the macOS bundler auto-merges into the generated plist (dev + `.dmg`). The ffmpeg child inherits the app's TCC grant. **Dev caveat:** a stale `tauri dev` binary (build-ID mismatch) or a denied TCC prompt makes capture fail — restart the dev build and allow the mic prompt when testing dictation.
 
+## P2P co-review (watch party)
+
+`src-tauri/src/commands/session.rs` + the co-review block in `App.tsx`. A
+peer-to-peer collab *primitive* in the same spirit as the stream proxy — not an
+app backend. **Media never transits peers**: everyone plays their own copy of
+the source; only tiny newline-delimited JSON control lines (`SessionMsg`) cross
+the wire.
+
+```
+host: session_start ─► iroh QUIC endpoint + one-line ticket (join code)
+peer: session_join(ticket, name) ─► dial, open bi-stream, send Hello
+topology: star — host + up to MAX_PEERS(3) guests, host relays everything
+```
+
+- **Wire messages** (`SessionMsg`, ts-rs generated): `Hello`, `PeerList`
+  (roster, host always first), `LoadSource`, `Transport` (2 Hz playhead truth),
+  `ReviewOp`/`ReviewDoc` (opaque JSON review mutations/snapshots — Rust only
+  relays), `Presence` (ghost playheads, ~3 Hz).
+- **Session-first flow**: a session can start with nothing loaded. The host's
+  `activeSourceUrl` effect broadcasts `LoadSource` on every source change +
+  to each new joiner; a peer holds the transport playhead-chase until its own
+  player `isReady()` for that source, then snaps to the host's frame.
+- **Shared review doc**: comments/replies/likes/resolves are ops
+  (`src/lib/review.ts` — idempotent adds by id, SET-not-toggle likes/resolves,
+  LWW edits with a deterministic tiebreak, `mergeReviewDoc` snapshot-merge on
+  join). Host applies + relays to all-but-sender, so the star converges.
+  On session end everyone persists the collaborative doc locally.
+- **Screening mode** is a pure CSS reflow of the existing body (participant
+  rail replaces the sidebar; the player is never remounted). The rail reads
+  real roster data; the host is identified by roster position 0 — the name
+  "Host" is reserved server-side so a guest can't claim the crown.
+- **Input hardening**: relayed control lines are capped (2 MB), Presence names
+  run through the same `clean_name` as Hello.
+- **Web-source only** for now (a local file can't reach guests); a relay-URL
+  override + LAN-only mode is deferred (Phase 3 note in session.rs).
+
 ## State management
 
 `App.tsx` owns most application state via `useState`. Preferences and history persist to `localStorage` under the `saucebunny.*` namespace:

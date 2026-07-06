@@ -227,17 +227,26 @@ pub fn cleanup_stale_cache(app: AppHandle) -> Result<u32, crate::AppError> {
 }
 
 /// Write raw bytes (e.g. a frame Blob marshalled from the frontend) to
-/// `path`. Used by the mediabunny snapshot path so we can produce the
-/// JPEG/PNG entirely in JS land and just persist the buffer here.
-/// Validates the parent dir exists; refuses to overwrite the saveDialog
-/// would have already vetted the path the user chose.
+/// `path`. Used by the mediabunny snapshot + local clip-export paths so we
+/// can produce the file entirely in JS land and just persist the buffer here.
+/// Validates the parent dir exists. Callers whose destination did NOT come
+/// from a saveDialog (the clip exporters derive names themselves) pass
+/// `if_not_exists` so a name collision errors instead of silently truncating
+/// an existing file — matching create_clip's refuse-to-overwrite behavior.
 #[tauri::command]
-pub fn write_bytes_to_path(path: String, bytes: Vec<u8>) -> Result<(), crate::AppError> {
+pub fn write_bytes_to_path(
+    path: String,
+    bytes: Vec<u8>,
+    if_not_exists: Option<bool>,
+) -> Result<(), crate::AppError> {
     let p = PathBuf::from(&path);
     if let Some(parent) = p.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
             return Err(format!("Folder does not exist: {}", parent.display()).into());
         }
+    }
+    if if_not_exists.unwrap_or(false) && p.exists() {
+        return Err(format!("File already exists: {}", p.display()).into());
     }
     std::fs::write(&p, &bytes).map_err(|e| format!("write failed: {e}"))?;
     Ok(())
@@ -340,7 +349,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-06-16-r94-dictation-mic-waveform";
+pub const BACKEND_BUILD_ID: &str = "2026-07-06-r104-host-name";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

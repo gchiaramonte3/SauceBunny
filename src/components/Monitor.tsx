@@ -88,6 +88,8 @@ type Props = {
   captionStyle?: CaptionStyle;
   /** Live HH:MM:SS:FF for the type-a-timecode HUD; null hides it. */
   tcOverlay?: string | null;
+  /** Signed J-K-L shuttle rate (e.g. -4 = rewind 4×); 0/undefined hides the badge. */
+  shuttleRate?: number;
   /** Review drawing annotation to render over the frame (draft or saved). */
   annotation?: AnnotationStrokes | null;
   /** True while the Review panel is in draw mode (overlay captures input). */
@@ -142,6 +144,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     toast, onToastDismiss,
     onPlayerTimeUpdate, onPlayerStateChange, onPlayerReady, onSurfaceClick,
     transcriptPath, transcriptReloadToken, currentSec, captionsOn, captionStyle, tcOverlay,
+    shuttleRate,
     annotation, annotationDrawing, annotationOpacity, onAnnotationChange, onAnnotationDismiss,
   } = props;
 
@@ -323,6 +326,15 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             <div className="cp-tc-hud-label">Go to timecode</div>
             <div className="cp-tc-hud-value">{tcOverlay}</div>
             <div className="cp-tc-hud-hint">Return to snap · Esc to cancel</div>
+          </div>
+        )}
+
+        {/* J-K-L shuttle badge — direction + speed while shuttling (App owns
+            the rate; K/Space or landing on +1 clears it). Purely indicative,
+            so it's pointer-transparent and hidden from the a11y tree. */}
+        {typeof shuttleRate === "number" && shuttleRate !== 0 && (
+          <div className="cp-shuttle-badge" aria-hidden>
+            {shuttleRate < 0 ? "◀◀" : "▶▶"} {Math.abs(shuttleRate)}×
           </div>
         )}
 

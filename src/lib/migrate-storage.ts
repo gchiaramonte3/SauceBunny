@@ -26,6 +26,17 @@ export function migrateLegacyStorageKeys(): void {
     for (const [k, v] of toCopy) {
       try { localStorage.setItem(k, v); } catch { /* quota — best-effort */ }
     }
+
+    // Sweep keys left behind by removed features so they don't accumulate
+    // forever. `saucebunny.clips.*` = the retired Clips tab (removed 2026-07).
+    const toRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith("saucebunny.clips.")) toRemove.push(key);
+    }
+    for (const k of toRemove) {
+      try { localStorage.removeItem(k); } catch { /* best-effort */ }
+    }
   } catch {
     // localStorage unavailable (private mode quirks) — non-fatal.
   }

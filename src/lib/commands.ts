@@ -85,6 +85,8 @@ export type CommandDeps = {
   handleClear: () => void;
   onPlayToggle: () => void;
   seekBySeconds: (s: number) => void;
+  /** J/L NLE transport: shuttle-ladder step, or a frame nudge while K is held. */
+  shuttleStep: (direction: 1 | -1) => void;
   onStep: (dir: number) => void;
   onSeek: (frame: number) => void;
   onMarkIn: () => void;
@@ -134,10 +136,14 @@ export function buildCommands(d: CommandDeps): Command[] {
     { id: "play.toggle", label: d.isPlaying ? "Pause" : "Play",
       group: "Playback", hotkey: "Space", disabled: !d.hasSource,
       run: () => d.onPlayToggle() },
-    { id: "play.back5",    label: "Back 5 seconds",    group: "Playback",
-      hotkey: "J", disabled: !d.hasSource, run: () => d.seekBySeconds(-5) },
-    { id: "play.fwd5",     label: "Forward 5 seconds", group: "Playback",
-      hotkey: "L", disabled: !d.hasSource, run: () => d.seekBySeconds(5) },
+    { id: "play.back5",    label: "Shuttle / step back", group: "Playback",
+      hotkey: "J", description: "Tap to shuttle in reverse (1-2-4-8×); hold K and tap to step a frame back",
+      keywords: ["jkl", "rewind", "reverse"],
+      disabled: !d.hasSource, run: () => d.shuttleStep(-1) },
+    { id: "play.fwd5",     label: "Shuttle / step forward", group: "Playback",
+      hotkey: "L", description: "Tap to shuttle forward (1-2-4-8×); hold K and tap to step a frame forward",
+      keywords: ["jkl", "fast-forward"],
+      disabled: !d.hasSource, run: () => d.shuttleStep(1) },
     { id: "play.frameBack", label: "Step 1 frame back",    group: "Playback",
       hotkey: "←", disabled: !d.hasSource, run: () => d.onStep(-1) },
     { id: "play.frameFwd",  label: "Step 1 frame forward", group: "Playback",

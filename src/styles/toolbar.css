@@ -2,6 +2,118 @@
 /* ============================================================
    TOP TOOLBAR
    ============================================================ */
+
+/* ── Co-review (P2P watch party) toolbar popover ── */
+.cp-coreview { position: relative; }
+.cp-coreview-live { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.4); }
+.cp-coreview-dot {
+  position: absolute;
+  top: 3px; right: 3px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: cp-coreview-blink 2s ease-in-out infinite;
+}
+@keyframes cp-coreview-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+.cp-coreview-pop {
+  /* `position: fixed` + `top`/`right` come from inline style (the component
+     computes them off the trigger's bounding rect and PORTALS to
+     document.body — the toolbar's backdrop-filter would otherwise trap it
+     under the canvas). z-index 9999 matches the notification popover: above
+     the canvas + queue drawer, below the settings modal. Solid opaque bg. */
+  z-index: 9999;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: #15151a;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  box-shadow: 0 8px 12px rgba(0,0,0,0.55);
+  animation: cp-fade-in var(--dur-fast) var(--ease-out);
+}
+.cp-coreview-title {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+.cp-coreview-sub {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-4);
+}
+.cp-coreview-sep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-5);
+}
+.cp-coreview-sep::before,
+.cp-coreview-sep::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-1);
+}
+/* One-line host hint under a gated "Start a session" — replaces the old
+   bordered note box; a quiet line, not a card. */
+.cp-coreview-hint {
+  padding: 0 2px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--fg-4);
+}
+.cp-coreview-input {
+  height: 28px;
+  padding: 0 8px;
+  background: var(--bg-0);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+.cp-coreview-input:focus { outline: none; border-color: var(--accent); box-shadow: none; }
+.cp-coreview-code {
+  padding: 6px 8px;
+  background: var(--bg-0);
+  border: 1px solid var(--line-1);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-2);
+  word-break: break-all;
+  max-height: 64px;
+  overflow-y: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.cp-coreview-peers {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.cp-coreview-leave:hover { color: #ff8a8a; border-color: rgba(255,138,138,0.4); }
+.cp-coreview-err {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: #ff8a8a;
+}
+
 .cp-toolbar {
   height: 60px;
   flex-shrink: 0;
@@ -10,7 +122,7 @@
   gap: 14px;
   padding: 0 18px;
   background: linear-gradient(180deg, rgba(20,20,21,0.5), rgba(14,14,16,0.3));
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid var(--line-1);
   backdrop-filter: blur(20px);
 }
 
@@ -42,17 +154,17 @@
   background: var(--accent);
   display: inline-block;
   transform: translateY(-1px);
-  /* Two-stop glow — inner halo + soft outer ambient — for a more
+  /* Two-stop glow — inner halo + tight outer ambient — for a more
      "alive" indicator than the previous flat single-shadow. */
   box-shadow:
     0 0 0 1px rgba(108,255,141,0.35),
     0 0 6px rgba(108,255,141,0.65),
-    0 0 14px rgba(108,255,141,0.30);
+    0 0 7px rgba(108,255,141,0.15);
   animation: cp-dot-pulse 2.8s var(--ease-in-out) infinite;
 }
 @keyframes cp-dot-pulse {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(108,255,141,0.35), 0 0 6px rgba(108,255,141,0.65), 0 0 14px rgba(108,255,141,0.30); }
-  50%      { box-shadow: 0 0 0 1px rgba(108,255,141,0.45), 0 0 10px rgba(108,255,141,0.85), 0 0 22px rgba(108,255,141,0.50); }
+  0%, 100% { box-shadow: 0 0 0 1px rgba(108,255,141,0.35), 0 0 6px rgba(108,255,141,0.65), 0 0 7px rgba(108,255,141,0.15); }
+  50%      { box-shadow: 0 0 0 1px rgba(108,255,141,0.45), 0 0 10px rgba(108,255,141,0.85), 0 0 11px rgba(108,255,141,0.25); }
 }
 
 /* Reusable gradient-text utility — apply with className="cp-grad-text"
@@ -75,7 +187,7 @@
   letter-spacing: 0.08em;
   margin-left: 10px;
   padding-left: 10px;
-  border-left: 1px solid rgba(255,255,255,0.08);
+  border-left: 1px solid var(--line-1);
 }
 
 .cp-url {
@@ -86,14 +198,14 @@
   gap: 10px;
   padding: 0 12px;
   background: rgba(0,0,0,0.4);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
   transition: all var(--dur-base) var(--ease-out);
   max-width: 720px;
   margin: 0 auto;
 }
 .cp-url:focus-within {
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: var(--line-3);
   background: rgba(0, 0, 0, 0.55);
 }
 .cp-url input {
@@ -113,3 +225,19 @@
   color: var(--fg-4);
 }
 
+
+/* ── Left cluster: wordmark + sidebar toggle ─────────────────────────
+   When the sidebar is open the cluster is sized so the toggle's right
+   edge rides the sidebar's right-edge line (sidebar 320px − toolbar
+   18px padding = 302px); collapsed, it hugs the wordmark. Mirrors the
+   right panel's cp-queue-toggle. */
+.cp-toolbar-left {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  transition: width var(--dur-base) var(--ease-out);
+}
+.cp-toolbar-left.sidebar-open { width: 302px; }
+.cp-sidebar-toggle.active { background: rgba(255,255,255,0.06); }

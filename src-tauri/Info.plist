@@ -6,13 +6,21 @@
 
     NSMicrophoneUsageDescription is REQUIRED for voice dictation: the Review
     composer's mic button records the microphone via the bundled ffmpeg
-    (avfoundation). The ffmpeg child inherits this app's TCC grant, so macOS
-    shows this string in the one-time microphone-access prompt. Without it,
-    capture is denied silently (no recording, no prompt).
+    (avfoundation) OR the native saucebunny-dictate sidecar (Apple Speech). The
+    child process inherits this app's TCC grant, so macOS shows this string in
+    the one-time microphone-access prompt. Without it, capture is denied
+    silently (no recording, no prompt).
+
+    NSSpeechRecognitionUsageDescription is REQUIRED for the native, on-device
+    dictation path: saucebunny-dictate calls SFSpeechRecognizer, which triggers
+    a one-time Speech Recognition access prompt showing this string. Recognition
+    runs on-device (requiresOnDeviceRecognition) — no audio leaves the Mac.
 -->
 <plist version="1.0">
 <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>Sauce Bunny records your microphone only while you hold the dictation button in a review comment, to transcribe your voice into text. Audio is processed entirely on this Mac and never leaves your computer.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Sauce Bunny transcribes your voice into review comments using on-device speech recognition. Speech is recognized entirely on this Mac and never leaves your computer.</string>
 </dict>
 </plist>

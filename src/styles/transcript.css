@@ -18,7 +18,7 @@
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid var(--line-1);
   background: rgba(255,255,255,0.015);
 }
 .cp-tx-origin { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
@@ -69,9 +69,9 @@
 .cp-tx-history {
   position: fixed;
   background: var(--bg-1, #161616);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+  box-shadow: var(--shadow-card);
   z-index: 9998;
   display: flex;
   flex-direction: column;
@@ -87,7 +87,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid var(--line-1);
   background: rgba(255,255,255,0.015);
 }
 .cp-tx-history-count {
@@ -95,7 +95,7 @@
   color: var(--fg-3);
   background: rgba(255,255,255,0.05);
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   font-weight: 600;
 }
 .cp-tx-history-empty {
@@ -158,11 +158,11 @@
   height: 20px;
   background: transparent;
   border: none;
-  color: var(--fg-5);
+  color: var(--fg-3);
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: 4px;
   flex-shrink: 0;
 }
 .cp-tx-history-row-remove:hover {
@@ -170,12 +170,89 @@
   background: rgba(255,80,80,0.12);
 }
 
+/* Speaker insights popover — opens from the header Insights button.
+   Same portaled chrome as the history popover above; one row per
+   speaker with a talk-share bar tinted in that speaker's colour. */
+.cp-tx-insights {
+  position: fixed;
+  background: var(--bg-1, #161616);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: var(--shadow-card);
+  z-index: 9998;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.cp-tx-insights-head {
+  padding: 8px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  border-bottom: 1px solid var(--line-1);
+  background: rgba(255,255,255,0.015);
+}
+.cp-tx-insights-empty {
+  padding: 20px 16px;
+  font-size: 12px;
+  color: var(--fg-4);
+  line-height: 1.5;
+  text-align: center;
+}
+.cp-tx-insights-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cp-tx-insights-row-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cp-tx-insights-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cp-tx-insights-nums {
+  font-size: 11px;
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.cp-tx-insights-bar {
+  height: 7px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+  margin: 4px 0 3px;
+}
+.cp-tx-insights-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width var(--dur-base) var(--ease-out);
+}
+.cp-tx-insights-meta {
+  font-size: 11.5px;
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+}
+
 .cp-tx-search {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid var(--line-1);
   background: var(--bg-0);
 }
 /* Segmented mode pill — Text · Speakers. Kept compact so the search
@@ -185,8 +262,8 @@
   display: inline-flex;
   flex-shrink: 0;
   background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
   padding: 1px;
 }
 .cp-tx-search-mode-btn {
@@ -212,8 +289,8 @@
   height: 28px;
   padding: 0 10px;
   background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
   color: var(--fg-1);
   font-family: var(--font-sans);
   font-size: 12px;
@@ -279,7 +356,7 @@
   background: transparent;
   border: none;
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   cursor: pointer;
 }
 .cp-tx-jump:hover {
@@ -306,7 +383,7 @@
 .cp-tx-turn-body {
   padding: 10px 12px;
   background: rgba(255,255,255,0.025);
-  border: 1px solid rgba(255,255,255,0.05);
+  border: 1px solid var(--line-1);
   border-radius: 8px;
   font-size: 13px;
   line-height: 1.55;
@@ -384,9 +461,9 @@
   right: 0;
   min-width: 200px;
   background: var(--bg-1, #161616);
-  border: 1px solid rgba(255,255,255,0.10);
+  border: 1px solid var(--line-2);
   border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-card);
   padding: 4px 0;
   z-index: 200;
 }
@@ -408,7 +485,7 @@
 }
 .cp-tx-dl-sep {
   height: 1px;
-  background: rgba(255,255,255,0.06);
+  background: var(--line-1);
   margin: 4px 0;
 }
 
@@ -424,9 +501,9 @@
 .cp-tx-rename {
   position: fixed;
   background: var(--bg-1, #161616);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+  box-shadow: var(--shadow-card);
   padding: 12px;
   z-index: 9998;
   display: flex;
@@ -448,8 +525,8 @@
   height: 28px;
   padding: 0 10px;
   background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
   color: var(--fg-1);
   font: 12px var(--font-sans);
   outline: none;
@@ -513,7 +590,7 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 4px;
   background: rgba(108, 255, 141, 0.10);
   color: var(--color-accent-green);
   border: 1px solid rgba(108, 255, 141, 0.18);
@@ -536,7 +613,7 @@
   font: 11px var(--font-sans);
   color: var(--fg-2);
   background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.10);
+  border: 1px solid var(--line-2);
   border-radius: 4px;
   cursor: pointer;
   outline: none;
@@ -552,7 +629,7 @@
   gap: 8px;
   padding: 8px 10px;
   background: rgba(255,255,255,0.025);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--line-2);
   border-radius: 6px;
 }
 .cp-folder-path {
@@ -576,7 +653,7 @@
   gap: 8px;
   margin: 8px 12px 0;
   padding: 7px 8px 7px 10px;
-  border: 1px solid rgba(255,255,255,0.07);
+  border: 1px solid var(--line-2);
   background: rgba(255,255,255,0.025);
   border-radius: 6px;
   font-size: 11px;
@@ -610,7 +687,7 @@
   height: 20px;
   background: transparent;
   border: none;
-  color: var(--fg-4);
+  color: var(--fg-3);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
@@ -628,7 +705,7 @@
   align-items: center;
   justify-content: center;
   background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--line-2);
   border-radius: 4px;
   color: var(--fg-3);
   cursor: pointer;
@@ -699,7 +776,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid var(--line-1);
   background: rgba(255,255,255,0.015);
 }
 .cp-tx-roster-label {
@@ -762,7 +839,7 @@
   white-space: nowrap;
   padding: 4px 8px 4px 4px;
   background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--line-2);
   border-radius: 999px;
   font-size: 11px;
   color: var(--fg-2);
@@ -781,7 +858,7 @@
 .cp-tx-roster-chip.drop-hover {
   border-color: var(--color-accent-green);
   background: rgba(108, 255, 141, 0.10);
-  box-shadow: 0 0 0 1px var(--color-accent-green), 0 0 12px rgba(108, 255, 141, 0.4);
+  box-shadow: 0 0 0 1px var(--color-accent-green), 0 0 6px rgba(108, 255, 141, 0.2);
   transform: scale(1.04);
 }
 .cp-tx-roster-pip {
@@ -805,7 +882,7 @@
   font-variant-numeric: tabular-nums;
   background: rgba(255,255,255,0.05);
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 4px;
   pointer-events: none;
 }
 .cp-tx-roster-unmerge {
@@ -813,7 +890,7 @@
   font-weight: 700;
   letter-spacing: 0.03em;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 4px;
   background: rgba(108, 255, 141, 0.10);
   color: var(--color-accent-green);
   border: 1px solid rgba(108, 255, 141, 0.18);
@@ -855,7 +932,7 @@
   letter-spacing: 0.02em;
   color: var(--fg-2);
   background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.09);
+  border: 1px solid var(--line-2);
   border-radius: 999px;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
@@ -879,7 +956,7 @@
   display: flex;
   flex-direction: column;
   background: #15151a;
-  border: 1px solid rgba(255,255,255,0.09);
+  border: 1px solid var(--line-2);
   border-radius: 12px;
   box-shadow: 0 24px 64px rgba(0,0,0,0.55), 0 0 0 0.5px rgba(255,255,255,0.04);
   overflow: hidden;
@@ -965,7 +1042,7 @@
   border-radius: 6px;
   padding: 4px 7px;
 }
-.cp-spk-name:hover { border-color: rgba(255,255,255,0.08); }
+.cp-spk-name:hover { border-color: var(--line-2); }
 .cp-spk-name:focus {
   outline: none;
   background: rgba(0,0,0,0.25);
@@ -990,7 +1067,7 @@
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23A2A0AA' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
   background-repeat: no-repeat;
   background-position: right 7px center;
-  border: 1px solid rgba(255,255,255,0.09);
+  border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
   padding: 4px 22px 4px 8px;
   cursor: pointer;
@@ -1024,7 +1101,7 @@
   flex-direction: column;
   gap: 10px;
   background: var(--color-surface-elevated);
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
   box-shadow:
     0 0 0 1px rgba(0,0,0,0.4),
@@ -1116,8 +1193,8 @@
   align-items: center;
   gap: 4px;
   background: rgba(0,0,0,0.25);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
   padding: 5px 9px;
   font-family: var(--font-ui);
   font-size: 12px;
@@ -1146,7 +1223,7 @@
 .cp-colorpick-swatch {
   height: 20px;
   border-radius: 6px;
-  border: 1px solid rgba(255,255,255,0.1);
+  border: 1px solid var(--line-2);
   cursor: pointer;
   transition: transform 90ms ease, box-shadow 120ms ease;
 }

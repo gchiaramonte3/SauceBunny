@@ -27,8 +27,8 @@ registerMp3Encoder();
 // mediabunny-first even where WKWebView lacks a WebCodecs AudioDecoder —
 // e.g. AV1+Opus YouTube downloads play in-app with no ffmpeg transcode.
 // Decode-only; does not touch the web-streaming (MSE/proxy) path.
-import { registerLocalAudioDecoders } from "./lib/mediabunny-decoders";
-registerLocalAudioDecoders();
+import { registerLocalDecoders } from "./lib/mediabunny-decoders";
+registerLocalDecoders();
 
 import "./styles/app.css";
 

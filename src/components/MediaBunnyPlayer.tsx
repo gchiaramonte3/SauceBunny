@@ -339,27 +339,16 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     setShuttle: (rate: number) => {
       if (!readyRef.current) return;
       if (rate === 0) {
-        // Exit shuttle: restore the clock at the shuttle position, then resume
-        // normal playback if we were playing when shuttle engaged.
+        // Exit shuttle: restore the clock at the shuttle position and HARD
+        // STOP. K after an 8× shuttle must freeze, not glide on at 1× — the
+        // L-ladder's landing-on-+1 path calls play() explicitly when real
+        // playback should resume. (The old was-playing resume is retired.)
         if (shuttleRafRef.current) { cancelAnimationFrame(shuttleRafRef.current); shuttleRafRef.current = 0; }
         if (shuttleRateRef.current !== 0) {
           shuttleRateRef.current = 0;
           startMediaTimeRef.current = shuttleTimeRef.current;
           onTimeUpdateRef.current?.(shuttleTimeRef.current);
-          if (shuttleWasPlayingRef.current) {
-            const ctx = audioCtxRef.current;
-            if (ctx) {
-              if (ctx.state === "suspended") ctx.resume().catch(() => { /* ignore */ });
-              cancelInFlight();
-              const gen = ++genRef.current;
-              startContextTimeRef.current = ctx.currentTime;
-              playingRef.current = true;
-              setIsPlaying(true);
-              onPlayStateChange?.(true);
-              runAudioLoop(startMediaTimeRef.current, gen);
-              runVideoLoop(startMediaTimeRef.current, gen);
-            }
-          } else {
+          {
             playingRef.current = false;
             setIsPlaying(false);
             onPlayStateChange?.(false);
@@ -468,10 +457,33 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
             onError?.(`[WEBCODECS_UNSUPPORTED] video codec "${codec}"`);
             return;
           }
+          // ProRes DECODES fine (turbores), but its output is 10/12-bit YUV.
+          // mediabunny can only paint a sample to a canvas by wrapping it in a
+          // WebCodecs VideoFrame, and this WKWebView's WebCodecs has no 10-bit
+          // VideoFrame — so getCanvas() silently yields a BLACK canvas (no throw,
+          // so the generic error path never fires). Treat "decodes but can't be
+          // painted here" like an unsupported codec: hand off to the ffmpeg-prep
+          // fallback, which transcodes to 8-bit H.264 for playback (the original
+          // ProRes is untouched and still used for export). turbores is the only
+          // custom-registered VIDEO decoder, so ProRes is the only >8-bit sample
+          // that reaches here — gate any future one the same way.
+          if (vt.codec === "prores") {
+            onError?.(`[WEBCODECS_UNSUPPORTED] ProRes is 10-bit — WKWebView can't paint it to a canvas`);
+            return;
+          }
           videoSinkRef.current = new CanvasSink(vt, { poolSize: 4 });
-          // Paint the first frame so the canvas isn't black before play.
-          const first = await videoSinkRef.current.getCanvas(0);
-          if (!cancelled && first) drawCanvas(first.canvas);
+          // Paint the first frame so the canvas isn't black before play. If a
+          // sample decodes but can't be wrapped for the canvas, getCanvas throws
+          // → same unsupported-render fallback rather than a silent black frame.
+          try {
+            const first = await videoSinkRef.current.getCanvas(0);
+            if (!cancelled && first) drawCanvas(first.canvas);
+          } catch (e) {
+            if (cancelled) return;
+            const codec = await vt.getCodec().catch(() => "unknown");
+            onError?.(`[WEBCODECS_UNSUPPORTED] ${codec} video can't be rendered here (${e instanceof Error ? e.message : String(e)})`);
+            return;
+          }
         }
         if (at) {
           if (!(await at.canDecode())) {
@@ -546,7 +558,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       ) : (
         <div className="cp-audio-card">
           <div className={"cp-audio-icon" + (isPlaying ? " playing" : "")}>
-            <IconFilm size={28} stroke="rgba(255,255,255,0.5)" />
+            <IconFilm size={32} stroke="rgba(255,255,255,0.6)" />
             {isPlaying && (
               <div className="cp-eq">
                 <span /><span /><span /><span />

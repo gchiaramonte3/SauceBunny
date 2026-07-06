@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { IconReveal, IconAlert, IconChevronDown } from "./Icons";
+import { IconReveal, IconAlert, IconChevronDown, IconInfo } from "./Icons";
 import { parseSrt, groupIntoTurns, fmtTime, type Turn } from "../lib/srt";
+import { speakerStats } from "../lib/speaker-stats";
 import { secondsToTc } from "../lib/timecode";
 import { formatError } from "../lib/error-format";
 import {
@@ -14,6 +15,7 @@ import { RenamePopover, type RenameState } from "./transcript/RenamePopover";
 import { SpeakerRosterModal } from "./transcript/SpeakerRosterModal";
 import { SpeakerColorPicker } from "./SpeakerColorPicker";
 import { HistoryPopover } from "./transcript/HistoryPopover";
+import { InsightsPopover } from "./transcript/InsightsPopover";
 import {
   escapeHtml,
   highlightMatch,
@@ -354,6 +356,24 @@ export function TranscriptViewer({
   // out-of-range cursor briefly points past the new match set.
   useEffect(() => { setMatchCursor(0); }, [query, searchMode]);
 
+  // ── Karaoke-body precomputes (perf) ──────────────────────────────
+  // The turns.map render runs on EVERY playhead tick (activeCueIdx changes).
+  // Hoist the O(turns²) cue-offset scan, the per-turn name/alias resolution,
+  // and the search-match lookup out of that hot loop so a tick only re-marks
+  // the active cue instead of recomputing all bookkeeping. Keyed so a rename
+  // (which changes the displayNameFor / resolveAlias callbacks) still refreshes.
+  const cueStartIndices = useMemo(() => {
+    const out: number[] = [];
+    let sum = 0;
+    for (const t of turns) { out.push(sum); sum += t.cues.length; }
+    return out;
+  }, [turns]);
+  const turnMeta = useMemo(
+    () => turns.map((t, ti) => ({ displayName: displayNameFor(ti, t.speaker), resolvedTag: resolveAlias(t.speaker) })),
+    [turns, displayNameFor, resolveAlias],
+  );
+  const matchSet = useMemo(() => new Set(matches), [matches]);
+
   const jumpToMatch = useCallback((delta: 1 | -1) => {
     if (matches.length === 0) return;
     const next = (matchCursor + delta + matches.length) % matches.length;
@@ -666,6 +686,16 @@ export function TranscriptViewer({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [toolsOpen]);
 
+  // ── Speaker insights popover state ───────────────────────────────
+  // Anchored to the Insights header button (the DOMRect doubles as the
+  // open flag, same pattern as the colour picker). The stats derive
+  // straight from the loaded cues — recomputed only when turns change.
+  const [insightsAnchor, setInsightsAnchor] = useState<DOMRect | null>(null);
+  const insightStats = useMemo(
+    () => speakerStats(turns.flatMap((t) => t.cues)),
+    [turns],
+  );
+
   // ── History popover state ────────────────────────────────────────
   // Anchored to the History button. Closes on outside-click or Esc.
   // Re-reads localStorage on each open so the list reflects entries
@@ -973,6 +1003,21 @@ export function TranscriptViewer({
               </div>
             )}
           </div>
+          <button
+            className={"btn btn-ghost cp-tx-iconbtn" + (insightsAnchor ? " active" : "")}
+            title="Speaker insights"
+            /* Swallow the mousedown so the open popover's outside-click
+               handler doesn't close it before this click re-opens it —
+               keeps the button a true toggle. */
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              setInsightsAnchor((prev) => (prev ? null : rect));
+            }}
+          >
+            <IconInfo size={13} />
+            <span>Insights</span>
+          </button>
         </div>
         <div className="cp-tx-head-actions" ref={dlRef}>
           <button
@@ -1166,20 +1211,20 @@ export function TranscriptViewer({
       {/* Body — one chat-bubble block per turn */}
       <div className="cp-tx-body" ref={scrollRef} onScroll={onScroll}>
         {turns.map((turn, ti) => {
-          const cueStartIdx = turns.slice(0, ti).reduce((n, t) => n + t.cues.length, 0);
-          const displayName = displayNameFor(ti, turn.speaker);
+          const cueStartIdx = cueStartIndices[ti];
+          const { displayName, resolvedTag } = turnMeta[ti];
           const hasOverride =
             !!overrides.turn[String(ti)] ||
             // Resolve the alias chain — globals are keyed on the RESOLVED tag,
             // so a merged-then-renamed turn must check its canonical key.
-            !!overrides.global[resolveAlias(turn.speaker) ?? "__NULL__"];
+            !!overrides.global[resolvedTag ?? "__NULL__"];
           return (
             <div className="cp-tx-turn" key={ti}>
               <div className={"cp-tx-turn-head" + (hasRealSpeakers ? "" : " no-speaker")}>
                 {hasRealSpeakers && (<>
                 <span
                   className={"cp-tx-speaker" + (hasOverride ? " renamed" : "")}
-                  style={{ background: speakerDisplayColor(resolveAlias(turn.speaker)) }}
+                  style={{ background: speakerDisplayColor(resolvedTag) }}
                   onClick={(e) => openRename(e, ti, turn.speaker)}
                   onContextMenu={(e) => openRename(e, ti, turn.speaker)}
                   title="Click or right-click to rename · use Manage speakers to recolour or merge"
@@ -1208,7 +1253,7 @@ export function TranscriptViewer({
                 {turn.cues.map((cue, ci) => {
                   const idx = cueStartIdx + ci;
                   const active = idx === activeCueIdx;
-                  const isMatch = matches.includes(idx);
+                  const isMatch = matchSet.has(idx);
                   const isActiveMatch = matches[matchCursor] === idx;
                   return (
                     <span
@@ -1288,6 +1333,14 @@ export function TranscriptViewer({
             ? () => { resetSpeakerColor(colorPick.key); setColorPick(null); }
             : undefined}
           onClose={() => setColorPick(null)}
+        />
+      )}
+      {insightsAnchor && (
+        <InsightsPopover
+          anchor={insightsAnchor}
+          stats={insightStats}
+          colorOf={(s) => speakerDisplayColor(resolveAlias(s))}
+          onClose={() => setInsightsAnchor(null)}
         />
       )}
       {historyOpen && historyBtnRef.current && (

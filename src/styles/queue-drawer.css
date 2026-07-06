@@ -22,9 +22,11 @@
   transition: border-color var(--dur-slow) var(--ease-in-out);
 }
 .cp-queue-drawer.open {
-  /* width is now set inline from React state (resize-drag persistence).
-     Border just animates on open/close. */
-  border-left-color: rgba(255,255,255,0.05);
+  /* Floating rounded side panel (matches the sidebar + main viewport). width is
+     set inline from React state (resize-drag persistence). */
+  border: 1px solid var(--line-1);
+  border-radius: 16px;
+  margin: var(--s-2) var(--s-2) var(--s-2) 3px;
 }
 /* Embedded (r44.B) — drawer rendered inside its own native window.
    The OS window IS the resize handle, so we fill the parent fully
@@ -32,8 +34,22 @@
 .cp-queue-drawer.embedded {
   width: 100% !important; /* override the inline width from React state */
   height: 100%;
-  border-left-color: transparent; /* no docked-edge border in standalone window */
+  /* Fills its own OS window — no floating gutter/radius/border. */
+  margin: 0;
+  border: none;
+  border-radius: 0;
 }
+/* Keep-alive tab bodies — visited tabs stay mounted (hidden) so per-tab state
+   (search, scroll, an AI chat, a running dictation) survives tab switches.
+   The wrapper reproduces the drawer's flex-child layout; the explicit [hidden]
+   rule is required because an authored `display` beats the UA hidden rule. */
+.cp-tab-keep {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.cp-tab-keep[hidden] { display: none; }
 .cp-panel-window-root {
   position: fixed;
   inset: 0;
@@ -43,38 +59,57 @@
 .cp-tab-popout {
   /* Pop-out icon button — shares the close button's chrome so the
      two affordances feel paired in the tab-strip right edge. */
-  color: var(--fg-4);
+  color: var(--fg-3);
 }
 .cp-tab-popout:hover { color: var(--color-accent-green); }
 /* Inner content respects the current drawer width — let it shrink. */
 .cp-queue-drawer > * { min-width: 0; }
 
-/* Resize handle — 4px sliver on the left edge. Bigger hover hit zone
-   (8px) via a pseudo-element so the cursor target isn't pixel-precise. */
+/* Resize handle — placement only; visuals come from .cp-resize-handle
+   (resize.css). Rail hugs the drawer's left boundary; the drawer's
+   overflow:hidden clips the outer half of the halo, which biases the
+   glow inward — intended. */
 .cp-queue-resize {
-  position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
-  width: 4px;
-  cursor: ew-resize;
-  z-index: 5;
-  background: transparent;
-  transition: background 120ms ease;
+  --rail-inset: 0px;
 }
-.cp-queue-resize::before {
-  content: "";
-  position: absolute;
-  inset: 0 -4px;
+
+/* Inline rename (double-click a queued row's name) + the bulk-rename bar. */
+.cp-queue-rename {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  background: var(--bg-0);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
 }
-.cp-queue-resize:hover {
-  background: rgba(108, 255, 141, 0.20);
+.cp-queue-rename:focus { outline: none; border-color: var(--accent); box-shadow: none; }
+.cp-queue-renameall {
+  display: flex;
+  gap: 6px;
+  padding-bottom: 8px;
 }
-/* While dragging, lock cursor + suppress pointer-events on any iframe
-   (notably the YouTube player) so the gesture isn't interrupted when
-   the cursor crosses the embed. */
-body.cp-resizing-drawer { cursor: ew-resize !important; }
-body.cp-resizing-drawer iframe { pointer-events: none; }
+.cp-queue-renameall input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--bg-0);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+.cp-queue-renameall input:focus { outline: none; border-color: var(--accent); box-shadow: none; }
+.cp-queue-renameall input::placeholder { color: var(--fg-4); overflow: hidden; text-overflow: ellipsis; }
 
 /* ── Tab strip — the queue-head is now a real tablist instead of a
       static title. As we wire more panel features (transcripts, activity
@@ -89,7 +124,7 @@ body.cp-resizing-drawer iframe { pointer-events: none; }
   /* Slight dark wash on the tab strip area pulls it back relative to
      the active tab so the active pill reads as "raised forward". */
   background: linear-gradient(180deg, rgba(0,0,0,0.20), rgba(0,0,0,0.0));
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid var(--line-1);
 }
 .cp-tab {
   display: inline-flex;
@@ -146,7 +181,7 @@ body.cp-resizing-drawer iframe { pointer-events: none; }
     var(--bg-3);
   border-color: rgba(108,255,141,0.25);
   box-shadow:
-    0 6px 18px rgba(0,0,0,0.32),
+    0 6px 12px rgba(0,0,0,0.32),
     0 0 0 1px rgba(108,255,141,0.15);
   /* No opacity drop — Zoom keeps the dragged thing fully opaque so the
      "this is what's moving" mental model stays crisp. */
@@ -187,10 +222,10 @@ body.cp-tab-dragging { cursor: grabbing; }
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 4px;
   background: rgba(255,255,255,0.04);
   color: var(--fg-5);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--line-2);
 }
 .cp-tab-filler { flex: 1; }
 .cp-tab-close {
@@ -204,7 +239,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   justify-content: center;
   background: transparent;
   border: none;
-  color: var(--fg-4);
+  color: var(--fg-3);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -242,9 +277,9 @@ body.cp-tab-dragging { cursor: grabbing; }
   display: flex;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 7px;
+  border-radius: 8px;
   background: rgba(255,255,255,0.02);
-  border: 1px solid rgba(255,255,255,0.04);
+  border: 1px solid var(--line-1);
   margin-bottom: 6px;
   transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
@@ -298,7 +333,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   color: var(--fg-4);
   background: rgba(255,255,255,0.04);
 }
@@ -347,8 +382,8 @@ body.cp-tab-dragging { cursor: grabbing; }
   height: 24px;
   background: transparent;
   border: none;
-  color: var(--fg-4);
-  border-radius: 5px;
+  color: var(--fg-3);
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -359,7 +394,7 @@ body.cp-tab-dragging { cursor: grabbing; }
 .cp-queue-iconbtn.danger:hover { color: #ff8a8a; background: rgba(232,38,38,0.10); }
 
 .cp-queue-foot {
-  border-top: 1px solid rgba(255,255,255,0.05);
+  border-top: 1px solid var(--line-1);
   padding: 10px 12px 14px;
 }
 .cp-queue-summary {

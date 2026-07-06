@@ -17,6 +17,7 @@ Paste a URL (YouTube, Vimeo, TikTok, X, Reddit, Instagram, or any page with embe
 - **Transcript workspace** — searchable karaoke-highlighted reader, click any line to jump the video, pop it out to its own floating window, export TXT/MD/SRT/PDF.
 - **AI Summary** — a local LLM (llama.cpp) summarizes the transcript on-device, speaker-aware, with clickable timecodes that jump the video.
 - **Review workspace** — Frame.io-style timecoded threaded comments, freehand frame annotations, and on-device **voice dictation** (mic → text); export notes to Markdown, a CSV marker sheet, or a CMX3600 EDL.
+- **Co-review (watch party)** — host a peer-to-peer session with a one-line join code (iroh QUIC, end-to-end encrypted — no accounts, no cloud). Guests follow your playhead; comments, replies, and likes converge live across everyone; ghost playheads show where each person is parked. A cinematic **screening mode** puts the participant rail, viewport, and comments in a Louper-style theater layout. Web sources only for now.
 - **Clip export** — lossless cuts or re-encodes, full-clip or marked range, MP3 audio export, an export queue, on-video captions drawn from your transcript.
 - **Command palette** (⌘K), rebindable shortcuts, customizable defaults, dark editorial UI.
 

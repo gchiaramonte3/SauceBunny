@@ -5,7 +5,38 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
-_Nothing yet — 0.1.0 is the current release._
+### Co-review (P2P watch party) — new
+- **Watch and review together, peer-to-peer** — host a session and share a
+  one-line join code; up to 3 guests connect over iroh QUIC (end-to-end
+  encrypted, no accounts, no cloud). Guests follow the host's playhead.
+- **Session-first flow** — start a session with nothing loaded; when the host
+  loads a web URL it propagates to every guest, and playhead sync activates
+  once each guest's player has loaded (late joiners snap to the host's frame).
+- **Live shared comments** — review comments, replies, likes, and resolves
+  converge across everyone in the session (idempotent ops, last-write-wins
+  edits, snapshot merge on join). Everyone keeps the review when the session
+  ends.
+- **Presence ghost playheads** — see where everyone else is parked on the
+  timeline, live.
+- **Screening mode** — a cinematic Louper-style layout: participant rail
+  (avatars, host crown, live dots), centered rounded viewport, comments panel.
+  Sessions auto-enter it; exit and re-enter any time from the co-review menu.
+- Hardened against hostile peers: reserved "Host" name, per-message size caps,
+  presence-name sanitization; host identity by roster position (not name).
+- Hosting is **web-source only** for now — a local file can't reach guests yet.
+
+### Playback
+- **ProRes plays instead of showing black** — 10-bit sources (ProRes 422/HQ…)
+  are routed to an automatic 8-bit playback copy because WKWebView can't paint
+  10-bit WebCodecs frames; the original file is untouched for export.
+
+### Fixes & performance
+- Karaoke transcript no longer recomputes O(turns²) bookkeeping on every
+  playhead tick — smooth on multi-hour transcripts.
+- Review exports: Markdown now escapes comment text/names; EDL titles are
+  single-line safe. Liking a reply whose parent was just deleted no longer
+  sends a phantom op. AI Summary no longer splits an emoji at the transcript
+  truncation point, and picks up a freshly downloaded model immediately.
 
 ## [0.1.0] — 2026-06-16
 

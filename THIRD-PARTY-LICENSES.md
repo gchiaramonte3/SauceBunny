@@ -61,7 +61,8 @@ explicitly **LGPL** ffmpeg build (no `--enable-gpl` / `--enable-nonfree`); see
 | opus-decoder | MIT |
 | @tauri-apps/* (api + plugins + cli) | MIT or Apache-2.0 |
 | vite, vitest, typescript, @vitejs/plugin-react, @types/* | MIT / Apache-2.0 |
-| mediabunny, @mediabunny/mp3-encoder | MPL-2.0 (the mp3 encoder embeds LAME, LGPL) — unmodified upstream; source available at https://github.com/Vanilagy/mediabunny |
+| mediabunny, @mediabunny/mp3-encoder, @mediabunny/prores | MPL-2.0 (the mp3 encoder embeds LAME, LGPL; @mediabunny/prores wraps the turbores WASM ProRes decoder) — unmodified upstream; source at https://github.com/Vanilagy/mediabunny |
+| turbores (WASM Apple ProRes decoder, pulled in by @mediabunny/prores) | MPL-2.0 — unmodified upstream; source at https://github.com/Vanilagy/turbores |
 | @fontsource/nunito-sans (packaging) | MIT |
 
 ## Font

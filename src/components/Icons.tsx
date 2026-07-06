@@ -78,15 +78,18 @@ export const IconAlert = (p: IconProps) => (
     <circle cx="12" cy="12" r="9" />
   </Icon>
 );
+// Film frame — the source/empty-state glyph. Geometry sits on a 1.5-unit
+// grid (rails at 7.5/16.5, sprockets at 7.5/16.5, center divider at 12) so
+// the strokes land on whole device pixels at the sizes it renders at
+// (24 in the sidebar, 32 on the audio card) instead of smearing across
+// fractional pixels — the old 22/28px renders read as low-res.
 export const IconFilm = (p: IconProps) => (
-  <Icon {...p}>
-    <rect x="3" y="3" width="18" height="18" rx="2" />
-    <line x1="7" y1="3" x2="7" y2="21" />
-    <line x1="17" y1="3" x2="17" y2="21" />
-    <line x1="3" y1="9" x2="7" y2="9" />
-    <line x1="3" y1="15" x2="7" y2="15" />
-    <line x1="17" y1="9" x2="21" y2="9" />
-    <line x1="17" y1="15" x2="21" y2="15" />
+  <Icon {...p} strokeWidth={1.5}>
+    <rect x="3" y="3" width="18" height="18" rx="2.25" />
+    <path d="M7.5 3v18M16.5 3v18" />
+    <path d="M3 12h18" />
+    <path d="M3 7.5h4.5M16.5 7.5H21" />
+    <path d="M3 16.5h4.5M16.5 16.5H21" />
   </Icon>
 );
 export const IconClipboard = (p: IconProps) => (
@@ -137,7 +140,28 @@ export const IconPanelRight = (p: IconProps) => (
     <path d="M15 4v16" />
   </Icon>
 );
+export const IconPanelLeft = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M9 4v16" />
+  </Icon>
+);
 
+// Crown — the co-review session host badge.
+export const IconCrown = (p: IconProps) => (
+  <Icon {...p} strokeWidth={2}>
+    <path d="M3 7l4.5 3.5L12 4l4.5 6.5L21 7l-1.6 11.5a1 1 0 0 1-1 .85H5.6a1 1 0 0 1-1-.85L3 7z" />
+  </Icon>
+);
+// Two people — the co-review (watch party) session toggle.
+export const IconUsers = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+  </Icon>
+);
 // Speech bubble — the Review tab (timecoded comments).
 export const IconReview = (p: IconProps) => (
   <Icon {...p}>
@@ -165,6 +189,20 @@ export const IconClearMarks = (p: IconProps) => (
     <path d="M5 5v14M5 5h3M5 19h3" />
     <path d="M19 5v14M19 5h-3M19 19h-3" />
     <path d="M9 9l6 6M15 9l-6 6" />
+  </Icon>
+);
+// In/out span — the review comment-range tool. Same bracket language as
+// IconMarkIn / IconMarkOut / IconClearMarks; the duration bar with endpoint
+// dots between the brackets reads as "a span", not a mark.
+export const IconRange = (p: IconProps) => (
+  <Icon {...p} strokeWidth={2}>
+    <path d="M5 5v14" strokeLinecap="square" />
+    <path d="M5 5h4M5 19h4" />
+    <path d="M19 5v14" strokeLinecap="square" />
+    <path d="M19 5h-4M19 19h-4" />
+    <path d="M9 12h6" strokeWidth={2.4} />
+    <circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none" />
   </Icon>
 );
 export const IconAspect = (p: IconProps) => (

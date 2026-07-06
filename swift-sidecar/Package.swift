@@ -51,5 +51,13 @@ let package = Package(
       ],
       path: "Sources/saucebunny-diarize"
     ),
+    // Dictation sidecar — on-device live speech-to-text via Apple's Speech
+    // framework. NO external dependencies (system Speech + AVFoundation only),
+    // so it stays light and compiles anywhere; SFSpeechRecognizer is macOS 13+
+    // and runs comfortably under this package's macOS 14 floor.
+    .executableTarget(
+      name: "saucebunny-dictate",
+      path: "Sources/saucebunny-dictate"
+    ),
   ]
 )

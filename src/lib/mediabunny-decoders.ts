@@ -3,21 +3,31 @@ import {
   type AudioCodec, type EncodedPacket,
 } from "mediabunny";
 import { OpusDecoder } from "opus-decoder";
+import { registerProresDecoder } from "@mediabunny/prores";
 
 /**
- * Custom audio decoders registered with mediabunny so local playback can be
- * mediabunny-first even on WKWebView builds that lack a WebCodecs `AudioDecoder`
- * (Safari < 26 / macOS < 26 — see CLAUDE.md "Media playback path"). mediabunny's
- * built-in audio decode goes through WebCodecs; `registerDecoder` lets us
- * polyfill a codec WebCodecs can't do here, and `track.canDecode()` then reports
- * it as decodable — so MediaBunnyPlayer plays the file (WebCodecs video +
- * Web-Audio audio) with NO ffmpeg transcode.
+ * Custom audio + video decoders registered with mediabunny so local playback
+ * can be mediabunny-first even when WKWebView's WebCodecs can't do the codec
+ * (see CLAUDE.md "Media playback path"). mediabunny's built-in decode goes
+ * through WebCodecs; `registerDecoder` lets us polyfill a codec WebCodecs lacks,
+ * and `track.canDecode()` then reports it decodable — so MediaBunnyPlayer /
+ * CanvasSink play the file in-app with NO ffmpeg transcode.
  *
- * **Opus** is the one that matters in practice: modern YouTube downloads are
- * AV1 video (which WKWebView's WebCodecs CAN decode) + Opus audio (which it
- * can't), so without this the whole file bounces to a full ffmpeg re-encode
- * just to hear it. A tiny WASM libopus (the MIT `opus-decoder`, WASM inlined →
- * fully local, no network) closes that gap.
+ * **Opus** (audio): modern YouTube downloads are AV1 video (which WKWebView's
+ * WebCodecs CAN decode) + Opus audio (which it can't); without this the whole
+ * file bounces to a full ffmpeg re-encode just to hear it. A tiny WASM libopus
+ * (the MIT `opus-decoder`, WASM inlined → fully local) closes that gap. We own
+ * this `CustomAudioDecoder` because no upstream adapter exists.
+ *
+ * **ProRes** (video): WKWebView's WebCodecs can't decode ProRes at all, so a
+ * ProRes file (the dominant Mac editing/intermediate codec) would otherwise
+ * always transcode. mediabunny 1.50 demuxes ProRes but ships no decoder; the
+ * official `@mediabunny/prores` adapter supplies one backed by turbores (a
+ * pure-WASM ProRes decoder, MPL-2.0, WASM inlined → fully local). We use the
+ * adapter rather than hand-wiring turbores because it carries the WebKit
+ * height-trim fix (bug 317524), dynamic VideoFrame pixel-format probing, color
+ * space + pixel-aspect handling, and auto shared-memory detection — all of
+ * which a hand-rolled `CustomVideoDecoder` would miss in WKWebView.
  *
  * Scope: this only adds DECODE capability to mediabunny's reader/player path.
  * It does not touch the web-streaming pipeline (MSEStreamPlayer / stream_proxy),
@@ -138,9 +148,11 @@ class OpusAudioDecoder extends CustomAudioDecoder {
 
 let registered = false;
 
-/** Register Sauce Bunny's custom mediabunny decoders. Idempotent; call once at startup. */
-export function registerLocalAudioDecoders(): void {
+/** Register Sauce Bunny's custom mediabunny decoders (audio + video).
+ *  Idempotent; call once at startup. */
+export function registerLocalDecoders(): void {
   if (registered) return;
   registered = true;
-  registerDecoder(OpusAudioDecoder);
+  registerDecoder(OpusAudioDecoder); // libopus (we own this)
+  registerProresDecoder();           // turbores, via the official adapter
 }

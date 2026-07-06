@@ -994,7 +994,7 @@ export function SettingsModal(props: Props) {
                         <div key={m.id} className={"cp-model-row" + (isActive ? " selected" : "")}>
                           <div className="cp-model-info-wrap">
                             <div className="cp-model-head">
-                              <IconSparkles size={13} stroke="var(--fg-4)" />
+                              <IconSparkles size={13} stroke="var(--fg-3)" />
                               <span className="name">{m.name}</span>
                               <span className="size">{formatMB(m.size_bytes)}</span>
                               {isRecommended && <span className="badge recommended">Recommended</span>}
@@ -1069,7 +1069,7 @@ export function SettingsModal(props: Props) {
                     <div className={"cp-model-row" + (parakeetActive ? " selected" : "")}>
                       <div className="cp-model-info-wrap">
                         <div className="cp-model-head">
-                          <IconSparkles size={13} stroke="var(--fg-4)" />
+                          <IconSparkles size={13} stroke="var(--fg-3)" />
                           <span className="name">Parakeet TDT v3</span>
                           <span className="size">≈0.5 GB</span>
                           {parakeetReady && <span className="badge installed">Installed</span>}
@@ -1285,7 +1285,7 @@ export function SettingsModal(props: Props) {
                         <div key={m.id} className={"cp-model-row" + (isSel && m.downloaded ? " selected" : "")}>
                           <div className="cp-model-info-wrap">
                             <div className="cp-model-head">
-                              <IconSparkles size={13} stroke="var(--fg-4)" />
+                              <IconSparkles size={13} stroke="var(--fg-3)" />
                               <span className="name">{m.name}</span>
                               <span className="size">{formatMB(m.size_bytes)}</span>
                               {m.recommended && <span className="badge recommended">Recommended</span>}

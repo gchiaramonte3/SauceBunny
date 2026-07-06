@@ -2,19 +2,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import type { DictateDoneEvent, DictateLevelEvent } from "../types";
+import type { DictateDoneEvent, DictateLevelEvent, DictatePartialEvent } from "../types";
 import { DictationWave } from "./DictationWave";
-import { secondsToTc } from "../lib/timecode";
+import { EmojiPicker } from "./EmojiPicker";
+import { IconDownload, IconRange } from "./Icons";
+import { secondsToHms, secondsToTc } from "../lib/timecode";
 import { loadJson, saveJson } from "../lib/storage";
 import { formatError } from "../lib/error-format";
 import {
   loadReview, saveReview, ensureVersion,
-  addComment, editComment, deleteComment,
-  toggleResolved, rootComments, repliesOf, openCount,
+  buildComment, insertComment, editComment, deleteComment, editReply, removeReply,
+  setResolved, setLike, rootComments, repliesOf, openCount,
   reviewToMarkdown, reviewToCsv, reviewToEdl,
-  avatarColor, initialsOf, AVATAR_COLORS, AUTHOR_KEY, AUTHOR_COLOR_KEY, REVIEW_CHANGED_EVENT,
-  loadReviewHistory, removeReviewHistory,
-  type ReviewDoc, type ReviewComment, type CommentSort, type AnnotationStrokes, type ReviewHistoryEntry,
+  avatarColor, initialsOf, loadReviewer, AVATAR_COLORS, AUTHOR_KEY, AUTHOR_COLOR_KEY, REVIEW_CHANGED_EVENT,
+  loadReviewHistory, removeReviewHistory, clearReviewHistory,
+  type ReviewDoc, type ReviewComment, type CommentSort, type AnnotationStrokes, type ReviewHistoryEntry, type ReviewOp,
 } from "../lib/review";
 
 /**
@@ -42,6 +44,42 @@ function timeAgo(ms: number, now: number): string {
   return new Date(ms).toLocaleDateString();
 }
 
+/** Insert an emoji at a single-line input's caret (replacing any selection),
+ *  then restore focus + caret — the input-flavoured twin of the composer's
+ *  textarea insertEmoji. Used by the reply input and the reply edit field. */
+function insertAtCaret(
+  ref: React.RefObject<HTMLInputElement>, value: string, setValue: (s: string) => void, emoji: string,
+) {
+  const el = ref.current;
+  if (!el) { setValue(value + emoji); return; }
+  const start = el.selectionStart ?? value.length;
+  const end = el.selectionEnd ?? value.length;
+  setValue(value.slice(0, start) + emoji + value.slice(end));
+  requestAnimationFrame(() => {
+    const n = ref.current;
+    if (!n) return;
+    const caret = start + emoji.length;
+    n.focus();
+    n.setSelectionRange(caret, caret);
+  });
+}
+
+// Composer height persistence — null = auto-size (grow with content up to
+// 140px, today's behavior). A number = the user dragged the composer to a
+// fixed height: the typing area IS that height and content scrolls inside it.
+const COMPOSER_HEIGHT_KEY = "saucebunny.review.composerHeight";
+const COMPOSER_MIN = 34;       // matches .cp-review-input min-height
+const COMPOSER_LOAD_MAX = 480; // static clamp on read; live drags clamp to 60% of the panel
+function loadComposerHeight(): number | null {
+  try {
+    const raw = localStorage.getItem(COMPOSER_HEIGHT_KEY);
+    if (!raw) return null;
+    const n = parseInt(raw, 10);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(COMPOSER_MIN, Math.min(COMPOSER_LOAD_MAX, n));
+  } catch { return null; }
+}
+
 function Avatar({ name, size = 30, color }: { name: string; size?: number; color?: string }) {
   return (
     <span
@@ -66,6 +104,11 @@ export function ReviewPanel({
   onDraftConsumed,
   onShowAnnotation,
   onOpenReview,
+  onRangeDraft,
+  onRegisterRangeHotkeys,
+  sessionActive = false,
+  sessionDoc = null,
+  onSessionOp,
 }: {
   /** Stable id for the current source (local path or URL); null when none loaded. */
   sourceKey: string | null;
@@ -89,6 +132,23 @@ export function ReviewPanel({
   onShowAnnotation?: (a: AnnotationStrokes | null) => void;
   /** Re-open a past-review source (local path / URL) from the history popover. */
   onOpenReview?: (path: string) => void;
+  /** Emit the range currently being set in the composer (or null) so App can
+   *  preview it on the timeline. `live` = an end still follows the playhead. */
+  onRangeDraft?: (r: { start: number; end: number; color: string; live: boolean } | null) => void;
+  /** Register the ⇧I/⇧O range-mark handlers with App's keyboard dispatch
+   *  (null on unmount). The range state stays local to this panel. */
+  onRegisterRangeHotkeys?: (h: { markIn: () => void; markOut: () => void } | null) => void;
+  /** Co-review: true while a session is active. May be true BEFORE the doc
+   *  snapshot lands — the panel then shows "Connecting…" and blocks posting so
+   *  a comment can't be written into the void (would be lost when the snapshot
+   *  arrives). Drives `inSession` instead of doc-presence for exactly that reason. */
+  sessionActive?: boolean;
+  /** Co-review: the SHARED doc (arrives once the snapshot lands). While a
+   *  session is active the panel shows this instead of the local-by-sourceKey
+   *  doc and routes every mutation through `onSessionOp` (App applies + relays
+   *  over the P2P session) instead of localStorage. */
+  sessionDoc?: ReviewDoc | null;
+  onSessionOp?: (op: ReviewOp) => void;
 }) {
   const [doc, setDoc] = useState<ReviewDoc | null>(null);
   const [sort, setSort] = useState<CommentSort>("time");
@@ -99,17 +159,107 @@ export function ReviewPanel({
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   const [author, setAuthor] = useState(() => loadJson<string>(AUTHOR_KEY, ""));
   // Chosen avatar colour — stable + user-picked (NOT derived from the live-typed
-  // name, which used to recolour on every keystroke). Defaults off the saved name.
-  const [authorColor, setAuthorColor] = useState(() =>
-    loadJson<string>(AUTHOR_COLOR_KEY, avatarColor(loadJson<string>(AUTHOR_KEY, "") || "You")));
+  // name, which used to recolour on every keystroke). loadReviewer defaults a
+  // named reviewer off their name hash and a first-run (unnamed) reviewer to
+  // AVATAR_COLORS[0] (blue).
+  const [authorColor, setAuthorColor] = useState(() => loadReviewer().color);
   const [nameModal, setNameModal] = useState(false);
   const [nameInput, setNameInput] = useState("");
   const [filter, setFilter] = useState<"all" | "open" | "resolved">("all");
   const [search, setSearch] = useState("");
+  // ── Comment range (in→out) ────────────────────────────────────────
+  // Optional span for the NEXT comment. Either end can be armed first (⇧I,
+  // ⇧O, or the composer button); the unarmed end follows the playhead in the
+  // live preview until it's marked too. Distinct from the clip mark-in/out
+  // (orange, App-level) — this is reviewer-tinted and lives in the composer.
+  //
+  // State machine (MIN span 0.05s; t = playhead):
+  //   IDLE(∅,∅) · IN-ARMED(in,∅) · OUT-ARMED(∅,out) · SET(in,out)
+  //   ⇧I: arm/move IN; from OUT-ARMED completes (normalized); from SET moves
+  //       IN, collapsing the span drops OUT (back to IN-ARMED).
+  //   ⇧O: the exact mirror. Sub-MIN completions are ignored (stay armed).
+  const [rangeIn, setRangeIn] = useState<number | null>(null);
+  const [rangeOut, setRangeOut] = useState<number | null>(null);
+  const MIN_RANGE_SPAN = 0.05; // s — below this a "span" is really a point
+  const clearRange = () => { setRangeIn(null); setRangeOut(null); };
+  const markRangeIn = () => {
+    if (!ensureNamed()) return;
+    if (currentSec == null) return; // no playable playhead — a mark at 0:00 would be a lie
+    const t = currentSec;
+    if (rangeOut == null) { setRangeIn(t); return; }          // IDLE / IN-ARMED: (re)arm IN
+    if (rangeIn == null) {                                    // OUT-ARMED: complete
+      const a = Math.min(t, rangeOut), b = Math.max(t, rangeOut);
+      if (b - a < MIN_RANGE_SPAN) return;                     // no real span — stay armed
+      setRangeIn(a); setRangeOut(b);
+    } else if (rangeOut - t < MIN_RANGE_SPAN) {               // SET: IN at/after OUT collapses
+      setRangeIn(t); setRangeOut(null);
+    } else {
+      setRangeIn(t);                                          // SET: move IN
+    }
+  };
+  const markRangeOut = () => {
+    if (!ensureNamed()) return;
+    if (currentSec == null) return; // no playable playhead — a mark at 0:00 would be a lie
+    const t = currentSec;
+    if (rangeIn == null) { setRangeOut(t); return; }          // IDLE / OUT-ARMED: (re)arm OUT
+    if (rangeOut == null) {                                   // IN-ARMED: complete
+      const a = Math.min(rangeIn, t), b = Math.max(rangeIn, t);
+      if (b - a < MIN_RANGE_SPAN) return;                     // no real span — stay armed
+      setRangeIn(a); setRangeOut(b);
+    } else if (t - rangeIn < MIN_RANGE_SPAN) {                // SET: OUT at/before IN collapses
+      setRangeOut(t); setRangeIn(null);
+    } else {
+      setRangeOut(t);                                         // SET: move OUT
+    }
+  };
+  // Composer button keeps its tap cycle: arm IN → complete → re-arm.
+  const tapRange = () => {
+    if (rangeIn != null && rangeOut != null) {                // SET → re-arm
+      if (!ensureNamed() || currentSec == null) return;
+      setRangeIn(currentSec); setRangeOut(null);
+    } else if (rangeIn != null) markRangeOut();               // IN-ARMED → complete
+    else markRangeIn();                                       // IDLE / OUT-ARMED
+  };
+  // Preview the in-progress range on the App timeline; clear on unmount. The
+  // playhead-following end is clamped against the armed mark so the band
+  // never inverts while scrubbing behind it.
+  useEffect(() => {
+    if (rangeIn == null && rangeOut == null) { onRangeDraft?.(null); return; }
+    const t = currentSec ?? rangeIn ?? rangeOut ?? 0;
+    const start = rangeIn ?? Math.min(t, rangeOut!);
+    const end = rangeOut ?? Math.max(t, rangeIn!);
+    onRangeDraft?.({ start, end, color: authorColor, live: rangeIn == null || rangeOut == null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeIn, rangeOut, currentSec, authorColor]);
+  useEffect(() => () => onRangeDraft?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Hotkey registration — App dispatches ⇧I/⇧O here, gated on the Review tab
+  // being active in the docked drawer. No deps: re-registers every render so
+  // the handlers never close over stale range state; unmount registers null.
+  useEffect(() => {
+    onRegisterRangeHotkeys?.({ markIn: markRangeIn, markOut: markRangeOut });
+    return () => onRegisterRangeHotkeys?.(null);
+  });
+  // Collapsed reply threads (Reddit-style) — per-comment UI state, deliberately
+  // NOT persisted: threads default to expanded on every load.
+  const [collapsedThreads, setCollapsedThreads] = useState<ReadonlySet<string>>(new Set());
+  const toggleThread = (id: string) => setCollapsedThreads((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   const [searchOpen, setSearchOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<ReviewHistoryEntry[]>([]);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // Panel root — measured for the composer-resize 60%-of-panel cap.
+  const rootRef = useRef<HTMLDivElement>(null);
+  // ── Composer height (drag-resizable split vs the comment list) ──────
+  // null = auto-size; a number = user-dragged fixed height. Mirrored into a
+  // ref because autosizeComposer is also called from once-registered
+  // dictation listeners whose closures would otherwise see the mount value.
+  const [composerHeight, setComposerHeight] = useState<number | null>(loadComposerHeight);
+  const [composerResizing, setComposerResizing] = useState(false);
+  const composerHeightRef = useRef<number | null>(composerHeight);
   // Popover containers — used by the unified outside-click/Escape dismissal.
   const exportWrapRef = useRef<HTMLDivElement>(null);
   const historyWrapRef = useRef<HTMLDivElement>(null);
@@ -129,6 +279,17 @@ export function ReviewPanel({
   // Latest mic level (0..1) for the waveform — a ref so 20 Hz updates from the
   // backend never re-render React; DictationWave reads it in its rAF loop.
   const micLevelRef = useRef(0);
+  // Composer text snapshot taken when dictation starts. Live partials and the
+  // final transcript are appended onto THIS, so streaming words replace cleanly
+  // and a cancel/error reverts to exactly what was typed before.
+  const dictBaseRef = useRef("");
+
+  // Append dictated text onto the pre-dictation snapshot with one separating space.
+  const withDictation = (t: string) => {
+    const base = dictBaseRef.current;
+    if (!t) return base;
+    return base.trim() ? base.replace(/\s*$/, "") + " " + t : t;
+  };
 
   useEffect(() => {
     const unDone = listen<DictateDoneEvent>("dictate-done", (e) => {
@@ -138,20 +299,25 @@ export function ReviewPanel({
       setRecording(false);
       setTranscribing(false);
       if (e.payload.success) {
-        const t = (e.payload.text ?? "").trim();
-        if (t) {
-          setText((prev) => (prev.trim() ? prev.replace(/\s*$/, "") + " " + t : t));
-          requestAnimationFrame(autosizeComposer);
-        }
+        setText(withDictation((e.payload.text ?? "").trim()));
         setDictNote(e.payload.note ?? null); // e.g. hit the 5-minute cap
-      } else if (e.payload.error && e.payload.error !== "Cancelled") {
-        setDictError(e.payload.error);
+      } else {
+        setText(dictBaseRef.current); // revert any live partials
+        if (e.payload.error && e.payload.error !== "Cancelled") setDictError(e.payload.error);
       }
+      requestAnimationFrame(autosizeComposer);
+      dictBaseRef.current = "";
+    });
+    // Native path only: interim transcript while still speaking → live update.
+    const unPartial = listen<DictatePartialEvent>("dictate-partial", (e) => {
+      if (e.payload.job_id !== dictJobRef.current) return;
+      setText(withDictation(e.payload.text));
+      requestAnimationFrame(autosizeComposer);
     });
     const unLevel = listen<DictateLevelEvent>("dictate-level", (e) => {
       if (e.payload.job_id === dictJobRef.current) micLevelRef.current = e.payload.level;
     });
-    return () => { unDone.then((f) => f()); unLevel.then((f) => f()); };
+    return () => { unDone.then((f) => f()); unPartial.then((f) => f()); unLevel.then((f) => f()); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -208,15 +374,24 @@ export function ReviewPanel({
     setDictError(null);
     setDictNote(null);
     micLevelRef.current = 0;
+    dictBaseRef.current = text; // partials + final append onto what's already typed
     try {
       const job = await invoke<string>("new_job_id");
       dictJobRef.current = job;
-      // Mic chosen in Settings → Transcription ("default" = system default input).
-      const device = loadJson<string>("saucebunny.dictation.device", "default");
-      await invoke("dictate_start", { jobId: job, device });
+      try {
+        // Prefer the native, on-device, LIVE-streaming path (Apple Speech):
+        // words appear in the composer as you speak.
+        await invoke("dictate_native_start", { jobId: job, locale: "en-US" });
+      } catch {
+        // Native sidecar unavailable → fall back to ffmpeg → Whisper/Parakeet
+        // (batch after stop). Mic chosen in Settings → Transcription.
+        const device = loadJson<string>("saucebunny.dictation.device", "default");
+        await invoke("dictate_start", { jobId: job, device });
+      }
       setRecording(true);
     } catch (e) {
       dictJobRef.current = null;
+      dictBaseRef.current = "";
       setDictError(formatError(e));
     }
   };
@@ -246,8 +421,58 @@ export function ReviewPanel({
   const autosizeComposer = () => {
     const ta = composerRef.current;
     if (!ta) return;
+    // Hidden keep-alive tab (display:none ancestor) measures clientHeight 0 —
+    // skip the re-measure so background dictation events can't stamp a
+    // collapsed height; the styles set while visible remain correct.
+    if (rootRef.current && rootRef.current.clientHeight === 0) return;
+    const manual = composerHeightRef.current;
+    if (manual != null) {
+      // Manual mode: the typing area is exactly the dragged height — content
+      // scrolls inside it. Inline maxHeight beats the stylesheet's 140px cap
+      // so a tall composer actually gets tall; re-clamping against the live
+      // panel height self-heals when the window/drawer shrinks.
+      const cap = rootRef.current ? Math.round(rootRef.current.clientHeight * 0.6) : COMPOSER_LOAD_MAX;
+      const h = Math.max(COMPOSER_MIN, Math.min(manual, cap));
+      ta.style.maxHeight = h + "px";
+      ta.style.height = h + "px";
+      return;
+    }
+    ta.style.maxHeight = ""; // back to the stylesheet's 140px cap
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, 140) + "px";
+  };
+  // Keep the ref in sync, re-apply the height, persist. Removal (null)
+  // returns the key to "auto" for the next launch.
+  useEffect(() => {
+    composerHeightRef.current = composerHeight;
+    autosizeComposer();
+    try {
+      if (composerHeight == null) localStorage.removeItem(COMPOSER_HEIGHT_KEY);
+      else localStorage.setItem(COMPOSER_HEIGHT_KEY, String(composerHeight));
+    } catch { /* quota */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerHeight]);
+  const onComposerResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = composerHeightRef.current
+      ?? composerRef.current?.getBoundingClientRect().height
+      ?? COMPOSER_MIN;
+    const cap = rootRef.current ? Math.round(rootRef.current.clientHeight * 0.6) : COMPOSER_LOAD_MAX;
+    setComposerResizing(true);
+    document.body.classList.add("cp-resizing-ns");
+    function onMove(ev: MouseEvent) {
+      // Dragging UP grows the composer (cursor delta is negative upward).
+      setComposerHeight(Math.max(COMPOSER_MIN, Math.min(cap, Math.round(startH + (startY - ev.clientY)))));
+    }
+    function onUp() {
+      setComposerResizing(false);
+      document.body.classList.remove("cp-resizing-ns");
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
   };
 
   // Load (and ensure a version exists) whenever the source changes.
@@ -256,13 +481,15 @@ export function ReviewPanel({
     // linger over the new one.
     setDictError(null);
     setDictNote(null);
+    setCollapsedThreads(new Set()); // new source → all threads back to expanded
+    clearRange(); // an armed range from the previous clip would be nonsense here
     if (!sourceKey) { setDoc(null); return; }
     const { doc: d } = ensureVersion(loadReview(sourceKey), sourceKey, sourceTitle ?? undefined);
     saveReview(d);
     setDoc(d);
   }, [sourceKey, sourceTitle]);
 
-  // One mutate helper: apply a pure op, persist, set state.
+  // One mutate helper: apply a pure op, persist, set state. (Solo path only.)
   const mutate = (fn: (d: ReviewDoc) => ReviewDoc) => {
     setDoc((prev) => {
       if (!prev) return prev;
@@ -272,12 +499,36 @@ export function ReviewPanel({
     });
   };
 
-  const versionId = doc?.activeVersionId ?? null;
+  // ── Co-review awareness ────────────────────────────────────────────
+  // In a session the SHARED doc is the source of truth for both display and
+  // mutation; solo, it's the local-by-sourceKey doc. `inSession` follows the
+  // session being ACTIVE (not the doc arriving) so a joined-but-connecting
+  // peer never falls back to the solo path and posts into the void. `dispatch`
+  // sends an op to the session (App applies + relays) or mutates locally.
+  const inSession = sessionActive;
+  const connecting = inSession && !sessionDoc;
+  const viewDoc = inSession ? sessionDoc : doc;
+  const dispatch = (op: ReviewOp, localFn: (d: ReviewDoc) => ReviewDoc) => {
+    if (inSession) onSessionOp?.(op);
+    else mutate(localFn);
+  };
+  // On leaving a session, reload the local doc — App persisted the merged
+  // collaborative doc to storage, so the panel must re-read it (its local
+  // `doc` state predates the session's comments).
+  const wasInSessionRef = useRef(false);
+  useEffect(() => {
+    const was = wasInSessionRef.current;
+    wasInSessionRef.current = inSession;
+    if (was && !inSession && sourceKey) setDoc(loadReview(sourceKey));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inSession, sourceKey]);
+
+  const versionId = viewDoc?.activeVersionId ?? null;
   const roots = useMemo(
-    () => (doc ? rootComments(doc, versionId, sort) : []),
-    [doc, versionId, sort],
+    () => (viewDoc ? rootComments(viewDoc, versionId, sort) : []),
+    [viewDoc, versionId, sort],
   );
-  const open = doc ? openCount(doc, versionId) : 0;
+  const open = viewDoc ? openCount(viewDoc, versionId) : 0;
   const resolved = roots.length - open;
 
   // The visible list = current open/resolved filter ∩ text search (body or author).
@@ -291,7 +542,15 @@ export function ReviewPanel({
     });
   }, [roots, filter, search]);
 
-  if (!sourceKey || !doc || !versionId) {
+  if (connecting) {
+    return (
+      <div className="cp-review-empty">
+        <p>Connecting to the session…</p>
+        <p className="sub">Loading the shared review from the host — comments will appear here.</p>
+      </div>
+    );
+  }
+  if (!viewDoc || !versionId || (!inSession && !sourceKey)) {
     return (
       <div className="cp-review-empty">
         <p>Load a source to start a review.</p>
@@ -305,33 +564,57 @@ export function ReviewPanel({
     const hasDrawing = !!draft && draft.strokes.length > 0;
     if (!body && !hasDrawing) return;
     if (!ensureNamed()) return;
-    mutate((d) => addComment(d, {
+    // Post column of the range machine: a SET range posts as-is; an ARMED
+    // range commits the live span the pill is showing — the SAME clamped
+    // values the preview computes (scrubbing behind an armed IN / ahead of
+    // an armed OUT collapses to the mark), degrading to a point comment.
+    const t = currentSec ?? 0;
+    let timeStart = t;
+    let timeEnd: number | null = null;
+    if (rangeIn != null && rangeOut != null) {
+      timeStart = rangeIn; timeEnd = rangeOut;
+    } else if (rangeIn != null) {
+      const end = Math.max(t, rangeIn); // clamped like the pill/draft
+      if (end - rangeIn >= MIN_RANGE_SPAN) { timeStart = rangeIn; timeEnd = end; }
+      else timeStart = rangeIn;
+    } else if (rangeOut != null) {
+      const start = Math.min(t, rangeOut); // clamped like the pill/draft
+      if (rangeOut - start >= MIN_RANGE_SPAN) { timeStart = start; timeEnd = rangeOut; }
+      else timeStart = rangeOut;
+    }
+    const comment = buildComment({
       versionId,
-      timeStart: currentSec ?? 0,
+      timeStart,
+      timeEnd,
       body: body || "(drawing)",
       author,
       annotation: hasDrawing ? draft : null,
-    }));
+    });
+    dispatch({ t: "add", comment }, (d) => insertComment(d, comment));
     setText("");
-    if (composerRef.current) composerRef.current.style.height = "auto";
+    clearRange();
+    // Re-measure after React flushes the cleared text — collapses in auto
+    // mode, holds the dragged height in manual mode.
+    requestAnimationFrame(autosizeComposer);
     if (hasDrawing) onDraftConsumed?.();
   };
   const submitReply = (parentId: string, atTime: number) => {
     const body = replyDraft.trim();
     if (!body) return;
     if (!ensureNamed()) return; // gate like submit() — no empty-author replies
-    mutate((d) => addComment(d, { versionId, timeStart: atTime, body, author, parentId }));
+    const reply = buildComment({ versionId, timeStart: atTime, body, author, parentId });
+    dispatch({ t: "add", comment: reply }, (d) => insertComment(d, reply));
     setReplyDraft("");
     setReplyTo(null);
   };
 
   const doExport = async (kind: "md" | "csv" | "edl") => {
     setExportOpen(false);
-    if (!doc) return;
+    if (!viewDoc) return;
     const f = {
-      md:  { ext: "md",  name: "Markdown", text: reviewToMarkdown(doc, sourceTitle ?? "Review") },
-      csv: { ext: "csv", name: "CSV",      text: reviewToCsv(doc, fps) },
-      edl: { ext: "edl", name: "EDL",      text: reviewToEdl(doc, fps, sourceTitle ?? "Sauce Bunny Review") },
+      md:  { ext: "md",  name: "Markdown", text: reviewToMarkdown(viewDoc, sourceTitle ?? "Review") },
+      csv: { ext: "csv", name: "CSV",      text: reviewToCsv(viewDoc, fps) },
+      edl: { ext: "edl", name: "EDL",      text: reviewToEdl(viewDoc, fps, sourceTitle ?? "Sauce Bunny Review") },
     }[kind];
     const base = (sourceTitle ?? "review").replace(/[^\w.-]+/g, "-").slice(0, 60) || "review";
     try {
@@ -345,7 +628,7 @@ export function ReviewPanel({
   };
 
   return (
-    <div className="cp-review">
+    <div className="cp-review" ref={rootRef}>
       <ReviewToolbar
         filter={filter} setFilter={setFilter}
         counts={{ all: roots.length, open, resolved }}
@@ -392,12 +675,18 @@ export function ReviewPanel({
             fps={fps}
             myName={author}
             myColor={authorColor}
-            replies={repliesOf(doc, c.id)}
+            replies={repliesOf(viewDoc, c.id)}
             onSeek={onSeek}
             onShowAnnotation={onShowAnnotation}
-            onResolve={() => mutate((d) => toggleResolved(d, c.id))}
-            onDelete={() => mutate((d) => deleteComment(d, c.id))}
-            onEdit={(body) => mutate((d) => editComment(d, c.id, body))}
+            onResolve={() => { const at = Date.now(), v = !c.resolved; dispatch({ t: "resolve", id: c.id, resolved: v, at }, (d) => setResolved(d, c.id, v, at)); }}
+            onDelete={() => dispatch({ t: "del", id: c.id }, (d) => deleteComment(d, c.id))}
+            onEdit={(body) => { const at = Date.now(); dispatch({ t: "edit", id: c.id, body, at }, (d) => editComment(d, c.id, body, at)); }}
+            onLike={() => { if (!ensureNamed()) return; const liked = !(c.likes ?? []).includes(author); dispatch({ t: "like", id: c.id, name: author, liked }, (d) => setLike(d, c.id, author, liked)); }}
+            onEditReply={(replyId, body) => { const at = Date.now(); dispatch({ t: "editReply", versionId, commentId: c.id, replyId, body, at }, (d) => editReply(d, versionId, c.id, replyId, body, at)); }}
+            onDeleteReply={(replyId) => dispatch({ t: "delReply", versionId, commentId: c.id, replyId }, (d) => removeReply(d, versionId, c.id, replyId))}
+            onLikeReply={(replyId) => { if (!ensureNamed()) return; const r = viewDoc.comments.find((x) => x.id === replyId); if (!r) return; const liked = !(r.likes ?? []).includes(author); dispatch({ t: "like", id: replyId, name: author, liked }, (d) => setLike(d, replyId, author, liked)); }}
+            collapsed={collapsedThreads.has(c.id)}
+            onToggleCollapse={() => toggleThread(c.id)}
             replyOpen={replyTo === c.id}
             onToggleReply={() => { setReplyTo(replyTo === c.id ? null : c.id); setReplyDraft(""); }}
             replyDraft={replyDraft}
@@ -419,8 +708,13 @@ export function ReviewPanel({
         levelRef={micLevelRef}
         text={text} setText={setText}
         composerRef={composerRef} autosize={autosizeComposer}
+        onResizeStart={onComposerResizeStart}
+        resizing={composerResizing}
+        onResizeReset={() => setComposerHeight(null)}
         submit={submit} hasDraft={!!draft && draft.strokes.length > 0}
         currentSec={currentSec} fps={fps}
+        rangeIn={rangeIn} rangeOut={rangeOut} onRangeTap={tapRange} onRangeClear={clearRange}
+        rangeColor={authorColor}
       />
 
       {nameModal && (
@@ -507,13 +801,17 @@ function ReviewToolbar({
           <option value="oldest">Oldest first</option>
         </select>
         <div className="cp-review-export" ref={exportWrapRef}>
+          {/* Icon trigger (matches the search/history icon buttons); the menu
+              stays anchored to this wrapper via its position:relative. */}
           <button
-            className="cp-review-export-btn"
+            className={"cp-review-iconbtn" + (exportOpen ? " active" : "")}
             onClick={() => setExportOpen((o) => !o)}
             disabled={exportDisabled}
-            title="Export the review (the local stand-in for a share link)"
+            aria-pressed={exportOpen}
+            aria-label="Export review"
+            title="Export review…"
           >
-            Export ▾
+            <IconDownload size={14} strokeWidth={2} className="cp-review-glyph" />
           </button>
           {exportOpen && (
             <div className="cp-review-export-menu">
@@ -555,6 +853,15 @@ function ReviewToolbar({
                     >✕</button>
                   </div>
                 ))}
+                {/* Bulk clear — history entries are just pointers, so no confirm:
+                    the review docs themselves are never deleted from here. */}
+                {history.length > 0 && (
+                  <button
+                    className="cp-review-history-clear"
+                    onMouseDown={() => { clearReviewHistory(); setHistory([]); }}
+                    title="Clear the list — review notes themselves are kept"
+                  >Clear all</button>
+                )}
               </div>
             )}
           </div>
@@ -565,7 +872,7 @@ function ReviewToolbar({
           onClick={openRename}
           title={author ? `Reviewing as ${author} — click to rename` : "Set your name"}
         >
-          <Avatar name={author || "?"} size={24} color={authorColor} />
+          <Avatar name={author || "?"} size={26} color={authorColor} />
         </button>
       </div>
     </div>
@@ -580,7 +887,9 @@ function ReviewComposer({
   dictError, clearDictError, dictNote, clearDictNote,
   toggleDictation, levelRef,
   text, setText, composerRef, autosize,
+  onResizeStart, resizing, onResizeReset,
   submit, hasDraft, currentSec, fps,
+  rangeIn, rangeOut, onRangeTap, onRangeClear, rangeColor,
 }: {
   drawActive: boolean;
   onToggleDraw?: () => void;
@@ -597,11 +906,39 @@ function ReviewComposer({
   setText: (s: string) => void;
   composerRef: React.RefObject<HTMLTextAreaElement>;
   autosize: () => void;
+  /** Start the composer-height drag (handle on the composer's top edge). */
+  onResizeStart: (e: React.MouseEvent) => void;
+  /** True while the height drag is live — brightens the shared handle rail. */
+  resizing: boolean;
+  /** Double-click reset — back to auto-size. */
+  onResizeReset: () => void;
   submit: () => void;
   hasDraft: boolean;
   currentSec: number | null;
   fps: number;
+  rangeIn: number | null;
+  rangeOut: number | null;
+  onRangeTap: () => void;
+  onRangeClear: () => void;
+  rangeColor: string;
 }) {
+  // Insert an emoji at the textarea caret (replacing any selection), then
+  // restore focus + caret so typing continues seamlessly.
+  const insertEmoji = (emoji: string) => {
+    const ta = composerRef.current;
+    if (!ta) { setText(text + emoji); return; }
+    const start = ta.selectionStart ?? text.length;
+    const end = ta.selectionEnd ?? text.length;
+    setText(text.slice(0, start) + emoji + text.slice(end));
+    requestAnimationFrame(() => {
+      const el = composerRef.current;
+      if (!el) return;
+      const caret = start + emoji.length;
+      el.focus();
+      el.setSelectionRange(caret, caret);
+      autosize();
+    });
+  };
   return (
     <>
       {drawActive && (
@@ -630,8 +967,45 @@ function ReviewComposer({
           {dictNote}
         </div>
       )}
+      {/* Comment range indicator — reviewer-tinted, deliberately unlike the
+          orange clip in/out. Appears once either end is armed; the unarmed
+          end shows the (clamped) live playhead in italics until marked. */}
+      {(rangeIn != null || rangeOut != null) && (() => {
+        const t = currentSec ?? rangeIn ?? rangeOut ?? 0;
+        const startTc = secondsToTc(rangeIn ?? Math.min(t, rangeOut ?? t), fps);
+        const endTc = secondsToTc(rangeOut ?? Math.max(t, rangeIn ?? t), fps);
+        return (
+          <div className="cp-review-rangebar" style={{ ["--marker-color" as string]: rangeColor }}>
+            <span className="cp-review-range-pill">
+              <IconRange size={11} strokeWidth={2.4} className="cp-review-glyph" />
+              <span className={rangeIn == null ? "live" : undefined}>{startTc}</span>
+              <span className="cp-review-range-arrow">→</span>
+              <span className={rangeOut == null ? "live" : undefined}>{endTc}</span>
+            </span>
+            <span className="cp-review-range-hint">
+              {rangeIn != null && rangeOut != null
+                ? "range locked — Post attaches it to your comment"
+                : rangeIn != null
+                  ? "⇧O marks OUT — end follows the playhead until then"
+                  : "⇧I marks IN — start follows the playhead until then"}
+            </span>
+            <button className="cp-review-range-x" onClick={onRangeClear} title="Clear range" aria-label="Clear range">×</button>
+          </div>
+        );
+      })()}
       {/* Composer — draw + voice + comment, anchored at the current playhead. */}
       <div className="cp-review-composer">
+        {/* Height drag handle — rides the composer's top hairline; the list
+            above takes whatever the composer doesn't. */}
+        <div
+          className={"cp-review-vresize cp-resize-handle horizontal" + (resizing ? " dragging" : "")}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize comment box"
+          onMouseDown={onResizeStart}
+          onDoubleClick={onResizeReset}
+          title="Drag to resize · double-click to reset"
+        />
         {onToggleDraw && (
           <button
             className={"cp-review-tool" + (drawActive ? " active" : "")}
@@ -651,6 +1025,19 @@ function ReviewComposer({
         >
           <MicGlyph />
         </button>
+        <EmojiPicker onPick={insertEmoji} />
+        <button
+          className={"cp-review-tool" + (rangeIn != null || rangeOut != null ? " active" : "")}
+          onClick={() => { if (ensureNamed()) onRangeTap(); }}
+          title={rangeIn == null && rangeOut == null
+                 ? "Set a comment time range — mark IN at the playhead (⇧I / ⇧O)"
+                 : rangeIn == null || rangeOut == null
+                   ? "Mark the other end at the playhead (⇧I / ⇧O)"
+                   : "Range set — tap to start a new one"}
+          aria-label="Set comment time range"
+        >
+          <IconRange size={16} className="cp-review-glyph" />
+        </button>
         <textarea
           ref={composerRef}
           className="cp-review-input"
@@ -660,7 +1047,10 @@ function ReviewComposer({
           onInput={autosize}
           onFocus={() => ensureNamed()}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
-          placeholder={drawActive ? "Describe the drawing…" : `Comment at ${secondsToTc(currentSec ?? 0, fps)}…`}
+          // Placeholder uses coarse h:mm:ss (no frames, no zero-padded hour) so
+          // it fits a narrow panel without wrapping; posted comments still
+          // carry the full SMPTE timecode via secondsToTc.
+          placeholder={drawActive ? "Describe the drawing…" : `Comment at ${secondsToHms(currentSec ?? 0).replace(/^0(?=\d)/, "")}`}
         />
         <button className="btn btn-primary btn-compact" onClick={submit} disabled={!text.trim() && !hasDraft}>Post</button>
       </div>
@@ -712,7 +1102,8 @@ function NameGateModal({
 }
 
 function CommentRow({
-  c, now, fps, myName, myColor, replies, onSeek, onShowAnnotation, onResolve, onDelete, onEdit,
+  c, now, fps, myName, myColor, replies, onSeek, onShowAnnotation, onResolve, onDelete, onEdit, onLike,
+  onEditReply, onDeleteReply, onLikeReply, collapsed, onToggleCollapse,
   replyOpen, onToggleReply, replyDraft, setReplyDraft, onSubmitReply,
 }: {
   c: ReviewComment;
@@ -726,6 +1117,13 @@ function CommentRow({
   onResolve: () => void;
   onDelete: () => void;
   onEdit: (body: string) => void;
+  onLike: () => void;
+  onEditReply: (replyId: string, body: string) => void;
+  onDeleteReply: (replyId: string) => void;
+  onLikeReply: (replyId: string) => void;
+  /** Reply thread collapsed to a one-line "N replies" row (UI state in ReviewPanel). */
+  collapsed: boolean;
+  onToggleCollapse: () => void;
   replyOpen: boolean;
   onToggleReply: () => void;
   replyDraft: string;
@@ -735,6 +1133,7 @@ function CommentRow({
   const hasDrawing = !!c.annotation && c.annotation.strokes.length > 0;
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(c.body);
+  const replyInputRef = useRef<HTMLInputElement>(null);
   return (
     <div className={"cp-review-comment" + (c.resolved ? " resolved" : "")}>
       {/* Header: avatar · name · relative time · actions (Frame.io card). */}
@@ -746,6 +1145,7 @@ function CommentRow({
         </div>
         {c.resolved && <span className="cp-review-badge">Resolved</span>}
         <div className="cp-review-actions">
+          <LikeButton likes={c.likes ?? []} myName={myName} onLike={onLike} />
           <button onClick={onResolve} title={c.resolved ? "Reopen" : "Resolve"}>{c.resolved ? "Reopen" : "Resolve"}</button>
           <button onClick={() => { setEditing(true); setEditDraft(c.body); }} title="Edit">Edit</button>
           <button onClick={onDelete} title="Delete">✕</button>
@@ -755,11 +1155,12 @@ function CommentRow({
       {/* Timecode chip (+ drawing badge) — click to jump. */}
       <div className="cp-review-chiprow">
         <button
-          className="cp-review-tc"
+          className={"cp-review-tc" + (c.timeEnd != null && c.timeEnd > c.timeStart ? " range" : "")}
           onClick={() => { onSeek(c.timeStart); if (hasDrawing) onShowAnnotation?.(c.annotation); }}
-          title={hasDrawing ? "Jump + show drawing" : "Jump to this point"}
+          title={c.timeEnd != null && c.timeEnd > c.timeStart ? "Jump to range start" : (hasDrawing ? "Jump + show drawing" : "Jump to this point")}
         >
           <ClockGlyph /> {secondsToTc(c.timeStart, fps)}
+          {c.timeEnd != null && c.timeEnd > c.timeStart && <> – {secondsToTc(c.timeEnd, fps)}</>}
         </button>
         {hasDrawing && (
           <button
@@ -782,28 +1183,117 @@ function CommentRow({
         <div className="cp-review-body">{c.body}</div>
       )}
 
-      {replies.map((r) => (
-        <div className="cp-review-reply" key={r.id}>
-          <Avatar name={r.author} size={20} color={r.author === myName ? myColor : undefined} />
-          <div className="cp-review-reply-main">
-            <span className="cp-review-author">{r.author}</span>
-            <span className="cp-review-ago">{timeAgo(r.createdAt, now)}</span>
-            <div className="cp-review-body">{r.body}</div>
+      {/* Reddit-style reply thread: a clickable thread-line down the left of
+          the reply block collapses it to a one-line "N replies" row. */}
+      {replies.length > 0 && (collapsed ? (
+        <button className="cp-review-collapsed" onClick={onToggleCollapse} aria-expanded={false}>
+          ▸ {replies.length} {replies.length === 1 ? "reply" : "replies"}
+        </button>
+      ) : (
+        <div className="cp-review-thread-block">
+          <button
+            className="cp-review-thread"
+            onClick={onToggleCollapse}
+            title="Collapse replies"
+            aria-label={`Collapse ${replies.length} ${replies.length === 1 ? "reply" : "replies"}`}
+            aria-expanded={true}
+          />
+          <div className="cp-review-thread-replies">
+            {replies.map((r) => (
+              <ReplyRow
+                key={r.id}
+                r={r}
+                now={now}
+                myName={myName}
+                myColor={myColor}
+                onEdit={(body) => onEditReply(r.id, body)}
+                onDelete={() => onDeleteReply(r.id)}
+                onLike={() => onLikeReply(r.id)}
+              />
+            ))}
           </div>
         </div>
       ))}
 
       {replyOpen ? (
         <div className="cp-review-reply-input">
-          <input value={replyDraft} onChange={(e) => setReplyDraft(e.target.value)} autoFocus
+          <input ref={replyInputRef} value={replyDraft} onChange={(e) => setReplyDraft(e.target.value)} autoFocus
             placeholder="Reply…"
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onSubmitReply(); } if (e.key === "Escape") onToggleReply(); }} />
-          <button className="btn btn-ghost btn-compact" onClick={onSubmitReply} disabled={!replyDraft.trim()}>Reply</button>
+          <EmojiPicker onPick={(em) => insertAtCaret(replyInputRef, replyDraft, setReplyDraft, em)} />
+          <button className="btn btn-primary btn-compact" onClick={onSubmitReply} disabled={!replyDraft.trim()}>Post</button>
         </div>
       ) : (
         <button className="cp-review-replylink" onClick={onToggleReply}>Reply</button>
       )}
     </div>
+  );
+}
+
+/** One reply under a comment's thread-line — same avatar+name+time header as
+ *  before, plus quiet hover actions (Edit / ×) mirroring the comment header.
+ *  Editing swaps the body for an input prefilled with the text; Enter saves,
+ *  Esc cancels, and the emoji picker inserts at the caret like the composer. */
+function ReplyRow({
+  r, now, myName, myColor, onEdit, onDelete, onLike,
+}: {
+  r: ReviewComment;
+  now: number;
+  myName: string;
+  myColor: string;
+  onEdit: (body: string) => void;
+  onDelete: () => void;
+  onLike: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(r.body);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const save = () => { onEdit(draft.trim() || r.body); setEditing(false); };
+  return (
+    <div className="cp-review-reply">
+      <Avatar name={r.author} size={20} color={r.author === myName ? myColor : undefined} />
+      <div className="cp-review-reply-main">
+        <div className="cp-review-reply-head">
+          <div className="cp-review-meta">
+            <span className="cp-review-author">{r.author}</span>
+            <span className="cp-review-ago">{timeAgo(r.createdAt, now)}</span>
+          </div>
+          <div className="cp-review-actions">
+            <LikeButton likes={r.likes ?? []} myName={myName} onLike={onLike} />
+            <button onClick={() => { setDraft(r.body); setEditing(true); }} title="Edit">Edit</button>
+            <button onClick={onDelete} title="Delete">✕</button>
+          </div>
+        </div>
+        {editing ? (
+          <div className="cp-review-edit">
+            <input ref={inputRef} value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }} />
+            <EmojiPicker onPick={(em) => insertAtCaret(inputRef, draft, setDraft, em)} />
+            <button className="btn btn-ghost btn-compact" onClick={save}>Save</button>
+          </div>
+        ) : (
+          <div className="cp-review-body">{r.body}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Thumbs-up toggle in a note's action cluster (comments + replies). Quiet
+ *  like its Edit/× siblings; once anyone has liked, the count rides along and
+ *  the button stays visible at a glance (see .has-likes in review.css). */
+function LikeButton({ likes, myName, onLike }: { likes: string[]; myName: string; onLike: () => void }) {
+  const liked = !!myName && likes.includes(myName);
+  return (
+    <button
+      className={"cp-review-like" + (liked ? " liked" : "") + (likes.length > 0 ? " has-likes" : "")}
+      onClick={onLike}
+      aria-pressed={liked}
+      title={likes.length > 0 ? `Liked by ${likes.join(", ")}` : "Like"}
+    >
+      <ThumbGlyph />
+      {likes.length > 0 && <span className="cp-review-like-n">{likes.length}</span>}
+    </button>
   );
 }
 
@@ -849,6 +1339,17 @@ function HistoryGlyph() {
       <path d="M3 3v5h5" />
       <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
       <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+/** Thumbs-up glyph for the like toggle. */
+function ThumbGlyph() {
+  return (
+    <svg className="cp-review-glyph" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 11v10" />
+      <path d="M7 11l4-8a3 3 0 0 1 3 3v3h5a2 2 0 0 1 2 2.3l-1.3 7a2 2 0 0 1-2 1.7H7" />
     </svg>
   );
 }

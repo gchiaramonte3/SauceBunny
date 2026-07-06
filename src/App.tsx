@@ -9,6 +9,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { Toolbar } from "./components/Toolbar";
 import { Sidebar } from "./components/Sidebar";
+import { ParticipantRail } from "./components/ParticipantRail";
 import { Monitor, type AspectId } from "./components/Monitor";
 import type { Notif } from "./components/NotificationBell";
 import type { ToastKind } from "./components/CanvasToast";
@@ -22,7 +23,7 @@ import { YouTubeAuthModal } from "./components/YouTubeAuthModal";
 import type { PlayerHandle } from "./components/player-handle";
 import type {
   AppStatus, ClientLog, DoneEvent, ExportOpts,
-  LocalFileMeta, LogEvent, Metadata, ProgressEvent, QueuedClip, RecentClip,
+  LocalFileMeta, LogEvent, Metadata, ProgressEvent, QueuedClip, QueueSource, RecentClip,
   SourceKind, WhisperModel,
 } from "./types";
 import { asLogTag } from "./types";
@@ -44,7 +45,15 @@ import {
   KEY_ACTION_BY_ID, type KeyActionId, type KeybindingOverrides,
 } from "./lib/keybindings";
 import { migrateLegacyStorageKeys } from "./lib/migrate-storage";
-import { loadReview, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
+import { loadActiveTab } from "./lib/tab-state";
+import type { SessionMsg } from "./bindings/SessionMsg";
+import type { SessionState as CoSessionState } from "./bindings/SessionState";
+import { nextShuttleRate } from "./lib/shuttle";
+import { parseSrt } from "./lib/srt";
+import { speakerLanes } from "./lib/speaker-stats";
+import { speakerColor } from "./components/transcript/helpers";
+import { MediaInfoModal } from "./components/MediaInfoModal";
+import { loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes, type ReviewDoc, type ReviewOp } from "./lib/review";
 import { loadJson, saveJson } from "./lib/storage";
 import {
   durationToTc, framesToTc, secondsToTc,
@@ -537,6 +546,14 @@ export default function App() {
   // ====== Clip queue (multi-section export) ======
   const [clipQueue, setClipQueue] = useState<QueuedClip[]>([]);
   const [queueOpen, setQueueOpen] = useState(false);
+  // Left source/export sidebar visibility — persisted, mirroring the right
+  // drawer's toolbar toggle. Defaults open.
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem("saucebunny.sidebarOpen") !== "0"; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("saucebunny.sidebarOpen", sidebarOpen ? "1" : "0"); } catch { /* quota */ }
+  }, [sidebarOpen]);
   const [queueRunning, setQueueRunning] = useState(false);
   /**
    * True when the side panel has been popped out into its own native
@@ -644,6 +661,11 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "commands" | "about">("general");
 
+  // ====== Media info modal ======
+  // Deep inspector over the ORIGINAL local source file (never the ffmpeg
+  // playback copy — the user wants the truth about their file on disk).
+  const [mediaInfoOpen, setMediaInfoOpen] = useState(false);
+
   // ====== Active transcript ======
   // The Transcript tab in the right drawer reads from here. We track the
   // file on disk + which producer made it (yt-dlp captions vs Whisper)
@@ -666,6 +688,38 @@ export default function App() {
       setQueueOpen(true);
     }
   }, [transcriptArrivedTick]);
+
+  // ====== Speaker lanes (timeline) ======
+  // Thin per-speaker bands along the bottom of the scrub track, derived
+  // from the active transcript's cues. Recomputed when the transcript file
+  // changes (path) or is rewritten in place (arrivedTick bump). Lanes only
+  // render for diarized / speaker-labelled transcripts — an all-null strip
+  // would just be one solid bar of noise.
+  const [speakerLaneData, setSpeakerLaneData] = useState<
+    { startMs: number; endMs: number; color: string; speaker: string | null }[]
+  >([]);
+  const transcriptPath = activeTranscript?.path ?? null;
+  useEffect(() => {
+    if (!transcriptPath) { setSpeakerLaneData([]); return; }
+    let alive = true;
+    void (async () => {
+      try {
+        const text = await invoke<string>("read_text_file_capped", {
+          path: transcriptPath,
+          maxBytes: 8 * 1024 * 1024,
+        });
+        if (!alive) return;
+        const cues = parseSrt(text);
+        if (!cues.some((c) => c.speaker !== null)) { setSpeakerLaneData([]); return; }
+        setSpeakerLaneData(
+          speakerLanes(cues).map((lane) => ({ ...lane, color: speakerColor(lane.speaker) })),
+        );
+      } catch {
+        if (alive) setSpeakerLaneData([]);
+      }
+    })();
+    return () => { alive = false; };
+  }, [transcriptPath, transcriptArrivedTick]);
 
   // ====== Backend build ID handshake ======
   // Persistent banner state when the running Rust binary doesn't match the
@@ -1346,6 +1400,15 @@ export default function App() {
       });
       if (sourceSeqRef.current !== seq) return; // user already moved on
       setMetadata(m);
+      // Queue items added during the optimistic-stub window captured
+      // "Loading…" as their title — re-stamp them with the real title/
+      // thumbnail now that metadata has hydrated (recents would otherwise
+      // show "Loading…" for clips exported from those items).
+      setClipQueue((prev) => prev.map((c) =>
+        c.source.kind === "web" && c.source.url === full && c.title === stub.title
+          ? { ...c, title: m.title, thumbnail: m.thumbnail ?? c.thumbnail }
+          : c
+      ));
       setExportOpts((prev) => ({
         ...prev,
         captions: defaults.captions && m.has_subs,
@@ -1392,14 +1455,68 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ytAuthRetry]);
 
+  /**
+   * Shared local-clip export core (single Export button + queued items):
+   * mediabunny Conversion → bytes → write_bytes_to_path. Owns the cancel
+   * token (Stop / source-switch flip it via localExportCancelRef); callers
+   * keep their own status/notification/recents bookkeeping. There is no
+   * ffmpeg fallback for local clips — "unsupported" surfaces as-is.
+   */
+  const runLocalClipExport = useCallback(async (args: {
+    inputPath: string;
+    startSeconds: number | null;
+    endSeconds: number | null;
+    format: "video-mp4" | "audio-mp3";
+    destPath: string;
+    /** 0..100 */
+    onProgress: (pct: number) => void;
+  }): Promise<
+    | { kind: "ok"; bytesWritten: number }
+    | { kind: "cancelled" }
+    | { kind: "unsupported"; reason: string }
+    | { kind: "error"; message: string }
+  > => {
+    const cancelToken = { cancelled: false };
+    localExportCancelRef.current = cancelToken;
+    try {
+      const result = await exportLocalClipViaMediabunny({
+        inputPath: args.inputPath,
+        startSeconds: args.startSeconds,
+        endSeconds: args.endSeconds,
+        format: args.format,
+        onProgress: (p) => args.onProgress(p * 100),
+      }, cancelToken);
+      if (result.kind !== "ok") return result;
+      // Persist via the small bytes-writer command we already have.
+      // For >50MB clips this is a one-shot invoke; large but works.
+      // ifNotExists: destPath is derived (not saveDialog-vetted) — refuse
+      // to clobber an existing file, matching create_clip's behavior.
+      await invoke("write_bytes_to_path", {
+        path: args.destPath,
+        bytes: Array.from(result.bytes),
+        ifNotExists: true,
+      });
+      return { kind: "ok", bytesWritten: result.bytes.byteLength };
+    } catch (err) {
+      // formatError handles Error / AppError / string — `err instanceof Error`
+      // alone misses the r51 discriminated-union shape.
+      return { kind: "error", message: formatError(err) };
+    } finally {
+      // Ownership-checked release — a concurrently started export may have
+      // installed ITS token; blindly nulling would strand its Stop button.
+      if (localExportCancelRef.current === cancelToken) localExportCancelRef.current = null;
+    }
+  }, []);
+
   const handleExport = useCallback(async () => {
     if (!metadata || !exportOpts.folder) return;
 
     // ─── Local-file branch ──────────────────────────────────────────
     // Drive the clip via mediabunny's Conversion API (demux + stream-
-    // copy or WebCodecs re-encode, no ffmpeg subprocess). MP3 audio
-    // export still rides the ffmpeg path because mediabunny needs the
-    // @mediabunny/mp3-encoder extension and we haven't installed it yet.
+    // copy or WebCodecs re-encode, no ffmpeg subprocess). MP3 rides
+    // Mp3OutputFormat (the mp3-encoder extension registered in main.tsx);
+    // everything else writes MP4 — Conversion handles passthrough vs.
+    // re-encode internally based on codec compatibility.
     if (sourceKind === "file") {
       if (!localFilePath) {
         pushNotification("error", "Local file missing", "Re-import the file and try again.");
@@ -1414,15 +1531,8 @@ export default function App() {
         pushNotification("error", "Filename is empty", "Pick a filename before exporting.");
         return;
       }
-      // Pick container + extension based on the user's format selection.
-      // Mp3 path goes through Mp3OutputFormat (mediabunny's mp3-encoder
-      // extension is registered at app startup in main.tsx). Everything
-      // else writes MP4 — Mediabunny's Conversion handles passthrough
-      // vs. re-encode internally based on codec compatibility.
       const isAudioOnly = exportOpts.format === "audio";
-      const exportFormat: "video-mp4" | "audio-mp3" = isAudioOnly ? "audio-mp3" : "video-mp4";
-      const ext = isAudioOnly ? "mp3" : "mp4";
-      const destPath = `${exportOpts.folder}/${safe}.${ext}`;
+      const destPath = `${exportOpts.folder}/${safe}.${isAudioOnly ? "mp3" : "mp4"}`;
 
       setErrorDetail(null);
       setResultPath(null);
@@ -1431,80 +1541,64 @@ export default function App() {
       appendLog("info", "mediabunny",
         `Exporting local clip ${startSec != null && endSec != null ? `${startSec.toFixed(2)}s → ${endSec.toFixed(2)}s` : "full"} → ${destPath}`);
 
-      const cancelToken = { cancelled: false };
-      localExportCancelRef.current = cancelToken;
-      try {
-        const result = await exportLocalClipViaMediabunny({
-          inputPath: localFilePath,
-          startSeconds: startSec,
-          endSeconds: endSec,
-          format: exportFormat,
-          onProgress: (p) => setProgress(p * 100),
-        }, cancelToken);
+      const result = await runLocalClipExport({
+        inputPath: localFilePath,
+        startSeconds: startSec,
+        endSeconds: endSec,
+        format: isAudioOnly ? "audio-mp3" : "video-mp4",
+        destPath,
+        onProgress: setProgress,
+      });
 
-        if (result.kind === "cancelled") {
-          setStatus("loaded");
-          setProgress(0);
-          appendLog("warn", "mediabunny", "Local export cancelled.");
-          pushNotification("info", "Export cancelled", "");
-          return;
-        }
-        if (result.kind === "unsupported") {
-          // Future: fall back to a Rust ffmpeg-based local-clip command.
-          // For now surface clearly so the user knows what happened.
-          appendLog("err", "mediabunny", `Unsupported for mediabunny export: ${result.reason}`);
-          setStatus("error");
-          setErrorDetail(result.reason);
-          pushNotification("error", "Local export not supported",
-            "This file's codecs aren't compatible with the in-browser exporter yet. ffmpeg fallback for local clips is on the roadmap.");
-          return;
-        }
-        if (result.kind === "error") {
-          throw new Error(result.message);
-        }
-
-        // Persist via the small bytes-writer command we already have.
-        // For >50MB clips this is a one-shot invoke; large but works.
-        await invoke("write_bytes_to_path", {
-          path: destPath,
-          bytes: Array.from(result.bytes),
-        });
-
+      if (result.kind === "cancelled") {
         setStatus("loaded");
-        setResultPath(destPath);
         setProgress(0);
-        const filename = destPath.split("/").pop() ?? "Done.";
-        appendLog("ok", "mediabunny",
-          `Wrote ${(result.bytes.byteLength / 1_000_000).toFixed(1)} MB → ${destPath}`);
-        pushNotification("success", "Clip exported", filename, destPath);
-        notify("Clip exported", filename);
-
-        // Add to recents.
-        const m = metadataRef.current;
-        if (m) {
-          const dur = (endSec != null && startSec != null)
-            ? secondsToTc(endSec - startSec, fps)
-            : (m.duration != null ? secondsToTc(m.duration, fps) : "Full");
-          const r: RecentClip = {
-            id: Math.random().toString(36).slice(2),
-            title: m.title,
-            path: destPath,
-            dur,
-            when: Date.now(),
-            thumbnail: m.thumbnail,
-          };
-          setRecents((prev) => [r, ...prev].slice(0, 6));
-        }
-      } catch (err) {
-        // formatError handles Error / AppError / string — `err instanceof Error`
-        // alone misses the r51 discriminated-union shape.
-        const msg = formatError(err);
-        setErrorDetail(msg);
-        appendLog("err", "mediabunny", msg);
+        appendLog("warn", "mediabunny", "Local export cancelled.");
+        pushNotification("info", "Export cancelled", "");
+        return;
+      }
+      if (result.kind === "unsupported") {
+        // Future: fall back to a Rust ffmpeg-based local-clip command.
+        // For now surface clearly so the user knows what happened.
+        appendLog("err", "mediabunny", `Unsupported for mediabunny export: ${result.reason}`);
         setStatus("error");
-        pushNotification("error", "Local export failed", msg);
-      } finally {
-        localExportCancelRef.current = null;
+        setErrorDetail(result.reason);
+        pushNotification("error", "Local export not supported",
+          "This file's codecs aren't compatible with the in-browser exporter yet. ffmpeg fallback for local clips is on the roadmap.");
+        return;
+      }
+      if (result.kind === "error") {
+        setErrorDetail(result.message);
+        appendLog("err", "mediabunny", result.message);
+        setStatus("error");
+        pushNotification("error", "Local export failed", result.message);
+        return;
+      }
+
+      setStatus("loaded");
+      setResultPath(destPath);
+      setProgress(0);
+      const filename = destPath.split("/").pop() ?? "Done.";
+      appendLog("ok", "mediabunny",
+        `Wrote ${(result.bytesWritten / 1_000_000).toFixed(1)} MB → ${destPath}`);
+      pushNotification("success", "Clip exported", filename, destPath);
+      notify("Clip exported", filename);
+
+      // Add to recents.
+      const m = metadataRef.current;
+      if (m) {
+        const dur = (endSec != null && startSec != null)
+          ? secondsToTc(endSec - startSec, fps)
+          : (m.duration != null ? secondsToTc(m.duration, fps) : "Full");
+        const rc: RecentClip = {
+          id: Math.random().toString(36).slice(2),
+          title: m.title,
+          path: destPath,
+          dur,
+          when: Date.now(),
+          thumbnail: m.thumbnail,
+        };
+        setRecents((prev) => [rc, ...prev].slice(0, 6));
       }
       return;
     }
@@ -1562,7 +1656,7 @@ export default function App() {
       appendLog("err", "ffmpeg", msg);
       setStatus("error");
     }
-  }, [metadata, sourceKind, exportOpts, fps, inFrames, outFrames, appendLog, pushNotification]);
+  }, [metadata, sourceKind, localFilePath, exportOpts, fps, inFrames, outFrames, runLocalClipExport, appendLog, pushNotification]);
 
   const handleReveal = useCallback(() => {
     if (!resultPath) return;
@@ -1898,11 +1992,18 @@ export default function App() {
     }
   }, [jobId, transcriptJobId, playbackPrepJobId, appendLog, webPlayback.downloading, stopWebPlayback]);
 
-  /** Add the current active selection as a new queued item, then clear marks. */
+  /** Add the current active selection as a new queued item, then clear marks.
+   *  The item captures its SOURCE (web URL or local path), fps, and title at
+   *  add time, so the queue survives source switches and mixed queues export
+   *  each clip from the right place. */
   const handleAddToQueue = useCallback(() => {
-    if (sourceKind !== "youtube") {
-      pushNotification("info", "Queue is YouTube-only for now",
-        "Local-file clip export is coming next; queue currently only handles YouTube sources.");
+    if (sourceKind === "file" && !localFilePath) {
+      pushNotification("error", "Local file missing", "Re-import the file and try again.");
+      return;
+    }
+    if (sourceKind !== "file" && !metadata?.webpage_url) {
+      pushNotification("info", "Load a source first",
+        "Fetch a URL or import a file, then mark the section you want to queue.");
       return;
     }
     if (inFrames == null || outFrames == null) {
@@ -1921,14 +2022,23 @@ export default function App() {
     const nameFor = (n: number) => baseName === "clip" ? `clip-${n}` : `${baseName}-${n}`;
     let nextIndex = clipQueueRef.current.length + 1;
     while (clipQueueRef.current.some((c) => c.filename === nameFor(nextIndex))) nextIndex++;
+    const source: QueueSource = sourceKind === "file"
+      ? { kind: "file", path: localFilePath! }
+      : { kind: "web", url: metadata!.webpage_url };
     const item: QueuedClip = {
       id: Math.random().toString(36).slice(2),
+      source,
+      fps,
+      title: metadata?.title ?? nameFor(nextIndex),
+      thumbnail: metadata?.thumbnail ?? null,
       inFrames,
       outFrames,
       filename: nameFor(nextIndex),
       format: exportOpts.format,
-      reencode: exportOpts.reencode,
-      captions: exportOpts.captions,
+      // reencode/captions are yt-dlp features — meaningless for the
+      // mediabunny local path, so file items pin them off.
+      reencode: sourceKind === "file" ? false : exportOpts.reencode,
+      captions: sourceKind === "file" ? false : exportOpts.captions,
       status: "queued",
     };
     setClipQueue((prev) => [...prev, item]);
@@ -1936,20 +2046,56 @@ export default function App() {
     setOutFrames(null);
     setQueueOpen(true);
     appendLog("info", "queue", `Queued ${item.filename} (${framesToTc(item.inFrames, fps)} → ${framesToTc(item.outFrames, fps)})`);
-  }, [sourceKind, inFrames, outFrames, fps, exportOpts.filename, exportOpts.format, exportOpts.reencode, exportOpts.captions, appendLog, pushNotification]);
+  }, [sourceKind, localFilePath, metadata, inFrames, outFrames, fps, exportOpts.filename, exportOpts.format, exportOpts.reencode, exportOpts.captions, appendLog, pushNotification]);
 
   const handleQueueRemove = useCallback((id: string) => {
     setClipQueue((prev) => prev.filter((c) => c.id !== id));
+  }, []);
+
+  /** Rename one queued clip (double-click in the drawer). Sanitizes; empty →
+   *  no-op; a collision with a sibling bumps a numeric suffix until unique so
+   *  Export All can't overwrite one file with another. */
+  const handleQueueRename = useCallback((id: string, name: string) => {
+    const base = sanitizeFilename(name);
+    if (!base) return;
+    setClipQueue((prev) => {
+      const taken = new Set(prev.filter((c) => c.id !== id).map((c) => c.filename));
+      let next = base;
+      let n = 2;
+      while (taken.has(next)) next = `${base}-${n++}`;
+      return prev.map((c) => c.id === id ? { ...c, filename: next } : c);
+    });
+  }, []);
+
+  /** Bulk rename: every QUEUED item becomes base-1..N in queue order.
+   *  Running/done/error items keep their names — their files may already
+   *  exist on disk under them. */
+  const handleQueueRenameAll = useCallback((rawBase: string) => {
+    const base = sanitizeFilename(rawBase);
+    if (!base) return;
+    setClipQueue((prev) => {
+      let n = 1;
+      return prev.map((c) => c.status === "queued" ? { ...c, filename: `${base}-${n++}` } : c);
+    });
   }, []);
 
   const handleQueueClearAll = useCallback(() => {
     setClipQueue([]);
   }, []);
 
-  /** Run every "queued" item through create_clip sequentially. */
+  /** Run every "queued" item sequentially — web items through create_clip
+   *  (yt-dlp/ffmpeg, per-item cookie retry), local items through the shared
+   *  mediabunny core. Each item carries its own source + fps, so the queue
+   *  is independent of whatever is currently loaded. */
   const handleExportQueue = useCallback(async () => {
-    if (!metadata || !exportOpts.folder) return;
+    if (!exportOpts.folder) return;
     if (queueRunning) return;
+    // A single local export owns the shared cancel token — running the queue
+    // concurrently would clobber it and strand the Stop button for both.
+    if (localExportCancelRef.current) {
+      pushNotification("info", "Export in progress", "Wait for the current export to finish before running the queue.");
+      return;
+    }
     const eligible = clipQueueRef.current.filter((c) => c.status === "queued");
     if (eligible.length === 0) return;
     setQueueRunning(true);
@@ -1963,7 +2109,55 @@ export default function App() {
       if (!clipQueueRef.current.some((c) => c.id === item.id)) continue;
       setClipQueue((prev) => prev.map((c) => c.id === item.id ? { ...c, status: "running" } : c));
       setProgress(0);
-      appendLog("info", "queue", `Exporting ${item.filename} (${framesToTc(item.inFrames, fps)} → ${framesToTc(item.outFrames, fps)})…`);
+      const itemR = Math.max(1, Math.round(item.fps));
+      appendLog("info", "queue", `Exporting ${item.filename} (${framesToTc(item.inFrames, item.fps)} → ${framesToTc(item.outFrames, item.fps)})…`);
+      const pushQueueRecent = (path: string) => {
+        const rc: RecentClip = {
+          id: Math.random().toString(36).slice(2),
+          title: item.title,
+          path,
+          dur: secondsToTc((item.outFrames - item.inFrames) / itemR, item.fps),
+          when: Date.now(),
+          thumbnail: item.thumbnail,
+        };
+        setRecents((prev) => [rc, ...prev].slice(0, 6));
+      };
+
+      // ── Local item → in-browser mediabunny export ──────────────────
+      if (item.source.kind === "file") {
+        const isAudio = item.format === "audio";
+        const destPath = `${exportOpts.folder}/${item.filename}.${isAudio ? "mp3" : "mp4"}`;
+        const result = await runLocalClipExport({
+          inputPath: item.source.path,
+          startSeconds: item.inFrames / itemR,
+          endSeconds: item.outFrames / itemR,
+          format: isAudio ? "audio-mp3" : "video-mp4",
+          destPath,
+          onProgress: setProgress,
+        });
+        if (result.kind === "cancelled") {
+          cancelled = true;
+          setClipQueue((prev) => prev.map((c) => c.id === item.id ? { ...c, status: "queued" } : c));
+          break;
+        }
+        if (result.kind === "ok") {
+          setClipQueue((prev) => prev.map((c) => c.id === item.id ? { ...c, status: "done", path: destPath, error: undefined } : c));
+          appendLog("ok", "mediabunny", `Wrote ${(result.bytesWritten / 1_000_000).toFixed(1)} MB → ${destPath}`);
+          pushQueueRecent(destPath);
+          okCount++;
+        } else {
+          // "unsupported" and "error" both land here — there is no ffmpeg
+          // fallback for local clips (mirrors the single-export behavior).
+          const msg = result.kind === "unsupported" ? result.reason : result.message;
+          setClipQueue((prev) => prev.map((c) => c.id === item.id ? { ...c, status: "error", error: msg } : c));
+          appendLog("err", "mediabunny", msg);
+          failCount++;
+        }
+        continue;
+      }
+
+      // ── Web item → create_clip (yt-dlp/ffmpeg subprocess) ──────────
+      const webUrl = item.source.url;
       // One clip attempt for a given cookie setting (fresh job id each time so
       // cancellation tracks the live attempt). Resolves via the queue done-event
       // resolver, or via the invoke's own rejection.
@@ -1975,10 +2169,10 @@ export default function App() {
             queueResolverRef.current = resolve;
             invoke("create_clip", {
               args: {
-                url: metadata.webpage_url,
-                start: framesToTc(item.inFrames, fps),
-                end: framesToTc(item.outFrames, fps),
-                fps,
+                url: webUrl,
+                start: framesToTc(item.inFrames, item.fps),
+                end: framesToTc(item.outFrames, item.fps),
+                fps: item.fps,
                 output_dir: exportOpts.folder,
                 filename: item.filename,
                 job_id: jobId,
@@ -2018,24 +2212,17 @@ export default function App() {
       } : c));
       if (result.success) {
         okCount++;
-        if (result.path && metadata) {
-          const span = (item.outFrames - item.inFrames) / Math.max(1, Math.round(fps));
-          const r: RecentClip = {
-            id: Math.random().toString(36).slice(2),
-            title: metadata.title,
-            path: result.path,
-            dur: secondsToTc(span, fps),
-            when: Date.now(),
-            thumbnail: metadata.thumbnail,
-          };
-          setRecents((prev) => [r, ...prev].slice(0, 6));
-        }
+        if (result.path) pushQueueRecent(result.path);
       } else {
         failCount++;
       }
     }
     setQueueRunning(false);
-    setStatus("loaded");
+    // Restore status only if the queue still owns it — a source switch
+    // mid-run (which cancels the current item) has already set "fetching"
+    // and will complete its own loaded/error transition. And a stale queue
+    // can export with no source loaded — don't fake "loaded" then.
+    setStatus((prev) => prev === "exporting" ? (metadataRef.current ? "loaded" : "empty") : prev);
     setProgress(0);
     if (cancelled) {
       pushNotification("info", "Queue stopped", `${okCount} exported, ${failCount} failed, rest still queued.`);
@@ -2044,7 +2231,7 @@ export default function App() {
     } else {
       pushNotification("error", "Queue finished with errors", `${okCount} ok · ${failCount} failed.`);
     }
-  }, [metadata, exportOpts.folder, queueRunning, fps, appendLog, pushNotification]);
+  }, [exportOpts.folder, queueRunning, runLocalClipExport, appendLog, pushNotification]);
 
   const handleSnapshot = useCallback(async () => {
     if (!metadata || snapshotBusy) return;
@@ -2737,12 +2924,19 @@ export default function App() {
   }, [appendLog]);
 
   // ====== Transport ======
-  // ── Variable-speed shuttle (J-K-L double-tap) ───────────────────────
-  // rate: 0 = normal · >0 = fast-forward × · <0 = rewind ×. Routed to the live
-  // player, which honors it per-engine (MediaBunny does true smooth reverse;
-  // WebKit fast-forwards natively + scans backward — see PlayerHandle).
+  // ── Variable-speed shuttle (NLE-grade J-K-L) ────────────────────────
+  // rate: 0 = normal · >0 = fast-forward × · <0 = rewind ×. Each J/L press
+  // walks the Premiere-style ladder (lib/shuttle.ts): 1-2-4-8× in the pressed
+  // direction, opposite presses step back down, landing on +1 resumes REAL
+  // playback. K+J / K+L nudge a single frame. Routed to the live player, which
+  // honors it per-engine (MediaBunny does true smooth reverse; WebKit
+  // fast-forwards natively + scans backward — see PlayerHandle).
   const shuttleRateRef = useRef(0);
-  const dblTapRef = useRef({ l: 0, j: 0 });
+  // Mirrored into state so the Monitor can render the "◀◀ 4×" badge.
+  const [shuttleRate, setShuttleRate] = useState(0);
+  // Physical K held? Turns the next J/L into a frame-step (set on keydown,
+  // cleared on keyup/window-blur in the keyboard effect below).
+  const kHeldRef = useRef(false);
 
   // ── Timecode entry HUD (type digits → snap playhead) ──
   // Raw digits typed so far; null = HUD closed. A bare number key opens it;
@@ -2754,6 +2948,7 @@ export default function App() {
   useEffect(() => { tcEntryRef.current = tcEntry; }, [tcEntry]);
   const applyShuttle = useCallback((rate: number) => {
     shuttleRateRef.current = rate;
+    setShuttleRate(rate);
     playerRef.current?.setShuttle?.(rate);
   }, []);
   const exitShuttle = useCallback(() => {
@@ -2796,6 +2991,51 @@ export default function App() {
     setPlayheadFrames(Math.floor(targetSec * r));
     if (p?.isReady()) p.seekTo(targetSec);
   }, [fps, playheadFrames, durationFrames, exitShuttle]);
+
+  // Max |shuttle rate| for the ACTIVE player. The MSE web stream caps at 4× —
+  // reverse scans only the buffered window and forward playbackRate beyond
+  // that outruns the proxy's fMP4 remux. Local/downloaded playback takes 8×.
+  // Mirrors Monitor's player choice: MSE mounts only for an http(s) web
+  // stream URL (the download-fallback cachePath is a local file → 8×).
+  const playerShuttleCap = useCallback(() => {
+    const webSrc = webPlayback.cachePath ?? webPlayback.streamUrl;
+    const usesMse = !(sourceKind === "file" && localFilePath)
+      && !!webSrc && /^https?:\/\//i.test(webSrc);
+    return usesMse ? 4 : 8;
+  }, [sourceKind, localFilePath, webPlayback.cachePath, webPlayback.streamUrl]);
+
+  /**
+   * J/L transport press. K held → single-frame nudge (the K+J / K+L editor
+   * convention); otherwise walk the shuttle ladder in `direction`. Landing on
+   * +1 exits the shuttle into REAL playback (native clock + audio).
+   */
+  const shuttleStep = useCallback((direction: 1 | -1, isRepeat = false) => {
+    if (kHeldRef.current) { onStep(direction); return; } // frame-step (pauses + kills shuttle)
+    // Holding J/L auto-repeats the keydown — hold sustains the current rate;
+    // only discrete presses climb the ladder (matches Premiere/Resolve).
+    if (isRepeat) return;
+    const p = playerRef.current;
+    const playing = p?.isReady() ? p.isPlaying() : isPlaying;
+    const cur = shuttleRateRef.current !== 0 ? shuttleRateRef.current : (playing ? 1 : 0);
+    const next = nextShuttleRate(cur, direction, playerShuttleCap());
+    if (next === 1) {
+      // +1 = normal play, not a 1× shuttle — same start path onPlayToggle uses.
+      applyShuttle(0);
+      if (p?.isReady()) p.play();
+      else setIsPlaying(true);
+      return;
+    }
+    applyShuttle(next);
+  }, [isPlaying, onStep, applyShuttle, playerShuttleCap]);
+
+  // The players self-terminate a shuttle at the media bounds (reverse hits 0 /
+  // forward hits the end) without a callback; mirror that here so the badge
+  // clears and the next J/L starts from a clean slate.
+  useEffect(() => {
+    if (shuttleRate === 0 || durationFrames <= 0) return;
+    if ((shuttleRate < 0 && playheadFrames <= 0)
+     || (shuttleRate > 1 && playheadFrames >= durationFrames - 1)) applyShuttle(0);
+  }, [shuttleRate, playheadFrames, durationFrames, applyShuttle]);
 
   const onMarkIn = useCallback(() => {
     const r = Math.max(1, Math.round(fps));
@@ -2849,13 +3089,21 @@ export default function App() {
   }, [durationFrames, fps, exitShuttle]);
 
   // ====== Keyboard ======
+  // Review comment-range hotkeys (⇧I/⇧O) — ReviewPanel registers its handlers
+  // here (the range state lives in the panel; App only forwards intent). The
+  // gate values ride a companion latest-value ref because reviewSourceKey is
+  // derived later in this file than the keyboard effect below.
+  const reviewRangeKeysRef = useRef<{ markIn: () => void; markOut: () => void } | null>(null);
+  const registerReviewRangeKeys = useCallback(
+    (h: { markIn: () => void; markOut: () => void } | null) => { reviewRangeKeysRef.current = h; }, []);
+  const reviewRangeGateRef = useRef({ panelDetached: false, queueOpen: false, reviewSourceKey: null as string | null, hasSource: false });
   // Data-driven: the live event is serialized to a combo and matched against the
   // user-editable binding map (Settings → Commands). The three things that aren't
   // simple action triggers — the timecode-entry HUD, Esc-closes-Settings, and
   // bare-digit-opens-HUD — stay hand-coded around the dispatch.
   useEffect(() => {
     // Run a matched action with the exact behavior of its hand-coded predecessor
-    // (double-tap shuttle on back/fwd, the export status gate, etc.).
+    // (the shuttle ladder on back/fwd, the export status gate, etc.).
     function runAction(id: KeyActionId, e: KeyboardEvent) {
       e.preventDefault();
       switch (id) {
@@ -2867,22 +3115,31 @@ export default function App() {
         case "queue.toggle": setQueueOpen((p) => !p); break;
         case "export.clip":  if (status === "loaded") handleExport(); break;
         case "play.toggle":  onPlayToggle(); break;
-        case "play.back5": {
-          // Double-tap → rewind shuttle; single tap → back 5s.
-          const now = Date.now();
-          if (now - dblTapRef.current.j < 350) { dblTapRef.current.j = 0; applyShuttle(-2); }
-          else { dblTapRef.current.j = now; seekBySeconds(-5); }
-          break;
-        }
-        case "play.fwd5": {
-          // Double-tap → fast-forward shuttle; single tap → forward 5s.
-          const now = Date.now();
-          if (now - dblTapRef.current.l < 350) { dblTapRef.current.l = 0; applyShuttle(2); }
-          else { dblTapRef.current.l = now; seekBySeconds(5); }
-          break;
-        }
+        // J / L — NLE transport: each press walks the shuttle ladder
+        // (1-2-4-8×, opposite press steps down, +1 resumes real playback);
+        // with K held it's a single-frame nudge instead. Repeats (key held)
+        // sustain the current rate rather than laddering to the cap.
+        case "play.back5": shuttleStep(-1, e.repeat); break;
+        case "play.fwd5":  shuttleStep(1, e.repeat); break;
         case "mark.in":      onMarkIn(); break;
         case "mark.out":     onMarkOut(); break;
+        // ⇧I/⇧O — review comment-range marks, only when the review UI is
+        // actually in front of the user: docked drawer open, Review tab
+        // active, a source loaded. loadActiveTab() reads the write-through
+        // persisted tab (lib/tab-state) — no reactive plumbing needed. When
+        // the panel is floated the docked drawer is unmounted and the
+        // floated Review tab is a stub, so these no-op there.
+        case "review.rangeIn":
+        case "review.rangeOut": {
+          const g = reviewRangeGateRef.current;
+          // hasSource matters beyond reviewSourceKey: metadata (and thus the
+          // key) survives status="error", but the playhead is null there —
+          // marks would silently land at 0:00.
+          if (g.panelDetached || !g.queueOpen || loadActiveTab() !== "review" || !g.reviewSourceKey || !g.hasSource) break;
+          const h = reviewRangeKeysRef.current;
+          if (id === "review.rangeIn") h?.markIn(); else h?.markOut();
+          break;
+        }
         case "mark.clear":   onClearMarks(); break;
         case "mark.gotoIn":  onGotoIn(); break;
         case "mark.gotoOut": onGotoOut(); break;
@@ -2898,6 +3155,10 @@ export default function App() {
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement;
       const inField = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+
+      // Physical-K tracking for K+J/K+L frame-stepping. Tracked by e.code so
+      // layout/Shift can't alias it; cleared on keyup + window blur below.
+      if (e.code === "KeyK") kHeldRef.current = true;
 
       // ── Timecode entry HUD (modal text entry; not rebindable) ──
       // While open: digits append, Backspace deletes, Return snaps the playhead,
@@ -2940,12 +3201,24 @@ export default function App() {
         return;
       }
     }
+    // Keyup/blur companions exist solely for the K-held bookkeeping — the
+    // action dispatch itself stays keydown-only.
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code === "KeyK") kHeldRef.current = false;
+    }
+    function onBlur() { kHeldRef.current = false; }
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
   }, [
     comboToAction, handleFetch, handleExport, handleAddToQueue, status, fps, durationFrames, settingsOpen,
-    onPlayToggle, seekBySeconds, onMarkIn, onMarkOut, onClearMarks,
-    onGotoIn, onGotoOut, onStep, onSeek, applyShuttle,
+    onPlayToggle, shuttleStep, onMarkIn, onMarkOut, onClearMarks,
+    onGotoIn, onGotoOut, onStep, onSeek,
   ]);
 
   // ── Native menubar event wiring ─────────────────────────────────
@@ -3031,7 +3304,7 @@ export default function App() {
     captionsOn, logsOpen, clipQueueLength: clipQueue.length, queueRunning,
     activeTranscriptPath: activeTranscript?.path ?? null,
     exportFolder: exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
-    handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds,
+    handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds, shuttleStep,
     onStep, onSeek, onMarkIn, onMarkOut, onClearMarks, onGotoIn, onGotoOut,
     handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
     handleQueueClearAll, handleImportTranscript, handleGenerateTranscript,
@@ -3058,7 +3331,7 @@ export default function App() {
     url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
     captionsOn, logsOpen, clipQueue.length, queueRunning, activeTranscript,
     exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
-    handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds,
+    handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds, shuttleStep,
     onStep, onSeek, onMarkIn, onMarkOut, onClearMarks, onGotoIn, onGotoOut,
     handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
     handleQueueClearAll, handleGenerateTranscript, handleDownloadCaptions, handleImportTranscript,
@@ -3090,7 +3363,252 @@ export default function App() {
   const reviewSourceKey = (sourceKind === "file" && localFilePath && metadata)
     ? (resolveByFingerprint(reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize)) ?? localFilePath)
     : (metadata?.webpage_url ?? null);
-  const [reviewMarkers, setReviewMarkers] = useState<{ id: string; time: number; resolved: boolean; color: string; initials: string }[]>([]);
+  const [reviewMarkers, setReviewMarkers] = useState<{ id: string; time: number; timeEnd: number | null; resolved: boolean; color: string; initials: string }[]>([]);
+  // Live range being set in the review composer → previewed on the timeline.
+  // `live` = an end still follows the playhead (pulsing); false = locked.
+  const [reviewRangeDraft, setReviewRangeDraft] = useState<{ start: number; end: number; color: string; live: boolean } | null>(null);
+  // Latest-value mirror for the keyboard effect's ⇧I/⇧O review-range gate.
+  useEffect(() => { reviewRangeGateRef.current = { panelDetached, queueOpen, reviewSourceKey, hasSource }; });
+
+  // ── Co-review session (P2P watch party — r100 transport, r101 live review) ──
+  // Rust owns the iroh endpoint (commands/session.rs) as a dumb relay; the
+  // frontend is the review source-of-truth. Host: broadcasts source + a 2 Hz
+  // transport heartbeat + a review-doc snapshot on each join + its own comment
+  // ops. Peer: follows the host playhead, adopts the shared doc, and sends its
+  // own comment ops up (the host relays them to everyone). WEB-ONLY — a local
+  // file can't be pushed to peers, so hosting is gated to web sources.
+  const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], error: null });
+  const coSessionActive = coSession.role !== "off";
+  // The shared review doc while in a session (null = solo). The Review panel +
+  // timeline markers read THIS instead of the local-by-sourceKey doc.
+  const [sessionDoc, setSessionDoc] = useState<ReviewDoc | null>(null);
+  const sessionDocRef = useRef<ReviewDoc | null>(null); sessionDocRef.current = sessionDoc;
+  // Live peer playheads → ghost cursors on the timeline (excludes self; the
+  // relay never echoes your own presence back).
+  const [coGhosts, setCoGhosts] = useState<{ name: string; position: number; at: number }[]>([]);
+  const coSeqRef = useRef(0);
+  const coPlayheadRef = useRef(0); coPlayheadRef.current = playheadFrames;
+  const coPlayingRef = useRef(false); coPlayingRef.current = isPlaying;
+  const coFpsRef = useRef(30); coFpsRef.current = fps;
+  const coRoleRef = useRef("off"); coRoleRef.current = coSession.role;
+  const coLastHostPosRef = useRef<number | null>(null);
+  const coReadyRef = useRef(false); // has OUR player loaded the host's source yet?
+  // Session-first: a session can be hosted at any time — start it, then load a
+  // web source and it propagates to guests (the activeSourceUrl effect below).
+  // A local file is the one source guests can't receive yet, so flag it for a
+  // caveat in the popover rather than blocking the session.
+  const coLocalSourceLoaded = hasSource && sourceKind === "file";
+
+  // Send a session message the right way for our role: the host broadcasts to
+  // all peers; a peer sends up to the host, which relays it to everyone else.
+  const sendSessionMsg = useCallback((msg: SessionMsg) => {
+    const cmd = coRoleRef.current === "host" ? "session_broadcast" : "session_send";
+    void invoke(cmd, { msg }).catch(() => {});
+  }, []);
+
+  // Apply a review op to the shared doc + relay it (called by the Review panel
+  // for every mutation while in session). Optimistic: apply locally now and
+  // send; the host relays to all-but-sender so we never receive our own op back.
+  const postSessionOp = useCallback((op: ReviewOp) => {
+    setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
+    sendSessionMsg({ kind: "reviewOp", op: JSON.stringify(op) });
+  }, [sendSessionMsg]);
+
+  // Latest-closure ref so the once-registered session:msg listener never stales.
+  const coApplyRef = useRef<(m: SessionMsg) => void>(() => {});
+  coApplyRef.current = (m) => {
+    switch (m.kind) {
+      case "loadSource":
+        if (activeSourceUrlRef.current !== m.url) {
+          // The source is changing under us — we're not synced to it until our
+          // own player reports ready for the NEW source. Re-arm here so a
+          // stale-ready old player can't apply the host's transport to the
+          // wrong video, and the snap-to-host fires on the first ready tick.
+          coReadyRef.current = false;
+          setUrl(m.url);
+          void handleFetch(m.url);
+        }
+        return;
+      case "reviewDoc":
+        // MERGE, not blind-replace: the host re-broadcasts a full snapshot on
+        // every join, and an existing peer may have an in-flight op not yet in
+        // that snapshot — mergeReviewDoc keeps it (and unions likes) so no
+        // comment/edit silently vanishes.
+        try {
+          const incoming = JSON.parse(m.doc) as ReviewDoc;
+          setSessionDoc((prev) => (prev ? mergeReviewDoc(prev, incoming) : incoming));
+        } catch { /* malformed snapshot */ }
+        return;
+      case "reviewOp":
+        try {
+          const op = JSON.parse(m.op) as ReviewOp;
+          setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
+        } catch { /* malformed op */ }
+        return;
+      case "presence": {
+        const now = Date.now();
+        setCoGhosts((prev) => [
+          ...prev.filter((g) => g.name !== m.name && now - g.at < 5000),
+          { name: m.name, position: m.position, at: now },
+        ]);
+        return;
+      }
+      case "transport": {
+        const p = playerRef.current;
+        // Session-first: hold the playhead chase until OUR player has actually
+        // loaded the source — sync activates once both sides have the video.
+        if (!p || !p.isReady()) { coReadyRef.current = false; return; }
+        // First tick after our source finished loading — snap to the host even
+        // when paused, so a late-loading guest lands on the shared frame.
+        const justLoaded = !coReadyRef.current;
+        coReadyRef.current = true;
+        const r = Math.max(1, Math.round(coFpsRef.current));
+        const expected = m.position + (m.playing ? (Math.max(0, Date.now() - m.atMs) / 1000) * m.rate : 0);
+        const cur = coPlayheadRef.current / r;
+        const hostScrubbed = coLastHostPosRef.current === null || Math.abs(m.position - coLastHostPosRef.current) > 0.25;
+        coLastHostPosRef.current = m.position;
+        // Follow: while playing, chase drift > 0.5 s. While paused, only jump
+        // when the host actually scrubbed — so a paused guest can glance at a
+        // nearby frame without being yanked back on every heartbeat.
+        if (m.playing) {
+          if (Math.abs(cur - expected) > 0.5) onSeek(Math.floor(expected * r));
+        } else if (justLoaded || (hostScrubbed && Math.abs(cur - expected) > 0.1)) {
+          onSeek(Math.floor(expected * r));
+        }
+        if (m.playing !== coPlayingRef.current) {
+          if (m.playing) p.play(); else p.pause();
+        }
+        return;
+      }
+    }
+  };
+  useEffect(() => {
+    const unState = listen<CoSessionState>("session:state", (e) => setCoSession(e.payload));
+    const unMsg = listen<SessionMsg>("session:msg", (e) => coApplyRef.current(e.payload));
+    return () => { unState.then((f) => f()); unMsg.then((f) => f()); };
+  }, []);
+  // Host seeds the shared doc from its local review of the current source on
+  // start; persists the collaborative doc for everyone on end.
+  const prevCoRoleRef = useRef("off");
+  useEffect(() => {
+    const prev = prevCoRoleRef.current;
+    prevCoRoleRef.current = coSession.role;
+    if (coSession.role === "host" && prev !== "host" && reviewSourceKey) {
+      const { doc } = ensureVersion(loadReview(reviewSourceKey), reviewSourceKey, metadataRef.current?.title ?? undefined);
+      setSessionDoc(doc);
+    }
+    if (coSession.role === "off" && prev !== "off") {
+      const d = sessionDocRef.current;
+      if (d && d.comments.length > 0 && d.sourceKey) saveReview(d); // everyone keeps the review
+      setSessionDoc(null);
+      setCoGhosts([]);
+      coLastHostPosRef.current = null;
+      coReadyRef.current = false;
+    }
+  }, [coSession.role, reviewSourceKey]);
+  // Host → peers: current source whenever it changes (web only — a local file
+  // has no activeSourceUrl so nothing is pushed).
+  useEffect(() => {
+    if (coSession.role !== "host" || !activeSourceUrl) return;
+    void invoke("session_broadcast", { msg: { kind: "loadSource", url: activeSourceUrl } }).catch(() => {});
+  }, [coSession.role, activeSourceUrl]);
+  // Host → new joiner: source + a fresh doc snapshot when the peer count rises.
+  // Fanned to all; existing peers harmlessly re-adopt the identical doc.
+  const prevPeerCountRef = useRef(0);
+  useEffect(() => {
+    const prev = prevPeerCountRef.current;
+    prevPeerCountRef.current = coSession.peers.length;
+    if (coSession.role !== "host" || coSession.peers.length <= prev) return;
+    if (activeSourceUrlRef.current) {
+      void invoke("session_broadcast", { msg: { kind: "loadSource", url: activeSourceUrlRef.current } }).catch(() => {});
+    }
+    const d = sessionDocRef.current;
+    if (d) void invoke("session_broadcast", { msg: { kind: "reviewDoc", doc: JSON.stringify(d) } }).catch(() => {});
+  }, [coSession.role, coSession.peers.length]);
+  // Host → peers: 2 Hz transport heartbeat (play/pause/seek/scrub-settle).
+  useEffect(() => {
+    if (coSession.role !== "host") return;
+    const send = () => {
+      const r = Math.max(1, Math.round(coFpsRef.current));
+      const msg: SessionMsg = {
+        kind: "transport",
+        playing: coPlayingRef.current,
+        position: coPlayheadRef.current / r,
+        rate: 1,
+        atMs: Date.now(),
+        seq: ++coSeqRef.current,
+      };
+      void invoke("session_broadcast", { msg }).catch(() => {});
+    };
+    send();
+    const iv = window.setInterval(send, 500);
+    return () => window.clearInterval(iv);
+  }, [coSession.role]);
+  // Everyone broadcasts their own playhead ~3 Hz for ghost cursors + prunes
+  // stale ghosts (someone who stopped sending).
+  useEffect(() => {
+    if (!coSessionActive) return;
+    const send = () => {
+      const me = loadReviewer().name || (coRoleRef.current === "host" ? "Host" : "Guest");
+      const r = Math.max(1, Math.round(coFpsRef.current));
+      sendSessionMsg({ kind: "presence", name: me, position: coPlayheadRef.current / r });
+      const now = Date.now();
+      setCoGhosts((prev) => prev.filter((g) => now - g.at < 5000));
+    };
+    const iv = window.setInterval(send, 350);
+    return () => window.clearInterval(iv);
+  }, [coSessionActive, sendSessionMsg]);
+  const startCoReview = useCallback(async () => {
+    try {
+      // Host under the review identity's name (falls back to "Host" in Rust)
+      // so guests see a real person heading the roster, not a role label.
+      await invoke<string>("session_start", { name: loadReviewer().name || null });
+    }
+    catch (e) { pushNotification("error", "Couldn't start co-review", formatError(e)); }
+  }, [pushNotification]);
+  const joinCoReview = useCallback(async (ticket: string, name: string) => {
+    try { await invoke("session_join", { ticket, name }); }
+    catch (e) { pushNotification("error", "Couldn't join session", formatError(e)); }
+  }, [pushNotification]);
+  const leaveCoReview = useCallback(() => { void invoke("session_leave").catch(() => {}); }, []);
+
+  // ── Screening mode (Louper-style cinematic watch-party layout) ──────
+  // A reflow of the EXISTING body (participant rail ← sidebar, cinematic
+  // viewport, comments) — never a new tree, so the player is not remounted
+  // and the session/playback keep running. Auto-enters when a session starts,
+  // auto-exits when it ends; the rail's "Exit" drops back to editing while the
+  // session stays live (re-enter from the co-review popover).
+  const [screening, setScreening] = useState(false);
+  const prevScreenSessionRef = useRef(false);
+  useEffect(() => {
+    const was = prevScreenSessionRef.current;
+    prevScreenSessionRef.current = coSessionActive;
+    if (coSessionActive && !was) { setScreening(true); setQueueOpen(true); }
+    if (!coSessionActive && was) setScreening(false);
+  }, [coSessionActive]);
+  // Everyone in the session, for the rail — so people see each other. Host's
+  // roster is peers-only (its own name is local); a peer's roster is the full
+  // list the host broadcast (Host + peers, self found by name).
+  const screeningParticipants = useMemo(() => {
+    const me = loadReviewer();
+    const myName = me.name || "You";
+    if (coSession.role === "host") {
+      return [
+        { name: myName, color: me.color, isHost: true, isSelf: true },
+        ...coSession.peers.map((n) => ({ name: n, color: reviewerColorFor(n, me), isHost: false, isSelf: false })),
+      ];
+    }
+    // Peer view: the host is always the roster head — session.rs builds the
+    // roster as [HOST_NAME, ...peers] — so identify it by POSITION, not a name
+    // string a guest could pick ("Host"). Claim "You" for only the FIRST name
+    // that matches ours, so a same-named guest can't also show the chip.
+    let selfSeen = false;
+    return coSession.peers.map((n, i) => {
+      const isSelf = !selfSeen && n === myName;
+      if (isSelf) selfSeen = true;
+      return { name: n, color: reviewerColorFor(n, me), isHost: i === 0, isSelf };
+    });
+  }, [coSession.role, coSession.peers]);
   const [reviewAnnotations, setReviewAnnotations] = useState<{ id: string; time: number; strokes: AnnotationStrokes }[]>([]);
   // Drawing-annotation state: draw mode + the live draft (attached to the next
   // comment) + a saved annotation being viewed read-only over the frame.
@@ -3102,13 +3620,16 @@ export default function App() {
     setReviewDrawActive(false);
     setReviewDraft(null);
     setAnnotationDisplay(null);
+    // In a co-review session the SHARED doc drives markers (see the effect
+    // below) — don't let the local-by-sourceKey reload overwrite them.
+    if (coSessionActive) return;
     if (!reviewSourceKey) { setReviewMarkers([]); setReviewAnnotations([]); return; }
     const reload = () => {
       const d = loadReview(reviewSourceKey);
       const me = loadReviewer();
       const markers = reviewMarkersOf(d, d.activeVersionId);
       setReviewMarkers(markers.map((m) => ({
-        id: m.id, time: m.time, resolved: m.resolved,
+        id: m.id, time: m.time, timeEnd: m.timeEnd, resolved: m.resolved,
         color: reviewerColorFor(m.author, me), initials: initialsOf(m.author),
       })));
       setReviewAnnotations(annotationsOf(d, d.activeVersionId));
@@ -3134,7 +3655,31 @@ export default function App() {
     };
     window.addEventListener(REVIEW_CHANGED_EVENT, onChanged);
     return () => window.removeEventListener(REVIEW_CHANGED_EVENT, onChanged);
-  }, [reviewSourceKey]);
+  }, [reviewSourceKey, coSessionActive]);
+
+  // In a session, the shared doc drives the timeline markers + annotations
+  // (so everyone's live comments show on every timeline).
+  useEffect(() => {
+    if (!sessionDoc) return;
+    const me = loadReviewer();
+    const markers = reviewMarkersOf(sessionDoc, sessionDoc.activeVersionId);
+    setReviewMarkers(markers.map((m) => ({
+      id: m.id, time: m.time, timeEnd: m.timeEnd, resolved: m.resolved,
+      color: reviewerColorFor(m.author, me), initials: initialsOf(m.author),
+    })));
+    setReviewAnnotations(annotationsOf(sessionDoc, sessionDoc.activeVersionId));
+  }, [sessionDoc]);
+
+  // Ghost cursors for the timeline — peer playheads in frames, tinted per name.
+  const coGhostMarkers = useMemo(() => {
+    const r = Math.max(1, Math.round(fps));
+    const me = loadReviewer();
+    return coGhosts.map((g) => ({
+      name: g.name,
+      frame: Math.floor(g.position * r),
+      color: reviewerColorFor(g.name, me),
+    }));
+  }, [coGhosts, fps]);
 
   const { handlePopOut: handlePopOutPanel } = usePanelBus({
     panelDetached,
@@ -3250,6 +3795,8 @@ export default function App() {
         onToggleQueue={() => setQueueOpen((p) => !p)}
         queueCount={clipQueue.length}
         queueOpen={queueOpen}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen((p) => !p)}
         hasSource={status === "loaded" || status === "exporting" || status === "success" || status === "error"}
         status={status}
         onOpenSettings={() => setSettingsOpen(true)}
@@ -3257,10 +3804,25 @@ export default function App() {
         onMarkAllRead={onMarkAllRead}
         onClearNotifications={onClearNotifications}
         onDismissNotification={onDismissNotification}
+        coSession={coSession}
+        coLocalSource={coLocalSourceLoaded}
+        coScreening={screening}
+        onCoToggleScreening={() => setScreening((s) => !s)}
+        onCoStart={() => { void startCoReview(); }}
+        onCoJoin={(t, n) => { void joinCoReview(t, n); }}
+        onCoLeave={leaveCoReview}
       />
 
-      <div className="cp-body">
+      <div className={"cp-body" + (screening ? " cp-screening" : "")}>
+        {/* Always mounted (stable sibling of <main>) so entering screening
+            never remounts the player; renders nothing when not screening. */}
+        <ParticipantRail
+          active={screening}
+          participants={screeningParticipants}
+          onExit={() => setScreening(false)}
+        />
         <Sidebar
+          open={sidebarOpen}
           status={status}
           metadata={metadata}
           exportOpts={exportOpts}
@@ -3299,7 +3861,11 @@ export default function App() {
         <main className="cp-main">
           <div className="cp-monitor-wrap">
             <div className="cp-view-bar">
-              <ViewOptions aspect={aspect} onAspectChange={setAspect} />
+              <ViewOptions
+                aspect={aspect}
+                onAspectChange={setAspect}
+                onShowMediaInfo={sourceKind === "file" && localFilePath ? () => setMediaInfoOpen(true) : undefined}
+              />
             </div>
             <Monitor
               ref={playerRef}
@@ -3355,6 +3921,8 @@ export default function App() {
                  path as the Pipeline Stop, so cancel semantics are
                  identical wherever the user clicks. */
               onCancelPlaybackPrep={handleStop}
+              /* Nonzero while J/L shuttling — renders the "◀◀ 4×" HUD badge. */
+              shuttleRate={shuttleRate}
               useWebCodecs={localPlayer === "mediabunny" && !webCodecsFallbackForImport}
               onMediaError={(msg) => {
                 // MediaBunnyPlayer prefixes codec-incompatibility errors
@@ -3464,6 +4032,10 @@ export default function App() {
                 status: c.status,
               }))}
               commentMarkers={reviewMarkers}
+              reviewRangeDraft={reviewRangeDraft}
+              filmstripPath={sourceKind === "file" ? (playbackPath ?? localFilePath) : null}
+              speakerLanes={speakerLaneData}
+              ghosts={coGhostMarkers}
               onSeek={onSeek}
             />
             {/* Status line under the timeline. Stays present so setting or
@@ -3522,6 +4094,8 @@ export default function App() {
           onClearAll={handleQueueClearAll}
           onExportAll={handleExportQueue}
           onStop={handleStop}
+          onRenameClip={handleQueueRename}
+          onRenameAll={handleQueueRenameAll}
           transcriptPath={activeTranscript?.path ?? null}
           transcriptOrigin={activeTranscript?.origin ?? "unknown"}
           transcriptPlayhead={transcriptPlayhead}
@@ -3561,6 +4135,11 @@ export default function App() {
           onReviewDraftConsumed={() => { setReviewDraft(null); setReviewDrawActive(false); }}
           onShowAnnotation={(a) => { setReviewDrawActive(false); setReviewDraft(null); setAnnotationDisplay(a); }}
           onOpenReviewSource={handleOpenReviewSource}
+          onReviewRangeDraft={setReviewRangeDraft}
+          onRegisterRangeHotkeys={registerReviewRangeKeys}
+          reviewSessionActive={coSessionActive}
+          reviewSessionDoc={sessionDoc}
+          onReviewSessionOp={postSessionOp}
         />}
       </div>
 
@@ -3599,6 +4178,12 @@ export default function App() {
         onPick={handleYtAuthPick}
         onClose={handleYtAuthClose}
       />
+
+      {/* Media info inspector — probes the ORIGINAL source file so the
+          numbers describe what's on disk, not the normalised playback copy. */}
+      {mediaInfoOpen && localFilePath && (
+        <MediaInfoModal path={localFilePath} onClose={() => setMediaInfoOpen(false)} />
+      )}
 
       {/* ⌘K command palette — mounted at top level so its portal sits
           above every panel/drawer/modal. Always rendered; the component

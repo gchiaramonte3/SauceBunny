@@ -13,6 +13,8 @@
 @import "./shell.css";
 @import "./toolbar.css";
 @import "./buttons.css";
+/* Shared primitives — must precede the per-section files that place instances. */
+@import "./resize.css";
 @import "./sidebar.css";
 @import "./monitor.css";
 @import "./transport.css";
@@ -23,3 +25,4 @@
 @import "./transcript.css";
 @import "./ai.css";
 @import "./review.css";
+@import "./screening.css";

@@ -30,7 +30,7 @@
 .cp-monitor {
   background: #000;
   border-radius: 6px;
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--line-1);
   overflow: hidden;
   position: relative;
   display: flex;
@@ -40,9 +40,7 @@
   flex-shrink: 0;
   transition: width var(--dur-base) var(--ease-out),
               height var(--dur-base) var(--ease-out);
-  box-shadow:
-    0 0 0 1px rgba(0,0,0,0.4),
-    0 18px 50px rgba(0,0,0,0.5);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
 }
 .cp-monitor-img {
   width: 100%;
@@ -116,8 +114,8 @@
   padding: 8px 16px;
   border-radius: 9px;
   background: rgba(10, 10, 12, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(6px);
   pointer-events: none;
   z-index: 8;
@@ -142,6 +140,26 @@
   color: var(--fg-4);
 }
 
+/* J-K-L shuttle badge — top-left pill over the canvas showing direction +
+   speed ("◀◀ 4×") while a shuttle is engaged. Indicative only: no pointer
+   events, same stacking band as the timecode HUD. */
+.cp-shuttle-badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--line-2);
+  color: var(--fg-1);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  z-index: 8;
+}
+
 /* Empty state */
 .cp-empty {
   position: absolute; inset: 0;
@@ -164,8 +182,8 @@
 .cp-empty-perf span {
   width: 14px; height: 18px;
   background: linear-gradient(180deg, rgba(108,255,141,0.20), rgba(109,82,237,0.15));
-  border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 3px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.10),
     0 0 8px rgba(108,255,141,0.10);
@@ -215,7 +233,7 @@
   color: rgba(255,255,255,0.92);
   background: rgba(0,0,0,0.6);
   padding: 4px 8px;
-  border-radius: 3px;
+  border-radius: 4px;
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
@@ -236,9 +254,9 @@
   background: rgba(15,15,18,0.86);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
-  box-shadow: 0 8px 22px rgba(0,0,0,0.45);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.45);
   font-family: var(--font-ui);
   animation: cp-fade-in var(--dur-fast) var(--ease-out);
   /* r55: was pointer-events: none so it never blocked clicks on the
@@ -259,8 +277,8 @@
   text-transform: uppercase;
   color: var(--fg-1);
   background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.14);
-  border-radius: 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
   padding: 4px 9px;
   margin-left: 4px;
   cursor: pointer;
@@ -276,7 +294,7 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 2px solid rgba(255,255,255,0.18);
+  border: 2px solid var(--line-3);
   border-top-color: var(--accent);
   animation: cp-spin 0.8s linear infinite;
   flex-shrink: 0;
@@ -335,7 +353,7 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  border: 3px solid rgba(255,255,255,0.14);
+  border: 3px solid var(--line-2);
   border-top-color: var(--accent);
   animation: cp-spin 0.85s linear infinite;
 }
@@ -371,7 +389,7 @@
   height: 26px;
   padding: 0 10px;
   background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--line-2);
   border-radius: 6px;
   color: var(--fg-3);
   font-family: var(--font-ui);
@@ -382,7 +400,7 @@
   transition: all var(--dur-fast) var(--ease-out);
   font-variant-numeric: tabular-nums;
 }
-.cp-view-trigger:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); border-color: rgba(255,255,255,0.1); }
+.cp-view-trigger:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); border-color: var(--line-3); }
 .cp-view-trigger.active { background: rgba(255,255,255,0.08); color: var(--fg-1); }
 .cp-view-trigger .label { letter-spacing: 0.04em; }
 
@@ -392,9 +410,9 @@
   right: 0;
   width: 220px;
   background: #15151a;
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
-  box-shadow: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 0.5px rgba(255,255,255,0.04);
+  box-shadow: 0 8px 12px rgba(0,0,0,0.5), 0 0 0 0.5px var(--line-1);
   padding: 6px;
   z-index: 20;
   animation: cp-fade-in var(--dur-fast) var(--ease-out);
@@ -414,7 +432,7 @@
 .cp-popover-item {
   background: transparent;
   border: none;
-  border-radius: 5px;
+  border-radius: 6px;
   padding: 7px 9px;
   text-align: left;
   cursor: pointer;
@@ -539,7 +557,7 @@
 }
 .cp-audio-icon.playing {
   background: rgba(var(--accent-rgb), 0.10);
-  box-shadow: 0 0 32px rgba(var(--accent-rgb), 0.15);
+  box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.08);
 }
 .cp-audio-name {
   font-family: var(--font-sans);
@@ -591,9 +609,9 @@
   bottom: calc(100% + 8px);
   right: -4px;
   background: #15151a;
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
-  box-shadow: 0 14px 36px rgba(0,0,0,0.55);
+  box-shadow: 0 6px 12px rgba(0,0,0,0.55);
   padding: 8px 10px;
   display: flex;
   align-items: center;
@@ -659,9 +677,9 @@
   background: rgba(20, 20, 22, 0.92);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--line-2);
   border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+  box-shadow: 0 6px 12px rgba(0,0,0,0.45);
   font-family: var(--font-sans);
   cursor: pointer;
   z-index: 6;
@@ -723,7 +741,7 @@
   background: transparent;
   border: none;
   border-radius: 4px;
-  color: var(--fg-4);
+  color: var(--fg-3);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
@@ -761,9 +779,9 @@
   width: 360px;
   max-height: 440px;
   background: #15151a;
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--line-2);
   border-radius: 10px;
-  box-shadow: 0 18px 44px rgba(0,0,0,0.55);
+  box-shadow: 0 8px 12px rgba(0,0,0,0.55);
   z-index: 9999;
   display: flex;
   flex-direction: column;
@@ -775,7 +793,7 @@
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid var(--line-1);
   font-family: var(--font-ui);
 }
 .cp-notif-header .title {
@@ -812,7 +830,7 @@
   display: flex;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 7px;
+  border-radius: 8px;
   transition: background var(--dur-fast) var(--ease-out);
 }
 .cp-notif-item:hover { background: rgba(255,255,255,0.02); }
@@ -972,9 +990,9 @@
   max-width: min(92%, 520px);
   padding: 7px 10px;
   background: rgba(20,20,23,0.92);
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--line-2);
   border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
   backdrop-filter: blur(8px);
 }
 .cp-annot-swatches { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
@@ -998,12 +1016,12 @@
   display: inline-flex;
 }
 .cp-annot-custom input { width: 200%; height: 200%; margin: -50%; border: none; padding: 0; background: none; cursor: pointer; }
-.cp-annot-divider { width: 1px; height: 18px; background: rgba(255,255,255,0.14); flex-shrink: 0; }
+.cp-annot-divider { width: 1px; height: 18px; background: var(--line-2); flex-shrink: 0; }
 .cp-annot-sizectl { display: inline-flex; align-items: center; gap: 7px; }
 .cp-annot-dot { display: block; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(0,0,0,0.35); }
 .cp-annot-sizectl input[type="range"] { width: 88px; }
 .cp-annot-clear {
-  border: 1px solid rgba(255,255,255,0.14);
+  border: 1px solid var(--line-2);
   background: transparent;
   color: var(--fg-2);
   font-family: var(--font-ui);
@@ -1019,14 +1037,14 @@
   position: absolute;
   top: 10px;
   right: 10px;
-  border: 1px solid rgba(255,255,255,0.14);
+  border: 1px solid var(--line-2);
   background: rgba(20,20,23,0.85);
   color: var(--fg-2);
   font-family: var(--font-ui);
   font-size: 11px;
   font-weight: 600;
   padding: 4px 10px;
-  border-radius: 7px;
+  border-radius: 8px;
   cursor: pointer;
   backdrop-filter: blur(8px);
 }

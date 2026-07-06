@@ -1302,3 +1302,281 @@ pub async fn prepare_local_for_playback(
     Ok(args.job_id)
 }
 
+// ─── Deep media inspector (r96) ──────────────────────────────────────────────
+// Everything the source panel's quick probe doesn't show: exact codec/profile/
+// fourcc, pixel format + bit depth, precise (rational) frame rate + VFR flag,
+// color space, embedded timecode, audio layout — plus two sampled-packet
+// analyses ffprobe won't state directly: VBR-vs-CBR (bitrate variation across
+// ~1s buckets) and whether the stream is all-intra (every frame a keyframe,
+// e.g. ProRes/DNxHD — the "every frame is a picture" property).
+
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct MediaInfoVideo {
+    pub codec: String,
+    /// Container fourcc, e.g. `apch` = ProRes 422 HQ.
+    pub codec_tag: Option<String>,
+    pub profile: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub pix_fmt: Option<String>,
+    pub bit_depth: Option<u32>,
+    /// ffprobe field_order: "progressive", "tt", "bb", "tb", "bt", or unknown.
+    pub field_order: Option<String>,
+    pub fps: Option<f64>,
+    /// The exact rational, e.g. "30000/1001".
+    pub fps_exact: Option<String>,
+    /// True when avg_frame_rate ≠ r_frame_rate (variable frame rate).
+    pub vfr: bool,
+    pub bitrate_bps: Option<f64>,
+    pub color_space: Option<String>,
+    pub color_transfer: Option<String>,
+    pub color_primaries: Option<String>,
+    pub nb_frames: Option<f64>,
+    /// Every sampled packet is a keyframe (I-frame-only codec).
+    pub all_intra: Option<bool>,
+    pub keyframe_ratio: Option<f64>,
+    /// Bitrate varies across ~1s windows (sampled) → VBR.
+    pub vbr: Option<bool>,
+    /// Coefficient of variation of per-window byte totals (0 = perfectly constant).
+    pub bitrate_cv: Option<f64>,
+}
+
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct MediaInfoAudio {
+    pub codec: String,
+    pub channels: u32,
+    pub channel_layout: Option<String>,
+    pub sample_rate: Option<u32>,
+    pub sample_fmt: Option<String>,
+    pub bitrate_bps: Option<f64>,
+    pub vbr: Option<bool>,
+    pub bitrate_cv: Option<f64>,
+}
+
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct MediaInfo {
+    pub container: String,
+    pub duration_s: Option<f64>,
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+    pub overall_bitrate_bps: Option<f64>,
+    /// Embedded start timecode (QuickTime tmcd / format tag), if any.
+    pub timecode: Option<String>,
+    pub video: Option<MediaInfoVideo>,
+    pub audio: Option<MediaInfoAudio>,
+}
+
+/// "30000/1001" → 29.97…; None for zero/invalid denominators.
+fn parse_ratio(s: &str) -> Option<f64> {
+    let (n, d) = s.split_once('/')?;
+    let n: f64 = n.trim().parse().ok()?;
+    let d: f64 = d.trim().parse().ok()?;
+    if d == 0.0 || !n.is_finite() || !d.is_finite() { return None; }
+    Some(n / d)
+}
+
+/// Coefficient of variation (stddev/mean) of packet-size sums over fixed-count
+/// buckets — a bitrate-over-time steadiness measure. None when there aren't at
+/// least 3 full buckets to compare.
+fn bucket_cv(sizes: &[u64], bucket: usize) -> Option<f64> {
+    if bucket == 0 { return None; }
+    let sums: Vec<f64> = sizes
+        .chunks(bucket)
+        .filter(|c| c.len() == bucket) // drop the partial tail bucket
+        .map(|c| c.iter().map(|&s| s as f64).sum())
+        .collect();
+    if sums.len() < 3 { return None; }
+    let mean = sums.iter().sum::<f64>() / sums.len() as f64;
+    if mean <= 0.0 { return None; }
+    let var = sums.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / sums.len() as f64;
+    Some(var.sqrt() / mean)
+}
+
+/// Bitrate steadier than ±10% across windows reads as CBR; above it, VBR.
+const VBR_CV_THRESHOLD: f64 = 0.10;
+
+async fn ffprobe_json(app: &AppHandle, args: &[&str]) -> Result<serde_json::Value, crate::AppError> {
+    let cmd = app
+        .shell()
+        .sidecar("ffprobe")
+        .map_err(|e| format!("ffprobe sidecar: {e}"))?;
+    let out = cmd
+        .args(args)
+        .output()
+        .await
+        .map_err(|e| format!("ffprobe failed to run: {e}"))?;
+    serde_json::from_slice(&out.stdout).map_err(|e| format!("ffprobe returned no JSON: {e}").into())
+}
+
+fn jstr(v: &serde_json::Value, key: &str) -> Option<String> {
+    v.get(key).and_then(|x| x.as_str()).map(|s| s.to_string())
+}
+fn jnum_from_str(v: &serde_json::Value, key: &str) -> Option<f64> {
+    v.get(key).and_then(|x| x.as_str()).and_then(|s| s.parse().ok())
+}
+
+/// Sampled packet sizes + keyframe count for one stream. `None` (not an error)
+/// when the sample pass fails — the basic info is still worth returning.
+async fn sample_packets(app: &AppHandle, path: &str, stream: &str, count: usize) -> Option<(Vec<u64>, usize)> {
+    let interval = format!("%+#{count}");
+    let v = ffprobe_json(app, &[
+        "-v", "error", "-select_streams", stream,
+        "-show_entries", "packet=size,flags",
+        "-read_intervals", &interval,
+        "-print_format", "json", path,
+    ]).await.ok()?;
+    let packets = v.get("packets")?.as_array()?;
+    let mut sizes = Vec::with_capacity(packets.len());
+    let mut keyframes = 0usize;
+    for p in packets {
+        if let Some(sz) = jnum_from_str(p, "size") { sizes.push(sz as u64); }
+        if jstr(p, "flags").is_some_and(|f| f.contains('K')) { keyframes += 1; }
+    }
+    if sizes.is_empty() { return None; }
+    Some((sizes, keyframes))
+}
+
+#[tauri::command]
+pub async fn probe_media_info(app: AppHandle, path: String) -> Result<MediaInfo, crate::AppError> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err(format!("File not found: {path}").into());
+    }
+    let size_bytes = p.metadata().map(|m| m.len()).unwrap_or(0);
+
+    let root = ffprobe_json(&app, &[
+        "-v", "error", "-print_format", "json", "-show_format", "-show_streams", &path,
+    ]).await?;
+
+    let format = root.get("format").cloned().unwrap_or_default();
+    let empty = Vec::new();
+    let streams = root.get("streams").and_then(|s| s.as_array()).unwrap_or(&empty);
+
+    // Timecode: format tag first, else any stream's (QuickTime puts it on tmcd).
+    let timecode = format
+        .get("tags").and_then(|t| jstr(t, "timecode"))
+        .or_else(|| streams.iter().find_map(|s| s.get("tags").and_then(|t| jstr(t, "timecode"))));
+
+    let vstream = streams.iter().find(|s| jstr(s, "codec_type").as_deref() == Some("video"));
+    let astream = streams.iter().find(|s| jstr(s, "codec_type").as_deref() == Some("audio"));
+
+    let mut video = vstream.map(|s| {
+        let avg = jstr(s, "avg_frame_rate");
+        let real = jstr(s, "r_frame_rate");
+        let fps = avg.as_deref().and_then(parse_ratio).filter(|f| *f > 0.0)
+            .or_else(|| real.as_deref().and_then(parse_ratio));
+        // VFR: the container's nominal tick rate disagrees with the measured
+        // average — the classic screen-recording / phone-footage signature.
+        let vfr = match (avg.as_deref().and_then(parse_ratio), real.as_deref().and_then(parse_ratio)) {
+            (Some(a), Some(r)) if a > 0.0 && r > 0.0 => (a - r).abs() / r > 0.001,
+            _ => false,
+        };
+        MediaInfoVideo {
+            codec: jstr(s, "codec_long_name").or_else(|| jstr(s, "codec_name")).unwrap_or_else(|| "unknown".into()),
+            codec_tag: jstr(s, "codec_tag_string").filter(|t| t != "[0][0][0][0]"),
+            profile: jstr(s, "profile"),
+            width: s.get("width").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+            height: s.get("height").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+            pix_fmt: jstr(s, "pix_fmt"),
+            bit_depth: jnum_from_str(s, "bits_per_raw_sample").map(|b| b as u32),
+            field_order: jstr(s, "field_order"),
+            fps,
+            fps_exact: avg.filter(|a| a != "0/0"),
+            vfr,
+            bitrate_bps: jnum_from_str(s, "bit_rate"),
+            color_space: jstr(s, "color_space"),
+            color_transfer: jstr(s, "color_transfer"),
+            color_primaries: jstr(s, "color_primaries"),
+            nb_frames: jnum_from_str(s, "nb_frames"),
+            all_intra: None,
+            keyframe_ratio: None,
+            vbr: None,
+            bitrate_cv: None,
+        }
+    });
+
+    let mut audio = astream.map(|s| MediaInfoAudio {
+        codec: jstr(s, "codec_long_name").or_else(|| jstr(s, "codec_name")).unwrap_or_else(|| "unknown".into()),
+        channels: s.get("channels").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+        channel_layout: jstr(s, "channel_layout"),
+        sample_rate: jnum_from_str(s, "sample_rate").map(|r| r as u32),
+        sample_fmt: jstr(s, "sample_fmt"),
+        bitrate_bps: jnum_from_str(s, "bit_rate"),
+        vbr: None,
+        bitrate_cv: None,
+    });
+
+    // Sampled-packet analysis — best-effort; the basic info stands without it.
+    if let Some(v) = video.as_mut() {
+        if let Some((sizes, keyframes)) = sample_packets(&app, &path, "v:0", 240).await {
+            let total = sizes.len();
+            v.keyframe_ratio = Some(keyframes as f64 / total as f64);
+            // Only call it all-intra off a meaningful sample.
+            v.all_intra = Some(total >= 24 && keyframes == total);
+            let bucket = v.fps.map(|f| f.round() as usize).filter(|b| *b >= 5).unwrap_or(30);
+            v.bitrate_cv = bucket_cv(&sizes, bucket);
+            v.vbr = v.bitrate_cv.map(|cv| cv > VBR_CV_THRESHOLD);
+        }
+    }
+    if let Some(a) = audio.as_mut() {
+        if let Some((sizes, _)) = sample_packets(&app, &path, "a:0", 500).await {
+            a.bitrate_cv = bucket_cv(&sizes, 100);
+            a.vbr = a.bitrate_cv.map(|cv| cv > VBR_CV_THRESHOLD);
+        }
+    }
+
+    Ok(MediaInfo {
+        container: jstr(&format, "format_long_name").or_else(|| jstr(&format, "format_name")).unwrap_or_else(|| "unknown".into()),
+        duration_s: jnum_from_str(&format, "duration"),
+        size_bytes,
+        overall_bitrate_bps: jnum_from_str(&format, "bit_rate"),
+        timecode,
+        video,
+        audio,
+    })
+}
+
+#[cfg(test)]
+mod media_info_tests {
+    use super::{bucket_cv, parse_ratio};
+
+    #[test]
+    fn ratio_parses_ntsc_and_rejects_garbage() {
+        assert!((parse_ratio("30000/1001").unwrap() - 29.97).abs() < 0.01);
+        assert_eq!(parse_ratio("25/1"), Some(25.0));
+        assert_eq!(parse_ratio("0/0"), None);
+        assert_eq!(parse_ratio("abc"), None);
+        assert_eq!(parse_ratio("30"), None);
+    }
+
+    #[test]
+    fn constant_bitrate_has_near_zero_cv() {
+        let sizes = vec![1000u64; 120];
+        let cv = bucket_cv(&sizes, 30).unwrap();
+        assert!(cv < 1e-9, "cv={cv}");
+    }
+
+    #[test]
+    fn variable_bitrate_has_high_cv() {
+        // Alternate 1s windows of small and large packets.
+        let mut sizes = Vec::new();
+        for i in 0..120u64 {
+            sizes.push(if (i / 30) % 2 == 0 { 500 } else { 5000 });
+        }
+        let cv = bucket_cv(&sizes, 30).unwrap();
+        assert!(cv > 0.5, "cv={cv}");
+    }
+
+    #[test]
+    fn cv_needs_at_least_three_full_buckets() {
+        assert_eq!(bucket_cv(&[1000u64; 59], 30), None); // only 1 full bucket
+        assert_eq!(bucket_cv(&[1000u64; 89], 30), None); // only 2 full
+        assert!(bucket_cv(&[1000u64; 90], 30).is_some()); // exactly 3
+        assert_eq!(bucket_cv(&[], 30), None);
+        assert_eq!(bucket_cv(&[1000], 0), None);
+    }
+}
+

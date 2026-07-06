@@ -33,12 +33,24 @@ export type PlayerHandle = {
    *   rate < 0   → reverse / rewind at |rate|×
    *   rate === 0 → exit shuttle, return to normal 1× playback
    *
+   * App.tsx drives this with the Premiere-style ladder (lib/shuttle.ts):
+   * each J/L press steps ±1 → 2 → 4 → 8×, an opposite press steps back down,
+   * and landing on +1 exits the shuttle into real playback. The ladder is
+   * capped per engine — 8× for local playback, 4× for the MSE web stream
+   * (faster would outrun the proxy remux) — and the <video> players also
+   * clamp defensively inside setShuttle.
+   *
+   * Audio during shuttle: the <video> players stay audible up to 2× and
+   * mute above it (pre-shuttle muted state is restored on exit);
+   * MediaBunnyPlayer's shuttle is video-only by design (tape-machine style).
+   *
    * Per-engine behaviour:
    *   • MediaBunnyPlayer owns its own clock + decodes any frame on demand, so
    *     it does TRUE smooth forward AND reverse.
    *   • WebKit <video> players (MSE / local) can only fast-FORWARD natively
-   *     (playbackRate); they approximate reverse with a backward seek-scan
-   *     (smooth on local files, limited to the buffered range on streams).
+   *     (playbackRate); they approximate reverse with a wall-clock rAF
+   *     backward scan (smooth on local files, clamped to the buffered range
+   *     on streams).
    */
   setShuttle: (rate: number) => void;
   /**

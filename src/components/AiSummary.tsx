@@ -131,12 +131,14 @@ export function AiSummary({ transcriptPath, reloadToken, selectedModelId, style,
       unlisteners.push(await listen<ModelProgressEvent>("model-download-progress", (e) => {
         if (mounted && e.payload.job_id === dlJobRef.current) setDownloadPct(e.payload.percent);
       }));
-      unlisteners.push(await listen<DoneEvent>("model-download-done", (e) => {
+      unlisteners.push(await listen<DoneEvent>("model-download-done", async (e) => {
         if (!mounted || e.payload.job_id !== dlJobRef.current) return;
         dlJobRef.current = null;
         setDownloadingId(null);
         setDownloadPct(0);
-        if (e.payload.success) refreshModels();
+        // Await so the models list (and thus activeModel) reflects the new
+        // model before the user can start a chat with it.
+        if (e.payload.success) await refreshModels();
         else { setPhase("error"); setPhaseMsg(e.payload.error ?? "Download failed"); }
       }));
     })();
@@ -230,7 +232,15 @@ export function AiSummary({ transcriptPath, reloadToken, selectedModelId, style,
     const ctx = server?.ctx ?? 16384;
     const budget = Math.floor(ctx * 3.5 * 0.65);
     const truncated = text.length > budget;
-    return { text: truncated ? text.slice(0, budget) : text, truncated, hasSpeakers };
+    let clipped = text;
+    if (truncated) {
+      clipped = text.slice(0, budget);
+      // Don't end on a lone high surrogate (a split emoji / astral char) — it
+      // would encode to a replacement char in the request body.
+      const last = clipped.charCodeAt(clipped.length - 1);
+      if (last >= 0xd800 && last <= 0xdbff) clipped = clipped.slice(0, -1);
+    }
+    return { text: clipped, truncated, hasSpeakers };
   }, [raw, server?.ctx, transcriptPath, speakersTick]);
 
   useEffect(() => {
