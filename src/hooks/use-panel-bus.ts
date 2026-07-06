@@ -39,6 +39,9 @@ export type PanelSnapshot = {
   transcriptArrivedTick: number;
   regenerateBusy: boolean;
   canRegenerate: boolean;
+  /** True when a media source is loaded — gates the transcript empty-state's
+   *  "Generate transcript" button in the popped-out panel. */
+  hasSource: boolean;
   /** AI Summary: chosen model + output style, mirrored so the popped-out
    *  panel's AI tab uses the same model/style as the docked view. */
   aiModelId: string;
@@ -46,6 +49,11 @@ export type PanelSnapshot = {
     format: "bullets" | "numbered" | "prose";
     length: "brief" | "standard" | "detailed";
   };
+  /** Auto-chapters: source identity (main's reviewSourceKey) so the panel's
+   *  AI tab persists chapters under the same key main's timeline reads. */
+  chapterSourceKey: string | null;
+  /** Auto-chapters: source duration in seconds (clamps model timestamps). */
+  durationSec: number | null;
 };
 
 export type PanelHandlers = {
@@ -58,8 +66,14 @@ export type PanelHandlers = {
   onLoadFromHistory: (entry: TranscriptHistoryEntry) => void;
   onRegenerate: () => void;
   onImportTranscript: () => void;
+  /** Panel edited a cue in place (the panel writes the file itself) — main
+   *  bumps the arrived tick so captions / AI summary / speaker lanes re-read. */
+  onTranscriptEdited: () => void;
   /** Panel asked to manage AI models — main opens Settings → AI Summary. */
   onOpenAiSettings: () => void;
+  /** Panel generated/deleted chapters (already saved to the shared
+   *  localStorage) — main re-reads so its timeline markers update. */
+  onChaptersChanged: () => void;
 };
 
 /** Shared key the main window writes the live snapshot to and the popped-out
@@ -78,8 +92,11 @@ const INITIAL_SNAPSHOT: PanelSnapshot = {
   transcriptArrivedTick: 0,
   regenerateBusy: false,
   canRegenerate: false,
+  hasSource: false,
   aiModelId: "qwen3-4b-instruct",
   aiStyle: { format: "bullets", length: "standard" },
+  chapterSourceKey: null,
+  durationSec: null,
 };
 
 type Args = {
@@ -182,8 +199,12 @@ export function usePanelBus({
           () => handlersRef.current.onRegenerate()),
         listen("panel:action:importTranscript",
           () => handlersRef.current.onImportTranscript()),
+        listen("panel:action:transcriptEdited",
+          () => handlersRef.current.onTranscriptEdited()),
         listen("panel:action:openAiSettings",
           () => handlersRef.current.onOpenAiSettings()),
+        listen("panel:action:chaptersChanged",
+          () => handlersRef.current.onChaptersChanged()),
       ]);
       if (cancelled) { off.forEach((u) => u()); return; }
       unlistens = off;

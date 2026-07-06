@@ -225,6 +225,126 @@
   color: var(--fg-4);
 }
 
+/* ── Recent sources (URL-bar history popover) ────────────────────────
+   Trigger lives inside .cp-url beside the paste button; the popover
+   portals to document.body (same reason as the bell/co-review pops:
+   the toolbar's backdrop-filter traps in-flow popovers under the
+   canvas). position/top/right come from the component's anchor math. */
+.cp-recents { display: inline-flex; }
+.cp-recents-trigger {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+.cp-recents-trigger:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.cp-recents-trigger.active { color: var(--fg-1); }
+.cp-recents-pop {
+  z-index: 9999;
+  width: 340px;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  background: #15151a;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  box-shadow: 0 8px 12px rgba(0,0,0,0.55);
+  animation: cp-fade-in var(--dur-fast) var(--ease-out);
+  overflow: hidden;
+}
+.cp-recents-list {
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cp-recents-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 28px 7px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.cp-recents-row.active { background: rgba(255,255,255,0.06); }
+.cp-recents-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cp-recents-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.cp-recents-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+.cp-recents-badge.url { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.35); }
+.cp-recents-meta {
+  display: flex;
+  gap: 10px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--fg-4);
+}
+.cp-recents-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--fg-4);
+  cursor: pointer;
+}
+.cp-recents-row:hover .cp-recents-remove,
+.cp-recents-row.active .cp-recents-remove { display: inline-flex; }
+.cp-recents-remove:hover { color: var(--fg-1); background: rgba(255,255,255,0.08); }
+.cp-recents-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line-1);
+}
+.cp-recents-clear {
+  border: none;
+  background: transparent;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--fg-4);
+  cursor: pointer;
+}
+.cp-recents-clear:hover { color: var(--fg-1); }
+
 
 /* ── Left cluster: wordmark + sidebar toggle ─────────────────────────
    When the sidebar is open the cluster is sized so the toggle's right
@@ -241,3 +361,10 @@
 }
 .cp-toolbar-left.sidebar-open { width: 302px; }
 .cp-sidebar-toggle.active { background: rgba(255,255,255,0.06); }
+
+/* Reduced motion: still the wordmark dot's glow pulse and the co-review
+   live-session blink (both infinite attention pulses). */
+@media (prefers-reduced-motion: reduce) {
+  .cp-wordmark .dot { animation: none; }
+  .cp-coreview-dot { animation: none; }
+}

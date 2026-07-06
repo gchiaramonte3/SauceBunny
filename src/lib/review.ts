@@ -17,11 +17,27 @@ import { secondsToHms, secondsToTc } from "./timecode";
 
 export type ReviewStatusState = "pending" | "approved" | "changes";
 
+/** A Frame.io-style text callout anchored to a point on the frame. Coords are
+ *  normalized 0..1 like stroke points so the label scales with the video box. */
+export type AnnotationLabel = { text: string; x: number; y: number };
+
 /** A free-hand drawing captured on a frame, stored with a comment. Points are
  *  normalized 0..1 against the canvas it was drawn on so it scales to any size. */
 export type AnnotationStrokes = {
   strokes: { color: string; size: number; pts: [number, number][] }[];
+  /** Optional text labels riding the same annotation payload as the strokes.
+   *  ADDITIVE + OPTIONAL on purpose: docs persisted (or peers running) before
+   *  labels existed simply lack the field, and old clients parsing a labeled
+   *  doc ignore it — never rename/repurpose `strokes` for this reason. */
+  labels?: AnnotationLabel[];
 };
+
+/** True when an annotation has anything to show — strokes OR labels. Old
+ *  callsites checked `strokes.length > 0`, which would drop a labels-only
+ *  annotation; route every "is there a drawing?" question through this. */
+export function annotationHasContent(a: AnnotationStrokes | null | undefined): boolean {
+  return !!a && (a.strokes.length > 0 || (a.labels?.length ?? 0) > 0);
+}
 
 export type ReviewComment = {
   id: string;
@@ -396,6 +412,66 @@ export function applyReviewOp(doc: ReviewDoc, op: ReviewOp): ReviewDoc {
   }
 }
 
+/** Ops that reverse `op`, given the doc as it was BEFORE the op applied.
+ *  Powers the local-user undo stack (lib/undo.ts): the panel snapshots the
+ *  pre-op doc when it dispatches, and computes the inverse lazily at undo
+ *  time. `at` must be stamped at EXECUTION time (a fresh Date.now()) so the
+ *  inverse beats the LWW guard of the op it reverses. Re-adds carry the
+ *  ORIGINAL comment (same id/timestamps — insertComment is idempotent by id),
+ *  so an undo-of-delete converges in co-review exactly like a normal add.
+ *  Unknown targets return [] (nothing to reverse). */
+export function inverseReviewOps(before: ReviewDoc, op: ReviewOp, at = Date.now()): ReviewOp[] {
+  switch (op.t) {
+    case "add":
+      // Works for roots and replies alike: deleteComment drops replies only
+      // via parentId === id, and a reply's id is never another's parentId.
+      return [{ t: "del", id: op.comment.id }];
+    case "del": {
+      // deleteComment removes the root AND its replies — resurrect all of
+      // them (peers' replies included, authorship intact).
+      const removed = before.comments.filter((c) => c.id === op.id || c.parentId === op.id);
+      return removed.map((c) => ({ t: "add", comment: c }));
+    }
+    case "delReply": {
+      const r = before.comments.find(
+        (c) => c.id === op.replyId && c.parentId === op.commentId && c.versionId === op.versionId);
+      return r ? [{ t: "add", comment: r }] : [];
+    }
+    case "edit": {
+      const cur = before.comments.find((c) => c.id === op.id);
+      return cur ? [{ t: "edit", id: op.id, body: cur.body, at }] : [];
+    }
+    case "editReply": {
+      const cur = before.comments.find((c) => c.id === op.replyId);
+      return cur
+        ? [{ t: "editReply", versionId: op.versionId, commentId: op.commentId, replyId: op.replyId, body: cur.body, at }]
+        : [];
+    }
+    case "resolve": {
+      const cur = before.comments.find((c) => c.id === op.id);
+      return [{ t: "resolve", id: op.id, resolved: cur ? cur.resolved : !op.resolved, at }];
+    }
+    case "like":
+      return [{ t: "like", id: op.id, name: op.name, liked: !op.liked }];
+    default:
+      return [];
+  }
+}
+
+/** Re-stamp an op's LWW timestamp for replay (redo): its own undo just wrote
+ *  a NEWER updatedAt, so replaying the op verbatim would lose the LWW guard
+ *  and no-op. Ops without `at` are returned unchanged. */
+export function restampReviewOp(op: ReviewOp, at: number): ReviewOp {
+  switch (op.t) {
+    case "edit":
+    case "resolve":
+    case "editReply":
+      return { ...op, at };
+    default:
+      return op;
+  }
+}
+
 /** Merge an incoming (authoritative) snapshot with the local doc so a local op
  *  that hasn't been echoed back yet survives a snapshot re-adopt (the host
  *  re-broadcasts a full doc on every join; without this an existing peer's
@@ -506,14 +582,15 @@ export function openCount(doc: ReviewDoc, versionId: string | null): number {
   return doc.comments.filter((c) => c.versionId === versionId && c.parentId === null && !c.resolved).length;
 }
 
-/** Saved drawings for a version (time + strokes) — drives the on-frame
- *  proximity fade: the overlay shows a drawing as the playhead nears its time. */
+/** Saved drawings for a version (time + strokes/labels) — drives the on-frame
+ *  proximity fade: the overlay shows a drawing as the playhead nears its time.
+ *  Carries the author so label chips can be tinted to that reviewer's colour. */
 export function annotationsOf(
   doc: ReviewDoc, versionId: string | null,
-): { id: string; time: number; strokes: AnnotationStrokes }[] {
+): { id: string; time: number; author: string; strokes: AnnotationStrokes }[] {
   return doc.comments
-    .filter((c) => c.versionId === versionId && c.parentId === null && c.annotation && c.annotation.strokes.length > 0)
-    .map((c) => ({ id: c.id, time: c.timeStart, strokes: c.annotation as AnnotationStrokes }));
+    .filter((c) => c.versionId === versionId && c.parentId === null && annotationHasContent(c.annotation))
+    .map((c) => ({ id: c.id, time: c.timeStart, author: c.author, strokes: c.annotation as AnnotationStrokes }));
 }
 
 // ── export (the local stand-in for Frame.io's share link) ────────────────────
@@ -532,6 +609,16 @@ function mdInline(s: string): string {
   return s.replace(/[\r\n]+/g, " ").replace(/[`*_\[\]]/g, "\\$&").trim();
 }
 
+/** Render a comment's annotation labels for the exports, appended to the
+ *  comment line: ` [label: "Fix this"] [label: "And this"]`. Strokes have no
+ *  textual form so they stay export-invisible (as before); labels are text, so
+ *  they carry. `esc` lets each format escape the label text its own way (the
+ *  Markdown export passes mdInline; CSV/EDL escape the whole line downstream). */
+export function labelSuffix(c: ReviewComment, esc: (s: string) => string = (s) => s): string {
+  const labels = c.annotation?.labels ?? [];
+  return labels.map((l) => ` [label: "${esc(l.text)}"]`).join("");
+}
+
 /** Human-readable review notes for the active version. */
 export function reviewToMarkdown(doc: ReviewDoc, title = "Review"): string {
   const v = doc.versions.find((x) => x.id === doc.activeVersionId);
@@ -546,7 +633,7 @@ export function reviewToMarkdown(doc: ReviewDoc, title = "Review"): string {
     "",
   ];
   for (const c of roots) {
-    out.push(`- **[${secondsToHms(c.timeStart)}]** ${mdInline(c.body)} — ${mdInline(c.author)}${c.resolved ? "  _(resolved)_" : ""}`);
+    out.push(`- **[${secondsToHms(c.timeStart)}]** ${mdInline(c.body)}${labelSuffix(c, mdInline)} — ${mdInline(c.author)}${c.resolved ? "  _(resolved)_" : ""}`);
     for (const r of repliesOf(doc, c.id)) out.push(`  - ↳ ${mdInline(r.body)} — ${mdInline(r.author)}`);
   }
   return out.filter((l) => l !== "").join("\n") + "\n";
@@ -565,7 +652,7 @@ function csvCell(s: string): string {
 export function reviewToCsv(doc: ReviewDoc, fps: number): string {
   const rows = ["Timecode,Resolved,Author,Comment"];
   for (const c of rootComments(doc, doc.activeVersionId, "time")) {
-    rows.push([secondsToTc(c.timeStart, fps), c.resolved ? "yes" : "no", csvCell(c.author), csvCell(c.body)].join(","));
+    rows.push([secondsToTc(c.timeStart, fps), c.resolved ? "yes" : "no", csvCell(c.author), csvCell(c.body + labelSuffix(c))].join(","));
   }
   return rows.join("\n") + "\n";
 }
@@ -581,7 +668,7 @@ export function reviewToEdl(doc: ReviewDoc, fps: number, title = "Sauce Bunny Re
     const outTc = secondsToTc(c.timeStart + 1 / Math.max(1, Math.round(fps)), fps);
     const ev = String(n++).padStart(3, "0");
     const color = c.resolved ? "ResolveColorGreen" : "ResolveColorRed";
-    const note = c.body.replace(/[\r\n]+/g, " ");
+    const note = (c.body + labelSuffix(c)).replace(/[\r\n]+/g, " ");
     lines.push(`${ev}  AX       V     C        ${inTc} ${outTc} ${inTc} ${outTc}`);
     lines.push(` |C:${color} |M:${note} |D:1`);
   }

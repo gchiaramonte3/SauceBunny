@@ -29,6 +29,7 @@ import type { LlmModel } from "../bindings/LlmModel";
 import { formatError } from "../lib/error-format";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { YouTubeSettings } from "./YouTubeSettings";
+import { useModalFocus } from "../hooks/use-modal-focus";
 
 type TabId = "general" | "captions" | "transcription" | "youtube" | "ai-summary" | "commands" | "about";
 
@@ -638,6 +639,10 @@ export function SettingsModal(props: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // Trap Tab inside the dialog + restore focus to the opener on close.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(open, dialogRef);
+
   if (!open) return null;
 
   async function chooseFolder() {
@@ -659,12 +664,20 @@ export function SettingsModal(props: Props) {
 
   return (
     <div className="cp-modal-backdrop" onClick={onClose}>
-      <div className="cp-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="cp-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+        ref={dialogRef}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="cp-modal-header">
           <h2>Settings</h2>
           <span className="crumb">{TABS.find((t) => t.id === tab)?.label}</span>
           <div className="filler" />
-          <button className="cp-modal-close" onClick={onClose} title="Close (Esc)">
+          <button className="cp-modal-close" onClick={onClose} title="Close (Esc)" aria-label="Close">
             ✕
           </button>
         </div>

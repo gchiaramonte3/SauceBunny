@@ -88,6 +88,8 @@ export function NotificationBell({ notifications, onMarkAllRead, onClearAll, onD
         type="button"
         className={"btn-icon cp-notif-trigger" + (unread > 0 ? " has-unread" : "")}
         title={unread > 0 ? `${unread} new notification${unread === 1 ? "" : "s"}` : "Notifications"}
+        aria-label={unread > 0 ? `Notifications (${unread} new)` : "Notifications"}
+        aria-expanded={open}
         onClick={toggle}
       >
         <IconBell size={15} />

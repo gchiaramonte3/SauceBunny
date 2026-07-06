@@ -305,6 +305,34 @@
   color: var(--fg-4);
   white-space: nowrap;
 }
+/* Next / previous match — compact chevron pair to the right of the count.
+   Only rendered while a query is active, so the idle row stays clean. */
+.cp-tx-search-nav {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+}
+.cp-tx-search-nav-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  color: var(--fg-3);
+  cursor: pointer;
+  padding: 0;
+}
+.cp-tx-search-nav-btn:hover:not(:disabled) {
+  color: var(--fg-1);
+  background: rgba(255,255,255,0.07);
+}
+.cp-tx-search-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 /* Empty-keybinding indicator inside the commands list (Settings ▸ Commands).
    Replaces an inline style block with hardcoded fallback hex (r46). */
 .cp-cmd-empty-key {
@@ -427,6 +455,41 @@
   text-underline-offset: 2px;
 }
 
+/* Inline cue editor — swapped in place of a cue span on double-click.
+   Matches the turn-body prose (same family/size/leading) so the paragraph
+   doesn't jump; the green ring marks the editable region. Height is content-
+   sized by the component (measured scrollHeight — a dynamic value, not a
+   tokenizable one). */
+.cp-tx-cue-editor {
+  display: block;
+  width: 100%;
+  margin: 2px 0;
+  padding: 4px 6px;
+  background: rgba(108, 255, 141, 0.05);
+  border: 1px solid rgba(108, 255, 141, 0.45);
+  border-radius: 4px;
+  color: var(--fg-1);
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  resize: none;
+  overflow: hidden;
+  outline: none;
+}
+
+/* Save-failure strip for inline cue edits (read-only volume, disk full…).
+   A static sibling of the search row — the absolute-positioned
+   .cp-tx-dl-error pattern is anchored to the Download button and would
+   float in the wrong place here. */
+.cp-tx-edit-error {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--color-danger, #e5484d);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .cp-tx-empty {
   flex: 1;
   display: flex;
@@ -449,6 +512,14 @@
   max-width: 280px;
 }
 .cp-tx-empty-actions { margin-top: 12px; display: flex; gap: 8px; }
+/* Why-is-the-button-disabled hint under the empty-state actions. */
+.cp-tx-empty-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--fg-4);
+  line-height: 1.45;
+  max-width: 280px;
+}
 
 /* Download dropdown — anchored to the Download button in the header. */
 .cp-tx-head-actions { position: relative; }
@@ -540,6 +611,43 @@
    in r46.B when the popover was extracted into its own file. */
 .cp-tx-merge-body { font-size: 12px; color: var(--fg-2); line-height: 1.45; }
 .cp-tx-merge-hint { font-size: 11px; color: var(--fg-4); }
+/* "…or this turn is actually" — per-turn reassignment to a known speaker.
+   Chip-per-speaker row under the scope radios; pip colour mirrors the
+   roster so the target is recognizable at a glance. */
+.cp-tx-rename-assign { padding: 2px 0 0; border-top: 1px solid var(--line-1); margin-top: 4px; }
+.cp-tx-rename-assign-label { font-size: 10.5px; color: var(--fg-4); padding: 4px 0 5px; }
+.cp-tx-rename-assign-list { display: flex; flex-wrap: wrap; gap: 5px; max-height: 88px; overflow-y: auto; }
+.cp-tx-rename-assign-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px 0 4px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--line-2);
+  border-radius: 11px;
+  color: var(--fg-2);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  cursor: pointer;
+  max-width: 100%;
+}
+.cp-tx-rename-assign-btn:hover {
+  border-color: rgba(108, 255, 141, 0.5);
+  background: rgba(108, 255, 141, 0.06);
+  color: var(--fg-1);
+}
+.cp-tx-rename-assign-pip {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.cp-tx-rename-assign-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cp-tx-rename-scope { display: flex; flex-direction: column; gap: 4px; padding: 2px 0; }
 .cp-tx-rename-scope label {
   display: flex; align-items: flex-start; gap: 6px;

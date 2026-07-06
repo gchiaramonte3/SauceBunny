@@ -35,6 +35,8 @@ export function VolumeControl({ volume, muted, onVolumeChange, onMutedChange }: 
         type="button"
         className={"cp-icon-btn volume" + (effectivelyMuted ? " muted" : "") + (open ? " active" : "")}
         title={effectivelyMuted ? "Unmute" : "Volume"}
+        aria-label={effectivelyMuted ? "Volume (muted)" : "Volume"}
+        aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         onContextMenu={(e) => { e.preventDefault(); onMutedChange(!muted); }}
       >
@@ -47,6 +49,7 @@ export function VolumeControl({ volume, muted, onVolumeChange, onMutedChange }: 
             className="cp-volume-mute"
             onClick={() => onMutedChange(!muted)}
             title={muted ? "Unmute" : "Mute"}
+            aria-label={muted ? "Unmute" : "Mute"}
           >
             {muted ? <IconVolumeMuted size={13} /> : <IconVolume size={13} />}
           </button>
