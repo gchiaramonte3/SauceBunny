@@ -3740,6 +3740,7 @@ export default function App() {
       transcriptArrivedTick,
       regenerateBusy: transcriptState === "running",
       canRegenerate: hasSource && !!selectedModel?.downloaded,
+      hasSource,
       aiModelId: defaults.llmSummarizationModel,
       aiStyle: { format: defaults.summaryFormat, length: defaults.summaryLength },
     },
@@ -3762,6 +3763,7 @@ export default function App() {
       onLoadFromHistory: handleLoadFromHistory,
       onRegenerate: () => { void handleGenerateTranscript(); },
       onImportTranscript: () => { void handleImportTranscript(); },
+      onTranscriptEdited: () => setTranscriptArrivedTick((n) => n + 1),
       onOpenAiSettings: () => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); },
     },
   });
@@ -4169,6 +4171,12 @@ export default function App() {
           onImportTranscript={handleImportTranscript}
           sourceKind={sourceKind}
           onFixCaptionTiming={handleFixCaptionTiming}
+          transcriptHasSource={hasSource}
+          /* Inline cue editing rewrote the SRT in place — the arrived tick is
+             the existing "same path, new contents" signal (see the speaker-
+             lanes effect), so every reader of the file re-reads: the caption
+             overlay, AI summary, speaker lanes, and the viewer itself. */
+          onTranscriptEdited={() => setTranscriptArrivedTick((n) => n + 1)}
           aiModelId={defaults.llmSummarizationModel}
           aiStyle={{ format: defaults.summaryFormat, length: defaults.summaryLength }}
           onOpenAiSettings={() => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); }}

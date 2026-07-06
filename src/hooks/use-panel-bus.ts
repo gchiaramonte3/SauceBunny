@@ -39,6 +39,9 @@ export type PanelSnapshot = {
   transcriptArrivedTick: number;
   regenerateBusy: boolean;
   canRegenerate: boolean;
+  /** True when a media source is loaded — gates the transcript empty-state's
+   *  "Generate transcript" button in the popped-out panel. */
+  hasSource: boolean;
   /** AI Summary: chosen model + output style, mirrored so the popped-out
    *  panel's AI tab uses the same model/style as the docked view. */
   aiModelId: string;
@@ -58,6 +61,9 @@ export type PanelHandlers = {
   onLoadFromHistory: (entry: TranscriptHistoryEntry) => void;
   onRegenerate: () => void;
   onImportTranscript: () => void;
+  /** Panel edited a cue in place (the panel writes the file itself) — main
+   *  bumps the arrived tick so captions / AI summary / speaker lanes re-read. */
+  onTranscriptEdited: () => void;
   /** Panel asked to manage AI models — main opens Settings → AI Summary. */
   onOpenAiSettings: () => void;
 };
@@ -78,6 +84,7 @@ const INITIAL_SNAPSHOT: PanelSnapshot = {
   transcriptArrivedTick: 0,
   regenerateBusy: false,
   canRegenerate: false,
+  hasSource: false,
   aiModelId: "qwen3-4b-instruct",
   aiStyle: { format: "bullets", length: "standard" },
 };
@@ -182,6 +189,8 @@ export function usePanelBus({
           () => handlersRef.current.onRegenerate()),
         listen("panel:action:importTranscript",
           () => handlersRef.current.onImportTranscript()),
+        listen("panel:action:transcriptEdited",
+          () => handlersRef.current.onTranscriptEdited()),
         listen("panel:action:openAiSettings",
           () => handlersRef.current.onOpenAiSettings()),
       ]);

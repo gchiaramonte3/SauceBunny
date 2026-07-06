@@ -64,3 +64,18 @@ test("side panel toggles open", async ({ page }) => {
   await expect(page.locator(".cp-queue-drawer.open")).toBeVisible();
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
+
+test("transcript tab shows the empty state with Generate gated on a source", async ({ page }) => {
+  await boot(page);
+  await page.locator(".cp-queue-toggle").click();
+  await page.getByRole("tab", { name: /Transcript/ }).click();
+  const empty = page.locator(".cp-tx-empty");
+  await expect(empty).toBeVisible();
+  await expect(empty.getByText("No transcript yet")).toBeVisible();
+  // No source loaded in the smoke run → the primary action is disabled with
+  // a hint, while Import stays available.
+  await expect(empty.getByRole("button", { name: "Generate transcript" })).toBeDisabled();
+  await expect(empty.getByRole("button", { name: "Import transcript…" })).toBeEnabled();
+  await expect(page.locator(".cp-tx-empty-hint")).toBeVisible();
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});

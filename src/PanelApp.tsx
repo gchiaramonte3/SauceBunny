@@ -37,6 +37,7 @@ type PanelState = {
   transcriptArrivedTick: number;
   regenerateBusy: boolean;
   canRegenerate: boolean;
+  hasSource: boolean;
   aiModelId: string;
   aiStyle: {
     format: "bullets" | "numbered" | "prose";
@@ -55,6 +56,7 @@ const INITIAL: PanelState = {
   transcriptArrivedTick: 0,
   regenerateBusy: false,
   canRegenerate: false,
+  hasSource: false,
   aiModelId: "qwen3-4b-instruct",
   aiStyle: { format: "bullets", length: "standard" },
 };
@@ -69,6 +71,7 @@ type ActionKind =
   | "loadFromHistory"
   | "regenerate"
   | "importTranscript"
+  | "transcriptEdited"
   | "openAiSettings";
 
 function sendAction(kind: ActionKind, payload?: unknown) {
@@ -166,6 +169,10 @@ export default function PanelApp() {
         regenerateBusy={state.regenerateBusy}
         canRegenerate={state.canRegenerate}
         onImportTranscript={() => sendAction("importTranscript")}
+        transcriptHasSource={state.hasSource}
+        /* The panel's viewer writes the SRT itself (invoke works in any
+           window); main only needs the tick bump so ITS readers re-read. */
+        onTranscriptEdited={() => sendAction("transcriptEdited")}
         aiModelId={state.aiModelId}
         aiStyle={state.aiStyle}
         onOpenAiSettings={() => sendAction("openAiSettings")}

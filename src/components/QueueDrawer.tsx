@@ -80,6 +80,12 @@ type Props = {
   /** r84: re-time loose YouTube captions with Whisper. Optional (omitted in the
    *  popped-out panel, where the banner is hidden rather than wired over the bus). */
   onFixCaptionTiming?: () => void;
+  /** True when a media source is loaded — gates the transcript empty-state's
+   *  "Generate transcript" button. */
+  transcriptHasSource?: boolean;
+  /** Inline cue editing rewrote the SRT in place — App bumps the arrived tick
+   *  so the caption overlay / AI summary / speaker lanes re-read the file. */
+  onTranscriptEdited?: () => void;
   /** AI Summary: the summarization model + output style chosen in Settings. */
   aiModelId?: string | null;
   aiStyle?: SummaryStyle;
@@ -185,6 +191,7 @@ export function QueueDrawer({
   onRegenerateTranscript, regenerateBusy, canRegenerate,
   onRedetectSpeakers, canRedetect,
   onImportTranscript, sourceKind, onFixCaptionTiming,
+  transcriptHasSource, onTranscriptEdited,
   aiModelId, aiStyle, onOpenAiSettings,
   reviewSourceKey, reviewSourceTitle,
   reviewDrawActive, reviewDraft, onToggleReviewDraw, onReviewDraftConsumed, onShowAnnotation,
@@ -768,6 +775,8 @@ export function QueueDrawer({
           onImportTranscript={onImportTranscript}
           sourceKind={sourceKind}
           onFixCaptionTiming={onFixCaptionTiming}
+          hasSource={transcriptHasSource}
+          onTranscriptEdited={onTranscriptEdited}
         />
         </div>
       )}

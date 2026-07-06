@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { IconReveal, IconAlert, IconChevronDown, IconInfo } from "./Icons";
-import { parseSrt, groupIntoTurns, fmtTime, type Turn } from "../lib/srt";
+import { parseSrt, groupIntoTurns, serializeCues, fmtTime, type Turn } from "../lib/srt";
 import { speakerStats } from "../lib/speaker-stats";
 import { secondsToTc } from "../lib/timecode";
 import { formatError } from "../lib/error-format";
@@ -11,11 +11,13 @@ import {
   removeEntry,
   type TranscriptHistoryEntry,
 } from "../lib/transcript-history";
-import { RenamePopover, type RenameState } from "./transcript/RenamePopover";
+import { RenamePopover, type RenameState, type ReassignChoice } from "./transcript/RenamePopover";
 import { SpeakerRosterModal } from "./transcript/SpeakerRosterModal";
 import { SpeakerColorPicker } from "./SpeakerColorPicker";
 import { HistoryPopover } from "./transcript/HistoryPopover";
 import { InsightsPopover } from "./transcript/InsightsPopover";
+import { TranscriptSearchBar, type SearchMode } from "./transcript/SearchBar";
+import { CueEditor } from "./transcript/CueEditor";
 import {
   escapeHtml,
   highlightMatch,
@@ -96,6 +98,22 @@ type Props = {
    *  the cached audio). When omitted (e.g. the popped-out panel), the banner
    *  is hidden rather than showing a dead button. */
   onFixCaptionTiming?: () => void;
+  /**
+   * True when a media source is loaded. Gates the empty-state's primary
+   * "Generate transcript" button (which fires the SAME handler as the
+   * sidebar's Generate) — without a source it's disabled with a hint.
+   * Distinct from `canRegenerate`, which also requires a downloaded model;
+   * clicking Generate with no model bounces to Settings → Transcription,
+   * which is more helpful than a dead button.
+   */
+  hasSource?: boolean;
+  /**
+   * Inline cue editing rewrote the SRT/VTT file in place. App bumps the
+   * arrived tick so every other reader of the same file (on-video captions,
+   * AI summary, timeline speaker lanes) re-reads. Optional: in the popped-out
+   * panel it routes over the panel action bus.
+   */
+  onTranscriptEdited?: () => void;
 };
 
 /**
@@ -119,6 +137,7 @@ export function TranscriptViewer({
   onRegenerate, regenerateBusy, canRegenerate, fps = 30,
   onRedetectSpeakers, canRedetect,
   onImportTranscript, sourceKind, onFixCaptionTiming,
+  hasSource = false, onTranscriptEdited,
 }: Props) {
   const [raw, setRaw] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -129,29 +148,34 @@ export function TranscriptViewer({
   const lastScrollTop = useRef(0);
 
   // ── Speaker overrides ───────────────────────────────────────────
-  // Three layers, resolved in this order (later wins):
+  // Four layers, resolved in this order (later wins):
   //   1. aliases:  tag → tag    "these two are the same person"
   //   2. global:   tag → name   "rename SPEAKER_00 → Tom everywhere"
-  //   3. turn:     ti  → name   "this one turn is actually …"
+  //   3. turnTag:  ti  → tag    "this one turn belongs to that OTHER speaker"
+  //   4. turn:     ti  → name   "this one turn is actually …" (free text)
   //
   // displayNameFor() walks the alias chain first (so a merged speaker
   // resolves to its target tag), then applies the global rename on the
   // resolved tag, then the per-turn override. Color is also keyed on
-  // the resolved tag so merged speakers share a colour.
+  // the resolved tag so merged speakers share a colour — a turnTag
+  // reassignment resolves to the TARGET tag, so the turn takes the
+  // target speaker's name AND colour (and follows later renames of it).
   //
-  // All three layers persist together in localStorage keyed by path.
+  // All layers persist together in localStorage keyed by path.
   type Overrides = {
     global: Record<string, string>;
     turn: Record<string, string>;
     aliases: Record<string, string>;
     colors: Record<string, string>; // canonical tag → custom hex pip colour
+    turnTag: Record<string, string>; // ti → canonical tag ("Speaker" = untagged group)
   };
+  const EMPTY: Overrides = { global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {} };
   const storageKey = path ? `saucebunny.speakerNames.${path}` : null;
-  const [overrides, setOverrides] = useState<Overrides>({ global: {}, turn: {}, aliases: {}, colors: {} });
+  const [overrides, setOverrides] = useState<Overrides>(EMPTY);
 
   // Load overrides when the path changes.
   useEffect(() => {
-    if (!storageKey) { setOverrides({ global: {}, turn: {}, aliases: {}, colors: {} }); return; }
+    if (!storageKey) { setOverrides(EMPTY); return; }
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
@@ -162,13 +186,16 @@ export function TranscriptViewer({
           turn:    typeof parsed.turn    === "object" && parsed.turn    ? parsed.turn    : {},
           aliases: typeof parsed.aliases === "object" && parsed.aliases ? parsed.aliases : {},
           colors:  typeof parsed.colors  === "object" && parsed.colors  ? parsed.colors  : {},
+          turnTag: typeof parsed.turnTag === "object" && parsed.turnTag ? parsed.turnTag : {},
         });
       } else {
-        setOverrides({ global: {}, turn: {}, aliases: {}, colors: {} });
+        setOverrides(EMPTY);
       }
     } catch {
-      setOverrides({ global: {}, turn: {}, aliases: {}, colors: {} });
+      setOverrides(EMPTY);
     }
+    // EMPTY is a render-stable literal (never mutated); listing it would only churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
 
   // The storageKey the persist effect last ran against. CRITICAL: on the render
@@ -186,7 +213,8 @@ export function TranscriptViewer({
     const empty = Object.keys(overrides.global).length === 0
                && Object.keys(overrides.turn).length === 0
                && Object.keys(overrides.aliases).length === 0
-               && Object.keys(overrides.colors).length === 0;
+               && Object.keys(overrides.colors).length === 0
+               && Object.keys(overrides.turnTag).length === 0;
     if (empty) {
       localStorage.removeItem(storageKey);
     } else {
@@ -301,10 +329,26 @@ export function TranscriptViewer({
   // Hoisted above the search block (r43) so `matches` in speaker mode
   // can call it. The full block (rename + merge + roster) still lives
   // further down — only the resolver itself moves up.
+
+  /**
+   * The tag a turn should be TREATED as: a turnTag reassignment ("this one
+   * turn belongs to that other speaker") wins over the turn's original tag;
+   * either way the alias chain resolves it to its canonical form. Both the
+   * display name AND the chip colour key off this, so a reassigned turn
+   * looks exactly like the target speaker.
+   */
+  const effectiveTagFor = useCallback((turnIdx: number, originalTag: string | null): string | null => {
+    const reassigned = overrides.turnTag[String(turnIdx)];
+    if (reassigned !== undefined) {
+      return reassigned === "Speaker" ? null : resolveAlias(reassigned);
+    }
+    return resolveAlias(originalTag);
+  }, [overrides.turnTag, resolveAlias]);
+
   const displayNameFor = useCallback((turnIdx: number, originalTag: string | null): string => {
     const turnOverride = overrides.turn[String(turnIdx)];
     if (turnOverride) return turnOverride;
-    const resolved = resolveAlias(originalTag);
+    const resolved = effectiveTagFor(turnIdx, originalTag);
     const tagKey = resolved ?? "__NULL__";
     const globalOverride = overrides.global[tagKey];
     if (globalOverride) return globalOverride;
@@ -313,7 +357,7 @@ export function TranscriptViewer({
     // (already-renamed, or non-diarized null) pass through unchanged. A
     // null tag amid real speakers → "Unknown speaker" (the diarizer skipped it).
     return humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers });
-  }, [overrides, resolveAlias, hasIdentifiedSpeakers]);
+  }, [overrides, effectiveTagFor, hasIdentifiedSpeakers]);
 
   // ── Search ──────────────────────────────────────────────────────
   // Two modes today:
@@ -327,8 +371,9 @@ export function TranscriptViewer({
   // We persist the mode per-session (no localStorage) so it resets to
   // "text" when the app restarts — search is a transient activity and
   // a sticky mode would surprise users who searched for a speaker once
-  // and forget to flip back.
-  type SearchMode = "text" | "speakers";
+  // and forget to flip back. (SearchMode + the row UI live in
+  // ./transcript/SearchBar.tsx; the match state stays here, feeding the
+  // karaoke memos below.)
   const [searchMode, setSearchMode] = useState<SearchMode>("text");
 
   const matches = useMemo(() => {
@@ -369,28 +414,49 @@ export function TranscriptViewer({
     return out;
   }, [turns]);
   const turnMeta = useMemo(
-    () => turns.map((t, ti) => ({ displayName: displayNameFor(ti, t.speaker), resolvedTag: resolveAlias(t.speaker) })),
-    [turns, displayNameFor, resolveAlias],
+    () => turns.map((t, ti) => ({ displayName: displayNameFor(ti, t.speaker), resolvedTag: effectiveTagFor(ti, t.speaker) })),
+    [turns, displayNameFor, effectiveTagFor],
   );
   const matchSet = useMemo(() => new Set(matches), [matches]);
 
+  // Jump = SCROLL the match into view, never seek. Cycling results is a
+  // reading activity — moving the playhead on every ↩ would restart audio
+  // at each hit (and fight the karaoke autoscroll, hence the pause of
+  // follow-mode). Clicking the cue is the explicit "take me there" action.
   const jumpToMatch = useCallback((delta: 1 | -1) => {
     if (matches.length === 0) return;
     const next = (matchCursor + delta + matches.length) % matches.length;
     setMatchCursor(next);
     const cueIdx = matches[next];
-    const cue = flatCues[cueIdx]?.cue;
-    if (!cue) return;
     setAutoScroll(false);
-    onSeek(cue.start);
     scrollRef.current?.querySelector<HTMLElement>(`[data-cue-idx="${cueIdx}"]`)
       ?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [matches, matchCursor, flatCues, onSeek]);
+  }, [matches, matchCursor]);
 
-  function onSearchKey(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter") { e.preventDefault(); jumpToMatch(e.shiftKey ? -1 : 1); }
-    else if (e.key === "Escape") { e.preventDefault(); setQuery(""); }
-  }
+  // ── ⌘F — focus the transcript search ─────────────────────────────
+  // The rebindable-shortcut registry (lib/keybindings.ts) has no notion of
+  // tab scope — its per-tab precedent (the Review range hotkeys) registers
+  // handlers with App, which only works in the MAIN window and would need
+  // new plumbing through QueueDrawer + the panel bus. So this follows the
+  // ⌘G listener below instead: a window-scope listener owned by the viewer,
+  // gated on the transcript tab actually being VISIBLE — the drawer keeps
+  // hidden tabs mounted ([hidden] keep-alive wrappers) and the closed drawer
+  // is aria-hidden, so both are checked. Anywhere else ⌘F stays untouched.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      if (e.key.toLowerCase() !== "f") return;
+      const root = wrapRef.current;
+      if (!root || root.closest("[hidden]") || root.closest('[aria-hidden="true"]')) return;
+      e.preventDefault();
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // ── Cmd+G / Cmd+Shift+G — Avid-style "find next / previous" ──────
   // Wired at window scope so the user can cycle through results
@@ -437,6 +503,7 @@ export function TranscriptViewer({
         turn:    { ...prev.turn },
         aliases: { ...prev.aliases, [sourceTag]: canonicalTarget },
         colors:  { ...prev.colors },
+        turnTag: { ...prev.turnTag },
       };
       // Drop a now-unused global rename on the source (its tag
       // resolves elsewhere, so the rename would never display anyway).
@@ -454,7 +521,8 @@ export function TranscriptViewer({
     const resolved = key === "__NULL__" ? null : key;
     setOverrides((prev) => {
       const next: Overrides = {
-        global: { ...prev.global }, turn: { ...prev.turn }, aliases: { ...prev.aliases }, colors: { ...prev.colors },
+        global: { ...prev.global }, turn: { ...prev.turn }, aliases: { ...prev.aliases },
+        colors: { ...prev.colors }, turnTag: { ...prev.turnTag },
       };
       if (trimmed && trimmed !== humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers })) {
         next.global[key] = trimmed;
@@ -583,6 +651,7 @@ export function TranscriptViewer({
         turn:    { ...prev.turn },
         aliases: { ...prev.aliases },
         colors:  { ...prev.colors },
+        turnTag: { ...prev.turnTag },
       };
       // Key the GLOBAL rename on the alias-RESOLVED tag — displayNameFor reads
       // overrides under the resolved key, and mergeSpeaker deletes globals
@@ -629,7 +698,8 @@ export function TranscriptViewer({
   // identifying an "Unknown speaker" before naming it. Resolves through the
   // alias chain (so a merged or untagged speaker is matched by canonical key),
   // seeks + scrolls to that turn's first cue, and closes the popover. Reuses
-  // the same seek/scroll idiom as search-jump and cue-click.
+  // the same seek/scroll idiom as cue-click (unlike search-jump, this one
+  // DOES seek — "go to speaker" is an explicit take-me-there action).
   const goToSpeaker = useCallback(() => {
     if (!rename) return;
     const targetKey = resolveAlias(rename.originalTag) ?? "__NULL__";
@@ -647,10 +717,77 @@ export function TranscriptViewer({
       ?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [rename, resolveAlias, turns, flatCues, onSeek]);
 
+  /**
+   * Reassign ONE turn to another known speaker ("the diarizer got this
+   * turn wrong — it's actually Tom"). Stored as a turnTag override, so
+   * the turn takes the target's display name AND colour, and follows any
+   * later rename/recolour of that speaker. Reassigning back to the turn's
+   * own canonical tag just deletes the override (fully reversible). Any
+   * per-turn free-text rename is dropped — it would shadow the target name.
+   */
+  const reassignTurn = useCallback((turnIdx: number, targetTag: string) => {
+    setOverrides((prev) => {
+      const next: Overrides = {
+        global:  { ...prev.global },
+        turn:    { ...prev.turn },
+        aliases: { ...prev.aliases },
+        colors:  { ...prev.colors },
+        turnTag: { ...prev.turnTag },
+      };
+      const original = resolveAliasChain(turns[turnIdx]?.speaker ?? null, prev.aliases) ?? "Speaker";
+      if (targetTag === original) delete next.turnTag[String(turnIdx)];
+      else next.turnTag[String(turnIdx)] = targetTag;
+      delete next.turn[String(turnIdx)];
+      return next;
+    });
+    setRename(null);
+  }, [turns]);
+
   function resetAllRenames() {
-    setOverrides({ global: {}, turn: {}, aliases: {}, colors: {} });
+    setOverrides({ global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {} });
     setRename(null);
   }
+
+  // ── Inline cue editing ───────────────────────────────────────────
+  // Double-click a cue → swap the span for a textarea (CueEditor). Commit
+  // re-serializes ALL cues back to SRT/VTT and rewrites the transcript file
+  // IN PLACE — the file on disk is the single source of truth every reader
+  // (this viewer, the on-video captions, AI summary, exports, speaker lanes)
+  // re-parses, so an edit flows everywhere with no second store. After the
+  // write, `onTranscriptEdited` bumps App's arrived tick so those readers
+  // re-read. The `editingCue` check in the render loop is O(1) per cue, so
+  // the karaoke-tick perf memos are untouched.
+  const [editingCue, setEditingCue] = useState<number | null>(null);
+  const [editErr, setEditErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!editErr) return;
+    const t = window.setTimeout(() => setEditErr(null), 8000);
+    return () => window.clearTimeout(t);
+  }, [editErr]);
+  // Editing a stale index after a reload would splice the wrong cue.
+  useEffect(() => { setEditingCue(null); }, [turns]);
+
+  const commitCueEdit = useCallback(async (cueIdx: number, newText: string) => {
+    setEditingCue(null);
+    const target = flatCues[cueIdx]?.cue;
+    const trimmed = newText.replace(/\s+/g, " ").trim();
+    // Empty = "delete"? No — cancel. Removing a cue shifts every index after
+    // it and silently loses timing; that's a bigger feature than a keystroke.
+    if (!path || !target || !trimmed || trimmed === target.text) return;
+    const nextCues = flatCues.map((f, i) => (i === cueIdx ? { ...f.cue, text: trimmed } : f.cue));
+    const format = path.toLowerCase().endsWith(".vtt") ? "vtt" as const : "srt" as const;
+    const serialized = serializeCues(nextCues, format);
+    try {
+      const bytes = Array.from(new TextEncoder().encode(serialized));
+      await invoke("write_bytes_to_path", { path, bytes });
+      // Local fast path — reparse immediately instead of waiting for the
+      // reload-token round trip (which follows anyway and reads the same bytes).
+      setRaw(serialized);
+      onTranscriptEdited?.();
+    } catch (e) {
+      setEditErr(formatError(e));
+    }
+  }, [flatCues, path, onTranscriptEdited]);
 
   // ── Download menu state ──────────────────────────────────────────
   const [dlOpen, setDlOpen] = useState(false);
@@ -884,19 +1021,44 @@ export function TranscriptViewer({
   // ── Render branches ──────────────────────────────────────────────
 
   if (!path) {
+    // Empty state — the primary action generates a transcript right here:
+    // same handler as the sidebar's Generate button (App passes
+    // handleGenerateTranscript to both), so model/speaker settings and the
+    // missing-model bounce-to-Settings behave identically. Gated on a loaded
+    // SOURCE (not on canRegenerate, which also wants a downloaded model —
+    // the handler explains a missing model better than a dead button would).
     return (
       <div className="cp-tx-empty">
         <div className="cp-tx-empty-title">No transcript yet</div>
         <div className="cp-tx-empty-body">
-          Generate a Whisper transcript or download YouTube captions from the
-          sidebar — the result appears here automatically. Or import an existing
-          <code> .srt</code> / <code>.vtt</code> from disk:
+          Transcribe the loaded source with your local transcription engine —
+          the searchable, speaker-labelled result appears here and drives the
+          on-video captions. Or import an existing
+          <code> .srt</code> / <code>.vtt</code> from disk.
         </div>
         <div className="cp-tx-empty-actions">
+          <button
+            className="btn btn-primary"
+            onClick={onRegenerate}
+            disabled={!hasSource || regenerateBusy}
+            title={
+              !hasSource
+                ? "Load a video or audio source first"
+                : "Transcribe the loaded source with current Settings (model · speaker detection)"
+            }
+          >
+            {regenerateBusy ? "Generating…" : "Generate transcript"}
+          </button>
           <button className="btn btn-ghost" onClick={onImportTranscript}>
             Import transcript…
           </button>
         </div>
+        {!hasSource && (
+          <div className="cp-tx-empty-hint">
+            Load a source first — paste a URL or import a file from the toolbar,
+            then generate from here or the sidebar.
+          </div>
+        )}
       </div>
     );
   }
@@ -937,10 +1099,11 @@ export function TranscriptViewer({
   // derivation already runs in a useMemo elsewhere.
   const hasAnyOverride =
     Object.keys(overrides.global).length > 0 ||
-    Object.keys(overrides.turn).length > 0;
+    Object.keys(overrides.turn).length > 0 ||
+    Object.keys(overrides.turnTag).length > 0;
 
   return (
-    <div className="cp-tx-wrap">
+    <div className="cp-tx-wrap" ref={wrapRef}>
       {/* Header — Clear · History · Download. Per user feedback the
           filename was visual noise (it's already implied by which
           source you have loaded); the header is now actions-only. The
@@ -1047,72 +1210,22 @@ export function TranscriptViewer({
         </div>
       </div>
 
-      <div className="cp-tx-search">
-        {/* Mode pill — Text / Speakers. Two-button segmented control;
-            we'll grow it (Markers, Timestamps) as those features land
-            but this is what the user asked for now (Avid-style filter). */}
-        <div className="cp-tx-search-mode" role="tablist" aria-label="Search mode">
-          <button
-            role="tab"
-            aria-selected={searchMode === "text"}
-            className={"cp-tx-search-mode-btn" + (searchMode === "text" ? " active" : "")}
-            onClick={() => setSearchMode("text")}
-            title="Search the transcript text"
-          >
-            Text
-          </button>
-          <button
-            role="tab"
-            aria-selected={searchMode === "speakers"}
-            className={"cp-tx-search-mode-btn" + (searchMode === "speakers" ? " active" : "")}
-            onClick={() => setSearchMode("speakers")}
-            title="Search by speaker name (e.g. 'Tom', 'Speaker 2')"
-          >
-            Speakers
-          </button>
+      <TranscriptSearchBar
+        ref={searchInputRef}
+        mode={searchMode}
+        onModeChange={setSearchMode}
+        query={query}
+        onQueryChange={setQuery}
+        matchCount={matches.length}
+        matchCursor={matchCursor}
+        onJump={jumpToMatch}
+        onResetNames={hasAnyOverride ? resetAllRenames : undefined}
+      />
+      {editErr && (
+        <div className="cp-tx-edit-error" role="alert" title={editErr}>
+          Edit not saved: {editErr}
         </div>
-        <input
-          className="cp-tx-search-input"
-          placeholder={searchMode === "speakers" ? "Find a speaker…" : "Search transcript…"}
-          title={searchMode === "speakers" ? "Search by speaker name" : "Search the transcript — ⌘G next · ⇧⌘G previous"}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={onSearchKey}
-          /* Spell-check ON in text mode (Whisper output is prose);
-             OFF in speaker mode (names like "Tom" or "Speaker 2" get
-             squiggle-underlined as misspellings, which is just noise).
-             `lang="en"` is the missing piece that nudges WKWebView to
-             pick a real dictionary — without it the underline often
-             doesn't render at all (per user screenshot r43 of "Thansky ou"
-             not flagged). */
-          spellCheck={searchMode === "text"}
-          lang={searchMode === "text" ? "en" : undefined}
-          autoComplete="off"
-          autoCorrect={searchMode === "text" ? "on" : "off"}
-        />
-        {query && (
-          <span className="cp-tx-search-count">
-            {matches.length === 0 ? "no matches" : `${matchCursor + 1} / ${matches.length}`}
-          </span>
-        )}
-        {/* "Follow playback" moved to a floating pill over the transcript
-            body (r65) — it was overflowing this row. "Reset names" is now a
-            compact icon (only when the user has renamed speakers) so the row
-            never clips. */}
-        {hasAnyOverride && (
-          <button
-            className="cp-tx-icon-action"
-            onClick={resetAllRenames}
-            title="Reset all custom speaker names for this transcript"
-            aria-label="Reset speaker names"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.36 2.64L3 8" />
-              <path d="M3 3v5h5" />
-            </svg>
-          </button>
-        )}
-      </div>
+      )}
 
       {/* Roster — only when there's something worth roster-ing (more
           than one speaker, or any speaker actually labeled). Drives
@@ -1215,6 +1328,7 @@ export function TranscriptViewer({
           const { displayName, resolvedTag } = turnMeta[ti];
           const hasOverride =
             !!overrides.turn[String(ti)] ||
+            !!overrides.turnTag[String(ti)] ||
             // Resolve the alias chain — globals are keyed on the RESOLVED tag,
             // so a merged-then-renamed turn must check its canonical key.
             !!overrides.global[resolvedTag ?? "__NULL__"];
@@ -1252,6 +1366,16 @@ export function TranscriptViewer({
               <div className="cp-tx-turn-body">
                 {turn.cues.map((cue, ci) => {
                   const idx = cueStartIdx + ci;
+                  if (idx === editingCue) {
+                    return (
+                      <CueEditor
+                        key={ci}
+                        initialText={cue.text}
+                        onCommit={(t) => { void commitCueEdit(idx, t); }}
+                        onCancel={() => setEditingCue(null)}
+                      />
+                    );
+                  }
                   const active = idx === activeCueIdx;
                   const isMatch = matchSet.has(idx);
                   const isActiveMatch = matches[matchCursor] === idx;
@@ -1266,7 +1390,14 @@ export function TranscriptViewer({
                         (isActiveMatch ? " match-active" : "")
                       }
                       onClick={() => { setAutoScroll(true); onSeek(cue.start); }}
-                      title={`${secondsToTc(cue.start, fps)} — click to jump`}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        // Freeze follow-mode so the karaoke autoscroll can't
+                        // yank the paragraph away mid-edit.
+                        setAutoScroll(false);
+                        setEditingCue(idx);
+                      }}
+                      title={`${secondsToTc(cue.start, fps)} — click to jump · double-click to edit`}
                     >
                       {/* In speaker mode, don't highlight the body —
                           the query targets the speaker name, not the
@@ -1302,13 +1433,24 @@ export function TranscriptViewer({
       )}
 
       {/* Rename popover — portaled so it can overflow the drawer + sit
-          above scroll. Positioned next to the chip the user clicked. */}
+          above scroll. Positioned next to the chip the user clicked.
+          When other speakers exist, it also offers "this turn is actually …"
+          — a per-turn reassignment to a known speaker (computed only while
+          the popover is open, so it costs nothing on playhead ticks). */}
       {rename && (
         <RenamePopover
           state={rename}
           onCancel={() => setRename(null)}
           onApply={applyRename}
           onGoToSpeaker={goToSpeaker}
+          reassignChoices={roster
+            .filter((r) => r.tag !== (effectiveTagFor(rename.turnIdx, rename.originalTag) ?? "Speaker"))
+            .map((r): ReassignChoice => ({
+              tag: r.tag,
+              name: r.name,
+              color: speakerDisplayColor(r.colorTag),
+            }))}
+          onReassign={(tag) => reassignTurn(rename.turnIdx, tag)}
         />
       )}
       {speakerModalOpen && (
