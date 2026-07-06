@@ -31,3 +31,7 @@ vite.config.d.ts
 # Editor/agent-local config (machine-specific, not shared)
 .claude/launch.json
 .claude/settings.local.json
+
+# Playwright output (e2e smoke harness)
+test-results/
+playwright-report/
