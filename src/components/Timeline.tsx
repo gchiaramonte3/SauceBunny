@@ -207,7 +207,7 @@ export function Timeline({
   const ticks = Array.from({ length: 11 }, (_, i) => i);
 
   return (
-    <div className="cp-timeline" style={{ opacity: dim ? 0.3 : 1 }}>
+    <div className="cp-timeline" role="region" aria-label="Timeline" style={{ opacity: dim ? 0.3 : 1 }}>
       <div className="cp-timeline-ruler">
         {!dim && ticks.map((i) => {
           const left = (i / 10) * 100;

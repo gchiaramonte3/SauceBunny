@@ -189,6 +189,9 @@
   0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(-3px); }
 }
+@media (prefers-reduced-motion: reduce) {
+  .cp-ai-typing span { animation: none; opacity: 0.6; }
+}
 
 /* ── Composer ────────────────────────────────────────────────────── */
 .cp-ai-composer {

@@ -91,6 +91,7 @@ export function ViewOptions({ aspect, onAspectChange, waveformVisible, onWavefor
           className="cp-view-trigger icon-only"
           onClick={onShowMediaInfo}
           title="Media info"
+          aria-label="Media info"
         >
           <IconInfo size={13} />
         </button>
@@ -100,6 +101,8 @@ export function ViewOptions({ aspect, onAspectChange, waveformVisible, onWavefor
         className={"cp-view-trigger" + (open ? " active" : "")}
         onClick={() => setOpen((o) => !o)}
         title="Canvas aspect"
+        aria-label="Canvas aspect and view options"
+        aria-expanded={open}
       >
         <IconAspect size={13} />
         <span className="label">{current.label}</span>
@@ -109,6 +112,7 @@ export function ViewOptions({ aspect, onAspectChange, waveformVisible, onWavefor
         className="cp-view-trigger icon-only"
         onClick={toggleFullscreen}
         title={fullscreen ? "Exit full screen" : "Enter full screen"}
+        aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}
       >
         {fullscreen ? <IconFullscreenExit size={13} /> : <IconFullscreen size={13} />}
       </button>

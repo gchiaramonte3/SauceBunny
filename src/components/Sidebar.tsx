@@ -226,7 +226,11 @@ export function Sidebar(props: Props) {
   }
 
   return (
-    <aside className={"cp-sidebar" + (props.open === false ? " closed" : "")} aria-hidden={props.open === false}>
+    <aside
+      className={"cp-sidebar" + (props.open === false ? " closed" : "")}
+      aria-hidden={props.open === false}
+      aria-label="Source and export"
+    >
       {!hasSource && (
         <div className="cp-section">
           <div className="cp-section-label">Source</div>
@@ -276,6 +280,7 @@ export function Sidebar(props: Props) {
                   onClick={downloadThumbnail}
                   disabled={!metadata.thumbnail}
                   title="Save thumbnail…"
+                  aria-label="Save thumbnail"
                 >
                   <IconDownload size={13} />
                 </button>
@@ -710,6 +715,7 @@ export function Sidebar(props: Props) {
                   className="btn-icon"
                   style={{ width: 22, height: 22, border: "none" }}
                   title="Reveal in Finder"
+                  aria-label="Reveal in Finder"
                   onClick={(e) => { e.stopPropagation(); invoke("reveal_in_finder", { path: r.path }).catch(() => {}); }}
                 >
                   <IconReveal size={12} />

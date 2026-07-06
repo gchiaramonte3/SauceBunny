@@ -361,3 +361,10 @@
 }
 .cp-toolbar-left.sidebar-open { width: 302px; }
 .cp-sidebar-toggle.active { background: rgba(255,255,255,0.06); }
+
+/* Reduced motion: still the wordmark dot's glow pulse and the co-review
+   live-session blink (both infinite attention pulses). */
+@media (prefers-reduced-motion: reduce) {
+  .cp-wordmark .dot { animation: none; }
+  .cp-coreview-dot { animation: none; }
+}

@@ -1276,3 +1276,13 @@
 }
 .cp-annot-label-input::placeholder { color: var(--fg-4); font-weight: 400; }
 
+/* Reduced motion: still the fetching scanline shimmer, the equalizer
+   bounce, and the toast slide-in (fade-only entrances stay; the cp-spin
+   loading spinners are kept — they're functional progress indicators,
+   not decoration). */
+@media (prefers-reduced-motion: reduce) {
+  .cp-scanline::before { animation: none; }
+  .cp-eq span { animation: none; transform: scaleY(0.7); }
+  .cp-canvas-toast { animation: none; }
+}
+

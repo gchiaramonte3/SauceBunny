@@ -37,6 +37,44 @@ test("shell boots: toolbar, sidebar, monitor render without pageerrors", async (
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
+test("a11y landmarks: banner/main/complementary present and uniquely labeled", async ({ page }) => {
+  await boot(page);
+  // Toolbar = the banner landmark; the canvas column = main.
+  await expect(page.getByRole("banner")).toBeVisible();
+  await expect(page.getByRole("main")).toBeVisible();
+  // Left sidebar is a labeled complementary panel.
+  await expect(page.getByRole("complementary", { name: "Source and export" })).toBeVisible();
+  // Transport + timeline are labeled regions.
+  await expect(page.getByRole("region", { name: "Playback transport" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Timeline" })).toBeVisible();
+  // Opening the drawer exposes the second complementary panel + tablist.
+  await page.locator(".cp-queue-toggle").click();
+  await expect(page.getByRole("complementary", { name: "Queue and tools" })).toBeVisible();
+  await expect(page.getByRole("tablist", { name: "Right panel sections" })).toBeVisible();
+  await expect(page.getByRole("tabpanel")).toBeVisible(); // active tab body
+  // Every complementary landmark carries a unique label (aria-hidden ones
+  // are excluded by getByRole, so this checks what a screen reader sees).
+  const names = await page
+    .getByRole("complementary")
+    .evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? ""));
+  expect(names.every((n) => n.length > 0)).toBe(true);
+  expect(new Set(names).size).toBe(names.length);
+  // The single polite live region for pipeline milestones exists.
+  await expect(page.locator(".cp-a11y-status[aria-live='polite']")).toHaveCount(1);
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
+test("settings modal is a labeled dialog and restores focus on close", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Settings" })).toHaveCount(0);
+  // Focus returns to the button that opened the modal.
+  await expect(page.getByRole("button", { name: "Settings", exact: true })).toBeFocused();
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
 test("settings modal opens and closes", async ({ page }) => {
   await boot(page);
   await page.getByTitle("Settings (⌘,)").click();

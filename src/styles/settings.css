@@ -36,6 +36,11 @@
   overflow: hidden;
   animation: cp-modal-in var(--dur-slow) var(--ease-out);
 }
+/* Reduced motion: modal appears without the rise/scale entrance
+   (covers Settings + the MediaInfo modal, which reuses .cp-modal). */
+@media (prefers-reduced-motion: reduce) {
+  .cp-modal { animation: none; }
+}
 .cp-modal-header {
   height: 50px;
   flex-shrink: 0;

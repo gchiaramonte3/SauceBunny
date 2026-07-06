@@ -38,6 +38,11 @@
   from { opacity: 0; transform: translateY(-8px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0)     scale(1); }
 }
+/* Reduced motion: no slide/scale entrance for the palette or the
+   shortcut sheet (defined below, same animation). */
+@media (prefers-reduced-motion: reduce) {
+  .cp-palette, .cp-shortcuts { animation: none; }
+}
 .cp-palette-input-wrap {
   display: flex;
   align-items: center;

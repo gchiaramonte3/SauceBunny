@@ -500,6 +500,7 @@ export function QueueDrawer({
     <aside
       className={"cp-queue-drawer" + (open ? " open" : "") + (embedded ? " embedded" : "")}
       aria-hidden={!open}
+      aria-label="Queue and tools"
       // Inline width only when docked + open. In embedded (floating) mode
       // the parent layout dictates size — let it fill the OS window.
       style={!embedded && open ? { width: drawerWidth } : undefined}
@@ -533,8 +534,10 @@ export function QueueDrawer({
           return (
             <button
               key={t.id}
+              id={"cp-tab-" + t.id}
               role="tab"
               aria-selected={isActive}
+              aria-controls={"cp-tabpanel-" + t.id}
               aria-disabled={t.disabled}
               className={
                 "cp-tab" +
@@ -604,7 +607,7 @@ export function QueueDrawer({
           the ACTIVE tab so hidden bodies do no karaoke/timecode work while
           keeping all their internal state. Add a case here for a new tab. */}
       {visited.has("queue") && (
-        <div className="cp-tab-keep" hidden={activeTab !== "queue"}>
+        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-queue" aria-labelledby="cp-tab-queue" hidden={activeTab !== "queue"}>
         {/* === existing queue body kept untouched below === */}
 
       <div className="cp-queue-list">
@@ -685,6 +688,7 @@ export function QueueDrawer({
                   <button
                     className="cp-queue-iconbtn"
                     title="Reveal in Finder"
+                    aria-label={`Reveal ${c.filename} in Finder`}
                     onClick={() => invoke("reveal_in_finder", { path: c.path }).catch(() => {})}
                   >
                     <IconReveal size={13} />
@@ -694,6 +698,7 @@ export function QueueDrawer({
                   <button
                     className="cp-queue-iconbtn danger"
                     title="Remove from queue"
+                    aria-label={`Remove ${c.filename} from queue`}
                     onClick={() => onRemove(c.id)}
                   >
                     <IconTrash size={13} />
@@ -768,7 +773,7 @@ export function QueueDrawer({
         </div>
       )}
       {visited.has("transcript") && (
-        <div className="cp-tab-keep" hidden={activeTab !== "transcript"}>
+        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-transcript" aria-labelledby="cp-tab-transcript" hidden={activeTab !== "transcript"}>
         <TranscriptViewer
           path={transcriptPath}
           /* Same-path overwrites (Regenerate / Fix-timing) re-read via the tick. */
@@ -796,7 +801,7 @@ export function QueueDrawer({
         </div>
       )}
       {visited.has("ai") && (
-        <div className="cp-tab-keep" hidden={activeTab !== "ai"}>
+        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-ai" aria-labelledby="cp-tab-ai" hidden={activeTab !== "ai"}>
         <AiSummary
           transcriptPath={transcriptPath}
           reloadToken={transcriptArrivedTick}
@@ -811,7 +816,7 @@ export function QueueDrawer({
         </div>
       )}
       {visited.has("review") && (
-        <div className="cp-tab-keep" hidden={activeTab !== "review"}>
+        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-review" aria-labelledby="cp-tab-review" hidden={activeTab !== "review"}>
         <ReviewPanel
           sourceKey={reviewSourceKey ?? null}
           sourceTitle={reviewSourceTitle}

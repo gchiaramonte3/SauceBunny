@@ -1,6 +1,7 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { shortcutSheetGroups, type KeybindingOverrides } from "../lib/keybindings";
+import { useModalFocus } from "../hooks/use-modal-focus";
 
 type Props = {
   open: boolean;
@@ -36,6 +37,10 @@ export function ShortcutSheet({ open, onClose, keybindings, onCustomize }: Props
     return () => window.removeEventListener("keydown", onKey, true);
   }, [open, onClose]);
 
+  // Trap Tab inside the sheet + restore focus to the opener on close.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(open, dialogRef);
+
   if (!open) return null;
 
   return createPortal(
@@ -46,7 +51,7 @@ export function ShortcutSheet({ open, onClose, keybindings, onCustomize }: Props
       aria-modal="true"
       aria-label="Keyboard shortcuts"
     >
-      <div className="cp-shortcuts" onClick={(e) => e.stopPropagation()}>
+      <div className="cp-shortcuts" ref={dialogRef} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
         <div className="cp-shortcuts-head">
           <h2>Keyboard shortcuts</h2>
           <button

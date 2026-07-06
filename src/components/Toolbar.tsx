@@ -84,7 +84,8 @@ export function Toolbar({
   }
 
   return (
-    <div className="cp-toolbar">
+    // <header> = the banner landmark (screen-reader "jump to toolbar").
+    <header className="cp-toolbar">
       {/* Left cluster: wordmark + the sidebar toggle. When the sidebar is
           open, the cluster is sized so the toggle sits exactly on the
           sidebar's right-edge line — the mirror of the right panel toggle. */}
@@ -98,6 +99,7 @@ export function Toolbar({
           className={"btn-icon cp-sidebar-toggle" + (sidebarOpen ? " active" : "")}
           onClick={onToggleSidebar}
           title={sidebarOpen ? "Hide source panel" : "Show source panel"}
+          aria-label={sidebarOpen ? "Hide source panel" : "Show source panel"}
           aria-pressed={sidebarOpen}
         >
           <IconPanelLeft size={15} />
@@ -122,6 +124,7 @@ export function Toolbar({
             }
           }}
           placeholder="paste any video URL — youtube, vimeo, tiktok, twitter, reddit, …"
+          aria-label="Video URL"
           spellCheck={false}
           autoCorrect="off"
           autoCapitalize="off"
@@ -131,6 +134,7 @@ export function Toolbar({
           className="btn-icon"
           style={{ width: 22, height: 22, border: "none" }}
           title="Paste & fetch"
+          aria-label="Paste URL and fetch"
           onClick={(e) => {
             e.stopPropagation();
             pasteFromClipboard();
@@ -184,6 +188,8 @@ export function Toolbar({
         type="button"
         className={"btn-icon cp-queue-toggle" + (queueCount > 0 ? " has-items" : "") + (queueOpen ? " active" : "")}
         title={`Side panel (${queueCount} queued) — ⌘⇧Q`}
+        aria-label={`Toggle side panel (${queueCount} queued)`}
+        aria-pressed={queueOpen}
         onClick={onToggleQueue}
       >
         <IconPanelRight size={15} />
@@ -205,9 +211,9 @@ export function Toolbar({
         onClearAll={onClearNotifications}
         onDismiss={onDismissNotification}
       />
-      <button type="button" className="btn-icon" title="Settings (⌘,)" onClick={onOpenSettings}>
+      <button type="button" className="btn-icon" title="Settings (⌘,)" aria-label="Settings" onClick={onOpenSettings}>
         <IconSettings size={15} />
       </button>
-    </div>
+    </header>
   );
 }

@@ -38,6 +38,8 @@ export function SpeedControl({ rate, onRateChange }: Props) {
         type="button"
         className={"cp-icon-btn speed" + (rate !== 1 ? " engaged" : "") + (open ? " active" : "")}
         title="Playback speed — right-click to reset to 1×"
+        aria-label={`Playback speed: ${formatPlaybackRate(rate)}`}
+        aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         onContextMenu={(e) => { e.preventDefault(); onRateChange(1); }}
       >

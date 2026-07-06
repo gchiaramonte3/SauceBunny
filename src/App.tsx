@@ -4585,6 +4585,21 @@ export default function App() {
         onImportTranscript={(p) => { void loadTranscriptPath(p); }}
         notify={pushNotification}
       />
+
+      {/* Single app-wide live region (visually hidden) — announces the
+          long-running pipeline milestones to screen readers. Driven by the
+          same state the Sidebar/LogsPanel render, so it can't drift. Kept
+          to ONE region: a change in this string is announced politely. */}
+      <div className="cp-a11y-status" role="status" aria-live="polite">
+        {status === "exporting" ? "Exporting…"
+          : transcriptState === "running"
+            ? (transcriptPhase?.startsWith("diarize") ? "Detecting speakers…" : "Transcribing…")
+            : status === "success" ? "Export complete"
+              : status === "error" ? "Operation failed — check the pipeline log"
+                : transcriptState === "error" ? "Transcription failed"
+                  : transcriptState === "done" ? "Transcript ready"
+                    : ""}
+      </div>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { parseSrt, groupIntoTurns, serializeCues, fmtTime, type Turn } from "../
 import { speakerStats } from "../lib/speaker-stats";
 import { secondsToTc } from "../lib/timecode";
 import { formatError } from "../lib/error-format";
+import { scrollBehavior } from "../lib/motion";
 import {
   getHistory,
   removeEntry,
@@ -306,7 +307,7 @@ export function TranscriptViewer({
   useEffect(() => {
     if (!autoScroll || activeCueIdx < 0 || !scrollRef.current) return;
     const el = scrollRef.current.querySelector<HTMLElement>(`[data-cue-idx="${activeCueIdx}"]`);
-    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    el?.scrollIntoView({ block: "center", behavior: scrollBehavior() });
   }, [activeCueIdx, autoScroll]);
 
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
@@ -430,7 +431,7 @@ export function TranscriptViewer({
     const cueIdx = matches[next];
     setAutoScroll(false);
     scrollRef.current?.querySelector<HTMLElement>(`[data-cue-idx="${cueIdx}"]`)
-      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+      ?.scrollIntoView({ block: "center", behavior: scrollBehavior() });
   }, [matches, matchCursor]);
 
   // ── ⌘F — focus the transcript search ─────────────────────────────
@@ -714,7 +715,7 @@ export function TranscriptViewer({
     onSeek(flatCues[cueIdx].cue.start);
     scrollRef.current
       ?.querySelector<HTMLElement>(`[data-cue-idx="${cueIdx}"]`)
-      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+      ?.scrollIntoView({ block: "center", behavior: scrollBehavior() });
   }, [rename, resolveAlias, turns, flatCues, onSeek]);
 
   /**

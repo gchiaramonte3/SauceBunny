@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Command, CommandGroup } from "../lib/commands";
 import { scoreCommand } from "../lib/commands";
+import { useModalFocus } from "../hooks/use-modal-focus";
 
 type Props = {
   open: boolean;
@@ -27,6 +28,11 @@ export function CommandPalette({ open, onClose, commands }: Props) {
   const [activeIdx, setActiveIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Trap Tab inside the palette + restore focus to the opener on close.
+  // (The input autofocus below still wins the initial focus.)
+  useModalFocus(open, dialogRef);
 
   // Reset query + active index whenever the palette opens. Without this
   // the second time you open it you'd land on the last query / row.
@@ -125,7 +131,7 @@ export function CommandPalette({ open, onClose, commands }: Props) {
       aria-modal="true"
       aria-label="Command palette"
     >
-      <div className="cp-palette" onClick={(e) => e.stopPropagation()}>
+      <div className="cp-palette" ref={dialogRef} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
         <div className="cp-palette-input-wrap">
           <span className="cp-palette-search-icon">⌘</span>
           <input

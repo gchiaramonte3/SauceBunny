@@ -6,6 +6,7 @@ import { parseSrt, groupIntoTurns, fmtTime } from "../lib/srt";
 import { loadSpeakerOverrides, resolveSpeakerName, SPEAKERS_CHANGED_EVENT } from "./transcript/helpers";
 import { streamChat, type ChatMessage } from "../lib/ai-chat";
 import { formatError } from "../lib/error-format";
+import { scrollBehavior } from "../lib/motion";
 import { Markdown } from "./Markdown";
 import { AiChapters } from "./AiChapters";
 import type { LlmModel } from "../bindings/LlmModel";
@@ -257,7 +258,7 @@ export function AiSummary({
   }, [raw, server?.ctx, transcriptPath, speakersTick]);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: scrollBehavior() });
   }, [messages, streaming]);
 
   // Reset the conversation when the transcript changes.

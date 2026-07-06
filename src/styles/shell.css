@@ -157,4 +157,5 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .cp-drop-card { animation: none; }
+  .cp-build-banner { animation: none; }
 }
