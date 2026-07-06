@@ -312,8 +312,6 @@
 }
 .cp-getting-started-step.done .cp-getting-started-text strong {
   color: var(--fg-4);
-  text-decoration: line-through;
-  text-decoration-color: rgba(255, 255, 255, 0.35);
 }
 .cp-getting-started-text em {
   font-style: normal;
