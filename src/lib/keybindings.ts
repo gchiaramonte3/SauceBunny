@@ -16,6 +16,7 @@ export type KeyActionId =
   | "play.toggle" | "play.back5" | "play.fwd5"
   | "play.frameBack" | "play.frameFwd" | "play.secondBack" | "play.secondFwd"
   | "play.toStart" | "play.toEnd"
+  | "play.rateDown" | "play.rateUp" | "play.rateReset"
   | "mark.in" | "mark.out" | "mark.clear" | "mark.gotoIn" | "mark.gotoOut"
   | "review.rangeIn" | "review.rangeOut"
   | "src.fetch" | "export.clip" | "queue.add" | "queue.toggle"
@@ -51,6 +52,12 @@ export const KEY_ACTIONS: KeyAction[] = [
   { id: "play.secondFwd",  label: "Step 1 second forward", group: "Transport", defaults: ["shift+right", "shift+."],global: false },
   { id: "play.toStart",    label: "Jump to start",         group: "Transport", defaults: ["home"],                  global: false },
   { id: "play.toEnd",      label: "Jump to end",           group: "Transport", defaults: ["end"],                   global: false },
+  // Persistent playback speed (Transport speed picker) — distinct from the
+  // J-K-L shuttle, which is a transient override. mpv-style [ / ] steps, \
+  // resets. Bare keys, so they're free (only mod+\ was taken, by view.logs).
+  { id: "play.rateDown",   label: "Decrease playback speed", group: "Transport", defaults: ["["],                   global: false },
+  { id: "play.rateUp",     label: "Increase playback speed", group: "Transport", defaults: ["]"],                   global: false },
+  { id: "play.rateReset",  label: "Reset playback speed",    group: "Transport", defaults: ["\\"],                  global: false },
   { id: "mark.in",         label: "Mark in",               group: "Marking",   defaults: ["i"],                     global: false },
   { id: "mark.out",        label: "Mark out",              group: "Marking",   defaults: ["o"],                     global: false },
   { id: "mark.clear",      label: "Clear marks",           group: "Marking",   defaults: ["g"],                     global: false },

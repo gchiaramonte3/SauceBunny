@@ -49,6 +49,7 @@ import { loadActiveTab } from "./lib/tab-state";
 import type { SessionMsg } from "./bindings/SessionMsg";
 import type { SessionState as CoSessionState } from "./bindings/SessionState";
 import { nextShuttleRate } from "./lib/shuttle";
+import { sanitizePlaybackRate, stepPlaybackRate } from "./lib/playback-rate";
 import { parseSrt } from "./lib/srt";
 import { speakerLanes } from "./lib/speaker-stats";
 import { speakerColor } from "./components/transcript/helpers";
@@ -654,6 +655,39 @@ export default function App() {
   }, [muted]);
   const handleMutedChange = useCallback((m: boolean) => setMutedState(m), []);
 
+  // ====== Playback speed (persisted) ======
+  // The user's "watch speed" (0.5–2×), distinct from the transient J-K-L
+  // shuttle: the players restore THIS rate whenever a shuttle exits. Applies
+  // to the <video>-backed players (local + MSE stream); MediaBunny/WebCodecs
+  // playback ignores it by design (see PlayerHandle.setPlaybackRate).
+  const [playbackRate, setPlaybackRate] = useState<number>(() =>
+    sanitizePlaybackRate(loadJson<number>("saucebunny.playbackRate", 1)));
+  useEffect(() => saveJson("saucebunny.playbackRate", playbackRate), [playbackRate]);
+  // Transient on-video HUD (the shuttle-badge pill) flashed when the rate
+  // changes — armed after the first run so the persisted rate doesn't flash
+  // on boot. The same effect pushes the rate to the live player; the
+  // player-ready path re-applies it when a player (re)mounts.
+  const [rateHud, setRateHud] = useState<number | null>(null);
+  const rateHudTimerRef = useRef(0);
+  const rateHudArmedRef = useRef(false);
+  useEffect(() => {
+    try { playerRef.current?.setPlaybackRate(playbackRate); } catch { /* ignore */ }
+    if (!rateHudArmedRef.current) { rateHudArmedRef.current = true; return; }
+    setRateHud(playbackRate);
+    if (rateHudTimerRef.current) window.clearTimeout(rateHudTimerRef.current);
+    rateHudTimerRef.current = window.setTimeout(() => {
+      rateHudTimerRef.current = 0;
+      setRateHud(null);
+    }, 1500);
+  }, [playbackRate]);
+  useEffect(() => () => {
+    if (rateHudTimerRef.current) window.clearTimeout(rateHudTimerRef.current);
+  }, []);
+  const handlePlaybackRateChange = useCallback(
+    (r: number) => setPlaybackRate(sanitizePlaybackRate(r)), []);
+  const handlePlaybackRateStep = useCallback(
+    (dir: 1 | -1) => setPlaybackRate((r) => stepPlaybackRate(r, dir)), []);
+
   // ====== Command palette (⌘K) ======
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -1179,12 +1213,14 @@ export default function App() {
     webOnPlayerReady();
     // Player is up → drop the resolving/buffering overlay (r62).
     setPlayerReady(true);
-    // Apply persisted volume + mute as soon as a player becomes ready.
+    // Apply persisted volume + mute + playback speed as soon as a player
+    // becomes ready (MediaBunny ignores the rate — see PlayerHandle).
     const p = playerRef.current;
     if (p) {
       try {
         p.setVolume(volume);
         p.setMuted(muted);
+        p.setPlaybackRate(playbackRate);
       } catch { /* ignore */ }
     }
     // Fill in the duration immediately from whichever player just loaded so
@@ -1198,7 +1234,7 @@ export default function App() {
         return { ...prev, duration: dur };
       });
     }
-  }, [volume, muted, webOnPlayerReady]);
+  }, [volume, muted, playbackRate, webOnPlayerReady]);
 
   // ====== Actions ======
   /**
@@ -3149,6 +3185,10 @@ export default function App() {
         case "play.secondFwd":  onStep(Math.round(fps)); break;
         case "play.toStart": onSeek(0); break;
         case "play.toEnd":   onSeek(Math.max(0, durationFrames - 1)); break;
+        // Persistent playback speed ([ / ] / \) — steps the 0.5–2× list.
+        case "play.rateDown":  handlePlaybackRateStep(-1); break;
+        case "play.rateUp":    handlePlaybackRateStep(1); break;
+        case "play.rateReset": handlePlaybackRateChange(1); break;
       }
     }
 
@@ -3219,6 +3259,7 @@ export default function App() {
     comboToAction, handleFetch, handleExport, handleAddToQueue, status, fps, durationFrames, settingsOpen,
     onPlayToggle, shuttleStep, onMarkIn, onMarkOut, onClearMarks,
     onGotoIn, onGotoOut, onStep, onSeek,
+    handlePlaybackRateStep, handlePlaybackRateChange,
   ]);
 
   // ── Native menubar event wiring ─────────────────────────────────
@@ -3301,10 +3342,12 @@ export default function App() {
   // when the array was inline, so memoization behaves identically.
   const commands: Command[] = useMemo(() => buildCommands({
     url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
-    captionsOn, logsOpen, clipQueueLength: clipQueue.length, queueRunning,
+    captionsOn, playbackRate, logsOpen, clipQueueLength: clipQueue.length, queueRunning,
     activeTranscriptPath: activeTranscript?.path ?? null,
     exportFolder: exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
     handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds, shuttleStep,
+    onPlaybackRateStep: handlePlaybackRateStep,
+    onPlaybackRateReset: () => handlePlaybackRateChange(1),
     onStep, onSeek, onMarkIn, onMarkOut, onClearMarks, onGotoIn, onGotoOut,
     handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
     handleQueueClearAll, handleImportTranscript, handleGenerateTranscript,
@@ -3329,9 +3372,10 @@ export default function App() {
     return c;
   }), [
     url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
-    captionsOn, logsOpen, clipQueue.length, queueRunning, activeTranscript,
+    captionsOn, playbackRate, logsOpen, clipQueue.length, queueRunning, activeTranscript,
     exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
     handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds, shuttleStep,
+    handlePlaybackRateStep, handlePlaybackRateChange,
     onStep, onSeek, onMarkIn, onMarkOut, onClearMarks, onGotoIn, onGotoOut,
     handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
     handleQueueClearAll, handleGenerateTranscript, handleDownloadCaptions, handleImportTranscript,
@@ -3923,6 +3967,8 @@ export default function App() {
               onCancelPlaybackPrep={handleStop}
               /* Nonzero while J/L shuttling — renders the "◀◀ 4×" HUD badge. */
               shuttleRate={shuttleRate}
+              /* Flashed briefly when the persistent playback speed changes. */
+              playbackRateHud={rateHud}
               useWebCodecs={localPlayer === "mediabunny" && !webCodecsFallbackForImport}
               onMediaError={(msg) => {
                 // MediaBunnyPlayer prefixes codec-incompatibility errors
@@ -4008,6 +4054,7 @@ export default function App() {
               canSnapshot={status === "loaded" || status === "exporting" || status === "success"}
               volume={volume}
               muted={muted}
+              playbackRate={playbackRate}
               onPlayToggle={onPlayToggle}
               onStep={onStep}
               onMarkIn={onMarkIn}
@@ -4017,6 +4064,7 @@ export default function App() {
               onSnapshot={handleSnapshot}
               onVolumeChange={handleVolumeChange}
               onMutedChange={handleMutedChange}
+              onPlaybackRateChange={handlePlaybackRateChange}
             />
             <Timeline
               status={status}

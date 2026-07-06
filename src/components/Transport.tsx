@@ -3,6 +3,7 @@ import {
   IconMarkIn, IconMarkOut, IconClearMarks, IconCaptions, IconCamera,
 } from "./Icons";
 import { VolumeControl } from "./VolumeControl";
+import { SpeedControl } from "./SpeedControl";
 import type { AppStatus } from "../types";
 
 type Props = {
@@ -15,6 +16,7 @@ type Props = {
   canSnapshot: boolean;
   volume: number;
   muted: boolean;
+  playbackRate: number;
   onPlayToggle: () => void;
   onStep: (frames: number) => void;
   onMarkIn: () => void;
@@ -24,15 +26,16 @@ type Props = {
   onSnapshot: () => void;
   onVolumeChange: (v: number) => void;
   onMutedChange: (m: boolean) => void;
+  onPlaybackRateChange: (r: number) => void;
 };
 
 export function Transport({
   status, isPlaying,
   playheadTc, durationTc,
   captionsOn, snapshotBusy, canSnapshot,
-  volume, muted,
+  volume, muted, playbackRate,
   onPlayToggle, onStep, onMarkIn, onMarkOut, onClearMarks, onToggleCaptions, onSnapshot,
-  onVolumeChange, onMutedChange,
+  onVolumeChange, onMutedChange, onPlaybackRateChange,
 }: Props) {
   const dim = status === "empty" || status === "fetching" || status === "error";
   return (
@@ -84,6 +87,7 @@ export function Transport({
           <IconCamera size={15} />
         </button>
         <div className="cp-icon-divider" />
+        <SpeedControl rate={playbackRate} onRateChange={onPlaybackRateChange} />
         <VolumeControl
           volume={volume}
           muted={muted}

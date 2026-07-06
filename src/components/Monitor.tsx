@@ -8,6 +8,7 @@ import { LocalMediaPlayer } from "./LocalMediaPlayer";
 import { MediaBunnyPlayer } from "./MediaBunnyPlayer";
 import { MSEStreamPlayer } from "./MSEStreamPlayer";
 import type { PlayerHandle } from "./player-handle";
+import { formatPlaybackRate } from "../lib/playback-rate";
 import type { AppStatus, Metadata, SourceKind } from "../types";
 
 export type AspectId = "off" | "16:9" | "9:16" | "1:1" | "2.39";
@@ -90,6 +91,9 @@ type Props = {
   tcOverlay?: string | null;
   /** Signed J-K-L shuttle rate (e.g. -4 = rewind 4×); 0/undefined hides the badge. */
   shuttleRate?: number;
+  /** Transient playback-speed HUD — the just-chosen rate (e.g. 1.5), flashed
+   *  briefly by App when the speed changes; null hides it. */
+  playbackRateHud?: number | null;
   /** Review drawing annotation to render over the frame (draft or saved). */
   annotation?: AnnotationStrokes | null;
   /** True while the Review panel is in draw mode (overlay captures input). */
@@ -144,7 +148,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     toast, onToastDismiss,
     onPlayerTimeUpdate, onPlayerStateChange, onPlayerReady, onSurfaceClick,
     transcriptPath, transcriptReloadToken, currentSec, captionsOn, captionStyle, tcOverlay,
-    shuttleRate,
+    shuttleRate, playbackRateHud,
     annotation, annotationDrawing, annotationOpacity, onAnnotationChange, onAnnotationDismiss,
   } = props;
 
@@ -335,6 +339,16 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
         {typeof shuttleRate === "number" && shuttleRate !== 0 && (
           <div className="cp-shuttle-badge" aria-hidden>
             {shuttleRate < 0 ? "◀◀" : "▶▶"} {Math.abs(shuttleRate)}×
+          </div>
+        )}
+
+        {/* Playback-speed HUD — same pill, flashed briefly when the user's
+            persistent rate changes (speed picker / [ ] \ shortcuts). The
+            shuttle badge wins while a shuttle is engaged: the shuttle rate is
+            what's actually playing at that moment. */}
+        {typeof playbackRateHud === "number" && !shuttleRate && (
+          <div className="cp-shuttle-badge" aria-hidden>
+            {formatPlaybackRate(playbackRateHud)}
           </div>
         )}
 

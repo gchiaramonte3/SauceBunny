@@ -12,6 +12,7 @@
  */
 
 import type { Dispatch, SetStateAction } from "react";
+import { formatPlaybackRate } from "./playback-rate";
 
 export type CommandGroup =
   | "Source"
@@ -70,6 +71,8 @@ export type CommandDeps = {
   /** Frames-per-second of the active source — for the 1-second step commands. */
   fps: number;
   captionsOn: boolean;
+  /** Current persistent playback speed (0.5–2×) — shown in the rate commands. */
+  playbackRate: number;
   logsOpen: boolean;
   clipQueueLength: number;
   queueRunning: boolean;
@@ -87,6 +90,10 @@ export type CommandDeps = {
   seekBySeconds: (s: number) => void;
   /** J/L NLE transport: shuttle-ladder step, or a frame nudge while K is held. */
   shuttleStep: (direction: 1 | -1) => void;
+  /** Persistent playback speed: one step up/down the 0.5–2× list. */
+  onPlaybackRateStep: (direction: 1 | -1) => void;
+  /** Persistent playback speed: back to 1×. */
+  onPlaybackRateReset: () => void;
   onStep: (dir: number) => void;
   onSeek: (frame: number) => void;
   onMarkIn: () => void;
@@ -158,6 +165,22 @@ export function buildCommands(d: CommandDeps): Command[] {
       hotkey: "End",
       disabled: !d.hasSource,
       run: () => d.onSeek(Math.max(0, d.durationFrames - 1)) },
+    // Persistent playback speed — distinct from the J-K-L shuttle (a transient
+    // override). Applies to the <video>-backed players; MediaBunny/WebCodecs
+    // local playback ignores it by design (see PlayerHandle.setPlaybackRate).
+    { id: "play.rateUp",   label: "Increase playback speed", group: "Playback",
+      hotkey: "]", description: `Now ${formatPlaybackRate(d.playbackRate)} — steps up the 0.5–2× list`,
+      keywords: ["rate", "faster", "2x"],
+      run: () => d.onPlaybackRateStep(1) },
+    { id: "play.rateDown", label: "Decrease playback speed", group: "Playback",
+      hotkey: "[", description: `Now ${formatPlaybackRate(d.playbackRate)} — steps down the 0.5–2× list`,
+      keywords: ["rate", "slower", "0.5x"],
+      run: () => d.onPlaybackRateStep(-1) },
+    { id: "play.rateReset", label: "Reset playback speed", group: "Playback",
+      hotkey: "\\", description: "Back to 1×",
+      keywords: ["rate", "normal", "1x"],
+      disabled: d.playbackRate === 1,
+      run: () => d.onPlaybackRateReset() },
     // ── Marks ────────────────────────────────────────────────────
     { id: "mark.in",   label: "Mark in",  group: "Marks", hotkey: "I",
       disabled: !d.hasSource, run: () => d.onMarkIn() },
