@@ -16,10 +16,12 @@ export type KeyActionId =
   | "play.toggle" | "play.back5" | "play.fwd5"
   | "play.frameBack" | "play.frameFwd" | "play.secondBack" | "play.secondFwd"
   | "play.toStart" | "play.toEnd"
+  | "play.rateDown" | "play.rateUp" | "play.rateReset"
   | "mark.in" | "mark.out" | "mark.clear" | "mark.gotoIn" | "mark.gotoOut"
   | "review.rangeIn" | "review.rangeOut"
   | "src.fetch" | "export.clip" | "queue.add" | "queue.toggle"
-  | "view.logs" | "app.settings" | "app.palette";
+  | "view.logs" | "app.settings" | "app.palette" | "app.shortcuts"
+  | "edit.undo" | "edit.redo";
 
 export type KeyActionGroup = "Transport" | "Marking" | "Source & export" | "View" | "App";
 
@@ -51,6 +53,12 @@ export const KEY_ACTIONS: KeyAction[] = [
   { id: "play.secondFwd",  label: "Step 1 second forward", group: "Transport", defaults: ["shift+right", "shift+."],global: false },
   { id: "play.toStart",    label: "Jump to start",         group: "Transport", defaults: ["home"],                  global: false },
   { id: "play.toEnd",      label: "Jump to end",           group: "Transport", defaults: ["end"],                   global: false },
+  // Persistent playback speed (Transport speed picker) — distinct from the
+  // J-K-L shuttle, which is a transient override. mpv-style [ / ] steps, \
+  // resets. Bare keys, so they're free (only mod+\ was taken, by view.logs).
+  { id: "play.rateDown",   label: "Decrease playback speed", group: "Transport", defaults: ["["],                   global: false },
+  { id: "play.rateUp",     label: "Increase playback speed", group: "Transport", defaults: ["]"],                   global: false },
+  { id: "play.rateReset",  label: "Reset playback speed",    group: "Transport", defaults: ["\\"],                  global: false },
   { id: "mark.in",         label: "Mark in",               group: "Marking",   defaults: ["i"],                     global: false },
   { id: "mark.out",        label: "Mark out",              group: "Marking",   defaults: ["o"],                     global: false },
   { id: "mark.clear",      label: "Clear marks",           group: "Marking",   defaults: ["g"],                     global: false },
@@ -68,6 +76,18 @@ export const KEY_ACTIONS: KeyAction[] = [
   { id: "view.logs",       label: "Toggle pipeline log",   group: "View",      defaults: ["mod+\\"],                global: true },
   { id: "app.settings",    label: "Open / close settings", group: "App",       defaults: ["mod+,"],                 global: true },
   { id: "app.palette",     label: "Command palette",       group: "App",       defaults: ["mod+k"],                 global: true },
+  // ⌘/ was free (only mod+\ and the bare [ ] \ row are taken near it).
+  { id: "app.shortcuts",   label: "Keyboard shortcuts",    group: "App",       defaults: ["mod+/"],                 global: true },
+  // Scoped undo/redo (lib/undo.ts): marks, the user's own review ops, and the
+  // in-composer annotation draft. Deliberately NOT global: in a text field the
+  // action is skipped and nothing is preventDefault-ed, so the keystroke falls
+  // through to the native Edit ▸ Undo menu item (PredefinedMenuItem::undo in
+  // src-tauri/src/lib.rs) and the field's own undo manager keeps working.
+  // Outside fields, the DOM sees the keydown FIRST and our preventDefault
+  // suppresses the menu — same mechanism that lets mod+, / mod+k / mod+\ win
+  // over their identical menu accelerators today.
+  { id: "edit.undo",       label: "Undo",                  group: "App",       defaults: ["mod+z"],                 global: false },
+  { id: "edit.redo",       label: "Redo",                  group: "App",       defaults: ["mod+shift+z"],           global: false },
 ];
 
 export const KEY_ACTION_BY_ID: Record<KeyActionId, KeyAction> =
@@ -205,4 +225,49 @@ export function formatCombo(combo: string): string {
 /** Display all resolved bindings for an action, e.g. "Space / K" or "—" if unbound. */
 export function formatBindings(combos: string[]): string {
   return combos.length ? combos.map(formatCombo).join(" / ") : "—";
+}
+
+// ── Shortcut cheat-sheet (⌘/) ────────────────────────────────────────────────
+
+/**
+ * Keyboard interactions that live OUTSIDE the rebindable registry — hand-coded
+ * listeners with their own scope gates. The cheat-sheet lists them in a
+ * separate "Contextual" group so the user learns them without implying they
+ * can be re-bound. Keep this in sync when adding a hardcoded keydown listener:
+ *  - 0–9 / timecode HUD: App.tsx keyboard handler
+ *  - K-held frame nudge: App.tsx (kHeldRef) + lib/shuttle.ts
+ *  - ⌘F, ⌘G/⇧⌘G: TranscriptViewer.tsx window listeners (tab-visible gated)
+ *  - ↩ in the URL bar: Toolbar.tsx input onKeyDown
+ */
+export type ContextualShortcut = { keys: string; label: string; where: string };
+
+export const CONTEXTUAL_SHORTCUTS: ContextualShortcut[] = [
+  { keys: "0–9",       label: "Go to timecode — type digits, ↩ snaps, Esc cancels", where: "Player" },
+  { keys: "K held + J / L", label: "Nudge one frame back / forward",                where: "Player" },
+  { keys: "⌘F",        label: "Find in transcript",                                 where: "Transcript tab" },
+  { keys: "⌘G / ⇧⌘G",  label: "Next / previous transcript search match",            where: "Transcript tab" },
+  { keys: "↩",         label: "Fetch the typed URL",                                where: "URL bar" },
+  { keys: "Esc",       label: "Close the front-most dialog or popover",             where: "Anywhere" },
+];
+
+export type ShortcutSheetRow = { label: string; keys: string; note?: string };
+export type ShortcutSheetGroup = { title: string; rows: ShortcutSheetRow[] };
+
+/**
+ * Rows for the ⌘/ cheat-sheet: every registry action with its RESOLVED
+ * bindings (user overrides included, so rebinds show live), grouped in
+ * KEY_ACTIONS order, plus the trailing "Contextual" group above.
+ */
+export function shortcutSheetGroups(overrides: KeybindingOverrides): ShortcutSheetGroup[] {
+  const groups: ShortcutSheetGroup[] = [];
+  for (const a of KEY_ACTIONS) {
+    let g = groups.find((x) => x.title === a.group);
+    if (!g) { g = { title: a.group, rows: [] }; groups.push(g); }
+    g.rows.push({ label: a.label, keys: formatBindings(bindingsFor(a.id, overrides)) });
+  }
+  groups.push({
+    title: "Contextual",
+    rows: CONTEXTUAL_SHORTCUTS.map((c) => ({ label: c.label, keys: c.keys, note: c.where })),
+  });
+  return groups;
 }

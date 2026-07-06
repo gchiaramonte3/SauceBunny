@@ -100,7 +100,17 @@ export function LogsPanel({
 
   return (
     <div className={"cp-logs " + (open ? "open" : "collapsed")}>
-      <div className="cp-logs-header" onClick={onToggle}>
+      <div
+        className="cp-logs-header"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        aria-label="Pipeline log"
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); }
+        }}
+      >
         <IconChevronDown size={11} className="chev" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }} />
         <span className="title">Pipeline</span>
         <span className={"status-pill " + pill.cls}>{pill.label}</span>

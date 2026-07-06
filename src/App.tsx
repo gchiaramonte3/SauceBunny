@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -32,12 +32,21 @@ import { usePanelBus } from "./hooks/use-panel-bus";
 import { useWebPlayback } from "./hooks/use-web-playback";
 import { QueueDrawer } from "./components/QueueDrawer";
 import { CommandPalette } from "./components/CommandPalette";
+import { ShortcutSheet } from "./components/ShortcutSheet";
+import { DropTarget } from "./components/DropTarget";
+import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS, TRANSCRIPT_EXTENSIONS } from "./lib/import-extensions";
 import {
   recordTranscript,
   findForSource,
   touchEntry,
+  getHistory as getTranscriptHistory,
   type TranscriptHistoryEntry,
 } from "./lib/transcript-history";
+import {
+  deriveOnboardingSteps, onboardingComplete,
+  loadOnboardingDismissed, saveOnboardingDismissed,
+  type OnboardingStepId,
+} from "./lib/onboarding";
 import type { Command } from "./lib/commands";
 import { buildCommands } from "./lib/commands";
 import {
@@ -49,12 +58,16 @@ import { loadActiveTab } from "./lib/tab-state";
 import type { SessionMsg } from "./bindings/SessionMsg";
 import type { SessionState as CoSessionState } from "./bindings/SessionState";
 import { nextShuttleRate } from "./lib/shuttle";
+import { sanitizePlaybackRate, stepPlaybackRate } from "./lib/playback-rate";
 import { parseSrt } from "./lib/srt";
 import { speakerLanes } from "./lib/speaker-stats";
 import { speakerColor } from "./components/transcript/helpers";
 import { MediaInfoModal } from "./components/MediaInfoModal";
 import { loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes, type ReviewDoc, type ReviewOp } from "./lib/review";
+import { loadChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
+import { appUndo } from "./lib/undo";
 import { loadJson, saveJson } from "./lib/storage";
+import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
 import {
   durationToTc, framesToTc, secondsToTc,
   tcToFrames, tcToSeconds,
@@ -443,6 +456,23 @@ export default function App() {
   const [inFrames, setInFrames] = useState<number | null>(null);
   const [outFrames, setOutFrames] = useState<number | null>(null);
 
+  // Undoable mark mutation — records the before/after pair on the app stack
+  // (lib/undo.ts). Used by the I/O/G handlers and the queue-add mark clear.
+  // TC-field edits are deliberately NOT recorded: the field is a text input
+  // with its own native undo, and per-keystroke mark entries would flood the
+  // stack. Values are absolute frames, so replay is order-independent.
+  const pushMarksUndo = useCallback((
+    label: string,
+    prevIn: number | null, prevOut: number | null,
+    nextIn: number | null, nextOut: number | null,
+  ) => {
+    appUndo.push({
+      label,
+      undo: () => { setInFrames(prevIn); setOutFrames(prevOut); },
+      redo: () => { setInFrames(nextIn); setOutFrames(nextOut); },
+    });
+  }, []);
+
   const [exportOpts, setExportOpts] = useState<ExportOpts>(() => ({
     inTc: "",
     outTc: "",
@@ -623,11 +653,24 @@ export default function App() {
   const [recents, setRecents] = useState<RecentClip[]>(() => loadJson<RecentClip[]>(RECENTS_KEY, []));
   useEffect(() => saveJson(RECENTS_KEY, recents), [recents]);
 
+  // ====== Recent sources (URL-bar history + "Resume last session") ======
+  // Recorded only on SUCCESSFUL loads: web URLs when fetch_metadata resolves,
+  // local files when probe_local_file succeeds. Failed loads never land here.
+  const [recentSources, setRecentSources] = useState<RecentSource[]>(() => loadRecentSources());
+  useEffect(() => saveRecentSources(recentSources), [recentSources]);
+  const recordRecentSource = useCallback(
+    (entry: { kind: RecentSource["kind"]; value: string; title: string; durationSeconds?: number }) => {
+      setRecentSources((prev) => upsertRecent(prev, entry));
+    }, []);
+
   // ====== Aspect crop guide + captions display ======
   const [aspect, setAspect] = useState<AspectId>(() => loadJson<AspectId>(ASPECT_KEY, "off"));
   useEffect(() => saveJson(ASPECT_KEY, aspect), [aspect]);
   const [captionsOn, setCaptionsOn] = useState<boolean>(() => loadJson<boolean>("cp-captions-on", false));
   useEffect(() => saveJson("cp-captions-on", captionsOn), [captionsOn]);
+  // Timeline audio waveform lane (local files only) — ViewOptions toggle.
+  const [waveformVisible, setWaveformVisible] = useState<boolean>(() => loadJson<boolean>("saucebunny.waveformVisible", true));
+  useEffect(() => saveJson("saucebunny.waveformVisible", waveformVisible), [waveformVisible]);
 
   // ====== Volume (persisted) — drives both YT and local players ======
   // If a previous session left the volume at 0, bump it to 0.5 on launch so
@@ -654,8 +697,49 @@ export default function App() {
   }, [muted]);
   const handleMutedChange = useCallback((m: boolean) => setMutedState(m), []);
 
+  // ====== Playback speed (persisted) ======
+  // The user's "watch speed" (0.5–2×), distinct from the transient J-K-L
+  // shuttle: the players restore THIS rate whenever a shuttle exits. Applies
+  // to the <video>-backed players (local + MSE stream); MediaBunny/WebCodecs
+  // playback ignores it by design (see PlayerHandle.setPlaybackRate).
+  const [playbackRate, setPlaybackRate] = useState<number>(() =>
+    sanitizePlaybackRate(loadJson<number>("saucebunny.playbackRate", 1)));
+  useEffect(() => saveJson("saucebunny.playbackRate", playbackRate), [playbackRate]);
+  // Transient on-video HUD (the shuttle-badge pill) flashed when the rate
+  // changes — armed after the first run so the persisted rate doesn't flash
+  // on boot. The same effect pushes the rate to the live player; the
+  // player-ready path re-applies it when a player (re)mounts.
+  const [rateHud, setRateHud] = useState<number | null>(null);
+  const rateHudTimerRef = useRef(0);
+  const rateHudArmedRef = useRef(false);
+  useEffect(() => {
+    try { playerRef.current?.setPlaybackRate(playbackRate); } catch { /* ignore */ }
+    if (!rateHudArmedRef.current) { rateHudArmedRef.current = true; return; }
+    setRateHud(playbackRate);
+    if (rateHudTimerRef.current) window.clearTimeout(rateHudTimerRef.current);
+    rateHudTimerRef.current = window.setTimeout(() => {
+      rateHudTimerRef.current = 0;
+      setRateHud(null);
+    }, 1500);
+  }, [playbackRate]);
+  useEffect(() => () => {
+    if (rateHudTimerRef.current) window.clearTimeout(rateHudTimerRef.current);
+  }, []);
+  const handlePlaybackRateChange = useCallback(
+    (r: number) => setPlaybackRate(sanitizePlaybackRate(r)), []);
+  const handlePlaybackRateStep = useCallback(
+    (dir: 1 | -1) => setPlaybackRate((r) => stepPlaybackRate(r, dir)), []);
+
   // ====== Command palette (⌘K) ======
   const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // ====== Shortcut cheat-sheet (⌘/) ======
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  // ====== First-run checklist (Monitor empty state) ======
+  // Step completion derives from existing signals; only the manual
+  // dismissal is persisted (saucebunny.onboarding).
+  const [onboardingDismissed, setOnboardingDismissed] = useState<boolean>(() => loadOnboardingDismissed());
 
   // ====== Settings modal ======
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1179,12 +1263,14 @@ export default function App() {
     webOnPlayerReady();
     // Player is up → drop the resolving/buffering overlay (r62).
     setPlayerReady(true);
-    // Apply persisted volume + mute as soon as a player becomes ready.
+    // Apply persisted volume + mute + playback speed as soon as a player
+    // becomes ready (MediaBunny ignores the rate — see PlayerHandle).
     const p = playerRef.current;
     if (p) {
       try {
         p.setVolume(volume);
         p.setMuted(muted);
+        p.setPlaybackRate(playbackRate);
       } catch { /* ignore */ }
     }
     // Fill in the duration immediately from whichever player just loaded so
@@ -1198,7 +1284,7 @@ export default function App() {
         return { ...prev, duration: dur };
       });
     }
-  }, [volume, muted, webOnPlayerReady]);
+  }, [volume, muted, playbackRate, webOnPlayerReady]);
 
   // ====== Actions ======
   /**
@@ -1400,6 +1486,14 @@ export default function App() {
       });
       if (sourceSeqRef.current !== seq) return; // user already moved on
       setMetadata(m);
+      // Successful load confirmed → record in recent sources. Title comes
+      // from the metadata this fetch already returned (no second request).
+      recordRecentSource({
+        kind: "url",
+        value: full,
+        title: m.title,
+        durationSeconds: m.duration ?? undefined,
+      });
       // Queue items added during the optimistic-stub window captured
       // "Loading…" as their title — re-stamp them with the real title/
       // thumbnail now that metadata has hydrated (recents would otherwise
@@ -1444,7 +1538,7 @@ export default function App() {
     } finally {
       if (sourceSeqRef.current === seq) setMetadataLoading(false);
     }
-  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, loadWebPlayback]);
+  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, loadWebPlayback, recordRecentSource]);
 
   // Re-run the current fetch after the user picks a browser in the YouTube
   // auth modal. By the time this fires, `defaults.ytCookiesBrowser` (and thus
@@ -1748,7 +1842,11 @@ export default function App() {
   // Load a local file by absolute path — the import core, shared by the
   // file-picker import and the Review version switcher (which loads a chosen
   // version's file straight into the existing player; A/B toggle compare).
-  const loadLocalPath = useCallback(async (picked: string) => {
+  /** Import a local file. Resolves to null on success (or a superseded
+   *  load), or the formatted error message on failure — callers that need
+   *  to react to a failed load (e.g. stale recent-source pruning) inspect
+   *  the message; the error UI itself is fully handled in here. */
+  const loadLocalPath = useCallback(async (picked: string): Promise<string | null> => {
     try {
       resetForNewSource();
       const seq = ++sourceSeqRef.current;
@@ -1756,7 +1854,7 @@ export default function App() {
       appendLog("info", "import", `Probing local file: ${picked}`);
 
       const lf = await invoke<LocalFileMeta>("probe_local_file", { path: picked });
-      if (sourceSeqRef.current !== seq) return;
+      if (sourceSeqRef.current !== seq) return null;
 
       // Adapt the local file shape to the existing Metadata so the rest of
       // the UI (sidebar, monitor, settings) can stay agnostic. webpage_url
@@ -1852,6 +1950,13 @@ export default function App() {
       // the next source.
       void tryAutoLoadTranscript({ sourcePath: picked }, seq);
       setStatus("loaded");
+      // Probe succeeded → the import is a successful load; record it.
+      recordRecentSource({
+        kind: "file",
+        value: lf.path,
+        title: lf.filename,
+        durationSeconds: lf.duration ?? undefined,
+      });
 
       // ─── Playback prep ─────────────────────────────────────────────
       // WKWebView often can't decode arbitrary MP4s (HEVC, High-10, missing
@@ -1892,7 +1997,7 @@ export default function App() {
       if (videoNative && audioNative && containerOk) {
         setLocalPlayer("native");
         appendLog("ok", "import", "Codecs natively supported — playing original file (no transcode).");
-        return;
+        return null;
       }
 
       // Mediabunny-first (r93): probe whether WebCodecs — plus our registered
@@ -1902,12 +2007,12 @@ export default function App() {
       // WKWebView decodes AV1 video via WebCodecs, and libopus covers the
       // Opus audio that WKWebView's (absent) AudioDecoder can't.
       const canMb = await canMediabunnyDecode(lf.path);
-      if (sourceSeqRef.current !== seq) return;
+      if (sourceSeqRef.current !== seq) return null;
       if (canMb) {
         setLocalPlayer("mediabunny");
         appendLog("ok", "import",
           `In-app decode via mediabunny (${vc || "?"} / ${ac || "?"}) — no transcode.`);
-        return;
+        return null;
       }
 
       // Mediabunny can't decode this file here (e.g. a codec WebCodecs lacks
@@ -1922,13 +2027,15 @@ export default function App() {
       appendLog("info", "import",
         `Transcoding for playback: ${reasonParts.join(", ")}.`);
       await runPlaybackPrep(lf.path, lf.has_video, lf.duration, seq);
+      return null;
     } catch (err) {
       const msg = formatError(err);
       setErrorDetail(msg);
       appendLog("err", "import", msg);
       setStatus("error");
+      return msg;
     }
-  }, [appendLog, defaults.folder, defaults.useWebCodecsDecoder, resetForNewSource, runPlaybackPrep]);
+  }, [appendLog, defaults.folder, defaults.useWebCodecsDecoder, resetForNewSource, runPlaybackPrep, recordRecentSource]);
 
   const handleImportFile = useCallback(async () => {
     const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
@@ -1936,8 +2043,8 @@ export default function App() {
         multiple: false,
         directory: false,
         filters: [
-          { name: "Video", extensions: ["mp4", "mov", "m4v", "mkv", "webm", "avi"] },
-          { name: "Audio", extensions: ["mp3", "m4a", "wav", "flac", "ogg", "aac"] },
+          { name: "Video", extensions: VIDEO_EXTENSIONS },
+          { name: "Audio", extensions: AUDIO_EXTENSIONS },
           { name: "All", extensions: ["*"] },
         ],
       })
@@ -1952,6 +2059,38 @@ export default function App() {
     if (/^https?:\/\//i.test(path)) { setUrl(path); void handleFetch(path); }
     else void loadLocalPath(path);
   }, [handleFetch, loadLocalPath]);
+
+  // Open a recent source through the SAME handlers as paste/import — no
+  // parallel loading path. Staleness choice for file recents: auto-remove on
+  // confirmed not-found. probe_local_file existence-checks the path before
+  // touching ffmpeg and errors with "File not found: <path>" (an AppError
+  // whose message is the only signal it exposes), so we match on that message;
+  // any other failure (codec, ffmpeg, permissions) keeps the entry since the
+  // file may still be perfectly loadable later. The normal error UI (Monitor
+  // overlay + pipeline log) still fires from loadLocalPath itself.
+  const handleOpenRecentSource = useCallback((entry: RecentSource) => {
+    if (entry.kind === "url") {
+      setUrl(entry.value);
+      void handleFetch(entry.value);
+      return;
+    }
+    void (async () => {
+      const errMsg = await loadLocalPath(entry.value);
+      if (errMsg && /file not found/i.test(errMsg)) {
+        setRecentSources((prev) => removeRecent(prev, entry.value));
+        pushNotification("info", "Removed from recents",
+          `"${entry.title}" no longer exists at its saved location.`);
+      }
+    })();
+  }, [handleFetch, loadLocalPath, pushNotification]);
+
+  const handleRemoveRecentSource = useCallback((value: string) => {
+    setRecentSources((prev) => removeRecent(prev, value));
+  }, []);
+
+  const handleClearRecentSources = useCallback(() => {
+    setRecentSources([]);
+  }, []);
 
   const handleStop = useCallback(async () => {
     const ids = [jobId, transcriptJobId, playbackPrepJobId].filter((x): x is string => !!x);
@@ -2042,11 +2181,14 @@ export default function App() {
       status: "queued",
     };
     setClipQueue((prev) => [...prev, item]);
+    // Queueing consumes the selection — record the clear so ⌘Z restores the
+    // marks (the queued item itself stays put; queue ops aren't undoable).
+    pushMarksUndo("clear marks", inFrames, outFrames, null, null);
     setInFrames(null);
     setOutFrames(null);
     setQueueOpen(true);
     appendLog("info", "queue", `Queued ${item.filename} (${framesToTc(item.inFrames, fps)} → ${framesToTc(item.outFrames, fps)})`);
-  }, [sourceKind, localFilePath, metadata, inFrames, outFrames, fps, exportOpts.filename, exportOpts.format, exportOpts.reencode, exportOpts.captions, appendLog, pushNotification]);
+  }, [sourceKind, localFilePath, metadata, inFrames, outFrames, fps, exportOpts.filename, exportOpts.format, exportOpts.reencode, exportOpts.captions, appendLog, pushNotification, pushMarksUndo]);
 
   const handleQueueRemove = useCallback((id: string) => {
     setClipQueue((prev) => prev.filter((c) => c.id !== id));
@@ -2688,20 +2830,12 @@ export default function App() {
    * dropped the origin badge in r31 so that distinction isn't shown
    * anywhere user-facing anyway.
    *
-   * Triggered from the empty-state Import button AND the macOS File
-   * menu (r42), so route both through this single callback.
+   * Triggered from the empty-state Import button, the macOS File menu
+   * (r42), AND a dropped .srt/.vtt (DropTarget) — the path core is
+   * `loadTranscriptPath` so all three land in the same place.
    */
-  const handleImportTranscript = useCallback(async () => {
+  const loadTranscriptPath = useCallback(async (picked: string) => {
     try {
-      const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
-        m.open({
-          multiple: false,
-          directory: false,
-          filters: [{ name: "Transcript", extensions: ["srt", "vtt"] }],
-          title: "Import transcript",
-        })
-      );
-      if (typeof picked !== "string" || !picked) return;
       // Probe — read_text_file_capped errors clearly if the file is
       // missing / too large. We don't load the bytes here; the viewer
       // will read them itself on the path change.
@@ -2721,6 +2855,19 @@ export default function App() {
       pushNotification("error", "Couldn't open transcript", formatError(e));
     }
   }, [appendLog, pushNotification]);
+
+  const handleImportTranscript = useCallback(async () => {
+    const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
+      m.open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Transcript", extensions: TRANSCRIPT_EXTENSIONS }],
+        title: "Import transcript",
+      })
+    );
+    if (typeof picked !== "string" || !picked) return;
+    await loadTranscriptPath(picked);
+  }, [loadTranscriptPath]);
 
   const handleLoadFromHistory = useCallback(async (entry: TranscriptHistoryEntry) => {
     try {
@@ -3040,29 +3187,30 @@ export default function App() {
   const onMarkIn = useCallback(() => {
     const r = Math.max(1, Math.round(fps));
     // If an out mark already exists and the playhead is past it, bump out a frame.
-    setInFrames(() => {
-      if (outFrames != null && playheadFrames >= outFrames) {
-        return Math.max(0, outFrames - r);
-      }
-      return playheadFrames;
-    });
-  }, [playheadFrames, outFrames, fps]);
+    const next = (outFrames != null && playheadFrames >= outFrames)
+      ? Math.max(0, outFrames - r)
+      : playheadFrames;
+    if (next !== inFrames) pushMarksUndo("mark in", inFrames, outFrames, next, outFrames);
+    setInFrames(next);
+  }, [playheadFrames, inFrames, outFrames, fps, pushMarksUndo]);
 
   const onMarkOut = useCallback(() => {
     const r = Math.max(1, Math.round(fps));
-    setOutFrames(() => {
-      if (inFrames != null && playheadFrames <= inFrames) {
-        return Math.min(Math.max(0, durationFrames - 1), inFrames + r);
-      }
-      return playheadFrames;
-    });
-  }, [playheadFrames, inFrames, fps, durationFrames]);
+    const next = (inFrames != null && playheadFrames <= inFrames)
+      ? Math.min(Math.max(0, durationFrames - 1), inFrames + r)
+      : playheadFrames;
+    if (next !== outFrames) pushMarksUndo("mark out", inFrames, outFrames, inFrames, next);
+    setOutFrames(next);
+  }, [playheadFrames, inFrames, outFrames, fps, durationFrames, pushMarksUndo]);
 
   // Clear literally clears — no selection at all.
   const onClearMarks = useCallback(() => {
+    if (inFrames != null || outFrames != null) {
+      pushMarksUndo("clear marks", inFrames, outFrames, null, null);
+    }
     setInFrames(null);
     setOutFrames(null);
-  }, []);
+  }, [inFrames, outFrames, pushMarksUndo]);
 
   const onGotoIn = useCallback(() => {
     if (inFrames == null) return;
@@ -3088,6 +3236,34 @@ export default function App() {
     playerRef.current?.seekTo?.(clamped / r);
   }, [durationFrames, fps, exitShuttle]);
 
+  // ====== Undo / redo (scoped — see lib/undo.ts) ======
+  // One app-wide stack: mark entries (pushed above) and the user's own review
+  // ops (pushed by ReviewPanel) interleave chronologically. The annotation
+  // DRAFT keeps a separate lightweight in-composer history (registered into
+  // this ref where the draft state lives, further down): draft snapshots die
+  // with the draft — posted, cleared, or draw-mode exit — so global entries
+  // for them would rot into confusing zombies. While drawing, ⌘Z steps the
+  // draft first and falls through to the app stack when it's exhausted.
+  const draftUndoRef = useRef<{ undo: () => boolean; redo: () => boolean } | null>(null);
+  // Transient HUD over the canvas — toast only, no bell entry, no sound
+  // (undo feedback is ephemeral confirmation, not a completion event).
+  const showUndoHud = useCallback((title: string) => {
+    setToast({ id: ++toastIdRef.current, kind: "success", title });
+  }, []);
+  const performUndo = useCallback(() => {
+    if (draftUndoRef.current?.undo()) return;
+    const label = appUndo.undo();
+    if (label) showUndoHud(`Undid: ${label}`);
+  }, [showUndoHud]);
+  const performRedo = useCallback(() => {
+    if (draftUndoRef.current?.redo()) return;
+    const label = appUndo.redo();
+    if (label) showUndoHud(`Redid: ${label}`);
+  }, [showUndoHud]);
+  // Live canUndo/canRedo + next labels for the palette (subscribe-based so a
+  // push from ReviewPanel re-renders the registry too).
+  const undoSnap = useSyncExternalStore(appUndo.subscribe, appUndo.getSnapshot);
+
   // ====== Keyboard ======
   // Review comment-range hotkeys (⇧I/⇧O) — ReviewPanel registers its handlers
   // here (the range state lives in the panel; App only forwards intent). The
@@ -3108,7 +3284,16 @@ export default function App() {
       e.preventDefault();
       switch (id) {
         case "app.palette":  setPaletteOpen((p) => !p); break;
+        case "app.shortcuts": setShortcutsOpen((p) => !p); break;
         case "app.settings": setSettingsOpen((p) => !p); break;
+        // ⌘Z / ⇧⌘Z — non-global on purpose: in a text field these cases never
+        // run (and nothing is preventDefault-ed), so the keystroke falls
+        // through to the native Edit ▸ Undo/Redo menu items and the field's
+        // own undo manager. Outside fields the DOM keydown arrives BEFORE the
+        // menu's key equivalent and runAction's preventDefault suppresses it —
+        // the same ordering the ⌘,/⌘K/⌘\ registry-vs-menu twins already rely on.
+        case "edit.undo": performUndo(); break;
+        case "edit.redo": performRedo(); break;
         case "src.fetch":    handleFetch(); break;
         case "view.logs":    setLogsOpen((p) => !p); break;
         case "queue.add":    handleAddToQueue(); break;
@@ -3149,6 +3334,10 @@ export default function App() {
         case "play.secondFwd":  onStep(Math.round(fps)); break;
         case "play.toStart": onSeek(0); break;
         case "play.toEnd":   onSeek(Math.max(0, durationFrames - 1)); break;
+        // Persistent playback speed ([ / ] / \) — steps the 0.5–2× list.
+        case "play.rateDown":  handlePlaybackRateStep(-1); break;
+        case "play.rateUp":    handlePlaybackRateStep(1); break;
+        case "play.rateReset": handlePlaybackRateChange(1); break;
       }
     }
 
@@ -3219,6 +3408,8 @@ export default function App() {
     comboToAction, handleFetch, handleExport, handleAddToQueue, status, fps, durationFrames, settingsOpen,
     onPlayToggle, shuttleStep, onMarkIn, onMarkOut, onClearMarks,
     onGotoIn, onGotoOut, onStep, onSeek,
+    handlePlaybackRateStep, handlePlaybackRateChange,
+    performUndo, performRedo,
   ]);
 
   // ── Native menubar event wiring ─────────────────────────────────
@@ -3301,16 +3492,22 @@ export default function App() {
   // when the array was inline, so memoization behaves identically.
   const commands: Command[] = useMemo(() => buildCommands({
     url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
-    captionsOn, logsOpen, clipQueueLength: clipQueue.length, queueRunning,
+    captionsOn, playbackRate, logsOpen, clipQueueLength: clipQueue.length, queueRunning,
     activeTranscriptPath: activeTranscript?.path ?? null,
     exportFolder: exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
     handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds, shuttleStep,
+    onPlaybackRateStep: handlePlaybackRateStep,
+    onPlaybackRateReset: () => handlePlaybackRateChange(1),
     onStep, onSeek, onMarkIn, onMarkOut, onClearMarks, onGotoIn, onGotoOut,
     handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
     handleQueueClearAll, handleImportTranscript, handleGenerateTranscript,
     handleDownloadCaptions, handleStop,
     setQueueOpen, setTranscriptArrivedTick, setCaptionsOn, setLogsOpen,
     setSettingsOpen, setPaletteOpen,
+    onShowShortcuts: () => setShortcutsOpen(true),
+    canUndo: undoSnap.canUndo, canRedo: undoSnap.canRedo,
+    undoLabel: undoSnap.undoLabel, redoLabel: undoSnap.redoLabel,
+    onUndo: performUndo, onRedo: performRedo,
     onProbeDiarizer: async () => {
       try {
         const ver = await invoke<string>("probe_diarizer");
@@ -3329,14 +3526,49 @@ export default function App() {
     return c;
   }), [
     url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
-    captionsOn, logsOpen, clipQueue.length, queueRunning, activeTranscript,
+    captionsOn, playbackRate, logsOpen, clipQueue.length, queueRunning, activeTranscript,
     exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
     handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds, shuttleStep,
+    handlePlaybackRateStep, handlePlaybackRateChange,
     onStep, onSeek, onMarkIn, onMarkOut, onClearMarks, onGotoIn, onGotoOut,
     handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
     handleQueueClearAll, handleGenerateTranscript, handleDownloadCaptions, handleImportTranscript,
-    handleStop, keybindings,
+    handleStop, keybindings, undoSnap, performUndo, performRedo,
   ]);
+
+  // ====== First-run checklist derivation ======
+  // Null hides the card (dismissed, or every step done at least once). All
+  // three signals already persist elsewhere — recents, the folder setting,
+  // transcript history — so nothing here duplicates state.
+  // transcriptArrivedTick re-derives after a transcript lands mid-session.
+  const onboardingSteps = useMemo(() => {
+    if (onboardingDismissed) return null;
+    const steps = deriveOnboardingSteps({
+      recentsCount: recentSources.length,
+      exportFolder: exportOpts.folder ?? defaults.folder,
+      transcriptCount: getTranscriptHistory().length,
+    });
+    return onboardingComplete(steps) ? null : steps;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onboardingDismissed, recentSources.length, exportOpts.folder, defaults.folder, transcriptArrivedTick]);
+
+  // Route a pending checklist step to the surface that completes it.
+  const handleOnboardingStep = useCallback((id: OnboardingStepId) => {
+    if (id === "source") {
+      // Same focus lever the File-menu "Open URL…" item uses.
+      const el = document.querySelector<HTMLInputElement>(".cp-toolbar-url input");
+      el?.focus();
+      el?.select();
+    } else if (id === "folder") {
+      setSettingsInitialTab("general");
+      setSettingsOpen(true);
+    } else {
+      // Transcript tab: its empty state explains Generate (and gates on a
+      // source being loaded first). arrivedTick is the "show this tab" lever.
+      setQueueOpen(true);
+      setTranscriptArrivedTick((n) => n + 1);
+    }
+  }, []);
 
   // ====== Side-panel pop-out (r44.B + r52 extract) ======
   // Cross-window state-sync bridge lives in src/hooks/use-panel-bus.ts.
@@ -3350,6 +3582,10 @@ export default function App() {
   // offset put highlight and click-to-seek in different time domains.)
   const transcriptPlayhead = hasSource
     ? playheadFrames / Math.max(1, Math.round(fps))
+    : null;
+  // Source duration in seconds for the auto-chapters clamp (null = unknown).
+  const sourceDurationSec = durationFrames > 0
+    ? durationFrames / Math.max(1, Math.round(fps))
     : null;
 
   // Review comment markers for the monitor timeline — re-read whenever the
@@ -3379,6 +3615,12 @@ export default function App() {
   // file can't be pushed to peers, so hosting is gated to web sources.
   const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], error: null });
   const coSessionActive = coSession.role !== "off";
+  // Undo hygiene: undoing across sources is nonsense, and entries recorded
+  // solo must never replay into a co-review session (or vice versa — their
+  // closures route to different docs). Drop the whole stack on either
+  // boundary. The annotation-draft history is reset by the source-change
+  // effect below, which already clears the draft itself.
+  useEffect(() => { appUndo.clear(); }, [reviewSourceKey, coSession.role]);
   // The shared review doc while in a session (null = solo). The Review panel +
   // timeline markers read THIS instead of the local-by-sourceKey doc.
   const [sessionDoc, setSessionDoc] = useState<ReviewDoc | null>(null);
@@ -3609,16 +3851,62 @@ export default function App() {
       return { name: n, color: reviewerColorFor(n, me), isHost: i === 0, isSelf };
     });
   }, [coSession.role, coSession.peers]);
-  const [reviewAnnotations, setReviewAnnotations] = useState<{ id: string; time: number; strokes: AnnotationStrokes }[]>([]);
-  // Drawing-annotation state: draw mode + the live draft (attached to the next
-  // comment) + a saved annotation being viewed read-only over the frame.
+  const [reviewAnnotations, setReviewAnnotations] = useState<{ id: string; time: number; color: string; strokes: AnnotationStrokes }[]>([]);
+  // Drawing-annotation state: draw mode (+ the label tool inside it) + the
+  // live draft (attached to the next comment) + a saved annotation being
+  // viewed read-only over the frame (with its author's colour for labels).
   const [reviewDrawActive, setReviewDrawActive] = useState(false);
+  const [reviewLabelMode, setReviewLabelMode] = useState(false);
   const [reviewDraft, setReviewDraft] = useState<AnnotationStrokes | null>(null);
   const [annotationDisplay, setAnnotationDisplay] = useState<AnnotationStrokes | null>(null);
+  const [annotationDisplayColor, setAnnotationDisplayColor] = useState<string | null>(null);
+  // ── In-composer draft undo ─────────────────────────────────────────
+  // Snapshot history of the draft while drawing: each committed stroke/label
+  // (or a Clear) pushes the PREVIOUS draft, so ⌘Z steps items off one at a
+  // time; ⇧⌘Z walks back forward until a new stroke diverges. Drafts are
+  // immutable snapshots (the overlay always hands up a fresh object), so
+  // holding references is safe. History dies with the draft — see the
+  // draftUndoRef comment for why this isn't on the global stack.
+  const draftPastRef = useRef<(AnnotationStrokes | null)[]>([]);
+  const draftFutureRef = useRef<(AnnotationStrokes | null)[]>([]);
+  const reviewDraftRef = useRef(reviewDraft); reviewDraftRef.current = reviewDraft;
+  const clearDraftHistory = useCallback(() => {
+    draftPastRef.current = [];
+    draftFutureRef.current = [];
+  }, []);
+  const onReviewDraftChange = useCallback((a: AnnotationStrokes) => {
+    draftPastRef.current.push(reviewDraftRef.current);
+    if (draftPastRef.current.length > 50) draftPastRef.current.shift();
+    draftFutureRef.current = [];
+    setReviewDraft(a);
+  }, []);
+  // Register with the keyboard dispatch (plain render-time ref assignment,
+  // like sessionDocRef above): only while draw mode is live does ⌘Z route
+  // here, and an exhausted history falls through to the app stack.
+  draftUndoRef.current = reviewDrawActive
+    ? {
+        undo: () => {
+          const prev = draftPastRef.current.pop();
+          if (prev === undefined) return false;
+          draftFutureRef.current.push(reviewDraftRef.current);
+          setReviewDraft(prev);
+          return true;
+        },
+        redo: () => {
+          const next = draftFutureRef.current.pop();
+          if (next === undefined) return false;
+          draftPastRef.current.push(reviewDraftRef.current);
+          setReviewDraft(next);
+          return true;
+        },
+      }
+    : null;
   useEffect(() => {
     // New source → drop any in-flight drawing + viewed annotation.
     setReviewDrawActive(false);
+    setReviewLabelMode(false);
     setReviewDraft(null);
+    clearDraftHistory();
     setAnnotationDisplay(null);
     // In a co-review session the SHARED doc drives markers (see the effect
     // below) — don't let the local-by-sourceKey reload overwrite them.
@@ -3632,7 +3920,8 @@ export default function App() {
         id: m.id, time: m.time, timeEnd: m.timeEnd, resolved: m.resolved,
         color: reviewerColorFor(m.author, me), initials: initialsOf(m.author),
       })));
-      setReviewAnnotations(annotationsOf(d, d.activeVersionId));
+      setReviewAnnotations(annotationsOf(d, d.activeVersionId)
+        .map((a) => ({ id: a.id, time: a.time, strokes: a.strokes, color: reviewerColorFor(a.author, me) })));
       // Once a clip has notes, record it in history + link its fingerprint so
       // re-opening it (anywhere) reloads this review. Read metadata via the ref —
       // this closure outlives a setMetadata that keeps the same reviewSourceKey
@@ -3655,7 +3944,25 @@ export default function App() {
     };
     window.addEventListener(REVIEW_CHANGED_EVENT, onChanged);
     return () => window.removeEventListener(REVIEW_CHANGED_EVENT, onChanged);
-  }, [reviewSourceKey, coSessionActive]);
+  }, [reviewSourceKey, coSessionActive, clearDraftHistory]);
+
+  // Auto-chapter markers for the timeline — same pattern as the review
+  // markers above: keyed by the source, re-read on CHAPTERS_CHANGED_EVENT
+  // (fired by lib/chapters saves in this window; the popped-out panel's
+  // saves arrive as a panel:action:chaptersChanged → main re-dispatches the
+  // same event, so this one listener covers both windows).
+  const [chapterMarkers, setChapterMarkers] = useState<ChapterMarker[]>([]);
+  useEffect(() => {
+    if (!reviewSourceKey) { setChapterMarkers([]); return; }
+    const reload = () => setChapterMarkers(loadChapters(reviewSourceKey));
+    reload();
+    const onChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ sourceKey?: string }>).detail;
+      if (!detail || detail.sourceKey === reviewSourceKey) reload();
+    };
+    window.addEventListener(CHAPTERS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(CHAPTERS_CHANGED_EVENT, onChanged);
+  }, [reviewSourceKey]);
 
   // In a session, the shared doc drives the timeline markers + annotations
   // (so everyone's live comments show on every timeline).
@@ -3667,7 +3974,8 @@ export default function App() {
       id: m.id, time: m.time, timeEnd: m.timeEnd, resolved: m.resolved,
       color: reviewerColorFor(m.author, me), initials: initialsOf(m.author),
     })));
-    setReviewAnnotations(annotationsOf(sessionDoc, sessionDoc.activeVersionId));
+    setReviewAnnotations(annotationsOf(sessionDoc, sessionDoc.activeVersionId)
+      .map((a) => ({ id: a.id, time: a.time, strokes: a.strokes, color: reviewerColorFor(a.author, me) })));
   }, [sessionDoc]);
 
   // Ghost cursors for the timeline — peer playheads in frames, tinted per name.
@@ -3696,8 +4004,11 @@ export default function App() {
       transcriptArrivedTick,
       regenerateBusy: transcriptState === "running",
       canRegenerate: hasSource && !!selectedModel?.downloaded,
+      hasSource,
       aiModelId: defaults.llmSummarizationModel,
       aiStyle: { format: defaults.summaryFormat, length: defaults.summaryLength },
+      chapterSourceKey: reviewSourceKey,
+      durationSec: sourceDurationSec,
     },
     handlers: {
       onRemove: handleQueueRemove,
@@ -3718,7 +4029,13 @@ export default function App() {
       onLoadFromHistory: handleLoadFromHistory,
       onRegenerate: () => { void handleGenerateTranscript(); },
       onImportTranscript: () => { void handleImportTranscript(); },
+      onTranscriptEdited: () => setTranscriptArrivedTick((n) => n + 1),
       onOpenAiSettings: () => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); },
+      // The panel saved chapters to the SHARED localStorage; re-dispatch the
+      // same-window change event so the chapter-markers effect re-reads.
+      onChaptersChanged: () => {
+        try { window.dispatchEvent(new CustomEvent(CHAPTERS_CHANGED_EVENT)); } catch { /* non-DOM */ }
+      },
     },
   });
 
@@ -3732,12 +4049,13 @@ export default function App() {
   //      opacity ramping with distance so it appears then fades while scrubbing.
   const ANNOT_PROX_WINDOW = 0.6; // seconds on either side of the drawing's time
   let proxStrokes: AnnotationStrokes | null = null;
+  let proxColor: string | null = null;
   let proxOpacity = 0;
   if (!reviewDrawActive && !annotationDisplay && reviewAnnotations.length) {
     let bestDist = Infinity;
     for (const a of reviewAnnotations) {
       const d = Math.abs(a.time - playheadSec);
-      if (d < bestDist) { bestDist = d; proxStrokes = a.strokes; }
+      if (d < bestDist) { bestDist = d; proxStrokes = a.strokes; proxColor = a.color; }
     }
     proxOpacity = bestDist <= ANNOT_PROX_WINDOW ? Math.max(0, 1 - bestDist / ANNOT_PROX_WINDOW) : 0;
     if (proxOpacity <= 0) proxStrokes = null;
@@ -3746,6 +4064,10 @@ export default function App() {
   const annStrokes = annDrawing ? reviewDraft : (annotationDisplay ?? proxStrokes);
   const annOpacity = annDrawing || annotationDisplay ? 1 : proxOpacity;
   const annPinned = !annDrawing && !!annotationDisplay;
+  // Label-chip tint: the current reviewer's colour while drafting, else the
+  // shown annotation's author colour (undefined → the overlay's default).
+  const annLabelColor = (annDrawing ? loadReviewer().color
+    : annotationDisplay ? annotationDisplayColor : proxColor) ?? undefined;
   // Live HH:MM:SS:FF for the timecode-entry HUD (right-aligned digit fill).
   const tcOverlay = tcEntry == null ? null
     : (() => { const d = tcEntry.slice(-8).padStart(8, "0"); return `${d.slice(0, 2)}:${d.slice(2, 4)}:${d.slice(4, 6)}:${d.slice(6, 8)}`; })();
@@ -3792,6 +4114,10 @@ export default function App() {
         onFetch={handleFetch}
         onClear={handleClear}
         onImportFile={handleImportFile}
+        recentSources={recentSources}
+        onOpenRecent={handleOpenRecentSource}
+        onRemoveRecent={handleRemoveRecentSource}
+        onClearRecents={handleClearRecentSources}
         onToggleQueue={() => setQueueOpen((p) => !p)}
         queueCount={clipQueue.length}
         queueOpen={queueOpen}
@@ -3847,6 +4173,7 @@ export default function App() {
           whisperModelReady={whisperModelReady}
           whisperModelLabel={whisperModelLabel}
           onOpenTranscriptionSettings={handleOpenTranscriptionSettings}
+          onOpenGeneralSettings={() => { setSettingsInitialTab("general"); setSettingsOpen(true); }}
           detectSpeakers={defaults.detectSpeakers}
           setDetectSpeakers={(v) => setDefaults({ ...defaults, detectSpeakers: v })}
           expectedSpeakers={defaults.expectedSpeakers}
@@ -3864,6 +4191,8 @@ export default function App() {
               <ViewOptions
                 aspect={aspect}
                 onAspectChange={setAspect}
+                waveformVisible={waveformVisible}
+                onWaveformVisibleChange={setWaveformVisible}
                 onShowMediaInfo={sourceKind === "file" && localFilePath ? () => setMediaInfoOpen(true) : undefined}
               />
             </div>
@@ -3872,6 +4201,16 @@ export default function App() {
               status={status}
               metadata={metadata}
               errorDetail={errorDetail}
+              /* Empty-state "Resume last session" — one-click reopen of the
+                 most recent source via the same fetch/import handlers. */
+              resumeTitle={recentSources.length > 0 ? recentSources[0].title : null}
+              onResume={recentSources.length > 0 ? () => handleOpenRecentSource(recentSources[0]) : undefined}
+              /* First-run checklist card — null once done/dismissed. */
+              onboarding={onboardingSteps ? {
+                steps: onboardingSteps,
+                onStep: handleOnboardingStep,
+                onDismiss: () => { saveOnboardingDismissed(); setOnboardingDismissed(true); },
+              } : null}
               aspect={aspect}
               sourceKind={sourceKind}
               /* Prefer the ffmpeg-normalised playback copy when ready —
@@ -3923,6 +4262,8 @@ export default function App() {
               onCancelPlaybackPrep={handleStop}
               /* Nonzero while J/L shuttling — renders the "◀◀ 4×" HUD badge. */
               shuttleRate={shuttleRate}
+              /* Flashed briefly when the persistent playback speed changes. */
+              playbackRateHud={rateHud}
               useWebCodecs={localPlayer === "mediabunny" && !webCodecsFallbackForImport}
               onMediaError={(msg) => {
                 // MediaBunnyPlayer prefixes codec-incompatibility errors
@@ -3993,8 +4334,10 @@ export default function App() {
               annotation={annStrokes}
               annotationDrawing={annDrawing}
               annotationOpacity={annOpacity}
-              onAnnotationChange={setReviewDraft}
+              onAnnotationChange={onReviewDraftChange}
               onAnnotationDismiss={annPinned ? () => setAnnotationDisplay(null) : undefined}
+              annotationLabelMode={annDrawing && reviewLabelMode}
+              annotationLabelColor={annLabelColor}
             />
             <Transport
               status={status}
@@ -4008,6 +4351,7 @@ export default function App() {
               canSnapshot={status === "loaded" || status === "exporting" || status === "success"}
               volume={volume}
               muted={muted}
+              playbackRate={playbackRate}
               onPlayToggle={onPlayToggle}
               onStep={onStep}
               onMarkIn={onMarkIn}
@@ -4017,6 +4361,7 @@ export default function App() {
               onSnapshot={handleSnapshot}
               onVolumeChange={handleVolumeChange}
               onMutedChange={handleMutedChange}
+              onPlaybackRateChange={handlePlaybackRateChange}
             />
             <Timeline
               status={status}
@@ -4032,8 +4377,10 @@ export default function App() {
                 status: c.status,
               }))}
               commentMarkers={reviewMarkers}
+              chapterMarkers={chapterMarkers}
               reviewRangeDraft={reviewRangeDraft}
               filmstripPath={sourceKind === "file" ? (playbackPath ?? localFilePath) : null}
+              waveformOn={waveformVisible}
               speakerLanes={speakerLaneData}
               ghosts={coGhostMarkers}
               onSeek={onSeek}
@@ -4049,7 +4396,9 @@ export default function App() {
                     : inFrames == null && outFrames != null
                       ? "Mark in (I) to set the start of the selection."
                       : "Selection set — adjust with I / O or drag the playhead."
-              ) : ""}
+              ) : status === "empty" && bindingsFor("app.shortcuts", keybindings)[0]
+                ? `Press ${formatCombo(bindingsFor("app.shortcuts", keybindings)[0])} for keyboard shortcuts.`
+                : ""}
             </div>
           </div>
 
@@ -4121,19 +4470,39 @@ export default function App() {
           onImportTranscript={handleImportTranscript}
           sourceKind={sourceKind}
           onFixCaptionTiming={handleFixCaptionTiming}
+          transcriptHasSource={hasSource}
+          /* Inline cue editing rewrote the SRT in place — the arrived tick is
+             the existing "same path, new contents" signal (see the speaker-
+             lanes effect), so every reader of the file re-reads: the caption
+             overlay, AI summary, speaker lanes, and the viewer itself. */
+          onTranscriptEdited={() => setTranscriptArrivedTick((n) => n + 1)}
           aiModelId={defaults.llmSummarizationModel}
           aiStyle={{ format: defaults.summaryFormat, length: defaults.summaryLength }}
           onOpenAiSettings={() => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); }}
+          chapterSourceKey={reviewSourceKey}
+          chapterDurationSec={sourceDurationSec}
           reviewSourceKey={reviewSourceKey}
           reviewSourceTitle={metadata?.title ?? null}
           reviewDrawActive={reviewDrawActive}
           reviewDraft={reviewDraft}
           onToggleReviewDraw={() => {
             setAnnotationDisplay(null);
-            setReviewDrawActive((on) => { if (on) setReviewDraft(null); return !on; });
+            // Pen click while the label tool is active = switch back to the
+            // pen (stay in draw mode); otherwise toggle draw mode itself.
+            if (reviewDrawActive && reviewLabelMode) { setReviewLabelMode(false); return; }
+            setReviewLabelMode(false);
+            setReviewDrawActive((on) => { if (on) { setReviewDraft(null); clearDraftHistory(); } return !on; });
           }}
-          onReviewDraftConsumed={() => { setReviewDraft(null); setReviewDrawActive(false); }}
-          onShowAnnotation={(a) => { setReviewDrawActive(false); setReviewDraft(null); setAnnotationDisplay(a); }}
+          reviewLabelActive={reviewLabelMode}
+          onToggleReviewLabel={() => {
+            setAnnotationDisplay(null);
+            // Label click enters draw mode if needed; inside draw mode it
+            // toggles between the label tool and the pen.
+            if (!reviewDrawActive) { setReviewDrawActive(true); setReviewLabelMode(true); return; }
+            setReviewLabelMode((v) => !v);
+          }}
+          onReviewDraftConsumed={() => { setReviewDraft(null); clearDraftHistory(); setReviewDrawActive(false); setReviewLabelMode(false); }}
+          onShowAnnotation={(a, color) => { setReviewDrawActive(false); setReviewLabelMode(false); setReviewDraft(null); clearDraftHistory(); setAnnotationDisplay(a); setAnnotationDisplayColor(color ?? null); }}
           onOpenReviewSource={handleOpenReviewSource}
           onReviewRangeDraft={setReviewRangeDraft}
           onRegisterRangeHotkeys={registerReviewRangeKeys}
@@ -4194,6 +4563,43 @@ export default function App() {
         onClose={() => setPaletteOpen(false)}
         commands={commands}
       />
+
+      {/* ⌘/ shortcut cheat-sheet — same portal/scrim mechanics as the palette.
+          Reads the LIVE keybinding overrides so user rebinds show correctly. */}
+      <ShortcutSheet
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+        keybindings={keybindings}
+        onCustomize={() => { setSettingsInitialTab("commands"); setSettingsOpen(true); }}
+      />
+
+      {/* Full-window drag-and-drop import (Tauri webview drag events; see
+          DropTarget.tsx). Main window only — PanelApp never mounts this.
+          Media drops reuse loadLocalPath (same core as the Import button,
+          so recents/restore work automatically); transcript drops reuse
+          the Import-transcript core. */}
+      <DropTarget
+        busy={status === "fetching" || status === "exporting" || playbackPrepBusy || webPlayback.downloading}
+        hasSource={hasSource}
+        onImportMedia={(p) => { void loadLocalPath(p); }}
+        onImportTranscript={(p) => { void loadTranscriptPath(p); }}
+        notify={pushNotification}
+      />
+
+      {/* Single app-wide live region (visually hidden) — announces the
+          long-running pipeline milestones to screen readers. Driven by the
+          same state the Sidebar/LogsPanel render, so it can't drift. Kept
+          to ONE region: a change in this string is announced politely. */}
+      <div className="cp-a11y-status" role="status" aria-live="polite">
+        {status === "exporting" ? "Exporting…"
+          : transcriptState === "running"
+            ? (transcriptPhase?.startsWith("diarize") ? "Detecting speakers…" : "Transcribing…")
+            : status === "success" ? "Export complete"
+              : status === "error" ? "Operation failed — check the pipeline log"
+                : transcriptState === "error" ? "Transcription failed"
+                  : transcriptState === "done" ? "Transcript ready"
+                    : ""}
+      </div>
     </div>
   );
 }

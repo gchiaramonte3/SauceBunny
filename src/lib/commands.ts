@@ -12,6 +12,7 @@
  */
 
 import type { Dispatch, SetStateAction } from "react";
+import { formatPlaybackRate } from "./playback-rate";
 
 export type CommandGroup =
   | "Source"
@@ -70,6 +71,8 @@ export type CommandDeps = {
   /** Frames-per-second of the active source — for the 1-second step commands. */
   fps: number;
   captionsOn: boolean;
+  /** Current persistent playback speed (0.5–2×) — shown in the rate commands. */
+  playbackRate: number;
   logsOpen: boolean;
   clipQueueLength: number;
   queueRunning: boolean;
@@ -87,6 +90,10 @@ export type CommandDeps = {
   seekBySeconds: (s: number) => void;
   /** J/L NLE transport: shuttle-ladder step, or a frame nudge while K is held. */
   shuttleStep: (direction: 1 | -1) => void;
+  /** Persistent playback speed: one step up/down the 0.5–2× list. */
+  onPlaybackRateStep: (direction: 1 | -1) => void;
+  /** Persistent playback speed: back to 1×. */
+  onPlaybackRateReset: () => void;
   onStep: (dir: number) => void;
   onSeek: (frame: number) => void;
   onMarkIn: () => void;
@@ -104,6 +111,16 @@ export type CommandDeps = {
   handleDownloadCaptions: () => void;
   handleStop: () => void;
   onProbeDiarizer: () => void;
+  /** Opens the ⌘/ shortcut cheat-sheet (ShortcutSheet). */
+  onShowShortcuts: () => void;
+  // ── scoped undo/redo (lib/undo.ts) ──
+  canUndo: boolean;
+  canRedo: boolean;
+  /** Label of the next undo/redo step ("mark in", "add comment") or null. */
+  undoLabel: string | null;
+  redoLabel: string | null;
+  onUndo: () => void;
+  onRedo: () => void;
   // ── setters used directly in run handlers ──
   setQueueOpen: Dispatch<SetStateAction<boolean>>;
   setTranscriptArrivedTick: Dispatch<SetStateAction<number>>;
@@ -158,6 +175,22 @@ export function buildCommands(d: CommandDeps): Command[] {
       hotkey: "End",
       disabled: !d.hasSource,
       run: () => d.onSeek(Math.max(0, d.durationFrames - 1)) },
+    // Persistent playback speed — distinct from the J-K-L shuttle (a transient
+    // override). Applies to the <video>-backed players; MediaBunny/WebCodecs
+    // local playback ignores it by design (see PlayerHandle.setPlaybackRate).
+    { id: "play.rateUp",   label: "Increase playback speed", group: "Playback",
+      hotkey: "]", description: `Now ${formatPlaybackRate(d.playbackRate)} — steps up the 0.5–2× list`,
+      keywords: ["rate", "faster", "2x"],
+      run: () => d.onPlaybackRateStep(1) },
+    { id: "play.rateDown", label: "Decrease playback speed", group: "Playback",
+      hotkey: "[", description: `Now ${formatPlaybackRate(d.playbackRate)} — steps down the 0.5–2× list`,
+      keywords: ["rate", "slower", "0.5x"],
+      run: () => d.onPlaybackRateStep(-1) },
+    { id: "play.rateReset", label: "Reset playback speed", group: "Playback",
+      hotkey: "\\", description: "Back to 1×",
+      keywords: ["rate", "normal", "1x"],
+      disabled: d.playbackRate === 1,
+      run: () => d.onPlaybackRateReset() },
     // ── Marks ────────────────────────────────────────────────────
     { id: "mark.in",   label: "Mark in",  group: "Marks", hotkey: "I",
       disabled: !d.hasSource, run: () => d.onMarkIn() },
@@ -232,10 +265,24 @@ export function buildCommands(d: CommandDeps): Command[] {
       group: "View", hotkey: "⌘\\",
       run: () => d.setLogsOpen((p) => !p) },
     // ── App ─────────────────────────────────────────────────────
+    // Scoped undo/redo — marks, own review ops, annotation drafts. The hotkey
+    // literals are overlaid with the live binding in App (KEY_ACTION_BY_ID).
+    { id: "edit.undo", label: "Undo", group: "App", hotkey: "⌘Z",
+      description: d.undoLabel ? `Undo ${d.undoLabel}` : "Nothing to undo",
+      keywords: ["revert", "back"],
+      disabled: !d.canUndo, run: () => d.onUndo() },
+    { id: "edit.redo", label: "Redo", group: "App", hotkey: "⌘⇧Z",
+      description: d.redoLabel ? `Redo ${d.redoLabel}` : "Nothing to redo",
+      keywords: ["again", "repeat"],
+      disabled: !d.canRedo, run: () => d.onRedo() },
     { id: "app.settings", label: "Open settings", group: "App", hotkey: "⌘,",
       run: () => d.setSettingsOpen(true) },
     { id: "app.palette", label: "Show command palette", group: "App", hotkey: "⌘K",
       run: () => d.setPaletteOpen(true) },
+    { id: "app.shortcuts", label: "Show keyboard shortcuts", group: "App", hotkey: "⌘/",
+      description: "Cheat-sheet of every key binding",
+      keywords: ["cheat sheet", "hotkeys", "keymap", "help"],
+      run: () => d.onShowShortcuts() },
     { id: "app.stop", label: "Stop running operation", group: "App",
       description: "Cancel the in-flight export / transcript / prep",
       disabled: d.status !== "exporting" && d.transcriptState !== "running" && !d.playbackPrepBusy,

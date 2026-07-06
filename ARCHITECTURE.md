@@ -211,6 +211,8 @@ topology: star — host + up to MAX_PEERS(3) guests, host relays everything
 
 A one-shot migration helper at app boot copies any leftover `clippull.*` keys to `saucebunny.*` (legacy from the pre-rebrand `ClipPull` name).
 
+**Scoped undo/redo** (`src/lib/undo.ts`): one module-level stack (`appUndo`, ⌘Z/⇧⌘Z, capped at 50) covering in/out marks and the user's OWN review ops — never peer-originated co-review changes (entries are pushed only from ReviewPanel's local mutation funnel; inverse ops are built by `inverseReviewOps` in `review.ts` with fresh LWW timestamps). App clears the stack on source change and co-review join/leave. The annotation draft keeps a separate in-composer snapshot history (⌘Z removes the last stroke/label while drawing) because draft state dies with the draft. Inside text fields the shortcut deliberately falls through to the native Edit ▸ Undo menu item, so field-level text undo is untouched.
+
 ## Build-ID handshake
 
 Both sides of the IPC carry a build-ID string:

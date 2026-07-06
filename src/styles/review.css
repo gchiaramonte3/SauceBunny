@@ -761,6 +761,11 @@
   .cp-emoji-cell { transition: background var(--dur-fast) var(--ease-out); }
   .cp-emoji-cell:hover { transform: none; }
   .cp-emoji-cell:active { transform: none; }
+  /* Recording-mic halo pulse — steady ring instead. */
+  .cp-review-tool.recording {
+    animation: none;
+    box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.22);
+  }
 }
 
 .cp-review-drawhint {
