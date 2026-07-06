@@ -205,6 +205,16 @@ Smart selection, tried in order:
 2. **mediabunny / WebCodecs → canvas** (`MediaBunnyPlayer`) — decode any codec WKWebView's `<video>` can't, render to canvas. Toggle in Settings.
 3. **ffmpeg transcode** — sidecar prep to a WKWebView-compatible MP4 when WebCodecs can't decode either.
 
+**ProRes / 10-bit caveat (`d1da322`):** turbores (via `@mediabunny/prores`)
+decodes ProRes fine — but mediabunny can only *paint* a sample by wrapping it in
+a WebCodecs `VideoFrame`, and WKWebView has no 10-bit `VideoFrame` support, so
+`getCanvas()` silently yields a BLACK canvas with no error. 10-bit sources
+(ProRes 422/HQ etc.) are therefore routed to path 3 (ffmpeg 8-bit H.264 playback
+copy; the original stays untouched for export), and `MediaBunnyPlayer` guards its
+first-frame paint so any future unpaintable sample falls back instead of
+rendering black. Don't "fix" ProRes by pointing it back at MediaBunnyPlayer
+without verifying WKWebView can actually paint 10-bit frames.
+
 ### Web sources (YouTube/Vimeo/… — the r53–r66 saga)
 WKWebView makes the obvious paths impossible, all VERIFIED dead ends:
 - **YouTube IFrame** → Error 153 (YouTube tightened Referer/origin Dec 2025; `tauri://localhost` rejected).
@@ -290,7 +300,7 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
    - Update frontend callers to use `formatError(e)` from `lib/error-format.ts` instead of `String(e)`.
    - Re-run `cargo test --lib` if you add new `AppError` variants — the binding regenerates automatically.
 5. **UI smoke harness** — unit tests (vitest + `cargo test --lib`) cover the parsers/timecode/proxy logic since r86; playback and the transcript pipeline are still verified manually. A Playwright/tauri-driver smoke run is the open item.
-6. **Transcript render performance** — the karaoke highlight recomputes O(turns²) bookkeeping per playhead tick; fine normally, measurable on multi-hour transcripts.
+6. ~~**Transcript render performance**~~ — DONE (`68d4a25`): the karaoke render's O(turns²) cue-offset scan, per-turn name/alias resolution, and search-match lookup are precomputed in memos keyed on turns/overrides, so a playhead tick only re-marks the active cue.
 
 ---
 
