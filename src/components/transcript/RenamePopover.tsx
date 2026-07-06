@@ -25,6 +25,16 @@ export type RenameState = {
   rect: DOMRect;
 };
 
+/** One reassignment target — a known speaker from the roster. */
+export type ReassignChoice = {
+  /** Canonical roster tag ("Speaker" sentinel for the untagged group). */
+  tag: string;
+  /** Display name (after any global rename). */
+  name: string;
+  /** Pip background (gradient or custom hex) — matches the roster chip. */
+  color: string;
+};
+
 type Props = {
   state: RenameState;
   onCancel: () => void;
@@ -32,9 +42,18 @@ type Props = {
   /** Jump the transcript to where this speaker first appears, then close.
    *  Optional so any caller without a viewport stays valid. */
   onGoToSpeaker?: () => void;
+  /** Other known speakers this ONE turn can be reassigned to. When present
+   *  (and non-empty) the popover grows a "this turn is actually …" row —
+   *  the per-turn twin of drag-to-merge, for the "the diarizer got this one
+   *  turn wrong" case. Omitted → classic rename-only popover. */
+  reassignChoices?: ReassignChoice[];
+  /** Reassign the anchor turn to `tag`. Parent applies + closes. */
+  onReassign?: (tag: string) => void;
 };
 
-export function RenamePopover({ state, onCancel, onApply, onGoToSpeaker }: Props) {
+export function RenamePopover({
+  state, onCancel, onApply, onGoToSpeaker, reassignChoices, onReassign,
+}: Props) {
   const [name, setName] = useState(state.currentName);
   const [scope, setScope] = useState<"all" | "turn">("all");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -62,10 +81,12 @@ export function RenamePopover({ state, onCancel, onApply, onGoToSpeaker }: Props
     onApply(name, scope);
   }
 
+  const showReassign = !!onReassign && !!reassignChoices && reassignChoices.length > 0;
+
   // Clamp inside the viewport so the popover never spills off-screen
   // when the chip is near a corner.
   const POP_W = 288;
-  const POP_H = 150;
+  const POP_H = showReassign ? 210 : 150;
   const top = Math.min(window.innerHeight - POP_H - 8, state.rect.bottom + 6);
   const left = Math.max(
     8,
@@ -128,6 +149,26 @@ export function RenamePopover({ state, onCancel, onApply, onGoToSpeaker }: Props
           <span>Only this turn</span>
         </label>
       </div>
+      {showReassign && (
+        <div className="cp-tx-rename-assign">
+          <div className="cp-tx-rename-assign-label">…or this turn is actually</div>
+          <div className="cp-tx-rename-assign-list" role="listbox" aria-label="Reassign this turn to a known speaker">
+            {reassignChoices!.map((c) => (
+              <button
+                key={c.tag}
+                role="option"
+                aria-selected={false}
+                className="cp-tx-rename-assign-btn"
+                onClick={() => onReassign!(c.tag)}
+                title={`Reassign only this turn to ${c.name}`}
+              >
+                <span className="cp-tx-rename-assign-pip" style={{ background: c.color }} aria-hidden />
+                <span className="cp-tx-rename-assign-name">{c.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="cp-tx-rename-actions">
         {onGoToSpeaker && (
           <button

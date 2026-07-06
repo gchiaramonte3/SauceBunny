@@ -74,3 +74,20 @@ button:focus-visible, input:focus-visible {
   box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.4);
 }
 
+/* ============================================================
+   SCREEN-READER-ONLY
+   ============================================================ */
+/* Visually hidden but still announced — used by the app-wide polite
+   live region in App.tsx. Standard clip-rect technique. */
+.cp-a11y-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+

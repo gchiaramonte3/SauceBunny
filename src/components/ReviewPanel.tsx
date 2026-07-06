@@ -9,13 +9,15 @@ import { IconDownload, IconRange } from "./Icons";
 import { secondsToHms, secondsToTc } from "../lib/timecode";
 import { loadJson, saveJson } from "../lib/storage";
 import { formatError } from "../lib/error-format";
+import { appUndo } from "../lib/undo";
 import {
   loadReview, saveReview, ensureVersion,
   buildComment, insertComment, editComment, deleteComment, editReply, removeReply,
   setResolved, setLike, rootComments, repliesOf, openCount,
+  applyReviewOp, inverseReviewOps, restampReviewOp,
   reviewToMarkdown, reviewToCsv, reviewToEdl,
   avatarColor, initialsOf, loadReviewer, AVATAR_COLORS, AUTHOR_KEY, AUTHOR_COLOR_KEY, REVIEW_CHANGED_EVENT,
-  loadReviewHistory, removeReviewHistory, clearReviewHistory,
+  loadReviewHistory, removeReviewHistory, clearReviewHistory, annotationHasContent,
   type ReviewDoc, type ReviewComment, type CommentSort, type AnnotationStrokes, type ReviewHistoryEntry, type ReviewOp,
 } from "../lib/review";
 
@@ -101,6 +103,8 @@ export function ReviewPanel({
   drawActive = false,
   draft = null,
   onToggleDraw,
+  labelActive = false,
+  onToggleLabel,
   onDraftConsumed,
   onShowAnnotation,
   onOpenReview,
@@ -126,10 +130,15 @@ export function ReviewPanel({
   draft?: AnnotationStrokes | null;
   /** Toggle draw mode on/off (managed by App, drives the monitor overlay). */
   onToggleDraw?: () => void;
+  /** True while the label tool is selected inside draw mode. */
+  labelActive?: boolean;
+  /** Toggle the label tool (App enters draw mode first when needed). */
+  onToggleLabel?: () => void;
   /** Clear the draft + exit draw mode after a comment captured it. */
   onDraftConsumed?: () => void;
-  /** Display a saved annotation read-only over the frame (null to hide). */
-  onShowAnnotation?: (a: AnnotationStrokes | null) => void;
+  /** Display a saved annotation read-only over the frame (null to hide).
+   *  `color` = the author's reviewer colour, for the label chips. */
+  onShowAnnotation?: (a: AnnotationStrokes | null, color?: string) => void;
   /** Re-open a past-review source (local path / URL) from the history popover. */
   onOpenReview?: (path: string) => void;
   /** Emit the range currently being set in the composer (or null) so App can
@@ -512,6 +521,56 @@ export function ReviewPanel({
     if (inSession) onSessionOp?.(op);
     else mutate(localFn);
   };
+
+  // ── Undo integration (lib/undo.ts) ─────────────────────────────────
+  // CO-REVIEW SAFETY: entries are pushed ONLY from this panel's own handlers
+  // (via dispatchUndoable below) — the funnel every LOCAL mutation goes
+  // through. Ops arriving from peers land in App's session:msg listener and
+  // never gain an inverse, so ⌘Z can only take back the user's own actions.
+  // App additionally clears the stack on session join/leave and source change,
+  // so a captured entry can never replay against the wrong doc/mode.
+  //
+  // Replay is self-contained: in a session it re-enters the op relay; solo it
+  // goes straight to localStorage — deliberately NOT through this instance's
+  // state, because the ⌘Z keydown lives in App and may fire after this panel
+  // instance unmounted (drawer tab switch). saveReview fires
+  // REVIEW_CHANGED_EVENT, which the effect below folds back into a mounted
+  // panel's state.
+  const replayOps = (ops: ReviewOp[]) => {
+    if (ops.length === 0) return;
+    if (inSession) { for (const op of ops) onSessionOp?.(op); return; }
+    if (!sourceKey) return;
+    let d = loadReview(sourceKey);
+    for (const op of ops) d = applyReviewOp(d, op);
+    saveReview(d);
+  };
+  // Dispatch + record. The inverse is computed LAZILY from the pre-op doc
+  // snapshot with a fresh timestamp so it wins the LWW guard at undo time;
+  // redo re-stamps the original op for the same reason. Re-adds carry the
+  // original comment (same id/timestamps — insertComment is idempotent by
+  // id), so undo/redo of adds and deletes converges cleanly in co-review.
+  const dispatchUndoable = (label: string, op: ReviewOp, localFn: (d: ReviewDoc) => ReviewDoc) => {
+    const before = viewDoc; // ops are pure — `before` stays an immutable snapshot
+    dispatch(op, localFn);
+    if (!before) return;
+    appUndo.push({
+      label,
+      undo: () => replayOps(inverseReviewOps(before, op, Date.now())),
+      redo: () => replayOps([restampReviewOp(op, Date.now())]),
+    });
+  };
+  // Fold external solo-mode writes (an undo/redo replay, possibly from a
+  // closure that outlived a previous panel instance) back into local state.
+  // Echoes of our own saves are harmless — same data re-read.
+  useEffect(() => {
+    if (sessionActive || !sourceKey) return;
+    const onChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ sourceKey?: string }>).detail;
+      if (!detail || detail.sourceKey === sourceKey) setDoc(loadReview(sourceKey));
+    };
+    window.addEventListener(REVIEW_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(REVIEW_CHANGED_EVENT, onChanged);
+  }, [sessionActive, sourceKey]);
   // On leaving a session, reload the local doc — App persisted the merged
   // collaborative doc to storage, so the panel must re-read it (its local
   // `doc` state predates the session's comments).
@@ -561,7 +620,7 @@ export function ReviewPanel({
 
   const submit = () => {
     const body = text.trim();
-    const hasDrawing = !!draft && draft.strokes.length > 0;
+    const hasDrawing = annotationHasContent(draft);
     if (!body && !hasDrawing) return;
     if (!ensureNamed()) return;
     // Post column of the range machine: a SET range posts as-is; an ARMED
@@ -590,7 +649,7 @@ export function ReviewPanel({
       author,
       annotation: hasDrawing ? draft : null,
     });
-    dispatch({ t: "add", comment }, (d) => insertComment(d, comment));
+    dispatchUndoable("add comment", { t: "add", comment }, (d) => insertComment(d, comment));
     setText("");
     clearRange();
     // Re-measure after React flushes the cleared text — collapses in auto
@@ -603,7 +662,7 @@ export function ReviewPanel({
     if (!body) return;
     if (!ensureNamed()) return; // gate like submit() — no empty-author replies
     const reply = buildComment({ versionId, timeStart: atTime, body, author, parentId });
-    dispatch({ t: "add", comment: reply }, (d) => insertComment(d, reply));
+    dispatchUndoable("add reply", { t: "add", comment: reply }, (d) => insertComment(d, reply));
     setReplyDraft("");
     setReplyTo(null);
   };
@@ -678,12 +737,12 @@ export function ReviewPanel({
             replies={repliesOf(viewDoc, c.id)}
             onSeek={onSeek}
             onShowAnnotation={onShowAnnotation}
-            onResolve={() => { const at = Date.now(), v = !c.resolved; dispatch({ t: "resolve", id: c.id, resolved: v, at }, (d) => setResolved(d, c.id, v, at)); }}
-            onDelete={() => dispatch({ t: "del", id: c.id }, (d) => deleteComment(d, c.id))}
-            onEdit={(body) => { const at = Date.now(); dispatch({ t: "edit", id: c.id, body, at }, (d) => editComment(d, c.id, body, at)); }}
+            onResolve={() => { const at = Date.now(), v = !c.resolved; dispatchUndoable(v ? "resolve comment" : "reopen comment", { t: "resolve", id: c.id, resolved: v, at }, (d) => setResolved(d, c.id, v, at)); }}
+            onDelete={() => dispatchUndoable("delete comment", { t: "del", id: c.id }, (d) => deleteComment(d, c.id))}
+            onEdit={(body) => { const at = Date.now(); dispatchUndoable("edit comment", { t: "edit", id: c.id, body, at }, (d) => editComment(d, c.id, body, at)); }}
             onLike={() => { if (!ensureNamed()) return; const liked = !(c.likes ?? []).includes(author); dispatch({ t: "like", id: c.id, name: author, liked }, (d) => setLike(d, c.id, author, liked)); }}
-            onEditReply={(replyId, body) => { const at = Date.now(); dispatch({ t: "editReply", versionId, commentId: c.id, replyId, body, at }, (d) => editReply(d, versionId, c.id, replyId, body, at)); }}
-            onDeleteReply={(replyId) => dispatch({ t: "delReply", versionId, commentId: c.id, replyId }, (d) => removeReply(d, versionId, c.id, replyId))}
+            onEditReply={(replyId, body) => { const at = Date.now(); dispatchUndoable("edit reply", { t: "editReply", versionId, commentId: c.id, replyId, body, at }, (d) => editReply(d, versionId, c.id, replyId, body, at)); }}
+            onDeleteReply={(replyId) => dispatchUndoable("delete reply", { t: "delReply", versionId, commentId: c.id, replyId }, (d) => removeReply(d, versionId, c.id, replyId))}
             onLikeReply={(replyId) => { if (!ensureNamed()) return; const r = viewDoc.comments.find((x) => x.id === replyId); if (!r) return; const liked = !(r.likes ?? []).includes(author); dispatch({ t: "like", id: replyId, name: author, liked }, (d) => setLike(d, replyId, author, liked)); }}
             collapsed={collapsedThreads.has(c.id)}
             onToggleCollapse={() => toggleThread(c.id)}
@@ -699,6 +758,8 @@ export function ReviewPanel({
       <ReviewComposer
         drawActive={drawActive}
         onToggleDraw={onToggleDraw}
+        labelActive={labelActive}
+        onToggleLabel={onToggleLabel}
         ensureNamed={ensureNamed}
         recording={recording}
         transcribing={transcribing}
@@ -711,7 +772,7 @@ export function ReviewPanel({
         onResizeStart={onComposerResizeStart}
         resizing={composerResizing}
         onResizeReset={() => setComposerHeight(null)}
-        submit={submit} hasDraft={!!draft && draft.strokes.length > 0}
+        submit={submit} hasDraft={annotationHasContent(draft)}
         currentSec={currentSec} fps={fps}
         rangeIn={rangeIn} rangeOut={rangeOut} onRangeTap={tapRange} onRangeClear={clearRange}
         rangeColor={authorColor}
@@ -882,7 +943,7 @@ function ReviewToolbar({
 /** Composer: draw/voice tools + the playhead-anchored comment box, with its
  *  draw / recording / transcribing / error / note hint stack above it. */
 function ReviewComposer({
-  drawActive, onToggleDraw, ensureNamed,
+  drawActive, onToggleDraw, labelActive, onToggleLabel, ensureNamed,
   recording, transcribing,
   dictError, clearDictError, dictNote, clearDictNote,
   toggleDictation, levelRef,
@@ -893,6 +954,8 @@ function ReviewComposer({
 }: {
   drawActive: boolean;
   onToggleDraw?: () => void;
+  labelActive: boolean;
+  onToggleLabel?: () => void;
   ensureNamed: () => boolean;
   recording: boolean;
   transcribing: boolean;
@@ -943,7 +1006,9 @@ function ReviewComposer({
     <>
       {drawActive && (
         <div className="cp-review-drawhint">
-          ✎ Drawing on the frame — your comment will include it.
+          {labelActive
+            ? "Aa Click the video to place a label — Enter commits, Esc cancels."
+            : "✎ Drawing on the frame — your comment will include it."}
         </div>
       )}
       {recording && (
@@ -1008,12 +1073,22 @@ function ReviewComposer({
         />
         {onToggleDraw && (
           <button
-            className={"cp-review-tool" + (drawActive ? " active" : "")}
+            className={"cp-review-tool" + (drawActive && !labelActive ? " active" : "")}
             onClick={() => { if (ensureNamed()) onToggleDraw(); }}
             title={drawActive ? "Stop drawing" : "Draw on the frame"}
             aria-label="Draw on the frame"
           >
             <PencilGlyph />
+          </button>
+        )}
+        {onToggleLabel && (
+          <button
+            className={"cp-review-tool" + (drawActive && labelActive ? " active" : "")}
+            onClick={() => { if (ensureNamed()) onToggleLabel(); }}
+            title={drawActive && labelActive ? "Stop placing labels" : "Place a text label on the frame"}
+            aria-label="Place a text label on the frame"
+          >
+            <LabelGlyph />
           </button>
         )}
         <button
@@ -1113,7 +1188,7 @@ function CommentRow({
   myColor: string;
   replies: ReviewComment[];
   onSeek: (s: number) => void;
-  onShowAnnotation?: (a: AnnotationStrokes | null) => void;
+  onShowAnnotation?: (a: AnnotationStrokes | null, color?: string) => void;
   onResolve: () => void;
   onDelete: () => void;
   onEdit: (body: string) => void;
@@ -1130,7 +1205,10 @@ function CommentRow({
   setReplyDraft: (s: string) => void;
   onSubmitReply: () => void;
 }) {
-  const hasDrawing = !!c.annotation && c.annotation.strokes.length > 0;
+  const hasDrawing = annotationHasContent(c.annotation);
+  // Label chips on the overlay are tinted to the note author's colour —
+  // same resolution the Avatar uses (my chosen colour for me, hash otherwise).
+  const authorTint = c.author === myName ? myColor : avatarColor(c.author);
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(c.body);
   const replyInputRef = useRef<HTMLInputElement>(null);
@@ -1156,7 +1234,7 @@ function CommentRow({
       <div className="cp-review-chiprow">
         <button
           className={"cp-review-tc" + (c.timeEnd != null && c.timeEnd > c.timeStart ? " range" : "")}
-          onClick={() => { onSeek(c.timeStart); if (hasDrawing) onShowAnnotation?.(c.annotation); }}
+          onClick={() => { onSeek(c.timeStart); if (hasDrawing) onShowAnnotation?.(c.annotation, authorTint); }}
           title={c.timeEnd != null && c.timeEnd > c.timeStart ? "Jump to range start" : (hasDrawing ? "Jump + show drawing" : "Jump to this point")}
         >
           <ClockGlyph /> {secondsToTc(c.timeStart, fps)}
@@ -1165,7 +1243,7 @@ function CommentRow({
         {hasDrawing && (
           <button
             className="cp-review-drawbadge"
-            onClick={() => { onSeek(c.timeStart); onShowAnnotation?.(c.annotation); }}
+            onClick={() => { onSeek(c.timeStart); onShowAnnotation?.(c.annotation, authorTint); }}
             title="Show this drawing on the frame"
           >
             ✎ drawing
@@ -1315,6 +1393,17 @@ function PencilGlyph() {
       strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+/** Text-label glyph (a tag) for the label-on-frame tool. */
+function LabelGlyph() {
+  return (
+    <svg className="cp-review-glyph" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20.6 13.4 12.6 21.4a2 2 0 0 1-2.8 0L3 14.6V3h11.6l6 6a2 2 0 0 1 0 2.8Z" />
+      <circle cx="7.5" cy="7.5" r="0.5" fill="currentColor" />
     </svg>
   );
 }

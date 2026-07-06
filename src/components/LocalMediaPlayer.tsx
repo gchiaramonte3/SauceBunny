@@ -42,6 +42,9 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
   const shuttleRateRef = useRef(0);
   const shuttleRafRef = useRef(0);
   const preShuttleMutedRef = useRef<boolean | null>(null);
+  // User's persistent playback speed (Transport speed picker). The shuttle
+  // temporarily owns `playbackRate`; every shuttle exit restores THIS value.
+  const userRateRef = useRef(1);
   // Scrub hardening: while the playhead is being dragged we pause the element
   // so continuous playback can't fight the seek, then resume once seeks settle.
   // (The streaming player has had this since r66; the local <video> never did,
@@ -114,6 +117,18 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     getVolume: () => mediaRef.current?.volume ?? 1,
     setMuted: (m) => { if (mediaRef.current) mediaRef.current.muted = m; },
     isMuted: () => mediaRef.current?.muted ?? false,
+    setPlaybackRate: (rate) => {
+      // Defensive clamp to WebKit's safe range; the app's list is 0.5–2×.
+      const r = Math.max(0.25, Math.min(4, rate));
+      userRateRef.current = r;
+      const m = mediaRef.current;
+      if (!m) return;
+      // defaultPlaybackRate survives load() — the path-swap effect below calls
+      // el.load(), whose reset lands on the default, so the rate sticks.
+      m.defaultPlaybackRate = r;
+      // A live shuttle owns playbackRate until it exits (setShuttle(0) restores).
+      if (shuttleRateRef.current === 0) m.playbackRate = r;
+    },
     setShuttle: (rate) => {
       const m = mediaRef.current;
       if (!m) return;
@@ -123,7 +138,9 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       if (rate !== 0 && shuttleRateRef.current === 0) preShuttleMutedRef.current = m.muted;
       shuttleRateRef.current = rate;
       if (rate === 0) {
-        m.playbackRate = 1;
+        // Back to the user's chosen speed, not a hardcoded 1× — the shuttle is
+        // a transient override on top of the persistent rate.
+        m.playbackRate = userRateRef.current;
         if (preShuttleMutedRef.current != null) { m.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
         // Exit is a HARD STOP: K after an 8× shuttle must freeze, not glide on
         // at 1× ("slow motion"). The L-ladder's landing-on-+1 path explicitly
@@ -157,6 +174,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
           try { mm.currentTime = 0; } catch { /* ignore */ }
           onTimeUpdate?.(0);
           shuttleRateRef.current = 0;
+          mm.playbackRate = userRateRef.current; // self-exit restores the user rate too
           if (preShuttleMutedRef.current != null) { mm.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
           setIsPlaying(false);
           return;
@@ -233,7 +251,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       shuttleRateRef.current = 0;
       // Mid-shuttle source swap: give the element back its pre-shuttle audio.
       if (preShuttleMutedRef.current != null) { el.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
-      el.playbackRate = 1;
+      el.playbackRate = userRateRef.current; // clear any shuttle override, keep the user rate
       // New source → reset scrub bookkeeping + the one-shot duration retry.
       scrubbingRef.current = false;
       wasPlayingRef.current = false;

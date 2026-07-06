@@ -578,3 +578,26 @@
 /* Fully collapse the floating panel (drop its gutter margins + border) so no
    sliver is left when hidden. */
 .cp-sidebar.closed { width: 0; margin: 0; border-color: transparent; }
+
+/* Export-folder nudge — one-line explanation under the export CTA when the
+   button is disabled because no folder is set, with a deep-link into
+   Settings → General (the sidebar's Choose button covers this session). */
+.cp-folder-nudge {
+  margin-top: 8px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--warning);
+  text-align: center;
+}
+.cp-folder-nudge-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--fg-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.cp-folder-nudge-link:hover { color: var(--fg-0); }
