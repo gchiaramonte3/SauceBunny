@@ -205,11 +205,10 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
       <div className="cp-monitor-area">
         <div className="cp-monitor" ref={monitorRef} style={monitorStyle}>
           <div className="cp-empty">
-            <div className="cp-empty-perf">
-              <span /><span /><span /><span /><span /><span /><span /><span />
-            </div>
-            <h3>Paste a video URL</h3>
-            <p>YouTube, Vimeo, TikTok, Twitter/X, Reddit, Instagram, or any page with embedded video. Sauce Bunny resolves the highest-quality stream available — no host branding, no metadata you didn't ask for.</p>
+            <h3>Paste a link or drop a file</h3>
+            <p className="cp-empty-sources" aria-label="Supported sources">
+              YouTube · Vimeo · TikTok · X · Reddit · Instagram · local video
+            </p>
             {resumeTitle && onResume && (
               <button
                 type="button"

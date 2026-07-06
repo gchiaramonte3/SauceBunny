@@ -33,7 +33,7 @@ export type OnboardingSignals = {
 export function deriveOnboardingSteps(s: OnboardingSignals): OnboardingStep[] {
   return [
     { id: "source",     label: "Load a source",
-      hint: "Paste a URL, import a file, or drag one in",
+      hint: "The URL bar is at the top",
       done: s.recentsCount > 0 },
     { id: "folder",     label: "Set your export folder",
       hint: "Settings → General → Default folder",
