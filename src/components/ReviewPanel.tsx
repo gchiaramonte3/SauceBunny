@@ -9,10 +9,12 @@ import { IconDownload, IconRange } from "./Icons";
 import { secondsToHms, secondsToTc } from "../lib/timecode";
 import { loadJson, saveJson } from "../lib/storage";
 import { formatError } from "../lib/error-format";
+import { appUndo } from "../lib/undo";
 import {
   loadReview, saveReview, ensureVersion,
   buildComment, insertComment, editComment, deleteComment, editReply, removeReply,
   setResolved, setLike, rootComments, repliesOf, openCount,
+  applyReviewOp, inverseReviewOps, restampReviewOp,
   reviewToMarkdown, reviewToCsv, reviewToEdl,
   avatarColor, initialsOf, loadReviewer, AVATAR_COLORS, AUTHOR_KEY, AUTHOR_COLOR_KEY, REVIEW_CHANGED_EVENT,
   loadReviewHistory, removeReviewHistory, clearReviewHistory, annotationHasContent,
@@ -519,6 +521,56 @@ export function ReviewPanel({
     if (inSession) onSessionOp?.(op);
     else mutate(localFn);
   };
+
+  // ── Undo integration (lib/undo.ts) ─────────────────────────────────
+  // CO-REVIEW SAFETY: entries are pushed ONLY from this panel's own handlers
+  // (via dispatchUndoable below) — the funnel every LOCAL mutation goes
+  // through. Ops arriving from peers land in App's session:msg listener and
+  // never gain an inverse, so ⌘Z can only take back the user's own actions.
+  // App additionally clears the stack on session join/leave and source change,
+  // so a captured entry can never replay against the wrong doc/mode.
+  //
+  // Replay is self-contained: in a session it re-enters the op relay; solo it
+  // goes straight to localStorage — deliberately NOT through this instance's
+  // state, because the ⌘Z keydown lives in App and may fire after this panel
+  // instance unmounted (drawer tab switch). saveReview fires
+  // REVIEW_CHANGED_EVENT, which the effect below folds back into a mounted
+  // panel's state.
+  const replayOps = (ops: ReviewOp[]) => {
+    if (ops.length === 0) return;
+    if (inSession) { for (const op of ops) onSessionOp?.(op); return; }
+    if (!sourceKey) return;
+    let d = loadReview(sourceKey);
+    for (const op of ops) d = applyReviewOp(d, op);
+    saveReview(d);
+  };
+  // Dispatch + record. The inverse is computed LAZILY from the pre-op doc
+  // snapshot with a fresh timestamp so it wins the LWW guard at undo time;
+  // redo re-stamps the original op for the same reason. Re-adds carry the
+  // original comment (same id/timestamps — insertComment is idempotent by
+  // id), so undo/redo of adds and deletes converges cleanly in co-review.
+  const dispatchUndoable = (label: string, op: ReviewOp, localFn: (d: ReviewDoc) => ReviewDoc) => {
+    const before = viewDoc; // ops are pure — `before` stays an immutable snapshot
+    dispatch(op, localFn);
+    if (!before) return;
+    appUndo.push({
+      label,
+      undo: () => replayOps(inverseReviewOps(before, op, Date.now())),
+      redo: () => replayOps([restampReviewOp(op, Date.now())]),
+    });
+  };
+  // Fold external solo-mode writes (an undo/redo replay, possibly from a
+  // closure that outlived a previous panel instance) back into local state.
+  // Echoes of our own saves are harmless — same data re-read.
+  useEffect(() => {
+    if (sessionActive || !sourceKey) return;
+    const onChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ sourceKey?: string }>).detail;
+      if (!detail || detail.sourceKey === sourceKey) setDoc(loadReview(sourceKey));
+    };
+    window.addEventListener(REVIEW_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(REVIEW_CHANGED_EVENT, onChanged);
+  }, [sessionActive, sourceKey]);
   // On leaving a session, reload the local doc — App persisted the merged
   // collaborative doc to storage, so the panel must re-read it (its local
   // `doc` state predates the session's comments).
@@ -597,7 +649,7 @@ export function ReviewPanel({
       author,
       annotation: hasDrawing ? draft : null,
     });
-    dispatch({ t: "add", comment }, (d) => insertComment(d, comment));
+    dispatchUndoable("add comment", { t: "add", comment }, (d) => insertComment(d, comment));
     setText("");
     clearRange();
     // Re-measure after React flushes the cleared text — collapses in auto
@@ -610,7 +662,7 @@ export function ReviewPanel({
     if (!body) return;
     if (!ensureNamed()) return; // gate like submit() — no empty-author replies
     const reply = buildComment({ versionId, timeStart: atTime, body, author, parentId });
-    dispatch({ t: "add", comment: reply }, (d) => insertComment(d, reply));
+    dispatchUndoable("add reply", { t: "add", comment: reply }, (d) => insertComment(d, reply));
     setReplyDraft("");
     setReplyTo(null);
   };
@@ -685,12 +737,12 @@ export function ReviewPanel({
             replies={repliesOf(viewDoc, c.id)}
             onSeek={onSeek}
             onShowAnnotation={onShowAnnotation}
-            onResolve={() => { const at = Date.now(), v = !c.resolved; dispatch({ t: "resolve", id: c.id, resolved: v, at }, (d) => setResolved(d, c.id, v, at)); }}
-            onDelete={() => dispatch({ t: "del", id: c.id }, (d) => deleteComment(d, c.id))}
-            onEdit={(body) => { const at = Date.now(); dispatch({ t: "edit", id: c.id, body, at }, (d) => editComment(d, c.id, body, at)); }}
+            onResolve={() => { const at = Date.now(), v = !c.resolved; dispatchUndoable(v ? "resolve comment" : "reopen comment", { t: "resolve", id: c.id, resolved: v, at }, (d) => setResolved(d, c.id, v, at)); }}
+            onDelete={() => dispatchUndoable("delete comment", { t: "del", id: c.id }, (d) => deleteComment(d, c.id))}
+            onEdit={(body) => { const at = Date.now(); dispatchUndoable("edit comment", { t: "edit", id: c.id, body, at }, (d) => editComment(d, c.id, body, at)); }}
             onLike={() => { if (!ensureNamed()) return; const liked = !(c.likes ?? []).includes(author); dispatch({ t: "like", id: c.id, name: author, liked }, (d) => setLike(d, c.id, author, liked)); }}
-            onEditReply={(replyId, body) => { const at = Date.now(); dispatch({ t: "editReply", versionId, commentId: c.id, replyId, body, at }, (d) => editReply(d, versionId, c.id, replyId, body, at)); }}
-            onDeleteReply={(replyId) => dispatch({ t: "delReply", versionId, commentId: c.id, replyId }, (d) => removeReply(d, versionId, c.id, replyId))}
+            onEditReply={(replyId, body) => { const at = Date.now(); dispatchUndoable("edit reply", { t: "editReply", versionId, commentId: c.id, replyId, body, at }, (d) => editReply(d, versionId, c.id, replyId, body, at)); }}
+            onDeleteReply={(replyId) => dispatchUndoable("delete reply", { t: "delReply", versionId, commentId: c.id, replyId }, (d) => removeReply(d, versionId, c.id, replyId))}
             onLikeReply={(replyId) => { if (!ensureNamed()) return; const r = viewDoc.comments.find((x) => x.id === replyId); if (!r) return; const liked = !(r.likes ?? []).includes(author); dispatch({ t: "like", id: replyId, name: author, liked }, (d) => setLike(d, replyId, author, liked)); }}
             collapsed={collapsedThreads.has(c.id)}
             onToggleCollapse={() => toggleThread(c.id)}

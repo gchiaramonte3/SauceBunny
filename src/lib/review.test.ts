@@ -8,6 +8,7 @@ import {
   reviewFingerprint, resolveByFingerprint, linkFingerprint,
   loadReviewHistory, upsertReviewHistory, removeReviewHistory, clearReviewHistory,
   buildComment, insertComment, setResolved, setLike, applyReviewOp, mergeReviewDoc,
+  inverseReviewOps, restampReviewOp,
   annotationHasContent, annotationsOf, labelSuffix,
   type ReviewDoc, type ReviewComment, type AnnotationStrokes,
 } from "./review";
@@ -406,5 +407,95 @@ describe("fingerprint index + history", () => {
     expect(loadReviewHistory()).toHaveLength(2);
     clearReviewHistory();
     expect(loadReviewHistory()).toEqual([]);
+  });
+});
+
+describe("undo inverse ops (inverseReviewOps / restampReviewOp)", () => {
+  const mk = (v: string, id: string, over: Partial<ReviewComment> = {}): ReviewComment =>
+    ({ ...buildComment({ versionId: v, timeStart: 1, body: "hi", author: "A" }, 1000), id, ...over });
+
+  it("add ⇄ del round-trips, preserving the original id + timestamps", () => {
+    const { doc, v } = seed();
+    const c = mk(v, "c1");
+    const addOp = { t: "add", comment: c } as const;
+    const after = applyReviewOp(doc, addOp);
+    const undone = inverseReviewOps(doc, addOp, 2000).reduce(applyReviewOp, after);
+    expect(undone.comments).toEqual(doc.comments);
+    // redo replays the SAME comment object → identical row, no duplicate
+    const redone = applyReviewOp(applyReviewOp(undone, addOp), addOp);
+    expect(redone.comments).toHaveLength(1);
+    expect(redone.comments[0]).toEqual(c); // id + createdAt/updatedAt intact
+  });
+
+  it("del of a root resurrects the root AND its replies (peer replies included)", () => {
+    const { doc, v } = seed();
+    const root = mk(v, "r1");
+    const mine = mk(v, "p1", { parentId: "r1", author: "A" });
+    const peers = mk(v, "p2", { parentId: "r1", author: "Peer" });
+    let d = [root, mine, peers].reduce((acc, c) => insertComment(acc, c), doc);
+    const delOp = { t: "del", id: "r1" } as const;
+    const before = d;
+    d = applyReviewOp(d, delOp);
+    expect(d.comments).toHaveLength(0);
+    const undone = inverseReviewOps(before, delOp, 5000).reduce(applyReviewOp, d);
+    expect(undone.comments).toHaveLength(3);
+    expect(undone.comments.find((c) => c.id === "p2")?.author).toBe("Peer");
+  });
+
+  it("delReply inverse re-adds just that reply; unknown reply → no ops", () => {
+    const { doc, v } = seed();
+    const root = mk(v, "r1");
+    const reply = mk(v, "p1", { parentId: "r1" });
+    const before = insertComment(insertComment(doc, root), reply);
+    const op = { t: "delReply", versionId: v, commentId: "r1", replyId: "p1" } as const;
+    const after = applyReviewOp(before, op);
+    const undone = inverseReviewOps(before, op, 5000).reduce(applyReviewOp, after);
+    expect(undone.comments).toEqual(expect.arrayContaining(before.comments));
+    expect(undone.comments).toHaveLength(2);
+    expect(inverseReviewOps(doc, op, 5000)).toEqual([]); // reply not in doc
+  });
+
+  it("edit inverse restores the old body — and a FRESH `at` beats the LWW guard", () => {
+    const { doc, v } = seed();
+    const before = insertComment(doc, mk(v, "c1", { body: "old" }));
+    const editOp = { t: "edit", id: "c1", body: "new", at: 2000 } as const;
+    const after = applyReviewOp(before, editOp);
+    expect(after.comments[0].body).toBe("new");
+    // Inverse stamped LATER than the edit → wins LWW and restores "old".
+    const undone = inverseReviewOps(before, editOp, 3000).reduce(applyReviewOp, after);
+    expect(undone.comments[0].body).toBe("old");
+    // Redo must be re-stamped: the verbatim op (at=2000) would now LOSE.
+    expect(applyReviewOp(undone, editOp).comments[0].body).toBe("old");
+    const redone = applyReviewOp(undone, restampReviewOp(editOp, 4000));
+    expect(redone.comments[0].body).toBe("new");
+  });
+
+  it("resolve inverse restores the doc's previous resolved state", () => {
+    const { doc, v } = seed();
+    const before = insertComment(doc, mk(v, "c1"));
+    const op = { t: "resolve", id: "c1", resolved: true, at: 2000 } as const;
+    const after = applyReviewOp(before, op);
+    expect(after.comments[0].resolved).toBe(true);
+    const inv = inverseReviewOps(before, op, 3000);
+    expect(inv).toEqual([{ t: "resolve", id: "c1", resolved: false, at: 3000 }]);
+    expect(applyReviewOp(after, inv[0]).comments[0].resolved).toBe(false);
+  });
+
+  it("editReply inverse addresses the reply through its full path", () => {
+    const { doc, v } = seed();
+    const root = mk(v, "r1");
+    const reply = mk(v, "p1", { parentId: "r1", body: "old" });
+    const before = insertComment(insertComment(doc, root), reply);
+    const op = { t: "editReply", versionId: v, commentId: "r1", replyId: "p1", body: "new", at: 2000 } as const;
+    const after = applyReviewOp(before, op);
+    const undone = inverseReviewOps(before, op, 3000).reduce(applyReviewOp, after);
+    expect(undone.comments.find((c) => c.id === "p1")?.body).toBe("old");
+  });
+
+  it("restampReviewOp only touches LWW ops", () => {
+    const del = { t: "del", id: "x" } as const;
+    expect(restampReviewOp(del, 9000)).toBe(del); // non-LWW → same object
+    const res = restampReviewOp({ t: "resolve", id: "x", resolved: true, at: 1 }, 9000);
+    expect(res).toEqual({ t: "resolve", id: "x", resolved: true, at: 9000 });
   });
 });

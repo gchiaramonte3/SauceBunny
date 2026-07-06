@@ -20,7 +20,8 @@ export type KeyActionId =
   | "mark.in" | "mark.out" | "mark.clear" | "mark.gotoIn" | "mark.gotoOut"
   | "review.rangeIn" | "review.rangeOut"
   | "src.fetch" | "export.clip" | "queue.add" | "queue.toggle"
-  | "view.logs" | "app.settings" | "app.palette" | "app.shortcuts";
+  | "view.logs" | "app.settings" | "app.palette" | "app.shortcuts"
+  | "edit.undo" | "edit.redo";
 
 export type KeyActionGroup = "Transport" | "Marking" | "Source & export" | "View" | "App";
 
@@ -77,6 +78,16 @@ export const KEY_ACTIONS: KeyAction[] = [
   { id: "app.palette",     label: "Command palette",       group: "App",       defaults: ["mod+k"],                 global: true },
   // ⌘/ was free (only mod+\ and the bare [ ] \ row are taken near it).
   { id: "app.shortcuts",   label: "Keyboard shortcuts",    group: "App",       defaults: ["mod+/"],                 global: true },
+  // Scoped undo/redo (lib/undo.ts): marks, the user's own review ops, and the
+  // in-composer annotation draft. Deliberately NOT global: in a text field the
+  // action is skipped and nothing is preventDefault-ed, so the keystroke falls
+  // through to the native Edit ▸ Undo menu item (PredefinedMenuItem::undo in
+  // src-tauri/src/lib.rs) and the field's own undo manager keeps working.
+  // Outside fields, the DOM sees the keydown FIRST and our preventDefault
+  // suppresses the menu — same mechanism that lets mod+, / mod+k / mod+\ win
+  // over their identical menu accelerators today.
+  { id: "edit.undo",       label: "Undo",                  group: "App",       defaults: ["mod+z"],                 global: false },
+  { id: "edit.redo",       label: "Redo",                  group: "App",       defaults: ["mod+shift+z"],           global: false },
 ];
 
 export const KEY_ACTION_BY_ID: Record<KeyActionId, KeyAction> =

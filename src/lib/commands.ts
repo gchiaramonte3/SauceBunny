@@ -113,6 +113,14 @@ export type CommandDeps = {
   onProbeDiarizer: () => void;
   /** Opens the ⌘/ shortcut cheat-sheet (ShortcutSheet). */
   onShowShortcuts: () => void;
+  // ── scoped undo/redo (lib/undo.ts) ──
+  canUndo: boolean;
+  canRedo: boolean;
+  /** Label of the next undo/redo step ("mark in", "add comment") or null. */
+  undoLabel: string | null;
+  redoLabel: string | null;
+  onUndo: () => void;
+  onRedo: () => void;
   // ── setters used directly in run handlers ──
   setQueueOpen: Dispatch<SetStateAction<boolean>>;
   setTranscriptArrivedTick: Dispatch<SetStateAction<number>>;
@@ -257,6 +265,16 @@ export function buildCommands(d: CommandDeps): Command[] {
       group: "View", hotkey: "⌘\\",
       run: () => d.setLogsOpen((p) => !p) },
     // ── App ─────────────────────────────────────────────────────
+    // Scoped undo/redo — marks, own review ops, annotation drafts. The hotkey
+    // literals are overlaid with the live binding in App (KEY_ACTION_BY_ID).
+    { id: "edit.undo", label: "Undo", group: "App", hotkey: "⌘Z",
+      description: d.undoLabel ? `Undo ${d.undoLabel}` : "Nothing to undo",
+      keywords: ["revert", "back"],
+      disabled: !d.canUndo, run: () => d.onUndo() },
+    { id: "edit.redo", label: "Redo", group: "App", hotkey: "⌘⇧Z",
+      description: d.redoLabel ? `Redo ${d.redoLabel}` : "Nothing to redo",
+      keywords: ["again", "repeat"],
+      disabled: !d.canRedo, run: () => d.onRedo() },
     { id: "app.settings", label: "Open settings", group: "App", hotkey: "⌘,",
       run: () => d.setSettingsOpen(true) },
     { id: "app.palette", label: "Show command palette", group: "App", hotkey: "⌘K",

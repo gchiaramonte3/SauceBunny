@@ -412,6 +412,66 @@ export function applyReviewOp(doc: ReviewDoc, op: ReviewOp): ReviewDoc {
   }
 }
 
+/** Ops that reverse `op`, given the doc as it was BEFORE the op applied.
+ *  Powers the local-user undo stack (lib/undo.ts): the panel snapshots the
+ *  pre-op doc when it dispatches, and computes the inverse lazily at undo
+ *  time. `at` must be stamped at EXECUTION time (a fresh Date.now()) so the
+ *  inverse beats the LWW guard of the op it reverses. Re-adds carry the
+ *  ORIGINAL comment (same id/timestamps — insertComment is idempotent by id),
+ *  so an undo-of-delete converges in co-review exactly like a normal add.
+ *  Unknown targets return [] (nothing to reverse). */
+export function inverseReviewOps(before: ReviewDoc, op: ReviewOp, at = Date.now()): ReviewOp[] {
+  switch (op.t) {
+    case "add":
+      // Works for roots and replies alike: deleteComment drops replies only
+      // via parentId === id, and a reply's id is never another's parentId.
+      return [{ t: "del", id: op.comment.id }];
+    case "del": {
+      // deleteComment removes the root AND its replies — resurrect all of
+      // them (peers' replies included, authorship intact).
+      const removed = before.comments.filter((c) => c.id === op.id || c.parentId === op.id);
+      return removed.map((c) => ({ t: "add", comment: c }));
+    }
+    case "delReply": {
+      const r = before.comments.find(
+        (c) => c.id === op.replyId && c.parentId === op.commentId && c.versionId === op.versionId);
+      return r ? [{ t: "add", comment: r }] : [];
+    }
+    case "edit": {
+      const cur = before.comments.find((c) => c.id === op.id);
+      return cur ? [{ t: "edit", id: op.id, body: cur.body, at }] : [];
+    }
+    case "editReply": {
+      const cur = before.comments.find((c) => c.id === op.replyId);
+      return cur
+        ? [{ t: "editReply", versionId: op.versionId, commentId: op.commentId, replyId: op.replyId, body: cur.body, at }]
+        : [];
+    }
+    case "resolve": {
+      const cur = before.comments.find((c) => c.id === op.id);
+      return [{ t: "resolve", id: op.id, resolved: cur ? cur.resolved : !op.resolved, at }];
+    }
+    case "like":
+      return [{ t: "like", id: op.id, name: op.name, liked: !op.liked }];
+    default:
+      return [];
+  }
+}
+
+/** Re-stamp an op's LWW timestamp for replay (redo): its own undo just wrote
+ *  a NEWER updatedAt, so replaying the op verbatim would lose the LWW guard
+ *  and no-op. Ops without `at` are returned unchanged. */
+export function restampReviewOp(op: ReviewOp, at: number): ReviewOp {
+  switch (op.t) {
+    case "edit":
+    case "resolve":
+    case "editReply":
+      return { ...op, at };
+    default:
+      return op;
+  }
+}
+
 /** Merge an incoming (authoritative) snapshot with the local doc so a local op
  *  that hasn't been echoed back yet survives a snapshot re-adopt (the host
  *  re-broadcasts a full doc on every join; without this an existing peer's

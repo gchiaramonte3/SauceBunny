@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -65,6 +65,7 @@ import { speakerColor } from "./components/transcript/helpers";
 import { MediaInfoModal } from "./components/MediaInfoModal";
 import { loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes, type ReviewDoc, type ReviewOp } from "./lib/review";
 import { loadChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
+import { appUndo } from "./lib/undo";
 import { loadJson, saveJson } from "./lib/storage";
 import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
 import {
@@ -454,6 +455,23 @@ export default function App() {
   // me the mp3" workflows.
   const [inFrames, setInFrames] = useState<number | null>(null);
   const [outFrames, setOutFrames] = useState<number | null>(null);
+
+  // Undoable mark mutation — records the before/after pair on the app stack
+  // (lib/undo.ts). Used by the I/O/G handlers and the queue-add mark clear.
+  // TC-field edits are deliberately NOT recorded: the field is a text input
+  // with its own native undo, and per-keystroke mark entries would flood the
+  // stack. Values are absolute frames, so replay is order-independent.
+  const pushMarksUndo = useCallback((
+    label: string,
+    prevIn: number | null, prevOut: number | null,
+    nextIn: number | null, nextOut: number | null,
+  ) => {
+    appUndo.push({
+      label,
+      undo: () => { setInFrames(prevIn); setOutFrames(prevOut); },
+      redo: () => { setInFrames(nextIn); setOutFrames(nextOut); },
+    });
+  }, []);
 
   const [exportOpts, setExportOpts] = useState<ExportOpts>(() => ({
     inTc: "",
@@ -2163,11 +2181,14 @@ export default function App() {
       status: "queued",
     };
     setClipQueue((prev) => [...prev, item]);
+    // Queueing consumes the selection — record the clear so ⌘Z restores the
+    // marks (the queued item itself stays put; queue ops aren't undoable).
+    pushMarksUndo("clear marks", inFrames, outFrames, null, null);
     setInFrames(null);
     setOutFrames(null);
     setQueueOpen(true);
     appendLog("info", "queue", `Queued ${item.filename} (${framesToTc(item.inFrames, fps)} → ${framesToTc(item.outFrames, fps)})`);
-  }, [sourceKind, localFilePath, metadata, inFrames, outFrames, fps, exportOpts.filename, exportOpts.format, exportOpts.reencode, exportOpts.captions, appendLog, pushNotification]);
+  }, [sourceKind, localFilePath, metadata, inFrames, outFrames, fps, exportOpts.filename, exportOpts.format, exportOpts.reencode, exportOpts.captions, appendLog, pushNotification, pushMarksUndo]);
 
   const handleQueueRemove = useCallback((id: string) => {
     setClipQueue((prev) => prev.filter((c) => c.id !== id));
@@ -3166,29 +3187,30 @@ export default function App() {
   const onMarkIn = useCallback(() => {
     const r = Math.max(1, Math.round(fps));
     // If an out mark already exists and the playhead is past it, bump out a frame.
-    setInFrames(() => {
-      if (outFrames != null && playheadFrames >= outFrames) {
-        return Math.max(0, outFrames - r);
-      }
-      return playheadFrames;
-    });
-  }, [playheadFrames, outFrames, fps]);
+    const next = (outFrames != null && playheadFrames >= outFrames)
+      ? Math.max(0, outFrames - r)
+      : playheadFrames;
+    if (next !== inFrames) pushMarksUndo("mark in", inFrames, outFrames, next, outFrames);
+    setInFrames(next);
+  }, [playheadFrames, inFrames, outFrames, fps, pushMarksUndo]);
 
   const onMarkOut = useCallback(() => {
     const r = Math.max(1, Math.round(fps));
-    setOutFrames(() => {
-      if (inFrames != null && playheadFrames <= inFrames) {
-        return Math.min(Math.max(0, durationFrames - 1), inFrames + r);
-      }
-      return playheadFrames;
-    });
-  }, [playheadFrames, inFrames, fps, durationFrames]);
+    const next = (inFrames != null && playheadFrames <= inFrames)
+      ? Math.min(Math.max(0, durationFrames - 1), inFrames + r)
+      : playheadFrames;
+    if (next !== outFrames) pushMarksUndo("mark out", inFrames, outFrames, inFrames, next);
+    setOutFrames(next);
+  }, [playheadFrames, inFrames, outFrames, fps, durationFrames, pushMarksUndo]);
 
   // Clear literally clears — no selection at all.
   const onClearMarks = useCallback(() => {
+    if (inFrames != null || outFrames != null) {
+      pushMarksUndo("clear marks", inFrames, outFrames, null, null);
+    }
     setInFrames(null);
     setOutFrames(null);
-  }, []);
+  }, [inFrames, outFrames, pushMarksUndo]);
 
   const onGotoIn = useCallback(() => {
     if (inFrames == null) return;
@@ -3214,6 +3236,34 @@ export default function App() {
     playerRef.current?.seekTo?.(clamped / r);
   }, [durationFrames, fps, exitShuttle]);
 
+  // ====== Undo / redo (scoped — see lib/undo.ts) ======
+  // One app-wide stack: mark entries (pushed above) and the user's own review
+  // ops (pushed by ReviewPanel) interleave chronologically. The annotation
+  // DRAFT keeps a separate lightweight in-composer history (registered into
+  // this ref where the draft state lives, further down): draft snapshots die
+  // with the draft — posted, cleared, or draw-mode exit — so global entries
+  // for them would rot into confusing zombies. While drawing, ⌘Z steps the
+  // draft first and falls through to the app stack when it's exhausted.
+  const draftUndoRef = useRef<{ undo: () => boolean; redo: () => boolean } | null>(null);
+  // Transient HUD over the canvas — toast only, no bell entry, no sound
+  // (undo feedback is ephemeral confirmation, not a completion event).
+  const showUndoHud = useCallback((title: string) => {
+    setToast({ id: ++toastIdRef.current, kind: "success", title });
+  }, []);
+  const performUndo = useCallback(() => {
+    if (draftUndoRef.current?.undo()) return;
+    const label = appUndo.undo();
+    if (label) showUndoHud(`Undid: ${label}`);
+  }, [showUndoHud]);
+  const performRedo = useCallback(() => {
+    if (draftUndoRef.current?.redo()) return;
+    const label = appUndo.redo();
+    if (label) showUndoHud(`Redid: ${label}`);
+  }, [showUndoHud]);
+  // Live canUndo/canRedo + next labels for the palette (subscribe-based so a
+  // push from ReviewPanel re-renders the registry too).
+  const undoSnap = useSyncExternalStore(appUndo.subscribe, appUndo.getSnapshot);
+
   // ====== Keyboard ======
   // Review comment-range hotkeys (⇧I/⇧O) — ReviewPanel registers its handlers
   // here (the range state lives in the panel; App only forwards intent). The
@@ -3236,6 +3286,14 @@ export default function App() {
         case "app.palette":  setPaletteOpen((p) => !p); break;
         case "app.shortcuts": setShortcutsOpen((p) => !p); break;
         case "app.settings": setSettingsOpen((p) => !p); break;
+        // ⌘Z / ⇧⌘Z — non-global on purpose: in a text field these cases never
+        // run (and nothing is preventDefault-ed), so the keystroke falls
+        // through to the native Edit ▸ Undo/Redo menu items and the field's
+        // own undo manager. Outside fields the DOM keydown arrives BEFORE the
+        // menu's key equivalent and runAction's preventDefault suppresses it —
+        // the same ordering the ⌘,/⌘K/⌘\ registry-vs-menu twins already rely on.
+        case "edit.undo": performUndo(); break;
+        case "edit.redo": performRedo(); break;
         case "src.fetch":    handleFetch(); break;
         case "view.logs":    setLogsOpen((p) => !p); break;
         case "queue.add":    handleAddToQueue(); break;
@@ -3351,6 +3409,7 @@ export default function App() {
     onPlayToggle, shuttleStep, onMarkIn, onMarkOut, onClearMarks,
     onGotoIn, onGotoOut, onStep, onSeek,
     handlePlaybackRateStep, handlePlaybackRateChange,
+    performUndo, performRedo,
   ]);
 
   // ── Native menubar event wiring ─────────────────────────────────
@@ -3446,6 +3505,9 @@ export default function App() {
     setQueueOpen, setTranscriptArrivedTick, setCaptionsOn, setLogsOpen,
     setSettingsOpen, setPaletteOpen,
     onShowShortcuts: () => setShortcutsOpen(true),
+    canUndo: undoSnap.canUndo, canRedo: undoSnap.canRedo,
+    undoLabel: undoSnap.undoLabel, redoLabel: undoSnap.redoLabel,
+    onUndo: performUndo, onRedo: performRedo,
     onProbeDiarizer: async () => {
       try {
         const ver = await invoke<string>("probe_diarizer");
@@ -3471,7 +3533,7 @@ export default function App() {
     onStep, onSeek, onMarkIn, onMarkOut, onClearMarks, onGotoIn, onGotoOut,
     handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
     handleQueueClearAll, handleGenerateTranscript, handleDownloadCaptions, handleImportTranscript,
-    handleStop, keybindings,
+    handleStop, keybindings, undoSnap, performUndo, performRedo,
   ]);
 
   // ====== First-run checklist derivation ======
@@ -3553,6 +3615,12 @@ export default function App() {
   // file can't be pushed to peers, so hosting is gated to web sources.
   const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], error: null });
   const coSessionActive = coSession.role !== "off";
+  // Undo hygiene: undoing across sources is nonsense, and entries recorded
+  // solo must never replay into a co-review session (or vice versa — their
+  // closures route to different docs). Drop the whole stack on either
+  // boundary. The annotation-draft history is reset by the source-change
+  // effect below, which already clears the draft itself.
+  useEffect(() => { appUndo.clear(); }, [reviewSourceKey, coSession.role]);
   // The shared review doc while in a session (null = solo). The Review panel +
   // timeline markers read THIS instead of the local-by-sourceKey doc.
   const [sessionDoc, setSessionDoc] = useState<ReviewDoc | null>(null);
@@ -3792,11 +3860,53 @@ export default function App() {
   const [reviewDraft, setReviewDraft] = useState<AnnotationStrokes | null>(null);
   const [annotationDisplay, setAnnotationDisplay] = useState<AnnotationStrokes | null>(null);
   const [annotationDisplayColor, setAnnotationDisplayColor] = useState<string | null>(null);
+  // ── In-composer draft undo ─────────────────────────────────────────
+  // Snapshot history of the draft while drawing: each committed stroke/label
+  // (or a Clear) pushes the PREVIOUS draft, so ⌘Z steps items off one at a
+  // time; ⇧⌘Z walks back forward until a new stroke diverges. Drafts are
+  // immutable snapshots (the overlay always hands up a fresh object), so
+  // holding references is safe. History dies with the draft — see the
+  // draftUndoRef comment for why this isn't on the global stack.
+  const draftPastRef = useRef<(AnnotationStrokes | null)[]>([]);
+  const draftFutureRef = useRef<(AnnotationStrokes | null)[]>([]);
+  const reviewDraftRef = useRef(reviewDraft); reviewDraftRef.current = reviewDraft;
+  const clearDraftHistory = useCallback(() => {
+    draftPastRef.current = [];
+    draftFutureRef.current = [];
+  }, []);
+  const onReviewDraftChange = useCallback((a: AnnotationStrokes) => {
+    draftPastRef.current.push(reviewDraftRef.current);
+    if (draftPastRef.current.length > 50) draftPastRef.current.shift();
+    draftFutureRef.current = [];
+    setReviewDraft(a);
+  }, []);
+  // Register with the keyboard dispatch (plain render-time ref assignment,
+  // like sessionDocRef above): only while draw mode is live does ⌘Z route
+  // here, and an exhausted history falls through to the app stack.
+  draftUndoRef.current = reviewDrawActive
+    ? {
+        undo: () => {
+          const prev = draftPastRef.current.pop();
+          if (prev === undefined) return false;
+          draftFutureRef.current.push(reviewDraftRef.current);
+          setReviewDraft(prev);
+          return true;
+        },
+        redo: () => {
+          const next = draftFutureRef.current.pop();
+          if (next === undefined) return false;
+          draftPastRef.current.push(reviewDraftRef.current);
+          setReviewDraft(next);
+          return true;
+        },
+      }
+    : null;
   useEffect(() => {
     // New source → drop any in-flight drawing + viewed annotation.
     setReviewDrawActive(false);
     setReviewLabelMode(false);
     setReviewDraft(null);
+    clearDraftHistory();
     setAnnotationDisplay(null);
     // In a co-review session the SHARED doc drives markers (see the effect
     // below) — don't let the local-by-sourceKey reload overwrite them.
@@ -3834,7 +3944,7 @@ export default function App() {
     };
     window.addEventListener(REVIEW_CHANGED_EVENT, onChanged);
     return () => window.removeEventListener(REVIEW_CHANGED_EVENT, onChanged);
-  }, [reviewSourceKey, coSessionActive]);
+  }, [reviewSourceKey, coSessionActive, clearDraftHistory]);
 
   // Auto-chapter markers for the timeline — same pattern as the review
   // markers above: keyed by the source, re-read on CHAPTERS_CHANGED_EVENT
@@ -4224,7 +4334,7 @@ export default function App() {
               annotation={annStrokes}
               annotationDrawing={annDrawing}
               annotationOpacity={annOpacity}
-              onAnnotationChange={setReviewDraft}
+              onAnnotationChange={onReviewDraftChange}
               onAnnotationDismiss={annPinned ? () => setAnnotationDisplay(null) : undefined}
               annotationLabelMode={annDrawing && reviewLabelMode}
               annotationLabelColor={annLabelColor}
@@ -4381,7 +4491,7 @@ export default function App() {
             // pen (stay in draw mode); otherwise toggle draw mode itself.
             if (reviewDrawActive && reviewLabelMode) { setReviewLabelMode(false); return; }
             setReviewLabelMode(false);
-            setReviewDrawActive((on) => { if (on) setReviewDraft(null); return !on; });
+            setReviewDrawActive((on) => { if (on) { setReviewDraft(null); clearDraftHistory(); } return !on; });
           }}
           reviewLabelActive={reviewLabelMode}
           onToggleReviewLabel={() => {
@@ -4391,8 +4501,8 @@ export default function App() {
             if (!reviewDrawActive) { setReviewDrawActive(true); setReviewLabelMode(true); return; }
             setReviewLabelMode((v) => !v);
           }}
-          onReviewDraftConsumed={() => { setReviewDraft(null); setReviewDrawActive(false); setReviewLabelMode(false); }}
-          onShowAnnotation={(a, color) => { setReviewDrawActive(false); setReviewLabelMode(false); setReviewDraft(null); setAnnotationDisplay(a); setAnnotationDisplayColor(color ?? null); }}
+          onReviewDraftConsumed={() => { setReviewDraft(null); clearDraftHistory(); setReviewDrawActive(false); setReviewLabelMode(false); }}
+          onShowAnnotation={(a, color) => { setReviewDrawActive(false); setReviewLabelMode(false); setReviewDraft(null); clearDraftHistory(); setAnnotationDisplay(a); setAnnotationDisplayColor(color ?? null); }}
           onOpenReviewSource={handleOpenReviewSource}
           onReviewRangeDraft={setReviewRangeDraft}
           onRegisterRangeHotkeys={registerReviewRangeKeys}
