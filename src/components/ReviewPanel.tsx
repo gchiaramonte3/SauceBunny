@@ -15,7 +15,7 @@ import {
   setResolved, setLike, rootComments, repliesOf, openCount,
   reviewToMarkdown, reviewToCsv, reviewToEdl,
   avatarColor, initialsOf, loadReviewer, AVATAR_COLORS, AUTHOR_KEY, AUTHOR_COLOR_KEY, REVIEW_CHANGED_EVENT,
-  loadReviewHistory, removeReviewHistory, clearReviewHistory,
+  loadReviewHistory, removeReviewHistory, clearReviewHistory, annotationHasContent,
   type ReviewDoc, type ReviewComment, type CommentSort, type AnnotationStrokes, type ReviewHistoryEntry, type ReviewOp,
 } from "../lib/review";
 
@@ -101,6 +101,8 @@ export function ReviewPanel({
   drawActive = false,
   draft = null,
   onToggleDraw,
+  labelActive = false,
+  onToggleLabel,
   onDraftConsumed,
   onShowAnnotation,
   onOpenReview,
@@ -126,10 +128,15 @@ export function ReviewPanel({
   draft?: AnnotationStrokes | null;
   /** Toggle draw mode on/off (managed by App, drives the monitor overlay). */
   onToggleDraw?: () => void;
+  /** True while the label tool is selected inside draw mode. */
+  labelActive?: boolean;
+  /** Toggle the label tool (App enters draw mode first when needed). */
+  onToggleLabel?: () => void;
   /** Clear the draft + exit draw mode after a comment captured it. */
   onDraftConsumed?: () => void;
-  /** Display a saved annotation read-only over the frame (null to hide). */
-  onShowAnnotation?: (a: AnnotationStrokes | null) => void;
+  /** Display a saved annotation read-only over the frame (null to hide).
+   *  `color` = the author's reviewer colour, for the label chips. */
+  onShowAnnotation?: (a: AnnotationStrokes | null, color?: string) => void;
   /** Re-open a past-review source (local path / URL) from the history popover. */
   onOpenReview?: (path: string) => void;
   /** Emit the range currently being set in the composer (or null) so App can
@@ -561,7 +568,7 @@ export function ReviewPanel({
 
   const submit = () => {
     const body = text.trim();
-    const hasDrawing = !!draft && draft.strokes.length > 0;
+    const hasDrawing = annotationHasContent(draft);
     if (!body && !hasDrawing) return;
     if (!ensureNamed()) return;
     // Post column of the range machine: a SET range posts as-is; an ARMED
@@ -699,6 +706,8 @@ export function ReviewPanel({
       <ReviewComposer
         drawActive={drawActive}
         onToggleDraw={onToggleDraw}
+        labelActive={labelActive}
+        onToggleLabel={onToggleLabel}
         ensureNamed={ensureNamed}
         recording={recording}
         transcribing={transcribing}
@@ -711,7 +720,7 @@ export function ReviewPanel({
         onResizeStart={onComposerResizeStart}
         resizing={composerResizing}
         onResizeReset={() => setComposerHeight(null)}
-        submit={submit} hasDraft={!!draft && draft.strokes.length > 0}
+        submit={submit} hasDraft={annotationHasContent(draft)}
         currentSec={currentSec} fps={fps}
         rangeIn={rangeIn} rangeOut={rangeOut} onRangeTap={tapRange} onRangeClear={clearRange}
         rangeColor={authorColor}
@@ -882,7 +891,7 @@ function ReviewToolbar({
 /** Composer: draw/voice tools + the playhead-anchored comment box, with its
  *  draw / recording / transcribing / error / note hint stack above it. */
 function ReviewComposer({
-  drawActive, onToggleDraw, ensureNamed,
+  drawActive, onToggleDraw, labelActive, onToggleLabel, ensureNamed,
   recording, transcribing,
   dictError, clearDictError, dictNote, clearDictNote,
   toggleDictation, levelRef,
@@ -893,6 +902,8 @@ function ReviewComposer({
 }: {
   drawActive: boolean;
   onToggleDraw?: () => void;
+  labelActive: boolean;
+  onToggleLabel?: () => void;
   ensureNamed: () => boolean;
   recording: boolean;
   transcribing: boolean;
@@ -943,7 +954,9 @@ function ReviewComposer({
     <>
       {drawActive && (
         <div className="cp-review-drawhint">
-          ✎ Drawing on the frame — your comment will include it.
+          {labelActive
+            ? "Aa Click the video to place a label — Enter commits, Esc cancels."
+            : "✎ Drawing on the frame — your comment will include it."}
         </div>
       )}
       {recording && (
@@ -1008,12 +1021,22 @@ function ReviewComposer({
         />
         {onToggleDraw && (
           <button
-            className={"cp-review-tool" + (drawActive ? " active" : "")}
+            className={"cp-review-tool" + (drawActive && !labelActive ? " active" : "")}
             onClick={() => { if (ensureNamed()) onToggleDraw(); }}
             title={drawActive ? "Stop drawing" : "Draw on the frame"}
             aria-label="Draw on the frame"
           >
             <PencilGlyph />
+          </button>
+        )}
+        {onToggleLabel && (
+          <button
+            className={"cp-review-tool" + (drawActive && labelActive ? " active" : "")}
+            onClick={() => { if (ensureNamed()) onToggleLabel(); }}
+            title={drawActive && labelActive ? "Stop placing labels" : "Place a text label on the frame"}
+            aria-label="Place a text label on the frame"
+          >
+            <LabelGlyph />
           </button>
         )}
         <button
@@ -1113,7 +1136,7 @@ function CommentRow({
   myColor: string;
   replies: ReviewComment[];
   onSeek: (s: number) => void;
-  onShowAnnotation?: (a: AnnotationStrokes | null) => void;
+  onShowAnnotation?: (a: AnnotationStrokes | null, color?: string) => void;
   onResolve: () => void;
   onDelete: () => void;
   onEdit: (body: string) => void;
@@ -1130,7 +1153,10 @@ function CommentRow({
   setReplyDraft: (s: string) => void;
   onSubmitReply: () => void;
 }) {
-  const hasDrawing = !!c.annotation && c.annotation.strokes.length > 0;
+  const hasDrawing = annotationHasContent(c.annotation);
+  // Label chips on the overlay are tinted to the note author's colour —
+  // same resolution the Avatar uses (my chosen colour for me, hash otherwise).
+  const authorTint = c.author === myName ? myColor : avatarColor(c.author);
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(c.body);
   const replyInputRef = useRef<HTMLInputElement>(null);
@@ -1156,7 +1182,7 @@ function CommentRow({
       <div className="cp-review-chiprow">
         <button
           className={"cp-review-tc" + (c.timeEnd != null && c.timeEnd > c.timeStart ? " range" : "")}
-          onClick={() => { onSeek(c.timeStart); if (hasDrawing) onShowAnnotation?.(c.annotation); }}
+          onClick={() => { onSeek(c.timeStart); if (hasDrawing) onShowAnnotation?.(c.annotation, authorTint); }}
           title={c.timeEnd != null && c.timeEnd > c.timeStart ? "Jump to range start" : (hasDrawing ? "Jump + show drawing" : "Jump to this point")}
         >
           <ClockGlyph /> {secondsToTc(c.timeStart, fps)}
@@ -1165,7 +1191,7 @@ function CommentRow({
         {hasDrawing && (
           <button
             className="cp-review-drawbadge"
-            onClick={() => { onSeek(c.timeStart); onShowAnnotation?.(c.annotation); }}
+            onClick={() => { onSeek(c.timeStart); onShowAnnotation?.(c.annotation, authorTint); }}
             title="Show this drawing on the frame"
           >
             ✎ drawing
@@ -1315,6 +1341,17 @@ function PencilGlyph() {
       strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+/** Text-label glyph (a tag) for the label-on-frame tool. */
+function LabelGlyph() {
+  return (
+    <svg className="cp-review-glyph" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20.6 13.4 12.6 21.4a2 2 0 0 1-2.8 0L3 14.6V3h11.6l6 6a2 2 0 0 1 0 2.8Z" />
+      <circle cx="7.5" cy="7.5" r="0.5" fill="currentColor" />
     </svg>
   );
 }

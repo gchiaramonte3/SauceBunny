@@ -115,6 +115,10 @@ type Props = {
   annotationOpacity?: number;
   onAnnotationChange?: (a: AnnotationStrokes) => void;
   onAnnotationDismiss?: () => void;
+  /** True while the Review label tool is active (clicks place text labels). */
+  annotationLabelMode?: boolean;
+  /** Reviewer colour for annotation label chips. */
+  annotationLabelColor?: string;
 };
 
 /**
@@ -164,6 +168,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     transcriptPath, transcriptReloadToken, currentSec, captionsOn, captionStyle, tcOverlay,
     shuttleRate, playbackRateHud,
     annotation, annotationDrawing, annotationOpacity, onAnnotationChange, onAnnotationDismiss,
+    annotationLabelMode, annotationLabelColor,
   } = props;
 
   const natural = metadata?.width && metadata?.height ? metadata.width / metadata.height : 16 / 9;
@@ -399,6 +404,8 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
           opacity={annotationOpacity ?? 1}
           onChange={onAnnotationChange ?? (() => {})}
           onDismiss={onAnnotationDismiss}
+          labelMode={!!annotationLabelMode}
+          labelColor={annotationLabelColor}
         />
 
         {/* Type-a-timecode HUD — appears the moment the user types a digit

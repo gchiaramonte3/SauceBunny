@@ -1,18 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { getStroke } from "perfect-freehand";
-import type { AnnotationStrokes } from "../lib/review";
+import { annotationHasContent, type AnnotationStrokes } from "../lib/review";
+import { AnnotationLabels } from "./review/AnnotationLabels";
+import { LabelInput } from "./review/LabelInput";
 
 /**
  * Free-hand drawing surface over the monitor — the Frame.io "draw on the frame"
  * gesture. Two modes from one component:
  *   • drawing → captures pointer strokes (perfect-freehand: smooth, tapered,
- *     velocity-pressured), reports them up via onChange.
+ *     velocity-pressured), reports them up via onChange. With `labelMode` on,
+ *     a click places a text-label input instead of starting a stroke; Enter
+ *     commits the label into the same annotation payload the strokes ride in.
  *   • display → renders a saved annotation read-only over the current frame at a
  *     parent-controlled `opacity` (so it can fade in/out as the playhead nears
  *     the comment's timecode). Pointer-transparent so the video stays clickable.
  *
  * Points are normalized 0..1 against the canvas so a drawing made at one monitor
- * size still lines up after a window/panel resize.
+ * size still lines up after a window/panel resize; label anchors use the same
+ * space (chip positions scale, chip text stays a fixed readable size).
  */
 const PEN_COLORS = [
   "#ff3b30", "#ff9500", "#ffcc00", "#34c759", "#5ac8fa",
@@ -38,7 +43,7 @@ function outlineToPath(outline: number[][]): Path2D {
 }
 
 export function AnnotationOverlay({
-  annotation, drawing, opacity = 1, onChange, onDismiss,
+  annotation, drawing, opacity = 1, onChange, onDismiss, labelMode = false, labelColor = "#4dabf7",
 }: {
   /** Strokes to render (the live draft while drawing, or a saved one to view). */
   annotation: AnnotationStrokes | null;
@@ -46,18 +51,43 @@ export function AnnotationOverlay({
   drawing: boolean;
   /** Read-only display opacity 0..1 (parent fades it by playhead proximity). */
   opacity?: number;
-  /** Fired after each committed stroke (or a clear) while drawing. */
+  /** Fired after each committed stroke/label (or a clear) while drawing. */
   onChange: (a: AnnotationStrokes) => void;
   /** Hide the read-only display (only shown for an explicitly-pinned drawing). */
   onDismiss?: () => void;
+  /** While drawing: clicks place text labels instead of pen strokes. */
+  labelMode?: boolean;
+  /** Reviewer colour for label chips (draft = current reviewer; saved = the
+   *  comment author's) — defaults to the panel blue (AVATAR_COLORS[0]). */
+  labelColor?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const live = useRef<Stroke | null>(null);
   const [color, setColor] = useState(PEN_COLORS[0]);
   const [size, setSize] = useState(8);
+  // In-progress label (label mode): anchor + text while the input is open.
+  // Mirrored in a ref so the input's blur and a same-tick canvas click can't
+  // both commit it (whichever runs second sees null and no-ops).
+  const [pendingLabel, setPendingLabel] = useState<{ x: number; y: number; text: string } | null>(null);
+  const pendingRef = useRef(pendingLabel);
+  pendingRef.current = pendingLabel;
 
   const strokes = annotation?.strokes ?? [];
+  const labels = annotation?.labels ?? [];
+
+  const commitPendingLabel = () => {
+    const p = pendingRef.current;
+    if (!p) return;
+    pendingRef.current = null;
+    setPendingLabel(null);
+    const text = p.text.trim();
+    if (text) onChange({ strokes, labels: [...labels, { text, x: p.x, y: p.y }] });
+  };
+  const cancelPendingLabel = () => {
+    pendingRef.current = null;
+    setPendingLabel(null);
+  };
 
   const redraw = () => {
     const cv = canvasRef.current;
@@ -130,12 +160,25 @@ export function AnnotationOverlay({
 
   const onDown = (e: React.PointerEvent) => {
     if (!drawing) return;
+    if (labelMode) {
+      // An open input absorbs this click: commit if it has text, dismiss if
+      // empty ("clicking elsewhere while empty dismisses") — and DON'T place
+      // a new label from the same click. Otherwise, place the input here.
+      if (pendingRef.current) {
+        if (pendingRef.current.text.trim()) commitPendingLabel();
+        else cancelPendingLabel();
+        return;
+      }
+      const [x, y] = norm(e);
+      setPendingLabel({ x, y, text: "" });
+      return;
+    }
     (e.target as Element).setPointerCapture(e.pointerId);
     live.current = { color, size, pts: [norm(e)] };
     redraw();
   };
   const onMove = (e: React.PointerEvent) => {
-    if (!drawing || !live.current) return;
+    if (!drawing || labelMode || !live.current) return;
     live.current.pts.push(norm(e));
     redraw();
   };
@@ -146,13 +189,18 @@ export function AnnotationOverlay({
     if (finished.pts.length > 0) onChange({ strokes: [...strokes, finished] });
   };
 
+  // Leaving draw/label mode with an input still open → drop it (uncommitted).
+  useEffect(() => {
+    if (!drawing || !labelMode) cancelPendingLabel();
+  }, [drawing, labelMode]);
+
   // Read-only with nothing to show (or fully faded) → render nothing.
-  if (!drawing && (strokes.length === 0 || opacity <= 0)) return null;
+  if (!drawing && (!annotationHasContent(annotation) || opacity <= 0)) return null;
 
   return (
     <div
       ref={wrapRef}
-      className={"cp-annot" + (drawing ? " drawing" : "")}
+      className={"cp-annot" + (drawing ? " drawing" : "") + (drawing && labelMode ? " labeling" : "")}
       style={{ pointerEvents: drawing ? "auto" : "none", opacity: drawing ? 1 : opacity }}
     >
       <canvas
@@ -164,6 +212,20 @@ export function AnnotationOverlay({
         onPointerLeave={onUp}
         onPointerCancel={onUp}
       />
+      {/* Text labels — committed chips (draft + saved view) and, in label
+          mode, the in-progress input at the clicked anchor. */}
+      <AnnotationLabels labels={labels} color={labelColor} />
+      {pendingLabel && (
+        <LabelInput
+          x={pendingLabel.x}
+          y={pendingLabel.y}
+          color={labelColor}
+          value={pendingLabel.text}
+          onChange={(text) => setPendingLabel((p) => (p ? { ...p, text } : p))}
+          onCommit={commitPendingLabel}
+          onCancel={cancelPendingLabel}
+        />
+      )}
       {drawing ? (
         <div className="cp-annot-tools">
           <div className="cp-annot-swatches">
@@ -193,8 +255,8 @@ export function AnnotationOverlay({
           <span className="cp-annot-divider" />
           <button
             className="cp-annot-clear"
-            onClick={() => { live.current = null; onChange({ strokes: [] }); }}
-            disabled={strokes.length === 0}
+            onClick={() => { live.current = null; cancelPendingLabel(); onChange({ strokes: [] }); }}
+            disabled={!annotationHasContent(annotation)}
           >
             Clear
           </button>

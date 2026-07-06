@@ -110,10 +110,15 @@ type Props = {
   reviewDraft?: AnnotationStrokes | null;
   /** Toggle draw mode on/off. */
   onToggleReviewDraw?: () => void;
+  /** Review labels: true while the text-label tool is active in draw mode. */
+  reviewLabelActive?: boolean;
+  /** Toggle the label tool (App enters draw mode first when needed). */
+  onToggleReviewLabel?: () => void;
   /** Called once the draft has been attached to a comment (clears + exits draw). */
   onReviewDraftConsumed?: () => void;
-  /** Show a saved annotation read-only over the frame (null to hide). */
-  onShowAnnotation?: (a: AnnotationStrokes | null) => void;
+  /** Show a saved annotation read-only over the frame (null to hide).
+   *  `color` = the note author's reviewer colour, for the label chips. */
+  onShowAnnotation?: (a: AnnotationStrokes | null, color?: string) => void;
   /** Re-open a past-review source (local path or URL) from the history popover. */
   onOpenReviewSource?: (path: string) => void;
   /** Live review-comment range being set → previewed on the App's timeline.
@@ -204,7 +209,7 @@ export function QueueDrawer({
   aiModelId, aiStyle, onOpenAiSettings,
   chapterSourceKey, chapterDurationSec, onChaptersChanged,
   reviewSourceKey, reviewSourceTitle,
-  reviewDrawActive, reviewDraft, onToggleReviewDraw, onReviewDraftConsumed, onShowAnnotation,
+  reviewDrawActive, reviewDraft, onToggleReviewDraw, reviewLabelActive, onToggleReviewLabel, onReviewDraftConsumed, onShowAnnotation,
   onOpenReviewSource, onReviewRangeDraft, onRegisterRangeHotkeys,
   reviewSessionActive, reviewSessionDoc, onReviewSessionOp,
   onRenameClip, onRenameAll,
@@ -817,6 +822,8 @@ export function QueueDrawer({
           drawActive={!!reviewDrawActive}
           draft={reviewDraft ?? null}
           onToggleDraw={onToggleReviewDraw}
+          labelActive={!!reviewLabelActive}
+          onToggleLabel={onToggleReviewLabel}
           onDraftConsumed={onReviewDraftConsumed}
           onShowAnnotation={onShowAnnotation}
           onOpenReview={onOpenReviewSource}

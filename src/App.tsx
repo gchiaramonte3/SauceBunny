@@ -3783,15 +3783,19 @@ export default function App() {
       return { name: n, color: reviewerColorFor(n, me), isHost: i === 0, isSelf };
     });
   }, [coSession.role, coSession.peers]);
-  const [reviewAnnotations, setReviewAnnotations] = useState<{ id: string; time: number; strokes: AnnotationStrokes }[]>([]);
-  // Drawing-annotation state: draw mode + the live draft (attached to the next
-  // comment) + a saved annotation being viewed read-only over the frame.
+  const [reviewAnnotations, setReviewAnnotations] = useState<{ id: string; time: number; color: string; strokes: AnnotationStrokes }[]>([]);
+  // Drawing-annotation state: draw mode (+ the label tool inside it) + the
+  // live draft (attached to the next comment) + a saved annotation being
+  // viewed read-only over the frame (with its author's colour for labels).
   const [reviewDrawActive, setReviewDrawActive] = useState(false);
+  const [reviewLabelMode, setReviewLabelMode] = useState(false);
   const [reviewDraft, setReviewDraft] = useState<AnnotationStrokes | null>(null);
   const [annotationDisplay, setAnnotationDisplay] = useState<AnnotationStrokes | null>(null);
+  const [annotationDisplayColor, setAnnotationDisplayColor] = useState<string | null>(null);
   useEffect(() => {
     // New source → drop any in-flight drawing + viewed annotation.
     setReviewDrawActive(false);
+    setReviewLabelMode(false);
     setReviewDraft(null);
     setAnnotationDisplay(null);
     // In a co-review session the SHARED doc drives markers (see the effect
@@ -3806,7 +3810,8 @@ export default function App() {
         id: m.id, time: m.time, timeEnd: m.timeEnd, resolved: m.resolved,
         color: reviewerColorFor(m.author, me), initials: initialsOf(m.author),
       })));
-      setReviewAnnotations(annotationsOf(d, d.activeVersionId));
+      setReviewAnnotations(annotationsOf(d, d.activeVersionId)
+        .map((a) => ({ id: a.id, time: a.time, strokes: a.strokes, color: reviewerColorFor(a.author, me) })));
       // Once a clip has notes, record it in history + link its fingerprint so
       // re-opening it (anywhere) reloads this review. Read metadata via the ref —
       // this closure outlives a setMetadata that keeps the same reviewSourceKey
@@ -3859,7 +3864,8 @@ export default function App() {
       id: m.id, time: m.time, timeEnd: m.timeEnd, resolved: m.resolved,
       color: reviewerColorFor(m.author, me), initials: initialsOf(m.author),
     })));
-    setReviewAnnotations(annotationsOf(sessionDoc, sessionDoc.activeVersionId));
+    setReviewAnnotations(annotationsOf(sessionDoc, sessionDoc.activeVersionId)
+      .map((a) => ({ id: a.id, time: a.time, strokes: a.strokes, color: reviewerColorFor(a.author, me) })));
   }, [sessionDoc]);
 
   // Ghost cursors for the timeline — peer playheads in frames, tinted per name.
@@ -3933,12 +3939,13 @@ export default function App() {
   //      opacity ramping with distance so it appears then fades while scrubbing.
   const ANNOT_PROX_WINDOW = 0.6; // seconds on either side of the drawing's time
   let proxStrokes: AnnotationStrokes | null = null;
+  let proxColor: string | null = null;
   let proxOpacity = 0;
   if (!reviewDrawActive && !annotationDisplay && reviewAnnotations.length) {
     let bestDist = Infinity;
     for (const a of reviewAnnotations) {
       const d = Math.abs(a.time - playheadSec);
-      if (d < bestDist) { bestDist = d; proxStrokes = a.strokes; }
+      if (d < bestDist) { bestDist = d; proxStrokes = a.strokes; proxColor = a.color; }
     }
     proxOpacity = bestDist <= ANNOT_PROX_WINDOW ? Math.max(0, 1 - bestDist / ANNOT_PROX_WINDOW) : 0;
     if (proxOpacity <= 0) proxStrokes = null;
@@ -3947,6 +3954,10 @@ export default function App() {
   const annStrokes = annDrawing ? reviewDraft : (annotationDisplay ?? proxStrokes);
   const annOpacity = annDrawing || annotationDisplay ? 1 : proxOpacity;
   const annPinned = !annDrawing && !!annotationDisplay;
+  // Label-chip tint: the current reviewer's colour while drafting, else the
+  // shown annotation's author colour (undefined → the overlay's default).
+  const annLabelColor = (annDrawing ? loadReviewer().color
+    : annotationDisplay ? annotationDisplayColor : proxColor) ?? undefined;
   // Live HH:MM:SS:FF for the timecode-entry HUD (right-aligned digit fill).
   const tcOverlay = tcEntry == null ? null
     : (() => { const d = tcEntry.slice(-8).padStart(8, "0"); return `${d.slice(0, 2)}:${d.slice(2, 4)}:${d.slice(4, 6)}:${d.slice(6, 8)}`; })();
@@ -4215,6 +4226,8 @@ export default function App() {
               annotationOpacity={annOpacity}
               onAnnotationChange={setReviewDraft}
               onAnnotationDismiss={annPinned ? () => setAnnotationDisplay(null) : undefined}
+              annotationLabelMode={annDrawing && reviewLabelMode}
+              annotationLabelColor={annLabelColor}
             />
             <Transport
               status={status}
@@ -4364,10 +4377,22 @@ export default function App() {
           reviewDraft={reviewDraft}
           onToggleReviewDraw={() => {
             setAnnotationDisplay(null);
+            // Pen click while the label tool is active = switch back to the
+            // pen (stay in draw mode); otherwise toggle draw mode itself.
+            if (reviewDrawActive && reviewLabelMode) { setReviewLabelMode(false); return; }
+            setReviewLabelMode(false);
             setReviewDrawActive((on) => { if (on) setReviewDraft(null); return !on; });
           }}
-          onReviewDraftConsumed={() => { setReviewDraft(null); setReviewDrawActive(false); }}
-          onShowAnnotation={(a) => { setReviewDrawActive(false); setReviewDraft(null); setAnnotationDisplay(a); }}
+          reviewLabelActive={reviewLabelMode}
+          onToggleReviewLabel={() => {
+            setAnnotationDisplay(null);
+            // Label click enters draw mode if needed; inside draw mode it
+            // toggles between the label tool and the pen.
+            if (!reviewDrawActive) { setReviewDrawActive(true); setReviewLabelMode(true); return; }
+            setReviewLabelMode((v) => !v);
+          }}
+          onReviewDraftConsumed={() => { setReviewDraft(null); setReviewDrawActive(false); setReviewLabelMode(false); }}
+          onShowAnnotation={(a, color) => { setReviewDrawActive(false); setReviewLabelMode(false); setReviewDraft(null); setAnnotationDisplay(a); setAnnotationDisplayColor(color ?? null); }}
           onOpenReviewSource={handleOpenReviewSource}
           onReviewRangeDraft={setReviewRangeDraft}
           onRegisterRangeHotkeys={registerReviewRangeKeys}
