@@ -79,3 +79,35 @@ test("transcript tab shows the empty state with Generate gated on a source", asy
   await expect(page.locator(".cp-tx-empty-hint")).toBeVisible();
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
+
+test("recent sources: popover lists seeded entries, empty state offers resume", async ({ page }) => {
+  // Seed two recents BEFORE boot — the popover and the Monitor empty-state
+  // "Resume last session" button both read saucebunny.recentSources.
+  await page.addInitScript(() => {
+    localStorage.setItem("saucebunny.recentSources", JSON.stringify([
+      { kind: "url", value: "https://youtube.com/watch?v=abc", title: "Seeded web source", durationSeconds: 90, lastOpenedAt: Date.now() },
+      { kind: "file", value: "/tmp/seeded.mp4", title: "seeded.mp4", lastOpenedAt: Date.now() - 60_000 },
+    ]));
+  });
+  await boot(page);
+  // Empty state offers one-click resume of the most recent entry.
+  await expect(page.locator(".cp-empty-resume")).toContainText("Seeded web source");
+  // History trigger opens the popover with both rows, newest first.
+  await page.getByTitle("Recent sources", { exact: true }).click();
+  const pop = page.locator(".cp-recents-pop");
+  await expect(pop).toBeVisible();
+  const rows = pop.locator(".cp-recents-row");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText("Seeded web source");
+  await expect(rows.nth(0).locator(".cp-recents-badge")).toHaveText("web");
+  await expect(rows.nth(1)).toContainText("seeded.mp4");
+  await expect(rows.nth(1).locator(".cp-recents-badge")).toHaveText("file");
+  // Per-row remove prunes without closing.
+  await rows.nth(1).hover();
+  await rows.nth(1).locator(".cp-recents-remove").click();
+  await expect(pop.locator(".cp-recents-row")).toHaveCount(1);
+  // Escape closes (shared popover convention).
+  await page.keyboard.press("Escape");
+  await expect(pop).toHaveCount(0);
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});

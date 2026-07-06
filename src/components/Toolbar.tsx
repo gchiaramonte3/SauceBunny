@@ -3,6 +3,8 @@ import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { IconLink, IconClipboard, IconSettings, IconImport, IconPanelRight, IconPanelLeft } from "./Icons";
 import { NotificationBell, type Notif } from "./NotificationBell";
 import { CoReviewPopover } from "./CoReviewPopover";
+import { RecentSources } from "./RecentSources";
+import type { RecentSource } from "../lib/recent-sources";
 import type { AppStatus } from "../types";
 import type { SessionState } from "../bindings/SessionState";
 
@@ -12,6 +14,12 @@ type Props = {
   onFetch: (url?: string) => void;
   onClear: () => void;
   onImportFile: () => void;
+  /** Recent sources (URL-bar history popover). Opening one routes through
+   *  the same fetch/import handlers as paste/import — no parallel path. */
+  recentSources: RecentSource[];
+  onOpenRecent: (entry: RecentSource) => void;
+  onRemoveRecent: (value: string) => void;
+  onClearRecents: () => void;
   onToggleQueue: () => void;
   queueCount: number;
   queueOpen: boolean;
@@ -43,7 +51,9 @@ function stripScheme(s: string): string {
 }
 
 export function Toolbar({
-  url, onChange, onFetch, onClear, onImportFile, onToggleQueue, queueCount, queueOpen,
+  url, onChange, onFetch, onClear, onImportFile,
+  recentSources, onOpenRecent, onRemoveRecent, onClearRecents,
+  onToggleQueue, queueCount, queueOpen,
   sidebarOpen, onToggleSidebar,
   hasSource, status, onOpenSettings,
   notifications, onMarkAllRead, onClearNotifications, onDismissNotification,
@@ -128,6 +138,12 @@ export function Toolbar({
         >
           <IconClipboard size={13} />
         </button>
+        <RecentSources
+          entries={recentSources}
+          onOpen={onOpenRecent}
+          onRemove={onRemoveRecent}
+          onClearAll={onClearRecents}
+        />
       </div>
 
       {hasSource ? (

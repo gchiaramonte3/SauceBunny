@@ -56,6 +56,7 @@ import { speakerColor } from "./components/transcript/helpers";
 import { MediaInfoModal } from "./components/MediaInfoModal";
 import { loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes, type ReviewDoc, type ReviewOp } from "./lib/review";
 import { loadJson, saveJson } from "./lib/storage";
+import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
 import {
   durationToTc, framesToTc, secondsToTc,
   tcToFrames, tcToSeconds,
@@ -623,6 +624,16 @@ export default function App() {
   // ====== Recents ======
   const [recents, setRecents] = useState<RecentClip[]>(() => loadJson<RecentClip[]>(RECENTS_KEY, []));
   useEffect(() => saveJson(RECENTS_KEY, recents), [recents]);
+
+  // ====== Recent sources (URL-bar history + "Resume last session") ======
+  // Recorded only on SUCCESSFUL loads: web URLs when fetch_metadata resolves,
+  // local files when probe_local_file succeeds. Failed loads never land here.
+  const [recentSources, setRecentSources] = useState<RecentSource[]>(() => loadRecentSources());
+  useEffect(() => saveRecentSources(recentSources), [recentSources]);
+  const recordRecentSource = useCallback(
+    (entry: { kind: RecentSource["kind"]; value: string; title: string; durationSeconds?: number }) => {
+      setRecentSources((prev) => upsertRecent(prev, entry));
+    }, []);
 
   // ====== Aspect crop guide + captions display ======
   const [aspect, setAspect] = useState<AspectId>(() => loadJson<AspectId>(ASPECT_KEY, "off"));
@@ -1436,6 +1447,14 @@ export default function App() {
       });
       if (sourceSeqRef.current !== seq) return; // user already moved on
       setMetadata(m);
+      // Successful load confirmed → record in recent sources. Title comes
+      // from the metadata this fetch already returned (no second request).
+      recordRecentSource({
+        kind: "url",
+        value: full,
+        title: m.title,
+        durationSeconds: m.duration ?? undefined,
+      });
       // Queue items added during the optimistic-stub window captured
       // "Loading…" as their title — re-stamp them with the real title/
       // thumbnail now that metadata has hydrated (recents would otherwise
@@ -1480,7 +1499,7 @@ export default function App() {
     } finally {
       if (sourceSeqRef.current === seq) setMetadataLoading(false);
     }
-  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, loadWebPlayback]);
+  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, loadWebPlayback, recordRecentSource]);
 
   // Re-run the current fetch after the user picks a browser in the YouTube
   // auth modal. By the time this fires, `defaults.ytCookiesBrowser` (and thus
@@ -1784,7 +1803,11 @@ export default function App() {
   // Load a local file by absolute path — the import core, shared by the
   // file-picker import and the Review version switcher (which loads a chosen
   // version's file straight into the existing player; A/B toggle compare).
-  const loadLocalPath = useCallback(async (picked: string) => {
+  /** Import a local file. Resolves to null on success (or a superseded
+   *  load), or the formatted error message on failure — callers that need
+   *  to react to a failed load (e.g. stale recent-source pruning) inspect
+   *  the message; the error UI itself is fully handled in here. */
+  const loadLocalPath = useCallback(async (picked: string): Promise<string | null> => {
     try {
       resetForNewSource();
       const seq = ++sourceSeqRef.current;
@@ -1792,7 +1815,7 @@ export default function App() {
       appendLog("info", "import", `Probing local file: ${picked}`);
 
       const lf = await invoke<LocalFileMeta>("probe_local_file", { path: picked });
-      if (sourceSeqRef.current !== seq) return;
+      if (sourceSeqRef.current !== seq) return null;
 
       // Adapt the local file shape to the existing Metadata so the rest of
       // the UI (sidebar, monitor, settings) can stay agnostic. webpage_url
@@ -1888,6 +1911,13 @@ export default function App() {
       // the next source.
       void tryAutoLoadTranscript({ sourcePath: picked }, seq);
       setStatus("loaded");
+      // Probe succeeded → the import is a successful load; record it.
+      recordRecentSource({
+        kind: "file",
+        value: lf.path,
+        title: lf.filename,
+        durationSeconds: lf.duration ?? undefined,
+      });
 
       // ─── Playback prep ─────────────────────────────────────────────
       // WKWebView often can't decode arbitrary MP4s (HEVC, High-10, missing
@@ -1928,7 +1958,7 @@ export default function App() {
       if (videoNative && audioNative && containerOk) {
         setLocalPlayer("native");
         appendLog("ok", "import", "Codecs natively supported — playing original file (no transcode).");
-        return;
+        return null;
       }
 
       // Mediabunny-first (r93): probe whether WebCodecs — plus our registered
@@ -1938,12 +1968,12 @@ export default function App() {
       // WKWebView decodes AV1 video via WebCodecs, and libopus covers the
       // Opus audio that WKWebView's (absent) AudioDecoder can't.
       const canMb = await canMediabunnyDecode(lf.path);
-      if (sourceSeqRef.current !== seq) return;
+      if (sourceSeqRef.current !== seq) return null;
       if (canMb) {
         setLocalPlayer("mediabunny");
         appendLog("ok", "import",
           `In-app decode via mediabunny (${vc || "?"} / ${ac || "?"}) — no transcode.`);
-        return;
+        return null;
       }
 
       // Mediabunny can't decode this file here (e.g. a codec WebCodecs lacks
@@ -1958,13 +1988,15 @@ export default function App() {
       appendLog("info", "import",
         `Transcoding for playback: ${reasonParts.join(", ")}.`);
       await runPlaybackPrep(lf.path, lf.has_video, lf.duration, seq);
+      return null;
     } catch (err) {
       const msg = formatError(err);
       setErrorDetail(msg);
       appendLog("err", "import", msg);
       setStatus("error");
+      return msg;
     }
-  }, [appendLog, defaults.folder, defaults.useWebCodecsDecoder, resetForNewSource, runPlaybackPrep]);
+  }, [appendLog, defaults.folder, defaults.useWebCodecsDecoder, resetForNewSource, runPlaybackPrep, recordRecentSource]);
 
   const handleImportFile = useCallback(async () => {
     const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
@@ -1988,6 +2020,38 @@ export default function App() {
     if (/^https?:\/\//i.test(path)) { setUrl(path); void handleFetch(path); }
     else void loadLocalPath(path);
   }, [handleFetch, loadLocalPath]);
+
+  // Open a recent source through the SAME handlers as paste/import — no
+  // parallel loading path. Staleness choice for file recents: auto-remove on
+  // confirmed not-found. probe_local_file existence-checks the path before
+  // touching ffmpeg and errors with "File not found: <path>" (an AppError
+  // whose message is the only signal it exposes), so we match on that message;
+  // any other failure (codec, ffmpeg, permissions) keeps the entry since the
+  // file may still be perfectly loadable later. The normal error UI (Monitor
+  // overlay + pipeline log) still fires from loadLocalPath itself.
+  const handleOpenRecentSource = useCallback((entry: RecentSource) => {
+    if (entry.kind === "url") {
+      setUrl(entry.value);
+      void handleFetch(entry.value);
+      return;
+    }
+    void (async () => {
+      const errMsg = await loadLocalPath(entry.value);
+      if (errMsg && /file not found/i.test(errMsg)) {
+        setRecentSources((prev) => removeRecent(prev, entry.value));
+        pushNotification("info", "Removed from recents",
+          `"${entry.title}" no longer exists at its saved location.`);
+      }
+    })();
+  }, [handleFetch, loadLocalPath, pushNotification]);
+
+  const handleRemoveRecentSource = useCallback((value: string) => {
+    setRecentSources((prev) => removeRecent(prev, value));
+  }, []);
+
+  const handleClearRecentSources = useCallback(() => {
+    setRecentSources([]);
+  }, []);
 
   const handleStop = useCallback(async () => {
     const ids = [jobId, transcriptJobId, playbackPrepJobId].filter((x): x is string => !!x);
@@ -3838,6 +3902,10 @@ export default function App() {
         onFetch={handleFetch}
         onClear={handleClear}
         onImportFile={handleImportFile}
+        recentSources={recentSources}
+        onOpenRecent={handleOpenRecentSource}
+        onRemoveRecent={handleRemoveRecentSource}
+        onClearRecents={handleClearRecentSources}
         onToggleQueue={() => setQueueOpen((p) => !p)}
         queueCount={clipQueue.length}
         queueOpen={queueOpen}
@@ -3918,6 +3986,10 @@ export default function App() {
               status={status}
               metadata={metadata}
               errorDetail={errorDetail}
+              /* Empty-state "Resume last session" — one-click reopen of the
+                 most recent source via the same fetch/import handlers. */
+              resumeTitle={recentSources.length > 0 ? recentSources[0].title : null}
+              onResume={recentSources.length > 0 ? () => handleOpenRecentSource(recentSources[0]) : undefined}
               aspect={aspect}
               sourceKind={sourceKind}
               /* Prefer the ffmpeg-normalised playback copy when ready —

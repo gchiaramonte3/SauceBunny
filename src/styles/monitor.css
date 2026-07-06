@@ -205,6 +205,21 @@
   text-align: center;
   line-height: 1.5;
 }
+/* "Resume last session" — one-click reopen of the most recent source.
+   Rides the .btn/.btn-ghost family; only the title-truncation is local. */
+.cp-empty-resume {
+  max-width: 420px;
+  gap: 7px;
+}
+.cp-empty-resume span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-empty-resume strong {
+  font-weight: 700;
+  color: var(--fg-1);
+}
 
 /* Monitor overlays — minimal: only timecodes by default. */
 .cp-monitor-overlay {

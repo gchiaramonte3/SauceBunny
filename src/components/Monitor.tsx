@@ -1,5 +1,5 @@
 import { forwardRef, useLayoutEffect, useRef, useState } from "react";
-import { IconAlert } from "./Icons";
+import { IconAlert, IconHistory } from "./Icons";
 import { CanvasToast, type ToastKind } from "./CanvasToast";
 import { CaptionOverlay, type CaptionStyle } from "./CaptionOverlay";
 import { AnnotationOverlay } from "./AnnotationOverlay";
@@ -17,6 +17,10 @@ type Props = {
   status: AppStatus;
   metadata: Metadata | null;
   errorDetail: string | null;
+  /** Most-recent recent-source title — renders a one-click "Resume last
+   *  session" button in the empty state. Null hides the affordance. */
+  resumeTitle?: string | null;
+  onResume?: () => void;
   aspect: AspectId;
   /** "youtube" → web source (any host yt-dlp supports — including YouTube
    *  itself, which used to use the IFrame embed until r53 dropped it);
@@ -141,6 +145,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
   const {
     status, metadata,
     errorDetail,
+    resumeTitle, onResume,
     aspect,
     sourceKind, localFilePath, webStreamUrl, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs,
@@ -172,6 +177,17 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             </div>
             <h3>Paste a video URL</h3>
             <p>YouTube, Vimeo, TikTok, Twitter/X, Reddit, Instagram, or any page with embedded video. Sauce Bunny resolves the highest-quality stream available — no host branding, no metadata you didn't ask for.</p>
+            {resumeTitle && onResume && (
+              <button
+                type="button"
+                className="btn btn-ghost cp-empty-resume"
+                onClick={onResume}
+                title="Reopen the most recent source"
+              >
+                <IconHistory size={13} />
+                <span>Resume last session: <strong>{resumeTitle}</strong></span>
+              </button>
+            )}
           </div>
         </div>
       </div>
