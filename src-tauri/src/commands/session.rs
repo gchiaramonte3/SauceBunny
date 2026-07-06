@@ -46,8 +46,9 @@ const MAX_PEERS: usize = 3;
 /// before it can be fanned out to every other peer (×N memory amplification).
 const MAX_MSG_BYTES: usize = 2 * 1024 * 1024;
 
-/// Host's roster display name. Phase-2 refinement: let `session_start` take
-/// a display name like `session_join` does.
+/// Fallback roster display name for a host who hasn't set one.
+/// `session_start` takes a display name like `session_join` does (r104);
+/// this is also the reserved word guests can't claim (see `clean_name`).
 const HOST_NAME: &str = "Host";
 
 /// How long a freshly-accepted connection gets to open its stream and send
@@ -165,6 +166,8 @@ enum Session {
 /// tasks, and `session_broadcast`.
 #[derive(Default)]
 struct HostShared {
+    /// The host's own roster display name (heads every `PeerList`).
+    host_name: String,
     /// Send halves + names. tokio Mutex: broadcast writes are async.
     peers: AsyncMutex<Vec<PeerConn>>,
     /// Per-connection task handles, so `session_leave` can abort them.
@@ -192,6 +195,7 @@ static NEXT_PEER_ID: AtomicU64 = AtomicU64::new(1);
 pub async fn session_start(
     app: AppHandle,
     state: State<'_, SessionManager>,
+    name: Option<String>,
 ) -> Result<String, crate::AppError> {
     let mut inner = state.inner.lock().await;
     if !matches!(inner.session, Session::Off) {
@@ -210,7 +214,10 @@ pub async fn session_start(
     let _ = tokio::time::timeout(ONLINE_TIMEOUT, endpoint.online()).await;
 
     let ticket = EndpointTicket::new(endpoint.addr()).to_string();
-    let shared = Arc::new(HostShared::default());
+    let shared = Arc::new(HostShared {
+        host_name: clean_host_name(name.as_deref().unwrap_or("")),
+        ..HostShared::default()
+    });
     let accept_task = tokio::spawn(accept_loop(app.clone(), endpoint.clone(), shared.clone()));
 
     inner.generation += 1;
@@ -517,7 +524,7 @@ async fn relay_to_others(shared: &HostShared, sender_id: u64, msg: &SessionMsg) 
 async fn broadcast_peer_list(shared: &HostShared) {
     let mut peers = shared.peers.lock().await;
     loop {
-        let roster: Vec<String> = std::iter::once(HOST_NAME.to_string())
+        let roster: Vec<String> = std::iter::once(shared.host_name.clone())
             .chain(peers.iter().map(|p| p.name.clone()))
             .collect();
         let Ok(mut line) = serde_json::to_string(&SessionMsg::PeerList { peers: roster }) else {
@@ -698,8 +705,7 @@ async fn write_msg_line(send: &mut SendStream, msg: &SessionMsg) -> Result<(), S
 /// Display names come from the other side of the wire — trim, strip
 /// control characters, cap the length, and never let one be empty.
 fn clean_name(raw: &str) -> String {
-    let cleaned: String = raw.trim().chars().filter(|c| !c.is_control()).take(40).collect();
-    let trimmed = cleaned.trim();
+    let trimmed = sanitize_name(raw);
     if trimmed.is_empty() {
         "Guest".to_string()
     } else if trimmed.eq_ignore_ascii_case(HOST_NAME) {
@@ -707,8 +713,21 @@ fn clean_name(raw: &str) -> String {
         // / roster-head slot (or spoof a ghost label) by choosing that name.
         format!("{trimmed} (guest)")
     } else {
-        trimmed.to_string()
+        trimmed
     }
+}
+
+/// The host's own name: same sanitation, but "Host" is legitimately theirs
+/// (it's the default), so no reserved-name suffix.
+fn clean_host_name(raw: &str) -> String {
+    let trimmed = sanitize_name(raw);
+    if trimmed.is_empty() { HOST_NAME.to_string() } else { trimmed }
+}
+
+/// Shared wire-input sanitation: trim, strip control chars, cap the length.
+fn sanitize_name(raw: &str) -> String {
+    let cleaned: String = raw.trim().chars().filter(|c| !c.is_control()).take(40).collect();
+    cleaned.trim().to_string()
 }
 
 // ============================================================
@@ -787,5 +806,14 @@ mod tests {
         assert_eq!(clean_name("Host"), "Host (guest)");
         assert_eq!(clean_name("  host "), "host (guest)");
         assert_eq!(clean_name("Hostess"), "Hostess"); // only exact match is reserved
+    }
+
+    #[test]
+    fn clean_host_name_defaults_and_allows_host() {
+        assert_eq!(clean_host_name(""), "Host");       // unset → default
+        assert_eq!(clean_host_name("  "), "Host");
+        assert_eq!(clean_host_name("Host"), "Host");   // no (guest) suffix for the host
+        assert_eq!(clean_host_name(" Gasper \n"), "Gasper");
+        assert_eq!(clean_host_name(&"x".repeat(100)).len(), 40);
     }
 }

@@ -3559,7 +3559,11 @@ export default function App() {
     return () => window.clearInterval(iv);
   }, [coSessionActive, sendSessionMsg]);
   const startCoReview = useCallback(async () => {
-    try { await invoke<string>("session_start"); }
+    try {
+      // Host under the review identity's name (falls back to "Host" in Rust)
+      // so guests see a real person heading the roster, not a role label.
+      await invoke<string>("session_start", { name: loadReviewer().name || null });
+    }
     catch (e) { pushNotification("error", "Couldn't start co-review", formatError(e)); }
   }, [pushNotification]);
   const joinCoReview = useCallback(async (ticket: string, name: string) => {
