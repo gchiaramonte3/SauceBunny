@@ -167,6 +167,25 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
   const { ref: monitorRef, dims } = useContainSize(ratio);
   const monitorStyle = dims ? { width: `${dims.w}px`, height: `${dims.h}px` } : undefined;
 
+  /* Floating toast — hoisted above the status early-returns so feedback that
+     fires with NO source loaded (a rejected drag-and-drop, a transcript that
+     failed to open) is still visible instead of only ticking the bell. */
+  const toastEl = toast && (
+    <CanvasToast
+      /* Keyed on the monotonic id: replacing a visible toast remounts
+         with a FRESH countdown instead of inheriting the old timer. */
+      key={toast.id}
+      kind={toast.kind}
+      title={toast.title}
+      body={toast.body}
+      /* When the bottom-left prep banner is up (e.g. the web-preview
+         download), lift the centered toast above it so the two don't
+         collide in the same bottom band. */
+      className={playbackPrepBusy ? "cp-canvas-toast--above-banner" : undefined}
+      onDismiss={onToastDismiss}
+    />
+  );
+
   if (status === "empty") {
     return (
       <div className="cp-monitor-area">
@@ -189,6 +208,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               </button>
             )}
           </div>
+          {toastEl}
         </div>
       </div>
     );
@@ -205,6 +225,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               yt-dlp · probing manifests
             </div>
           </div>
+          {toastEl}
         </div>
       </div>
     );
@@ -223,6 +244,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             <div className="label">Couldn't resolve source</div>
             <div className="detail">{errorDetail ?? "Unknown error"}</div>
           </div>
+          {toastEl}
         </div>
       </div>
     );
@@ -431,21 +453,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
 
         {/* Completion is announced via the floating toast + the notification
             bell up in the toolbar — the canvas stays clean. */}
-        {toast && (
-          <CanvasToast
-            /* Keyed on the monotonic id: replacing a visible toast remounts
-               with a FRESH countdown instead of inheriting the old timer. */
-            key={toast.id}
-            kind={toast.kind}
-            title={toast.title}
-            body={toast.body}
-            /* When the bottom-left prep banner is up (e.g. the web-preview
-               download), lift the centered toast above it so the two don't
-               collide in the same bottom band. */
-            className={playbackPrepBusy ? "cp-canvas-toast--above-banner" : undefined}
-            onDismiss={onToastDismiss}
-          />
-        )}
+        {toastEl}
       </div>
     </div>
   );

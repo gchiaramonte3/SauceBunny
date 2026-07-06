@@ -99,3 +99,62 @@
   background: var(--bg-1);
 }
 
+
+/* ============================================================
+   DRAG-AND-DROP IMPORT OVERLAY (DropTarget.tsx)
+   ============================================================ */
+.cp-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10001; /* one above the command palette (10000) — nothing outranks a live OS drag */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 10, 13, 0.72); /* --bg-0 at 72% — the tokens carry no alpha variants */
+  /* The OS drag session owns the pointer; this overlay is pure feedback and
+     must never intercept the webview's drag events. */
+  pointer-events: none;
+}
+.cp-drop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-8) var(--s-12);
+  border: 2px dashed var(--line-3);
+  border-radius: var(--r-xl);
+  background: var(--bg-2);
+  box-shadow: var(--shadow-card);
+  animation: cp-drop-card-in var(--dur-fast) var(--ease-out);
+}
+.cp-drop-icon { color: var(--fg-3); }
+.cp-drop-title {
+  font-family: var(--font-ui);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+.cp-drop-hint {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--fg-3);
+  max-width: 420px;
+  text-align: center;
+  overflow-wrap: anywhere; /* long dropped filenames */
+}
+/* Variants — media (green) vs transcript (purple) when the hover payload
+   carries paths; busy stays muted, unsupported warns. */
+.cp-drop-card.media       { border-color: var(--stroke-green); }
+.cp-drop-card.media .cp-drop-icon { color: var(--success); }
+.cp-drop-card.transcript  { border-color: var(--color-accent-purple); }
+.cp-drop-card.transcript .cp-drop-icon { color: var(--color-accent-purple); }
+.cp-drop-card.unsupported { border-color: var(--danger-2); }
+.cp-drop-card.unsupported .cp-drop-icon { color: var(--danger); }
+.cp-drop-card.busy        { border-color: var(--line-2); }
+@keyframes cp-drop-card-in {
+  0%   { opacity: 0; transform: scale(0.97); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-drop-card { animation: none; }
+}

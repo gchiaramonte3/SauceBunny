@@ -13,6 +13,9 @@
  */
 export function tauriMockInit(expectedBuildId: string): void {
   const callbacks = new Map<number, (payload: unknown) => void>();
+  // event name → handler callback ids, recorded from plugin:event|listen so
+  // tests can push Tauri events (e.g. tauri://drag-*) into the app.
+  const listeners = new Map<string, Set<number>>();
   let nextCallbackId = 1;
 
   // Shaped responses for the commands the shell actually calls on boot /
@@ -29,12 +32,30 @@ export function tauriMockInit(expectedBuildId: string): void {
 
   // The event plugin's unlisten path calls this directly (event.js).
   (window as unknown as Record<string, unknown>).__TAURI_EVENT_PLUGIN_INTERNALS__ = {
-    unregisterListener: (_event: string, _id: number) => {},
+    unregisterListener: (event: string, id: number) => { listeners.get(event)?.delete(id); },
+  };
+
+  // Test-only hook: emit a Tauri event into the app exactly the way the Rust
+  // side would (the handler receives the { event, id, payload } envelope).
+  (window as unknown as Record<string, unknown>).__TAURI_MOCK__ = {
+    emitTauriEvent: (event: string, payload: unknown) => {
+      for (const id of listeners.get(event) ?? []) {
+        callbacks.get(id)?.({ event, id, payload });
+      }
+    },
   };
 
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
-    invoke: (cmd: string, _args?: unknown) => {
-      if (cmd === "plugin:event|listen") return Promise.resolve(nextCallbackId++);
+    invoke: (cmd: string, args?: unknown) => {
+      if (cmd === "plugin:event|listen") {
+        const a = args as { event: string; handler: number };
+        let set = listeners.get(a.event);
+        if (!set) { set = new Set(); listeners.set(a.event, set); }
+        set.add(a.handler);
+        // Resolves to the eventId that event.js later passes back to
+        // unregisterListener — using the handler id keeps them in sync.
+        return Promise.resolve(a.handler);
+      }
       if (cmd === "plugin:event|unlisten") return Promise.resolve(null);
       if (cmd in table) return Promise.resolve(table[cmd]);
       return Promise.resolve(null);

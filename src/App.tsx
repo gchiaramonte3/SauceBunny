@@ -32,6 +32,8 @@ import { usePanelBus } from "./hooks/use-panel-bus";
 import { useWebPlayback } from "./hooks/use-web-playback";
 import { QueueDrawer } from "./components/QueueDrawer";
 import { CommandPalette } from "./components/CommandPalette";
+import { DropTarget } from "./components/DropTarget";
+import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS, TRANSCRIPT_EXTENSIONS } from "./lib/import-extensions";
 import {
   recordTranscript,
   findForSource,
@@ -2004,8 +2006,8 @@ export default function App() {
         multiple: false,
         directory: false,
         filters: [
-          { name: "Video", extensions: ["mp4", "mov", "m4v", "mkv", "webm", "avi"] },
-          { name: "Audio", extensions: ["mp3", "m4a", "wav", "flac", "ogg", "aac"] },
+          { name: "Video", extensions: VIDEO_EXTENSIONS },
+          { name: "Audio", extensions: AUDIO_EXTENSIONS },
           { name: "All", extensions: ["*"] },
         ],
       })
@@ -2788,20 +2790,12 @@ export default function App() {
    * dropped the origin badge in r31 so that distinction isn't shown
    * anywhere user-facing anyway.
    *
-   * Triggered from the empty-state Import button AND the macOS File
-   * menu (r42), so route both through this single callback.
+   * Triggered from the empty-state Import button, the macOS File menu
+   * (r42), AND a dropped .srt/.vtt (DropTarget) — the path core is
+   * `loadTranscriptPath` so all three land in the same place.
    */
-  const handleImportTranscript = useCallback(async () => {
+  const loadTranscriptPath = useCallback(async (picked: string) => {
     try {
-      const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
-        m.open({
-          multiple: false,
-          directory: false,
-          filters: [{ name: "Transcript", extensions: ["srt", "vtt"] }],
-          title: "Import transcript",
-        })
-      );
-      if (typeof picked !== "string" || !picked) return;
       // Probe — read_text_file_capped errors clearly if the file is
       // missing / too large. We don't load the bytes here; the viewer
       // will read them itself on the path change.
@@ -2821,6 +2815,19 @@ export default function App() {
       pushNotification("error", "Couldn't open transcript", formatError(e));
     }
   }, [appendLog, pushNotification]);
+
+  const handleImportTranscript = useCallback(async () => {
+    const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
+      m.open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: "Transcript", extensions: TRANSCRIPT_EXTENSIONS }],
+        title: "Import transcript",
+      })
+    );
+    if (typeof picked !== "string" || !picked) return;
+    await loadTranscriptPath(picked);
+  }, [loadTranscriptPath]);
 
   const handleLoadFromHistory = useCallback(async (entry: TranscriptHistoryEntry) => {
     try {
@@ -4321,6 +4328,19 @@ export default function App() {
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         commands={commands}
+      />
+
+      {/* Full-window drag-and-drop import (Tauri webview drag events; see
+          DropTarget.tsx). Main window only — PanelApp never mounts this.
+          Media drops reuse loadLocalPath (same core as the Import button,
+          so recents/restore work automatically); transcript drops reuse
+          the Import-transcript core. */}
+      <DropTarget
+        busy={status === "fetching" || status === "exporting" || playbackPrepBusy || webPlayback.downloading}
+        hasSource={hasSource}
+        onImportMedia={(p) => { void loadLocalPath(p); }}
+        onImportTranscript={(p) => { void loadTranscriptPath(p); }}
+        notify={pushNotification}
       />
     </div>
   );

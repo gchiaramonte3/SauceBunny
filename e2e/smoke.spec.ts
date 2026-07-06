@@ -80,6 +80,34 @@ test("transcript tab shows the empty state with Generate gated on a source", asy
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
+test("drag-and-drop: overlay tracks hover, transcript-without-media drop toasts", async ({ page }) => {
+  await boot(page);
+  // Push webview drag events through the mock seam exactly as Rust would.
+  const emit = (event: string, payload: unknown) =>
+    page.evaluate(
+      ([e, p]) => {
+        (window as unknown as {
+          __TAURI_MOCK__: { emitTauriEvent: (e: string, p: unknown) => void };
+        }).__TAURI_MOCK__.emitTauriEvent(e as string, p);
+      },
+      [event, payload] as const,
+    );
+  // Hovering a media file classifies the drop and names the file.
+  await emit("tauri://drag-enter", { paths: ["/tmp/movie.mp4"], position: { x: 20, y: 20 } });
+  const card = page.locator(".cp-drop-card");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Drop to import");
+  await expect(card).toContainText("movie.mp4");
+  // Leaving clears the overlay.
+  await emit("tauri://drag-leave", null);
+  await expect(page.locator(".cp-drop-overlay")).toHaveCount(0);
+  // Dropping a transcript with no source loaded → informative toast, no crash.
+  await emit("tauri://drag-drop", { paths: ["/tmp/notes.srt"], position: { x: 20, y: 20 } });
+  await expect(page.getByText("Load media first")).toBeVisible();
+  await expect(page.locator(".cp-drop-overlay")).toHaveCount(0);
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
 test("recent sources: popover lists seeded entries, empty state offers resume", async ({ page }) => {
   // Seed two recents BEFORE boot — the popover and the Monitor empty-state
   // "Resume last session" button both read saucebunny.recentSources.
