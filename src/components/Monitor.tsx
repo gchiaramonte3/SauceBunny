@@ -4,6 +4,7 @@ import { CanvasToast, type ToastKind } from "./CanvasToast";
 import { CaptionOverlay, type CaptionStyle } from "./CaptionOverlay";
 import { AnnotationOverlay } from "./AnnotationOverlay";
 import type { AnnotationStrokes } from "../lib/review";
+import type { OnboardingStep, OnboardingStepId } from "../lib/onboarding";
 import { LocalMediaPlayer } from "./LocalMediaPlayer";
 import { MediaBunnyPlayer } from "./MediaBunnyPlayer";
 import { MSEStreamPlayer } from "./MSEStreamPlayer";
@@ -21,6 +22,14 @@ type Props = {
    *  session" button in the empty state. Null hides the affordance. */
   resumeTitle?: string | null;
   onResume?: () => void;
+  /** First-run "getting started" checklist for the empty state. Null hides it
+   *  (dismissed, or every step already completed once — see lib/onboarding). */
+  onboarding?: {
+    steps: OnboardingStep[];
+    /** Pending step clicked — App routes it (focus URL bar, open Settings…). */
+    onStep: (id: OnboardingStepId) => void;
+    onDismiss: () => void;
+  } | null;
   aspect: AspectId;
   /** "youtube" → web source (any host yt-dlp supports — including YouTube
    *  itself, which used to use the IFrame embed until r53 dropped it);
@@ -145,7 +154,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
   const {
     status, metadata,
     errorDetail,
-    resumeTitle, onResume,
+    resumeTitle, onResume, onboarding,
     aspect,
     sourceKind, localFilePath, webStreamUrl, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs,
@@ -206,6 +215,38 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
                 <IconHistory size={13} />
                 <span>Resume last session: <strong>{resumeTitle}</strong></span>
               </button>
+            )}
+            {/* First-run checklist — a compact card, not a wizard. Steps derive
+                from existing signals (lib/onboarding.ts); done steps are inert. */}
+            {onboarding && (
+              <div className="cp-getting-started">
+                <div className="cp-getting-started-head">
+                  <span>Getting started</span>
+                  <button
+                    type="button"
+                    className="cp-getting-started-dismiss"
+                    onClick={onboarding.onDismiss}
+                    title="Hide this checklist permanently"
+                  >
+                    Don't show again
+                  </button>
+                </div>
+                {onboarding.steps.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className={"cp-getting-started-step" + (s.done ? " done" : "")}
+                    disabled={s.done}
+                    onClick={() => onboarding.onStep(s.id)}
+                  >
+                    <span className="cp-getting-started-check" aria-hidden>{s.done ? "✓" : ""}</span>
+                    <span className="cp-getting-started-text">
+                      <strong>{s.label}</strong>
+                      <em>{s.hint}</em>
+                    </span>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
           {toastEl}

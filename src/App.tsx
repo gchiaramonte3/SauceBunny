@@ -32,14 +32,21 @@ import { usePanelBus } from "./hooks/use-panel-bus";
 import { useWebPlayback } from "./hooks/use-web-playback";
 import { QueueDrawer } from "./components/QueueDrawer";
 import { CommandPalette } from "./components/CommandPalette";
+import { ShortcutSheet } from "./components/ShortcutSheet";
 import { DropTarget } from "./components/DropTarget";
 import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS, TRANSCRIPT_EXTENSIONS } from "./lib/import-extensions";
 import {
   recordTranscript,
   findForSource,
   touchEntry,
+  getHistory as getTranscriptHistory,
   type TranscriptHistoryEntry,
 } from "./lib/transcript-history";
+import {
+  deriveOnboardingSteps, onboardingComplete,
+  loadOnboardingDismissed, saveOnboardingDismissed,
+  type OnboardingStepId,
+} from "./lib/onboarding";
 import type { Command } from "./lib/commands";
 import { buildCommands } from "./lib/commands";
 import {
@@ -703,6 +710,14 @@ export default function App() {
 
   // ====== Command palette (⌘K) ======
   const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // ====== Shortcut cheat-sheet (⌘/) ======
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  // ====== First-run checklist (Monitor empty state) ======
+  // Step completion derives from existing signals; only the manual
+  // dismissal is persisted (saucebunny.onboarding).
+  const [onboardingDismissed, setOnboardingDismissed] = useState<boolean>(() => loadOnboardingDismissed());
 
   // ====== Settings modal ======
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -3215,6 +3230,7 @@ export default function App() {
       e.preventDefault();
       switch (id) {
         case "app.palette":  setPaletteOpen((p) => !p); break;
+        case "app.shortcuts": setShortcutsOpen((p) => !p); break;
         case "app.settings": setSettingsOpen((p) => !p); break;
         case "src.fetch":    handleFetch(); break;
         case "view.logs":    setLogsOpen((p) => !p); break;
@@ -3425,6 +3441,7 @@ export default function App() {
     handleDownloadCaptions, handleStop,
     setQueueOpen, setTranscriptArrivedTick, setCaptionsOn, setLogsOpen,
     setSettingsOpen, setPaletteOpen,
+    onShowShortcuts: () => setShortcutsOpen(true),
     onProbeDiarizer: async () => {
       try {
         const ver = await invoke<string>("probe_diarizer");
@@ -3452,6 +3469,40 @@ export default function App() {
     handleQueueClearAll, handleGenerateTranscript, handleDownloadCaptions, handleImportTranscript,
     handleStop, keybindings,
   ]);
+
+  // ====== First-run checklist derivation ======
+  // Null hides the card (dismissed, or every step done at least once). All
+  // three signals already persist elsewhere — recents, the folder setting,
+  // transcript history — so nothing here duplicates state.
+  // transcriptArrivedTick re-derives after a transcript lands mid-session.
+  const onboardingSteps = useMemo(() => {
+    if (onboardingDismissed) return null;
+    const steps = deriveOnboardingSteps({
+      recentsCount: recentSources.length,
+      exportFolder: exportOpts.folder ?? defaults.folder,
+      transcriptCount: getTranscriptHistory().length,
+    });
+    return onboardingComplete(steps) ? null : steps;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onboardingDismissed, recentSources.length, exportOpts.folder, defaults.folder, transcriptArrivedTick]);
+
+  // Route a pending checklist step to the surface that completes it.
+  const handleOnboardingStep = useCallback((id: OnboardingStepId) => {
+    if (id === "source") {
+      // Same focus lever the File-menu "Open URL…" item uses.
+      const el = document.querySelector<HTMLInputElement>(".cp-toolbar-url input");
+      el?.focus();
+      el?.select();
+    } else if (id === "folder") {
+      setSettingsInitialTab("general");
+      setSettingsOpen(true);
+    } else {
+      // Transcript tab: its empty state explains Generate (and gates on a
+      // source being loaded first). arrivedTick is the "show this tab" lever.
+      setQueueOpen(true);
+      setTranscriptArrivedTick((n) => n + 1);
+    }
+  }, []);
 
   // ====== Side-panel pop-out (r44.B + r52 extract) ======
   // Cross-window state-sync bridge lives in src/hooks/use-panel-bus.ts.
@@ -3968,6 +4019,7 @@ export default function App() {
           whisperModelReady={whisperModelReady}
           whisperModelLabel={whisperModelLabel}
           onOpenTranscriptionSettings={handleOpenTranscriptionSettings}
+          onOpenGeneralSettings={() => { setSettingsInitialTab("general"); setSettingsOpen(true); }}
           detectSpeakers={defaults.detectSpeakers}
           setDetectSpeakers={(v) => setDefaults({ ...defaults, detectSpeakers: v })}
           expectedSpeakers={defaults.expectedSpeakers}
@@ -3997,6 +4049,12 @@ export default function App() {
                  most recent source via the same fetch/import handlers. */
               resumeTitle={recentSources.length > 0 ? recentSources[0].title : null}
               onResume={recentSources.length > 0 ? () => handleOpenRecentSource(recentSources[0]) : undefined}
+              /* First-run checklist card — null once done/dismissed. */
+              onboarding={onboardingSteps ? {
+                steps: onboardingSteps,
+                onStep: handleOnboardingStep,
+                onDismiss: () => { saveOnboardingDismissed(); setOnboardingDismissed(true); },
+              } : null}
               aspect={aspect}
               sourceKind={sourceKind}
               /* Prefer the ffmpeg-normalised playback copy when ready —
@@ -4178,7 +4236,9 @@ export default function App() {
                     : inFrames == null && outFrames != null
                       ? "Mark in (I) to set the start of the selection."
                       : "Selection set — adjust with I / O or drag the playhead."
-              ) : ""}
+              ) : status === "empty" && bindingsFor("app.shortcuts", keybindings)[0]
+                ? `Press ${formatCombo(bindingsFor("app.shortcuts", keybindings)[0])} for keyboard shortcuts.`
+                : ""}
             </div>
           </div>
 
@@ -4328,6 +4388,15 @@ export default function App() {
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         commands={commands}
+      />
+
+      {/* ⌘/ shortcut cheat-sheet — same portal/scrim mechanics as the palette.
+          Reads the LIVE keybinding overrides so user rebinds show correctly. */}
+      <ShortcutSheet
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+        keybindings={keybindings}
+        onCustomize={() => { setSettingsInitialTab("commands"); setSettingsOpen(true); }}
       />
 
       {/* Full-window drag-and-drop import (Tauri webview drag events; see

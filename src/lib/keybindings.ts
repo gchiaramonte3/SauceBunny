@@ -20,7 +20,7 @@ export type KeyActionId =
   | "mark.in" | "mark.out" | "mark.clear" | "mark.gotoIn" | "mark.gotoOut"
   | "review.rangeIn" | "review.rangeOut"
   | "src.fetch" | "export.clip" | "queue.add" | "queue.toggle"
-  | "view.logs" | "app.settings" | "app.palette";
+  | "view.logs" | "app.settings" | "app.palette" | "app.shortcuts";
 
 export type KeyActionGroup = "Transport" | "Marking" | "Source & export" | "View" | "App";
 
@@ -75,6 +75,8 @@ export const KEY_ACTIONS: KeyAction[] = [
   { id: "view.logs",       label: "Toggle pipeline log",   group: "View",      defaults: ["mod+\\"],                global: true },
   { id: "app.settings",    label: "Open / close settings", group: "App",       defaults: ["mod+,"],                 global: true },
   { id: "app.palette",     label: "Command palette",       group: "App",       defaults: ["mod+k"],                 global: true },
+  // ⌘/ was free (only mod+\ and the bare [ ] \ row are taken near it).
+  { id: "app.shortcuts",   label: "Keyboard shortcuts",    group: "App",       defaults: ["mod+/"],                 global: true },
 ];
 
 export const KEY_ACTION_BY_ID: Record<KeyActionId, KeyAction> =
@@ -212,4 +214,49 @@ export function formatCombo(combo: string): string {
 /** Display all resolved bindings for an action, e.g. "Space / K" or "—" if unbound. */
 export function formatBindings(combos: string[]): string {
   return combos.length ? combos.map(formatCombo).join(" / ") : "—";
+}
+
+// ── Shortcut cheat-sheet (⌘/) ────────────────────────────────────────────────
+
+/**
+ * Keyboard interactions that live OUTSIDE the rebindable registry — hand-coded
+ * listeners with their own scope gates. The cheat-sheet lists them in a
+ * separate "Contextual" group so the user learns them without implying they
+ * can be re-bound. Keep this in sync when adding a hardcoded keydown listener:
+ *  - 0–9 / timecode HUD: App.tsx keyboard handler
+ *  - K-held frame nudge: App.tsx (kHeldRef) + lib/shuttle.ts
+ *  - ⌘F, ⌘G/⇧⌘G: TranscriptViewer.tsx window listeners (tab-visible gated)
+ *  - ↩ in the URL bar: Toolbar.tsx input onKeyDown
+ */
+export type ContextualShortcut = { keys: string; label: string; where: string };
+
+export const CONTEXTUAL_SHORTCUTS: ContextualShortcut[] = [
+  { keys: "0–9",       label: "Go to timecode — type digits, ↩ snaps, Esc cancels", where: "Player" },
+  { keys: "K held + J / L", label: "Nudge one frame back / forward",                where: "Player" },
+  { keys: "⌘F",        label: "Find in transcript",                                 where: "Transcript tab" },
+  { keys: "⌘G / ⇧⌘G",  label: "Next / previous transcript search match",            where: "Transcript tab" },
+  { keys: "↩",         label: "Fetch the typed URL",                                where: "URL bar" },
+  { keys: "Esc",       label: "Close the front-most dialog or popover",             where: "Anywhere" },
+];
+
+export type ShortcutSheetRow = { label: string; keys: string; note?: string };
+export type ShortcutSheetGroup = { title: string; rows: ShortcutSheetRow[] };
+
+/**
+ * Rows for the ⌘/ cheat-sheet: every registry action with its RESOLVED
+ * bindings (user overrides included, so rebinds show live), grouped in
+ * KEY_ACTIONS order, plus the trailing "Contextual" group above.
+ */
+export function shortcutSheetGroups(overrides: KeybindingOverrides): ShortcutSheetGroup[] {
+  const groups: ShortcutSheetGroup[] = [];
+  for (const a of KEY_ACTIONS) {
+    let g = groups.find((x) => x.title === a.group);
+    if (!g) { g = { title: a.group, rows: [] }; groups.push(g); }
+    g.rows.push({ label: a.label, keys: formatBindings(bindingsFor(a.id, overrides)) });
+  }
+  groups.push({
+    title: "Contextual",
+    rows: CONTEXTUAL_SHORTCUTS.map((c) => ({ label: c.label, keys: c.keys, note: c.where })),
+  });
+  return groups;
 }

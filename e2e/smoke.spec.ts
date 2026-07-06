@@ -108,6 +108,47 @@ test("drag-and-drop: overlay tracks hover, transcript-without-media drop toasts"
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
+test("shortcut cheat-sheet: opens on mod+/, lists live bindings, Customize deep-links", async ({ page }) => {
+  await boot(page);
+  // mod+/ (ctrl serializes to the same "mod" as ⌘ — lib/keybindings eventToCombo).
+  await page.keyboard.press("Control+/");
+  const sheet = page.locator(".cp-shortcuts");
+  await expect(sheet).toBeVisible();
+  // Registry-driven rows (grouped) + the hardcoded contextual group.
+  await expect(sheet.getByText("Play / pause")).toBeVisible();
+  await expect(sheet.getByText("Command palette")).toBeVisible();
+  await expect(sheet.getByText("not rebindable")).toBeVisible();
+  await expect(sheet.getByText("Find in transcript")).toBeVisible();
+  // Escape closes (shared modal convention).
+  await page.keyboard.press("Escape");
+  await expect(sheet).toHaveCount(0);
+  // Customize… routes to Settings → Commands with the tab preselected.
+  await page.keyboard.press("Control+/");
+  await page.getByRole("button", { name: "Customize…" }).click();
+  await expect(page.locator(".cp-modal-tab.active")).toContainText("Commands & Shortcuts");
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
+test("first-run checklist: pending steps render, folder step opens Settings, dismiss persists", async ({ page }) => {
+  await boot(page);
+  // Fresh profile → no recents, no folder, no transcript: all three pending.
+  const card = page.locator(".cp-getting-started");
+  await expect(card).toBeVisible();
+  await expect(card.locator(".cp-getting-started-step")).toHaveCount(3);
+  await expect(card.locator(".cp-getting-started-step.done")).toHaveCount(0);
+  // Pending folder step deep-links into Settings (General tab).
+  await card.getByRole("button", { name: /Set your export folder/ }).click();
+  await expect(page.locator(".cp-modal-tab.active")).toContainText("General");
+  await page.keyboard.press("Escape");
+  // "Don't show again" hides the card and persists across reload.
+  await card.getByRole("button", { name: "Don't show again" }).click();
+  await expect(card).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator(".cp-toolbar")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".cp-getting-started")).toHaveCount(0);
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
 test("recent sources: popover lists seeded entries, empty state offers resume", async ({ page }) => {
   // Seed two recents BEFORE boot — the popover and the Monitor empty-state
   // "Resume last session" button both read saucebunny.recentSources.

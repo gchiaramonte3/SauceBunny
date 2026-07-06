@@ -43,6 +43,8 @@ type Props = {
   whisperModelReady: boolean;
   whisperModelLabel: string | null;
   onOpenTranscriptionSettings: () => void;
+  /** Opens Settings → General (the export-folder nudge deep-link). */
+  onOpenGeneralSettings: () => void;
   /**
    * Stage of the in-flight transcript pipeline ("whisper" /
    * "diarize-prepare" / "diarize-process" / "diarize-merge"), or null
@@ -137,6 +139,7 @@ export function Sidebar(props: Props) {
     onGenerateTranscript, transcriptState, transcriptError, transcriptProgress,
     transcriptPhase,
     whisperModelReady, whisperModelLabel, onOpenTranscriptionSettings,
+    onOpenGeneralSettings,
     detectSpeakers, setDetectSpeakers, diarizerReady,
     expectedSpeakers, setExpectedSpeakers,
     onLog,
@@ -637,6 +640,17 @@ export function Sidebar(props: Props) {
                 </button>
               )}
             </div>
+            {/* Why-is-Export-disabled nudge: a missing folder used to just gray
+                the button out silently. One line + a deep-link into Settings →
+                General (the Choose button above also works for this session). */}
+            {!success && !exporting && !exportOpts.folder && (
+              <div className="cp-folder-nudge">
+                No output folder set — choose one above, or{" "}
+                <button type="button" className="cp-folder-nudge-link" onClick={onOpenGeneralSettings}>
+                  set a default in Settings
+                </button>
+              </div>
+            )}
             {!success && !exporting && (
               <div style={{
                 marginTop: 8,

@@ -111,6 +111,8 @@ export type CommandDeps = {
   handleDownloadCaptions: () => void;
   handleStop: () => void;
   onProbeDiarizer: () => void;
+  /** Opens the ⌘/ shortcut cheat-sheet (ShortcutSheet). */
+  onShowShortcuts: () => void;
   // ── setters used directly in run handlers ──
   setQueueOpen: Dispatch<SetStateAction<boolean>>;
   setTranscriptArrivedTick: Dispatch<SetStateAction<number>>;
@@ -259,6 +261,10 @@ export function buildCommands(d: CommandDeps): Command[] {
       run: () => d.setSettingsOpen(true) },
     { id: "app.palette", label: "Show command palette", group: "App", hotkey: "⌘K",
       run: () => d.setPaletteOpen(true) },
+    { id: "app.shortcuts", label: "Show keyboard shortcuts", group: "App", hotkey: "⌘/",
+      description: "Cheat-sheet of every key binding",
+      keywords: ["cheat sheet", "hotkeys", "keymap", "help"],
+      run: () => d.onShowShortcuts() },
     { id: "app.stop", label: "Stop running operation", group: "App",
       description: "Cancel the in-flight export / transcript / prep",
       disabled: d.status !== "exporting" && d.transcriptState !== "running" && !d.playbackPrepBusy,
