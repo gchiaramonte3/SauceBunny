@@ -43,6 +43,8 @@ type PanelState = {
     format: "bullets" | "numbered" | "prose";
     length: "brief" | "standard" | "detailed";
   };
+  chapterSourceKey: string | null;
+  durationSec: number | null;
 };
 
 const INITIAL: PanelState = {
@@ -59,6 +61,8 @@ const INITIAL: PanelState = {
   hasSource: false,
   aiModelId: "qwen3-4b-instruct",
   aiStyle: { format: "bullets", length: "standard" },
+  chapterSourceKey: null,
+  durationSec: null,
 };
 
 type ActionKind =
@@ -72,7 +76,8 @@ type ActionKind =
   | "regenerate"
   | "importTranscript"
   | "transcriptEdited"
-  | "openAiSettings";
+  | "openAiSettings"
+  | "chaptersChanged";
 
 function sendAction(kind: ActionKind, payload?: unknown) {
   // Fire-and-forget: main subscribes once at startup and we don't need
@@ -176,6 +181,11 @@ export default function PanelApp() {
         aiModelId={state.aiModelId}
         aiStyle={state.aiStyle}
         onOpenAiSettings={() => sendAction("openAiSettings")}
+        /* Auto-chapters: the panel's AI tab saves to the SHARED localStorage
+           itself; this action only tells main to re-read for its timeline. */
+        chapterSourceKey={state.chapterSourceKey}
+        chapterDurationSec={state.durationSec}
+        onChaptersChanged={() => sendAction("chaptersChanged")}
         /* `onPopOut` intentionally undefined — the pop-out button
            shouldn't appear inside the popped-out window. */
       />

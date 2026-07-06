@@ -64,6 +64,7 @@ import { speakerLanes } from "./lib/speaker-stats";
 import { speakerColor } from "./components/transcript/helpers";
 import { MediaInfoModal } from "./components/MediaInfoModal";
 import { loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes, type ReviewDoc, type ReviewOp } from "./lib/review";
+import { loadChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
 import { loadJson, saveJson } from "./lib/storage";
 import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
 import {
@@ -3520,6 +3521,10 @@ export default function App() {
   const transcriptPlayhead = hasSource
     ? playheadFrames / Math.max(1, Math.round(fps))
     : null;
+  // Source duration in seconds for the auto-chapters clamp (null = unknown).
+  const sourceDurationSec = durationFrames > 0
+    ? durationFrames / Math.max(1, Math.round(fps))
+    : null;
 
   // Review comment markers for the monitor timeline — re-read whenever the
   // source changes or the Review panel mutates (REVIEW_CHANGED_EVENT, mirrors
@@ -3826,6 +3831,24 @@ export default function App() {
     return () => window.removeEventListener(REVIEW_CHANGED_EVENT, onChanged);
   }, [reviewSourceKey, coSessionActive]);
 
+  // Auto-chapter markers for the timeline — same pattern as the review
+  // markers above: keyed by the source, re-read on CHAPTERS_CHANGED_EVENT
+  // (fired by lib/chapters saves in this window; the popped-out panel's
+  // saves arrive as a panel:action:chaptersChanged → main re-dispatches the
+  // same event, so this one listener covers both windows).
+  const [chapterMarkers, setChapterMarkers] = useState<ChapterMarker[]>([]);
+  useEffect(() => {
+    if (!reviewSourceKey) { setChapterMarkers([]); return; }
+    const reload = () => setChapterMarkers(loadChapters(reviewSourceKey));
+    reload();
+    const onChanged = (e: Event) => {
+      const detail = (e as CustomEvent<{ sourceKey?: string }>).detail;
+      if (!detail || detail.sourceKey === reviewSourceKey) reload();
+    };
+    window.addEventListener(CHAPTERS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(CHAPTERS_CHANGED_EVENT, onChanged);
+  }, [reviewSourceKey]);
+
   // In a session, the shared doc drives the timeline markers + annotations
   // (so everyone's live comments show on every timeline).
   useEffect(() => {
@@ -3868,6 +3891,8 @@ export default function App() {
       hasSource,
       aiModelId: defaults.llmSummarizationModel,
       aiStyle: { format: defaults.summaryFormat, length: defaults.summaryLength },
+      chapterSourceKey: reviewSourceKey,
+      durationSec: sourceDurationSec,
     },
     handlers: {
       onRemove: handleQueueRemove,
@@ -3890,6 +3915,11 @@ export default function App() {
       onImportTranscript: () => { void handleImportTranscript(); },
       onTranscriptEdited: () => setTranscriptArrivedTick((n) => n + 1),
       onOpenAiSettings: () => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); },
+      // The panel saved chapters to the SHARED localStorage; re-dispatch the
+      // same-window change event so the chapter-markers effect re-reads.
+      onChaptersChanged: () => {
+        try { window.dispatchEvent(new CustomEvent(CHAPTERS_CHANGED_EVENT)); } catch { /* non-DOM */ }
+      },
     },
   });
 
@@ -4224,6 +4254,7 @@ export default function App() {
                 status: c.status,
               }))}
               commentMarkers={reviewMarkers}
+              chapterMarkers={chapterMarkers}
               reviewRangeDraft={reviewRangeDraft}
               filmstripPath={sourceKind === "file" ? (playbackPath ?? localFilePath) : null}
               waveformOn={waveformVisible}
@@ -4325,6 +4356,8 @@ export default function App() {
           aiModelId={defaults.llmSummarizationModel}
           aiStyle={{ format: defaults.summaryFormat, length: defaults.summaryLength }}
           onOpenAiSettings={() => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); }}
+          chapterSourceKey={reviewSourceKey}
+          chapterDurationSec={sourceDurationSec}
           reviewSourceKey={reviewSourceKey}
           reviewSourceTitle={metadata?.title ?? null}
           reviewDrawActive={reviewDrawActive}

@@ -91,6 +91,15 @@ type Props = {
   aiStyle?: SummaryStyle;
   /** Open Settings → AI Summary (manage/download/switch the model). */
   onOpenAiSettings?: () => void;
+  /** Auto-chapters: source identity to persist under (main's reviewSourceKey —
+   *  the panel receives it through the bus snapshot). */
+  chapterSourceKey?: string | null;
+  /** Auto-chapters: source duration in seconds (clamps model timestamps). */
+  chapterDurationSec?: number | null;
+  /** Auto-chapters changed (generate/delete) — the popped-out panel forwards
+   *  this over the bus so main's timeline markers re-read. Omit when docked
+   *  (the same-window CHAPTERS_CHANGED_EVENT already covers it). */
+  onChaptersChanged?: () => void;
   /** Review tab: stable id for the current source (local path / URL), or null. */
   reviewSourceKey?: string | null;
   /** Review tab: human label for the source (title/filename). */
@@ -193,6 +202,7 @@ export function QueueDrawer({
   onImportTranscript, sourceKind, onFixCaptionTiming,
   transcriptHasSource, onTranscriptEdited,
   aiModelId, aiStyle, onOpenAiSettings,
+  chapterSourceKey, chapterDurationSec, onChaptersChanged,
   reviewSourceKey, reviewSourceTitle,
   reviewDrawActive, reviewDraft, onToggleReviewDraw, onReviewDraftConsumed, onShowAnnotation,
   onOpenReviewSource, onReviewRangeDraft, onRegisterRangeHotkeys,
@@ -789,6 +799,9 @@ export function QueueDrawer({
           style={aiStyle}
           onOpenSettings={onOpenAiSettings}
           onSeek={onTranscriptSeek}
+          sourceKey={chapterSourceKey ?? null}
+          durationSec={chapterDurationSec ?? null}
+          onChaptersChanged={onChaptersChanged}
         />
         </div>
       )}

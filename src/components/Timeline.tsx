@@ -57,12 +57,17 @@ type Props = {
   /** Co-review ghost cursors — other participants' live playheads, one faint
    *  tinted line + name chip each (empty when not in a session). */
   ghosts?: { name: string; frame: number; color: string }[];
+  /** Auto-detected chapters (seconds) — thin neutral ticks at the TOP edge of
+   *  the track, a title chip on hover, click → seek. Deliberately unlike the
+   *  reviewer-tinted comment dots (which sit mid-track). */
+  chapterMarkers?: { time: number; title: string }[];
   onSeek: (f: number) => void;
 };
 
 export function Timeline({
   status, durationFrames, playheadFrames, inFrames, outFrames, fps,
-  queuedRanges, commentMarkers, reviewRangeDraft, filmstripPath, waveformOn, speakerLanes, ghosts, onSeek,
+  queuedRanges, commentMarkers, reviewRangeDraft, filmstripPath, waveformOn, speakerLanes, ghosts,
+  chapterMarkers, onSeek,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -295,6 +300,22 @@ export function Timeline({
             {outFrames != null && inFrames == null && (
               <div className="cp-track-mark out" style={{ left: `${pct(outFrames)}%` }} title="Mark out" />
             )}
+            {/* Chapter ticks — thin neutral lines hugging the TOP edge so they
+                never obscure the filmstrip, waveform, or speaker lanes below.
+                Hover reveals the title chip; click seeks to the chapter. */}
+            {chapterMarkers?.map((c, i) => {
+              const r = Math.max(1, Math.round(fps));
+              return (
+                <div
+                  key={`ch-${c.time}-${i}`}
+                  className="cp-track-chapter"
+                  style={{ left: `${pct(c.time * r)}%` }}
+                  onMouseDown={(e) => { e.stopPropagation(); onSeek(Math.floor(c.time * r)); }}
+                >
+                  <span className="cp-track-chapter-tip">{c.title}</span>
+                </div>
+              );
+            })}
             {/* Review comment RANGES — a thin reviewer-tinted bar with bracket
                 caps in the comment lane. Deliberately unlike the orange clip
                 selection: it sits low on the track and carries the note's

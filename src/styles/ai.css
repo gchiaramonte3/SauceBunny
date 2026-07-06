@@ -323,3 +323,100 @@
 }
 .cp-md-ts-btn:hover { opacity: 1; text-decoration: underline; }
 .cp-md-ts-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.55); }
+
+/* ── Auto-chapters (AI Summary tab) ──────────────────────────────── */
+/* Compact block pinned under the model bar: header row (title + Detect/
+   Regenerate + Copy for YouTube) and a scroll-capped chapter list. Rows
+   click-to-seek; the × removes one bad chapter. */
+.cp-ai-chapters {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--line-1);
+  padding: 6px 12px 8px;
+  gap: 4px;
+  flex: none;
+}
+.cp-ai-chapters-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+.cp-ai-chapters-title {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  margin-right: auto;
+}
+.cp-ai-chapters-btn {
+  font-size: 11px;
+  padding: 3px 9px;
+}
+.cp-ai-chapters-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.cp-ai-chapter-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 168px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.cp-ai-chapter-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.cp-ai-chapter-jump {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 6px;
+  border: none;
+  border-radius: var(--r-xs);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-ui);
+}
+.cp-ai-chapter-jump:hover { background: rgba(255, 255, 255, 0.06); }
+.cp-ai-chapter-tc {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--color-accent-green);
+  opacity: 0.85;
+  flex: none;
+}
+.cp-ai-chapter-name {
+  font-size: 12px;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-ai-chapter-jump:hover .cp-ai-chapter-name { color: var(--fg-1); }
+.cp-ai-chapter-del {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--fg-4);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.cp-ai-chapter-del:hover { color: var(--danger); background: rgba(232, 38, 38, 0.10); }

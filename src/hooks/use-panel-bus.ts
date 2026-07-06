@@ -49,6 +49,11 @@ export type PanelSnapshot = {
     format: "bullets" | "numbered" | "prose";
     length: "brief" | "standard" | "detailed";
   };
+  /** Auto-chapters: source identity (main's reviewSourceKey) so the panel's
+   *  AI tab persists chapters under the same key main's timeline reads. */
+  chapterSourceKey: string | null;
+  /** Auto-chapters: source duration in seconds (clamps model timestamps). */
+  durationSec: number | null;
 };
 
 export type PanelHandlers = {
@@ -66,6 +71,9 @@ export type PanelHandlers = {
   onTranscriptEdited: () => void;
   /** Panel asked to manage AI models — main opens Settings → AI Summary. */
   onOpenAiSettings: () => void;
+  /** Panel generated/deleted chapters (already saved to the shared
+   *  localStorage) — main re-reads so its timeline markers update. */
+  onChaptersChanged: () => void;
 };
 
 /** Shared key the main window writes the live snapshot to and the popped-out
@@ -87,6 +95,8 @@ const INITIAL_SNAPSHOT: PanelSnapshot = {
   hasSource: false,
   aiModelId: "qwen3-4b-instruct",
   aiStyle: { format: "bullets", length: "standard" },
+  chapterSourceKey: null,
+  durationSec: null,
 };
 
 type Args = {
@@ -193,6 +203,8 @@ export function usePanelBus({
           () => handlersRef.current.onTranscriptEdited()),
         listen("panel:action:openAiSettings",
           () => handlersRef.current.onOpenAiSettings()),
+        listen("panel:action:chaptersChanged",
+          () => handlersRef.current.onChaptersChanged()),
       ]);
       if (cancelled) { off.forEach((u) => u()); return; }
       unlistens = off;

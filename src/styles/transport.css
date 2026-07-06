@@ -378,6 +378,62 @@
   background: var(--marker);
   box-shadow: 0 0 0 1px rgba(0,0,0,0.55);
 }
+/* Chapter markers — thin NEUTRAL ticks hugging the TOP edge of the track
+   (auto-chapters, AI Summary tab). Deliberately unlike the reviewer-tinted
+   comment dots: short, quiet, and top-anchored so they never obscure the
+   filmstrip, waveform, or the speaker lanes at the bottom. Hover reveals the
+   title chip; click seeks to the chapter start. */
+.cp-track-chapter {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 9px;
+  margin-left: -1px;
+  border-radius: 0 0 1px 1px;
+  background: var(--fg-2);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  opacity: 0.75;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 4;
+  transition: height var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+}
+/* Widen the hit target without widening the visual — 2px is unhoverable. */
+.cp-track-chapter::before {
+  content: "";
+  position: absolute;
+  top: 0; bottom: -4px;
+  left: -4px; right: -4px;
+}
+.cp-track-chapter:hover {
+  height: 13px;
+  opacity: 1;
+  z-index: 6;
+}
+.cp-track-chapter-tip {
+  display: none;
+  position: absolute;
+  top: 15px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 7px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--line-2);
+  background: var(--bg-3);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  box-shadow: var(--shadow-soft);
+  pointer-events: none;
+}
+.cp-track-chapter:hover .cp-track-chapter-tip { display: block; }
+
 /* Review comment markers — Frame.io-style dots on the track, tinted to the
    reviewer's colour (--marker-color). They sit centred on their timecode and
    smoothly expand into an initials chip on hover. Resolved markers dim. */

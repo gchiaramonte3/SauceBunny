@@ -7,6 +7,7 @@ import { loadSpeakerOverrides, resolveSpeakerName, SPEAKERS_CHANGED_EVENT } from
 import { streamChat, type ChatMessage } from "../lib/ai-chat";
 import { formatError } from "../lib/error-format";
 import { Markdown } from "./Markdown";
+import { AiChapters } from "./AiChapters";
 import type { LlmModel } from "../bindings/LlmModel";
 import type { LlmServerInfo } from "../bindings/LlmServerInfo";
 import type { DoneEvent } from "../bindings/DoneEvent";
@@ -33,6 +34,13 @@ type Props = {
   onOpenSettings?: () => void;
   /** Seek playback to a timestamp (seconds) — makes summary [m:ss] clickable. */
   onSeek?: (seconds: number) => void;
+  /** Auto-chapters: source identity to persist under (App's reviewSourceKey). */
+  sourceKey?: string | null;
+  /** Auto-chapters: source duration in seconds (clamps model timestamps). */
+  durationSec?: number | null;
+  /** Auto-chapters: notify the host after a generate/delete — the popped-out
+   *  panel forwards this over the panel bus so main's timeline re-reads. */
+  onChaptersChanged?: () => void;
 };
 
 const SUGGESTIONS = [
@@ -86,7 +94,10 @@ function buildSystemPrompt(transcript: string, truncated: boolean, style: Summar
   ].filter(Boolean).join("\n");
 }
 
-export function AiSummary({ transcriptPath, reloadToken, selectedModelId, style, onOpenSettings, onSeek }: Props) {
+export function AiSummary({
+  transcriptPath, reloadToken, selectedModelId, style, onOpenSettings, onSeek,
+  sourceKey, durationSec, onChaptersChanged,
+}: Props) {
   // ── Transcript text (timestamped, model-friendly) ────────────────
   const [raw, setRaw] = useState<string | null>(null);
   const loadKey = transcriptPath ? `${transcriptPath}#${reloadToken ?? 0}` : null;
@@ -240,7 +251,9 @@ export function AiSummary({ transcriptPath, reloadToken, selectedModelId, style,
       const last = clipped.charCodeAt(clipped.length - 1);
       if (last >= 0xd800 && last <= 0xdbff) clipped = clipped.slice(0, -1);
     }
-    return { text: clipped, truncated, hasSpeakers };
+    // `lines` is the UNCLIPPED per-turn list — the chapters run windows it
+    // itself (sampled evenly across the duration, not head-truncated).
+    return { text: clipped, truncated, hasSpeakers, lines };
   }, [raw, server?.ctx, transcriptPath, speakersTick]);
 
   useEffect(() => {
@@ -495,6 +508,18 @@ export function AiSummary({ transcriptPath, reloadToken, selectedModelId, style,
         )}
       </div>
       {dlError && <div className="cp-ai-error" role="alert">Save failed: {dlError}</div>}
+      {/* Auto-chapters — detect with the same local model, list under the
+          action (click → seek, × → delete), copy as YouTube chapter text.
+          Persists per source; the Timeline draws these as top-edge ticks. */}
+      <AiChapters
+        sourceKey={sourceKey ?? null}
+        durationSec={durationSec ?? null}
+        lines={transcriptForModel?.lines ?? null}
+        ensureServer={ensureServer}
+        chatBusy={streaming}
+        onSeek={onSeek}
+        onChaptersChanged={onChaptersChanged}
+      />
       <div className="cp-ai-thread" ref={scrollRef}>
         {messages.length === 0 && (
           <div className="cp-ai-intro">
