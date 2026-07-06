@@ -7,6 +7,7 @@ import { speakerStats } from "../lib/speaker-stats";
 import { secondsToTc } from "../lib/timecode";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
+import { usePopoverDismiss } from "../hooks/use-popover-dismiss";
 import {
   getHistory,
   removeEntry,
@@ -801,28 +802,14 @@ export function TranscriptViewer({
     return () => window.clearTimeout(t);
   }, [dlError]);
   const dlRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!dlOpen) return;
-    function onDoc(e: MouseEvent) {
-      if (!dlRef.current?.contains(e.target as Node)) setDlOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [dlOpen]);
+  usePopoverDismiss(dlOpen, [dlRef], () => setDlOpen(false));
 
   // ── Tools menu state ─────────────────────────────────────────────
   // Groups the secondary toolbar actions (re-detect speakers, history) so the
   // primary actions stay visible and the bar scales as features are added.
   const [toolsOpen, setToolsOpen] = useState(false);
   const toolsRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!toolsOpen) return;
-    function onDoc(e: MouseEvent) {
-      if (!toolsRef.current?.contains(e.target as Node)) setToolsOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [toolsOpen]);
+  usePopoverDismiss(toolsOpen, [toolsRef], () => setToolsOpen(false));
 
   // ── Speaker insights popover state ───────────────────────────────
   // Anchored to the Insights header button (the DOMRect doubles as the
@@ -881,11 +868,7 @@ export function TranscriptViewer({
   useEffect(() => {
     if (!historyOpen) return;
     setHistoryEntries(getHistory());
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setHistoryOpen(false);
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    // Escape/outside dismissal lives in HistoryPopover (usePopoverDismiss).
   }, [historyOpen]);
 
   // ── Builders for each export format ──────────────────────────────
@@ -1170,10 +1153,11 @@ export function TranscriptViewer({
           <button
             className={"btn btn-ghost cp-tx-iconbtn" + (insightsAnchor ? " active" : "")}
             title="Speaker insights"
-            /* Swallow the mousedown so the open popover's outside-click
-               handler doesn't close it before this click re-opens it —
-               keeps the button a true toggle. */
-            onMouseDown={(e) => e.stopPropagation()}
+            /* Swallow the pointerdown (what usePopoverDismiss listens for)
+               so the open popover's outside-press handler doesn't close it
+               before this click re-opens it — keeps the button a true
+               toggle. */
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
               setInsightsAnchor((prev) => (prev ? null : rect));

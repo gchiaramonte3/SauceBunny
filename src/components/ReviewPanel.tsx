@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { usePopoverDismiss } from "../hooks/use-popover-dismiss";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -339,28 +340,14 @@ export function ReviewPanel({
     if (j) invoke("cancel_job", { jobId: j }).catch(() => { /* best-effort */ });
   }, []);
 
-  // One robust dismissal for all three popovers (export / history / search):
-  // outside-click + Escape, only wired while something is open. Replaces the
-  // brittle per-button onBlur+setTimeout (which never closed on a click into the
-  // non-focusable comment list, and gave search no outside-click at all).
-  useEffect(() => {
-    if (!exportOpen && !historyOpen && !searchOpen) return;
-    const outside = (ref: React.RefObject<HTMLElement>, t: Node) => !ref.current || !ref.current.contains(t);
-    const onDown = (e: PointerEvent) => {
-      const t = e.target as Node;
-      if (exportOpen && outside(exportWrapRef, t)) setExportOpen(false);
-      if (historyOpen && outside(historyWrapRef, t)) setHistoryOpen(false);
-      if (searchOpen && outside(searchRowRef, t) && outside(searchBtnRef, t)) { setSearch(""); setSearchOpen(false); }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      setExportOpen(false); setHistoryOpen(false);
-      if (searchOpen) { setSearch(""); setSearchOpen(false); }
-    };
-    document.addEventListener("pointerdown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("pointerdown", onDown); document.removeEventListener("keydown", onKey); };
-  }, [exportOpen, historyOpen, searchOpen]);
+  // Outside-press + Escape dismissal for the three popovers (export /
+  // history / search), one hook each. Replaced the brittle per-button
+  // onBlur+setTimeout (which never closed on a click into the non-focusable
+  // comment list, and gave search no outside-click at all).
+  usePopoverDismiss(exportOpen, [exportWrapRef], () => setExportOpen(false));
+  usePopoverDismiss(historyOpen, [historyWrapRef], () => setHistoryOpen(false));
+  // Search clears its text on either dismissal — reopening starts fresh.
+  usePopoverDismiss(searchOpen, [searchRowRef, searchBtnRef], () => { setSearch(""); setSearchOpen(false); });
 
   // Export status banner is transient — auto-clear after a few seconds (and it's
   // also click-to-dismiss). Re-armed whenever the message changes.

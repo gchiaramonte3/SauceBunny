@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { usePopoverDismiss } from "../../hooks/use-popover-dismiss";
 
 /**
  * Inline rename UI for a speaker chip. Anchored to the chip's bounding
@@ -64,18 +65,11 @@ export function RenamePopover({
     requestAnimationFrame(() => inputRef.current?.select());
   }, []);
 
-  // Click-outside closes. Deferred a tick so the click that opened the
-  // popover doesn't immediately close it.
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (!popRef.current?.contains(e.target as Node)) onCancel();
-    }
-    const t = setTimeout(() => document.addEventListener("mousedown", onDoc), 0);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener("mousedown", onDoc);
-    };
-  }, [onCancel]);
+  // Mounted only while open, so `open` is constant. The input's own Escape
+  // handler below stays — it preventDefaults while typing; the hook's
+  // document-level Escape additionally cancels when focus is elsewhere
+  // (e.g. after clicking a scope radio). Both call onCancel — idempotent.
+  usePopoverDismiss(true, [popRef], onCancel);
 
   function commit() {
     onApply(name, scope);

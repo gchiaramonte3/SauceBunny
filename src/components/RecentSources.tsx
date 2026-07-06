@@ -1,9 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { IconHistory } from "./Icons";
 import { formatTimeAgo } from "../lib/transcript-history";
 import { secondsToHms } from "../lib/timecode";
 import type { RecentSource } from "../lib/recent-sources";
+import { usePopoverDismiss } from "../hooks/use-popover-dismiss";
+import { useAnchoredPortal, placeBelowAlignRight } from "../hooks/use-anchored-portal";
 
 type Props = {
   entries: RecentSource[];
@@ -24,21 +26,11 @@ export function RecentSources({ entries, onOpen, onRemove, onClearAll }: Props) 
   const [active, setActive] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
-
   // Clamp the keyboard cursor when rows are removed underneath it.
   const activeIdx = Math.min(active, Math.max(0, entries.length - 1));
 
-  useLayoutEffect(() => {
-    if (!open || !ref.current) return;
-    const compute = () => {
-      const r = ref.current!.getBoundingClientRect();
-      setAnchor({ top: r.bottom + 8, right: window.innerWidth - r.right });
-    };
-    compute();
-    window.addEventListener("resize", compute);
-    return () => window.removeEventListener("resize", compute);
-  }, [open]);
+  const anchor = useAnchoredPortal(open, ref, placeBelowAlignRight);
+  usePopoverDismiss(open, [ref, popoverRef], () => setOpen(false));
 
   // Refs mirror props/state for the document-level key handler — avoids
   // re-binding the listener on every arrow press or entry change.
@@ -47,15 +39,11 @@ export function RecentSources({ entries, onOpen, onRemove, onClearAll }: Props) 
   const activeRef = useRef(activeIdx);
   activeRef.current = activeIdx;
 
+  // ↑/↓ + Enter list navigation — popover-specific, so it stays out of the
+  // shared dismiss hook (which owns outside-press + Escape).
   useEffect(() => {
     if (!open) return;
-    function onDown(e: MouseEvent) {
-      const t = e.target as Node;
-      if (ref.current?.contains(t) || popoverRef.current?.contains(t)) return;
-      setOpen(false);
-    }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") { setOpen(false); return; }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const dir = e.key === "ArrowDown" ? 1 : -1;
@@ -69,12 +57,8 @@ export function RecentSources({ entries, onOpen, onRemove, onClearAll }: Props) 
         if (entry) { setOpen(false); onOpen(entry); }
       }
     }
-    document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
+    return () => document.removeEventListener("keydown", onKey);
   }, [open, onOpen]);
 
   // Removing the last row leaves nothing to show — close instead of

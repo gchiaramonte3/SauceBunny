@@ -7,6 +7,7 @@ import { loadSpeakerOverrides, resolveSpeakerName, SPEAKERS_CHANGED_EVENT } from
 import { streamChat, type ChatMessage } from "../lib/ai-chat";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
+import { usePopoverDismiss } from "../hooks/use-popover-dismiss";
 import { Markdown } from "./Markdown";
 import { AiChapters } from "./AiChapters";
 import type { LlmModel } from "../bindings/LlmModel";
@@ -316,14 +317,7 @@ export function AiSummary({
   const dlRef = useRef<HTMLDivElement>(null);
   const hasOutput = messages.some((m) => m.role === "assistant" && m.content.trim());
 
-  useEffect(() => {
-    if (!dlOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (dlRef.current && !dlRef.current.contains(e.target as Node)) setDlOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [dlOpen]);
+  usePopoverDismiss(dlOpen, [dlRef], () => setDlOpen(false));
 
   // Strip leaked emphasis for the plain-text export (the renderer does this for
   // the on-screen view; .txt has no renderer).

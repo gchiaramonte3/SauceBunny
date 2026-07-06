@@ -1,8 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { IconBell, IconReveal, IconCheck, IconAlert, IconInfo } from "./Icons";
 import { formatRelative } from "../lib/upload-date";
+import { usePopoverDismiss } from "../hooks/use-popover-dismiss";
+import { useAnchoredPortal, placeBelowAlignRight } from "../hooks/use-anchored-portal";
 
 export type Notif = {
   id: string;
@@ -26,47 +28,14 @@ export function NotificationBell({ notifications, onMarkAllRead, onClearAll, onD
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  // Anchor coords for the portaled popover. Recomputed whenever it opens
-  // (and on window resize while open) so it tracks the bell button even
-  // after a sidebar collapse or window resize. Using a portal here gets
-  // the dropdown OUT of the toolbar's stacking context — the previous
-  // z-index:90 inside the toolbar still ended up under the canvas/queue
-  // on some layouts because those siblings created their own contexts.
-  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
   const unread = notifications.filter((n) => !n.read).length;
 
-  useLayoutEffect(() => {
-    if (!open || !ref.current) return;
-    const compute = () => {
-      const r = ref.current!.getBoundingClientRect();
-      setAnchor({
-        top: r.bottom + 8,
-        // Anchor to the right edge of the bell so the popover hangs
-        // leftward. CSS positions via `right` from the viewport edge.
-        right: window.innerWidth - r.right,
-      });
-    };
-    compute();
-    window.addEventListener("resize", compute);
-    return () => window.removeEventListener("resize", compute);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDown(e: MouseEvent) {
-      const t = e.target as Node;
-      if (ref.current?.contains(t)) return;
-      if (popoverRef.current?.contains(t)) return;
-      setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  // Using a portal here gets the dropdown OUT of the toolbar's stacking
+  // context — the previous z-index:90 inside the toolbar still ended up
+  // under the canvas/queue on some layouts because those siblings created
+  // their own contexts.
+  const anchor = useAnchoredPortal(open, ref, placeBelowAlignRight);
+  usePopoverDismiss(open, [ref, popoverRef], () => setOpen(false));
 
   function toggle() {
     if (open) {

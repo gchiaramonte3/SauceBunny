@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { IconVolume, IconVolumeMuted } from "./Icons";
+import { usePopoverDismiss } from "../hooks/use-popover-dismiss";
 
 type Props = {
   /** 0..1 */
@@ -13,19 +14,7 @@ export function VolumeControl({ volume, muted, onVolumeChange, onMutedChange }: 
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    function onDown(e: MouseEvent) {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  usePopoverDismiss(open, [ref], () => setOpen(false));
 
   const effectivelyMuted = muted || volume === 0;
 

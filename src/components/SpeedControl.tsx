@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { PLAYBACK_RATES, formatPlaybackRate } from "../lib/playback-rate";
+import { usePopoverDismiss } from "../hooks/use-popover-dismiss";
 
 type Props = {
   /** Current persistent playback rate (one of PLAYBACK_RATES). */
@@ -18,19 +19,7 @@ export function SpeedControl({ rate, onRateChange }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    function onDown(e: MouseEvent) {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  usePopoverDismiss(open, [ref], () => setOpen(false));
 
   return (
     <div className="cp-speed" ref={ref}>

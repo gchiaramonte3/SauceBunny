@@ -1,4 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { usePopoverDismiss } from "../hooks/use-popover-dismiss";
+import { useAnchoredPortal } from "../hooks/use-anchored-portal";
 
 /**
  * Self-contained emoji picker for the review composer. Renders a monochrome
@@ -166,38 +168,21 @@ export function EmojiPicker({ onPick, title = "Add emoji" }: { onPick: (emoji: s
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [recents, setRecents] = useState<string[]>(loadRecents);
-  const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
 
   // Anchor the fixed popover just above the trigger, clamped to the viewport.
-  const place = () => {
-    const r = triggerRef.current?.getBoundingClientRect();
-    if (!r) return;
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - POP_WIDTH - 8));
-    setPos({ left, bottom: window.innerHeight - r.top + 8 });
-  };
+  const pos = useAnchoredPortal(open, triggerRef, (r) => ({
+    left: Math.max(8, Math.min(r.left, window.innerWidth - POP_WIDTH - 8)),
+    bottom: window.innerHeight - r.top + 8,
+  }));
 
-  useLayoutEffect(() => {
-    if (!open) return;
-    place();
-    const onResize = () => place();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (popRef.current?.contains(t) || triggerRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setOpen(false); setQuery(""); } };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
-  }, [open]);
+  // Escape clears the search too (a deliberate close); an accidental outside
+  // press keeps it for the next open.
+  usePopoverDismiss(open, [popRef, triggerRef], (reason) => {
+    setOpen(false);
+    if (reason === "escape") setQuery("");
+  });
 
   const pick = (emoji: string) => {
     onPick(emoji);

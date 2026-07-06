@@ -1,9 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   formatTimeAgo,
   type TranscriptHistoryEntry,
 } from "../../lib/transcript-history";
+import { usePopoverDismiss } from "../../hooks/use-popover-dismiss";
 
 /**
  * "Recent transcripts" popover anchored to the History button in the
@@ -29,17 +30,9 @@ export function HistoryPopover({
   anchor, entries, activePath, onClose, onPick, onRemove,
 }: Props) {
   const popRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (!popRef.current?.contains(e.target as Node)) onClose();
-    }
-    // Defer so the click that opened the popover doesn't immediately close it.
-    const t = setTimeout(() => document.addEventListener("mousedown", onDoc), 0);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener("mousedown", onDoc);
-    };
-  }, [onClose]);
+  // Mounted only while open, so `open` is constant. Escape used to live in
+  // TranscriptViewer's historyOpen effect — the hook owns it now.
+  usePopoverDismiss(true, [popRef], onClose);
 
   const POP_W = 340;
   const POP_H_MAX = 360;

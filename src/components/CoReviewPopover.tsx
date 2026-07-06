@@ -1,9 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { IconUsers } from "./Icons";
 import { CoReviewJoinForm } from "./CoReviewJoinForm";
 import type { SessionState } from "../bindings/SessionState";
+import { usePopoverDismiss } from "../hooks/use-popover-dismiss";
+import { useAnchoredPortal, placeBelowAlignRight } from "../hooks/use-anchored-portal";
 
 /**
  * Co-review (watch party) control — a toolbar popover for the P2P session.
@@ -34,50 +36,12 @@ export function CoReviewPopover({ session, localSource, hasSource, screening, on
   const [copied, setCopied] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  // Anchor coords for the portaled popover — recomputed on open + resize so it
-  // tracks the trigger through sidebar collapses / window resizes.
-  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
   const active = session.role !== "off";
 
-  useLayoutEffect(() => {
-    if (!open || !triggerRef.current) return;
-    const compute = () => {
-      const r = triggerRef.current!.getBoundingClientRect();
-      setAnchor({ top: r.bottom + 8, right: window.innerWidth - r.right });
-    };
-    compute();
-    // Coalesce resize bursts to one measurement per frame — a drag-resize
-    // fires dozens of events/sec, and each setAnchor re-renders the portal.
-    let raf = 0;
-    const onResize = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => { raf = 0; compute(); });
-    };
-    window.addEventListener("resize", onResize);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, [open]);
-
-  // Outside-click + Escape dismissal — must clear BOTH the trigger and the
-  // portaled popover (which is no longer a DOM descendant of the trigger).
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      const t = e.target as Node;
-      if (triggerRef.current?.contains(t)) return;
-      if (popoverRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("pointerdown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("pointerdown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  const anchor = useAnchoredPortal(open, triggerRef, placeBelowAlignRight);
+  // Dismissal must clear BOTH the trigger and the portaled popover (which is
+  // no longer a DOM descendant of the trigger).
+  usePopoverDismiss(open, [triggerRef, popoverRef], () => setOpen(false));
 
   const copyCode = async () => {
     if (!session.code) return;
