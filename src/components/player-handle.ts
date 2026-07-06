@@ -65,8 +65,16 @@ export type PlayerHandle = {
    *   • MediaBunnyPlayer ignores it BY DESIGN (plays at 1×): its clock is
    *     pre-scheduled Web Audio chunks chased by the video render loop, and
    *     there is no safe rate seam short of rebuilding that scheduling model.
+   *     It reports that via `supportsPlaybackRate` below.
    */
   setPlaybackRate: (rate: number) => void;
+  /**
+   * Whether this player honours `setPlaybackRate`. The <video>-backed
+   * players (local / MSE stream) do; MediaBunnyPlayer doesn't (see above)
+   * and reports `false` so the speed UI (badge, HUD, shortcuts, palette)
+   * can disable itself instead of claiming a rate that isn't playing.
+   */
+  supportsPlaybackRate: boolean;
   /**
    * Optional — returns a JPEG/PNG blob of the frame at `seconds` if the
    * player can decode frames directly (MediaBunnyPlayer does, others

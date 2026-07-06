@@ -211,6 +211,10 @@ export function AiSummary({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  // Mutual exclusion with the chapters run, both directions: AiChapters gates
+  // on `chatBusy`, and this mirrors its busy state back so the composer can't
+  // fire a second request at the single llama-server mid-detection.
+  const [chaptersBusy, setChaptersBusy] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -266,7 +270,7 @@ export function AiSummary({
 
   const send = useCallback(async (text: string) => {
     const content = text.trim();
-    if (!content || streaming) return;
+    if (!content || streaming || chaptersBusy) return;
     setInput("");
     const info = await ensureServer();
     if (!info || !transcriptForModel) return;
@@ -302,7 +306,7 @@ export function AiSummary({
       setStreaming(false);
       abortRef.current = null;
     }
-  }, [streaming, ensureServer, transcriptForModel, messages]);
+  }, [streaming, chaptersBusy, ensureServer, transcriptForModel, messages]);
 
   function stop() { abortRef.current?.abort(); setStreaming(false); }
 
@@ -518,6 +522,7 @@ export function AiSummary({
         lines={transcriptForModel?.lines ?? null}
         ensureServer={ensureServer}
         chatBusy={streaming}
+        onBusyChange={setChaptersBusy}
         onSeek={onSeek}
         onChaptersChanged={onChaptersChanged}
       />
@@ -562,13 +567,19 @@ export function AiSummary({
           className="cp-ai-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder='Ask about the transcript… e.g. "pull quotes about pricing"'
-          disabled={streaming}
+          placeholder={chaptersBusy ? "Detecting chapters…" : 'Ask about the transcript… e.g. "pull quotes about pricing"'}
+          disabled={streaming || chaptersBusy}
+          title={chaptersBusy ? "Detecting chapters — chat resumes when it finishes" : undefined}
         />
         {streaming ? (
           <button type="button" className="btn btn-ghost" onClick={stop}>Stop</button>
         ) : (
-          <button type="submit" className="btn btn-primary" disabled={!input.trim()}>Send</button>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={!input.trim() || chaptersBusy}
+            title={chaptersBusy ? "Detecting chapters — chat resumes when it finishes" : undefined}
+          >Send</button>
         )}
       </form>
     </div>

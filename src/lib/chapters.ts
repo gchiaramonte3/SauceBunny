@@ -11,6 +11,7 @@
  */
 
 import { loadJson, saveJson } from "./storage";
+import { hmsToSeconds, secondsToClock } from "./timecode";
 import type { ChatMessage } from "./ai-chat";
 
 export type Chapter = {
@@ -85,13 +86,7 @@ export function sampleTranscriptEvenly(
 
 /** Format seconds for the prompt/export: "MM:SS", or "H:MM:SS" when `long`. */
 export function chapterTimestamp(seconds: number, long: boolean): string {
-  const s = Math.max(0, Math.floor(seconds));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  const two = (n: number) => n.toString().padStart(2, "0");
-  if (long || h > 0) return `${h}:${two(m)}:${two(sec)}`;
-  return `${two(m)}:${two(sec)}`;
+  return secondsToClock(seconds, { padMinutes: true, forceHours: long });
 }
 
 /** Messages for a chapter-detection run against the (possibly sampled)
@@ -140,17 +135,10 @@ export function buildChapterPrompt(
 const CHAPTER_LINE_RE =
   /^\s*(?:[-*+•>]|\d{1,3}[.)])?\s*\[?\(?(\d{1,3}):(\d{2})(?::(\d{2}))?\)?\]?\s*[-–—:·.]?\s*(\S.*?)\s*$/;
 
+// H:MM:SS demands real clock fields; MM:SS may exceed 59 minutes
+// ("90:00" = 90 minutes) — exactly hmsToSeconds's permissive mode.
 function lineToSeconds(a: string, b: string, c: string | undefined): number | null {
-  if (c !== undefined) {
-    // H:MM:SS — minutes and seconds must be real clock fields.
-    const h = parseInt(a, 10), m = parseInt(b, 10), s = parseInt(c, 10);
-    if (m >= 60 || s >= 60) return null;
-    return h * 3600 + m * 60 + s;
-  }
-  // MM:SS — minutes may exceed 59 ("90:00" = 90 minutes).
-  const m = parseInt(a, 10), s = parseInt(b, 10);
-  if (s >= 60) return null;
-  return m * 60 + s;
+  return hmsToSeconds(c !== undefined ? `${a}:${b}:${c}` : `${a}:${b}`, { permissiveMinutes: true });
 }
 
 function cleanTitle(raw: string): string {

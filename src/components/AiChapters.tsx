@@ -20,6 +20,10 @@ type Props = {
   ensureServer: () => Promise<LlmServerInfo | null>;
   /** True while the chat is streaming — one model call at a time. */
   chatBusy: boolean;
+  /** Mirror of the mutual exclusion in the other direction: reports the
+   *  chapters run's busy state up so the parent can lock its chat composer
+   *  while a detection streams from the same single llama-server. */
+  onBusyChange?: (busy: boolean) => void;
   /** Seek playback to a chapter start (seconds). */
   onSeek?: (seconds: number) => void;
   /** Chapters changed (generate/delete) — the popped-out panel forwards this
@@ -35,7 +39,7 @@ type Props = {
  * source in localStorage (lib/chapters.ts) and feed the Timeline's markers.
  */
 export function AiChapters({
-  sourceKey, durationSec, lines, ensureServer, chatBusy, onSeek, onChaptersChanged,
+  sourceKey, durationSec, lines, ensureServer, chatBusy, onBusyChange, onSeek, onChaptersChanged,
 }: Props) {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [busy, setBusy] = useState(false);
@@ -66,6 +70,7 @@ export function AiChapters({
     if (chapters.length > 0 && editedRef.current
       && !confirm("Regenerate chapters? Your edits to the current list will be replaced.")) return;
     setBusy(true);
+    onBusyChange?.(true);
     setError(null);
     try {
       const info = await ensureServer();
@@ -93,6 +98,7 @@ export function AiChapters({
     } finally {
       abortRef.current = null;
       setBusy(false);
+      onBusyChange?.(false);
     }
   }
 

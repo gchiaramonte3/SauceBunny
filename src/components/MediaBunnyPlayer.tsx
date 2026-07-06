@@ -336,6 +336,10 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       if (gainRef.current) gainRef.current.gain.value = m ? 0 : volumeRef.current;
     },
     isMuted: () => mutedRef.current,
+    // Advertised so the speed UI (badge, HUD, [ / ] / \ shortcuts, palette)
+    // disables itself while this player is active instead of claiming a
+    // rate that isn't playing.
+    supportsPlaybackRate: false,
     setPlaybackRate: () => {
       // Deliberate no-op — this player always plays at 1×. Its master clock is
       // pre-scheduled Web Audio: every decoded chunk is queued at an exact
@@ -344,7 +348,8 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       // audio with a pitch/duration transform and rescaling both loops'
       // timestamp math — there is no safe seam without rebuilding the
       // scheduling model. The persistent speed applies to the <video>-backed
-      // players (local + MSE stream) and is gracefully ignored here.
+      // players (local + MSE stream); `supportsPlaybackRate: false` above
+      // tells the app not to pretend otherwise.
     },
     setShuttle: (rate: number) => {
       if (!readyRef.current) return;

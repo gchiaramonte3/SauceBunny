@@ -46,6 +46,26 @@ for bin in "${ROOT_DIR}"/src-tauri/binaries/*-aarch64-apple-darwin; do
 done
 
 echo
+echo "── ffmpeg filters ──────────────────────────────────────────────"
+# The 10-bit/HDR playback prep (media.rs) emits zscale/tonemap filter
+# chains. Those need libzimg compiled into the static ffmpeg — swscale
+# alone is NOT enough — and a refreshed sidecar without them would fail
+# playback for every 10-bit/HDR file. Catch that at release time.
+FFMPEG_BIN="${ROOT_DIR}/src-tauri/binaries/ffmpeg-aarch64-apple-darwin"
+if [ -f "$FFMPEG_BIN" ]; then
+  filters=$("$FFMPEG_BIN" -hide_banner -filters 2>/dev/null || true)
+  for f in zscale tonemap setparams; do
+    if echo "$filters" | grep -qE "^ .. ${f} "; then
+      pass "ffmpeg has filter: $f"
+    else
+      fatal "ffmpeg is missing the '$f' filter (needed by 10-bit/HDR playback prep — rebuild/re-fetch an ffmpeg with libzimg)"
+    fi
+  done
+else
+  fatal "ffmpeg sidecar missing — run npm run refresh:ffmpeg"
+fi
+
+echo
 echo "── Entitlements ────────────────────────────────────────────────"
 ENT="${ROOT_DIR}/src-tauri/entitlements.plist"
 if [ -f "$ENT" ]; then

@@ -186,7 +186,10 @@ export function AnnotationOverlay({
     if (!drawing || !live.current) return;
     const finished = live.current;
     live.current = null;
-    if (finished.pts.length > 0) onChange({ strokes: [...strokes, finished] });
+    // Carry `labels` too — the labels ride the same payload as the strokes
+    // (see the label-commit path above); dropping the field here would erase
+    // every placed label on the next pen stroke.
+    if (finished.pts.length > 0) onChange({ strokes: [...strokes, finished], labels });
   };
 
   // Leaving draw/label mode with an input still open → drop it (uncommitted).

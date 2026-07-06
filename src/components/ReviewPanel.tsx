@@ -544,18 +544,22 @@ export function ReviewPanel({
     for (const op of ops) d = applyReviewOp(d, op);
     saveReview(d);
   };
-  // Dispatch + record. The inverse is computed LAZILY from the pre-op doc
-  // snapshot with a fresh timestamp so it wins the LWW guard at undo time;
-  // redo re-stamps the original op for the same reason. Re-adds carry the
+  // Dispatch + record. The inverse ops are computed EAGERLY from the pre-op
+  // doc so the undo closure holds only the small inverse-op array (at most
+  // the deleted comment + its replies), never the whole ReviewDoc — pinning
+  // up to 50 full doc snapshots in the app-wide stack was a memory leak.
+  // LWW timestamps are re-stamped at EXECUTION time on undo AND redo so the
+  // replay wins the LWW guard of whatever it reverses. Re-adds carry the
   // original comment (same id/timestamps — insertComment is idempotent by
   // id), so undo/redo of adds and deletes converges cleanly in co-review.
   const dispatchUndoable = (label: string, op: ReviewOp, localFn: (d: ReviewDoc) => ReviewDoc) => {
     const before = viewDoc; // ops are pure — `before` stays an immutable snapshot
     dispatch(op, localFn);
     if (!before) return;
+    const inverse = inverseReviewOps(before, op); // `at` is a placeholder — re-stamped on undo
     appUndo.push({
       label,
-      undo: () => replayOps(inverseReviewOps(before, op, Date.now())),
+      undo: () => { const at = Date.now(); replayOps(inverse.map((o) => restampReviewOp(o, at))); },
       redo: () => replayOps([restampReviewOp(op, Date.now())]),
     });
   };

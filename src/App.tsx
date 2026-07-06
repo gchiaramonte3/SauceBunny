@@ -22,12 +22,12 @@ import { SettingsModal, type Defaults, type CaptionFontKey } from "./components/
 import { YouTubeAuthModal } from "./components/YouTubeAuthModal";
 import type { PlayerHandle } from "./components/player-handle";
 import type {
-  AppStatus, ClientLog, DoneEvent, ExportOpts,
+  AppError, AppStatus, ClientLog, DoneEvent, ExportOpts,
   LocalFileMeta, LogEvent, Metadata, ProgressEvent, QueuedClip, QueueSource, RecentClip,
   SourceKind, WhisperModel,
 } from "./types";
 import { asLogTag } from "./types";
-import { formatError } from "./lib/error-format";
+import { formatError, isAppError } from "./lib/error-format";
 import { usePanelBus } from "./hooks/use-panel-bus";
 import { useWebPlayback } from "./hooks/use-web-playback";
 import { QueueDrawer } from "./components/QueueDrawer";
@@ -701,34 +701,49 @@ export default function App() {
   // The user's "watch speed" (0.5–2×), distinct from the transient J-K-L
   // shuttle: the players restore THIS rate whenever a shuttle exits. Applies
   // to the <video>-backed players (local + MSE stream); MediaBunny/WebCodecs
-  // playback ignores it by design (see PlayerHandle.setPlaybackRate).
+  // playback can't honour it (PlayerHandle.supportsPlaybackRate), so the
+  // speed UI disables itself while that player is active.
   const [playbackRate, setPlaybackRate] = useState<number>(() =>
     sanitizePlaybackRate(loadJson<number>("saucebunny.playbackRate", 1)));
   useEffect(() => saveJson("saucebunny.playbackRate", playbackRate), [playbackRate]);
-  // Transient on-video HUD (the shuttle-badge pill) flashed when the rate
-  // changes — armed after the first run so the persisted rate doesn't flash
-  // on boot. The same effect pushes the rate to the live player; the
-  // player-ready path re-applies it when a player (re)mounts.
+  // Capability of the ACTIVE player — refreshed on every player-ready, reset
+  // on source swap. False only while MediaBunnyPlayer (always 1×) is up.
+  const [rateSupported, setRateSupported] = useState(true);
+  // Transient on-video HUD (the shuttle-badge pill). Flashed directly by the
+  // two rate handlers below — deliberately NOT an effect on `playbackRate`,
+  // so the persisted rate never flashes on boot (the old armed-ref guard
+  // double-fired under StrictMode) and a change flashes exactly once. The
+  // player-ready path re-applies the rate when a player (re)mounts.
   const [rateHud, setRateHud] = useState<number | null>(null);
   const rateHudTimerRef = useRef(0);
-  const rateHudArmedRef = useRef(false);
-  useEffect(() => {
-    try { playerRef.current?.setPlaybackRate(playbackRate); } catch { /* ignore */ }
-    if (!rateHudArmedRef.current) { rateHudArmedRef.current = true; return; }
-    setRateHud(playbackRate);
+  const flashRateHud = useCallback((r: number) => {
+    setRateHud(r);
     if (rateHudTimerRef.current) window.clearTimeout(rateHudTimerRef.current);
     rateHudTimerRef.current = window.setTimeout(() => {
       rateHudTimerRef.current = 0;
       setRateHud(null);
     }, 1500);
-  }, [playbackRate]);
+  }, []);
   useEffect(() => () => {
     if (rateHudTimerRef.current) window.clearTimeout(rateHudTimerRef.current);
   }, []);
-  const handlePlaybackRateChange = useCallback(
-    (r: number) => setPlaybackRate(sanitizePlaybackRate(r)), []);
+  const handlePlaybackRateChange = useCallback((r: number) => {
+    if (!rateSupported) {
+      // Honest no-op: the WebCodecs player always plays at 1× — surface a
+      // note instead of flashing a rate badge that isn't true.
+      setToast({ id: ++toastIdRef.current, kind: "info",
+        title: "Speed control isn't available for the WebCodecs player" });
+      return;
+    }
+    const next = sanitizePlaybackRate(r);
+    if (next === playbackRate) return;
+    setPlaybackRate(next);
+    try { playerRef.current?.setPlaybackRate(next); } catch { /* ignore */ }
+    flashRateHud(next);
+  }, [rateSupported, playbackRate, flashRateHud]);
   const handlePlaybackRateStep = useCallback(
-    (dir: 1 | -1) => setPlaybackRate((r) => stepPlaybackRate(r, dir)), []);
+    (dir: 1 | -1) => handlePlaybackRateChange(stepPlaybackRate(playbackRate, dir)),
+    [handlePlaybackRateChange, playbackRate]);
 
   // ====== Command palette (⌘K) ======
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -1264,13 +1279,20 @@ export default function App() {
     // Player is up → drop the resolving/buffering overlay (r62).
     setPlayerReady(true);
     // Apply persisted volume + mute + playback speed as soon as a player
-    // becomes ready (MediaBunny ignores the rate — see PlayerHandle).
+    // becomes ready, and record whether it can honour a rate at all (drives
+    // the speed UI's disabled state — MediaBunny always plays at 1×).
     const p = playerRef.current;
+    setRateSupported(p?.supportsPlaybackRate ?? true);
     if (p) {
+      // Rate FIRST, and isolated from the volume/mute try: the <video>
+      // players seed their shuttle-exit restore rate (userRateRef) inside
+      // setPlaybackRate, so it must land even if setVolume/setMuted throws —
+      // otherwise a shuttle exit would snap back to 1× while the badge
+      // still shows the persisted rate.
+      try { p.setPlaybackRate(playbackRate); } catch { /* ignore */ }
       try {
         p.setVolume(volume);
         p.setMuted(muted);
-        p.setPlaybackRate(playbackRate);
       } catch { /* ignore */ }
     }
     // Fill in the duration immediately from whichever player just loaded so
@@ -1358,6 +1380,9 @@ export default function App() {
     setWebAudioCachedSrc(null);
     setActiveSourceUrl(null);
     setPlayerReady(false);
+    // Speed UI capability is per-player; assume supported until the next
+    // player reports otherwise on ready.
+    setRateSupported(true);
     // Cancel any in-flight mediabunny local export tied to the previous
     // source — without this, switching sources mid-export would leave
     // the Conversion writing into a buffer for a file the user no
@@ -1843,10 +1868,14 @@ export default function App() {
   // file-picker import and the Review version switcher (which loads a chosen
   // version's file straight into the existing player; A/B toggle compare).
   /** Import a local file. Resolves to null on success (or a superseded
-   *  load), or the formatted error message on failure — callers that need
-   *  to react to a failed load (e.g. stale recent-source pruning) inspect
-   *  the message; the error UI itself is fully handled in here. */
-  const loadLocalPath = useCallback(async (picked: string): Promise<string | null> => {
+   *  load), or the failure — the display string plus the typed AppError
+   *  kind when the backend provided one, so callers that need to react to
+   *  a failed load (e.g. stale recent-source pruning on NotFound) can
+   *  branch on the kind instead of matching prose; the error UI itself is
+   *  fully handled in here. */
+  const loadLocalPath = useCallback(async (
+    picked: string,
+  ): Promise<{ message: string; kind: AppError["kind"] | null } | null> => {
     try {
       resetForNewSource();
       const seq = ++sourceSeqRef.current;
@@ -2033,7 +2062,7 @@ export default function App() {
       setErrorDetail(msg);
       appendLog("err", "import", msg);
       setStatus("error");
-      return msg;
+      return { message: msg, kind: isAppError(err) ? err.kind : null };
     }
   }, [appendLog, defaults.folder, defaults.useWebCodecsDecoder, resetForNewSource, runPlaybackPrep, recordRecentSource]);
 
@@ -2063,11 +2092,11 @@ export default function App() {
   // Open a recent source through the SAME handlers as paste/import — no
   // parallel loading path. Staleness choice for file recents: auto-remove on
   // confirmed not-found. probe_local_file existence-checks the path before
-  // touching ffmpeg and errors with "File not found: <path>" (an AppError
-  // whose message is the only signal it exposes), so we match on that message;
-  // any other failure (codec, ffmpeg, permissions) keeps the entry since the
-  // file may still be perfectly loadable later. The normal error UI (Monitor
-  // overlay + pipeline log) still fires from loadLocalPath itself.
+  // touching ffmpeg and rejects with a typed AppError::NotFound, which
+  // loadLocalPath surfaces as `kind` — so we branch on that, not on message
+  // prose. Any other failure (codec, ffmpeg, permissions) keeps the entry
+  // since the file may still be perfectly loadable later. The normal error UI
+  // (Monitor overlay + pipeline log) still fires from loadLocalPath itself.
   const handleOpenRecentSource = useCallback((entry: RecentSource) => {
     if (entry.kind === "url") {
       setUrl(entry.value);
@@ -2075,8 +2104,8 @@ export default function App() {
       return;
     }
     void (async () => {
-      const errMsg = await loadLocalPath(entry.value);
-      if (errMsg && /file not found/i.test(errMsg)) {
+      const err = await loadLocalPath(entry.value);
+      if (err?.kind === "NotFound") {
         setRecentSources((prev) => removeRecent(prev, entry.value));
         pushNotification("info", "Removed from recents",
           `"${entry.title}" no longer exists at its saved location.`);
@@ -3428,7 +3457,7 @@ export default function App() {
       await Promise.all([
         bind("open_url_bar",        () => {
           // Just focus the URL input — it's already in the toolbar.
-          const el = document.querySelector<HTMLInputElement>(".cp-toolbar-url input");
+          const el = document.querySelector<HTMLInputElement>(".cp-url input");
           el?.focus();
           el?.select();
         }),
@@ -3556,7 +3585,7 @@ export default function App() {
   const handleOnboardingStep = useCallback((id: OnboardingStepId) => {
     if (id === "source") {
       // Same focus lever the File-menu "Open URL…" item uses.
-      const el = document.querySelector<HTMLInputElement>(".cp-toolbar-url input");
+      const el = document.querySelector<HTMLInputElement>(".cp-url input");
       el?.focus();
       el?.select();
     } else if (id === "folder") {
@@ -4352,6 +4381,7 @@ export default function App() {
               volume={volume}
               muted={muted}
               playbackRate={playbackRate}
+              playbackRateSupported={rateSupported}
               onPlayToggle={onPlayToggle}
               onStep={onStep}
               onMarkIn={onMarkIn}

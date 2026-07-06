@@ -894,7 +894,10 @@ fn parse_ffmpeg_audio(stderr: &str) -> Option<String> {
 pub async fn probe_local_file(app: AppHandle, path: String) -> Result<LocalFileMeta, crate::AppError> {
     let p = PathBuf::from(&path);
     if !p.exists() {
-        return Err(format!("File not found: {path}").into());
+        // Typed NotFound (not prose in an `Invalid`): the frontend prunes
+        // stale recents by branching on `kind === "NotFound"` (App.tsx
+        // handleOpenRecentSource), so this must stay machine-readable.
+        return Err(crate::AppError::not_found(path));
     }
     let size_bytes = p.metadata().map(|m| m.len()).unwrap_or(0);
     let filename = p

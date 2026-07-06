@@ -40,13 +40,8 @@ export function RecentSources({ entries, onOpen, onRemove, onClearAll }: Props) 
     return () => window.removeEventListener("resize", compute);
   }, [open]);
 
-  // Refs mirror props/state for the document-level key handler — avoids
-  // re-binding the listener on every arrow press or entry change.
-  const entriesRef = useRef(entries);
-  entriesRef.current = entries;
-  const activeRef = useRef(activeIdx);
-  activeRef.current = activeIdx;
-
+  // Re-binding these two listeners whenever the entries or cursor change is
+  // free for a ≤12-row popover, so the handlers just close over live values.
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
@@ -59,13 +54,11 @@ export function RecentSources({ entries, onOpen, onRemove, onClearAll }: Props) 
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const dir = e.key === "ArrowDown" ? 1 : -1;
-        setActive((a) => {
-          const n = entriesRef.current.length;
-          return n === 0 ? 0 : (Math.min(a, n - 1) + dir + n) % n;
-        });
+        const n = entries.length;
+        if (n > 0) setActive((activeIdx + dir + n) % n);
       } else if (e.key === "Enter") {
         e.preventDefault();
-        const entry = entriesRef.current[Math.min(activeRef.current, entriesRef.current.length - 1)];
+        const entry = entries[activeIdx];
         if (entry) { setOpen(false); onOpen(entry); }
       }
     }
@@ -75,7 +68,7 @@ export function RecentSources({ entries, onOpen, onRemove, onClearAll }: Props) 
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, onOpen]);
+  }, [open, entries, activeIdx, onOpen]);
 
   // Removing the last row leaves nothing to show — close instead of
   // rendering an empty shell (the trigger disables itself at 0 entries).
@@ -102,7 +95,9 @@ export function RecentSources({ entries, onOpen, onRemove, onClearAll }: Props) 
           className="cp-recents-pop"
           role="listbox"
           aria-label="Recent sources"
-          style={{ position: "fixed", top: anchor.top, right: anchor.right }}
+          /* Only the measured anchor stays inline; position:fixed lives in
+             the .cp-recents-pop rule. */
+          style={{ top: anchor.top, right: anchor.right }}
         >
           <div className="cp-recents-list">
             {entries.map((entry, i) => (

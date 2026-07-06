@@ -176,8 +176,9 @@ export function buildCommands(d: CommandDeps): Command[] {
       disabled: !d.hasSource,
       run: () => d.onSeek(Math.max(0, d.durationFrames - 1)) },
     // Persistent playback speed — distinct from the J-K-L shuttle (a transient
-    // override). Applies to the <video>-backed players; MediaBunny/WebCodecs
-    // local playback ignores it by design (see PlayerHandle.setPlaybackRate).
+    // override). Applies to the <video>-backed players; while the WebCodecs
+    // player is active (PlayerHandle.supportsPlaybackRate = false) the App
+    // handlers no-op with an explanatory canvas note instead of lying.
     { id: "play.rateUp",   label: "Increase playback speed", group: "Playback",
       hotkey: "]", description: `Now ${formatPlaybackRate(d.playbackRate)} — steps up the 0.5–2× list`,
       keywords: ["rate", "faster", "2x"],

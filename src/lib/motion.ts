@@ -4,8 +4,8 @@
  * Used by the transcript karaoke autoscroll, search-jump, and the AI chat
  * scroll-to-bottom.
  */
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
 export function scrollBehavior(): ScrollBehavior {
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ? "auto"
-    : "smooth";
+  return reducedMotion.matches ? "auto" : "smooth";
 }

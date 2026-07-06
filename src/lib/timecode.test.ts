@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { framesToTc, tcToFrames, tcToSeconds, hmsToSeconds } from "./timecode";
+import { framesToTc, tcToFrames, tcToSeconds, hmsToSeconds, secondsToClock } from "./timecode";
 
 // Frames↔timecode math drives the playhead, marks, exports, and the
 // transcript click-to-seek (whose floor-rounding produced the r85
@@ -69,5 +69,32 @@ describe("hmsToSeconds", () => {
     expect(hmsToSeconds("1:99:00")).toBeNull(); // minutes >= 60
     expect(hmsToSeconds("a:bc")).toBeNull();
     expect(hmsToSeconds("1:2:3:4")).toBeNull();
+  });
+  it("permissiveMinutes allows minutes > 59 in the TWO-part form only (chapter lines)", () => {
+    expect(hmsToSeconds("90:00", { permissiveMinutes: true })).toBe(90 * 60);
+    expect(hmsToSeconds("90:00")).toBeNull(); // strict by default
+    expect(hmsToSeconds("1:99:00", { permissiveMinutes: true })).toBeNull(); // 3-part stays strict
+    expect(hmsToSeconds("90:99", { permissiveMinutes: true })).toBeNull(); // seconds still clocked
+  });
+});
+
+describe("secondsToClock", () => {
+  it("formats M:SS by default, rolling to H:MM:SS past an hour", () => {
+    expect(secondsToClock(0)).toBe("0:00");
+    expect(secondsToClock(75)).toBe("1:15");
+    expect(secondsToClock(3723)).toBe("1:02:03");
+  });
+  it("pads minutes with padMinutes (chapter/YouTube shape)", () => {
+    expect(secondsToClock(0, { padMinutes: true })).toBe("00:00");
+    expect(secondsToClock(75, { padMinutes: true })).toBe("01:15");
+    expect(secondsToClock(3723, { padMinutes: true })).toBe("1:02:03"); // hours form unaffected
+  });
+  it("forceHours emits H:MM:SS even under an hour", () => {
+    expect(secondsToClock(75, { forceHours: true })).toBe("0:01:15");
+    expect(secondsToClock(0, { forceHours: true })).toBe("0:00:00");
+  });
+  it("clamps negatives and floors fractions", () => {
+    expect(secondsToClock(-5)).toBe("0:00");
+    expect(secondsToClock(61.9)).toBe("1:01");
   });
 });

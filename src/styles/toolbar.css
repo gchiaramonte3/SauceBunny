@@ -244,6 +244,8 @@
 }
 .cp-recents-trigger.active { color: var(--fg-1); }
 .cp-recents-pop {
+  /* Portaled to <body>; the measured top/right anchor stays inline. */
+  position: fixed;
   z-index: 9999;
   width: 340px;
   max-height: 420px;

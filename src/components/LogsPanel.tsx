@@ -108,6 +108,10 @@ export function LogsPanel({
         aria-label="Pipeline log"
         onClick={onToggle}
         onKeyDown={(e) => {
+          // Only handle keys pressed on the header itself — Enter/Space on the
+          // nested Stop/Copy/Clear buttons bubbles up here, and preventDefault
+          // would cancel the button's own activation and toggle the panel.
+          if (e.target !== e.currentTarget) return;
           if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); }
         }}
       >

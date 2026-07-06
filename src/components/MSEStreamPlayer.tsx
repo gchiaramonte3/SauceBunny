@@ -271,6 +271,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       if (videoRef.current) videoRef.current.muted = m;
     },
     isMuted: () => videoRef.current?.muted ?? false,
+    supportsPlaybackRate: true,
     setPlaybackRate: (rate) => {
       // Clamp to what the streaming pipeline sustains (shuttle caps here too);
       // the app's list is 0.5–2×, comfortably under it.

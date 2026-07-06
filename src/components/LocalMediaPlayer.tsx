@@ -117,6 +117,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     getVolume: () => mediaRef.current?.volume ?? 1,
     setMuted: (m) => { if (mediaRef.current) mediaRef.current.muted = m; },
     isMuted: () => mediaRef.current?.muted ?? false,
+    supportsPlaybackRate: true,
     setPlaybackRate: (rate) => {
       // Defensive clamp to WebKit's safe range; the app's list is 0.5–2×.
       const r = Math.max(0.25, Math.min(4, rate));

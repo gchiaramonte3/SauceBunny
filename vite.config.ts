@@ -9,7 +9,8 @@ export default defineConfig({
   clearScreen: false,
   test: {
     // e2e/ is Playwright's turf (npm run test:e2e) — vitest must not collect it.
-    exclude: [...configDefaults.exclude, "e2e/**"],
+    // .claude/ holds agent worktrees (full repo copies) — same rule applies.
+    exclude: [...configDefaults.exclude, "e2e/**", ".claude/**"],
   },
   server: {
     port: 1420,

@@ -17,6 +17,8 @@ type Props = {
   volume: number;
   muted: boolean;
   playbackRate: number;
+  /** False while the active player can't honour a rate (WebCodecs player). */
+  playbackRateSupported: boolean;
   onPlayToggle: () => void;
   onStep: (frames: number) => void;
   onMarkIn: () => void;
@@ -33,7 +35,7 @@ export function Transport({
   status, isPlaying,
   playheadTc, durationTc,
   captionsOn, snapshotBusy, canSnapshot,
-  volume, muted, playbackRate,
+  volume, muted, playbackRate, playbackRateSupported,
   onPlayToggle, onStep, onMarkIn, onMarkOut, onClearMarks, onToggleCaptions, onSnapshot,
   onVolumeChange, onMutedChange, onPlaybackRateChange,
 }: Props) {
@@ -91,7 +93,7 @@ export function Transport({
           <IconCamera size={15} />
         </button>
         <div className="cp-icon-divider" />
-        <SpeedControl rate={playbackRate} onRateChange={onPlaybackRateChange} />
+        <SpeedControl rate={playbackRate} supported={playbackRateSupported} onRateChange={onPlaybackRateChange} />
         <VolumeControl
           volume={volume}
           muted={muted}

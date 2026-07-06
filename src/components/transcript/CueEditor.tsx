@@ -46,6 +46,9 @@ export function CueEditor({ initialText, onCommit, onCancel }: Props) {
       value={text}
       onChange={(e) => { setText(e.target.value); autosize(); }}
       onKeyDown={(e) => {
+        // Mid-IME composition, Enter confirms the composed text — it must
+        // never commit (and unmount) the editor.
+        if (e.nativeEvent.isComposing) return;
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
           onCommit(text);

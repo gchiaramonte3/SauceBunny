@@ -45,6 +45,9 @@ export function LabelInput({
         onChange={(e) => onChange(e.target.value)}
         onBlur={() => finish(true)}
         onKeyDown={(e) => {
+          // IME (Japanese/Chinese/Korean) — Enter/Esc while composing confirms
+          // or cancels the conversion candidate, not the label; don't commit.
+          if (e.nativeEvent.isComposing) return;
           if (e.key === "Enter") { e.preventDefault(); finish(true); }
           if (e.key === "Escape") { e.preventDefault(); finish(false); }
         }}

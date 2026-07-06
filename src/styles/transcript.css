@@ -485,7 +485,7 @@
   padding: 6px 12px;
   border-bottom: 1px solid var(--line-1);
   background: var(--bg-2);
-  color: var(--color-danger, #e5484d);
+  color: var(--danger);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -1020,8 +1020,8 @@
   padding: 6px 9px;
   border-radius: 6px;
   background: var(--bg-2);
-  border: 1px solid var(--color-danger, #e5484d);
-  color: var(--color-danger, #e5484d);
+  border: 1px solid var(--danger);
+  color: var(--danger);
   font-size: 11px;
   line-height: 1.35;
   z-index: 30;

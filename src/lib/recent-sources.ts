@@ -13,6 +13,8 @@
  * a DOM (mirrors tab-state.ts).
  */
 
+import { loadJson, saveJson } from "./storage";
+
 export type RecentSource = {
   kind: "url" | "file";
   /** Full URL (web) or absolute file path (local). The de-dup key. */
@@ -90,19 +92,14 @@ export function sanitizeRecentSources(raw: unknown): RecentSource[] {
   return out.slice(0, MAX_RECENT_SOURCES);
 }
 
-// ── localStorage wrappers (best-effort; storage can be unavailable) ─────────
+// ── localStorage wrappers (best-effort, via lib/storage like chapters.ts) ──
 
 export function loadRecentSources(): RecentSource[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? sanitizeRecentSources(JSON.parse(raw)) : [];
-  } catch {
-    return [];
-  }
+  // sanitize on load: the persisted blob is untrusted (old shapes, hand
+  // edits) and must never crash the popover render.
+  return sanitizeRecentSources(loadJson<unknown>(STORAGE_KEY, []));
 }
 
 export function saveRecentSources(list: readonly RecentSource[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  } catch { /* quota / private mode — recents are best-effort */ }
+  saveJson(STORAGE_KEY, list);
 }
