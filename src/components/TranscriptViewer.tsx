@@ -779,8 +779,10 @@ export function TranscriptViewer({
     const format = path.toLowerCase().endsWith(".vtt") ? "vtt" as const : "srt" as const;
     const serialized = serializeCues(nextCues, format);
     try {
-      const bytes = Array.from(new TextEncoder().encode(serialized));
-      await invoke("write_bytes_to_path", { path, bytes });
+      // String invoke arg — not Array.from(TextEncoder) bytes, which boxed
+      // every byte as a decimal JSON number (~6 MB of transient churn per
+      // edit on a large transcript, while playback is live).
+      await invoke("write_text_to_path", { path, text: serialized });
       // Local fast path — reparse immediately instead of waiting for the
       // reload-token round trip (which follows anyway and reads the same bytes).
       setRaw(serialized);
@@ -937,8 +939,7 @@ export function TranscriptViewer({
         // the SRT spec anyway — there's nowhere to put them.
         content = raw ?? "";
       }
-      const bytes = Array.from(new TextEncoder().encode(content));
-      await invoke("write_bytes_to_path", { path: dest, bytes });
+      await invoke("write_text_to_path", { path: dest, text: content });
       setDlError(null);
     } catch (e) {
       console.error("transcript download failed:", e);

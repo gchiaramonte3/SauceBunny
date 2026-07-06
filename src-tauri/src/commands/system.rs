@@ -252,6 +252,30 @@ pub fn write_bytes_to_path(
     Ok(())
 }
 
+/// Write a UTF-8 string to `path`. Same validation as `write_bytes_to_path`,
+/// but the payload crosses the invoke boundary as a JSON string instead of a
+/// `Vec<u8>` — text callers (inline cue edits, transcript downloads) were
+/// marshalling every byte as a boxed JS number in decimal, which churned
+/// megabytes of transient allocation per write on large transcripts.
+#[tauri::command]
+pub fn write_text_to_path(
+    path: String,
+    text: String,
+    if_not_exists: Option<bool>,
+) -> Result<(), crate::AppError> {
+    let p = PathBuf::from(&path);
+    if let Some(parent) = p.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            return Err(format!("Folder does not exist: {}", parent.display()).into());
+        }
+    }
+    if if_not_exists.unwrap_or(false) && p.exists() {
+        return Err(format!("File already exists: {}", p.display()).into());
+    }
+    std::fs::write(&p, text.as_bytes()).map_err(|e| format!("write failed: {e}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn reveal_in_finder(path: String) -> Result<(), crate::AppError> {
     let p = PathBuf::from(&path);
@@ -349,7 +373,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-06-r104-host-name";
+pub const BACKEND_BUILD_ID: &str = "2026-07-06-r105-write-text";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

@@ -170,6 +170,7 @@ pub fn run() {
             commands::cancel_job,
             commands::reveal_in_finder,
             commands::write_bytes_to_path,
+            commands::write_text_to_path,
             commands::new_job_id,
             commands::read_text_file_capped,
             commands::probe_diarizer,
