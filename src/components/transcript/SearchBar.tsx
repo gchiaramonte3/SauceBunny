@@ -1,4 +1,5 @@
 import { forwardRef } from "react";
+import { bindingsFor, formatCombo, loadKeybindings } from "../../lib/keybindings";
 
 /**
  * Transcript search row — mode pill (Text / Speakers), the query input,
@@ -36,6 +37,17 @@ export const TranscriptSearchBar = forwardRef<HTMLInputElement, Props>(
       else if (e.key === "Escape") { e.preventDefault(); onQueryChange(""); }
     }
 
+    // Tooltip hint resolved from the live registry (transcript.find /
+    // transcript.findNext are rebindable) so a rebind never leaves a stale
+    // literal here. Unbound → the fragment drops out of the hint.
+    const kb = loadKeybindings();
+    const findKey = bindingsFor("transcript.find", kb)[0];
+    const cycleKey = bindingsFor("transcript.findNext", kb)[0];
+    const textTitle = "Search the transcript — "
+      + (findKey ? `${formatCombo(findKey)} focus · ` : "")
+      + "↩ next · ⇧↩ previous"
+      + (cycleKey ? ` · ${formatCombo(cycleKey)} cycles` : "");
+
     return (
       <div className="cp-tx-search">
         {/* Mode pill — Text / Speakers. Two-button segmented control;
@@ -65,7 +77,7 @@ export const TranscriptSearchBar = forwardRef<HTMLInputElement, Props>(
           ref={inputRef}
           className="cp-tx-search-input"
           placeholder={mode === "speakers" ? "Find a speaker…" : "Search transcript…"}
-          title={mode === "speakers" ? "Search by speaker name" : "Search the transcript — ⌘F focus · ↩ next · ⇧↩ previous · ⌘G cycles"}
+          title={mode === "speakers" ? "Search by speaker name" : textTitle}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           onKeyDown={onSearchKey}

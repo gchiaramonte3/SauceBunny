@@ -3378,6 +3378,11 @@ export default function App() {
       const actionId = combo ? comboToAction.get(combo) : undefined;
       if (actionId) {
         const action = KEY_ACTION_BY_ID[actionId];
+        // Scoped actions (transcript.*) are dispatched by their owning
+        // component's registry-driven listener — TranscriptViewer also mounts
+        // in the floating panel window, where this handler doesn't exist.
+        // Return without consuming: the owner visibility-gates and decides.
+        if ((action.scope ?? "global") !== "global") return;
         if (action.global || (!inField && !settingsOpen)) { runAction(actionId, e); return; }
       }
 

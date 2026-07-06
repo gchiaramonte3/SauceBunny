@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   KEY_ACTIONS,
+  KEY_ACTION_BY_ID,
+  CONTEXTUAL_SHORTCUTS,
   bindingsFor,
   buildComboMap,
   assignBinding,
@@ -8,6 +10,7 @@ import {
   eventToCombo,
   formatCombo,
   formatBindings,
+  shortcutSheetGroups,
   type KeybindingOverrides,
 } from "./keybindings";
 
@@ -101,5 +104,51 @@ describe("assignBinding", () => {
     const o: KeybindingOverrides = { "mark.in": ["p"] };
     expect(resetBinding(o, "mark.in")["mark.in"]).toBeUndefined();
     expect(bindingsFor("mark.in", resetBinding(o, "mark.in"))).toEqual(["i"]);
+  });
+});
+
+describe("transcript-tab scoped actions", () => {
+  it("registers the transcript search keys as rebindable actions", () => {
+    expect(bindingsFor("transcript.find", {})).toEqual(["mod+f"]);
+    expect(bindingsFor("transcript.findNext", {})).toEqual(["mod+g"]);
+    expect(bindingsFor("transcript.findPrev", {})).toEqual(["mod+shift+g"]);
+    for (const id of ["transcript.find", "transcript.findNext", "transcript.findPrev"] as const) {
+      expect(KEY_ACTION_BY_ID[id].scope).toBe("transcript-tab");
+    }
+  });
+  it("conflict-steals their combos like any other action (no double-firing)", () => {
+    const { next, stolenFrom } = assignBinding({}, "app.palette", "mod+f");
+    expect(stolenFrom).toBe("transcript.find");
+    expect(bindingsFor("transcript.find", next)).toEqual([]);
+    expect(buildComboMap(next).get("mod+f")).toBe("app.palette");
+  });
+  it("shows in the ⌘/ sheet with LIVE bindings, under Transcript not Contextual", () => {
+    const groups = shortcutSheetGroups({ "transcript.find": ["mod+t"] });
+    const transcript = groups.find((g) => g.title === "Transcript");
+    expect(transcript?.rows.map((r) => [r.label, r.keys])).toEqual([
+      ["Find in transcript", "⌘T"],
+      ["Next search match", "⌘G"],
+      ["Previous search match", "⌘⇧G"],
+    ]);
+  });
+});
+
+describe("CONTEXTUAL_SHORTCUTS", () => {
+  // Pinned exactly: every row must be an interaction the registry CANNOT
+  // express — a modal entry mode (timecode digits), a held-key chord (K+J/L),
+  // or a focus-scoped input handler (URL-bar ↩, dialog Esc). Anything that's
+  // a plain combo belongs in KEY_ACTIONS, where it's rebindable and
+  // conflict-checked (that's how ⌘F/⌘G/⇧⌘G moved out — see transcript.*).
+  // If this fails because you added a row: can it be a scoped KeyAction instead?
+  it("only lists truly non-registry listeners", () => {
+    expect(CONTEXTUAL_SHORTCUTS.map((c) => c.keys)).toEqual([
+      "0–9", "K held + J / L", "↩", "Esc",
+    ]);
+  });
+  it("no longer lists the transcript search keys", () => {
+    for (const c of CONTEXTUAL_SHORTCUTS) {
+      expect(c.keys).not.toMatch(/⌘F|⌘G/);
+      expect(c.where).not.toBe("Transcript tab");
+    }
   });
 });

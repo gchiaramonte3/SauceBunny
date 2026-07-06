@@ -19,11 +19,12 @@ export type KeyActionId =
   | "play.rateDown" | "play.rateUp" | "play.rateReset"
   | "mark.in" | "mark.out" | "mark.clear" | "mark.gotoIn" | "mark.gotoOut"
   | "review.rangeIn" | "review.rangeOut"
+  | "transcript.find" | "transcript.findNext" | "transcript.findPrev"
   | "src.fetch" | "export.clip" | "queue.add" | "queue.toggle"
   | "view.logs" | "app.settings" | "app.palette" | "app.shortcuts"
   | "edit.undo" | "edit.redo";
 
-export type KeyActionGroup = "Transport" | "Marking" | "Source & export" | "View" | "App";
+export type KeyActionGroup = "Transport" | "Marking" | "Transcript" | "Source & export" | "View" | "App";
 
 export type KeyAction = {
   id: KeyActionId;
@@ -37,6 +38,17 @@ export type KeyAction = {
    * keys are false so typing in the URL bar never scrubs the video.
    */
   global: boolean;
+  /**
+   * Who dispatches the action. Absent / "global" → App.tsx's window keydown
+   * handler (main window only). "transcript-tab" → TranscriptViewer's own
+   * registry-driven listener, gated on the transcript tab being visible —
+   * the viewer also mounts in the floating panel window (PanelApp →
+   * QueueDrawer), where App's handler doesn't exist. App's dispatch skips
+   * scoped actions so a combo never fires twice. Scoped actions still join
+   * conflict-stealing (assignBinding), the Settings editor, and the ⌘/ sheet
+   * like any other action.
+   */
+  scope?: "global" | "transcript-tab";
 };
 
 /** Order here drives both the editor layout and combo-map precedence. */
@@ -69,6 +81,13 @@ export const KEY_ACTIONS: KeyAction[] = [
   // review comment attaches to. Only live while the Review tab is in front.
   { id: "review.rangeIn",  label: "Comment range: mark in",  group: "Marking", defaults: ["shift+i"],               global: false },
   { id: "review.rangeOut", label: "Comment range: mark out", group: "Marking", defaults: ["shift+o"],               global: false },
+  // Transcript search — scope "transcript-tab": dispatched by
+  // TranscriptViewer's own listener (see the scope doc above), visible-tab
+  // gated. `global: true` documents that they fire while a text field is
+  // focused — ⌘G must cycle matches from the search input itself.
+  { id: "transcript.find",     label: "Find in transcript",    group: "Transcript", defaults: ["mod+f"],            global: true, scope: "transcript-tab" },
+  { id: "transcript.findNext", label: "Next search match",     group: "Transcript", defaults: ["mod+g"],            global: true, scope: "transcript-tab" },
+  { id: "transcript.findPrev", label: "Previous search match", group: "Transcript", defaults: ["mod+shift+g"],      global: true, scope: "transcript-tab" },
   { id: "src.fetch",       label: "Fetch URL",             group: "Source & export", defaults: ["mod+enter"],       global: true },
   { id: "export.clip",     label: "Export clip",           group: "Source & export", defaults: ["alt+e"],           global: false },
   { id: "queue.add",       label: "Add selection to queue",group: "Source & export", defaults: ["mod+shift+a"],     global: true },
@@ -233,10 +252,13 @@ export function formatBindings(combos: string[]): string {
  * Keyboard interactions that live OUTSIDE the rebindable registry — hand-coded
  * listeners with their own scope gates. The cheat-sheet lists them in a
  * separate "Contextual" group so the user learns them without implying they
- * can be re-bound. Keep this in sync when adding a hardcoded keydown listener:
+ * can be re-bound. Only interactions the registry CANNOT express belong here:
+ * modal entry modes, held-key chords, focus-scoped input handlers. Anything
+ * that's a plain combo goes in KEY_ACTIONS (with `scope` if it's tab-gated —
+ * that's how ⌘F/⌘G/⇧⌘G moved out, see transcript.*). Keep this in sync when
+ * adding a hardcoded keydown listener:
  *  - 0–9 / timecode HUD: App.tsx keyboard handler
  *  - K-held frame nudge: App.tsx (kHeldRef) + lib/shuttle.ts
- *  - ⌘F, ⌘G/⇧⌘G: TranscriptViewer.tsx window listeners (tab-visible gated)
  *  - ↩ in the URL bar: Toolbar.tsx input onKeyDown
  */
 export type ContextualShortcut = { keys: string; label: string; where: string };
@@ -244,8 +266,6 @@ export type ContextualShortcut = { keys: string; label: string; where: string };
 export const CONTEXTUAL_SHORTCUTS: ContextualShortcut[] = [
   { keys: "0–9",       label: "Go to timecode — type digits, ↩ snaps, Esc cancels", where: "Player" },
   { keys: "K held + J / L", label: "Nudge one frame back / forward",                where: "Player" },
-  { keys: "⌘F",        label: "Find in transcript",                                 where: "Transcript tab" },
-  { keys: "⌘G / ⇧⌘G",  label: "Next / previous transcript search match",            where: "Transcript tab" },
   { keys: "↩",         label: "Fetch the typed URL",                                where: "URL bar" },
   { keys: "Esc",       label: "Close the front-most dialog or popover",             where: "Anywhere" },
 ];

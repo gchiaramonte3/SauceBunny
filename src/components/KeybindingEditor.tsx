@@ -5,7 +5,7 @@ import {
   type KeyActionId, type KeyActionGroup, type KeybindingOverrides,
 } from "../lib/keybindings";
 
-const GROUP_ORDER: KeyActionGroup[] = ["Transport", "Marking", "Source & export", "View", "App"];
+const GROUP_ORDER: KeyActionGroup[] = ["Transport", "Marking", "Transcript", "Source & export", "View", "App"];
 
 /**
  * Editable keyboard-shortcut table (Settings → Commands). Each action shows its

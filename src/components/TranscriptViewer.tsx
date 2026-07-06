@@ -7,6 +7,7 @@ import { speakerStats } from "../lib/speaker-stats";
 import { secondsToTc } from "../lib/timecode";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
+import { bindingsFor, eventToCombo, loadKeybindings } from "../lib/keybindings";
 import {
   getHistory,
   removeEntry,
@@ -434,45 +435,43 @@ export function TranscriptViewer({
       ?.scrollIntoView({ block: "center", behavior: scrollBehavior() });
   }, [matches, matchCursor]);
 
-  // ── ⌘F — focus the transcript search ─────────────────────────────
-  // The rebindable-shortcut registry (lib/keybindings.ts) has no notion of
-  // tab scope — its per-tab precedent (the Review range hotkeys) registers
-  // handlers with App, which only works in the MAIN window and would need
-  // new plumbing through QueueDrawer + the panel bus. So this follows the
-  // ⌘G listener below instead: a window-scope listener owned by the viewer,
-  // gated on the transcript tab actually being VISIBLE — the drawer keeps
-  // hidden tabs mounted ([hidden] keep-alive wrappers) and the closed drawer
-  // is aria-hidden, so both are checked. Anywhere else ⌘F stays untouched.
+  // ── ⌘F / ⌘G / ⇧⌘G — transcript search (registry-driven) ─────────
+  // The bindings live in the rebindable registry (lib/keybindings.ts,
+  // transcript.* with scope "transcript-tab") so Settings → Commands can
+  // re-bind them and assignBinding conflict-steals them like any other
+  // action — but the LISTENER is owned here, not by App's dispatch: the
+  // viewer also mounts in the floating panel window (PanelApp → QueueDrawer),
+  // where App's handler doesn't exist. App's dispatch skips scoped actions,
+  // so a combo never fires twice. Gated on the transcript tab actually being
+  // VISIBLE — the drawer keeps hidden tabs mounted ([hidden] keep-alive
+  // wrappers) and the closed drawer is aria-hidden, so both are checked.
+  // Anywhere else the keys stay untouched. Overrides are re-read per keydown
+  // (a tiny localStorage parse, shared across windows) so a rebind applies
+  // everywhere without event plumbing.
   const wrapRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
-      if (e.key.toLowerCase() !== "f") return;
+      const combo = eventToCombo(e);
+      if (!combo) return;
+      const overrides = loadKeybindings();
+      const id = (["transcript.find", "transcript.findNext", "transcript.findPrev"] as const)
+        .find((a) => bindingsFor(a, overrides).includes(combo));
+      if (!id) return;
       const root = wrapRef.current;
       if (!root || root.closest("[hidden]") || root.closest('[aria-hidden="true"]')) return;
+      if (id === "transcript.find") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+      // Find next / previous — Avid-style cycling without focus-tabbing back
+      // to the search input. Only with live matches, so an idle press isn't
+      // swallowed and doesn't feel like a no-op.
+      if (matches.length === 0) return;
       e.preventDefault();
-      searchInputRef.current?.focus();
-      searchInputRef.current?.select();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // ── Cmd+G / Cmd+Shift+G — Avid-style "find next / previous" ──────
-  // Wired at window scope so the user can cycle through results
-  // without focus-tabbing back to the search input. Only active when
-  // there's a non-empty query (so an idle Cmd+G doesn't steal Chrome's
-  // default find-again in dev tools or feel like a no-op in the wild).
-  useEffect(() => {
-    if (matches.length === 0) return;
-    function onKey(e: KeyboardEvent) {
-      // Ignore plain "g" keystrokes inside the rename / search
-      // inputs — handled by their own onKeyDown handlers, and we
-      // don't want to interfere with normal typing.
-      if (!e.metaKey || e.key.toLowerCase() !== "g") return;
-      e.preventDefault();
-      jumpToMatch(e.shiftKey ? -1 : 1);
+      jumpToMatch(id === "transcript.findNext" ? 1 : -1);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
