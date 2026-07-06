@@ -56,3 +56,18 @@ jobs:
       - uses: actions/checkout@v4
       - run: swift build -c release --arch arm64
         working-directory: swift-sidecar
+
+  ui-smoke:
+    name: ui smoke (playwright)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      # Drives the Vite-served frontend in Chromium with Tauri IPC mocked
+      # (e2e/tauri-mock.ts) — tauri-driver has no macOS support, so this is
+      # the shell-level smoke: boots, chrome wired, no pageerrors.
+      - run: npx playwright install chromium
+      - run: npx playwright test
