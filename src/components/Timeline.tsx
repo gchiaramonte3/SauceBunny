@@ -3,6 +3,8 @@ import type { AppStatus } from "../types";
 import { secondsToHms } from "../lib/timecode";
 import { filmstripCount, filmstripTimestamps } from "../lib/filmstrip";
 import { extractFilmstrip } from "../lib/mediabunny-helpers";
+import { extractWaveformPeaks, type WaveformPeaks } from "../lib/waveform";
+import { TimelineWaveform } from "./TimelineWaveform";
 
 /** Scrub-track height (px) when a filmstrip is shown — matches
  *  `.cp-track.has-filmstrip` in transport.css; also sizes the decoded thumbs. */
@@ -43,8 +45,12 @@ type Props = {
    *  (renders solid with a one-shot flash). */
   reviewRangeDraft?: { start: number; end: number; color: string; live: boolean } | null;
   /** Local file path to build the thumbnail filmstrip from (mediabunny-decoded).
-   *  null for web/streaming sources or when there's no decodable local file. */
+   *  null for web/streaming sources or when there's no decodable local file.
+   *  Also feeds the audio waveform lane — same local-files-only scope. */
   filmstripPath?: string | null;
+  /** Audio waveform lane visibility (ViewOptions toggle). Default true;
+   *  files with no decodable audio track simply render no waveform. */
+  waveformOn?: boolean;
   /** Speaker lanes from the diarized transcript — a thin strip of tinted
    *  bands along the bottom of the track showing who talks when. */
   speakerLanes?: { startMs: number; endMs: number; color: string; speaker: string | null }[];
@@ -56,12 +62,13 @@ type Props = {
 
 export function Timeline({
   status, durationFrames, playheadFrames, inFrames, outFrames, fps,
-  queuedRanges, commentMarkers, reviewRangeDraft, filmstripPath, speakerLanes, ghosts, onSeek,
+  queuedRanges, commentMarkers, reviewRangeDraft, filmstripPath, waveformOn, speakerLanes, ghosts, onSeek,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   const [trackW, setTrackW] = useState(0);
   const [filmstrip, setFilmstrip] = useState<(string | null)[]>([]);
+  const [wavePeaks, setWavePeaks] = useState<WaveformPeaks | null>(null);
   const filmCacheRef = useRef<Map<string, (string | null)[]>>(new Map());
   const dim = status === "empty" || status === "fetching" || status === "error";
 
@@ -171,6 +178,26 @@ export function Timeline({
     return () => { alive = false; ctrl.abort(); };
   }, [filmstripPath, durationFrames, fps, trackW, dim]);
 
+  // Extract audio peaks for the waveform lane. Mirrors the filmstrip's
+  // scheduling: local files only, deferred until the duration is known (so
+  // it never delays playback start or transcription), aborted on source
+  // change. Bucket count is fixed, so no dependency on track width — resize
+  // only redraws the canvas. Caching per path lives in lib/waveform.ts.
+  useEffect(() => {
+    const path = filmstripPath ?? null;
+    const durSec = fps > 0 ? durationFrames / fps : 0;
+    if (dim || !path || durSec <= 0 || waveformOn === false) { setWavePeaks(null); return; }
+
+    const ctrl = new AbortController();
+    let alive = true;
+    void (async () => {
+      const peaks = await extractWaveformPeaks(path, { signal: ctrl.signal });
+      if (!alive || ctrl.signal.aborted) return;
+      setWavePeaks(peaks);
+    })();
+    return () => { alive = false; ctrl.abort(); };
+  }, [filmstripPath, durationFrames, fps, dim, waveformOn]);
+
   const pct = (f: number) => durationFrames > 0 ? (f / durationFrames) * 100 : 0;
   const ticks = Array.from({ length: 11 }, (_, i) => i);
 
@@ -194,7 +221,7 @@ export function Timeline({
         })}
       </div>
       <div
-        className={"cp-track" + (dragging ? " dragging" : "") + (filmstrip.length > 0 ? " has-filmstrip" : "")}
+        className={"cp-track" + (dragging ? " dragging" : "") + (filmstrip.length > 0 ? " has-filmstrip" : "") + (wavePeaks ? " has-wave" : "")}
         ref={trackRef}
         onMouseDown={onMouseDown}
       >
@@ -209,6 +236,9 @@ export function Timeline({
             ))}
           </div>
         )}
+        {/* Audio waveform lane — muted peaks over the filmstrip, under the
+            scrim and every overlay (playhead/marks/comments stay dominant). */}
+        {wavePeaks && <TimelineWaveform peaks={wavePeaks} widthPx={trackW} />}
         {/* Speaker lanes — who talks when, as tinted bands hugging the bottom
             edge. Pointer-events off in CSS so clicks still seek the track. */}
         {speakerLanes && speakerLanes.length > 0 && !dim && (

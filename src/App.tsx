@@ -649,6 +649,9 @@ export default function App() {
   useEffect(() => saveJson(ASPECT_KEY, aspect), [aspect]);
   const [captionsOn, setCaptionsOn] = useState<boolean>(() => loadJson<boolean>("cp-captions-on", false));
   useEffect(() => saveJson("cp-captions-on", captionsOn), [captionsOn]);
+  // Timeline audio waveform lane (local files only) — ViewOptions toggle.
+  const [waveformVisible, setWaveformVisible] = useState<boolean>(() => loadJson<boolean>("saucebunny.waveformVisible", true));
+  useEffect(() => saveJson("saucebunny.waveformVisible", waveformVisible), [waveformVisible]);
 
   // ====== Volume (persisted) — drives both YT and local players ======
   // If a previous session left the volume at 0, bump it to 0.5 on launch so
@@ -4037,6 +4040,8 @@ export default function App() {
               <ViewOptions
                 aspect={aspect}
                 onAspectChange={setAspect}
+                waveformVisible={waveformVisible}
+                onWaveformVisibleChange={setWaveformVisible}
                 onShowMediaInfo={sourceKind === "file" && localFilePath ? () => setMediaInfoOpen(true) : undefined}
               />
             </div>
@@ -4221,6 +4226,7 @@ export default function App() {
               commentMarkers={reviewMarkers}
               reviewRangeDraft={reviewRangeDraft}
               filmstripPath={sourceKind === "file" ? (playbackPath ?? localFilePath) : null}
+              waveformOn={waveformVisible}
               speakerLanes={speakerLaneData}
               ghosts={coGhostMarkers}
               onSeek={onSeek}

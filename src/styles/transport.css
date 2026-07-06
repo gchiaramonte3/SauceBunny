@@ -258,6 +258,21 @@
 .cp-track.has-filmstrip .cp-track-fill {
   background: linear-gradient(180deg, rgba(0,0,0,0.04), rgba(0,0,0,0.30));
 }
+/* Audio waveform lane — mirrored min/max peaks around a centre axis, drawn
+   into a canvas (TimelineWaveform). Local files only, toggled from
+   ViewOptions. Sits above the filmstrip and below the scrim + every overlay,
+   in muted --fg-4 ink so the playhead, marks, comment markers and speaker
+   lanes stay visually dominant. `pointer-events:none` so clicks still seek.
+   The lane alone (audio-only files) also grows the track to filmstrip
+   height. */
+.cp-track.has-wave { height: 44px; }
+.cp-track-wave {
+  position: absolute; inset: 0; z-index: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  animation: cp-wave-in var(--dur-base) var(--ease-out);
+}
+@keyframes cp-wave-in { from { opacity: 0; } to { opacity: 1; } }
 /* Speaker lanes — thin diarization strip hugging the bottom of the track:
    one speaker-tinted band per turn, so "who talks when" reads at a glance.
    `pointer-events:none` so clicks pass through to the scrub track. */

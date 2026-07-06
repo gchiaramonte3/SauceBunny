@@ -6,6 +6,9 @@ import type { AspectId } from "./Monitor";
 type Props = {
   aspect: AspectId;
   onAspectChange: (a: AspectId) => void;
+  /** Timeline audio waveform lane visibility (persisted in App). */
+  waveformVisible: boolean;
+  onWaveformVisibleChange: (v: boolean) => void;
   /** Opens the media-info inspector. Only provided when a local source
    *  file is loaded — omitted, the button doesn't render. */
   onShowMediaInfo?: () => void;
@@ -19,7 +22,7 @@ const ASPECTS: { id: AspectId; label: string; subtitle: string }[] = [
   { id: "2.39", label: "2.39 : 1",  subtitle: "anamorphic / cinemascope" },
 ];
 
-export function ViewOptions({ aspect, onAspectChange, onShowMediaInfo }: Props) {
+export function ViewOptions({ aspect, onAspectChange, waveformVisible, onWaveformVisibleChange, onShowMediaInfo }: Props) {
   const [open, setOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -124,6 +127,18 @@ export function ViewOptions({ aspect, onAspectChange, onShowMediaInfo }: Props) 
               <span className="sub">{o.subtitle}</span>
             </button>
           ))}
+          <div className="cp-popover-header">Timeline</div>
+          {/* Toggle, not a pick-one — stays open so the state flip is visible. */}
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={waveformVisible}
+            className={"cp-popover-item" + (waveformVisible ? " active" : "")}
+            onClick={() => onWaveformVisibleChange(!waveformVisible)}
+          >
+            <span className="lbl">Audio waveform</span>
+            <span className="sub">{waveformVisible ? "shown on the scrub track" : "hidden"}</span>
+          </button>
         </div>
       )}
     </div>
