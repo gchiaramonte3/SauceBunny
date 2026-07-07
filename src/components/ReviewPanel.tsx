@@ -15,11 +15,59 @@ import {
   buildComment, insertComment, editComment, deleteComment, editReply, removeReply,
   setResolved, setLike, rootComments, repliesOf, openCount,
   applyReviewOp, inverseReviewOps, restampReviewOp,
-  reviewToMarkdown, reviewToCsv, reviewToEdl,
+  reviewToMarkdown,
   avatarColor, initialsOf, loadReviewer, AVATAR_COLORS, AUTHOR_KEY, AUTHOR_COLOR_KEY, REVIEW_CHANGED_EVENT,
   loadReviewHistory, removeReviewHistory, clearReviewHistory, annotationHasContent,
   type ReviewDoc, type ReviewComment, type CommentSort, type AnnotationStrokes, type ReviewHistoryEntry, type ReviewOp,
 } from "../lib/review";
+import {
+  markersToAvidTxt, markersToPremiereXml, markersToResolveEdl, markersToFcpxml, markersToCsv,
+} from "../lib/markers";
+import {
+  RATE_TABLE, DEFAULT_MARKER_SETTINGS, tcToFrames,
+  type FrameRateKey, type MarkerExportSettings,
+} from "../lib/marker-time";
+
+/** The export popover's format choices — Notes (Markdown) + the five marker
+ *  targets. Persisted marker settings drive every marker format. */
+type ExportKind = "md" | "avid" | "premiere" | "resolve" | "fcpx" | "csv";
+
+const FRAME_RATE_KEYS: FrameRateKey[] = ["23.976", "24", "25", "29.97", "30", "50", "59.94", "60"];
+const MARKER_SETTINGS_KEY = "saucebunny.markerExport";
+
+/** Map a source fps to a FrameRateKey when it's close to a known rate (so the
+ *  export dialog opens pre-seeded to the clip's rate), else null. */
+function fpsToRateKey(fps: number): FrameRateKey | null {
+  const targets: Record<FrameRateKey, number> = {
+    "23.976": 23.976, "24": 24, "25": 25, "29.97": 29.97, "30": 30, "50": 50, "59.94": 59.94, "60": 60,
+  };
+  let best: FrameRateKey | null = null;
+  let bestD = 0.2;
+  for (const k of FRAME_RATE_KEYS) {
+    const d = Math.abs(fps - targets[k]);
+    if (d < bestD) { bestD = d; best = k; }
+  }
+  return best;
+}
+
+/** Load persisted marker settings; seed the frame rate from the clip's fps when
+ *  nothing is stored yet. Anything stored wins (the user's explicit choice). */
+function loadMarkerSettings(fps: number): MarkerExportSettings {
+  const stored = loadJson<Partial<MarkerExportSettings>>(MARKER_SETTINGS_KEY, {});
+  const seeded = fpsToRateKey(fps);
+  const frameRate = stored.frameRate && FRAME_RATE_KEYS.includes(stored.frameRate)
+    ? stored.frameRate
+    : seeded ?? DEFAULT_MARKER_SETTINGS.frameRate;
+  const settings: MarkerExportSettings = {
+    frameRate,
+    sequenceStartTc: stored.sequenceStartTc ?? DEFAULT_MARKER_SETTINGS.sequenceStartTc,
+    dropFrame: stored.dropFrame ?? DEFAULT_MARKER_SETTINGS.dropFrame,
+  };
+  // Drop-frame is only meaningful at 29.97 / 59.94 — never persist it enabled
+  // on a rate that can't drop-frame.
+  if (!RATE_TABLE[settings.frameRate].dropAllowed) settings.dropFrame = false;
+  return settings;
+}
 
 /**
  * Frame.io-style review panel — a local, self-hosted review tab. Timecoded
@@ -166,6 +214,17 @@ export function ReviewPanel({
   const [replyDraft, setReplyDraft] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
+  // NLE marker-export settings (frame rate / Start TC / drop-frame), persisted
+  // and seeded from the source fps on first open. Drives every marker format.
+  const [markerSettings, setMarkerSettings] = useState<MarkerExportSettings>(() => loadMarkerSettings(fps));
+  const updateMarkerSettings = (patch: Partial<MarkerExportSettings>) => {
+    setMarkerSettings((prev) => {
+      const next = { ...prev, ...patch };
+      if (!RATE_TABLE[next.frameRate].dropAllowed) next.dropFrame = false;
+      saveJson(MARKER_SETTINGS_KEY, next);
+      return next;
+    });
+  };
   const [author, setAuthor] = useState(() => loadJson<string>(AUTHOR_KEY, ""));
   // Chosen avatar colour — stable + user-picked (NOT derived from the live-typed
   // name, which used to recolour on every keystroke). loadReviewer defaults a
@@ -671,20 +730,24 @@ export function ReviewPanel({
     setReplyTo(null);
   };
 
-  const doExport = async (kind: "md" | "csv" | "edl") => {
+  const doExport = async (kind: ExportKind) => {
     setExportOpen(false);
     if (!viewDoc) return;
+    const title = sourceTitle ?? "Sauce Bunny Review";
     const f = {
-      md:  { ext: "md",  name: "Markdown", text: reviewToMarkdown(viewDoc, sourceTitle ?? "Review") },
-      csv: { ext: "csv", name: "CSV",      text: reviewToCsv(viewDoc, fps) },
-      edl: { ext: "edl", name: "EDL",      text: reviewToEdl(viewDoc, fps, sourceTitle ?? "Sauce Bunny Review") },
+      md:       { ext: "md",     name: "Markdown",            text: reviewToMarkdown(viewDoc, sourceTitle ?? "Review") },
+      avid:     { ext: "txt",    name: "Avid Media Composer", text: markersToAvidTxt(viewDoc, markerSettings, title) },
+      premiere: { ext: "xml",    name: "Adobe Premiere",      text: markersToPremiereXml(viewDoc, markerSettings, title) },
+      resolve:  { ext: "edl",    name: "DaVinci Resolve",     text: markersToResolveEdl(viewDoc, markerSettings, title) },
+      fcpx:     { ext: "fcpxml", name: "Final Cut Pro",       text: markersToFcpxml(viewDoc, markerSettings, title) },
+      csv:      { ext: "csv",    name: "CSV",                 text: markersToCsv(viewDoc, markerSettings, title) },
     }[kind];
     const base = (sourceTitle ?? "review").replace(/[^\w.-]+/g, "-").slice(0, 60) || "review";
     try {
       const path = await saveDialog({ defaultPath: `${base}-review.${f.ext}`, filters: [{ name: f.name, extensions: [f.ext] }] });
       if (typeof path !== "string" || !path) return;
       await invoke("write_bytes_to_path", { path, bytes: Array.from(new TextEncoder().encode(f.text)) });
-      setExportMsg(`Exported → ${path.split("/").pop()}`);
+      setExportMsg(`Exported ${f.name} → ${path.split("/").pop()}`);
     } catch {
       setExportMsg("Export failed.");
     }
@@ -700,6 +763,7 @@ export function ReviewPanel({
         sort={sort} setSort={setSort}
         exportOpen={exportOpen} setExportOpen={setExportOpen} exportWrapRef={exportWrapRef}
         doExport={doExport} exportDisabled={roots.length === 0}
+        markerSettings={markerSettings} onMarkerSettingsChange={updateMarkerSettings}
         onOpenReview={onOpenReview}
         historyOpen={historyOpen} setHistoryOpen={setHistoryOpen} historyWrapRef={historyWrapRef}
         history={history} setHistory={setHistory} now={now}
@@ -803,6 +867,7 @@ function ReviewToolbar({
   searchOpen, setSearchOpen, clearSearch, searchBtnRef,
   sort, setSort,
   exportOpen, setExportOpen, exportWrapRef, doExport, exportDisabled,
+  markerSettings, onMarkerSettingsChange,
   onOpenReview, historyOpen, setHistoryOpen, historyWrapRef, history, setHistory, now,
   author, authorColor, openRename,
 }: {
@@ -818,8 +883,10 @@ function ReviewToolbar({
   exportOpen: boolean;
   setExportOpen: React.Dispatch<React.SetStateAction<boolean>>;
   exportWrapRef: React.RefObject<HTMLDivElement>;
-  doExport: (kind: "md" | "csv" | "edl") => void;
+  doExport: (kind: ExportKind) => void;
   exportDisabled: boolean;
+  markerSettings: MarkerExportSettings;
+  onMarkerSettingsChange: (patch: Partial<MarkerExportSettings>) => void;
   onOpenReview?: (path: string) => void;
   historyOpen: boolean;
   setHistoryOpen: (b: boolean) => void;
@@ -880,9 +947,15 @@ function ReviewToolbar({
           </button>
           {exportOpen && (
             <div className="cp-review-export-menu">
-              <button onMouseDown={() => doExport("md")}>Notes (Markdown)</button>
-              <button onMouseDown={() => doExport("csv")}>Markers (CSV)</button>
-              <button onMouseDown={() => doExport("edl")}>EDL (Resolve / Premiere)</button>
+              <div className="cp-review-export-group">Notes</div>
+              <button onMouseDown={() => doExport("md")}>Markdown</button>
+              <div className="cp-review-export-group">Markers</div>
+              <button onMouseDown={() => doExport("avid")}>Avid Media Composer</button>
+              <button onMouseDown={() => doExport("premiere")}>Adobe Premiere</button>
+              <button onMouseDown={() => doExport("resolve")}>DaVinci Resolve</button>
+              <button onMouseDown={() => doExport("fcpx")}>Final Cut Pro</button>
+              <button onMouseDown={() => doExport("csv")}>CSV</button>
+              <MarkerSettingsRow settings={markerSettings} onChange={onMarkerSettingsChange} />
             </div>
           )}
         </div>
@@ -940,6 +1013,60 @@ function ReviewToolbar({
           <Avatar name={author || "?"} size={26} color={authorColor} />
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Inline marker-export settings inside the export popover: frame rate, sequence
+ *  Start TC (validated), and a drop-frame toggle that's only enabled on the two
+ *  NTSC broadcast rates. The committed Start TC is only written back when it
+ *  parses, so an export always uses a valid timecode. */
+function MarkerSettingsRow({
+  settings, onChange,
+}: {
+  settings: MarkerExportSettings;
+  onChange: (patch: Partial<MarkerExportSettings>) => void;
+}) {
+  const [tcDraft, setTcDraft] = useState(settings.sequenceStartTc);
+  const tcValid = tcToFrames(tcDraft, settings.frameRate, settings.dropFrame) !== null;
+  const dropAllowed = RATE_TABLE[settings.frameRate].dropAllowed;
+  const commitTc = (v: string) => {
+    setTcDraft(v);
+    if (tcToFrames(v, settings.frameRate, settings.dropFrame) !== null) onChange({ sequenceStartTc: v });
+  };
+  return (
+    <div className="cp-review-export-settings">
+      <label className="cp-review-export-field">
+        <span>Frame rate</span>
+        <select
+          className="cp-review-export-select"
+          value={settings.frameRate}
+          onChange={(e) => onChange({ frameRate: e.target.value as FrameRateKey })}
+        >
+          {FRAME_RATE_KEYS.map((k) => <option key={k} value={k}>{k} fps</option>)}
+        </select>
+      </label>
+      <label className="cp-review-export-field">
+        <span>Start TC</span>
+        <input
+          className={"cp-review-export-tc" + (tcValid ? "" : " invalid")}
+          value={tcDraft}
+          spellCheck={false}
+          onChange={(e) => commitTc(e.target.value)}
+          placeholder="01:00:00:00"
+          aria-invalid={!tcValid}
+          aria-label="Sequence start timecode"
+        />
+      </label>
+      <label className={"cp-review-export-drop" + (dropAllowed ? "" : " disabled")}>
+        <input
+          type="checkbox"
+          checked={settings.dropFrame}
+          disabled={!dropAllowed}
+          onChange={(e) => onChange({ dropFrame: e.target.checked })}
+        />
+        <span>Drop-frame{dropAllowed ? "" : " (29.97 / 59.94 only)"}</span>
+      </label>
     </div>
   );
 }

@@ -157,7 +157,8 @@
   border-radius: 8px;
   box-shadow: var(--shadow-card);
   padding: 4px;
-  min-width: 180px;
+  min-width: 224px;
+  max-width: min(260px, calc(100vw - 24px));
   display: flex;
   flex-direction: column;
 }
@@ -173,6 +174,73 @@
   cursor: pointer;
 }
 .cp-review-export-menu button:hover { background: rgba(var(--accent-rgb), 0.14); color: var(--fg-1); }
+/* Two labeled groups (Notes / Markers) — a quiet small-caps section label. */
+.cp-review-export-group {
+  padding: 6px 10px 3px;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+.cp-review-export-group:not(:first-child) {
+  margin-top: 3px;
+  border-top: 1px solid var(--line-1);
+  padding-top: 8px;
+}
+/* Inline marker-export settings — frame rate / Start TC / drop-frame. */
+.cp-review-export-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 4px;
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--line-1);
+}
+.cp-review-export-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cp-review-export-field > span {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.cp-review-export-select,
+.cp-review-export-tc {
+  height: 24px;
+  padding: 0 8px;
+  background: var(--bg-0, #0c0c0e);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+.cp-review-export-tc {
+  width: 92px;
+  cursor: text;
+  font-variant-numeric: tabular-nums;
+}
+.cp-review-export-tc:focus,
+.cp-review-export-select:focus { outline: none; border-color: var(--accent); }
+.cp-review-export-tc.invalid { border-color: #ff8a8a; color: #ff8a8a; }
+.cp-review-export-drop {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.cp-review-export-drop input { cursor: pointer; margin: 0; }
+.cp-review-export-drop.disabled { color: var(--fg-5); cursor: not-allowed; }
+.cp-review-export-drop.disabled input { cursor: not-allowed; }
 
 /* Past-reviews history popover */
 .cp-review-history { position: relative; }
