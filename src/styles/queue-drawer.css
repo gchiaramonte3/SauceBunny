@@ -14,20 +14,25 @@
   width: 0;
   flex-shrink: 0;
   background: var(--bg-1);
-  border-left: 1px solid transparent;
+  /* Full transparent border (not just border-left) so opening only fades the
+     colour — mirrors the left sidebar exactly rather than snapping in 3 sides. */
+  border: 1px solid transparent;
+  border-radius: 16px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   position: relative; /* anchor the resize handle */
-  transition: border-color var(--dur-slow) var(--ease-in-out);
+  transition: var(--panel-slide);
 }
 .cp-queue-drawer.open {
   /* Floating rounded side panel (matches the sidebar + main viewport). width is
      set inline from React state (resize-drag persistence). */
-  border: 1px solid var(--line-1);
-  border-radius: 16px;
+  border-color: var(--line-1);
   margin: var(--s-2) var(--s-2) var(--s-2) 3px;
 }
+/* During a live resize-drag the width is driven frame-by-frame from the
+   pointer — animating it here would make the panel lag the cursor. */
+.cp-queue-drawer.resizing { transition: none; }
 /* Embedded (r44.B) — drawer rendered inside its own native window.
    The OS window IS the resize handle, so we fill the parent fully
    and lose the docked-drawer width track. */

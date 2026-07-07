@@ -574,7 +574,7 @@
 /* Collapsed state — mirrors the right drawer's hidden-but-mounted
    pattern: zero width, contents keep intrinsic size for a clean
    slide-back. Toggled from the toolbar's cp-sidebar-toggle. */
-.cp-sidebar { transition: width var(--dur-base) var(--ease-out), margin var(--dur-base) var(--ease-out); }
+.cp-sidebar { transition: var(--panel-slide); }
 /* Fully collapse the floating panel (drop its gutter margins + border) so no
    sliver is left when hidden. */
 .cp-sidebar.closed { width: 0; margin: 0; border-color: transparent; }

@@ -38,8 +38,12 @@
   justify-content: center;
   /* width + height set inline from useContainSize */
   flex-shrink: 0;
-  transition: width var(--dur-base) var(--ease-out),
-              height var(--dur-base) var(--ease-out);
+  /* Deliberately NO width/height transition. useContainSize re-writes this
+     box's inline size every frame (via ResizeObserver) as a side panel slides
+     or the window resizes. A transition here re-animates each of those
+     per-frame updates on its own timer, so the video lagged the layout and
+     rubber-banded ("wonky"). Tracking the container instantly is what keeps
+     the panel slide smooth. Aspect-ratio guide changes now snap. */
   box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
 }
 .cp-monitor-img {

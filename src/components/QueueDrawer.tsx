@@ -498,7 +498,7 @@ export function QueueDrawer({
 
   return (
     <aside
-      className={"cp-queue-drawer" + (open ? " open" : "") + (embedded ? " embedded" : "")}
+      className={"cp-queue-drawer" + (open ? " open" : "") + (embedded ? " embedded" : "") + (resizing ? " resizing" : "")}
       aria-hidden={!open}
       aria-label="Queue and tools"
       // Inline width only when docked + open. In embedded (floating) mode
