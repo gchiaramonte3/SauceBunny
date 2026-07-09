@@ -1,5 +1,5 @@
-import { Input, UrlSource, ALL_FORMATS, CanvasSink } from "mediabunny";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { Input, ALL_FORMATS, CanvasSink } from "mediabunny";
+import { mediabunnySource } from "./mediabunny-source";
 
 /**
  * Opens a local file via mediabunny just long enough to grab one frame
@@ -25,9 +25,8 @@ export async function extractFrameAsBlob(
   atSeconds: number,
   opts?: { mimeType?: string; quality?: number; maxWidth?: number },
 ): Promise<Blob | null> {
-  const url = convertFileSrc(localPath);
   // No AudioContext / no playback wiring — just demux + one canvas.
-  const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
+  const input = new Input({ source: mediabunnySource(localPath), formats: ALL_FORMATS });
   try {
     const vt = await input.getPrimaryVideoTrack();
     if (!vt) return null;
@@ -76,8 +75,7 @@ export async function extractFrameAsBlob(
  * Cheaper than opening a full Input+CanvasSink+AudioBufferSink.
  */
 export async function canMediabunnyDecode(localPath: string): Promise<boolean> {
-  const url = convertFileSrc(localPath);
-  const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
+  const input = new Input({ source: mediabunnySource(localPath), formats: ALL_FORMATS });
   try {
     const [vt, at] = await Promise.all([
       input.getPrimaryVideoTrack(),
@@ -118,8 +116,7 @@ export async function extractFilmstrip(
   opts?: { height?: number; quality?: number; signal?: AbortSignal },
 ): Promise<(string | null)[]> {
   if (timestamps.length === 0) return [];
-  const url = convertFileSrc(localPath);
-  const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
+  const input = new Input({ source: mediabunnySource(localPath), formats: ALL_FORMATS });
   const out: (string | null)[] = [];
   try {
     const vt = await input.getPrimaryVideoTrack();

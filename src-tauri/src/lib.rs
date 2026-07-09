@@ -156,6 +156,8 @@ pub fn run() {
             commands::stop_llm_server,
             commands::llm_server_status,
             commands::probe_local_file,
+            commands::get_file_size,
+            commands::read_file_range,
             commands::probe_media_info,
             commands::prepare_local_for_playback,
             commands::extract_local_frame,

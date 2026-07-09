@@ -1,12 +1,12 @@
 import {
   forwardRef, memo, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import {
-  Input, UrlSource, ALL_FORMATS,
+  Input, ALL_FORMATS,
   CanvasSink, AudioBufferSink,
   type InputVideoTrack, type InputAudioTrack,
 } from "mediabunny";
+import { mediabunnySource } from "../lib/mediabunny-source";
 import { IconFilm } from "./Icons";
 import type { PlayerHandle } from "./player-handle";
 
@@ -434,17 +434,17 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
 
     (async () => {
       try {
-        // Local file → asset:// via convertFileSrc. http(s) URL → pass
-        // straight to UrlSource (r60). UrlSource range-fetches over HTTP,
-        // so pointing it at the loopback media proxy
-        // (http://127.0.0.1:<port>/v1/<b64>) lets mediabunny demux a
-        // YouTube/web stream and decode it via WebCodecs to <canvas> —
-        // WITHOUT the <video> element, which WKWebView refuses to stream
+        // Local file → native fs byte-range reads (CustomSource); asset://
+        // range-fetch stalls on large local files. http(s) URL → UrlSource
+        // (r60), which range-fetches over HTTP: pointing it at the loopback
+        // media proxy (http://127.0.0.1:<port>/v1/<b64>) lets mediabunny
+        // demux a YouTube/web stream and decode it via WebCodecs to <canvas>
+        // — WITHOUT the <video> element, which WKWebView refuses to stream
         // cross-origin. The proxy serves CORS + Range/206, exactly what
-        // UrlSource's range-fetch needs. Seeking fetches only the bytes
-        // for that region = true streaming, no full download.
-        const url = /^https?:\/\//i.test(path) ? path : convertFileSrc(path);
-        const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
+        // UrlSource's range-fetch needs. Seeking fetches only the bytes for
+        // that region = true streaming, no full download. `mediabunnySource`
+        // picks the right one from the path.
+        const input = new Input({ source: mediabunnySource(path), formats: ALL_FORMATS });
         if (cancelled) { void input.dispose(); return; }
         inputRef.current = input;
 

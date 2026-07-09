@@ -436,6 +436,18 @@ export default function App() {
    */
   const [localPlayer, setLocalPlayer] = useState<"native" | "mediabunny">("native");
 
+  /**
+   * Per-import guard: set once we've fallen back from a failed native
+   * `<video>` load to MediaBunnyPlayer for THIS source. Native `<video>` over
+   * asset:// isn't guaranteed even for "friendly" codecs (e.g. very large
+   * files can log MEDIA_ERR_SRC_NOT_SUPPORTED and never load), so the first
+   * native error on a local original swaps to mediabunny (which reads the file
+   * via fetch(asset://) + ranged reads, sidestepping the <video> media loader).
+   * This flag makes that swap fire at most once per source so it can't loop.
+   * Cleared by resetForNewSource.
+   */
+  const [nativeFallbackTried, setNativeFallbackTried] = useState(false);
+
   // Effective fps and duration in frames.
   const fps = metadata?.fps && metadata.fps > 0 ? metadata.fps : fallbackFps;
   const durationFrames = useMemo(
@@ -1372,6 +1384,7 @@ export default function App() {
     setPlaybackPrepJobId(null);
     setPlaybackPrepProgress(0);
     setWebCodecsFallbackForImport(false);
+    setNativeFallbackTried(false);
     setLocalPlayer("native");
     // Tear down the web-playback machine (cancels any in-flight resolve/
     // download + watchdog, → inactive). r80.
@@ -2004,37 +2017,33 @@ export default function App() {
       //   • Audio: AAC, MP3 in MP4 container; Opus in WebM/Ogg ONLY
       // See: https://webkit.org/blog/16574/webkit-features-in-safari-18-4/
       //
-      // Conservative ruleset that holds on every supported Mac:
-      //   h264 video + (aac | mp3 | no audio)  →  NATIVE (zero prep)
-      //   everything else                       →  TRANSCODE
+      // Strategy (revised r107): MEDIABUNNY-FIRST for local files. The old
+      // r93 native-first short-circuit (h264/aac → play the original via a
+      // native <video src="asset://…">) proved UNRELIABLE — WKWebView's media
+      // element hangs on large local originals ("duration 0.0s", black canvas,
+      // never loads) and often doesn't even fire an `error` event, so it can't
+      // be caught and recovered. MediaBunnyPlayer instead reads the file via
+      // a CustomSource (native byte-range reads, r107) and decodes with
+      // WebCodecs — which on Safari 26 covers h264/hevc/av1/vp9 + aac/mp3/opus
+      // and works regardless of file size. So we probe mediabunny FIRST; only
+      // when WebCodecs genuinely can't decode do we ffmpeg-transcode to a
+      // small normalised cache copy and play THAT via native <video> (small
+      // copies load fine over asset://).
       //
-      // Audio-only files with mp3/aac → native. opus/flac/etc → transcode.
+      // What WKWebView/WebCodecs decodes (2026): H.264 (all Macs), HEVC (most),
+      // AV1 (M3+); AAC/MP3/Opus audio (Safari 26 has the WebCodecs AudioDecoder).
       const vc = (lf.vcodec ?? "").toLowerCase();
       const ac = (lf.acodec ?? "").toLowerCase();
       const videoNative = !lf.has_video || vc.startsWith("h264") || vc.startsWith("avc");
       const audioNative = !lf.has_audio || ac.startsWith("aac") || ac.startsWith("mp3");
       const ext = (lf.filename.split(".").pop() ?? "").toLowerCase();
-      // Container check — for video-bearing files we accept ISOBMFF
-      // family (mp4/m4v/mov). For audio-only we ALSO accept mp4/m4v/mov
-      // since audio-only mp4 is a thing (podcast feeds, ripped chapters)
-      // and Safari plays them natively as long as the audio codec is
-      // aac/mp3. Without this the mis-routing forces a needless transcode.
       const containerOk = lf.has_video
         ? ["mp4", "m4v", "mov"].includes(ext)
         : ["mp3", "m4a", "aac", "wav", "mp4", "m4v", "mov"].includes(ext);
 
-      if (videoNative && audioNative && containerOk) {
-        setLocalPlayer("native");
-        appendLog("ok", "import", "Codecs natively supported — playing original file (no transcode).");
-        return null;
-      }
-
-      // Mediabunny-first (r93): probe whether WebCodecs — plus our registered
-      // WASM audio decoders (libopus) — can decode this file IN-APP. If so,
-      // play the original directly via MediaBunnyPlayer with NO ffmpeg
-      // transcode. This is the common win for AV1+Opus YouTube downloads:
-      // WKWebView decodes AV1 video via WebCodecs, and libopus covers the
-      // Opus audio that WKWebView's (absent) AudioDecoder can't.
+      // Probe whether WebCodecs (+ our registered WASM decoders) can decode
+      // this file IN-APP. If so, play the original directly via MediaBunnyPlayer
+      // with NO ffmpeg transcode — the reliable path for any local file.
       const canMb = await canMediabunnyDecode(lf.path);
       if (sourceSeqRef.current !== seq) return null;
       if (canMb) {
@@ -4322,6 +4331,40 @@ export default function App() {
                   // user switching sources before prep finishes.
                   const seq = sourceSeqRef.current;
                   void runPlaybackPrep(localFilePath, !!metadata.vcodec, metadata.duration, seq);
+                  return;
+                }
+
+                // Native <video> failed on a local ORIGINAL (msg is NOT the
+                // WebCodecs marker above). The smart-selection routes friendly
+                // codecs (h264/aac/mp4) to the native path assuming asset://
+                // <video> will load them — but that isn't guaranteed (large
+                // files can log MEDIA_ERR_SRC_NOT_SUPPORTED + "duration 0.0s"
+                // and never load). Fall back to MediaBunnyPlayer, which reads
+                // the file via fetch(asset://) + ranged reads and bypasses the
+                // <video> media loader that just failed. If mediabunny ALSO
+                // can't decode it emits [WEBCODECS_UNSUPPORTED], which the
+                // branch above turns into an ffmpeg transcode — giving the full
+                // native → mediabunny → transcode chain.
+                //
+                // Guards keep this from looping or firing on the transcode
+                // path: it requires localPlayer==="native" (the transcode path
+                // leaves localPlayer at "mediabunny" and only flips
+                // webCodecsFallbackForImport), and both !nativeFallbackTried and
+                // !webCodecsFallbackForImport, so a second failure — whether of
+                // the mediabunny attempt or of a prepped transcode copy — falls
+                // through to the terminal error below instead of retrying.
+                if (
+                  sourceKind === "file"
+                  && localPlayer === "native"
+                  && localFilePath
+                  && !nativeFallbackTried
+                  && !playbackPrepBusy
+                  && !webCodecsFallbackForImport
+                ) {
+                  setNativeFallbackTried(true);
+                  setLocalPlayer("mediabunny");
+                  appendLog("warn", "media",
+                    "Native <video> couldn't load this file — decoding in-app via mediabunny.");
                   return;
                 }
 

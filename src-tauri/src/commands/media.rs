@@ -939,6 +939,55 @@ pub async fn probe_local_file(app: AppHandle, path: String) -> Result<LocalFileM
 }
 
 // ────────────────────────────────────────────────────────────────────────
+// LOCAL FILE BYTE READS (mediabunny CustomSource backend)
+//
+// mediabunny's `UrlSource` range-fetches a local file over the Tauri
+// `asset://` protocol, which stalls on large local files (an 800 MB mp4
+// won't load). The frontend instead backs mediabunny's `CustomSource` with
+// these two thin commands: `get_file_size` for the total length and
+// `read_file_range` for a lazy `[offset, offset+length)` slice.
+//
+// This is a hot read path during scrub/playback, so `read_file_range`
+// returns `tauri::ipc::Response` — RAW bytes → an ArrayBuffer on the JS
+// side. Do NOT change it to `Vec<u8>`: Tauri JSON-encodes that as a decimal
+// number array (~4× bloat) and would cripple performance here.
+// ────────────────────────────────────────────────────────────────────────
+
+/// Total byte length of a local file — mediabunny's `CustomSource.getSize`.
+#[tauri::command]
+pub fn get_file_size(path: String) -> Result<u64, crate::AppError> {
+    Ok(std::fs::metadata(&path)?.len())
+}
+
+/// Byte-reading core, split out so it's unit-testable without a Tauri
+/// `Response` (whose body is opaque). Reads at most `length` bytes starting
+/// at `offset`, clamped at EOF — a request past the tail returns a short (or
+/// empty) buffer rather than erroring.
+fn read_file_range_bytes(path: &str, offset: u64, length: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    f.seek(SeekFrom::Start(offset))?;
+    // `Take` caps the read at `length`; `read_to_end` stops early at EOF, so
+    // the two together clamp the range without any explicit size math.
+    let mut buf = Vec::new();
+    f.take(length).read_to_end(&mut buf)?;
+    Ok(buf)
+}
+
+/// Read a byte slice of a local file for mediabunny's `CustomSource.read`.
+/// Returns RAW bytes via `tauri::ipc::Response` (→ ArrayBuffer on the JS
+/// side). See the section header for why this must not return `Vec<u8>`.
+#[tauri::command]
+pub fn read_file_range(
+    path: String,
+    offset: u64,
+    length: u64,
+) -> Result<tauri::ipc::Response, crate::AppError> {
+    let bytes = read_file_range_bytes(&path, offset, length)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+// ────────────────────────────────────────────────────────────────────────
 // LOCAL FRAME EXTRACTION (4K snapshots)
 //
 // Mirrors `extract_frame` (YouTube path) but skips yt-dlp entirely — the
@@ -1834,6 +1883,38 @@ mod playback_color_tests {
         let (args, _) = playback_video_quality_args(Some(&p));
         let vf = &args[args.iter().position(|a| a == "-vf").unwrap() + 1];
         assert!(vf.starts_with("zscale=min=bt709:m=bt709:"));
+    }
+}
+
+#[cfg(test)]
+mod file_range_tests {
+    use super::read_file_range_bytes;
+
+    #[test]
+    fn reads_middle_range_and_clamps_at_eof() {
+        // 256-byte file where byte value == index, so slices are easy to assert.
+        let data: Vec<u8> = (0..=255u8).collect();
+        let path = std::env::temp_dir()
+            .join(format!("saucebunny-range-test-{}.bin", std::process::id()));
+        std::fs::write(&path, &data).unwrap();
+        let p = path.to_string_lossy().to_string();
+
+        // Middle slice [100, 110) → exactly 10 bytes, values 100..110.
+        assert_eq!(
+            read_file_range_bytes(&p, 100, 10).unwrap(),
+            (100..110).collect::<Vec<u8>>()
+        );
+        // Whole file.
+        assert_eq!(read_file_range_bytes(&p, 0, 256).unwrap(), data);
+        // Runs past EOF → clamped to the 6 bytes that exist (250..=255).
+        assert_eq!(
+            read_file_range_bytes(&p, 250, 20).unwrap(),
+            (250..=255).collect::<Vec<u8>>()
+        );
+        // Offset exactly at EOF → empty buffer, not an error.
+        assert!(read_file_range_bytes(&p, 256, 10).unwrap().is_empty());
+
+        let _ = std::fs::remove_file(&path);
     }
 }
 
