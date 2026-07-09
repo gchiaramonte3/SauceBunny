@@ -4,9 +4,10 @@ import {
 import {
   Input, ALL_FORMATS,
   CanvasSink, AudioBufferSink,
-  type InputVideoTrack, type InputAudioTrack,
+  type InputVideoTrack, type InputAudioTrack, type WrappedCanvas,
 } from "mediabunny";
 import { mediabunnySource } from "../lib/mediabunny-source";
+import { createScrubPump, type ScrubPump } from "../lib/scrub-pump";
 import { IconFilm } from "./Icons";
 import type { PlayerHandle } from "./player-handle";
 
@@ -88,6 +89,14 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
   const scheduledRef = useRef<AudioBufferSourceNode[]>([]);
   /** Most recent drawn frame — kept so React renders stay idempotent. */
   const lastDrawnRef = useRef<HTMLCanvasElement | OffscreenCanvas | null>(null);
+  /**
+   * Latest-wins scrub decoder (paused-seek path). A fast drag calls seekTo
+   * many times/sec; rather than spawn one getCanvas per call (decodes pile up,
+   * the shown frame lags the cursor), this pump keeps only the NEWEST target
+   * and decodes one at a time, dropping intermediate targets superseded while
+   * a decode was in flight. Created lazily below.
+   */
+  const scrubPumpRef = useRef<ScrubPump | null>(null);
 
   // Driving a setState for the visible play/pause UI on audio-only mode.
   const [isPlaying, setIsPlaying] = useState(false);
@@ -117,9 +126,30 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     lastDrawnRef.current = src;
   };
 
+  // Latest-wins scrub pump, created once. Its drain closes over refs only
+  // (genRef/videoSinkRef and the ref-reading drawCanvas), so a first-render
+  // closure stays correct across re-renders. The generation gate makes a
+  // play()/seek-while-playing/teardown supersede an in-flight scrub frame:
+  // the frame is still decoded but not painted, so it can't fight the
+  // playback loop — yet the pump keeps draining any newer scrub target.
+  if (!scrubPumpRef.current) {
+    scrubPumpRef.current = createScrubPump(async (target: number) => {
+      const gen = genRef.current;
+      const sink = videoSinkRef.current;
+      if (!sink) return;
+      let wrapped: WrappedCanvas | null = null;
+      try { wrapped = await sink.getCanvas(target); }
+      catch { return; }
+      if (gen === genRef.current && wrapped) drawCanvas(wrapped.canvas);
+    });
+  }
+
   /** Cancel all in-flight work without changing playing state. */
   const cancelInFlight = () => {
     genRef.current++;
+    // Drop any pending scrub target too; the in-flight decode (if any) is
+    // gated by the gen bump above and won't paint.
+    scrubPumpRef.current?.cancel();
     for (const node of scheduledRef.current) {
       try { node.stop(); } catch { /* already stopped */ }
       try { node.disconnect(); } catch { /* ignore */ }
@@ -309,15 +339,14 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
         runAudioLoop(clamped, gen);
         runVideoLoop(clamped, gen);
       } else {
-        // Paused seek — just show the frame at this timestamp.
-        const sink = videoSinkRef.current;
-        if (sink) {
-          const gen = genRef.current;
-          sink.getCanvas(clamped).then((wrapped) => {
-            if (gen !== genRef.current) return;
-            if (wrapped) drawCanvas(wrapped.canvas);
-          }).catch(() => { /* ignore */ });
-        }
+        // Paused seek / scrub. Coalesce into the single-flight pump: record
+        // the latest target and let it chase the cursor, dropping intermediate
+        // targets a fast drag produced while a decode was in flight, instead
+        // of spawning (and later discarding) one decode per seekTo. getCanvas
+        // is already frame-accurate — it returns the frame whose PTS ≤ target
+        // — so the painted frame matches the playhead readout above. cancelInFlight
+        // (called just above) already dropped any older pending target.
+        scrubPumpRef.current?.request(clamped);
       }
     },
     getCurrentTime: () => currentMediaTime(),
@@ -486,7 +515,14 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
             onError?.(`[WEBCODECS_UNSUPPORTED] ProRes is 10-bit — WKWebView can't paint it to a canvas`);
             return;
           }
-          videoSinkRef.current = new CanvasSink(vt, { poolSize: 4 });
+          videoSinkRef.current = new CanvasSink(vt, {
+            poolSize: 4,
+            // Scrub latency: `optimizeForLatency` tells WebCodecs to emit each
+            // decoded frame ASAP instead of buffering several first, so a
+            // getCanvas() lands sooner; `prefer-hardware` keeps decode on the
+            // GPU. Both fall back gracefully if unavailable.
+            decoderOptions: { hardwareAcceleration: "prefer-hardware", optimizeForLatency: true },
+          });
           // Paint the first frame so the canvas isn't black before play. If a
           // sample decodes but can't be wrapped for the canvas, getCanvas throws
           // → same unsupported-render fallback rather than a silent black frame.

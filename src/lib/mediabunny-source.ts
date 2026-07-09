@@ -31,6 +31,10 @@ export function localFileSource(path: string): CustomSource {
         }),
       ),
     prefetchProfile: "fileSystem",
+    // Keep more of the file resident (default 8 MiB) so scrubbing back and
+    // forth re-reads recently-touched GOP byte ranges from memory instead of
+    // re-invoking read_file_range.
+    maxCacheSize: 64 * 1024 * 1024,
   });
 }
 
