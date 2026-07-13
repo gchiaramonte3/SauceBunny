@@ -73,13 +73,37 @@ export function foldPeaks(
 }
 
 /**
+ * Bounded-Map insert with insertion-order LRU eviction. A `Map` iterates in
+ * insertion order, so delete+set makes `key` the newest entry (refreshing its
+ * recency when it already exists) and the first key is always the oldest.
+ * Route cache HITS through this too (re-setting the value just read) so the
+ * entry for the currently-displayed source is always the newest and never the
+ * eviction victim. Shared by the peaks cache below and the filmstrip cache in
+ * `Timeline.tsx`; both hold plain data (Float32Arrays / data-URL strings), so
+ * evicting is just dropping the reference — nothing to close or revoke.
+ */
+export function lruSet<K, V>(cache: Map<K, V>, key: K, value: V, max: number): void {
+  cache.delete(key);
+  cache.set(key, value);
+  if (cache.size <= max) return;
+  for (const oldest of cache.keys()) {
+    cache.delete(oldest); // deleting the current key mid-iteration is spec-safe
+    if (cache.size <= max) return;
+  }
+}
+
+/**
  * In-memory peaks cache, keyed by source path (bucket count is fixed, so the
  * path alone identifies the result). Module-level — survives Timeline
  * remounts, dies with the window, mirroring the filmstrip's in-memory-only
  * caching (the filmstrip never persists to disk, so neither do we).
  * `null` = probed and has no decodable audio track (cached so reopening an
  * audio-less video doesn't re-probe); decode ERRORS are not cached.
+ * LRU-bounded to `PEAKS_CACHE_MAX` sources so a session that hops across many
+ * files can't grow it without limit (~12 KB of Float32 per entry → ≤ ~200 KB;
+ * cheap `null` entries share the same cap rather than tracking two counts).
  */
+const PEAKS_CACHE_MAX = 16;
 const peaksCache = new Map<string, WaveformPeaks | null>();
 
 /**
@@ -94,19 +118,22 @@ export async function extractWaveformPeaks(
   opts?: { buckets?: number; signal?: AbortSignal },
 ): Promise<WaveformPeaks | null> {
   const cached = peaksCache.get(localPath);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    lruSet(peaksCache, localPath, cached, PEAKS_CACHE_MAX); // hit → newest
+    return cached;
+  }
 
   const url = convertFileSrc(localPath);
   const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
   try {
     const at = await input.getPrimaryAudioTrack();
     if (!at || !(await at.canDecode())) {
-      peaksCache.set(localPath, null);
+      lruSet(peaksCache, localPath, null, PEAKS_CACHE_MAX);
       return null;
     }
     const durationSec = await input.computeDuration();
     if (!(durationSec > 0)) {
-      peaksCache.set(localPath, null);
+      lruSet(peaksCache, localPath, null, PEAKS_CACHE_MAX);
       return null;
     }
     const peaks = createPeakBuckets(opts?.buckets ?? WAVEFORM_BUCKETS);
@@ -118,7 +145,7 @@ export async function extractWaveformPeaks(
       }
     }
     if (opts?.signal?.aborted) return null;
-    peaksCache.set(localPath, peaks);
+    lruSet(peaksCache, localPath, peaks, PEAKS_CACHE_MAX);
     return peaks;
   } catch {
     return null; // decode error → no waveform; a later retry may still succeed

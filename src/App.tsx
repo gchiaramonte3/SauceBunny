@@ -72,7 +72,7 @@ import {
   durationToTc, framesToTc, secondsToTc,
   tcToFrames, tcToSeconds,
 } from "./lib/timecode";
-import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, prettyHost } from "./lib/validation";
+import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, looksLikeExtractorRot, prettyHost } from "./lib/validation";
 import { sanitizeFilename, stripExt, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
 import { extractFrameAsBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
@@ -80,6 +80,11 @@ import { exportLocalClipViaMediabunny } from "./lib/mediabunny-export";
 import { extractAudioAsWav16k } from "./lib/mediabunny-audio";
 
 const DEFAULT_FPS_FALLBACK: Record<string, number> = { "24": 24, "25": 25, "30": 30 };
+
+/** Mirrors the Rust `YtdlpStatus` struct returned by `update_ytdlp` (same
+ *  local-mirror convention as YouTubeSettings.tsx — the struct predates the
+ *  ts-rs bindings and isn't exported through them). */
+type YtdlpStatus = { version: string; updated: boolean };
 
 function nowHms(): string {
   const d = new Date();
@@ -363,6 +368,53 @@ export default function App() {
     setYtAuthOpen(false);
     if (!defaults.ytAuthOnboarded) setDefaults({ ...defaults, ytAuthOnboarded: true });
   }, [defaults, setDefaults]);
+
+  // ====== yt-dlp extractor-rot recovery ======
+  // yt-dlp's site extractors rot — YouTube changes something every few weeks
+  // and yt-dlp ships the fix days later. A user on a stale copy just sees
+  // "Couldn't resolve source" and blames the app, even though Settings → Web
+  // sources has a working Update button. So when the surfaced error matches a
+  // KNOWN rot signature (lib/validation.ts looksLikeExtractorRot — the
+  // sign-in/bot-check flow and genuinely-unavailable videos are excluded and
+  // keep their own surfaces), the canvas error overlay offers a one-click
+  // "Update yt-dlp & retry":
+  //   offer → busy (update_ytdlp runs; version → pipeline log) → automatic
+  //   re-fetch of the SAME URL through handleFetch (fresh seq, full reset).
+  // ONE cycle per source URL: a rot-match after that URL's update+retry has
+  // already run renders the plain error plus an "engine is current" hint
+  // instead — never a second offer (no update→fail→offer loops).
+  type RotRecovery =
+    | { phase: "offer"; url: string }
+    | { phase: "busy"; url: string }
+    | { phase: "spent"; version: string };
+  const [rotRecovery, setRotRecovery] = useState<RotRecovery | null>(null);
+  /** URL → yt-dlp version its one update+retry cycle installed (null = the
+   *  update itself failed; those get the plain error, no "current" claim). */
+  const rotSpentUrlsRef = useRef(new Map<string, string | null>());
+
+  /** Classify a just-surfaced error for the current source: set the rot
+   *  offer (or the post-cycle hint) when it matches, clear a stale non-busy
+   *  flag when it doesn't — each surfaced error is authoritative for what
+   *  the overlay shows. Stable — safe in the long-lived event listeners. */
+  const classifyExtractorRot = useCallback((msg: string) => {
+    const u = activeSourceUrlRef.current;
+    if (!u || !looksLikeExtractorRot(msg)) {
+      // Not rot (or no committed source): drop any leftover flag so an
+      // unrelated later error can't render a misleading update button. An
+      // in-flight update keeps its busy state — it resolves itself.
+      setRotRecovery((prev) => (prev?.phase === "busy" ? prev : null));
+      return;
+    }
+    const spent = rotSpentUrlsRef.current;
+    if (spent.has(u)) {
+      const version = spent.get(u) ?? null;
+      setRotRecovery(version ? { phase: "spent", version } : null);
+    } else {
+      // Never downgrade busy → offer: a straggling error event from the
+      // same dead source must not un-disable the button mid-update.
+      setRotRecovery((prev) => (prev?.phase === "busy" ? prev : { phase: "offer", url: u }));
+    }
+  }, []);
 
   // ====== URL bar ======
   const [url, setUrl] = useState("");
@@ -929,6 +981,31 @@ export default function App() {
   // cache). Gates the audio pre-cache, caption auto-fetch, caption-sync offset.
   const webStreaming = webPlayback.state.kind === "streaming";
 
+  // A web source is DEAD once the playback machine reaches its terminal
+  // `failed` state (the stream resolve AND the download fallback both lost —
+  // nothing is playing, nothing will). When that terminal failure carries a
+  // stale-extractor signature, escalate from today's two transient toasts
+  // over a frozen poster to the canvas error overlay, where the one-click
+  // "Update yt-dlp & retry" renders. Non-rot terminal failures keep the
+  // existing quiet behavior (notification bell + pipeline log). Re-runs on
+  // errorDetail changes so a late-landing metadata error can't strand or
+  // clobber the verdict (classifyExtractorRot re-resolves it).
+  useEffect(() => {
+    const s = webPlayback.state;
+    if (s.kind !== "failed" || s.seq !== sourceSeqRef.current) return;
+    const rotMsg = looksLikeExtractorRot(s.message)
+      ? s.message
+      : errorDetail != null && looksLikeExtractorRot(errorDetail)
+        ? errorDetail
+        : null;
+    if (!rotMsg) return;
+    classifyExtractorRot(rotMsg);
+    // Keep the (usually richer) metadata error if one already surfaced;
+    // otherwise show the download failure that killed playback.
+    setErrorDetail((prev) => prev ?? s.message);
+    setStatus("error");
+  }, [webPlayback.state, errorDetail, classifyExtractorRot]);
+
   // ====== Backend build check ======
   // Runs once on mount. If the running Rust binary's BACKEND_BUILD_ID
   // doesn't match what the frontend expects, the user almost certainly
@@ -1091,6 +1168,10 @@ export default function App() {
         } else {
           setStatus("error");
           setErrorDetail(e.payload.error ?? "Export failed");
+          // A yt-dlp export can be the first place stale-extractor breakage
+          // surfaces (fetch worked off a cached/streaming path) — offer the
+          // one-click update+retry on the overlay this just raised.
+          classifyExtractorRot(e.payload.error ?? "");
           notify("Export failed", e.payload.error ?? "Unknown error");
           pushNotification("error", "Export failed", e.payload.error ?? "Unknown error");
         }
@@ -1269,9 +1350,10 @@ export default function App() {
       mounted = false;
       unlistens.forEach((u) => u());
     };
-    // appendLog / refreshWhisperModels / notify are all stable (empty deps),
-    // so this effect runs exactly once for the app's lifetime.
-  }, [appendLog, refreshWhisperModels, notify, pushNotification]);
+    // appendLog / refreshWhisperModels / notify / classifyExtractorRot are
+    // all stable (empty deps), so this effect runs exactly once for the
+    // app's lifetime.
+  }, [appendLog, refreshWhisperModels, notify, pushNotification, classifyExtractorRot]);
 
   // ====== Player callbacks ======
   // Sync our playhead from the YouTube player's current time while it's playing.
@@ -1357,6 +1439,9 @@ export default function App() {
     setTranscriptJobId(null);
     setMetadata(null);
     setErrorDetail(null);
+    // New source = a fresh rot verdict (the spent-URL map persists — one
+    // update+retry cycle per URL, not per attempt).
+    setRotRecovery(null);
     setLogs([]);
     setResultPath(null);
     setProgress(0);
@@ -1570,13 +1655,17 @@ export default function App() {
       // Don't blow the canvas away — the direct-stream path is independent
       // of metadata. Just record the error so the sidebar/notification surfaces it.
       setErrorDetail(msg);
+      // Stale-extractor signature? Arm the one-click "Update yt-dlp & retry"
+      // (rendered by the error overlay once playback also proves dead —
+      // see the webPlayback `failed` escalation effect).
+      classifyExtractorRot(msg);
       pushNotification("error", "Metadata fetch failed",
         "The player is still active, but export quality options may be limited until metadata loads.");
       maybePromptYtAuth(msg, seq);
     } finally {
       if (sourceSeqRef.current === seq) setMetadataLoading(false);
     }
-  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, loadWebPlayback, recordRecentSource]);
+  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, classifyExtractorRot, loadWebPlayback, recordRecentSource]);
 
   // Re-run the current fetch after the user picks a browser in the YouTube
   // auth modal. By the time this fires, `defaults.ytCookiesBrowser` (and thus
@@ -1586,6 +1675,44 @@ export default function App() {
     void handleFetch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ytAuthRetry]);
+
+  /**
+   * One-click recovery for a rot-flagged failure (the error-overlay CTA):
+   * run `update_ytdlp` (the exact command behind Settings → Web sources →
+   * Update yt-dlp — the backend resolves the freshly installed copy on the
+   * next spawn), log the resulting version, then re-run the SAME fetch
+   * through handleFetch — the true retry seam (fresh seq, full source
+   * reset). The URL's single cycle is spent whichever way the update ends,
+   * so the offer can never loop; and a different source started while the
+   * update ran wins (seq guard skips the retry rather than clobber it).
+   */
+  const handleUpdateYtdlpAndRetry = useCallback(async () => {
+    if (rotRecovery?.phase !== "offer") return;
+    const u = rotRecovery.url;
+    const seqAtClick = sourceSeqRef.current;
+    setRotRecovery({ phase: "busy", url: u });
+    appendLog("info", "yt-dlp", "Extractor failure looks like a stale yt-dlp — downloading the latest release…");
+    let version: string;
+    try {
+      version = (await invoke<YtdlpStatus>("update_ytdlp")).version;
+    } catch (err) {
+      // The update itself failed (offline, GitHub unreachable…). Spend the
+      // cycle with no version — plain error display, no "engine is current"
+      // claim we can't back up — and surface why.
+      rotSpentUrlsRef.current.set(u, null);
+      const msg = formatError(err);
+      appendLog("err", "yt-dlp", `yt-dlp update failed: ${msg}`);
+      pushNotification("error", "yt-dlp update failed", msg);
+      setRotRecovery(null);
+      return;
+    }
+    rotSpentUrlsRef.current.set(u, version);
+    appendLog("ok", "yt-dlp", `yt-dlp updated to ${version} — retrying ${hostnameOf(u)}…`);
+    // The user may have started a different source while the update ran —
+    // never yank it away with an automatic retry of the old URL.
+    if (sourceSeqRef.current !== seqAtClick) return;
+    void handleFetch(u);
+  }, [rotRecovery, appendLog, pushNotification, handleFetch]);
 
   /**
    * Shared local-clip export core (single Export button + queued items):
@@ -1785,10 +1912,13 @@ export default function App() {
       // union, not a string.
       const msg = formatError(err);
       setErrorDetail(msg);
+      // Same rot check as the clip-done listener — create_clip can also
+      // reject synchronously with yt-dlp's extractor error.
+      classifyExtractorRot(msg);
       appendLog("err", "ffmpeg", msg);
       setStatus("error");
     }
-  }, [metadata, sourceKind, localFilePath, exportOpts, fps, inFrames, outFrames, runLocalClipExport, appendLog, pushNotification]);
+  }, [metadata, sourceKind, localFilePath, exportOpts, fps, inFrames, outFrames, runLocalClipExport, appendLog, pushNotification, classifyExtractorRot]);
 
   const handleReveal = useCallback(() => {
     if (!resultPath) return;
@@ -4239,6 +4369,17 @@ export default function App() {
               status={status}
               metadata={metadata}
               errorDetail={errorDetail}
+              /* Stale-yt-dlp recovery: "offer"/"busy" renders the one-click
+                 "Update yt-dlp & retry" CTA on the error overlay; "spent"
+                 (this URL already got its one cycle) renders the
+                 engine-is-current hint instead. */
+              extractorRot={
+                rotRecovery == null
+                  ? null
+                  : rotRecovery.phase === "spent"
+                    ? rotRecovery
+                    : { phase: rotRecovery.phase, onUpdateAndRetry: handleUpdateYtdlpAndRetry }
+              }
               /* Empty-state "Resume last session" — one-click reopen of the
                  most recent source via the same fetch/import handlers. */
               resumeTitle={recentSources.length > 0 ? recentSources[0].title : null}

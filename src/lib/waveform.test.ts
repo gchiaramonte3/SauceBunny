@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { createPeakBuckets, foldPeaks, WAVEFORM_BUCKETS } from "./waveform";
+import {
+  createPeakBuckets,
+  foldPeaks,
+  lruSet,
+  WAVEFORM_BUCKETS,
+  type WaveformPeaks,
+} from "./waveform";
 
 describe("createPeakBuckets", () => {
   it("returns zeroed, length-matched min/max arrays", () => {
@@ -13,6 +19,52 @@ describe("createPeakBuckets", () => {
   it("default bucket count is in the ~1000-2000 display range", () => {
     expect(WAVEFORM_BUCKETS).toBeGreaterThanOrEqual(1000);
     expect(WAVEFORM_BUCKETS).toBeLessThanOrEqual(2000);
+  });
+});
+
+describe("lruSet", () => {
+  it("evicts the oldest entry once the cap is exceeded", () => {
+    const m = new Map<string, number>();
+    lruSet(m, "a", 1, 2);
+    lruSet(m, "b", 2, 2);
+    lruSet(m, "c", 3, 2);
+    expect(m.has("a")).toBe(false);
+    expect([...m.keys()]).toEqual(["b", "c"]);
+  });
+
+  it("re-setting an existing key refreshes recency instead of growing", () => {
+    // The cache-hit pattern: re-set the value just read so the displayed
+    // source is always the newest entry, hence never the eviction victim.
+    const m = new Map<string, number>();
+    lruSet(m, "a", 1, 3);
+    lruSet(m, "b", 2, 3);
+    lruSet(m, "c", 3, 3);
+    lruSet(m, "b", 2, 3); // hit → newest; size stays 3
+    expect(m.size).toBe(3);
+    lruSet(m, "d", 4, 3);
+    expect(m.has("a")).toBe(false); // oldest UNTOUCHED entry went, not "b"
+    expect([...m.keys()]).toEqual(["c", "b", "d"]);
+  });
+
+  it("never grows past the cap and keeps the newest entries", () => {
+    const m = new Map<string, number>();
+    for (let i = 0; i < 10; i++) lruSet(m, `k${i}`, i, 4);
+    expect(m.size).toBe(4);
+    expect([...m.keys()]).toEqual(["k6", "k7", "k8", "k9"]);
+  });
+
+  it("caches null distinctly from absent, and null entries share the cap", () => {
+    // Mirrors the peaks cache: `null` = probed, no audio. It must read back
+    // as a hit (so audio-less files aren't re-probed) yet still count toward
+    // — and age out of — the same cap as real entries.
+    const m = new Map<string, WaveformPeaks | null>();
+    lruSet(m, "noaudio.mp4", null, 2);
+    expect(m.get("noaudio.mp4")).toBeNull();
+    expect(m.has("noaudio.mp4")).toBe(true);
+    lruSet(m, "a.mov", createPeakBuckets(4), 2);
+    lruSet(m, "b.mov", createPeakBuckets(4), 2);
+    expect(m.has("noaudio.mp4")).toBe(false);
+    expect(m.size).toBe(2);
   });
 });
 

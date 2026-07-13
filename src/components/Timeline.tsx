@@ -3,12 +3,17 @@ import type { AppStatus } from "../types";
 import { secondsToHms } from "../lib/timecode";
 import { filmstripCount, filmstripTimestamps } from "../lib/filmstrip";
 import { extractFilmstrip } from "../lib/mediabunny-helpers";
-import { extractWaveformPeaks, type WaveformPeaks } from "../lib/waveform";
+import { extractWaveformPeaks, lruSet, type WaveformPeaks } from "../lib/waveform";
 import { TimelineWaveform } from "./TimelineWaveform";
 
 /** Scrub-track height (px) when a filmstrip is shown — matches
  *  `.cp-track.has-filmstrip` in transport.css; also sizes the decoded thumbs. */
 const FILMSTRIP_H = 44;
+
+/** Max cached filmstrips (source+count keys). Strips are the heavy cache —
+ *  up to 24 JPEG data URLs at 2× DPR each — so the cap is deliberately small;
+ *  reads refresh recency, so the displayed source is never the one evicted. */
+const FILMSTRIP_CACHE_MAX = 4;
 
 /**
  * Single queued clip's range — rendered as a muted band on the track so
@@ -156,7 +161,8 @@ export function Timeline({
 
   // Build the thumbnail filmstrip from the local file (mediabunny, one pass).
   // Depends on source/duration/width — NOT the playhead — so scrubbing never
-  // re-decodes. Cached per source+count; aborted on source/size change.
+  // re-decodes. Cached per source+count (LRU-bounded); aborted on source/size
+  // change.
   useEffect(() => {
     const path = filmstripPath ?? null;
     const durSec = fps > 0 ? durationFrames / fps : 0;
@@ -165,7 +171,11 @@ export function Timeline({
 
     const key = `${path}|${count}`;
     const cached = filmCacheRef.current.get(key);
-    if (cached) { setFilmstrip(cached); return; }
+    if (cached) {
+      lruSet(filmCacheRef.current, key, cached, FILMSTRIP_CACHE_MAX); // hit → newest
+      setFilmstrip(cached);
+      return;
+    }
 
     const ctrl = new AbortController();
     let alive = true;
@@ -177,7 +187,7 @@ export function Timeline({
         signal: ctrl.signal,
       });
       if (!alive || ctrl.signal.aborted) return;
-      if (strip.length > 0) filmCacheRef.current.set(key, strip);
+      if (strip.length > 0) lruSet(filmCacheRef.current, key, strip, FILMSTRIP_CACHE_MAX);
       setFilmstrip(strip);
     })();
     return () => { alive = false; ctrl.abort(); };

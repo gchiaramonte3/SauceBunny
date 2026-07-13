@@ -18,6 +18,18 @@ type Props = {
   status: AppStatus;
   metadata: Metadata | null;
   errorDetail: string | null;
+  /**
+   * Stale-yt-dlp recovery for the error overlay. When the surfaced error
+   * matches a known extractor-rot signature (lib/validation.ts
+   * looksLikeExtractorRot), App passes "offer" → the overlay renders a
+   * primary "Update yt-dlp & retry" action ("busy" while the update runs).
+   * "spent" — that URL already used its one update+retry cycle — renders
+   * an engine-is-current hint under the plain error instead.
+   */
+  extractorRot?:
+    | { phase: "offer" | "busy"; onUpdateAndRetry: () => void }
+    | { phase: "spent"; version: string }
+    | null;
   /** Most-recent recent-source title — renders a one-click "Resume last
    *  session" button in the empty state. Null hides the affordance. */
   resumeTitle?: string | null;
@@ -157,7 +169,7 @@ function useContainSize(aspect: number) {
 export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, ref) {
   const {
     status, metadata,
-    errorDetail,
+    errorDetail, extractorRot,
     resumeTitle, onResume, onboarding,
     aspect,
     sourceKind, localFilePath, webStreamUrl, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
@@ -288,6 +300,32 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             <div className="icon"><IconAlert size={20} /></div>
             <div className="label">Couldn't resolve source</div>
             <div className="detail">{errorDetail ?? "Unknown error"}</div>
+            {/* Stale-yt-dlp recovery. Sites change their players constantly;
+                yt-dlp ships fixes within days — so when the error matches a
+                known extractor-breakage signature, the fix is one click, not
+                a bug report. Same command as Settings → Web sources. */}
+            {extractorRot && extractorRot.phase !== "spent" && (
+              <>
+                <div className="cp-error-hint">
+                  This usually means the app's video engine (yt-dlp) is out of
+                  date for this site — updating takes a few seconds.
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary cp-error-update"
+                  onClick={extractorRot.onUpdateAndRetry}
+                  disabled={extractorRot.phase === "busy"}
+                >
+                  {extractorRot.phase === "busy" ? "Updating yt-dlp…" : "Update yt-dlp & retry"}
+                </button>
+              </>
+            )}
+            {extractorRot?.phase === "spent" && (
+              <div className="cp-error-hint">
+                yt-dlp is up to date ({extractorRot.version}) — the site may
+                have changed; check for a Sauce Bunny update.
+              </div>
+            )}
           </div>
           {toastEl}
         </div>

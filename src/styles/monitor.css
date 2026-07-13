@@ -1126,6 +1126,20 @@
   max-width: 520px;
   word-break: break-word;
 }
+/* Stale-yt-dlp recovery: the plain-language hint + the one-click
+   "Update yt-dlp & retry" CTA (shares .btn.btn-primary with the Settings →
+   Web sources update button — same action, same look). */
+.cp-error-overlay .cp-error-hint {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-2);
+  text-align: center;
+  max-width: 420px;
+}
+.cp-error-overlay .cp-error-update {
+  margin-top: 2px;
+}
 
 /* ============================================================
    ANNOTATION OVERLAY (review drawing)
