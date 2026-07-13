@@ -6,6 +6,7 @@ import type { DictateDoneEvent, DictateLevelEvent, DictatePartialEvent } from ".
 import { DictationWave } from "./DictationWave";
 import { EmojiPicker } from "./EmojiPicker";
 import { IconDownload, IconRange } from "./Icons";
+import { usePlayheadSeconds } from "../lib/playhead-store";
 import { secondsToHms, secondsToTc } from "../lib/timecode";
 import { loadJson, saveJson } from "../lib/storage";
 import { formatError } from "../lib/error-format";
@@ -95,7 +96,7 @@ function Avatar({ name, size = 30, color }: { name: string; size?: number; color
 export function ReviewPanel({
   sourceKey,
   sourceTitle,
-  currentSec,
+  playheadActive,
   fps,
   onSeek,
   drawActive = false,
@@ -114,8 +115,11 @@ export function ReviewPanel({
   sourceKey: string | null;
   /** Human label for the source (for the version row). */
   sourceTitle?: string | null;
-  /** Live playhead in seconds (null when nothing is loaded). */
-  currentSec: number | null;
+  /** True while the panel should track the live playhead (a source is loaded
+   *  AND the tab is visible). The panel subscribes to the playhead store
+   *  itself; while false its playhead reads null — freezing the composer
+   *  timestamp and blocking marks that would land at a lying 0:00. */
+  playheadActive: boolean;
   /** Source frame rate — for SMPTE timecodes in CSV/EDL export. */
   fps: number;
   /** Click-to-seek — receives seconds. */
@@ -150,6 +154,11 @@ export function ReviewPanel({
   sessionDoc?: ReviewDoc | null;
   onSessionOp?: (op: ReviewOp) => void;
 }) {
+  // Live playhead (seconds) from the store — re-renders per tick while the
+  // Review tab is up, exactly like the old 60Hz currentSec prop, so the
+  // composer timestamp and the range-draft's playhead-following end keep
+  // their cadence. Null while inactive (tab hidden / no source).
+  const currentSec = usePlayheadSeconds(fps, playheadActive);
   const [doc, setDoc] = useState<ReviewDoc | null>(null);
   const [sort, setSort] = useState<CommentSort>("time");
   const [text, setText] = useState("");

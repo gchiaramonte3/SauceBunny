@@ -47,8 +47,10 @@ type Props = {
   transcriptPath: string | null;
   /** Where the transcript came from — drives the origin badge. */
   transcriptOrigin: "captions" | "whisper" | "unknown";
-  /** Playhead seconds for the karaoke highlight, or null. */
-  transcriptPlayhead: number | null;
+  /** True when a playable source is loaded — combined with the active tab to
+   *  tell the transcript/review children to track the live playhead (they
+   *  subscribe to the playhead store themselves; no per-frame prop). */
+  playheadAvailable: boolean;
   /** Source frame rate, so transcript timestamps render as SMPTE. */
   transcriptFps?: number;
   /** Click-to-seek callback — receives seconds. */
@@ -179,7 +181,7 @@ function loadDrawerWidth(): number {
 export function QueueDrawer({
   open, onClose, queue, fps, running, hasFolder,
   onRemove, onClearAll, onExportAll, onStop,
-  transcriptPath, transcriptOrigin, transcriptPlayhead, transcriptFps,
+  transcriptPath, transcriptOrigin, playheadAvailable, transcriptFps,
   onTranscriptSeek, transcriptArrivedTick,
   onClearTranscript, onLoadFromHistory,
   onRegenerateTranscript, regenerateBusy, canRegenerate,
@@ -752,9 +754,9 @@ export function QueueDrawer({
           /* Same-path overwrites (Regenerate / Fix-timing) re-read via the tick. */
           reloadToken={transcriptArrivedTick}
           /* Playhead only while ACTIVE — a hidden transcript's karaoke
-             highlight + autoscroll stay frozen (null), then snap to the
-             current position on the next tick after re-show. */
-          playheadSeconds={activeTab === "transcript" ? transcriptPlayhead : null}
+             highlight + autoscroll stay frozen, then snap to the current
+             position when the tab re-shows. */
+          playheadActive={playheadAvailable && activeTab === "transcript"}
           fps={transcriptFps}
           onSeek={onTranscriptSeek}
           origin={transcriptOrigin}
@@ -789,7 +791,7 @@ export function QueueDrawer({
           sourceKey={reviewSourceKey ?? null}
           sourceTitle={reviewSourceTitle}
           /* Playhead only while ACTIVE — see the transcript note above. */
-          currentSec={activeTab === "review" ? transcriptPlayhead : null}
+          playheadActive={playheadAvailable && activeTab === "review"}
           fps={fps}
           onSeek={onTranscriptSeek}
           drawActive={!!reviewDrawActive}

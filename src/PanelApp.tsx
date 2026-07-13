@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
 import { QueueDrawer } from "./components/QueueDrawer";
+import { setPlayheadFrames } from "./lib/playhead-store";
 import { PANEL_SNAPSHOT_KEY } from "./hooks/use-panel-bus";
 import type { QueuedClip } from "./types";
 import type { TranscriptHistoryEntry } from "./lib/transcript-history";
@@ -119,6 +120,16 @@ export default function PanelApp() {
     return () => { window.removeEventListener("storage", onStorage); window.clearInterval(poll); };
   }, []);
 
+  // This window is its own JS context with its own playhead-store instance —
+  // the main window's live clock reaches us only as the snapshot's
+  // transcriptPlayhead (seconds, main-throttled). Mirror it into the store so
+  // TranscriptViewer's karaoke reads the same subscription API in both
+  // windows. Math.round undoes the frames→seconds→frames FP round-trip.
+  useEffect(() => {
+    const r = Math.max(1, Math.round(state.fps));
+    setPlayheadFrames(state.transcriptPlayhead != null ? Math.round(state.transcriptPlayhead * r) : 0);
+  }, [state.transcriptPlayhead, state.fps]);
+
   // Secondary (fast-path) channel: Tauri events, if they arrive.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -156,7 +167,7 @@ export default function PanelApp() {
         onStop={() => sendAction("stop")}
         transcriptPath={state.transcriptPath}
         transcriptOrigin={state.transcriptOrigin}
-        transcriptPlayhead={state.transcriptPlayhead}
+        playheadAvailable={state.transcriptPlayhead != null}
         transcriptFps={state.fps}
         onTranscriptSeek={(seconds) => sendAction("seek", { seconds })}
         transcriptArrivedTick={state.transcriptArrivedTick}

@@ -4092,7 +4092,7 @@ export default function App() {
           onRenameAll={handleQueueRenameAll}
           transcriptPath={activeTranscript?.path ?? null}
           transcriptOrigin={activeTranscript?.origin ?? "unknown"}
-          transcriptPlayhead={transcriptPlayhead}
+          playheadAvailable={hasSource}
           transcriptFps={fps}
           onTranscriptSeek={(seconds) => {
             // Clamp to duration so a stale cue past the end doesn't put

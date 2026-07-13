@@ -4,6 +4,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { IconReveal, IconAlert, IconChevronDown, IconInfo } from "./Icons";
 import { parseSrt, groupIntoTurns, fmtTime, type Turn } from "../lib/srt";
 import { speakerStats } from "../lib/speaker-stats";
+import { usePlayheadSeconds } from "../lib/playhead-store";
 import { secondsToTc } from "../lib/timecode";
 import { formatError } from "../lib/error-format";
 import {
@@ -38,10 +39,13 @@ type Props = {
    *  when only its contents changed. Optional: the popped-out panel omits it. */
   reloadToken?: number;
   /**
-   * Current playhead position in seconds. Drives the karaoke highlight.
-   * Pass `null` when no source is loaded.
+   * True while this viewer should track the live playhead (a source is
+   * loaded AND the tab is visible). The viewer subscribes to the playhead
+   * store itself — no per-frame prop — driving the karaoke highlight at the
+   * full tick rate. While false the highlight + autoscroll freeze, then snap
+   * to the current position when it flips back on.
    */
-  playheadSeconds: number | null;
+  playheadActive: boolean;
   /** Click-to-seek callback. Called with seconds — the App converts to frames. */
   onSeek: (seconds: number) => void;
   /**
@@ -114,12 +118,16 @@ type Props = {
  * etc. The rename UI works identically in both worlds.
  */
 export function TranscriptViewer({
-  path, reloadToken, playheadSeconds, onSeek, origin,
+  path, reloadToken, playheadActive, onSeek, origin,
   onClearTranscript, onLoadFromHistory,
   onRegenerate, regenerateBusy, canRegenerate, fps = 30,
   onRedetectSpeakers, canRedetect,
   onImportTranscript, sourceKind, onFixCaptionTiming,
 }: Props) {
+  // Live playhead (seconds) from the store — this viewer is one of the few
+  // per-tick subscribers (the karaoke highlight). Pinned to null while
+  // inactive so a hidden tab doesn't re-render on playback ticks.
+  const playheadSeconds = usePlayheadSeconds(fps, playheadActive);
   const [raw, setRaw] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
