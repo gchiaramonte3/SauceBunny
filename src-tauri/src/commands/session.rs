@@ -271,7 +271,8 @@ pub async fn session_join(
             &mut send,
             &SessionMsg::Hello { name: display_name.clone() },
         )
-        .await?;
+        .await
+        .map_err(|e| e.to_string())?;
         Ok::<_, String>((conn, send, recv))
     })
     .await;
@@ -379,9 +380,7 @@ pub async fn session_send(
     };
     // Tiny line; the brief write under the manager lock mirrors how
     // session_broadcast already writes under `inner`.
-    write_msg_line(send, &msg)
-        .await
-        .map_err(crate::AppError::internal)
+    write_msg_line(send, &msg).await
 }
 
 // ============================================================
@@ -694,12 +693,13 @@ async fn emit_state_now(app: &AppHandle) {
 }
 
 /// Serialize one `SessionMsg` as a JSON line and write it to a stream.
-async fn write_msg_line(send: &mut SendStream, msg: &SessionMsg) -> Result<(), String> {
-    let mut line = serde_json::to_string(msg).map_err(|e| e.to_string())?;
+async fn write_msg_line(send: &mut SendStream, msg: &SessionMsg) -> Result<(), crate::AppError> {
+    let mut line = serde_json::to_string(msg)
+        .map_err(|e| crate::AppError::internal(e.to_string()))?;
     line.push('\n');
     send.write_all(line.as_bytes())
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| crate::AppError::Network(e.to_string()))
 }
 
 /// Display names come from the other side of the wire — trim, strip

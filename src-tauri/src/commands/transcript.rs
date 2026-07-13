@@ -63,18 +63,59 @@ const WHISPER_MODELS: &[(&str, &str, u64)] = &[
     ("medium.en", "Medium (English)", 1_530_000_000),
 ];
 
-fn whisper_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
+fn whisper_models_dir(app: &AppHandle) -> Result<PathBuf, crate::AppError> {
     let base = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("app_data_dir: {e}"))?;
+        .map_err(|e| crate::AppError::internal(format!("app_data_dir: {e}")))?;
     let dir = base.join("models").join("whisper");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir models: {e}"))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| crate::AppError::internal(format!("mkdir models: {e}")))?;
     Ok(dir)
 }
 
-fn model_path(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+fn model_path(app: &AppHandle, id: &str) -> Result<PathBuf, crate::AppError> {
     Ok(whisper_models_dir(app)?.join(format!("ggml-{id}.bin")))
+}
+
+/// Normalize a requested transcription language for whisper-cli's `-l` flag
+/// (r108 — retires the hardcoded `-l en`).
+///
+/// Accepts "auto" (whisper.cpp's language auto-detect) or a 2–8 letter code
+/// ("en", "fr", "yue", …), lowercased. Absent, empty, or malformed input
+/// falls back to "auto" rather than erroring — a bad preference string must
+/// never kill a transcription run.
+fn normalize_whisper_lang(lang: Option<&str>) -> String {
+    let l = lang.unwrap_or("").trim().to_ascii_lowercase();
+    if l == "auto"
+        || ((2..=8).contains(&l.len()) && l.chars().all(|c| c.is_ascii_alphabetic()))
+    {
+        l
+    } else {
+        "auto".into()
+    }
+}
+
+/// Advisory pipeline-log line when an English-only Whisper model (`*.en`)
+/// is asked for a non-English language (r108). whisper-cli copes on its own
+/// (it forces English and prints its own warning), so we deliberately do NOT
+/// fail — this line just makes the mismatch visible in the pipeline log so
+/// the user (and the wave-2 language UI) can see why the output is English.
+/// `model` is a model id ("small.en") or a "ggml-small.en" file stem — both
+/// end in ".en" exactly when the model is English-only.
+fn warn_if_english_only_mismatch(app: &AppHandle, job_id: &str, model: &str, lang: &str) {
+    if model.ends_with(".en") && lang != "en" && lang != "auto" {
+        emit_transcript_log(
+            app,
+            job_id,
+            "warn",
+            format!(
+                "Model '{model}' is English-only but language '{lang}' was requested — \
+                 the transcript will come out in English. Use a multilingual model \
+                 (one without the .en suffix) for other languages."
+            ),
+        );
+    }
 }
 
 // ── Parakeet ASR engine (r90) ───────────────────────────────────────
@@ -82,10 +123,14 @@ fn model_path(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
 // sidecar's --asr mode. The ~0.5 GB model lives in an app-managed dir
 // (mirrors whisper_models_dir); Settings downloads it on demand.
 
-fn parakeet_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let base = app.path().app_data_dir().map_err(|e| format!("app_data_dir: {e}"))?;
+fn parakeet_models_dir(app: &AppHandle) -> Result<PathBuf, crate::AppError> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| crate::AppError::internal(format!("app_data_dir: {e}")))?;
     let dir = base.join("models").join("parakeet");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir parakeet models: {e}"))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| crate::AppError::internal(format!("mkdir parakeet models: {e}")))?;
     Ok(dir)
 }
 
@@ -97,9 +142,11 @@ fn parakeet_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
 /// child. So the model lands beside `parakeet/`, and any readiness check has to
 /// look there (this mismatch is why a downloaded model previously read as
 /// "not downloaded" and bounced the user to Settings).
-fn parakeet_repo_dir(app: &AppHandle) -> Result<PathBuf, String> {
+fn parakeet_repo_dir(app: &AppHandle) -> Result<PathBuf, crate::AppError> {
     let models = parakeet_models_dir(app)?; // ensures <…/models> exists
-    let parent = models.parent().ok_or_else(|| "parakeet models dir has no parent".to_string())?;
+    let parent = models
+        .parent()
+        .ok_or_else(|| crate::AppError::internal("parakeet models dir has no parent"))?;
     Ok(parent.join("parakeet-tdt-0.6b-v3"))
 }
 
@@ -385,9 +432,11 @@ fn srt_to_text(srt: &str) -> String {
 /// Run whisper-cli on a WAV → `<srt_base>.srt`. Greedy decode (`-bs 1 -bo 1`,
 /// no VAD) — for a one-or-two-sentence dictation clip a 5-beam search just burns
 /// ~5× the decode time for no accuracy gain on clean speech. Registered under
-/// `job_id` so Stop cancels it.
+/// `job_id` so Stop cancels it. `language` is a normalize_whisper_lang output
+/// ("auto" or a 2–8 letter code) — dictating in French should yield French.
 async fn run_whisper_dictation(
-    app: &AppHandle, job_id: &str, wav: &std::path::Path, srt_base: &str, model: &std::path::Path,
+    app: &AppHandle, job_id: &str, wav: &std::path::Path, srt_base: &str,
+    model: &std::path::Path, language: &str,
 ) -> Result<(), crate::AppError> {
     let wsp = app
         .shell()
@@ -398,7 +447,7 @@ async fn run_whisper_dictation(
             "-m", &model.to_string_lossy(),
             "-f", &wav.to_string_lossy(),
             "-osrt", "-of", srt_base,
-            "-l", "en", "-bs", "1", "-bo", "1",
+            "-l", language, "-bs", "1", "-bo", "1",
         ])
         .spawn()
         .map_err(|e| format!("whisper-cli failed to spawn: {e}"))?;
@@ -439,13 +488,28 @@ async fn run_whisper_dictation(
 /// kicks off a background task that streams live mic levels (`dictate-level`)
 /// while recording and — once recording stops — transcribes the WAV and emits
 /// `dictate-done`. `device` is the avfoundation audio index ("0", "1", …) or
-/// None/"default" for the system default input. Fails fast if no ASR model is
-/// available (so the UI never starts a pointless recording).
+/// None/"default" for the system default input. `language` is the dictation
+/// language ("auto"/None → whisper auto-detect; see normalize_whisper_lang) —
+/// applies to the Whisper engine only (Parakeet handles language itself).
+/// Fails fast if no ASR model is available (so the UI never starts a
+/// pointless recording).
 #[tauri::command]
-pub async fn dictate_start(app: AppHandle, job_id: String, device: Option<String>) -> Result<(), crate::AppError> {
+pub async fn dictate_start(
+    app: AppHandle,
+    job_id: String,
+    device: Option<String>,
+    language: Option<String>,
+) -> Result<(), crate::AppError> {
     // Resolve the engine up front so a "no model" error surfaces before we
     // ever turn on the mic.
     let engine = pick_dictation_engine(&app)?;
+    let lang = normalize_whisper_lang(language.as_deref());
+    if let DictEngine::Whisper(model) = &engine {
+        // English-only model + non-English request → advisory log (whisper
+        // itself will fall back to English; see warn_if_english_only_mismatch).
+        let stem = model.file_stem().map(|s| s.to_string_lossy().to_string());
+        warn_if_english_only_mismatch(&app, &job_id, stem.as_deref().unwrap_or(""), &lang);
+    }
 
     let cache = app.path().app_cache_dir().map_err(|e| format!("app_cache_dir: {e}"))?;
     std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
@@ -580,7 +644,10 @@ pub async fn dictate_start(app: AppHandle, job_id: String, device: Option<String
         let asr = match engine {
             DictEngine::Parakeet => run_parakeet_asr(&app2, &job2, &wav, &srt_str).await,
             DictEngine::Whisper(model) => {
-                run_whisper_dictation(&app2, &job2, &wav, &srt_base.to_string_lossy(), &model).await
+                run_whisper_dictation(
+                    &app2, &job2, &wav, &srt_base.to_string_lossy(), &model, &lang,
+                )
+                .await
             }
         };
         let _ = std::fs::remove_file(&wav);
@@ -826,7 +893,7 @@ pub async fn download_whisper_model(
                         success: false,
                         code: None,
                         path: None,
-                        error: Some(e),
+                        error: Some(e.to_string()),
                     },
                 );
             }
@@ -836,18 +903,22 @@ pub async fn download_whisper_model(
     Ok(args.job_id)
 }
 
+// NB: error messages here surface verbatim in `model-download-done` events
+// (stringified by the callers), so they ride the `From<String>` → `Invalid`
+// bridge to keep their bare Display text — do not re-wrap them in variants
+// whose Display adds a prefix.
 pub(crate) async fn download_with_progress(
     app: &AppHandle,
     url: &str,
     dest: &PathBuf,
     job_id: &str,
     model_id: &str,
-) -> Result<(), String> {
+) -> Result<(), crate::AppError> {
     let mut res = reqwest::get(url)
         .await
         .map_err(|e| format!("fetch: {e}"))?;
     if !res.status().is_success() {
-        return Err(format!("HTTP {}", res.status().as_u16()));
+        return Err(format!("HTTP {}", res.status().as_u16()).into());
     }
     let total = res.content_length().unwrap_or(0);
     let mut file = tokio::fs::File::create(dest)
@@ -940,6 +1011,10 @@ pub struct GenerateTranscriptArgs {
     /// "parakeet" → FluidAudio Parakeet via the diarize sidecar's --asr mode.
     #[serde(default)]
     pub engine: Option<String>,
+    /// Spoken language for whisper-cli's `-l` (r108). None/empty/invalid →
+    /// "auto" (whisper.cpp auto-detect). See normalize_whisper_lang.
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 fn emit_transcript_done(
@@ -1328,12 +1403,14 @@ pub async fn generate_transcript(
             emit_transcript_log(&app_for, &job_for, "info",
                 "Voice-activity detection on (Silero VAD).".into());
         }
+        let lang = normalize_whisper_lang(args.language.as_deref());
+        warn_if_english_only_mismatch(&app_for, &job_for, &args.model_id, &lang);
         let mut wcmd = wsp.args([
             "-m", &model_str,
             "-f", &wav_path_str,
             "-osrt",
             "-of", &output_base_str,
-            "-l", "en",
+            "-l", &lang,
             // Accuracy + caption-grade segmentation (researched): pin max
             // beam/best-of, and split-on-word at ~2-line length so each cue
             // fits the on-video overlay without breaking mid-word.
@@ -1654,6 +1731,10 @@ pub struct TranscribeLocalArgs {
     /// FluidAudio Parakeet via the diarize sidecar's --asr mode.
     #[serde(default)]
     pub engine: Option<String>,
+    /// Spoken language for whisper-cli's `-l` (r108). None/empty/invalid →
+    /// "auto" (whisper.cpp auto-detect). See normalize_whisper_lang.
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 /// Frontend-provided pre-normalised audio (16 kHz mono WAV bytes). Lets
@@ -1674,6 +1755,10 @@ pub struct TranscribePreparedWavArgs {
     /// Speaker-count hint forwarded to the diarizer when present.
     #[serde(default)]
     pub expected_speakers: Option<u32>,
+    /// Spoken language for whisper-cli's `-l` (r108). None/empty/invalid →
+    /// "auto" (whisper.cpp auto-detect). See normalize_whisper_lang.
+    #[serde(default)]
+    pub language: Option<String>,
     // NB: no `engine` field — Parakeet local-file runs route through
     // transcribe_local_file (ffmpeg WAV), not this WebCodecs fast-path.
 }
@@ -1751,6 +1836,8 @@ pub async fn transcribe_prepared_wav(
             emit_transcript_log(&app_for, &job_for, "info",
                 "Voice-activity detection on (Silero VAD).".into());
         }
+        let lang = normalize_whisper_lang(args.language.as_deref());
+        warn_if_english_only_mismatch(&app_for, &job_for, &args.model_id, &lang);
         let mut wcmd = wsp
             // No DYLD override — whisper-cli is statically linked (see the
             // generate_transcript spawn for the full rationale).
@@ -1759,7 +1846,7 @@ pub async fn transcribe_prepared_wav(
                 "-f", &wav_path_str,
                 "-osrt",
                 "-of", &output_base_str,
-                "-l", "en",
+                "-l", &lang,
                 // Accuracy + caption-grade segmentation (see generate_transcript).
                 "-bs", "5", "-bo", "5", "-sow", "-ml", "84",
                 "-pp",
@@ -1910,6 +1997,8 @@ pub async fn transcribe_local_file(
     let detect_speakers = args.detect_speakers;
     let expected_speakers = args.expected_speakers;
     let engine = args.engine.clone().unwrap_or_default();
+    let model_id = args.model_id.clone();
+    let lang = normalize_whisper_lang(args.language.as_deref());
 
     tokio::spawn(async move {
         // Phase 1: ffmpeg → 16 kHz mono WAV (works for any video or audio in).
@@ -2022,6 +2111,7 @@ pub async fn transcribe_local_file(
             emit_transcript_log(&app_for, &job_for, "info",
                 "Voice-activity detection on (Silero VAD).".into());
         }
+        warn_if_english_only_mismatch(&app_for, &job_for, &model_id, &lang);
         let mut wcmd = wsp
             // No DYLD override — whisper-cli is statically linked (see the
             // generate_transcript spawn for the full rationale).
@@ -2030,7 +2120,7 @@ pub async fn transcribe_local_file(
                 "-f", &wav_path_str,
                 "-osrt",
                 "-of", &output_base_str,
-                "-l", "en",
+                "-l", &lang,
                 // Accuracy + caption-grade segmentation (see generate_transcript).
                 "-bs", "5", "-bo", "5", "-sow", "-ml", "84",
                 "-pp",
@@ -2296,7 +2386,7 @@ mod srt_shift_tests {
 fn merge_diarization_into_srt(
     whisper_srt: &str,
     turns: &[DiarTurn],
-) -> Result<String, String> {
+) -> Result<String, crate::AppError> {
     if turns.is_empty() {
         return Err("diarizer returned zero turns".into());
     }

@@ -83,11 +83,11 @@ const RESOLVE_TIMEOUT_SECS: u64 = 40;
 async fn output_timed(
     cmd: tauri_plugin_shell::process::Command,
     secs: u64,
-) -> Result<tauri_plugin_shell::process::Output, String> {
+) -> Result<tauri_plugin_shell::process::Output, crate::AppError> {
     match tokio::time::timeout(std::time::Duration::from_secs(secs), cmd.output()).await {
         Ok(Ok(out)) => Ok(out),
-        Ok(Err(e)) => Err(format!("yt-dlp failed: {e}")),
-        Err(_) => Err(format!("timed out after {secs}s")),
+        Ok(Err(e)) => Err(crate::AppError::internal(format!("yt-dlp failed: {e}"))),
+        Err(_) => Err(crate::AppError::internal(format!("timed out after {secs}s"))),
     }
 }
 
@@ -99,7 +99,9 @@ async fn output_timed(
 ///
 /// The updated copy is run by NAME (`yt-dlp`, allowed in capabilities) with the
 /// app-data bin dir first on PATH, so command resolution picks it deterministically.
-pub(crate) fn ytdlp(app: &AppHandle) -> Result<tauri_plugin_shell::process::Command, String> {
+pub(crate) fn ytdlp(
+    app: &AppHandle,
+) -> Result<tauri_plugin_shell::process::Command, crate::AppError> {
     if let Ok(data) = app.path().app_data_dir() {
         let bin_dir = data.join("bin");
         if bin_dir.join("yt-dlp").is_file() {
@@ -110,7 +112,10 @@ pub(crate) fn ytdlp(app: &AppHandle) -> Result<tauri_plugin_shell::process::Comm
     Ok(app
         .shell()
         .sidecar("yt-dlp")
-        .map_err(|e| format!("sidecar yt-dlp not found: {e}"))?
+        // `invalid` (bare Display), not SidecarMissing: several callers embed
+        // this in their own "yt-dlp sidecar not found: {e}" strings and the
+        // established message text must survive the r108 AppError sweep.
+        .map_err(|e| crate::AppError::invalid(format!("sidecar yt-dlp not found: {e}")))?
         .env("PATH", HOMEBREW_PATH))
 }
 
@@ -137,8 +142,7 @@ pub async fn ytdlp_version(app: AppHandle) -> Result<YtdlpStatus, crate::AppErro
     let updated = updated_ytdlp_path(&app)
         .map(|p| p.is_file())
         .unwrap_or(false);
-    let out = ytdlp(&app)
-        .map_err(crate::AppError::internal)?
+    let out = ytdlp(&app)?
         .arg("--version")
         .output()
         .await
@@ -347,7 +351,7 @@ async fn run_metadata_ytdlp(
     app: &AppHandle,
     url: &str,
     cookies_browser: Option<&str>,
-) -> Result<tauri_plugin_shell::process::Output, String> {
+) -> Result<tauri_plugin_shell::process::Output, crate::AppError> {
     let cmd = ytdlp(app)?;
     let mut args: Vec<String> = vec![
         "--dump-json".into(),
@@ -382,7 +386,7 @@ pub async fn fetch_metadata(
         eprintln!("[metadata] resolve with cookies failed; retrying without cookies");
         result = run_metadata_ytdlp(&app, &url, None).await;
     }
-    let output = result.map_err(crate::AppError::internal)?;
+    let output = result?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -463,6 +467,51 @@ pub struct CaptionsArgs {
     pub filename: String,
     pub job_id: String,
     pub cookies_browser: Option<String>,
+    /// Preferred caption locale, e.g. "pt-BR" (r108). When present we request
+    /// that track plus its base form ("pt-BR,pt"); when absent/invalid we keep
+    /// the battle-tested English defaults. See `caption_lang_prefs`.
+    #[serde(default)]
+    pub locale: Option<String>,
+}
+
+/// Resolve the subtitle-language preferences for a caption download (r108).
+///
+/// Returns `(sub_langs_arg, rank_order)`:
+///   - `sub_langs_arg` feeds yt-dlp's `--sub-langs` (finite, explicit list —
+///     see the comment at the call site for why globs are banned).
+///   - `rank_order` feeds `scan_best`'s preference ladder (first = best).
+///
+/// No locale (or a malformed one) → the historical English defaults:
+/// download "en-US,en-orig,en", rank en-US > en > en-orig (note the two
+/// orders differ deliberately — that is the pre-r108 behavior, preserved).
+/// A locale like "pt-BR" → download + rank "pt-BR" then its base "pt".
+fn caption_lang_prefs(locale: Option<&str>) -> (String, Vec<String>) {
+    let english = || {
+        (
+            "en-US,en-orig,en".to_string(),
+            vec!["en-US".to_string(), "en".to_string(), "en-orig".to_string()],
+        )
+    };
+    let loc = locale.unwrap_or("").trim();
+    // BCP-47-ish sanity: letters/digits/hyphens only, bounded length. Anything
+    // else (empty, path-y garbage) falls back to the English defaults.
+    let valid = !loc.is_empty()
+        && loc.len() <= 16
+        && loc.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    if !valid {
+        return english();
+    }
+    let base = loc.split('-').next().unwrap_or("");
+    if base.eq_ignore_ascii_case("en") {
+        // English requested explicitly — the defaults already cover every
+        // English variant YouTube serves (incl. en-US/en-orig).
+        return english();
+    }
+    let mut langs = vec![loc.to_string()];
+    if !base.is_empty() && !base.eq_ignore_ascii_case(loc) {
+        langs.push(base.to_string());
+    }
+    (langs.join(","), langs)
 }
 
 /// True when a WebVTT/SRT caption body carries explicit speaker labels —
@@ -506,18 +555,23 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
 
     let cmd = ytdlp(&app)?;
 
+    // Requested-locale (plus base form) or the English defaults — one list
+    // drives yt-dlp's download, the other scan_best's preference ladder.
+    let (sub_langs, rank_langs) = caption_lang_prefs(args.locale.as_deref());
+
     let caption_args: Vec<String> = vec![
         "--write-subs".into(),
         "--write-auto-subs".into(),
-        // Explicit, finite list of English variants. The earlier glob
+        // Explicit, finite list of language codes. The earlier glob
         // `en.*` matched YouTube's `en-en-US` auto-translation track,
         // which 429s reliably and made yt-dlp exit nonzero even though
         // the real English tracks (en, en-US, en-orig) had already
-        // written cleanly to disk. The three explicit codes below
+        // written cleanly to disk. The explicit English defaults below
         // cover every English track YouTube actually serves for human +
-        // auto + original-language. yt-dlp will silently skip codes
+        // auto + original-language; a caller-provided locale swaps in
+        // that code + its base form instead. yt-dlp silently skips codes
         // that don't exist on a given video — no error.
-        "--sub-langs".into(), "en-US,en-orig,en".into(),
+        "--sub-langs".into(), sub_langs,
         // `--ignore-errors` makes a single failing track non-fatal — if
         // YouTube 429s one variant, the others still succeed and we
         // still exit 0. Defence-in-depth alongside the file-scan-on-
@@ -572,8 +626,10 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
         // the failure. The presence of the file on disk is the source of truth,
         // not the exit code.
         //
-        // Pick the best variant by preference:
+        // Pick the best variant by preference — for the English defaults:
         //   en-US  > en  > en-orig  > anything else
+        // (a caller-provided locale substitutes its own ladder, e.g.
+        // pt-BR > pt; see caption_lang_prefs).
         // (has_speakers, is_auto, lang/format rank, path). Sort keys in
         // priority order:
         //   1. has_speakers — a creator track with `<v Name>` voice tags
@@ -581,7 +637,11 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
         //   2. NOT auto-generated — manual/creator captions are human-corrected
         //      and far more accurate than YouTube's ASR auto-captions.
         //   3. language/format tier.
-        fn scan_best(dir: &std::path::Path, safe_for: &str) -> Option<String> {
+        fn scan_best(
+            dir: &std::path::Path,
+            safe_for: &str,
+            rank_langs: &[String],
+        ) -> Option<String> {
             let mut candidates: Vec<(bool, bool, u8, String)> = Vec::new();
             if let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
@@ -607,17 +667,28 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
                     {
                         continue;
                     }
-                    // Lower rank = preferred. Prefer .vtt over .srt at
-                    // every language tier — vtt is what we now write and
-                    // it's the format that still carries speaker voice
-                    // tags (a stray .srt would have lost them).
-                    let rank: u8 = if name.ends_with(".en-US.vtt")   { 0 }
-                              else if name.ends_with(".en.vtt")      { 1 }
-                              else if name.ends_with(".en-orig.vtt") { 2 }
-                              else if name.ends_with(".en-US.srt")   { 3 }
-                              else if name.ends_with(".en.srt")      { 4 }
-                              else if name.ends_with(".en-orig.srt") { 5 }
-                              else                                   { 6 };
+                    // Lower rank = preferred. ALL .vtt tiers outrank ALL
+                    // .srt tiers — vtt is what we now write and it's the
+                    // format that still carries speaker voice tags (a
+                    // stray .srt would have lost them). Within a format,
+                    // rank_langs order wins (English defaults reproduce
+                    // the historical en-US > en > en-orig ladder).
+                    let unranked = (rank_langs.len() * 2) as u8;
+                    let mut rank: u8 = unranked;
+                    for (i, lg) in rank_langs.iter().enumerate() {
+                        if name.ends_with(&format!(".{lg}.vtt")) {
+                            rank = i as u8;
+                            break;
+                        }
+                    }
+                    if rank == unranked {
+                        for (i, lg) in rank_langs.iter().enumerate() {
+                            if name.ends_with(&format!(".{lg}.srt")) {
+                                rank = (rank_langs.len() + i) as u8;
+                                break;
+                            }
+                        }
+                    }
                     // Caption files are tiny — read each once to sniff
                     // for speaker labels AND auto-vs-manual.
                     let body = std::fs::read_to_string(&p).unwrap_or_default();
@@ -669,7 +740,7 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
                     _ => {}
                 }
             }
-            let found = scan_best(&out_dir_for, &safe_for);
+            let found = scan_best(&out_dir_for, &safe_for, &rank_langs);
 
             // Cookied attempt produced nothing → retry once WITHOUT cookies
             // (LinkedIn/public-post failure mode; mirrors spawn_video_clip).
@@ -881,9 +952,7 @@ async fn resolve_stream_tiers(
     // A timeout/spawn failure here is systemic (wedged or slow extractor — often
     // the logged-in-page case), so propagate it: the caller retries WITHOUT
     // cookies rather than burning two more equally-slow tier calls.
-    let out = output_timed(yt.args(args), RESOLVE_TIMEOUT_SECS)
-        .await
-        .map_err(crate::AppError::internal)?;
+    let out = output_timed(yt.args(args), RESOLVE_TIMEOUT_SECS).await?;
     if out.status.success() {
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         let mut lines = stdout.lines().filter(|l| !l.trim().is_empty());

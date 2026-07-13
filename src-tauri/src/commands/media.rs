@@ -174,7 +174,7 @@ async fn spawn_video_clip(
     section_secs: Option<(f64, f64)>,
     output_str: String,
     ffmpeg_str: String,
-) -> Result<(), String> {
+) -> Result<(), crate::AppError> {
     let mut cmd_args: Vec<String> = vec![
         "-f".into(),
         yt_dlp_video_format(&args.format).into(),
@@ -341,13 +341,14 @@ async fn spawn_audio_clip(
     output_str: String,
     ffmpeg_str: String,
     cookies_browser: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), crate::AppError> {
     // Phase 1: yt-dlp downloads raw bestaudio to cache.
     let cache = app
         .path()
         .app_cache_dir()
-        .map_err(|e| format!("app_cache_dir: {e}"))?;
-    std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
+        .map_err(|e| crate::AppError::internal(format!("app_cache_dir: {e}")))?;
+    std::fs::create_dir_all(&cache)
+        .map_err(|e| crate::AppError::internal(format!("mkdir cache: {e}")))?;
     let raw_prefix = format!("saucebunny-{}-raw", job_id);
     let raw_template = cache
         .join(format!("{}.%(ext)s", raw_prefix))
