@@ -3,6 +3,7 @@ import { IconAlert } from "./Icons";
 import { CanvasToast, type ToastKind } from "./CanvasToast";
 import { CaptionOverlay, type CaptionStyle } from "./CaptionOverlay";
 import { AnnotationOverlay } from "./AnnotationOverlay";
+import { usePlayheadSeconds } from "../lib/playhead-store";
 import type { AnnotationStrokes } from "../lib/review";
 import { LocalMediaPlayer } from "./LocalMediaPlayer";
 import { MediaBunnyPlayer } from "./MediaBunnyPlayer";
@@ -80,8 +81,9 @@ type Props = {
   /** Bumped on every transcript arrival — forces a cue re-read when a
    *  regeneration overwrote the SAME path. */
   transcriptReloadToken?: number;
-  /** Current playhead position in seconds — picks which caption cue shows. */
-  currentSec?: number;
+  /** Source frame rate — the captions + annotation-fade overlays convert the
+   *  store's frame playhead to seconds with it (same clock everywhere). */
+  fps: number;
   /** Whether the transport-bar captions toggle is on. */
   captionsOn?: boolean;
   /** User-tunable caption appearance (Settings → Captions). */
@@ -90,15 +92,50 @@ type Props = {
   tcOverlay?: string | null;
   /** Signed J-K-L shuttle rate (e.g. -4 = rewind 4×); 0/undefined hides the badge. */
   shuttleRate?: number;
-  /** Review drawing annotation to render over the frame (draft or saved). */
+  /** Review drawing annotation to render over the frame — the live draft
+   *  while drawing, or a comment's drawing pinned via click. Always full
+   *  opacity. Null → the proximity fade (below) takes over. */
   annotation?: AnnotationStrokes | null;
   /** True while the Review panel is in draw mode (overlay captures input). */
   annotationDrawing?: boolean;
-  /** Read-only display opacity (proximity fade); 1 when drawing/pinned. */
-  annotationOpacity?: number;
+  /** Saved drawings for the playhead-proximity fade — when no draft/pinned
+   *  `annotation` is up, the nearest drawing appears then fades as the
+   *  playhead passes its time. Rendered by a store-subscribing leaf so the
+   *  60Hz fade never re-renders App (or the rest of the Monitor). */
+  proximityAnnotations?: { time: number; strokes: AnnotationStrokes }[];
   onAnnotationChange?: (a: AnnotationStrokes) => void;
   onAnnotationDismiss?: () => void;
 };
+
+/** Seconds on either side of a drawing's time that the proximity fade spans. */
+const ANNOT_PROX_WINDOW = 0.6;
+
+/** Proximity fade — the nearest saved drawing as the playhead passes it,
+ *  opacity ramping with distance so it appears then fades while scrubbing.
+ *  Subscribes to the playhead store at up to 60Hz; everything it re-renders
+ *  is one read-only AnnotationOverlay (opacity is CSS-only there). */
+function ProximityAnnotation({ annotations, fps }: {
+  annotations: { time: number; strokes: AnnotationStrokes }[];
+  fps: number;
+}) {
+  const playheadSec = usePlayheadSeconds(fps) ?? 0;
+  let strokes: AnnotationStrokes | null = null;
+  let bestDist = Infinity;
+  for (const a of annotations) {
+    const d = Math.abs(a.time - playheadSec);
+    if (d < bestDist) { bestDist = d; strokes = a.strokes; }
+  }
+  const opacity = bestDist <= ANNOT_PROX_WINDOW ? Math.max(0, 1 - bestDist / ANNOT_PROX_WINDOW) : 0;
+  if (!strokes || opacity <= 0) return null;
+  return (
+    <AnnotationOverlay
+      annotation={strokes}
+      drawing={false}
+      opacity={opacity}
+      onChange={() => {}}
+    />
+  );
+}
 
 /**
  * Sizes the monitor element to fit its parent at a fixed aspect ratio
@@ -143,9 +180,9 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     streamLoadingPhase,
     toast, onToastDismiss,
     onPlayerTimeUpdate, onPlayerStateChange, onPlayerReady, onSurfaceClick,
-    transcriptPath, transcriptReloadToken, currentSec, captionsOn, captionStyle, tcOverlay,
+    transcriptPath, transcriptReloadToken, fps, captionsOn, captionStyle, tcOverlay,
     shuttleRate,
-    annotation, annotationDrawing, annotationOpacity, onAnnotationChange, onAnnotationDismiss,
+    annotation, annotationDrawing, proximityAnnotations, onAnnotationChange, onAnnotationDismiss,
   } = props;
 
   const natural = metadata?.width && metadata?.height ? metadata.width / metadata.height : 16 / 9;
@@ -303,20 +340,25 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
         <CaptionOverlay
           path={transcriptPath ?? null}
           reloadToken={transcriptReloadToken}
-          currentSec={currentSec ?? 0}
+          fps={fps}
           enabled={!!captionsOn}
           style={captionStyle}
         />
 
-        {/* Review drawing annotations — draw on the frame (draft) or view a
-            saved one. Pointer-transparent unless actively drawing. */}
-        <AnnotationOverlay
-          annotation={annotation ?? null}
-          drawing={!!annotationDrawing}
-          opacity={annotationOpacity ?? 1}
-          onChange={onAnnotationChange ?? (() => {})}
-          onDismiss={onAnnotationDismiss}
-        />
+        {/* Review drawing annotations — draw on the frame (draft), view a
+            pinned one, or let the nearest saved drawing fade in/out with the
+            playhead. Pointer-transparent unless actively drawing. */}
+        {annotationDrawing || annotation || !proximityAnnotations?.length ? (
+          <AnnotationOverlay
+            annotation={annotation ?? null}
+            drawing={!!annotationDrawing}
+            opacity={1}
+            onChange={onAnnotationChange ?? (() => {})}
+            onDismiss={onAnnotationDismiss}
+          />
+        ) : (
+          <ProximityAnnotation annotations={proximityAnnotations} fps={fps} />
+        )}
 
         {/* Type-a-timecode HUD — appears the moment the user types a digit
             over the player; Return snaps the playhead, Esc cancels. Driven

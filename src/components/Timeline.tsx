@@ -3,6 +3,7 @@ import type { AppStatus } from "../types";
 import { secondsToHms } from "../lib/timecode";
 import { filmstripCount, filmstripTimestamps } from "../lib/filmstrip";
 import { extractFilmstrip } from "../lib/mediabunny-helpers";
+import { usePlayheadFrames } from "../lib/playhead-store";
 
 /** Scrub-track height (px) when a filmstrip is shown — matches
  *  `.cp-track.has-filmstrip` in transport.css; also sizes the decoded thumbs. */
@@ -21,10 +22,28 @@ export type TimelineRange = {
   status?: "queued" | "running" | "done" | "error";
 };
 
+/** The scrub cursor — the one element on the track that moves at up to 60Hz,
+ *  so it alone subscribes to the playhead store. The rest of the timeline
+ *  (ruler, filmstrip, marks, lanes) renders only when its own props change. */
+function PlayheadCursor({ durationFrames, onMouseDown }: {
+  durationFrames: number;
+  onMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
+}) {
+  const frames = usePlayheadFrames();
+  const left = durationFrames > 0 ? (frames / durationFrames) * 100 : 0;
+  return (
+    <div
+      className="cp-playhead"
+      style={{ left: `${left}%` }}
+      onMouseDown={onMouseDown}
+      title="Drag to scrub"
+    />
+  );
+}
+
 type Props = {
   status: AppStatus;
   durationFrames: number;
-  playheadFrames: number;
   /** null = mark not set; selection range only renders when both are set. */
   inFrames: number | null;
   outFrames: number | null;
@@ -55,7 +74,7 @@ type Props = {
 };
 
 export function Timeline({
-  status, durationFrames, playheadFrames, inFrames, outFrames, fps,
+  status, durationFrames, inFrames, outFrames, fps,
   queuedRanges, commentMarkers, reviewRangeDraft, filmstripPath, speakerLanes, ghosts, onSeek,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
@@ -323,12 +342,7 @@ export function Timeline({
                 <span className="cp-ghost-chip">{g.name}</span>
               </div>
             ))}
-            <div
-              className="cp-playhead"
-              style={{ left: `${pct(playheadFrames)}%` }}
-              onMouseDown={onPlayheadDown}
-              title="Drag to scrub"
-            />
+            <PlayheadCursor durationFrames={durationFrames} onMouseDown={onPlayheadDown} />
           </>
         )}
       </div>

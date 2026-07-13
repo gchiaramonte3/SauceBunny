@@ -3733,28 +3733,12 @@ export default function App() {
   });
 
   // ====== Derived ======
-  const playheadTc = framesToTc(playheadFrames, fps);
-  const playheadSec = playheadFrames / Math.max(1, Math.round(fps));
-
   // Review drawing shown on the frame, picked in priority order:
   //   1. live draft while drawing   2. a comment's drawing pinned via click
-  //   3. proximity fade — the nearest saved drawing as the playhead passes it,
-  //      opacity ramping with distance so it appears then fades while scrubbing.
-  const ANNOT_PROX_WINDOW = 0.6; // seconds on either side of the drawing's time
-  let proxStrokes: AnnotationStrokes | null = null;
-  let proxOpacity = 0;
-  if (!reviewDrawActive && !annotationDisplay && reviewAnnotations.length) {
-    let bestDist = Infinity;
-    for (const a of reviewAnnotations) {
-      const d = Math.abs(a.time - playheadSec);
-      if (d < bestDist) { bestDist = d; proxStrokes = a.strokes; }
-    }
-    proxOpacity = bestDist <= ANNOT_PROX_WINDOW ? Math.max(0, 1 - bestDist / ANNOT_PROX_WINDOW) : 0;
-    if (proxOpacity <= 0) proxStrokes = null;
-  }
+  //   3. proximity fade — handled INSIDE Monitor by a playhead-store
+  //      subscriber, so the 60Hz opacity ramp never re-renders App.
   const annDrawing = reviewDrawActive;
-  const annStrokes = annDrawing ? reviewDraft : (annotationDisplay ?? proxStrokes);
-  const annOpacity = annDrawing || annotationDisplay ? 1 : proxOpacity;
+  const annStrokes = annDrawing ? reviewDraft : annotationDisplay;
   const annPinned = !annDrawing && !!annotationDisplay;
   // Live HH:MM:SS:FF for the timecode-entry HUD (right-aligned digit fill).
   const tcOverlay = tcEntry == null ? null
@@ -3985,7 +3969,7 @@ export default function App() {
                  active transcript + playhead so they work for any source. */
               transcriptPath={activeTranscript?.path ?? null}
               transcriptReloadToken={transcriptArrivedTick}
-              currentSec={playheadSec}
+              fps={fps}
               captionsOn={captionsOn}
               /* User-tunable caption look (Settings → Captions). r82: no sync
                  offset — the audio-master clock keeps captions on the heard
@@ -3999,17 +3983,18 @@ export default function App() {
               /* Type-a-timecode HUD: digits build this string, Return snaps. */
               tcOverlay={tcOverlay}
               /* Review drawing annotations — draft while drawing, else the
-                 saved one being viewed. */
+                 saved one being viewed; with neither, Monitor's proximity
+                 fade picks from the saved list as the playhead passes. */
               annotation={annStrokes}
               annotationDrawing={annDrawing}
-              annotationOpacity={annOpacity}
+              proximityAnnotations={!annDrawing && !annotationDisplay ? reviewAnnotations : undefined}
               onAnnotationChange={setReviewDraft}
               onAnnotationDismiss={annPinned ? () => setAnnotationDisplay(null) : undefined}
             />
             <Transport
               status={status}
               isPlaying={isPlaying}
-              playheadTc={playheadTc}
+              fps={fps}
               durationTc={durationTc}
               /* Green only when captions are actually on-screen (toggled on
                  AND a transcript is loaded), not just when the flag is set. */
@@ -4031,7 +4016,6 @@ export default function App() {
             <Timeline
               status={status}
               durationFrames={durationFrames}
-              playheadFrames={playheadFrames}
               inFrames={inFrames}
               outFrames={outFrames}
               fps={fps}
