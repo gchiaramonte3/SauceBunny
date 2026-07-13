@@ -28,6 +28,7 @@ import type {
 } from "./types";
 import { asLogTag } from "./types";
 import { formatError } from "./lib/error-format";
+import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames } from "./lib/playhead-store";
 import { usePanelBus } from "./hooks/use-panel-bus";
 import { useWebPlayback } from "./hooks/use-web-playback";
 import { QueueDrawer } from "./components/QueueDrawer";
@@ -433,7 +434,15 @@ export default function App() {
 
   // ====== Playback (driven by YouTube player when available) ======
   const playerRef = useRef<PlayerHandle>(null);
-  const [playheadFrames, setPlayheadFrames] = useState(0);
+  const [playheadFrames, setPlayheadFramesState] = useState(0);
+  // Dual-write while the playhead-store migration is in flight: the store
+  // (lib/playhead-store) feeds the subscribed leaves; the state mirror still
+  // drives the not-yet-migrated App logic. The state goes away at the end of
+  // the migration and this collapses to the bare store write.
+  const setPlayheadFrames = useCallback((frames: number) => {
+    publishPlayheadFrames(frames);
+    setPlayheadFramesState(frames);
+  }, []);
   const [isPlaying, setIsPlaying] = useState(false);
 
   // ====== In/out + export form ======
@@ -2972,15 +2981,16 @@ export default function App() {
     exitShuttle();
     const p = playerRef.current;
     const r = Math.max(1, Math.round(fps));
-    setPlayheadFrames((f) => {
-      const next = Math.max(0, Math.min(Math.max(0, durationFrames - 1), f + delta));
-      if (p && p.isReady()) {
-        p.pause();
-        p.seekTo(next / r);
-      }
-      return next;
-    });
-  }, [durationFrames, fps, exitShuttle]);
+    // Read the live position from the store (action-time read — never a stale
+    // closure), compute, THEN write. Also keeps the seek side effect out of a
+    // React updater, where StrictMode's double-invoke used to double-seek.
+    const next = Math.max(0, Math.min(Math.max(0, durationFrames - 1), getPlayheadFrames() + delta));
+    if (p && p.isReady()) {
+      p.pause();
+      p.seekTo(next / r);
+    }
+    setPlayheadFrames(next);
+  }, [durationFrames, fps, exitShuttle, setPlayheadFrames]);
 
   const seekBySeconds = useCallback((deltaSec: number) => {
     exitShuttle();
