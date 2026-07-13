@@ -28,7 +28,7 @@ import type {
 } from "./types";
 import { asLogTag } from "./types";
 import { formatError } from "./lib/error-format";
-import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames } from "./lib/playhead-store";
+import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, subscribePlayhead } from "./lib/playhead-store";
 import { usePanelBus } from "./hooks/use-panel-bus";
 import { useWebPlayback } from "./hooks/use-web-playback";
 import { QueueDrawer } from "./components/QueueDrawer";
@@ -433,16 +433,12 @@ export default function App() {
   const durationTc = useMemo(() => durationToTc(metadata?.duration ?? 0, fps), [metadata, fps]);
 
   // ====== Playback (driven by YouTube player when available) ======
+  // The playhead itself is NOT App state — it lives in lib/playhead-store and
+  // ticks up to 60×/sec straight from the player. Only the leaves that paint
+  // it subscribe (Transport tc, Timeline cursor, captions, karaoke, the
+  // annotation fade); App logic reads getPlayheadFrames() at action time.
+  // This is what keeps playback from re-rendering the whole App tree.
   const playerRef = useRef<PlayerHandle>(null);
-  const [playheadFrames, setPlayheadFramesState] = useState(0);
-  // Dual-write while the playhead-store migration is in flight: the store
-  // (lib/playhead-store) feeds the subscribed leaves; the state mirror still
-  // drives the not-yet-migrated App logic. The state goes away at the end of
-  // the migration and this collapses to the bare store write.
-  const setPlayheadFrames = useCallback((frames: number) => {
-    publishPlayheadFrames(frames);
-    setPlayheadFramesState(frames);
-  }, []);
   const [isPlaying, setIsPlaying] = useState(false);
 
   // ====== In/out + export form ======
@@ -1175,7 +1171,7 @@ export default function App() {
   // Sync our playhead from the YouTube player's current time while it's playing.
   const onPlayerTimeUpdate = useCallback((seconds: number) => {
     const r = Math.max(1, Math.round(fps));
-    setPlayheadFrames(Math.floor(seconds * r));
+    publishPlayheadFrames(Math.floor(seconds * r));
   }, [fps]);
 
   const onPlayerStateChange = useCallback((playing: boolean) => {
@@ -1261,7 +1257,7 @@ export default function App() {
     // the tab back into view).
     setActiveTranscript(null);
     setMetadataLoading(false);
-    setPlayheadFrames(0);
+    publishPlayheadFrames(0);
     setInFrames(null);
     setOutFrames(null);
     setIsPlaying(false);
@@ -1346,7 +1342,7 @@ export default function App() {
     setMetadata(stub);
     setSourceKind("youtube");
     setStatus("loaded");
-    setPlayheadFrames(0);
+    publishPlayheadFrames(0);
     setInFrames(null);
     setOutFrames(null);
     // NOTE: we deliberately do NOT auto-load a prior transcript on fetch.
@@ -1831,7 +1827,7 @@ export default function App() {
       setLocalFilePath(lf.path);
       setLocalFileSize(lf.size_bytes ?? null);
       setUrl("");
-      setPlayheadFrames(0);
+      publishPlayheadFrames(0);
       setInFrames(null);
       setOutFrames(null);
       setExportOpts((prev) => ({
@@ -2245,9 +2241,12 @@ export default function App() {
   const handleSnapshot = useCallback(async () => {
     if (!metadata || snapshotBusy) return;
     const r = Math.max(1, Math.round(fps));
-    const seconds = playheadFrames / r;
+    // Action-time store read: grab the frame that's on screen when the user
+    // clicks, not a closure value from the last App render.
+    const playheadNow = getPlayheadFrames();
+    const seconds = playheadNow / r;
     const base = sanitizeFilename(metadata.title || "frame");
-    const tcLabel = framesToTc(playheadFrames, fps).replace(/:/g, "");
+    const tcLabel = framesToTc(playheadNow, fps).replace(/:/g, "");
     const defaultName = `${base}_${tcLabel}.jpg`;
     try {
       const dest = await saveDialog({
@@ -2256,7 +2255,7 @@ export default function App() {
       });
       if (!dest) return;
       setSnapshotBusy(true);
-      appendLog("info", "snapshot", `Grabbing frame at ${framesToTc(playheadFrames, fps)} (${seconds.toFixed(2)}s)…`);
+      appendLog("info", "snapshot", `Grabbing frame at ${framesToTc(playheadNow, fps)} (${seconds.toFixed(2)}s)…`);
       // Defensive cast — a stale dev server still has the old `extract_frame`
       // signature (returns void), which surfaces here as a null result and
       // the .width access would TypeError out. We treat any non-object
@@ -2346,7 +2345,7 @@ export default function App() {
     } finally {
       setSnapshotBusy(false);
     }
-  }, [metadata, sourceKind, localFilePath, snapshotBusy, fps, playheadFrames, exportOpts.folder, defaults.useWebCodecsDecoder, appendLog, notify, pushNotification]);
+  }, [metadata, sourceKind, localFilePath, snapshotBusy, fps, exportOpts.folder, defaults.useWebCodecsDecoder, appendLog, notify, pushNotification]);
 
   /**
    * Resolve the per-month subdirectory inside the transcript library
@@ -2989,18 +2988,18 @@ export default function App() {
       p.pause();
       p.seekTo(next / r);
     }
-    setPlayheadFrames(next);
-  }, [durationFrames, fps, exitShuttle, setPlayheadFrames]);
+    publishPlayheadFrames(next);
+  }, [durationFrames, fps, exitShuttle]);
 
   const seekBySeconds = useCallback((deltaSec: number) => {
     exitShuttle();
     const r = Math.max(1, Math.round(fps));
     const p = playerRef.current;
-    const currentSec = p?.isReady() ? (p.getCurrentTime?.() ?? 0) : playheadFrames / r;
+    const currentSec = p?.isReady() ? (p.getCurrentTime?.() ?? 0) : getPlayheadFrames() / r;
     const targetSec = Math.max(0, Math.min((durationFrames - 1) / r, currentSec + deltaSec));
-    setPlayheadFrames(Math.floor(targetSec * r));
+    publishPlayheadFrames(Math.floor(targetSec * r));
     if (p?.isReady()) p.seekTo(targetSec);
-  }, [fps, playheadFrames, durationFrames, exitShuttle]);
+  }, [fps, durationFrames, exitShuttle]);
 
   // Max |shuttle rate| for the ACTIVE player. The MSE web stream caps at 4× —
   // reverse scans only the buffered window and forward playbackRate beyond
@@ -3039,34 +3038,44 @@ export default function App() {
   }, [isPlaying, onStep, applyShuttle, playerShuttleCap]);
 
   // The players self-terminate a shuttle at the media bounds (reverse hits 0 /
-  // forward hits the end) without a callback; mirror that here so the badge
-  // clears and the next J/L starts from a clean slate.
+  // forward hits the end) without a callback; watch the playhead STORE while a
+  // shuttle is active so the badge clears and the next J/L starts from a clean
+  // slate. A subscription, not state — the per-tick edge check must not
+  // re-render App.
   useEffect(() => {
     if (shuttleRate === 0 || durationFrames <= 0) return;
-    if ((shuttleRate < 0 && playheadFrames <= 0)
-     || (shuttleRate > 1 && playheadFrames >= durationFrames - 1)) applyShuttle(0);
-  }, [shuttleRate, playheadFrames, durationFrames, applyShuttle]);
+    const check = () => {
+      const f = getPlayheadFrames();
+      if ((shuttleRate < 0 && f <= 0)
+       || (shuttleRate > 1 && f >= durationFrames - 1)) applyShuttle(0);
+    };
+    check(); // the edge may already be behind us the moment the shuttle starts
+    return subscribePlayhead(check);
+  }, [shuttleRate, durationFrames, applyShuttle]);
 
   const onMarkIn = useCallback(() => {
     const r = Math.max(1, Math.round(fps));
+    // Action-time store read: mark the frame on screen when the key lands.
+    const f = getPlayheadFrames();
     // If an out mark already exists and the playhead is past it, bump out a frame.
     setInFrames(() => {
-      if (outFrames != null && playheadFrames >= outFrames) {
+      if (outFrames != null && f >= outFrames) {
         return Math.max(0, outFrames - r);
       }
-      return playheadFrames;
+      return f;
     });
-  }, [playheadFrames, outFrames, fps]);
+  }, [outFrames, fps]);
 
   const onMarkOut = useCallback(() => {
     const r = Math.max(1, Math.round(fps));
+    const f = getPlayheadFrames();
     setOutFrames(() => {
-      if (inFrames != null && playheadFrames <= inFrames) {
+      if (inFrames != null && f <= inFrames) {
         return Math.min(Math.max(0, durationFrames - 1), inFrames + r);
       }
-      return playheadFrames;
+      return f;
     });
-  }, [playheadFrames, inFrames, fps, durationFrames]);
+  }, [inFrames, fps, durationFrames]);
 
   // Clear literally clears — no selection at all.
   const onClearMarks = useCallback(() => {
@@ -3078,7 +3087,7 @@ export default function App() {
     if (inFrames == null) return;
     exitShuttle();
     const r = Math.max(1, Math.round(fps));
-    setPlayheadFrames(inFrames);
+    publishPlayheadFrames(inFrames);
     playerRef.current?.seekTo?.(inFrames / r);
   }, [inFrames, fps, exitShuttle]);
 
@@ -3086,7 +3095,7 @@ export default function App() {
     if (outFrames == null) return;
     exitShuttle();
     const r = Math.max(1, Math.round(fps));
-    setPlayheadFrames(outFrames);
+    publishPlayheadFrames(outFrames);
     playerRef.current?.seekTo?.(outFrames / r);
   }, [outFrames, fps, exitShuttle]);
 
@@ -3094,7 +3103,7 @@ export default function App() {
     exitShuttle();
     const r = Math.max(1, Math.round(fps));
     const clamped = Math.max(0, Math.min(Math.max(0, durationFrames - 1), f));
-    setPlayheadFrames(clamped);
+    publishPlayheadFrames(clamped);
     playerRef.current?.seekTo?.(clamped / r);
   }, [durationFrames, fps, exitShuttle]);
 
@@ -3352,14 +3361,22 @@ export default function App() {
   // Cross-window state-sync bridge lives in src/hooks/use-panel-bus.ts.
   // We hand it the rendered snapshot + freshly-bound handlers; the hook
   // owns the listeners, the ref discipline, and the popout dispatch.
-  // r82: the playhead is now ONE clock across every path — the audio-master
-  // twin drives streaming time off the heard audio, and local/download use
-  // the native/AudioContext clock — so the transcript highlight, the on-video
-  // caption, the scrubber, and click-to-seek all read the same value with no
-  // offset. (This retired the captionSyncSec band-aid, whose highlight-only
-  // offset put highlight and click-to-seek in different time domains.)
+  //
+  // The popped-out panel is a separate webview — it can't subscribe to this
+  // window's playhead store, so its snapshot carries the playhead as data.
+  // This 4 Hz mirror is deliberately the ONLY App re-render the playhead
+  // causes anymore (and only while a panel is actually detached + playing);
+  // the docked UI reads the store directly at full tick rate. The panel's
+  // karaoke stepping at 4 Hz is the accepted trade for a quiet App tree.
+  const [panelPlayheadFrames, setPanelPlayheadFrames] = useState(0);
+  useEffect(() => {
+    if (!panelDetached) return;
+    setPanelPlayheadFrames(getPlayheadFrames()); // seed the pop-out instantly
+    const iv = window.setInterval(() => setPanelPlayheadFrames(getPlayheadFrames()), 250);
+    return () => window.clearInterval(iv);
+  }, [panelDetached]);
   const transcriptPlayhead = hasSource
-    ? playheadFrames / Math.max(1, Math.round(fps))
+    ? panelPlayheadFrames / Math.max(1, Math.round(fps))
     : null;
 
   // Review comment markers for the monitor timeline — re-read whenever the
@@ -3397,7 +3414,9 @@ export default function App() {
   // relay never echoes your own presence back).
   const [coGhosts, setCoGhosts] = useState<{ name: string; position: number; at: number }[]>([]);
   const coSeqRef = useRef(0);
-  const coPlayheadRef = useRef(0); coPlayheadRef.current = playheadFrames;
+  // No playhead ref here — the heartbeat/presence/chase callbacks below read
+  // getPlayheadFrames() when they fire (a render-mirrored ref would go stale
+  // now that playback ticks don't re-render App).
   const coPlayingRef = useRef(false); coPlayingRef.current = isPlaying;
   const coFpsRef = useRef(30); coFpsRef.current = fps;
   const coRoleRef = useRef("off"); coRoleRef.current = coSession.role;
@@ -3474,7 +3493,7 @@ export default function App() {
         coReadyRef.current = true;
         const r = Math.max(1, Math.round(coFpsRef.current));
         const expected = m.position + (m.playing ? (Math.max(0, Date.now() - m.atMs) / 1000) * m.rate : 0);
-        const cur = coPlayheadRef.current / r;
+        const cur = getPlayheadFrames() / r;
         const hostScrubbed = coLastHostPosRef.current === null || Math.abs(m.position - coLastHostPosRef.current) > 0.25;
         coLastHostPosRef.current = m.position;
         // Follow: while playing, chase drift > 0.5 s. While paused, only jump
@@ -3543,7 +3562,7 @@ export default function App() {
       const msg: SessionMsg = {
         kind: "transport",
         playing: coPlayingRef.current,
-        position: coPlayheadRef.current / r,
+        position: getPlayheadFrames() / r,
         rate: 1,
         atMs: Date.now(),
         seq: ++coSeqRef.current,
@@ -3561,7 +3580,7 @@ export default function App() {
     const send = () => {
       const me = loadReviewer().name || (coRoleRef.current === "host" ? "Host" : "Guest");
       const r = Math.max(1, Math.round(coFpsRef.current));
-      sendSessionMsg({ kind: "presence", name: me, position: coPlayheadRef.current / r });
+      sendSessionMsg({ kind: "presence", name: me, position: getPlayheadFrames() / r });
       const now = Date.now();
       setCoGhosts((prev) => prev.filter((g) => now - g.at < 5000));
     };
