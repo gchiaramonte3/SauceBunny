@@ -63,7 +63,7 @@
       "../licenses/GPLv3.txt": "licenses/"
     },
     "macOS": {
-      "minimumSystemVersion": "13.0",
+      "minimumSystemVersion": "14.0",
       "entitlements": "entitlements.plist"
     },
     "category": "public.app-category.video"

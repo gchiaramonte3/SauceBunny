@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/gchiaramonte3/SauceBunny/actions/workflows/ci.yml/badge.svg)](https://github.com/gchiaramonte3/SauceBunny/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Platform: macOS 13+ · Apple Silicon](https://img.shields.io/badge/platform-macOS%2013%2B%20·%20Apple%20Silicon-black)
+![Platform: macOS 14+ · Apple Silicon](https://img.shields.io/badge/platform-macOS%2014%2B%20·%20Apple%20Silicon-black)
 ![Built with Tauri 2 · React 18](https://img.shields.io/badge/built%20with-Tauri%202%20·%20React%2018-24C8DB)
 
 **Local-first macOS app for pulling, transcribing, and clipping video — no cloud, no accounts, no telemetry.**
@@ -29,7 +29,7 @@ Use it on content you have the rights to clip.
 
 ## Install
 
-**Requirements:** macOS 13+ (14+ recommended for diarization), Apple Silicon.
+**Requirements:** macOS 14+, Apple Silicon.
 
 Grab the notarized `.dmg` from [Releases](../../releases) — or build from source:
 
