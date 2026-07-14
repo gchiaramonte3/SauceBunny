@@ -19,6 +19,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { formatError } from "../lib/error-format";
+import { getPlayheadFrames } from "../lib/playhead-store";
 import {
   loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc,
   commentMarkers as reviewMarkersOf, annotationsOf,
@@ -45,8 +46,11 @@ export type ReviewAnnotationView = {
 };
 
 type Args = {
-  /** Live transport values — mirrored into refs for the interval senders. */
-  playheadFrames: number;
+  /** Live transport values — mirrored into refs for the interval senders.
+   *  (The playhead is NOT passed: it lives in lib/playhead-store, and the
+   *  heartbeat/presence/chase read getPlayheadFrames() when they fire — a
+   *  render-mirrored ref would go stale now that playback ticks don't
+   *  re-render App.) */
   isPlaying: boolean;
   fps: number;
   /** Committed web-source URL (null = none/local). The host pushes it to peers. */
@@ -93,7 +97,7 @@ export type CoReview = {
 };
 
 export function useCoReview({
-  playheadFrames, isPlaying, fps,
+  isPlaying, fps,
   activeSourceUrl, activeSourceUrlRef, reviewSourceKey,
   playerRef, metadataRef,
   onSeek, setUrl, handleFetch,
@@ -109,7 +113,6 @@ export function useCoReview({
   // relay never echoes your own presence back).
   const [coGhosts, setCoGhosts] = useState<{ name: string; position: number; at: number }[]>([]);
   const coSeqRef = useRef(0);
-  const coPlayheadRef = useRef(0); coPlayheadRef.current = playheadFrames;
   const coPlayingRef = useRef(false); coPlayingRef.current = isPlaying;
   const coFpsRef = useRef(30); coFpsRef.current = fps;
   const coRoleRef = useRef("off"); coRoleRef.current = coSession.role;
@@ -181,7 +184,7 @@ export function useCoReview({
         coReadyRef.current = true;
         const r = Math.max(1, Math.round(coFpsRef.current));
         const expected = m.position + (m.playing ? (Math.max(0, Date.now() - m.atMs) / 1000) * m.rate : 0);
-        const cur = coPlayheadRef.current / r;
+        const cur = getPlayheadFrames() / r;
         const hostScrubbed = coLastHostPosRef.current === null || Math.abs(m.position - coLastHostPosRef.current) > 0.25;
         coLastHostPosRef.current = m.position;
         // Follow: while playing, chase drift > 0.5 s. While paused, only jump
@@ -250,7 +253,7 @@ export function useCoReview({
       const msg: SessionMsg = {
         kind: "transport",
         playing: coPlayingRef.current,
-        position: coPlayheadRef.current / r,
+        position: getPlayheadFrames() / r,
         rate: 1,
         atMs: Date.now(),
         seq: ++coSeqRef.current,
@@ -268,7 +271,7 @@ export function useCoReview({
     const send = () => {
       const me = loadReviewer().name || (coRoleRef.current === "host" ? "Host" : "Guest");
       const r = Math.max(1, Math.round(coFpsRef.current));
-      sendSessionMsg({ kind: "presence", name: me, position: coPlayheadRef.current / r });
+      sendSessionMsg({ kind: "presence", name: me, position: getPlayheadFrames() / r });
       const now = Date.now();
       setCoGhosts((prev) => prev.filter((g) => now - g.at < 5000));
     };

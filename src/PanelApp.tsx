@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
 import { QueueDrawer } from "./components/QueueDrawer";
-import { PANEL_SNAPSHOT_KEY, type PanelSnapshot } from "./hooks/use-panel-bus";
+import { setPlayheadFrames } from "./lib/playhead-store";
+import { PANEL_SNAPSHOT_KEY, PANEL_PLAYHEAD_EVENT, type PanelSnapshot } from "./hooks/use-panel-bus";
 import type { TranscriptHistoryEntry } from "./lib/transcript-history";
 
 /**
@@ -114,6 +115,39 @@ export default function PanelApp() {
     };
   }, []);
 
+  // This window is its own JS context with its own playhead-store instance —
+  // the main window's live clock reaches us only as DATA. Two feeds write the
+  // store (TranscriptViewer's karaoke reads the same subscription API in both
+  // windows): (1) every snapshot's transcriptPlayhead — the boot seed and the
+  // authoritative value on pause/seek/source-change publishes; (2) the 4 Hz
+  // `panel:playhead` heartbeat main emits while the playhead is actually
+  // moving (see use-panel-bus.ts) — the live feed the karaoke steps on.
+  // Math.round undoes the frames→seconds→frames FP round-trip.
+  const fpsRef = useRef(state.fps);
+  fpsRef.current = state.fps;
+  useEffect(() => {
+    const r = Math.max(1, Math.round(state.fps));
+    setPlayheadFrames(state.transcriptPlayhead != null ? Math.round(state.transcriptPlayhead * r) : 0);
+  }, [state.transcriptPlayhead, state.fps]);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    (async () => {
+      const off = await listen<{ seconds: number }>(PANEL_PLAYHEAD_EVENT, (e) => {
+        if (cancelled) return;
+        const r = Math.max(1, Math.round(fpsRef.current));
+        setPlayheadFrames(Math.round(e.payload.seconds * r));
+      });
+      if (cancelled) { off(); return; }
+      unlisten = off;
+    })();
+    // Deliberately does NOT bump lastEventAtRef: the heartbeat proves the
+    // playhead channel is alive, not that snapshot events are — the
+    // reconciliation poll below must still be able to catch a dropped
+    // `panel:state`.
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
+
   // SAFETY NET: a slow reconciliation poll against the localStorage mirror
   // (written by main on every publish). Only consulted after RECONCILE_MS of
   // event silence, so while events flow it does nothing; if they ever prove
@@ -153,7 +187,7 @@ export default function PanelApp() {
         onStop={() => sendAction("stop")}
         transcriptPath={state.transcriptPath}
         transcriptOrigin={state.transcriptOrigin}
-        transcriptPlayhead={state.transcriptPlayhead}
+        playheadAvailable={state.transcriptPlayhead != null}
         transcriptFps={state.fps}
         onTranscriptSeek={(seconds) => sendAction("seek", { seconds })}
         transcriptArrivedTick={state.transcriptArrivedTick}

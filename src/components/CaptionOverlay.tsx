@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { usePlayheadSeconds } from "../lib/playhead-store";
 import { parseSrt, type Cue } from "../lib/srt";
 import {
   loadSpeakerOverrides,
@@ -114,8 +115,9 @@ type Props = {
    *  overwrite the SAME path, so without this the overlay would keep showing
    *  the old cues the user just paid a Whisper run to replace. */
   reloadToken?: number;
-  /** Current playhead position, in seconds. */
-  currentSec: number;
+  /** Source frame rate — converts the store's frame playhead to the seconds
+   *  the cue lookup runs in (same clock as the transcript highlight). */
+  fps: number;
   /** Whether the captions toggle in the transport bar is on. */
   enabled: boolean;
   /** Appearance overrides; falls back to CSS defaults when omitted. */
@@ -131,7 +133,11 @@ type Props = {
  * WKWebView would render a native <track>. It also means the diarized
  * speaker name rides along on screen.
  */
-export function CaptionOverlay({ path, reloadToken, currentSec, enabled, style }: Props) {
+export function CaptionOverlay({ path, reloadToken, fps, enabled, style }: Props) {
+  // Live playhead from the store — this overlay is one of the few 60Hz
+  // subscribers. Gated on `enabled` so a hidden overlay doesn't re-render on
+  // every tick (the snapshot pins to null → no notifications reach React).
+  const currentSec = usePlayheadSeconds(fps, enabled) ?? 0;
   const [cues, setCues] = useState<Cue[]>([]);
   // The path+token the current `cues` belong to. Guards against showing one
   // source's captions over another's video during the async load gap, while

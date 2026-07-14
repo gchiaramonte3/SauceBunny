@@ -4,12 +4,22 @@ import {
 } from "./Icons";
 import { VolumeControl } from "./VolumeControl";
 import { SpeedControl } from "./SpeedControl";
+import { usePlayheadFrames } from "../lib/playhead-store";
+import { framesToTc } from "../lib/timecode";
 import type { AppStatus } from "../types";
+
+/** Live playhead readout — the one part of the transport that ticks at up to
+ *  60Hz, so it alone subscribes to the playhead store. The rest of the bar
+ *  (buttons, volume, duration) renders only when its own props change. */
+function PlayheadTc({ fps }: { fps: number }) {
+  const frames = usePlayheadFrames();
+  return <div className="cp-tc">{framesToTc(frames, fps)}</div>;
+}
 
 type Props = {
   status: AppStatus;
   isPlaying: boolean;
-  playheadTc: string;
+  fps: number;
   durationTc: string;
   captionsOn: boolean;
   snapshotBusy: boolean;
@@ -33,7 +43,7 @@ type Props = {
 
 export function Transport({
   status, isPlaying,
-  playheadTc, durationTc,
+  fps, durationTc,
   captionsOn, snapshotBusy, canSnapshot,
   volume, muted, playbackRate, playbackRateSupported,
   onPlayToggle, onStep, onMarkIn, onMarkOut, onClearMarks, onToggleCaptions, onSnapshot,
@@ -49,7 +59,7 @@ export function Transport({
     >
       {/* LEFT — current playhead */}
       <div className="cp-transport-side left">
-        <div className="cp-tc">{playheadTc}</div>
+        <PlayheadTc fps={fps} />
       </div>
 
       {/* CENTER — primary playback controls, dead center */}

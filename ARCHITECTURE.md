@@ -215,6 +215,15 @@ A one-shot migration helper at app boot copies any leftover `clippull.*` keys to
 
 **Scoped undo/redo** (`src/lib/undo.ts`): one module-level stack (`appUndo`, ⌘Z/⇧⌘Z, capped at 50) covering in/out marks and the user's OWN review ops — never peer-originated co-review changes (entries are pushed only from ReviewPanel's local mutation funnel; inverse ops are built by `inverseReviewOps` in `review.ts` with fresh LWW timestamps). App clears the stack on source change and co-review join/leave. The annotation draft keeps a separate in-composer snapshot history (⌘Z removes the last stroke/label while drawing) because draft state dies with the draft. Inside text fields the shortcut deliberately falls through to the native Edit ▸ Undo menu item, so field-level text undo is untouched.
 
+### The playhead (subscription store, not state)
+
+The one deliberate exception to "state lives in App" is the playhead. It ticks up to 60×/sec while media plays, and as App-level state it re-rendered the entire (unmemoized) App tree per frame — and memoizing wasn't the fix, because Monitor's ~50-prop surface makes the prop-compare itself per-frame work. It lives outside React in `src/lib/playhead-store.ts` (canonical unit: integer frames, the same quantization the old state used, so every derived clock keeps agreeing — the store fans out the r88 single clock, it is never a second one):
+
+- **Writers** — the active player's `onTimeUpdate`, every seek/step/reset path in `App.tsx`, and `PanelApp` (the floating panel is a separate webview with its own store instance; it feeds its store from the two cross-window channels below).
+- **Render subscribers** (`useSyncExternalStore`, full tick rate) — the Transport timecode, the Timeline scrub cursor, `CaptionOverlay`'s cue lookup, `TranscriptViewer`'s karaoke highlight, `ReviewPanel`'s composer timestamp, and Monitor's annotation proximity fade. All leaves — a playback tick re-renders a handful of tiny components, never the tree.
+- **Action-time readers** — mark in/out, frame snapshot, seek-by-seconds, and the co-review heartbeat/presence/chase call `getPlayheadFrames()` when they fire; the shuttle edge-stop watches via a plain subscription (no re-render at all).
+- **Cross-window feed** — the popped-out panel can't subscribe across webviews, so the playhead reaches it as data, without re-rendering App: the change-driven `panel:state` snapshot carries the position as of its publish (the boot seed + the pause/seek truth), and `use-panel-bus` emits a lightweight `panel:playhead` heartbeat (4 Hz, only while a panel is detached and the playhead actually moved) that PanelApp writes into its window's store. The live clock deliberately stays OUT of the snapshot so playback never re-serializes it.
+
 ## Build-ID handshake
 
 Both sides of the IPC carry a build-ID string:
@@ -227,11 +236,10 @@ Bump both whenever you change a Rust command's signature or add a new one.
 
 ## Roadmap
 
-Done since this list was written: the commands.rs split (r47 — `commands/{download,media,transcript,system}.rs`), the floating side-panel window (r44.B), typed errors via `AppError` (r50–51), generated TS bindings via ts-rs (r49), unit tests for the pure logic in CI (r86 — vitest + `cargo test --lib`). The `api.ts` wrapper experiment was retired in r86: the codebase calls `invoke()` directly, typed by the generated bindings.
+Done since this list was written: the commands.rs split (r47 — `commands/{download,media,transcript,system}.rs`), the floating side-panel window (r44.B), typed errors via `AppError` (r50–51), generated TS bindings via ts-rs (r49), unit tests for the pure logic in CI (r86 — vitest + `cargo test --lib`), and the playhead-tick render costs — the karaoke highlight's O(turns²) bookkeeping is precomputed in memos (`68d4a25`), and the playhead itself moved to a subscription store so playback ticks re-render only the leaves that paint it (see "State management"). The `api.ts` wrapper experiment was retired in r86: the codebase calls `invoke()` directly, typed by the generated bindings.
 
 Remaining, roughly in priority order:
 
 1. **UI smoke harness** — unit tests cover the parsers/math; playback and the transcript pipeline are still verified manually. A Playwright (or tauri-driver) smoke run would close that gap.
 2. **First public release** — tagged v0.1.0 with a notarized .dmg (see DISTRIBUTION.md), plus an app-update story (tauri-plugin-updater) and a plan for yt-dlp staleness (YouTube breaks extractors faster than app releases ship).
-3. **Transcript render performance** — the karaoke highlight recomputes O(turns²) bookkeeping per playhead tick; fine for normal transcripts, measurable on multi-hour ones.
-4. **Linux / Windows builds** — macOS-first while we hit 1.0; cross-platform after.
+3. **Linux / Windows builds** — macOS-first while we hit 1.0; cross-platform after.

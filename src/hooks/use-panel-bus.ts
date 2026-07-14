@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit, type UnlistenFn } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getPlayheadFrames, playheadFramesToSeconds } from "../lib/playhead-store";
 import type { QueuedClip } from "../types";
 import type { TranscriptHistoryEntry } from "../lib/transcript-history";
 
@@ -15,6 +16,10 @@ import type { TranscriptHistoryEntry } from "../lib/transcript-history";
  *                    (debounced ~50ms), and mirrors the same payload to
  *                    localStorage for the panel's boot seed + slow
  *                    reconciliation poll. Idle = zero emits, zero writes.
+ *                    Plus one deliberate side-channel: `panel:playhead`,
+ *                    a 4 Hz playhead-only heartbeat while a panel is
+ *                    detached and the playhead is moving (see below) —
+ *                    the live clock stays OUT of the snapshot.
  *   - panel → main:  fires `panel:action:<kind>` for each user action,
  *                    plus `panel:request-state` on mount — main replies
  *                    with an immediate `panel:state` publish. The panel
@@ -46,6 +51,12 @@ export type PanelSnapshot = {
   hasFolder: boolean;
   transcriptPath: string | null;
   transcriptOrigin: "captions" | "whisper" | "unknown";
+  /** Playhead seconds AT PUBLISH TIME, or null with no source. Deliberately
+   *  low-frequency: the playhead lives in lib/playhead-store and no longer
+   *  re-renders App per tick, so this field only refreshes when some other
+   *  state change publishes a snapshot (pause, seek-adjacent state, queue
+   *  edits…). It is the panel's boot seed + paused-position truth; the LIVE
+   *  feed is the `panel:playhead` heartbeat below. */
   transcriptPlayhead: number | null;
   transcriptArrivedTick: number;
   regenerateBusy: boolean;
@@ -119,10 +130,19 @@ export function panelSnapshotsEqual(a: PanelSnapshot, b: PanelSnapshot): boolean
   );
 }
 
-/** Debounce window for change-driven publishes. Long enough to coalesce the
- *  per-frame playhead into ~20 events/sec while playing, short enough that a
- *  queue edit feels instant in the floating window. */
+/** Debounce window for change-driven publishes. Short enough that a queue
+ *  edit feels instant in the floating window; long enough to coalesce a
+ *  burst of related state flips into one serialize+emit. (The playhead no
+ *  longer rides renders per frame — see the `panel:playhead` side-channel.) */
 const PUBLISH_DEBOUNCE_MS = 50;
+
+/** Event name for the playhead-only side-channel (main → panel). */
+export const PANEL_PLAYHEAD_EVENT = "panel:playhead";
+
+/** Heartbeat period for `panel:playhead` — 4 Hz, the cadence the playhead
+ *  branch established for the panel mirror. The panel karaoke marks whole
+ *  cues, so stepping at 250ms is indistinguishable from per-frame there. */
+const PANEL_PLAYHEAD_MS = 250;
 
 const INITIAL_SNAPSHOT: PanelSnapshot = {
   queue: [],
@@ -171,8 +191,25 @@ export function usePanelBus({
   const lastPublishedRef = useRef<PanelSnapshot | null>(null);
   const publishTimer = useRef<number | null>(null);
 
+  // Last playhead (frames) sent over `panel:playhead` — the value-change gate
+  // for the heartbeat below. NaN ≠ anything, so the first beat always sends.
+  const lastPlayheadSentRef = useRef(Number.NaN);
+  const emitPlayheadBeat = useCallback((force = false) => {
+    const frames = getPlayheadFrames();
+    if (!force && frames === lastPlayheadSentRef.current) return;
+    lastPlayheadSentRef.current = frames;
+    void emit(PANEL_PLAYHEAD_EVENT, {
+      seconds: playheadFramesToSeconds(frames, snapshotRef.current.fps),
+    });
+  }, []);
+
   // Write-then-emit so the mirror is never behind the event a consumer is
-  // reacting to. Not debounced itself — callers gate it.
+  // reacting to. Not debounced itself — callers gate it. Every publish is
+  // chased by a FORCED playhead beat: the snapshot's transcriptPlayhead is
+  // only as fresh as App's last render (playback no longer re-renders App),
+  // so the store-fresh beat corrects it — and the request-state reply is how
+  // a freshly-popped panel gets its first live position even while paused
+  // (any beat emitted before the panel's listener existed was dropped).
   const publishNow = useCallback(() => {
     if (publishTimer.current != null) {
       window.clearTimeout(publishTimer.current);
@@ -182,7 +219,8 @@ export function usePanelBus({
     lastPublishedRef.current = snap;
     try { localStorage.setItem(PANEL_SNAPSHOT_KEY, JSON.stringify(snap)); } catch { /* quota */ }
     void emit("panel:state", snap);
-  }, []);
+    emitPlayheadBeat(true);
+  }, [emitPlayheadBeat]);
 
   useEffect(() => {
     snapshotRef.current = snapshot;
@@ -197,6 +235,30 @@ export function usePanelBus({
       publishNow();
     }, PUBLISH_DEBOUNCE_MS);
   }, [panelDetached, snapshot, publishNow]);
+
+  // ── Live playhead side-channel ───────────────────────────────────
+  // The floating panel's transcript karaoke needs a live-ish playhead, but
+  // neither existing channel can carry it now that the playhead lives in
+  // lib/playhead-store instead of App state (r: playhead subscription store):
+  // the change-driven snapshot above only publishes when App re-renders with
+  // changed content — playback ticks no longer re-render App at all — and
+  // stuffing the 60Hz clock back into the snapshot would mean re-serializing
+  // the whole payload per frame, exactly the churn the event rewrite removed.
+  // So the playhead gets its own LIGHTWEIGHT event: while a panel is
+  // detached, a 4 Hz timer reads the store and emits `panel:playhead`
+  // {seconds} — but only when the value actually moved since the last beat,
+  // so a paused, untouched playhead emits nothing while both playback AND
+  // paused scrubbing stream at 4 Hz. The panel writes it into its own
+  // window's playhead store and the karaoke steps at that cadence (it marks
+  // whole cues — 4 Hz is visually identical). Authoritative positions still
+  // ride the snapshot's transcriptPlayhead on real publishes; this channel
+  // is just the in-between-beats motion.
+  useEffect(() => {
+    if (!panelDetached) return;
+    emitPlayheadBeat();
+    const iv = window.setInterval(() => emitPlayheadBeat(), PANEL_PLAYHEAD_MS);
+    return () => window.clearInterval(iv);
+  }, [panelDetached, emitPlayheadBeat]);
 
   // The panel window outlives a main-window reload (dev reload, crash
   // recovery): React state resets to docked and publishing would stop
