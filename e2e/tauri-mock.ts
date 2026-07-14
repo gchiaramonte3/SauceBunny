@@ -21,6 +21,13 @@ export function tauriMockInit(expectedBuildId: string): void {
   // Shaped responses for the commands the shell actually calls on boot /
   // first interaction. Anything not listed resolves to null — the app's
   // error paths tolerate that, and the smoke run watches for pageerrors.
+  //
+  // The review store hydrates BEFORE first render (main.tsx): it derives its
+  // Reviews dir from default_transcript_library_path, then reads index.json
+  // via read_text_file_capped. Returning a real-looking path here exercises
+  // that whole path; the null fallthrough for read_text_file_capped reads as
+  // "no index yet" (fresh store), and ensure_dir_exists/write_bytes_to_path
+  // null-resolve as success — boot never blocks on hydration.
   const table: Record<string, unknown> = {
     get_backend_build_id: expectedBuildId,
     get_cache_stats: { total_bytes: 0, entries: 0, files: [] },
@@ -28,6 +35,7 @@ export function tauriMockInit(expectedBuildId: string): void {
     list_llm_models: [],
     list_audio_input_devices: [],
     get_downloaded_models: [],
+    default_transcript_library_path: "/e2e-mock/Documents/Sauce Bunny/Transcripts",
   };
 
   // The event plugin's unlisten path calls this directly (event.js).

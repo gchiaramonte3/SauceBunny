@@ -3,16 +3,21 @@
  *
  * This is a native re-implementation of the portable core of FreeFrame's review
  * domain (MIT) adapted to Sauce Bunny's constraints: no server, no DB, no auth —
- * everything persists to localStorage, keyed per source. The shape mirrors
+ * everything persists locally, keyed per source. The shape mirrors
  * FreeFrame (timecode_start/end seconds, threaded comments via parentId,
  * per-version approval) so the UX maps 1:1, minus the multi-user/cloud pieces
  * (share tokens, guests, notifications, RBAC) which a local app can't do.
  *
  * Pure ops return a NEW ReviewDoc (never mutate) so React state updates are
- * clean and the logic is unit-testable; persistence is a thin localStorage wrap.
+ * clean and the logic is unit-testable. Docs persist as real files in
+ * `~/Documents/Sauce Bunny/Reviews/` through lib/review-store.ts (hydrated at
+ * boot, write-through on save) — localStorage's ~5 MB quota was a ceiling
+ * annotation-heavy docs would hit. Small prefs (reviewer identity, history,
+ * fingerprint index) stay in localStorage.
  */
 
 import { loadJson, saveJson } from "./storage";
+import { getReviewDoc, putReviewDoc } from "./review-store";
 import { secondsToHms, secondsToTc } from "./timecode";
 
 export type ReviewStatusState = "pending" | "approved" | "changes";
@@ -89,15 +94,16 @@ function newId(): string {
 }
 
 // ── persistence ──────────────────────────────────────────────────────────────
-const KEY_PREFIX = "saucebunny.review.";
-const reviewKey = (sourceKey: string) => KEY_PREFIX + sourceKey;
+// Docs live in review-store's in-memory Map (hydrated from
+// ~/Documents/Sauce Bunny/Reviews/ at boot), which is what keeps loadReview
+// SYNCHRONOUS for its many call sites; saves write through to disk debounced.
 
 export function emptyDoc(sourceKey: string): ReviewDoc {
   return { sourceKey, versions: [], activeVersionId: null, comments: [], status: {} };
 }
 
 export function loadReview(sourceKey: string): ReviewDoc {
-  return ensureCommentIds(loadJson<ReviewDoc>(reviewKey(sourceKey), emptyDoc(sourceKey)));
+  return ensureCommentIds(getReviewDoc(sourceKey) ?? emptyDoc(sourceKey));
 }
 
 /** Backward-compatible read repair: assign an id to any persisted comment that
@@ -114,7 +120,7 @@ export function ensureCommentIds(doc: ReviewDoc): ReviewDoc {
 export const REVIEW_CHANGED_EVENT = "saucebunny:review-changed";
 
 export function saveReview(doc: ReviewDoc): void {
-  saveJson(reviewKey(doc.sourceKey), doc);
+  putReviewDoc(doc);
   try { window.dispatchEvent(new CustomEvent(REVIEW_CHANGED_EVENT, { detail: { sourceKey: doc.sourceKey } })); }
   catch { /* non-DOM context (tests) */ }
 }

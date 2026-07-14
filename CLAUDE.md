@@ -179,7 +179,8 @@ When adding a new cross-window interaction, use this event pattern. Do not intro
 | Whisper models | `app_data_dir()/whisper-models/` |
 | Diarizer models | Bundled or downloaded on first run, cached locally |
 | Transcript library | `~/Documents/Sauce Bunny/Transcripts/YYYY-MM/` |
-| User prefs | `localStorage` namespaced `saucebunny.*` |
+| Review docs | `~/Documents/Sauce Bunny/Reviews/` — one `<slug>-<hash>.json` per source + `index.json`; hydrated at boot, debounced write-through (`src/lib/review-store.ts`); legacy localStorage docs migrated out on first boot |
+| User prefs | `localStorage` namespaced `saucebunny.*` (incl. review history/fingerprint index/reviewer identity — only review DOCS moved to files) |
 
 Do not change these paths without updating both the Rust backend and the frontend.
 
