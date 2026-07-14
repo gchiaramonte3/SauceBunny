@@ -167,6 +167,7 @@ Cross-window communication uses Tauri events, not shared state:
 | `panel:request-state` | panel → main | Panel asks for current state on mount (listener registered before requesting — the mount handshake) |
 | `panel:popped-out` | Rust → main | Notifies main that panel window was created |
 | `panel:closed` | Rust → main | Notifies main that panel window was destroyed |
+| `panel:playhead` | main → panel | 4Hz playhead heartbeat (`{seconds}`) while a panel is detached and the playhead moves — feeds the panel's playhead store; the live clock deliberately stays OUT of `panel:state` snapshots |
 | `saucebunny:speakers-changed` | either window → both | Speaker overrides persisted; consumers re-read localStorage. Same name also fired as a window CustomEvent for the same-window fast path |
 
 Events are the PRIMARY channel — post-registration delivery is reliable in
