@@ -433,6 +433,10 @@
 /* Per-usage width locks (no JS measurement). */
 .cp-sbtn-fetch { min-width: 86px; }
 .cp-sbtn-export { flex: 1; height: 36px; font-size: 13px; }
+/* Spinner-only loading (Fetch passes an empty loadingLabel — "Resolving…"
+   won't fit the 86px lock): drop the empty label span so its flex gap doesn't
+   nudge the spinner off-center. Non-empty labels (Export, etc.) are unaffected. */
+.cp-sbtn-loading span:empty { display: none; }
 
 /* ── GenerateButton resolution flash (extension, not a rewrite) ──
    Reuses .cp-draw + the shared icons. On success/error the sparkle + text

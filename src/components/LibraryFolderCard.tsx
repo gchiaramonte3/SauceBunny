@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { IconFolder } from "./Icons";
 import { useLazyThumbnails } from "../hooks/use-lazy-thumbnails";
 
@@ -23,6 +23,10 @@ type Props = {
 export function LibraryFolderCard({ name, count, posterPaths, onOpen, requestThumb }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const urls = useLazyThumbnails(btnRef, posterPaths, requestThumb);
+  // Poster URLs that failed to load (dead remote / evicted blob) — hide that
+  // stack layer instead of WKWebView's broken-image chrome (LibraryCard's
+  // onError fallback; a Set because the stack shows up to 3 posters).
+  const [brokenUrls, setBrokenUrls] = useState<Set<string>>(new Set());
   const items = `${count} item${count === 1 ? "" : "s"}`;
 
   return (
@@ -45,14 +49,24 @@ export function LibraryFolderCard({ name, count, posterPaths, onOpen, requestThu
             posterPaths
               .map((path, i) => ({ path, i }))
               .reverse()
-              .map(({ path, i }) => (
-                <span
-                  key={path}
-                  className={"cp-lib-stack " + (i === 0 ? "front" : i === 1 ? "mid" : "back")}
-                >
-                  {urls[i] && <img src={urls[i]} alt="" draggable={false} />}
-                </span>
-              ))
+              .map(({ path, i }) => {
+                const u = urls[i];
+                return (
+                  <span
+                    key={path}
+                    className={"cp-lib-stack " + (i === 0 ? "front" : i === 1 ? "mid" : "back")}
+                  >
+                    {u && !brokenUrls.has(u) && (
+                      <img
+                        src={u}
+                        alt=""
+                        draggable={false}
+                        onError={() => setBrokenUrls((prev) => new Set(prev).add(u))}
+                      />
+                    )}
+                  </span>
+                );
+              })
           )}
         </span>
         <span className="cp-lib-card-title">{name}</span>

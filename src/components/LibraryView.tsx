@@ -98,6 +98,9 @@ function requestThumbnail(path: string): Promise<string | null> {
       thumbFailed.add(path);
       return null;
     } finally {
+      // Runs on BOTH resolve and the caught reject, so the slot is always freed
+      // and the next queued waiter always kicked — a failed decode never leaks a
+      // concurrency slot.
       thumbRunning--;
       thumbWaiters.shift()?.();
       thumbPending.delete(path);
@@ -156,14 +159,20 @@ export function LibraryView({
 
   // ── Scan orchestration — sequential, never a Promise.all fan-out ──────
   const scanOne = useCallback(async (root: string) => {
+    // Snapshot the sweep token so a rescan/removal that supersedes us mid-scan
+    // can't let this stale result clobber the newer state — scanAll only checks
+    // the token between roots, never after this async scan lands.
+    const sweep = scanSweepRef.current;
     setScans((s) => ({ ...s, [root]: { status: "loading" } }));
     try {
       const tree = await invoke<LibraryFolder>("scan_library_folder", {
         path: root,
         maxDepth: LIBRARY_SCAN_DEPTH,
       });
+      if (scanSweepRef.current !== sweep) return; // superseded — drop the write
       setScans((s) => ({ ...s, [root]: { status: "ok", tree } }));
     } catch (e) {
+      if (scanSweepRef.current !== sweep) return; // superseded — drop the write
       // Fail loud: the root renders an inline error row, never a silent skip.
       setScans((s) => ({ ...s, [root]: { status: "error", message: formatError(e) } }));
     }
@@ -410,8 +419,14 @@ export function LibraryView({
   );
 
   return (
-    <div
+    // <main> = the Home view's single main landmark (the Clip view's <main> is
+    // [hidden] and out of the a11y tree while Home is active). The header nests
+    // inside it, so cp-lib-head is a section header, not a second top-level
+    // banner. tabIndex={-1} makes .cp-lib a programmatic focus target for the
+    // view switch (a sibling owns that focus move) without entering tab order.
+    <main
       className="cp-lib"
+      tabIndex={-1}
       onKeyDown={(e) => {
         // Esc anywhere in the Library clears an active search.
         if (e.key === "Escape" && query !== "") {
@@ -529,6 +544,6 @@ export function LibraryView({
           </div>
         </>
       )}
-    </div>
+    </main>
   );
 }

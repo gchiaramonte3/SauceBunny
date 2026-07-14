@@ -697,6 +697,11 @@ export default function App() {
     setActiveView(v);
     if (v === "home") setHomeResetTick((t) => t + 1);
   }, [setActiveView]);
+  // Focus targets for keyboard view-switches (⌘1/⌘2): the outgoing view goes
+  // [hidden] and would orphan focus to <body>, so the shortcut moves focus into
+  // the newly-shown view's root (tabindex=-1 containers, see the JSX below).
+  const homeViewRef = useRef<HTMLDivElement>(null);
+  const clipViewRef = useRef<HTMLDivElement>(null);
   // Left source/export sidebar visibility — persisted, mirroring the right
   // drawer's toolbar toggle. Defaults open.
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
@@ -1514,6 +1519,12 @@ export default function App() {
     setTranscriptError(null);
     setTranscriptProgress(0);
     setTranscriptPhase(null);
+    // Per-source button flashes: clear the Fetch/Export/Generate phase state so
+    // a stale check/cross can't stick to the new source or falsely flash. Each
+    // run re-derives its own phase; a fresh source starts idle.
+    setFetchPhase("idle");
+    setExportPhase("idle");
+    setTranscriptResolution(null);
     // Drop the previous video's transcript so the Transcript tab doesn't
     // show stale captions over a different source. The next successful
     // generate/download repopulates it (and bumps arrivedTick to switch
@@ -1553,6 +1564,14 @@ export default function App() {
       localExportCancelRef.current.cancelled = true;
       localExportCancelRef.current = null;
     }
+    // Cancel any in-flight ffmpeg clip export (create_clip) from the previous
+    // source for the same reason as the mediabunny export above — otherwise its
+    // clip-done event would resolve against the wrong source. Mirrors the
+    // captions/transcript stale-job cancels: read the ref, cancel best-effort,
+    // null the state handle.
+    const staleClip = jobIdRef.current;
+    if (staleClip) invoke("cancel_job", { jobId: staleClip }).catch(() => { /* best-effort */ });
+    setJobId(null);
   }, [resetWebPlayback]);
 
   const handleFetch = useCallback(async (urlOverride?: string) => {
@@ -2094,8 +2113,15 @@ export default function App() {
    *  fully handled in here. */
   const loadLocalPath = useCallback(async (
     picked: string,
+    // When an explicit transcript will be attached by the caller (Library
+    // transcript-shelf open), skip the newest-transcript auto-loader so the
+    // user's chosen entry wins the race instead of the auto-loaded one.
+    skipAutoTranscript = false,
   ): Promise<{ message: string; kind: AppError["kind"] | null } | null> => {
     try {
+      // Loading a local source belongs in the Clip view — surface it so a
+      // drop / File-menu import / recent open from the Library is visible.
+      setActiveView("clip");
       resetForNewSource();
       const seq = ++sourceSeqRef.current;
       setStatus("fetching");
@@ -2195,8 +2221,8 @@ export default function App() {
       // Auto-load any prior transcript we generated for this exact file
       // path. Silent miss — first-time imports proceed normally. seq-guarded
       // so a source switch mid-probe can't attach this file's transcript to
-      // the next source.
-      void tryAutoLoadTranscript({ sourcePath: picked }, seq);
+      // the next source. Skipped when the caller will attach an explicit one.
+      if (!skipAutoTranscript) void tryAutoLoadTranscript({ sourcePath: picked }, seq);
       setStatus("loaded");
       // Probe succeeded → the import is a successful load; record it.
       recordRecentSource({
@@ -2279,7 +2305,7 @@ export default function App() {
       setStatus("error");
       return { message: msg, kind: isAppError(err) ? err.kind : null };
     }
-  }, [appendLog, defaults.folder, defaults.useWebCodecsDecoder, resetForNewSource, runPlaybackPrep, recordRecentSource]);
+  }, [appendLog, defaults.folder, defaults.useWebCodecsDecoder, resetForNewSource, runPlaybackPrep, recordRecentSource, setActiveView]);
 
   const handleImportFile = useCallback(async () => {
     const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
@@ -3090,6 +3116,9 @@ export default function App() {
    */
   const loadTranscriptPath = useCallback(async (picked: string) => {
     try {
+      // The transcript lands in the Clip view's Transcript tab — surface that
+      // view so a drop / File-menu import from the Library is visible.
+      setActiveView("clip");
       // Probe — read_text_file_capped errors clearly if the file is
       // missing / too large. We don't load the bytes here; the viewer
       // will read them itself on the path change.
@@ -3108,7 +3137,7 @@ export default function App() {
     } catch (e) {
       pushNotification("error", "Couldn't open transcript", formatError(e));
     }
-  }, [appendLog, pushNotification]);
+  }, [appendLog, pushNotification, setActiveView]);
 
   const handleImportTranscript = useCallback(async () => {
     const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
@@ -3155,14 +3184,15 @@ export default function App() {
     handleOpenRecentSource(entry);
   }, [setActiveView, handleOpenRecentSource]);
 
-  // Transcript-shelf open: load the SOURCE through the existing handlers
-  // (which also auto-attach a prior transcript for local files), then attach
-  // THIS entry via the same handler the Transcript-tab history popover uses.
-  // handleFetch/loadLocalPath clear the transcript synchronously up front, so
-  // the later attach never gets wiped by the reset.
+  // Transcript-shelf open: load the SOURCE through the existing handlers, then
+  // attach THIS entry via the same handler the Transcript-tab history popover
+  // uses. loadLocalPath is told to skip its newest-transcript auto-loader
+  // (skipAutoTranscript) so it can't race and clobber the user's explicit
+  // (possibly older) choice; handleFetch clears the transcript up front but
+  // never auto-attaches for web sources, so no skip flag is needed there.
   const handleLibraryOpenTranscript = useCallback((entry: TranscriptHistoryEntry) => {
     setActiveView("clip");
-    if (entry.sourcePath) void loadLocalPath(entry.sourcePath);
+    if (entry.sourcePath) void loadLocalPath(entry.sourcePath, true);
     else if (entry.sourceUrl) { setUrl(entry.sourceUrl); void handleFetch(entry.sourceUrl); }
     void handleLoadFromHistory(entry);
   }, [setActiveView, loadLocalPath, handleFetch, handleLoadFromHistory]);
@@ -3631,6 +3661,11 @@ export default function App() {
   const registerReviewRangeKeys = useCallback(
     (h: { markIn: () => void; markOut: () => void } | null) => { reviewRangeKeysRef.current = h; }, []);
   const reviewRangeGateRef = useRef({ panelDetached: false, queueOpen: false, reviewSourceKey: null as string | null, hasSource: false });
+  // Latest-value mirror of co-review screening for the keyboard effect — like
+  // reviewRangeGateRef, `screening` is derived later than this effect, so it
+  // can't be a dep. Read in the view-switch cases to no-op ⌘1/⌘2 while the
+  // co-review theater owns the window.
+  const screeningRef = useRef(false);
   // Data-driven: the live event is serialized to a combo and matched against the
   // user-editable binding map (Settings → Commands). The three things that aren't
   // simple action triggers — the timecode-entry HUD, Esc-closes-Settings, and
@@ -3656,8 +3691,24 @@ export default function App() {
         // ⌘1/⌘2 — top-level view switch (nav rail). Global: navigation has
         // to work from a text field too. The Clip view stays mounted either
         // way, so this never interrupts playback or a running job.
-        case "view.home":    setActiveView("home"); break;
-        case "view.clip":    setActiveView("clip"); break;
+        case "view.home":
+        case "view.clip": {
+          // During a co-review screening the theater owns the whole window
+          // (nav rail is CSS-hidden and the theater-exit control lives in the
+          // Clip view) — ⌘1/⌘2 would strand the user with no way back, so
+          // no-op until they leave screening.
+          if (screeningRef.current) break;
+          const v = id === "view.home" ? "home" : "clip";
+          // Route through navigateView (not raw setActiveView) so Home also
+          // bumps homeResetTick like every other nav surface does.
+          navigateView(v);
+          // The outgoing view is about to be [hidden]; if focus lived inside
+          // it, it orphans to <body>. Move focus into the newly-shown view's
+          // root once React commits the unhide (rAF lands after the paint).
+          const viewRef = v === "home" ? homeViewRef : clipViewRef;
+          requestAnimationFrame(() => viewRef.current?.focus());
+          break;
+        }
         case "view.logs":    setLogsOpen((p) => !p); break;
         case "queue.add":    handleAddToQueue(); break;
         case "queue.toggle": setQueueOpen((p) => !p); break;
@@ -3772,7 +3823,7 @@ export default function App() {
     onPlayToggle, shuttleStep, onMarkIn, onMarkOut, onClearMarks,
     onGotoIn, onGotoOut, onStep, onSeek,
     handlePlaybackRateStep, handlePlaybackRateChange,
-    performUndo, performRedo, setActiveView,
+    performUndo, performRedo, navigateView,
   ]);
 
   // ── Native menubar event wiring ─────────────────────────────────
@@ -4004,6 +4055,10 @@ export default function App() {
     pushNotification, setQueueOpen,
     setReviewMarkers, setReviewAnnotations,
   });
+  // Latest-value mirror of screening for the keyboard view-switch gate (see
+  // screeningRef — declared before that effect, mirrored here where screening
+  // is finally in scope).
+  useEffect(() => { screeningRef.current = screening; });
   // Undo hygiene: undoing across sources is nonsense, and entries recorded
   // solo must never replay into a co-review session (or vice versa — their
   // closures route to different docs). Drop the whole stack on either
@@ -4247,7 +4302,7 @@ export default function App() {
         <div className="cp-views">
           {/* Home — the Library (LibraryView.tsx owns roots/scans/search;
               App only supplies the open handlers + recents). */}
-          <div className="cp-view cp-view-home" hidden={activeView !== "home"}>
+          <div ref={homeViewRef} tabIndex={-1} className="cp-view cp-view-home" hidden={activeView !== "home"}>
             <LibraryView
               recentSources={recentSources}
               onOpenLocalPath={handleLibraryOpenLocalPath}
@@ -4263,7 +4318,7 @@ export default function App() {
               co-review sessions, and every listener beneath survive
               browsing the library. Audio deliberately keeps playing on
               Home (streaming-platform behavior — no pause-on-leave). */}
-          <div className="cp-view cp-view-clip" hidden={activeView !== "clip"}>
+          <div ref={clipViewRef} tabIndex={-1} className="cp-view cp-view-clip" hidden={activeView !== "clip"}>
             <Toolbar
               url={url}
               onChange={setUrl}

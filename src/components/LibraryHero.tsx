@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { IconPlay } from "./Icons";
 import { useLazyThumbnails } from "../hooks/use-lazy-thumbnails";
 import { formatTimeAgo } from "../lib/transcript-history";
@@ -32,6 +32,11 @@ export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl, requestTh
   // sources derive a poster URL locally (YouTube) or go without.
   const filePaths = recent?.kind === "file" ? [recent.value] : [];
   const [fileThumb = null] = useLazyThumbnails(ref, filePaths, requestThumb);
+  // Backdrop URL that failed to load — a dead remote thumb or an evicted blob
+  // falls back to the shade over bg-0 instead of WKWebView's broken-image
+  // chrome (mirrors LibraryCard's onError). Stored as the URL, not a boolean:
+  // the Hero persists across source changes, so a new recent must clear it.
+  const [brokenBg, setBrokenBg] = useState<string | null>(null);
 
   if (!recent) {
     return (
@@ -64,7 +69,15 @@ export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl, requestTh
 
   return (
     <section ref={ref} className="cp-lib-hero" aria-label="Continue watching">
-      {backdrop && <img className="cp-lib-hero-bg" src={backdrop} alt="" draggable={false} />}
+      {backdrop && backdrop !== brokenBg && (
+        <img
+          className="cp-lib-hero-bg"
+          src={backdrop}
+          alt=""
+          draggable={false}
+          onError={() => setBrokenBg(backdrop)}
+        />
+      )}
       <div className="cp-lib-hero-shade" />
       <div className="cp-lib-hero-content">
         <span className="cp-lib-hero-kicker">Continue watching</span>

@@ -175,7 +175,10 @@ export function Toolbar({
           className="btn btn-ghost cp-sbtn-fetch"
           phase={fetchPhase}
           idleContent="Fetch"
-          loadingLabel="Resolving…"
+          // Spinner-only while loading: the 86px width lock is too narrow for a
+          // "Resolving…" label, which clipped under the button's overflow:hidden.
+          // The visually-hidden aria-live status still announces "Loading".
+          loadingLabel=""
           onClick={() => onFetch()}
           onResolved={onFetchResolved}
           disabled={!display}
