@@ -10,7 +10,7 @@ import type { SessionState } from "../bindings/SessionState";
  * Phase 1: host shares a one-line join code (iroh ticket, minted in Rust);
  * peers paste it, auto-load the host's source, and follow the host's
  * transport. All session state lives in Rust; this is a pure view over the
- * `session:state` snapshots App receives.
+ * `session:state` snapshots useCoReview receives.
  *
  * The dropdown is PORTALED to document.body with position:fixed — the
  * toolbar's `backdrop-filter: blur(20px)` creates a stacking context, so an

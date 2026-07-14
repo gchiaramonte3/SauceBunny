@@ -39,8 +39,9 @@ src/                          # React 18 + TypeScript (strict)
     mediabunny-helpers.ts
     mediabunny-export.ts
     mediabunny-audio.ts
-  hooks/                      # Custom hooks — only when shared across 3+ components
-                              # (create on first need; not yet present)
+  hooks/                      # Custom hooks — shared 3+ ways, or one cohesive
+                              # subsystem extracted from App.tsx (use-panel-bus,
+                              # use-web-playback, use-co-review)
   styles/
     tokens.css                # Design tokens (colors, spacing, type scale, radii)
     app.css                   # All component styles, organized by section comments
