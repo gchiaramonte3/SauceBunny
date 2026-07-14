@@ -591,10 +591,11 @@ export function ReviewPanel({
   // ── Undo integration (lib/undo.ts) ─────────────────────────────────
   // CO-REVIEW SAFETY: entries are pushed ONLY from this panel's own handlers
   // (via dispatchUndoable below) — the funnel every LOCAL mutation goes
-  // through. Ops arriving from peers land in App's session:msg listener and
-  // never gain an inverse, so ⌘Z can only take back the user's own actions.
-  // App additionally clears the stack on session join/leave and source change,
-  // so a captured entry can never replay against the wrong doc/mode.
+  // through. Ops arriving from peers land in useCoReview's session:msg
+  // listener and never gain an inverse, so ⌘Z can only take back the user's
+  // own actions. App additionally clears the stack on session join/leave and
+  // source change, so a captured entry can never replay against the wrong
+  // doc/mode.
   //
   // Replay is self-contained: in a session it re-enters the op relay; solo it
   // goes straight to localStorage — deliberately NOT through this instance's

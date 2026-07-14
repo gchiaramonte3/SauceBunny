@@ -165,9 +165,11 @@ Key points:
 
 ## P2P co-review (watch party)
 
-`src-tauri/src/commands/session.rs` + the co-review block in `App.tsx`. A
-peer-to-peer collab *primitive* in the same spirit as the stream proxy — not an
-app backend. **Media never transits peers**: everyone plays their own copy of
+`src-tauri/src/commands/session.rs` + `src/hooks/use-co-review.ts` (the whole
+frontend subsystem — session lifecycle, transport follow, shared-doc sync,
+ghost cursors, screening mode — extracted from App.tsx in the same shape as
+`use-panel-bus`/`use-web-playback`). A peer-to-peer collab *primitive* in the
+same spirit as the stream proxy — not an app backend. **Media never transits peers**: everyone plays their own copy of
 the source; only tiny newline-delimited JSON control lines (`SessionMsg`) cross
 the wire.
 
