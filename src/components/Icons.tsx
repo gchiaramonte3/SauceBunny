@@ -320,3 +320,34 @@ export const IconScissors = (p: IconProps) => (
     <path d="M8.12 8.12 12 12" />
   </Icon>
 );
+// Magnifier — the Library header search field.
+export const IconSearch = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m16.2 16.2 4.8 4.8" />
+  </Icon>
+);
+// Plain closed folder — Library collection cards without a poster.
+export const IconFolder = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+  </Icon>
+);
+// Clockwise refresh — the Library rescan action.
+export const IconRefresh = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M21 4v6h-6" />
+    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L21 10" />
+  </Icon>
+);
+// Row-paging chevrons — the Library shelf hover arrows.
+export const IconChevronLeft = (p: IconProps) => (
+  <Icon {...p} strokeWidth={2}>
+    <polyline points="15 6 9 12 15 18" />
+  </Icon>
+);
+export const IconChevronRight = (p: IconProps) => (
+  <Icon {...p} strokeWidth={2}>
+    <polyline points="9 6 15 12 9 18" />
+  </Icon>
+);

@@ -1,0 +1,505 @@
+/* Library (Home view) — LibraryView / Hero / Row / Card / FolderCard.
+   Netflix-style shelves on a full-bleed bg-0 page: quiet, dark, cinematic —
+   the same product voice as the Clip view. Everything cp-lib-*. */
+
+/* ============================================================
+   PAGE — the view's own scroll context (the Clip view keeps
+   playing beneath while this is on screen).
+   ============================================================ */
+.cp-lib {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-0);
+}
+
+/* ── Header: title · search · Add Folder · rescan. Sticky so search and
+      rescan stay reachable while browsing long shelves. ── */
+.cp-lib-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-7);
+  background: rgba(10, 10, 13, 0.86); /* --bg-0 at 86% — tokens carry no alpha variants */
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line-1);
+}
+.cp-lib-title {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--fg-1);
+}
+.cp-lib-search {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: 0 1 320px;
+  height: 30px;
+  margin-left: auto;
+  padding: 0 var(--s-2) 0 var(--s-3);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  color: var(--fg-3);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.cp-lib-search:focus-within { border-color: var(--line-3); }
+.cp-lib-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  outline: none;
+}
+.cp-lib-search input::placeholder { color: var(--fg-4); }
+/* Ring lives on the wrapper (:focus-within) — mute the inner input's
+   global focus ring (same trick as .cp-review-search). */
+.cp-lib-search input:focus-visible { box-shadow: none; }
+.cp-lib-search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--fg-4);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.cp-lib-search-clear:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.08); }
+.cp-lib-rescan { width: 30px; height: 30px; }
+
+/* ============================================================
+   HERO — most recent source as a blurred/darkened backdrop under
+   a gradient that dissolves into the bg-0 page.
+   ============================================================ */
+.cp-lib-hero {
+  position: relative;
+  min-height: 260px;
+  display: flex;
+  overflow: hidden;
+}
+.cp-lib-hero-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(18px) brightness(0.55) saturate(1.1);
+  transform: scale(1.12); /* hide the blur's soft edges */
+}
+.cp-lib-hero-shade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(10, 10, 13, 0.35) 0%, rgba(10, 10, 13, 0.55) 55%, var(--bg-0) 100%),
+    linear-gradient(90deg, rgba(10, 10, 13, 0.75) 0%, transparent 60%);
+}
+.cp-lib-hero-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  width: 100%;
+  max-width: 620px;
+  padding: var(--s-10) var(--s-10) var(--s-7);
+}
+.cp-lib-hero-kicker {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ella-green);
+}
+.cp-lib-hero-title {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  color: var(--fg-0);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cp-lib-hero-sub {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg-3);
+}
+.cp-lib-hero-actions {
+  display: flex;
+  gap: var(--s-3);
+  margin-top: var(--s-2);
+}
+/* Empty hero — the brand wash the canvas empty state uses, centered invite. */
+.cp-lib-hero.empty {
+  align-items: center;
+  justify-content: center;
+  background: var(--grad-brand-wash);
+  border-bottom: 1px solid var(--line-1);
+}
+.cp-lib-hero.empty .cp-lib-hero-content {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--s-10);
+}
+
+/* ============================================================
+   SHELVES — vertical stack of horizontal rows.
+   ============================================================ */
+.cp-lib-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+  padding: var(--s-5) 0 var(--s-12);
+}
+.cp-lib-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: 0 var(--s-7);
+  margin-bottom: var(--s-1);
+}
+.cp-lib-row-title {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--fg-1);
+}
+.cp-lib-row-count {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+}
+/* Remove-root × — hover/focus reveal so the destructive-looking affordance
+   stays quiet. (It only forgets the root; disk is never touched.) */
+.cp-lib-row-remove {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--fg-4);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.cp-lib-row-head:hover .cp-lib-row-remove,
+.cp-lib-row-remove:focus-visible { opacity: 1; }
+.cp-lib-row-remove:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.08); }
+
+.cp-lib-row-body { position: relative; }
+.cp-lib-track {
+  display: flex;
+  gap: var(--s-3);
+  overflow-x: auto;
+  /* Vertical breathing room so the hover scale + shadow don't clip against
+     the scroller's forced overflow-y. */
+  padding: var(--s-2) var(--s-7) var(--s-3);
+  /* Hidden scrollbar — arrows + roving ←/→ cover discovery. */
+  scrollbar-width: none;
+}
+.cp-lib-track::-webkit-scrollbar { display: none; }
+/* Edge fades — only on edges that actually continue (classes from JS). */
+.cp-lib-track.fade-l {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 28px);
+  mask-image: linear-gradient(to right, transparent 0, #000 28px);
+}
+.cp-lib-track.fade-r {
+  -webkit-mask-image: linear-gradient(to left, transparent 0, #000 28px);
+  mask-image: linear-gradient(to left, transparent 0, #000 28px);
+}
+.cp-lib-track.fade-l.fade-r {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%);
+}
+/* Hover paging arrows — full-height hit zones over the track's ends. */
+.cp-lib-row-arrow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg-1);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+.cp-lib-row-arrow.left  { left: 0;  background: linear-gradient(90deg, rgba(10, 10, 13, 0.85), transparent); }
+.cp-lib-row-arrow.right { right: 0; background: linear-gradient(270deg, rgba(10, 10, 13, 0.85), transparent); }
+.cp-lib-row-body:hover .cp-lib-row-arrow { opacity: 1; }
+.cp-lib-row-arrow:hover { color: var(--ella-green); }
+
+/* ============================================================
+   CARDS — 16:9 posters (shared by item, recent, transcript) and
+   the stacked-poster folder collections.
+   ============================================================ */
+.cp-lib-cell { flex: 0 0 auto; width: 216px; }
+.cp-lib-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: var(--r-lg);
+  text-align: left;
+  cursor: pointer;
+}
+.cp-lib-card-art {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  transition: transform var(--dur-base) var(--ease-out),
+              box-shadow var(--dur-base) var(--ease-out),
+              border-color var(--dur-base) var(--ease-out);
+}
+.cp-lib-card:hover .cp-lib-card-art,
+.cp-lib-card:focus-visible .cp-lib-card-art {
+  transform: scale(1.04);
+  box-shadow: var(--shadow-card);
+  border-color: var(--line-3);
+}
+.cp-lib-card-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* Tokens-styled placeholder — glyph + filename on the card surface. */
+.cp-lib-card-ph {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  color: var(--fg-4);
+  background: var(--bg-2);
+}
+.cp-lib-card-ph-name {
+  max-width: 100%;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-align: center;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+/* Hover-revealed play glyph, centered over the art. */
+.cp-lib-card-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding-left: 2px; /* optical center for the triangle */
+  border-radius: var(--r-pill);
+  background: rgba(10, 10, 13, 0.62);
+  border: 1px solid var(--line-3);
+  color: var(--fg-0);
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out);
+  pointer-events: none;
+}
+.cp-lib-card:hover .cp-lib-card-play,
+.cp-lib-card:focus-visible .cp-lib-card-play { opacity: 1; }
+/* Folder collections keep the folder glyph, not a phantom play control. */
+.cp-lib-foldercard .cp-lib-card-play { display: none; }
+.cp-lib-card-badge {
+  position: absolute;
+  top: var(--s-2);
+  left: var(--s-2);
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  background: rgba(10, 10, 13, 0.72);
+  border: 1px solid var(--line-2);
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+.cp-lib-card-title {
+  margin-top: var(--s-2);
+  padding: 0 2px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Size/date (or host/recency) line — revealed on hover/focus. Fixed height
+   so the reveal never reflows the shelf. */
+.cp-lib-card-detail {
+  height: 16px;
+  padding: 0 2px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--fg-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+.cp-lib-card:hover .cp-lib-card-detail,
+.cp-lib-card:focus-visible .cp-lib-card-detail { opacity: 1; }
+/* Folder cards: the count IS the payload — keep it visible. */
+.cp-lib-foldercard .cp-lib-card-detail { opacity: 1; }
+
+/* Stacked-poster fan for folder collections (front = shallowest video). */
+.cp-lib-stack {
+  position: absolute;
+  inset: 8% 7%;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+.cp-lib-stack img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-lib-stack.back  { transform: translate(-5%, -6%) rotate(-3deg) scale(0.94); }
+.cp-lib-stack.mid   { transform: translate(5%, -2%) rotate(2deg) scale(0.97); }
+.cp-lib-stack.front { transform: translate(0, 3%); }
+
+/* ============================================================
+   BREADCRUMB, SEARCH GRID, NOTES
+   ============================================================ */
+.cp-lib-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-7) 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+.cp-lib-crumbs button {
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  border-radius: var(--r-xs);
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cp-lib-crumbs button:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.06); }
+.cp-lib-crumbs .sep { color: var(--fg-5); }
+.cp-lib-crumbs .cur { color: var(--fg-1); font-weight: 800; }
+
+/* Flat results grid — replaces the shelves while a query is active. */
+.cp-lib-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-7) var(--s-12);
+}
+.cp-lib-grid .cp-lib-cell { width: auto; }
+.cp-lib-grid-note { padding-top: var(--s-4); }
+
+.cp-lib-note {
+  margin: 0;
+  padding: 0 var(--s-7);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--fg-4);
+}
+.cp-lib-invite {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 0 var(--s-7);
+}
+.cp-lib-invite .cp-lib-note { padding: 0; }
+
+/* Inline root-scan failure — loud, actionable, never a silent skip. */
+.cp-lib-error {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin: 0 var(--s-7);
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid rgba(232, 38, 38, 0.4); /* --danger at 40% */
+  border-radius: var(--r-md);
+  background: rgba(232, 38, 38, 0.08);
+}
+.cp-lib-error-msg {
+  flex: 1;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+
+/* ── Reduced motion: hover scale/reveals snap, no transforms. ── */
+@media (prefers-reduced-motion: reduce) {
+  .cp-lib-card-art,
+  .cp-lib-card-play,
+  .cp-lib-card-detail,
+  .cp-lib-row-arrow,
+  .cp-lib-row-remove,
+  .cp-lib-search { transition: none; }
+  .cp-lib-card:hover .cp-lib-card-art,
+  .cp-lib-card:focus-visible .cp-lib-card-art { transform: none; }
+}

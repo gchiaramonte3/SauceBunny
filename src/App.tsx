@@ -126,7 +126,7 @@ function migrateCaptionFont(raw: unknown): CaptionFontKey {
 }
 
 /**
- * Top-level views (nav rail): "home" = the Library (phase-3 stub for now),
+ * Top-level views (nav rail): "home" = the Library (folder shelves + recents),
  * "clip" = the entire pre-rail app (toolbar + sidebar + monitor + drawer).
  * A state switch, NOT a router (CLAUDE.md) — and the Clip view is never
  * unmounted, only [hidden], so playback/jobs/listeners survive navigation.
@@ -671,6 +671,18 @@ export default function App() {
     setActiveViewState(v);
     saveJson(ACTIVE_VIEW_KEY, v);
   }, []);
+  /**
+   * Home-reset signal for the Library: bumped whenever Home is chosen
+   * through a navigation surface (nav rail item, logo, palette command),
+   * so the Library returns to its top level (clears drill-in + search)
+   * even when it was already the active view. Deliberately NOT bumped by
+   * plain setActiveView calls (e.g. "open URL bar" jumping to Clip).
+   */
+  const [homeResetTick, setHomeResetTick] = useState(0);
+  const navigateView = useCallback((v: AppView) => {
+    setActiveView(v);
+    if (v === "home") setHomeResetTick((t) => t + 1);
+  }, [setActiveView]);
   // Left source/export sidebar visibility — persisted, mirroring the right
   // drawer's toolbar toggle. Defaults open.
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
@@ -3092,6 +3104,44 @@ export default function App() {
     }
   }, [pushNotification]);
 
+  // ====== Library (Home view) open-handlers ======
+  // Every Library open switches to the Clip view first, then routes through
+  // the SAME load cores as the toolbar/monitor surfaces (loadLocalPath /
+  // handleFetch / handleOpenRecentSource) — no parallel load paths. The
+  // Library owns its own scan/search state; App only supplies these levers.
+  const handleLibraryOpenLocalPath = useCallback((path: string) => {
+    setActiveView("clip");
+    void loadLocalPath(path);
+  }, [setActiveView, loadLocalPath]);
+
+  const handleLibraryOpenRecent = useCallback((entry: RecentSource) => {
+    setActiveView("clip");
+    handleOpenRecentSource(entry);
+  }, [setActiveView, handleOpenRecentSource]);
+
+  // Transcript-shelf open: load the SOURCE through the existing handlers
+  // (which also auto-attach a prior transcript for local files), then attach
+  // THIS entry via the same handler the Transcript-tab history popover uses.
+  // handleFetch/loadLocalPath clear the transcript synchronously up front, so
+  // the later attach never gets wiped by the reset.
+  const handleLibraryOpenTranscript = useCallback((entry: TranscriptHistoryEntry) => {
+    setActiveView("clip");
+    if (entry.sourcePath) void loadLocalPath(entry.sourcePath);
+    else if (entry.sourceUrl) { setUrl(entry.sourceUrl); void handleFetch(entry.sourceUrl); }
+    void handleLoadFromHistory(entry);
+  }, [setActiveView, loadLocalPath, handleFetch, handleLoadFromHistory]);
+
+  // Hero "Paste a URL" → the same focus lever as the File-menu "Open URL…".
+  const handleSwitchToClip = useCallback((focusUrl?: boolean) => {
+    setActiveView("clip");
+    if (!focusUrl) return;
+    setTimeout(() => {
+      const el = document.querySelector<HTMLInputElement>(".cp-url input");
+      el?.focus();
+      el?.select();
+    }, 0);
+  }, [setActiveView]);
+
   /**
    * Trigger the FluidAudio Core ML model download via the
    * `saucebunny-diarize --prepare-models` sidecar flag. Wired to the
@@ -3775,7 +3825,7 @@ export default function App() {
   // when the array was inline, so memoization behaves identically.
   const commands: Command[] = useMemo(() => buildCommands({
     url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
-    captionsOn, playbackRate, activeView, onNavigateView: setActiveView,
+    captionsOn, playbackRate, activeView, onNavigateView: navigateView,
     logsOpen, clipQueueLength: clipQueue.length, queueRunning,
     activeTranscriptPath: activeTranscript?.path ?? null,
     exportFolder: exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
@@ -3810,7 +3860,7 @@ export default function App() {
     return c;
   }), [
     url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
-    captionsOn, playbackRate, activeView, setActiveView,
+    captionsOn, playbackRate, activeView, navigateView,
     logsOpen, clipQueue.length, queueRunning, activeTranscript,
     exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
     handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds, shuttleStep,
@@ -4153,15 +4203,23 @@ export default function App() {
       <div className={"cp-body" + (screening ? " cp-screening" : "")}>
         <NavRail
           active={activeView}
-          onNavigate={setActiveView}
+          onNavigate={navigateView}
           onOpenSettings={() => setSettingsOpen(true)}
           homeShortcut={homeCombo ? formatCombo(homeCombo) : undefined}
           clipShortcut={clipCombo ? formatCombo(clipCombo) : undefined}
         />
         <div className="cp-views">
-          {/* Home — the Library (phase-3 stub; LibraryView.tsx). */}
+          {/* Home — the Library (LibraryView.tsx owns roots/scans/search;
+              App only supplies the open handlers + recents). */}
           <div className="cp-view cp-view-home" hidden={activeView !== "home"}>
-            <LibraryView />
+            <LibraryView
+              recentSources={recentSources}
+              onOpenLocalPath={handleLibraryOpenLocalPath}
+              onOpenRecentSource={handleLibraryOpenRecent}
+              onOpenTranscriptHistory={handleLibraryOpenTranscript}
+              onSwitchToClip={handleSwitchToClip}
+              homeResetSignal={homeResetTick}
+            />
           </div>
           {/* Clip — the ENTIRE pre-rail app, toolbar included. NEVER
               unmounted: while Home is active it's [hidden] (the QueueDrawer

@@ -19,8 +19,10 @@ export function tauriMockInit(expectedBuildId: string): void {
   let nextCallbackId = 1;
 
   // Shaped responses for the commands the shell actually calls on boot /
-  // first interaction. Anything not listed resolves to null — the app's
-  // error paths tolerate that, and the smoke run watches for pageerrors.
+  // first interaction. Function values are called with the invoke args
+  // (return a value, a promise, or throw/reject an AppError-shaped object);
+  // anything not listed resolves to null — the app's error paths tolerate
+  // that, and the smoke run watches for pageerrors.
   //
   // The review store hydrates BEFORE first render (main.tsx): it derives its
   // Reviews dir from default_transcript_library_path, then reads index.json
@@ -36,6 +38,38 @@ export function tauriMockInit(expectedBuildId: string): void {
     list_audio_input_devices: [],
     get_downloaded_models: [],
     default_transcript_library_path: "/e2e-mock/Documents/Sauce Bunny/Transcripts",
+    // Library thumbnails: a 0-byte "file" makes mediabunny bail cleanly
+    // (extractFrameAsBlob → null) without ever range-reading, and the null
+    // fallthrough for generate_local_thumbnail lands every card on its
+    // placeholder — no decode work, no unhandled rejections.
+    get_file_size: 0,
+    // Library scan (LibraryView) — a small deterministic tree derived from
+    // the requested root: two files + one subfolder with one file. Roots
+    // containing "missing" reject with a typed AppError, exercising the
+    // fail-loud inline error row.
+    scan_library_folder: (args: unknown) => {
+      const path = String((args as { path?: unknown } | undefined)?.path ?? "");
+      if (path.includes("missing")) {
+        return Promise.reject({ kind: "NotFound", data: path });
+      }
+      const mkItem = (dir: string, name: string, kind: string, size: number) => ({
+        name, path: `${dir}/${name}`, size_bytes: size, modified_ms: 1749000000000, kind,
+      });
+      return {
+        name: path.split("/").pop() || path,
+        path,
+        folders: [{
+          name: "Interviews",
+          path: `${path}/Interviews`,
+          folders: [],
+          items: [mkItem(`${path}/Interviews`, "intro.mp4", "video", 1048576)],
+        }],
+        items: [
+          mkItem(path, "clip-a.mp4", "video", 2097152),
+          mkItem(path, "voice-memo.m4a", "audio", 512000),
+        ],
+      };
+    },
   };
 
   // The event plugin's unlisten path calls this directly (event.js).
@@ -65,7 +99,14 @@ export function tauriMockInit(expectedBuildId: string): void {
         return Promise.resolve(a.handler);
       }
       if (cmd === "plugin:event|unlisten") return Promise.resolve(null);
-      if (cmd in table) return Promise.resolve(table[cmd]);
+      if (cmd in table) {
+        const v = table[cmd];
+        // Promise.resolve().then flattens returned promises AND turns a
+        // synchronous throw into a rejection — matching real invoke.
+        return typeof v === "function"
+          ? Promise.resolve().then(() => (v as (a: unknown) => unknown)(args))
+          : Promise.resolve(v);
+      }
       return Promise.resolve(null);
     },
     transformCallback: (cb: (payload: unknown) => void, _once?: boolean) => {

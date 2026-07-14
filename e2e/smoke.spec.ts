@@ -43,10 +43,11 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   await expect(rail).toBeVisible();
   // Fresh profile boots into Clip (the working view).
   await expect(page.locator(".cp-view-clip")).toBeVisible();
-  // Home item → the Library stub (phase 3 fills it in).
+  // Home item → the Library. Fresh profile = no roots + no recents, so the
+  // empty hero invites with enabled actions.
   await rail.getByRole("button", { name: "Home", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Add a folder" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Add a folder" })).toBeEnabled();
   // KEEP-ALIVE: the Clip view is hidden, NOT unmounted — toolbar/monitor
   // stay in the DOM so playback and running jobs survive the switch.
   await expect(page.locator(".cp-view-clip")).toBeHidden();
@@ -210,6 +211,106 @@ test("first-run checklist: pending steps render, folder step opens Settings, dis
   await page.reload();
   await expect(page.locator(".cp-toolbar")).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".cp-getting-started")).toHaveCount(0);
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
+/** Clicks the nav rail's Home item (the Library view). */
+async function goHome(page: Page): Promise<void> {
+  await page
+    .getByRole("navigation", { name: "Primary" })
+    .getByRole("button", { name: "Home", exact: true })
+    .click();
+}
+
+test("library: seeded root scans into a shelf; search filters a flat grid; Esc restores", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e/Footage"]));
+  });
+  await boot(page);
+  await goHome(page);
+  // Header chrome: title, search, Add Folder, rescan.
+  await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Search library")).toBeVisible();
+  await expect(page.locator(".cp-lib-head").getByRole("button", { name: "Add Folder" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Rescan library" })).toBeVisible();
+  // The mocked scan renders one shelf: folder collection + video + audio cards.
+  const row = page.getByRole("list", { name: "Footage" });
+  await expect(row).toBeVisible();
+  await expect(row.getByRole("button", { name: /Interviews/ })).toBeVisible();
+  await expect(row.getByRole("button", { name: /clip-a\.mp4/ })).toBeVisible();
+  await expect(row.getByRole("button", { name: /voice-memo\.m4a/ })).toBeVisible();
+  // Search (debounced 150ms) replaces shelves with a flat grid — the nested
+  // intro.mp4 is findable across the whole tree.
+  await page.getByLabel("Search library").fill("intro");
+  const grid = page.getByRole("list", { name: "Search results" });
+  await expect(grid).toBeVisible();
+  await expect(grid.getByRole("button", { name: /intro\.mp4/ })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Footage" })).toHaveCount(0);
+  // Esc clears back to the shelves.
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("list", { name: "Footage" })).toBeVisible();
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
+test("library: failed root scan shows the inline error row; remove forgets the root", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e/missing-root"]));
+  });
+  await boot(page);
+  await goHome(page);
+  // Fail loud: the AppError renders inline (formatError), never a silent skip.
+  const row = page.locator(".cp-lib-row", { hasText: "missing-root" });
+  await expect(row.getByRole("alert")).toContainText("Not found: /e2e/missing-root");
+  await expect(row.getByRole("button", { name: "Retry" })).toBeVisible();
+  // Remove (hover-revealed ×) asks for confirmation, then forgets the root —
+  // storage included. Disk is never touched (nothing to touch here anyway).
+  page.once("dialog", (d) => { void d.accept(); });
+  await row.locator(".cp-lib-row-head").hover();
+  await row.getByRole("button", { name: /Remove missing-root/ }).click();
+  await expect(page.locator(".cp-lib-row", { hasText: "missing-root" })).toHaveCount(0);
+  const roots = await page.evaluate(() => localStorage.getItem("saucebunny.libraryRoots"));
+  expect(roots).toBe("[]");
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
+test("library hero: empty-state Paste a URL jumps to Clip and focuses the URL bar", async ({ page }) => {
+  await boot(page);
+  await goHome(page);
+  await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
+  await page.getByRole("button", { name: "Paste a URL" }).click();
+  await expect(page.locator(".cp-view-clip")).toBeVisible();
+  await expect(page.locator(".cp-url input")).toBeFocused();
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
+test("library: hero + Continue + Transcripts shelves from seeded history; opening returns to Clip", async ({ page }) => {
+  await page.addInitScript(() => {
+    // v=abc is deliberately NOT a valid 11-char YouTube id → no poster URL is
+    // derived → no external image requests from the e2e run.
+    localStorage.setItem("saucebunny.recentSources", JSON.stringify([
+      { kind: "url", value: "https://youtube.com/watch?v=abc", title: "Seeded web source", durationSeconds: 90, lastOpenedAt: Date.now() },
+      { kind: "file", value: "/tmp/seeded.mp4", title: "seeded.mp4", lastOpenedAt: Date.now() - 60_000 },
+    ]));
+    localStorage.setItem("saucebunny.transcriptHistory", JSON.stringify([
+      { id: "tx-1", srtPath: "/tmp/seeded.srt", sourcePath: null, sourceUrl: null, title: "Seeded transcript", origin: "whisper", createdAt: Date.now(), lastOpenedAt: Date.now() },
+    ]));
+  });
+  await boot(page);
+  await goHome(page);
+  // Hero fronts the most recent source with both open actions.
+  const hero = page.locator(".cp-lib-hero");
+  await expect(hero).toContainText("Seeded web source");
+  await expect(hero.getByRole("button", { name: "Resume" })).toBeVisible();
+  await expect(hero.getByRole("button", { name: "Open in Clip" })).toBeVisible();
+  // Continue shelf lists both recents; Transcripts shelf lists the history entry.
+  const cont = page.getByRole("list", { name: "Continue" });
+  await expect(cont.getByRole("button", { name: /Seeded web source/ })).toBeVisible();
+  await expect(cont.getByRole("button", { name: /seeded\.mp4/ })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Transcripts" })
+    .getByRole("button", { name: /Seeded transcript/ })).toBeVisible();
+  // Opening a recent routes through the standard handlers → back on Clip.
+  await cont.getByRole("button", { name: /seeded\.mp4/ }).click();
+  await expect(page.locator(".cp-view-clip")).toBeVisible();
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 

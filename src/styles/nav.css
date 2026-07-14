@@ -1,4 +1,4 @@
-/* Left navigation rail (NavRail.tsx) + the Home/Library stub (LibraryView.tsx). */
+/* Left navigation rail (NavRail.tsx). The Home/Library view lives in library.css. */
 /* ============================================================
    NAV RAIL — slim vertical icon rail on the window's left edge.
    Sits inside .cp-body (below the titlebar, so it never collides
@@ -82,46 +82,4 @@
 @media (prefers-reduced-motion: reduce) {
   .cp-nav-logo { transition: none; }
   .cp-nav-logo:hover { transform: none; }
-}
-
-/* ============================================================
-   LIBRARY VIEW (Home) — phase-1 empty-state stub, replaced in
-   phase 3. Same floating-card treatment as .cp-main so the two
-   views read as siblings.
-   ============================================================ */
-.cp-library {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 0;
-  margin: var(--s-2);
-  border: 1px solid var(--line-1);
-  border-radius: var(--r-xl);
-  background: var(--bg-1);
-  overflow: hidden;
-}
-.cp-library-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--s-4);
-  padding: var(--s-10);
-  text-align: center;
-}
-.cp-library-title {
-  margin: 0;
-  font-family: var(--font-ui);
-  font-size: 22px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  color: var(--fg-1);
-}
-.cp-library-hint {
-  margin: 0;
-  max-width: 400px;
-  font-family: var(--font-ui);
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--fg-4);
 }
