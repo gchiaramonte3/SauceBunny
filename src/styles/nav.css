@@ -90,4 +90,28 @@
   background: var(--ella-green);
 }
 
+/* Live-session badge — a small accent dot pinned to the Co-Review item's
+   top-right, rendered only while a session is active. Decorative
+   (aria-hidden); the accessible state rides the button's title. A soft ring
+   lifts it off whatever fill sits behind (rest vs .active). */
+.cp-nav-badge {
+  position: absolute;
+  top: 5px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ella-green);
+  box-shadow: 0 0 0 2px var(--bg-1), 0 0 6px rgba(108, 255, 141, 0.5);
+  animation: cp-nav-badge-pulse 2s ease-in-out infinite;
+}
+.cp-nav-item.active .cp-nav-badge { box-shadow: 0 0 0 2px var(--bg-3), 0 0 6px rgba(108, 255, 141, 0.5); }
+@keyframes cp-nav-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-nav-badge { animation: none; }
+}
+
 .cp-nav-spacer { flex: 1; }

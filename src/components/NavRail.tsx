@@ -1,4 +1,4 @@
-import { IconHome, IconScissors, IconSettings } from "./Icons";
+import { IconHome, IconScissors, IconSettings, IconUsers } from "./Icons";
 import type { AppView } from "../App";
 import logoUrl from "../assets/saucebunny-128.png";
 
@@ -21,9 +21,12 @@ type Props = {
   /** Pretty display combos for the tooltips (live rebindable shortcuts). */
   homeShortcut?: string;
   clipShortcut?: string;
+  coreviewShortcut?: string;
+  /** A co-review session is live — lights the badge dot on the Co-Review item. */
+  sessionActive: boolean;
 };
 
-export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, clipShortcut }: Props) {
+export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, clipShortcut, coreviewShortcut, sessionActive }: Props) {
   return (
     <nav className="cp-nav" aria-label="Primary">
       {/* Brand mark — a non-interactive logo, NOT a second Home button. The
@@ -52,6 +55,24 @@ export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, clip
       >
         <IconScissors size={18} />
         <span className="cp-nav-label">Clip</span>
+      </button>
+      <button
+        type="button"
+        className={"cp-nav-item" + (active === "coreview" ? " active" : "")}
+        onClick={() => onNavigate("coreview")}
+        title={
+          (coreviewShortcut ? `Co-Review (${coreviewShortcut})` : "Co-Review") +
+          (sessionActive ? " · in session" : "")
+        }
+        aria-label="Co-Review"
+        aria-current={active === "coreview" ? "page" : undefined}
+      >
+        <IconUsers size={18} />
+        <span className="cp-nav-label">Co-Review</span>
+        {/* Decorative live-session marker — the accessible "in session" state
+            rides the button title above, so a screen reader isn't handed a
+            stray dot. */}
+        {sessionActive && <span className="cp-nav-badge" aria-hidden="true" />}
       </button>
       <div className="cp-nav-spacer" />
       <button

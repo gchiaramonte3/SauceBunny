@@ -13,6 +13,7 @@ import { NavRail } from "./components/NavRail";
 import { LibraryView } from "./components/LibraryView";
 import { Sidebar } from "./components/Sidebar";
 import { ParticipantRail } from "./components/ParticipantRail";
+import { CoReviewLobby } from "./components/CoReviewLobby";
 import { Monitor, type AspectId } from "./components/Monitor";
 import type { Notif } from "./components/NotificationBell";
 import type { ToastKind } from "./components/CanvasToast";
@@ -128,11 +129,13 @@ function migrateCaptionFont(raw: unknown): CaptionFontKey {
 
 /**
  * Top-level views (nav rail): "home" = the Library (folder shelves + recents),
- * "clip" = the entire pre-rail app (toolbar + sidebar + monitor + drawer).
+ * "clip" = the entire pre-rail app (toolbar + sidebar + monitor + drawer),
+ * "coreview" = the Co-Review lobby (a first-class surface over the same
+ * useCoReview session state the toolbar popover reads).
  * A state switch, NOT a router (CLAUDE.md) — and the Clip view is never
  * unmounted, only [hidden], so playback/jobs/listeners survive navigation.
  */
-export type AppView = "home" | "clip";
+export type AppView = "home" | "clip" | "coreview";
 
 // v2 bump: re-encode default flipped from ON to OFF. Older v1 settings are
 // intentionally abandoned so users get the new, much faster default.
@@ -702,6 +705,7 @@ export default function App() {
   // the newly-shown view's root (tabindex=-1 containers, see the JSX below).
   const homeViewRef = useRef<HTMLDivElement>(null);
   const clipViewRef = useRef<HTMLDivElement>(null);
+  const coreviewViewRef = useRef<HTMLDivElement>(null);
   // Left source/export sidebar visibility — persisted, mirroring the right
   // drawer's toolbar toggle. Defaults open.
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
@@ -3688,24 +3692,25 @@ export default function App() {
         case "edit.undo": performUndo(); break;
         case "edit.redo": performRedo(); break;
         case "src.fetch":    handleFetch(); break;
-        // ⌘1/⌘2 — top-level view switch (nav rail). Global: navigation has
+        // ⌘1/⌘2/⌘3 — top-level view switch (nav rail). Global: navigation has
         // to work from a text field too. The Clip view stays mounted either
         // way, so this never interrupts playback or a running job.
         case "view.home":
-        case "view.clip": {
+        case "view.clip":
+        case "view.coreview": {
           // During a co-review screening the theater owns the whole window
           // (nav rail is CSS-hidden and the theater-exit control lives in the
-          // Clip view) — ⌘1/⌘2 would strand the user with no way back, so
+          // Clip view) — ⌘1/⌘2/⌘3 would strand the user with no way back, so
           // no-op until they leave screening.
           if (screeningRef.current) break;
-          const v = id === "view.home" ? "home" : "clip";
+          const v: AppView = id === "view.home" ? "home" : id === "view.coreview" ? "coreview" : "clip";
           // Route through navigateView (not raw setActiveView) so Home also
           // bumps homeResetTick like every other nav surface does.
           navigateView(v);
           // The outgoing view is about to be [hidden]; if focus lived inside
           // it, it orphans to <body>. Move focus into the newly-shown view's
           // root once React commits the unhide (rAF lands after the paint).
-          const viewRef = v === "home" ? homeViewRef : clipViewRef;
+          const viewRef = v === "home" ? homeViewRef : v === "coreview" ? coreviewViewRef : clipViewRef;
           requestAnimationFrame(() => viewRef.current?.focus());
           break;
         }
@@ -4257,6 +4262,7 @@ export default function App() {
   // in Settings → Commands shows correctly in the rail titles.
   const homeCombo = bindingsFor("view.home", keybindings)[0];
   const clipCombo = bindingsFor("view.clip", keybindings)[0];
+  const coreviewCombo = bindingsFor("view.coreview", keybindings)[0];
 
   // ── Stale-binary banner ──────────────────────────────────────────────
   // Only shows when the Rust backend doesn't match the frontend's expected
@@ -4302,6 +4308,8 @@ export default function App() {
             onOpenSettings={() => setSettingsOpen(true)}
             homeShortcut={homeCombo ? formatCombo(homeCombo) : undefined}
             clipShortcut={clipCombo ? formatCombo(clipCombo) : undefined}
+            coreviewShortcut={coreviewCombo ? formatCombo(coreviewCombo) : undefined}
+            sessionActive={coSessionActive}
           />
         </div>
         <div className="cp-views">
@@ -4779,6 +4787,23 @@ export default function App() {
                 onReviewSessionOp={postSessionOp}
               />}
             </div>
+          </div>
+          {/* Co-Review — a first-class lobby over the SAME useCoReview state
+              the toolbar popover reads (both surfaces stay in sync by
+              construction). Kept-alive like the others: [hidden] when inactive
+              so the session/listeners beneath are never torn down. "Enter
+              theater" lands on Clip with screening on (the theater overlays the
+              Clip player). */}
+          <div ref={coreviewViewRef} tabIndex={-1} className="cp-view cp-view-coreview" hidden={activeView !== "coreview"}>
+            <CoReviewLobby
+              session={coSession}
+              localSource={coLocalSourceLoaded}
+              participants={screeningParticipants}
+              onStart={() => { void startCoReview(); }}
+              onJoin={(t, n) => { void joinCoReview(t, n); }}
+              onLeave={leaveCoReview}
+              onEnterTheater={() => { navigateView("clip"); setScreening(true); }}
+            />
           </div>
         </div>
       </div>

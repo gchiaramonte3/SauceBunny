@@ -68,6 +68,18 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await page.keyboard.press("Control+1");
   await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
+  // Co-Review is a third first-class destination: rail item + ⌘3 → the lobby
+  // (keep-alive like the others, so the Clip view stays mounted beneath).
+  await rail.getByRole("button", { name: "Co-Review", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Co-Review" })).toBeVisible();
+  await expect(page.locator(".cp-view-clip")).toBeHidden();
+  await expect(page.locator(".cp-view-clip .cp-toolbar")).toBeAttached();
+  // The lobby is session-first: hosting is available with no source loaded.
+  await expect(page.getByRole("button", { name: "Start a session" })).toBeEnabled();
+  await page.keyboard.press("Control+2");
+  await expect(page.locator(".cp-view-clip")).toBeVisible();
+  await page.keyboard.press("Control+1");
+  await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
   // The choice persists (saucebunny.activeView) across reload.
   await page.reload();
   await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible({ timeout: 15_000 });

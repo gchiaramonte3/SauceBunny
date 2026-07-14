@@ -11,11 +11,14 @@ import { AUTHOR_KEY } from "../lib/review";
  * web source and it propagates to guests. A local file is the one thing guests
  * can't receive yet, so it earns a caveat line — not a block.
  */
-export function CoReviewJoinForm({ localSource, onStart, onJoin }: {
+export function CoReviewJoinForm({ localSource, onStart, onJoin, hideHeading = false }: {
   /** A local file is loaded — guests can't receive it yet (hosting still allowed). */
   localSource: boolean;
   onStart: () => void;
   onJoin: (ticket: string, name: string) => void;
+  /** Drop the built-in title + sub when a host (e.g. the lobby) already frames
+   *  the form — avoids a doubled "Co-review" heading. Popover leaves it on. */
+  hideHeading?: boolean;
 }) {
   const [ticket, setTicket] = useState("");
   // Default the display name to the review identity — same person, no accounts.
@@ -23,8 +26,10 @@ export function CoReviewJoinForm({ localSource, onStart, onJoin }: {
 
   return (
     <>
-      <div className="cp-coreview-title">Co-review</div>
-      <p className="cp-coreview-sub">Watch together — guests follow your playhead.</p>
+      {!hideHeading && <>
+        <div className="cp-coreview-title">Co-review</div>
+        <p className="cp-coreview-sub">Watch together — guests follow your playhead.</p>
+      </>}
 
       <button className="btn btn-primary" onClick={onStart}>Start a session</button>
       {localSource && (

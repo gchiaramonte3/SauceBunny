@@ -113,8 +113,8 @@ export type CommandDeps = {
   handleDownloadCaptions: () => void;
   handleStop: () => void;
   onProbeDiarizer: () => void;
-  /** Top-level view switch (nav rail / ⌘1 / ⌘2) — state, not a router. */
-  onNavigateView: (view: "home" | "clip") => void;
+  /** Top-level view switch (nav rail / ⌘1 / ⌘2 / ⌘3) — state, not a router. */
+  onNavigateView: (view: "home" | "clip" | "coreview") => void;
   /** Opens the ⌘/ shortcut cheat-sheet (ShortcutSheet). */
   onShowShortcuts: () => void;
   // ── scoped undo/redo (lib/undo.ts) ──
@@ -275,6 +275,11 @@ export function buildCommands(d: CommandDeps): Command[] {
       keywords: ["editor", "player", "monitor", "nav"],
       disabled: d.activeView === "clip",
       run: () => d.onNavigateView("clip") },
+    { id: "view.coreview", label: "Go to Co-Review", group: "View",
+      hotkey: "⌘3", description: "Watch & review together",
+      keywords: ["watch party", "session", "peers", "screening", "nav"],
+      disabled: d.activeView === "coreview",
+      run: () => d.onNavigateView("coreview") },
     { id: "view.captions", label: d.captionsOn ? "Hide captions" : "Show captions",
       group: "View", disabled: !d.hasSource,
       run: () => d.setCaptionsOn((p) => !p) },

@@ -1,0 +1,231 @@
+/* Co-Review lobby (CoReviewLobby.tsx) — the first-class watch-party
+   destination reached from the nav rail (⌘3). A quiet, centered column on the
+   same dark bg-0 page as the Library, with the app's card/line vocabulary.
+   The in-Clip toolbar popover (CoReviewPopover) is the parallel quick-access;
+   both read the same useCoReview state. Everything cp-colobby-*. */
+
+/* ── Page: the view's own scroll context (Clip keeps playing beneath). A
+      faint brand wash pinned to the top gives it warmth without shouting. ── */
+.cp-coreview-lobby {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: var(--s-12) var(--s-6);
+  background: var(--bg-0);
+}
+.cp-coreview-lobby::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 320px;
+  pointer-events: none;
+  background: var(--grad-brand-wash);
+  opacity: 0.7;
+}
+
+/* ── Centered column — comfortable reading width. ── */
+.cp-colobby-inner {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+}
+
+/* ── Header: brand-tinted glyph + title + one-line explainer. ── */
+.cp-colobby-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-4);
+}
+.cp-colobby-mark {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-lg);
+  background: rgba(108, 255, 141, 0.10);
+  border: 1px solid rgba(108, 255, 141, 0.28);
+  color: var(--ella-green);
+}
+.cp-colobby-title {
+  margin: 0 0 var(--s-1);
+  font-family: var(--font-ui);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  color: var(--fg-0);
+}
+.cp-colobby-sub {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg-3);
+}
+
+/* ── Card — the shared surface for both faces. ── */
+.cp-colobby-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: var(--s-5);
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-soft);
+}
+/* Off state: the join form stacks its own controls full-width (matching the
+   popover's flex column). */
+.cp-colobby-start {
+  gap: var(--s-2);
+}
+
+/* ── Role banner (in a session). ── */
+.cp-colobby-role {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+.cp-colobby-live {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-4);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
+}
+.cp-colobby-live.host {
+  background: var(--ella-green);
+  box-shadow: 0 0 0 3px rgba(108, 255, 141, 0.14), 0 0 8px rgba(108, 255, 141, 0.4);
+  animation: cp-colobby-blink 2s ease-in-out infinite;
+}
+@keyframes cp-colobby-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+/* ── Shared micro-label above each block. ── */
+.cp-colobby-label {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+
+/* ── Join code + copy. ── */
+.cp-colobby-share {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.cp-colobby-code {
+  padding: var(--s-2) var(--s-3);
+  background: var(--bg-0);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-2);
+  word-break: break-all;
+  max-height: 72px;
+  overflow-y: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.cp-colobby-copy { align-self: flex-start; }
+
+/* ── Roster — one row per participant. ── */
+.cp-colobby-roster {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.cp-colobby-people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.cp-colobby-person {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-1) 0;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+.cp-colobby-dot {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--co-color, var(--fg-4));
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+.cp-colobby-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cp-colobby-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line-1);
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--fg-3);
+}
+.cp-colobby-chip.host {
+  background: rgba(245, 196, 81, 0.12);
+  border-color: rgba(245, 196, 81, 0.35);
+  color: var(--gold);
+}
+
+/* ── Error surface + actions. ── */
+.cp-colobby-err {
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid rgba(255, 138, 138, 0.4);
+  border-radius: var(--r-sm);
+  background: rgba(232, 38, 38, 0.08);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: #ff8a8a;
+}
+.cp-colobby-actions {
+  display: flex;
+  gap: var(--s-2);
+  margin-top: var(--s-1);
+}
+.cp-colobby-enter { flex: 1; }
+.cp-colobby-leave:hover { color: #ff8a8a; border-color: rgba(255, 138, 138, 0.4); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-colobby-live.host { animation: none; }
+}
