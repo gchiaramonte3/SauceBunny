@@ -1,0 +1,144 @@
+# Nightly real-sidecar smoke.
+#
+# The per-push CI (ci.yml) stubs every sidecar binary, so the riskiest code —
+# whisper-cli invocation flags, the ffmpeg playback-prep and fMP4-remux arg
+# surfaces, the yt-dlp flag surface — never executes there. This job assembles
+# the REAL binaries (latest yt-dlp/ffmpeg/ffprobe, whisper.cpp master built
+# from source) and runs the `#[ignore]`-tagged `nightly_*` Rust tests, which
+# drive the production arg-builders end-to-end against generated fixtures
+# (incl. a 10-bit PQ-tagged ProRes file and a spoken-audio WAV). See
+# src-tauri/src/nightly.rs and CONTRIBUTING.md § "Nightly real-sidecar smoke".
+#
+# Deliberately separate from ci.yml so the per-push pipeline stays fast and
+# network-independent. A failure here means an upstream sidecar release (or
+# one of our arg surfaces) broke — it files/updates a GitHub issue.
+
+name: Nightly sidecar smoke
+
+on:
+  schedule:
+    - cron: "23 10 * * *" # 10:23 UTC daily — off the top-of-hour load spike
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: nightly-sidecars
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: real sidecars + pipeline smoke
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # The bundled sidecars are arm64-only (CLAUDE.md: Apple Silicon only).
+      # macos-latest is arm64 today; fail loudly if that ever changes.
+      - name: Assert Apple Silicon runner
+        run: |
+          test "$(uname -m)" = "arm64" || {
+            echo "::error::runner is $(uname -m), need arm64 — pin an arm64 macOS runner label"
+            exit 1
+          }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+
+      # ── whisper-cli: built from whisper.cpp master, cached on its SHA ──
+      # Rebuilding only when upstream (or our build script) changes keeps the
+      # nightly fast AND still catches every upstream change the day it lands.
+      - name: Resolve whisper.cpp upstream SHA
+        id: whisper-ref
+        run: echo "sha=$(git ls-remote https://github.com/ggerganov/whisper.cpp.git refs/heads/master | cut -f1)" >> "$GITHUB_OUTPUT"
+      - name: Cache whisper-cli binary
+        id: whisper-cache
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/binaries/whisper-cli-aarch64-apple-darwin
+          key: nightly-whisper-cli-${{ steps.whisper-ref.outputs.sha }}-${{ hashFiles('scripts/build-whisper.sh') }}
+      - name: Build whisper-cli (whisper.cpp master, static)
+        if: steps.whisper-cache.outputs.cache-hit != 'true'
+        run: |
+          command -v cmake >/dev/null || brew install cmake
+          npm run build:whisper
+
+      # ── yt-dlp / ffmpeg / ffprobe: fetched FRESH every night ──
+      # Catching their latest releases against our arg surfaces is the point,
+      # so these are deliberately uncached.
+      - name: Fetch latest yt-dlp
+        run: npm run refresh:sidecars
+      - name: Fetch latest static ffmpeg
+        run: npm run refresh:ffmpeg
+      - name: Fetch latest static ffprobe
+        run: npm run refresh:ffprobe
+
+      # Sidecars the smoke doesn't exercise (Swift diarizer/dictate, llama):
+      # stub them zero-byte, same as ci.yml, purely so tauri-build's
+      # externalBin existence check passes. `-s` keeps any real binary.
+      - name: Stub non-exercised sidecars
+        run: |
+          for name in yt-dlp ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate llama-server; do
+            f="src-tauri/binaries/${name}-aarch64-apple-darwin"
+            if [ ! -s "$f" ]; then
+              touch "$f" && chmod +x "$f"
+            fi
+          done
+
+      - name: Print sidecar versions under test
+        run: |
+          echo "yt-dlp:  $(./src-tauri/binaries/yt-dlp-aarch64-apple-darwin --version)"
+          ./src-tauri/binaries/ffmpeg-aarch64-apple-darwin -version | head -1
+          ./src-tauri/binaries/ffprobe-aarch64-apple-darwin -version | head -1
+          cat SIDECAR-VERSIONS.md || true
+
+      # whisper tiny.en (~78 MB) + Silero VAD — immutable artifacts the tests
+      # auto-download on a cache miss (src/nightly.rs), so this cache is just
+      # a network saver with a static key.
+      - name: Cache whisper/VAD models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/sauce-bunny/nightly
+          key: nightly-models-v1
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: nightly-cargo-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.toml') }}
+          restore-keys: nightly-cargo-${{ runner.os }}-
+
+      - name: Run nightly smoke tests (real binaries)
+        working-directory: src-tauri
+        env:
+          # GitHub's virtualized macOS runners may not expose the VideoToolbox
+          # hardware encoder. This lets the playback-prep tests retry with
+          # libx264 (loudly) so the rest of the arg surface is still verified.
+          # Local runs stay strict — don't set this on a real Mac.
+          SB_NIGHTLY_ALLOW_SW_ENCODER: "1"
+        run: cargo test --lib nightly_ -- --ignored --test-threads=1 --nocapture
+
+      - name: File or update a failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Nightly sidecar smoke failed"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          body="The nightly real-sidecar smoke failed on $(date -u +%Y-%m-%d): ${run_url}
+
+          Likely causes: a new yt-dlp/ffmpeg release or whisper.cpp master change broke an arg surface, a fetch source was unreachable, or a real regression in the arg-builders. The test log names the exact invariant that failed."
+          existing="$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number' 2>/dev/null || true)"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

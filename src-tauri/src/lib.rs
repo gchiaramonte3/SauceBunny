@@ -1,5 +1,9 @@
 mod commands;
 mod error;
+// Support for the nightly real-sidecar smoke tests (`cargo test --lib
+// nightly_ -- --ignored`) — compiled only under cfg(test), never shipped.
+#[cfg(test)]
+mod nightly;
 mod stream_proxy;
 pub use error::AppError;
 

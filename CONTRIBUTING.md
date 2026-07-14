@@ -70,6 +70,56 @@ are still verified manually, so please also describe the smoke-test you ran
 in the PR body (e.g. "Pulled a YouTube clip, generated a transcript with
 diarization on, dragged two speaker bubbles to merge — no regressions").
 
+## Nightly real-sidecar smoke
+
+Per-push CI stubs the sidecar binaries, so it never actually *runs* whisper,
+ffmpeg, or yt-dlp — a whisper.cpp flag rename or a broken fMP4 remux would
+ship silently. The nightly workflow
+(`.github/workflows/nightly-sidecars.yml`) closes that gap: every night it
+assembles the **real** binaries (latest yt-dlp/ffmpeg/ffprobe releases,
+whisper.cpp master built from source, cached on its upstream SHA) and runs
+the `#[ignore]`-tagged `nightly_*` Rust tests. Those tests drive the
+**production arg-builders** — `whisper_cli_args`, `wav_16k_mono_args`,
+`playback_prep_args` + the color-routing quality args, and the stream
+proxy's `/fmp4/` route — end-to-end against fixtures generated on the spot
+with the fetched ffmpeg:
+
+- **Playback prep**: a testsrc2+sine H.264/AAC file must take the SDR-8
+  fast path; a 10-bit **PQ-tagged ProRes 422 HQ** file must route through
+  the zscale/tonemap chain to bt709-tagged 8-bit SDR (the CLAUDE.md
+  "ProRes / 10-bit caveat" case — this is what catches a zscale/tonemap
+  option rename in a new ffmpeg build); an **untagged 10-bit** file must
+  take the error-diffusion dither path; audio-only input must come out as
+  MP3. All outputs are ffprobe-verified 8-bit yuv420p H.264 (+AAC,
+  faststart).
+- **Whisper**: macOS `say` speech → the production 16 kHz mono WAV
+  conversion → whisper-cli with the app's exact flags (incl. `-l` language
+  and `--vad`) must emit a well-formed SRT; every flag we pass must still
+  exist in `whisper-cli --help`.
+- **fMP4 remux (stream proxy)**: a local HTTP server stands in for the CDN;
+  the proxy's ffmpeg remux must stream a fragmented MP4 that keeps **both**
+  tracks (the r63 audio invariant), honor `?start=` seeks, and merge
+  DASH-split video+audio inputs (r75).
+- **yt-dlp**: the latest release must run, and every `--long-flag` we pass
+  anywhere in `commands/download.rs` must still be listed in `--help`
+  (the flag list is scraped from our own source, so it can't go stale).
+
+Run it locally (needs `npm run setup` first; downloads the tiny.en + Silero
+VAD models to `~/.cache/sauce-bunny/nightly/` on first run, ~78 MB total —
+override with `SB_NIGHTLY_WHISPER_MODEL` / `SB_NIGHTLY_VAD_MODEL`):
+
+```bash
+cd src-tauri && cargo test --lib nightly_ -- --ignored --test-threads=1
+```
+
+On CI the workflow sets `SB_NIGHTLY_ALLOW_SW_ENCODER=1` because GitHub's
+virtualized macOS runners may not expose the VideoToolbox hardware encoder;
+the playback-prep tests then retry with libx264 (loudly) so the rest of the
+arg surface is still verified. Don't set it locally — a real Mac should
+exercise the real encoder. A red nightly files/updates a "Nightly sidecar
+smoke failed" issue with a link to the run; it can also be triggered by hand
+from the Actions tab (`workflow_dispatch`).
+
 ## Conventions
 
 - **TypeScript strict mode.** No `any` unless you leave a comment explaining

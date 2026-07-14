@@ -598,3 +598,175 @@ mod tests {
         assert_eq!(body_len_from_range("garbage"), None);
     }
 }
+
+// ─── Nightly real-sidecar smoke (see src/nightly.rs; run with --ignored) ────
+//
+// End-to-end through the REAL proxy + REAL ffmpeg: a local HTTP "CDN" serves
+// the fixture, the proxy's `/fmp4/v1/` route spawns the bundled ffmpeg to
+// remux it, and we assert the streamed bytes are a fragmented MP4 that still
+// carries BOTH tracks — the r63 invariant (ffmpeg's fMP4 plays audio in
+// WKWebView where mediabunny's didn't) and the r75 DASH audio-merge.
+#[cfg(test)]
+mod nightly_proxy_tests {
+    use super::*;
+    use crate::nightly;
+    use std::path::PathBuf;
+
+    /// `serve_fmp4` resolves ffmpeg next to the running executable — for
+    /// `cargo test` that's target/debug/deps/, so link the repo sidecar there.
+    fn link_ffmpeg_next_to_test_exe() {
+        let exe = std::env::current_exe().expect("current_exe");
+        let dir = exe.parent().expect("test exe has a parent dir");
+        let dst = dir.join("ffmpeg");
+        let src = nightly::sidecar("ffmpeg");
+        match std::fs::read_link(&dst) {
+            Ok(existing) if existing == src => return,
+            Ok(_) => {
+                let _ = std::fs::remove_file(&dst); // stale link from another checkout
+            }
+            Err(_) if dst.exists() => return, // a real file is already there
+            Err(_) => {}
+        }
+        std::os::unix::fs::symlink(&src, &dst).expect("link ffmpeg next to test exe");
+    }
+
+    /// The proxy's BASE/TOKEN are process-global OnceLocks, so `start()` must
+    /// run exactly once no matter how many tests need it.
+    fn proxy_base() -> &'static str {
+        static BASE: OnceLock<String> = OnceLock::new();
+        BASE.get_or_init(|| {
+            link_ffmpeg_next_to_test_exe();
+            start().expect("stream proxy failed to start")
+        })
+    }
+
+    /// Tiny loopback file server standing in for the CDN. Ignores Range and
+    /// always answers 200 with the full body — ffmpeg accepts that, and the
+    /// fixtures are faststart so no seeking is needed to demux.
+    fn serve_fixtures(files: Vec<(&'static str, PathBuf)>) -> String {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind fixture server");
+        let port = server
+            .server_addr()
+            .to_ip()
+            .map(|a| a.port())
+            .expect("fixture server port");
+        std::thread::spawn(move || {
+            for req in server.incoming_requests() {
+                let path = req
+                    .url()
+                    .trim_start_matches('/')
+                    .split('?')
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                match files.iter().find(|(route, _)| *route == path) {
+                    Some((_, file)) => {
+                        let data = std::fs::read(file).expect("read fixture");
+                        let _ = req.respond(tiny_http::Response::from_data(data));
+                    }
+                    None => {
+                        let _ = req.respond(
+                            tiny_http::Response::from_string("not found").with_status_code(404),
+                        );
+                    }
+                }
+            }
+        });
+        format!("http://127.0.0.1:{port}")
+    }
+
+    /// GET a proxy URL and read the (chunked) body to EOF.
+    fn fetch_all(url: &str) -> (u16, Vec<u8>) {
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(180))
+            .build()
+            .expect("build blocking client");
+        let resp = client.get(url).send().expect("proxy request failed");
+        let status = resp.status().as_u16();
+        let bytes = resp.bytes().expect("read proxy stream").to_vec();
+        (status, bytes)
+    }
+
+    fn assert_fmp4_with_tracks(bytes: &[u8], want_audio: bool, what: &str) {
+        assert!(
+            bytes.len() > 20_000,
+            "{what}: fMP4 stream suspiciously small ({} bytes) — ffmpeg likely \
+             failed at spawn; run the request manually to see its stderr",
+            bytes.len()
+        );
+        let boxes = nightly::mp4_boxes(bytes);
+        let names: Vec<&str> = boxes.iter().map(|(f, _, _)| f.as_str()).collect();
+        assert_eq!(names.first().copied(), Some("ftyp"), "{what}: stream must open with ftyp, got {names:?}");
+        assert!(
+            names.iter().filter(|n| **n == "moof").count() >= 1,
+            "{what}: no moof fragments — not a fragmented MP4? boxes: {names:?}"
+        );
+        let moov = nightly::mp4_box_bytes(bytes, "moov")
+            .unwrap_or_else(|| panic!("{what}: stream has no moov init segment; boxes: {names:?}"));
+        assert!(
+            nightly::contains_bytes(moov, b"avc1"),
+            "{what}: moov lost the H.264 video track"
+        );
+        if want_audio {
+            assert!(
+                nightly::contains_bytes(moov, b"mp4a"),
+                "{what}: moov lost the AAC audio track — the r63 'ffmpeg fMP4 \
+                 keeps audio' invariant is broken"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_fmp4_remux_streams_fragmented_mp4_with_audio() {
+        let av = nightly::fixture_av();
+        let cdn = serve_fixtures(vec![("av.mp4", av)]);
+        let upstream = format!("{cdn}/av.mp4");
+        let url = format!("{}/fmp4/v1/{}?start=0", proxy_base(), URL_SAFE_NO_PAD.encode(upstream.as_bytes()));
+        let (status, bytes) = fetch_all(&url);
+        assert_eq!(status, 200, "fmp4 route returned {status}");
+        eprintln!("[nightly] fMP4 remux: {} bytes", bytes.len());
+        assert_fmp4_with_tracks(&bytes, true, "muxed remux");
+    }
+
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_fmp4_seek_rebuild_from_start_offset() {
+        let av = nightly::fixture_av();
+        let cdn = serve_fixtures(vec![("av.mp4", av)]);
+        let upstream = format!("{cdn}/av.mp4");
+        let b64 = URL_SAFE_NO_PAD.encode(upstream.as_bytes());
+        let (s0, full) = fetch_all(&format!("{}/fmp4/v1/{b64}?start=0", proxy_base()));
+        let (s3, tail) = fetch_all(&format!("{}/fmp4/v1/{b64}?start=3", proxy_base()));
+        assert_eq!((s0, s3), (200, 200));
+        assert_fmp4_with_tracks(&tail, true, "seek rebuild (start=3)");
+        // The fixture has a keyframe every second, so -ss 3 must actually
+        // drop the first ~3s — a rebuilt stream that ignores `start` would
+        // come back the same size as the full one.
+        assert!(
+            (tail.len() as f64) < (full.len() as f64) * 0.8,
+            "start=3 stream ({} bytes) is not meaningfully smaller than the \
+             full stream ({} bytes) — input-side -ss seek seems broken",
+            tail.len(),
+            full.len()
+        );
+    }
+
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_fmp4_dash_split_audio_merge() {
+        let video = nightly::fixture_video_only();
+        let audio = nightly::fixture_audio_m4a();
+        let cdn = serve_fixtures(vec![("v.mp4", video), ("a.m4a", audio)]);
+        let v64 = URL_SAFE_NO_PAD.encode(format!("{cdn}/v.mp4").as_bytes());
+        let a64 = URL_SAFE_NO_PAD.encode(format!("{cdn}/a.m4a").as_bytes());
+        let url = format!("{}/fmp4/v1/{v64}?start=0&audio={a64}", proxy_base());
+        let (status, bytes) = fetch_all(&url);
+        assert_eq!(status, 200, "2-input fmp4 route returned {status}");
+        eprintln!("[nightly] DASH-split merge: {} bytes", bytes.len());
+        // The r75 invariant: video from input 0 + audio from input 1, merged
+        // into ONE fMP4 with both tracks.
+        assert_fmp4_with_tracks(&bytes, true, "DASH-split 2-input merge");
+    }
+}

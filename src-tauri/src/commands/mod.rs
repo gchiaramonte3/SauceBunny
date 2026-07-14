@@ -98,7 +98,7 @@ fn current_triple() -> &'static str {
     }
 }
 
-fn sidecar_path(name: &str) -> Result<PathBuf, crate::AppError> {
+pub(crate) fn sidecar_path(name: &str) -> Result<PathBuf, crate::AppError> {
     let filename = format!("{}-{}", name, current_triple());
     if cfg!(debug_assertions) {
         let manifest = env!("CARGO_MANIFEST_DIR");

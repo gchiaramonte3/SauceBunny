@@ -1345,6 +1345,59 @@ async fn probe_playback_color(app: &AppHandle, path: &str) -> Option<PlaybackCol
     })
 }
 
+/// Assemble the full playback-prep ffmpeg invocation (exercised against the
+/// real binary by the nightly CI smoke — see `nightly_media_tests`).
+/// `video_quality_args` is the `playback_video_quality_args` output for video
+/// sources (pix_fmt / -vf color chain + bitrate, per the color-routing block
+/// above), or `None` for the audio-only path. Split video vs. audio:
+///   • Video: h264_videotoolbox is the hardware encoder on macOS.
+///     5–15× real time on Apple Silicon. +faststart moves the moov atom to
+///     the head of the file so progressive playback works without a full
+///     download.
+///   • Audio: libmp3lame is universal in WebKit; we keep 320 kbps so audio
+///     quality is preserved.
+pub(crate) fn playback_prep_args(
+    input_path: &str,
+    out_path: &str,
+    video_quality_args: Option<&[String]>,
+) -> Vec<String> {
+    let mut cmd_args: Vec<String> = vec![
+        "-hide_banner".into(),
+        "-y".into(), // overwrite any leftover from a prior aborted run
+        "-i".into(),
+        input_path.into(),
+    ];
+    match video_quality_args {
+        Some(quality) => {
+            cmd_args.extend([
+                "-map".into(), "0:v:0".into(),
+                "-map".into(), "0:a:0?".into(), // optional audio track
+                "-c:v".into(), "h264_videotoolbox".into(),
+            ]);
+            cmd_args.extend(quality.iter().cloned());
+            cmd_args.extend([
+                "-c:a".into(), "aac".into(),
+                "-b:a".into(), "160k".into(),
+                "-movflags".into(), "+faststart".into(),
+                // Emit a regular `time=` progress line ffmpeg-style.
+                "-progress".into(), "pipe:2".into(),
+                "-nostats".into(),
+            ]);
+        }
+        None => {
+            cmd_args.extend([
+                "-vn".into(),
+                "-c:a".into(), "libmp3lame".into(),
+                "-b:a".into(), "320k".into(),
+                "-progress".into(), "pipe:2".into(),
+                "-nostats".into(),
+            ]);
+        }
+    }
+    cmd_args.push(out_path.into());
+    cmd_args
+}
+
 #[derive(Deserialize)]
 pub struct PreparePlaybackArgs {
     pub input_path: String,
@@ -1395,22 +1448,7 @@ pub async fn prepare_local_for_playback(
         return Err(format!("ffmpeg sidecar missing at {}", ffmpeg.display()).into());
     }
 
-    // Argument list — split video vs. audio path:
-    //   • Video: h264_videotoolbox is the hardware encoder on macOS.
-    //     5–15× real time on Apple Silicon. yuv420p is the one pixel format
-    //     WKWebView reliably renders — depth/HDR reduction is routed per
-    //     source by `playback_video_quality_args` (see the color-routing
-    //     block above). +faststart moves the moov atom to the head of the
-    //     file so progressive playback works without a full download.
-    //   • Audio: libmp3lame is universal in WebKit; we keep 320 kbps so
-    //     audio quality is preserved.
-    let mut cmd_args: Vec<String> = vec![
-        "-hide_banner".into(),
-        "-y".into(), // overwrite any leftover from a prior aborted run
-        "-i".into(),
-        args.input_path.clone(),
-    ];
-    if args.has_video {
+    let cmd_args = if args.has_video {
         let probe = probe_playback_color(&app, &args.input_path).await;
         let (quality_args, color_label) = playback_video_quality_args(probe.as_ref());
         let _ = app.emit("playback-prep-log", LogEvent {
@@ -1419,30 +1457,10 @@ pub async fn prepare_local_for_playback(
             tag: "info".into(),
             line: format!("[playback-prep] color path: {color_label}"),
         });
-        cmd_args.extend([
-            "-map".into(), "0:v:0".into(),
-            "-map".into(), "0:a:0?".into(), // optional audio track
-            "-c:v".into(), "h264_videotoolbox".into(),
-        ]);
-        cmd_args.extend(quality_args);
-        cmd_args.extend([
-            "-c:a".into(), "aac".into(),
-            "-b:a".into(), "160k".into(),
-            "-movflags".into(), "+faststart".into(),
-            // Emit a regular `time=` progress line ffmpeg-style.
-            "-progress".into(), "pipe:2".into(),
-            "-nostats".into(),
-        ]);
+        playback_prep_args(&args.input_path, &out_str, Some(&quality_args))
     } else {
-        cmd_args.extend([
-            "-vn".into(),
-            "-c:a".into(), "libmp3lame".into(),
-            "-b:a".into(), "320k".into(),
-            "-progress".into(), "pipe:2".into(),
-            "-nostats".into(),
-        ]);
-    }
-    cmd_args.push(out_str.clone());
+        playback_prep_args(&args.input_path, &out_str, None)
+    };
 
     let cmd = app
         .shell()
@@ -1957,6 +1975,151 @@ mod media_info_tests {
         assert!(bucket_cv(&[1000u64; 90], 30).is_some()); // exactly 3
         assert_eq!(bucket_cv(&[], 30), None);
         assert_eq!(bucket_cv(&[1000], 0), None);
+    }
+}
+
+// ─── Nightly real-sidecar smoke (see src/nightly.rs; run with --ignored) ────
+//
+// The color-routing unit tests above pin the zscale/tonemap STRINGS; these
+// run the same probe → classify → quality-args → `playback_prep_args` chain
+// against the REAL bundled ffmpeg on generated fixtures, so a zscale/tonemap
+// option rename in a new ffmpeg build (the exact risk the safe_* allowlists
+// exist for) fails here instead of at a user's first HDR import.
+#[cfg(test)]
+mod nightly_media_tests {
+    use super::{playback_prep_args, playback_video_quality_args, PlaybackColorProbe};
+    use crate::nightly;
+    use std::path::Path;
+
+    /// Build the probe struct from the real ffprobe, the way
+    /// `probe_playback_color` does in-app (minus the AppHandle plumbing).
+    fn probe_struct(path: &Path) -> PlaybackColorProbe {
+        let pj = nightly::probe_json(path);
+        let s = nightly::probe_stream(&pj, "video").expect("fixture has a video stream");
+        PlaybackColorProbe {
+            width: s["width"].as_u64().unwrap_or(0) as u32,
+            height: s["height"].as_u64().unwrap_or(0) as u32,
+            pix_fmt: s["pix_fmt"].as_str().map(str::to_string),
+            color_space: s["color_space"].as_str().map(str::to_string),
+            color_transfer: s["color_transfer"].as_str().map(str::to_string),
+            color_primaries: s["color_primaries"].as_str().map(str::to_string),
+        }
+    }
+
+    /// Full production video prep on a fixture: real probe → real quality
+    /// args → real ffmpeg. Returns the color-path label for asserts.
+    fn prep_video(input: &Path, out: &Path) -> String {
+        let _ = std::fs::remove_file(out);
+        let probe = probe_struct(input);
+        let (quality, label) = playback_video_quality_args(Some(&probe));
+        let args = playback_prep_args(input.to_str().unwrap(), out.to_str().unwrap(), Some(&quality));
+        let encoder = nightly::run_playback_prep(&args);
+        eprintln!("[nightly] playback prep [{label}] ran with {encoder}");
+        label
+    }
+
+    fn assert_wkwebview_playable(out: &Path) {
+        let probe = nightly::probe_json(out);
+        let v = nightly::probe_stream(&probe, "video").expect("prepared file has a video stream");
+        assert_eq!(v["codec_name"], "h264", "WKWebView needs H.264, got {}", v["codec_name"]);
+        assert_eq!(v["pix_fmt"], "yuv420p", "WKWebView needs 8-bit yuv420p, got {}", v["pix_fmt"]);
+        let bits = v["bits_per_raw_sample"].as_str().unwrap_or("8");
+        assert_eq!(bits, "8", "playback copy must be 8-bit, got {bits}");
+        let dur = nightly::probe_duration(&probe);
+        assert!((4.0..=6.0).contains(&dur), "expected ~5s output, got {dur}s");
+    }
+
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_playback_prep_sdr_av() {
+        let input = nightly::fixture_av();
+        let out = nightly::scratch_dir().join("prep-sdr.mp4");
+        let label = prep_video(&input, &out);
+        assert!(label.contains("sdr-8bit"), "8-bit H.264 must take the fast path, got: {label}");
+
+        assert_wkwebview_playable(&out);
+        let probe = nightly::probe_json(&out);
+        let a = nightly::probe_stream(&probe, "audio").expect("prepared file kept its audio track");
+        assert_eq!(a["codec_name"], "aac", "audio must be AAC, got {}", a["codec_name"]);
+
+        // `-movflags +faststart` is the progressive-playback invariant: the
+        // moov atom must precede mdat.
+        let bytes = std::fs::read(&out).expect("read prepared mp4");
+        let boxes = nightly::mp4_boxes(&bytes);
+        let idx = |name: &str| boxes.iter().position(|(f, _, _)| f == name);
+        let (moov, mdat) = (idx("moov"), idx("mdat"));
+        assert!(
+            moov.is_some() && mdat.is_some() && moov < mdat,
+            "faststart violated — box order: {:?}",
+            boxes.iter().map(|(f, _, _)| f.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    // The CLAUDE.md "ProRes / 10-bit caveat" hard case: a PQ-tagged 10-bit
+    // ProRes 422 HQ must route through the r109 tonemap chain and come out
+    // as bt709-tagged 8-bit SDR that WKWebView can actually paint.
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_playback_prep_10bit_prores_hdr_tonemap() {
+        let input = nightly::fixture_hdr_prores();
+
+        // Sanity-check the fixture really is the hard case before testing.
+        let src = nightly::probe_json(&input);
+        let sv = nightly::probe_stream(&src, "video").expect("fixture has video");
+        assert_eq!(sv["codec_name"], "prores");
+        assert_eq!(sv["pix_fmt"], "yuv422p10le");
+        assert_eq!(sv["color_transfer"], "smpte2084", "fixture must be PQ-tagged");
+
+        let out = nightly::scratch_dir().join("prep-hdr.mp4");
+        let label = prep_video(&input, &out);
+        assert!(label.contains("hdr tonemap"), "PQ source must take the tonemap path, got: {label}");
+
+        assert_wkwebview_playable(&out);
+        let probe = nightly::probe_json(&out);
+        let v = nightly::probe_stream(&probe, "video").unwrap();
+        assert_eq!(
+            v["color_transfer"], "bt709",
+            "tonemapped output must be stamped bt709 SDR, got {}",
+            v["color_transfer"]
+        );
+        let a = nightly::probe_stream(&probe, "audio").expect("PCM audio must transcode to AAC");
+        assert_eq!(a["codec_name"], "aac");
+    }
+
+    // Untagged 10-bit SDR: the r109 dither path (zscale error-diffusion, no
+    // tonemap) — the fix for the old undithered swscale banding.
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_playback_prep_10bit_sdr_dither() {
+        let input = nightly::fixture_sdr10_prores();
+
+        let probe = probe_struct(&input);
+        let (quality, label) = playback_video_quality_args(Some(&probe));
+        assert!(label.contains("sdr-10bit"), "untagged 10-bit must classify SDR-10, got: {label}");
+        let vf = quality.join(" ");
+        assert!(vf.contains("dither=error_diffusion"), "dither chain missing: {vf}");
+        assert!(!vf.contains("tonemap"), "SDR-10 must not tonemap: {vf}");
+
+        let out = nightly::scratch_dir().join("prep-sdr10.mp4");
+        let label = prep_video(&input, &out);
+        assert!(label.contains("sdr-10bit"), "got: {label}");
+        assert_wkwebview_playable(&out);
+    }
+
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_playback_prep_audio_only_mp3() {
+        let input = nightly::fixture_audio_m4a();
+        let out = nightly::scratch_dir().join("prep-audio.mp3");
+        let _ = std::fs::remove_file(&out);
+        let args = playback_prep_args(input.to_str().unwrap(), out.to_str().unwrap(), None);
+        nightly::run_ok(&nightly::sidecar("ffmpeg"), &args, "audio-only playback prep");
+
+        let probe = nightly::probe_json(&out);
+        let a = nightly::probe_stream(&probe, "audio").expect("mp3 output has an audio stream");
+        assert_eq!(a["codec_name"], "mp3", "audio-only prep must produce MP3 (libmp3lame)");
+        let dur = nightly::probe_duration(&probe);
+        assert!((4.0..=6.0).contains(&dur), "expected ~5s output, got {dur}s");
     }
 }
 
