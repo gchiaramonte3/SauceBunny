@@ -29,6 +29,7 @@ import type { LlmModel } from "../bindings/LlmModel";
 import { formatError } from "../lib/error-format";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { YouTubeSettings } from "./YouTubeSettings";
+import { useModalFocus } from "../hooks/use-modal-focus";
 
 type TabId = "general" | "captions" | "transcription" | "youtube" | "ai-summary" | "commands" | "about";
 
@@ -48,6 +49,14 @@ export type Defaults = {
    * 100% on-device.
    */
   transcriptionEngine: "whisper" | "parakeet";
+  /**
+   * Spoken language for transcription — "auto" (whisper.cpp language
+   * auto-detect, the default) or an ISO-639-1 code ("en", "es", …).
+   * Threaded into every whisper-cli run (`-l`, incl. dictation) and into
+   * yt-dlp caption downloads as the preferred subtitle locale. Parakeet
+   * handles language itself and ignores this.
+   */
+  transcriptionLanguage: string;
   /** AI Summary: chosen local llama.cpp model id (Settings → AI Summary). */
   llmSummarizationModel: string;
   /** AI Summary output shape — bullets, numbered list, or prose. */
@@ -229,6 +238,26 @@ function formatMB(bytes: number): string {
 // errors were the top transcription complaint. medium.en / large are offered
 // for users who want maximum accuracy and will accept a slower pass.
 const RECOMMENDED_MODEL = "small.en";
+
+// Settings → Transcription → Language. Codes are whisper-cli `-l` values
+// (ISO-639-1); "auto" = whisper.cpp language auto-detection. The same code is
+// passed to yt-dlp caption downloads as the preferred subtitle locale (the
+// backend adds regional/base forms itself — e.g. "zh" is enough for Chinese).
+const TRANSCRIPTION_LANGUAGES: { code: string; label: string }[] = [
+  { code: "auto", label: "Auto-detect" },
+  { code: "en",   label: "English" },
+  { code: "es",   label: "Spanish" },
+  { code: "fr",   label: "French" },
+  { code: "de",   label: "German" },
+  { code: "it",   label: "Italian" },
+  { code: "pt",   label: "Portuguese" },
+  { code: "ja",   label: "Japanese" },
+  { code: "ko",   label: "Korean" },
+  { code: "zh",   label: "Chinese" },
+  { code: "ru",   label: "Russian" },
+  { code: "ar",   label: "Arabic" },
+  { code: "hi",   label: "Hindi" },
+];
 
 type ModelInfo = {
   tagline: string;
@@ -638,6 +667,10 @@ export function SettingsModal(props: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // Trap Tab inside the dialog + restore focus to the opener on close.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(open, dialogRef);
+
   if (!open) return null;
 
   async function chooseFolder() {
@@ -659,12 +692,20 @@ export function SettingsModal(props: Props) {
 
   return (
     <div className="cp-modal-backdrop" onClick={onClose}>
-      <div className="cp-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="cp-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+        ref={dialogRef}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="cp-modal-header">
           <h2>Settings</h2>
           <span className="crumb">{TABS.find((t) => t.id === tab)?.label}</span>
           <div className="filler" />
-          <button className="cp-modal-close" onClick={onClose} title="Close (Esc)">
+          <button className="cp-modal-close" onClick={onClose} title="Close (Esc)" aria-label="Close">
             ✕
           </button>
         </div>
@@ -1122,6 +1163,37 @@ export function SettingsModal(props: Props) {
                       </div>
                     )}
                   </CollapsibleSection>
+                </CollapsibleSection>
+
+                <CollapsibleSection id="tx-language" label="Language" open={sectionOpen("tx-language")} onToggle={() => toggleSection("tx-language")}>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Language
+                      <span className="desc">Whisper transcription language. Auto-detect works for most sources.</span>
+                    </div>
+                    <div className="v">
+                      <select
+                        className="cp-select"
+                        value={defaults.transcriptionLanguage}
+                        onChange={(e) => setDefaults({ ...defaults, transcriptionLanguage: e.target.value })}
+                      >
+                        {TRANSCRIPTION_LANGUAGES.map((l) => (
+                          <option key={l.code} value={l.code}>{l.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  {/* `*.en` Whisper models are English-only — whisper-cli would
+                      silently force English, so surface the mismatch right where
+                      the language is picked (the backend also logs it at run
+                      time; see warn_if_english_only_mismatch in transcript.rs). */}
+                  {defaults.whisperModel.endsWith(".en")
+                    && defaults.transcriptionLanguage !== "auto"
+                    && defaults.transcriptionLanguage !== "en" && (
+                    <div className="cp-source-hint warn" style={{ marginTop: 8 }}>
+                      The selected model is English-only — pick a multilingual model for other languages.
+                    </div>
+                  )}
                 </CollapsibleSection>
 
                 <CollapsibleSection id="tx-library" label="Transcript library" open={sectionOpen("tx-library")} onToggle={() => toggleSection("tx-library")}>

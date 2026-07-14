@@ -54,6 +54,28 @@ export type PlayerHandle = {
    */
   setShuttle: (rate: number) => void;
   /**
+   * Persistent user playback speed (Transport speed picker, 0.5–2×). Distinct
+   * from setShuttle: the shuttle is a transient J-K-L override, and on shuttle
+   * exit the player restores THIS rate rather than 1×.
+   *
+   * Per-engine behaviour:
+   *   • <video>-backed players (local / MSE stream) map it to `playbackRate`
+   *     AND `defaultPlaybackRate` — WebKit's load algorithm resets playbackRate
+   *     to the default, so path swaps / MSE pipeline rebuilds keep the rate.
+   *   • MediaBunnyPlayer ignores it BY DESIGN (plays at 1×): its clock is
+   *     pre-scheduled Web Audio chunks chased by the video render loop, and
+   *     there is no safe rate seam short of rebuilding that scheduling model.
+   *     It reports that via `supportsPlaybackRate` below.
+   */
+  setPlaybackRate: (rate: number) => void;
+  /**
+   * Whether this player honours `setPlaybackRate`. The <video>-backed
+   * players (local / MSE stream) do; MediaBunnyPlayer doesn't (see above)
+   * and reports `false` so the speed UI (badge, HUD, shortcuts, palette)
+   * can disable itself instead of claiming a rate that isn't playing.
+   */
+  supportsPlaybackRate: boolean;
+  /**
    * Optional — returns a JPEG/PNG blob of the frame at `seconds` if the
    * player can decode frames directly (MediaBunnyPlayer does, others
    * return null). Lets handleSnapshot skip the ffmpeg subprocess when

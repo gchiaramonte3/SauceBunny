@@ -1,4 +1,5 @@
-import { defineConfig } from "vite";
+// vitest/config's defineConfig = vite's + the typed `test` block.
+import { defineConfig, configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 const host = process.env.TAURI_DEV_HOST;
@@ -6,6 +7,11 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
+  test: {
+    // e2e/ is Playwright's turf (npm run test:e2e) — vitest must not collect it.
+    // .claude/ holds agent worktrees (full repo copies) — same rule applies.
+    exclude: [...configDefaults.exclude, "e2e/**", ".claude/**"],
+  },
   server: {
     port: 1420,
     strictPort: true,

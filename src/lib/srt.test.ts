@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSrt, groupIntoTurns, fmtTime } from "./srt";
+import { parseSrt, groupIntoTurns, fmtTime, serializeCues, secondsToCueTc, type Cue } from "./srt";
 
 // The parser is the single highest-blast-radius pure module in the app: the
 // transcript panel, the on-video captions, search, click-to-seek, and every
@@ -196,5 +196,87 @@ describe("fmtTime", () => {
     expect(fmtTime(0)).toMatch(/0:00/);
     expect(fmtTime(75)).toMatch(/1:15/);
     expect(fmtTime(3723)).toMatch(/1:02:03/);
+  });
+});
+
+describe("secondsToCueTc", () => {
+  it("formats zero-padded SRT and VTT timestamps", () => {
+    expect(secondsToCueTc(0)).toBe("00:00:00,000");
+    expect(secondsToCueTc(3723.045)).toBe("01:02:03,045");
+    expect(secondsToCueTc(3723.045, ".")).toBe("01:02:03.045");
+  });
+  it("carries millisecond rounding into the seconds field", () => {
+    // Naive per-field math would emit an out-of-range ",1000" here.
+    expect(secondsToCueTc(1.9996)).toBe("00:00:02,000");
+  });
+});
+
+describe("serializeCues", () => {
+  // The contract inline cue editing depends on: parseSrt(serializeCues(x))
+  // must reproduce x, because every consumer (viewer, on-video captions,
+  // exports, AI summary) re-parses the rewritten file.
+  const cue = (over: Partial<Cue>): Cue => ({
+    index: 1, start: 0, end: 1, text: "hello", speaker: null, ...over,
+  });
+
+  it("round-trips machine speaker tags through parseSrt", () => {
+    const cues = parseSrt(SRT);
+    cues[0] = { ...cues[0], text: "The greatest weapon of humankind, edited" };
+    const reparsed = parseSrt(serializeCues(cues));
+    expect(reparsed).toHaveLength(2);
+    expect(reparsed[0].speaker).toBe("SPEAKER_00");
+    expect(reparsed[0].text).toBe("The greatest weapon of humankind, edited");
+    expect(reparsed[0].start).toBeCloseTo(0.19, 3);
+    expect(reparsed[1].end).toBeCloseTo(19.91, 3);
+    expect(reparsed[1].speaker).toBe("SPEAKER_01");
+  });
+
+  it("round-trips human speaker names — including ones NAME:-style prefixes would drop", () => {
+    // "vic" is not name-shaped (lowercase), so a `vic:` prefix would silently
+    // lose the speaker on re-parse; the voice-tag encoding keeps it.
+    const cues = [
+      cue({ start: 1, end: 2.5, text: "We are in New York City", speaker: "Roger Bingham" }),
+      cue({ index: 2, start: 2.5, end: 4, text: "and it is loud", speaker: "vic" }),
+    ];
+    const reparsed = parseSrt(serializeCues(cues));
+    expect(reparsed.map((c) => c.speaker)).toEqual(["Roger Bingham", "vic"]);
+    expect(reparsed.map((c) => c.text)).toEqual(["We are in New York City", "and it is loud"]);
+  });
+
+  it("round-trips null speakers as plain text", () => {
+    const reparsed = parseSrt(serializeCues([cue({ text: "no one speaking" })]));
+    expect(reparsed[0].speaker).toBeNull();
+    expect(reparsed[0].text).toBe("no one speaking");
+  });
+
+  it("writes a WEBVTT header and dot separators in vtt mode (still re-parses)", () => {
+    const out = serializeCues([cue({ start: 61.5, end: 63 })], "vtt");
+    expect(out.startsWith("WEBVTT\n\n")).toBe(true);
+    expect(out).toContain("00:01:01.500 --> 00:01:03.000");
+    const reparsed = parseSrt(out);
+    expect(reparsed).toHaveLength(1);
+    expect(reparsed[0].start).toBeCloseTo(61.5, 3);
+  });
+
+  it("skips empty-text cues and renumbers the survivors", () => {
+    const out = serializeCues([
+      cue({ text: "  " }),
+      cue({ index: 2, start: 1, end: 2, text: "kept" }),
+    ]);
+    expect(out.startsWith("1\n")).toBe(true);
+    const reparsed = parseSrt(out);
+    expect(reparsed).toHaveLength(1);
+    expect(reparsed[0].text).toBe("kept");
+  });
+
+  it("survives text with ampersands and stray angle brackets", () => {
+    const reparsed = parseSrt(serializeCues([cue({ text: "salt & pepper, 1 < 2" })]));
+    expect(reparsed[0].text).toBe("salt & pepper, 1 < 2");
+  });
+
+  it("collapses internal newlines/whitespace so a block never splits mid-cue", () => {
+    const reparsed = parseSrt(serializeCues([cue({ text: "line one\n\nline two" })]));
+    expect(reparsed).toHaveLength(1);
+    expect(reparsed[0].text).toBe("line one line two");
   });
 });

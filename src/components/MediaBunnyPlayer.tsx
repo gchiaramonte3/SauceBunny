@@ -1,12 +1,13 @@
 import {
   forwardRef, memo, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import {
-  Input, UrlSource, ALL_FORMATS,
+  Input, ALL_FORMATS,
   CanvasSink, AudioBufferSink,
-  type InputVideoTrack, type InputAudioTrack,
+  type InputVideoTrack, type InputAudioTrack, type WrappedCanvas,
 } from "mediabunny";
+import { mediabunnySource } from "../lib/mediabunny-source";
+import { createScrubPump, type ScrubPump } from "../lib/scrub-pump";
 import { IconFilm } from "./Icons";
 import type { PlayerHandle } from "./player-handle";
 
@@ -88,6 +89,14 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
   const scheduledRef = useRef<AudioBufferSourceNode[]>([]);
   /** Most recent drawn frame — kept so React renders stay idempotent. */
   const lastDrawnRef = useRef<HTMLCanvasElement | OffscreenCanvas | null>(null);
+  /**
+   * Latest-wins scrub decoder (paused-seek path). A fast drag calls seekTo
+   * many times/sec; rather than spawn one getCanvas per call (decodes pile up,
+   * the shown frame lags the cursor), this pump keeps only the NEWEST target
+   * and decodes one at a time, dropping intermediate targets superseded while
+   * a decode was in flight. Created lazily below.
+   */
+  const scrubPumpRef = useRef<ScrubPump | null>(null);
 
   // Driving a setState for the visible play/pause UI on audio-only mode.
   const [isPlaying, setIsPlaying] = useState(false);
@@ -117,9 +126,30 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     lastDrawnRef.current = src;
   };
 
+  // Latest-wins scrub pump, created once. Its drain closes over refs only
+  // (genRef/videoSinkRef and the ref-reading drawCanvas), so a first-render
+  // closure stays correct across re-renders. The generation gate makes a
+  // play()/seek-while-playing/teardown supersede an in-flight scrub frame:
+  // the frame is still decoded but not painted, so it can't fight the
+  // playback loop — yet the pump keeps draining any newer scrub target.
+  if (!scrubPumpRef.current) {
+    scrubPumpRef.current = createScrubPump(async (target: number) => {
+      const gen = genRef.current;
+      const sink = videoSinkRef.current;
+      if (!sink) return;
+      let wrapped: WrappedCanvas | null = null;
+      try { wrapped = await sink.getCanvas(target); }
+      catch { return; }
+      if (gen === genRef.current && wrapped) drawCanvas(wrapped.canvas);
+    });
+  }
+
   /** Cancel all in-flight work without changing playing state. */
   const cancelInFlight = () => {
     genRef.current++;
+    // Drop any pending scrub target too; the in-flight decode (if any) is
+    // gated by the gen bump above and won't paint.
+    scrubPumpRef.current?.cancel();
     for (const node of scheduledRef.current) {
       try { node.stop(); } catch { /* already stopped */ }
       try { node.disconnect(); } catch { /* ignore */ }
@@ -309,15 +339,14 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
         runAudioLoop(clamped, gen);
         runVideoLoop(clamped, gen);
       } else {
-        // Paused seek — just show the frame at this timestamp.
-        const sink = videoSinkRef.current;
-        if (sink) {
-          const gen = genRef.current;
-          sink.getCanvas(clamped).then((wrapped) => {
-            if (gen !== genRef.current) return;
-            if (wrapped) drawCanvas(wrapped.canvas);
-          }).catch(() => { /* ignore */ });
-        }
+        // Paused seek / scrub. Coalesce into the single-flight pump: record
+        // the latest target and let it chase the cursor, dropping intermediate
+        // targets a fast drag produced while a decode was in flight, instead
+        // of spawning (and later discarding) one decode per seekTo. getCanvas
+        // is already frame-accurate — it returns the frame whose PTS ≤ target
+        // — so the painted frame matches the playhead readout above. cancelInFlight
+        // (called just above) already dropped any older pending target.
+        scrubPumpRef.current?.request(clamped);
       }
     },
     getCurrentTime: () => currentMediaTime(),
@@ -336,6 +365,21 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       if (gainRef.current) gainRef.current.gain.value = m ? 0 : volumeRef.current;
     },
     isMuted: () => mutedRef.current,
+    // Advertised so the speed UI (badge, HUD, [ / ] / \ shortcuts, palette)
+    // disables itself while this player is active instead of claiming a
+    // rate that isn't playing.
+    supportsPlaybackRate: false,
+    setPlaybackRate: () => {
+      // Deliberate no-op — this player always plays at 1×. Its master clock is
+      // pre-scheduled Web Audio: every decoded chunk is queued at an exact
+      // AudioContext time (runAudioLoop) and the video loop chases that clock
+      // (runVideoLoop). A rate change would mean rescheduling all in-flight
+      // audio with a pitch/duration transform and rescaling both loops'
+      // timestamp math — there is no safe seam without rebuilding the
+      // scheduling model. The persistent speed applies to the <video>-backed
+      // players (local + MSE stream); `supportsPlaybackRate: false` above
+      // tells the app not to pretend otherwise.
+    },
     setShuttle: (rate: number) => {
       if (!readyRef.current) return;
       if (rate === 0) {
@@ -419,17 +463,17 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
 
     (async () => {
       try {
-        // Local file → asset:// via convertFileSrc. http(s) URL → pass
-        // straight to UrlSource (r60). UrlSource range-fetches over HTTP,
-        // so pointing it at the loopback media proxy
-        // (http://127.0.0.1:<port>/v1/<b64>) lets mediabunny demux a
-        // YouTube/web stream and decode it via WebCodecs to <canvas> —
-        // WITHOUT the <video> element, which WKWebView refuses to stream
+        // Local file → native fs byte-range reads (CustomSource); asset://
+        // range-fetch stalls on large local files. http(s) URL → UrlSource
+        // (r60), which range-fetches over HTTP: pointing it at the loopback
+        // media proxy (http://127.0.0.1:<port>/v1/<b64>) lets mediabunny
+        // demux a YouTube/web stream and decode it via WebCodecs to <canvas>
+        // — WITHOUT the <video> element, which WKWebView refuses to stream
         // cross-origin. The proxy serves CORS + Range/206, exactly what
-        // UrlSource's range-fetch needs. Seeking fetches only the bytes
-        // for that region = true streaming, no full download.
-        const url = /^https?:\/\//i.test(path) ? path : convertFileSrc(path);
-        const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
+        // UrlSource's range-fetch needs. Seeking fetches only the bytes for
+        // that region = true streaming, no full download. `mediabunnySource`
+        // picks the right one from the path.
+        const input = new Input({ source: mediabunnySource(path), formats: ALL_FORMATS });
         if (cancelled) { void input.dispose(); return; }
         inputRef.current = input;
 
@@ -471,7 +515,14 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
             onError?.(`[WEBCODECS_UNSUPPORTED] ProRes is 10-bit — WKWebView can't paint it to a canvas`);
             return;
           }
-          videoSinkRef.current = new CanvasSink(vt, { poolSize: 4 });
+          videoSinkRef.current = new CanvasSink(vt, {
+            poolSize: 4,
+            // Scrub latency: `optimizeForLatency` tells WebCodecs to emit each
+            // decoded frame ASAP instead of buffering several first, so a
+            // getCanvas() lands sooner; `prefer-hardware` keeps decode on the
+            // GPU. Both fall back gracefully if unavailable.
+            decoderOptions: { hardwareAcceleration: "prefer-hardware", optimizeForLatency: true },
+          });
           // Paint the first frame so the canvas isn't black before play. If a
           // sample decodes but can't be wrapped for the canvas, getCanvas throws
           // → same unsupported-render fallback rather than a silent black frame.

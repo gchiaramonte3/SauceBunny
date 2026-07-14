@@ -51,10 +51,35 @@ export function secondsToHms(seconds: number): string {
   return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
 
+/**
+ * Canonical human clock formatter: "M:SS" (or "MM:SS" with `padMinutes`),
+ * rolling to "H:MM:SS" past an hour — or always with `forceHours`, so e.g. a
+ * chapter list keeps one shape across all its lines. Negative input clamps
+ * to zero. Distinct from secondsToHms, which always emits fully padded
+ * "HH:MM:SS" ruler labels.
+ */
+export function secondsToClock(
+  seconds: number,
+  opts: { padMinutes?: boolean; forceHours?: boolean } = {},
+): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (opts.forceHours || h > 0) return `${h}:${pad(m)}:${pad(sec)}`;
+  return `${opts.padMinutes ? pad(m) : m}:${pad(sec)}`;
+}
+
 /** Parse a coarse "m:ss" / "h:mm:ss" (or bare "ss") string to seconds. Returns
  *  null on malformed input. Used to make the AI summary's [m:ss] timecodes
- *  clickable (seek-to-region). */
-export function hmsToSeconds(hms: string): number | null {
+ *  clickable (seek-to-region) and, via chapters.ts, to read the LLM's chapter
+ *  lines. `permissiveMinutes` relaxes the minutes<60 check for the TWO-part
+ *  form only ("90:00" = 90 minutes — a legal chapter timestamp); the
+ *  three-part form always demands real clock fields. */
+export function hmsToSeconds(
+  hms: string,
+  opts: { permissiveMinutes?: boolean } = {},
+): number | null {
   const parts = hms.trim().split(":");
   if (parts.length < 1 || parts.length > 3) return null;
   const nums: number[] = [];
@@ -62,9 +87,11 @@ export function hmsToSeconds(hms: string): number | null {
     if (!/^\d+$/.test(p)) return null;
     nums.push(parseInt(p, 10));
   }
+  const twoPart = parts.length === 2;
   while (nums.length < 3) nums.unshift(0);
   const [h, m, s] = nums;
-  if (m >= 60 || s >= 60) return null;
+  if (s >= 60) return null;
+  if (m >= 60 && !(opts.permissiveMinutes && twoPart)) return null;
   return h * 3600 + m * 60 + s;
 }
 

@@ -133,6 +133,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const shuttleRateRef = useRef(0);
   const shuttleRafRef = useRef(0);
   const preShuttleMutedRef = useRef<boolean | null>(null);
+  // User's persistent playback speed (Transport speed picker, 0.5–2×). Well
+  // under the 4× the proxy remux can sustain. The shuttle temporarily owns
+  // `playbackRate`; every shuttle exit restores THIS value.
+  const userRateRef = useRef(1);
   // Frame-accurate scrub preview (r68). While dragging, a WebCodecs
   // CanvasSink decodes the exact frame under the cursor onto an overlay
   // canvas — instant + every frame, vs the <video>'s laggy native seek.
@@ -267,6 +271,21 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       if (videoRef.current) videoRef.current.muted = m;
     },
     isMuted: () => videoRef.current?.muted ?? false,
+    supportsPlaybackRate: true,
+    setPlaybackRate: (rate) => {
+      // Clamp to what the streaming pipeline sustains (shuttle caps here too);
+      // the app's list is 0.5–2×, comfortably under it.
+      const r = Math.max(0.25, Math.min(4, rate));
+      userRateRef.current = r;
+      const v = videoRef.current;
+      if (!v) return;
+      // defaultPlaybackRate survives the load algorithm — seek rebuilds swap
+      // video.src to a fresh MediaSource, whose reset lands on the default,
+      // so the rate sticks across out-of-buffer seeks.
+      v.defaultPlaybackRate = r;
+      // A live shuttle owns playbackRate until it exits (setShuttle(0) restores).
+      if (shuttleRateRef.current === 0) v.playbackRate = r;
+    },
     setShuttle: (rate) => {
       const v = videoRef.current;
       if (!v) return;
@@ -276,7 +295,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       if (rate !== 0 && shuttleRateRef.current === 0) preShuttleMutedRef.current = v.muted;
       shuttleRateRef.current = rate;
       if (rate === 0) {
-        v.playbackRate = 1;
+        // Back to the user's chosen speed, not a hardcoded 1× — the shuttle is
+        // a transient override on top of the persistent rate.
+        v.playbackRate = userRateRef.current;
         if (preShuttleMutedRef.current != null) { v.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
         // Exit is a HARD STOP (K = freeze instantly); the L-ladder's +1 landing
         // resumes real playback explicitly after this.
@@ -317,6 +338,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
           try { vv.currentTime = next; } catch { /* ignore */ }
           onTimeUpdate?.(baseTimeRef.current + Math.max(0, next - clockOriginRef.current));
           shuttleRateRef.current = 0;
+          vv.playbackRate = userRateRef.current; // self-exit restores the user rate too
           if (preShuttleMutedRef.current != null) { vv.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
           setIsPlaying(false);
           return;
@@ -752,7 +774,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       shuttleRateRef.current = 0;
       // Mid-shuttle source swap: give the element back its pre-shuttle audio.
       if (preShuttleMutedRef.current != null) { el.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
-      el.playbackRate = 1;
+      el.playbackRate = userRateRef.current; // clear any shuttle override, keep the user rate
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
       el.removeEventListener("playing", onResume);

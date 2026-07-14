@@ -38,8 +38,12 @@
   justify-content: center;
   /* width + height set inline from useContainSize */
   flex-shrink: 0;
-  transition: width var(--dur-base) var(--ease-out),
-              height var(--dur-base) var(--ease-out);
+  /* Deliberately NO width/height transition. useContainSize re-writes this
+     box's inline size every frame (via ResizeObserver) as a side panel slides
+     or the window resizes. A transition here re-animates each of those
+     per-frame updates on its own timer, so the video lagged the layout and
+     rubber-banded ("wonky"). Tracking the container instantly is what keeps
+     the panel slide smooth. Aspect-ratio guide changes now snap. */
   box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
 }
 .cp-monitor-img {
@@ -176,18 +180,6 @@
      other hero surfaces — see --grad-brand-wash. */
   background: var(--grad-brand-wash);
 }
-/* Color tint the equaliser bars too so they pick up the brand wash
-   rather than being a flat grey. */
-.cp-empty-perf { display: flex; gap: 6px; opacity: 0.55; }
-.cp-empty-perf span {
-  width: 14px; height: 18px;
-  background: linear-gradient(180deg, rgba(108,255,141,0.20), rgba(109,82,237,0.15));
-  border: 1px solid var(--line-2);
-  border-radius: 4px;
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.10),
-    0 0 8px rgba(108,255,141,0.10);
-}
 .cp-empty h3 {
   margin: 0;
   font-family: var(--font-sans);
@@ -196,14 +188,132 @@
   color: var(--fg-1);
   letter-spacing: -0.015em;
 }
-.cp-empty p {
-  margin: 0;
+/* Supported-sources row — one quiet line, not a paragraph. The `·`
+   separators keep it scannable; -fg-3 (not -fg-4) because 11px muted
+   text needs the contrast headroom. */
+.cp-empty-sources {
+  margin: -8px 0 0;
   font-family: var(--font-ui);
-  font-size: 12px;
-  color: var(--fg-4);
+  font-size: 11px;
+  color: var(--fg-3);
+  letter-spacing: 0.01em;
   max-width: 360px;
   text-align: center;
   line-height: 1.5;
+}
+/* "Resume last session" — one-click reopen of the most recent source.
+   Rides the .btn/.btn-ghost family; only the title-truncation is local. */
+.cp-empty-resume {
+  max-width: 420px;
+  gap: 7px;
+}
+.cp-empty-resume span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-empty-resume strong {
+  font-weight: 700;
+  color: var(--fg-1);
+}
+
+/* First-run "getting started" checklist card (lib/onboarding.ts). Compact
+   card under the empty-state copy — done steps dim + check, pending steps
+   are clickable rows that deep-link to the surface that completes them. */
+.cp-getting-started {
+  width: min(340px, 86%);
+  margin-top: 4px;
+  padding: 10px 12px 12px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--line-1);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+.cp-getting-started-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--fg-5);
+}
+.cp-getting-started-dismiss {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--fg-5);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.cp-getting-started-dismiss:hover { color: var(--fg-3); }
+.cp-getting-started-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.cp-getting-started-step:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--line-1);
+}
+.cp-getting-started-step:disabled { cursor: default; opacity: 0.55; }
+.cp-getting-started-check {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--success);
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+}
+.cp-getting-started-step.done .cp-getting-started-check {
+  border-color: rgba(108, 255, 141, 0.45);
+  background: rgba(108, 255, 141, 0.10);
+}
+.cp-getting-started-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.cp-getting-started-text strong {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg-2);
+  letter-spacing: -0.005em;
+}
+.cp-getting-started-step.done .cp-getting-started-text strong {
+  color: var(--fg-4);
+}
+.cp-getting-started-text em {
+  font-style: normal;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--fg-4);
 }
 
 /* Monitor overlays — minimal: only timecodes by default. */
@@ -663,6 +773,61 @@
 }
 .cp-icon-btn.volume.muted { color: #ff8a8a; }
 
+/* Speed control: rate badge + popover menu (sibling of the volume control,
+   same popover chrome). The badge is text ("1×"), so it sizes to content
+   instead of the fixed icon-button square. */
+.cp-speed { position: relative; }
+.cp-icon-btn.speed {
+  width: auto;
+  min-width: 34px;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+/* Non-1× rate → accent tint so a forgotten 2× is visible at a glance. */
+.cp-icon-btn.speed.engaged { color: var(--accent); }
+/* Active player can't honour a rate (WebCodecs player) — see SpeedControl. */
+.cp-icon-btn.speed:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.cp-speed-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: -4px;
+  background: #15151a;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: 0 6px 12px rgba(0,0,0,0.55);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  z-index: 40;
+  animation: cp-fade-in var(--dur-fast) var(--ease-out);
+}
+.cp-speed-option {
+  background: transparent;
+  border: none;
+  color: var(--fg-3);
+  cursor: pointer;
+  padding: 4px 16px;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.cp-speed-option:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); }
+.cp-speed-option.current {
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent);
+}
+
 /* ── Floating canvas toast (replaces the full-screen success overlay) ── */
 .cp-canvas-toast {
   position: absolute;
@@ -961,6 +1126,20 @@
   max-width: 520px;
   word-break: break-word;
 }
+/* Stale-yt-dlp recovery: the plain-language hint + the one-click
+   "Update yt-dlp & retry" CTA (shares .btn.btn-primary with the Settings →
+   Web sources update button — same action, same look). */
+.cp-error-overlay .cp-error-hint {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-2);
+  text-align: center;
+  max-width: 420px;
+}
+.cp-error-overlay .cp-error-update {
+  margin-top: 2px;
+}
 
 /* ============================================================
    ANNOTATION OVERLAY (review drawing)
@@ -1049,4 +1228,74 @@
   backdrop-filter: blur(8px);
 }
 .cp-annot-hide:hover { color: var(--fg-1); background: rgba(30,30,34,0.95); }
+
+/* Text labels — Frame.io-style callouts riding the annotation payload.
+   Anchored at normalized coords (positions scale with the video box); the
+   chip text stays a FIXED readable size (11px floor) at any monitor size.
+   --label-color = the reviewer's colour, set inline per chip. */
+.cp-annot.labeling { cursor: text; }
+.cp-annot-label {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Center the leader dot on the anchor point; the chip trails to the right. */
+  transform: translate(-5px, -50%);
+  pointer-events: none;
+  max-width: 46%;
+}
+.cp-annot-label.flip {
+  /* Near the right edge: chip sits left of its anchor so text stays on-frame. */
+  flex-direction: row-reverse;
+  transform: translate(calc(-100% + 5px), -50%);
+}
+.cp-annot-label-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--label-color);
+  border: 2px solid rgba(255,255,255,0.9);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.45);
+}
+.cp-annot-label-text {
+  background: rgba(20,20,23,0.85);
+  border: 1px solid var(--label-color);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  padding: 3px 8px;
+  border-radius: 7px;
+  backdrop-filter: blur(6px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-annot-label-editing { pointer-events: auto; z-index: 2; }
+.cp-annot-label-input {
+  background: rgba(20,20,23,0.92);
+  border: 1px solid var(--label-color);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 7px;
+  outline: none;
+  width: 132px;
+  backdrop-filter: blur(6px);
+}
+.cp-annot-label-input::placeholder { color: var(--fg-4); font-weight: 400; }
+
+/* Reduced motion: still the fetching scanline shimmer, the equalizer
+   bounce, and the toast slide-in (fade-only entrances stay; the cp-spin
+   loading spinners are kept — they're functional progress indicators,
+   not decoration). */
+@media (prefers-reduced-motion: reduce) {
+  .cp-scanline::before { animation: none; }
+  .cp-eq span { animation: none; transform: scaleY(0.7); }
+  .cp-canvas-toast { animation: none; }
+}
 

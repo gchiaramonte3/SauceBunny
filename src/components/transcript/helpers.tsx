@@ -193,9 +193,13 @@ export type SpeakerOverrides = {
   aliases: Record<string, string>;
   /** Per-speaker custom pip colour (canonical tag → hex). null group = "__NULL__". */
   colors: Record<string, string>;
+  /** Per-turn reassignment (turn index → canonical tag). Turn-indexed like
+   *  `turn`, so cue-level consumers (the caption overlay) can't apply it —
+   *  same documented limitation as per-turn renames. */
+  turnTag: Record<string, string>;
 };
 
-const EMPTY_OVERRIDES: SpeakerOverrides = { global: {}, turn: {}, aliases: {}, colors: {} };
+const EMPTY_OVERRIDES: SpeakerOverrides = { global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {} };
 
 /** localStorage key the panel persists a transcript's speaker overrides under. */
 export function speakerOverridesKey(path: string): string {
@@ -219,6 +223,7 @@ export function loadSpeakerOverrides(path: string | null): SpeakerOverrides {
       turn: p.turn && typeof p.turn === "object" ? p.turn : {},
       aliases: p.aliases && typeof p.aliases === "object" ? p.aliases : {},
       colors: p.colors && typeof p.colors === "object" ? p.colors : {},
+      turnTag: p.turnTag && typeof p.turnTag === "object" ? p.turnTag : {},
     };
   } catch {
     return EMPTY_OVERRIDES;

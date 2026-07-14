@@ -3,10 +3,17 @@ import type { AppStatus } from "../types";
 import { secondsToHms } from "../lib/timecode";
 import { filmstripCount, filmstripTimestamps } from "../lib/filmstrip";
 import { extractFilmstrip } from "../lib/mediabunny-helpers";
+import { extractWaveformPeaks, lruSet, type WaveformPeaks } from "../lib/waveform";
+import { TimelineWaveform } from "./TimelineWaveform";
 
 /** Scrub-track height (px) when a filmstrip is shown — matches
  *  `.cp-track.has-filmstrip` in transport.css; also sizes the decoded thumbs. */
 const FILMSTRIP_H = 44;
+
+/** Max cached filmstrips (source+count keys). Strips are the heavy cache —
+ *  up to 24 JPEG data URLs at 2× DPR each — so the cap is deliberately small;
+ *  reads refresh recency, so the displayed source is never the one evicted. */
+const FILMSTRIP_CACHE_MAX = 4;
 
 /**
  * Single queued clip's range — rendered as a muted band on the track so
@@ -43,25 +50,35 @@ type Props = {
    *  (renders solid with a one-shot flash). */
   reviewRangeDraft?: { start: number; end: number; color: string; live: boolean } | null;
   /** Local file path to build the thumbnail filmstrip from (mediabunny-decoded).
-   *  null for web/streaming sources or when there's no decodable local file. */
+   *  null for web/streaming sources or when there's no decodable local file.
+   *  Also feeds the audio waveform lane — same local-files-only scope. */
   filmstripPath?: string | null;
+  /** Audio waveform lane visibility (ViewOptions toggle). Default true;
+   *  files with no decodable audio track simply render no waveform. */
+  waveformOn?: boolean;
   /** Speaker lanes from the diarized transcript — a thin strip of tinted
    *  bands along the bottom of the track showing who talks when. */
   speakerLanes?: { startMs: number; endMs: number; color: string; speaker: string | null }[];
   /** Co-review ghost cursors — other participants' live playheads, one faint
    *  tinted line + name chip each (empty when not in a session). */
   ghosts?: { name: string; frame: number; color: string }[];
+  /** Auto-detected chapters (seconds) — thin neutral ticks at the TOP edge of
+   *  the track, a title chip on hover, click → seek. Deliberately unlike the
+   *  reviewer-tinted comment dots (which sit mid-track). */
+  chapterMarkers?: { time: number; title: string }[];
   onSeek: (f: number) => void;
 };
 
 export function Timeline({
   status, durationFrames, playheadFrames, inFrames, outFrames, fps,
-  queuedRanges, commentMarkers, reviewRangeDraft, filmstripPath, speakerLanes, ghosts, onSeek,
+  queuedRanges, commentMarkers, reviewRangeDraft, filmstripPath, waveformOn, speakerLanes, ghosts,
+  chapterMarkers, onSeek,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
   const [trackW, setTrackW] = useState(0);
   const [filmstrip, setFilmstrip] = useState<(string | null)[]>([]);
+  const [wavePeaks, setWavePeaks] = useState<WaveformPeaks | null>(null);
   const filmCacheRef = useRef<Map<string, (string | null)[]>>(new Map());
   const dim = status === "empty" || status === "fetching" || status === "error";
 
@@ -144,7 +161,8 @@ export function Timeline({
 
   // Build the thumbnail filmstrip from the local file (mediabunny, one pass).
   // Depends on source/duration/width — NOT the playhead — so scrubbing never
-  // re-decodes. Cached per source+count; aborted on source/size change.
+  // re-decodes. Cached per source+count (LRU-bounded); aborted on source/size
+  // change.
   useEffect(() => {
     const path = filmstripPath ?? null;
     const durSec = fps > 0 ? durationFrames / fps : 0;
@@ -153,7 +171,11 @@ export function Timeline({
 
     const key = `${path}|${count}`;
     const cached = filmCacheRef.current.get(key);
-    if (cached) { setFilmstrip(cached); return; }
+    if (cached) {
+      lruSet(filmCacheRef.current, key, cached, FILMSTRIP_CACHE_MAX); // hit → newest
+      setFilmstrip(cached);
+      return;
+    }
 
     const ctrl = new AbortController();
     let alive = true;
@@ -165,17 +187,37 @@ export function Timeline({
         signal: ctrl.signal,
       });
       if (!alive || ctrl.signal.aborted) return;
-      if (strip.length > 0) filmCacheRef.current.set(key, strip);
+      if (strip.length > 0) lruSet(filmCacheRef.current, key, strip, FILMSTRIP_CACHE_MAX);
       setFilmstrip(strip);
     })();
     return () => { alive = false; ctrl.abort(); };
   }, [filmstripPath, durationFrames, fps, trackW, dim]);
 
+  // Extract audio peaks for the waveform lane. Mirrors the filmstrip's
+  // scheduling: local files only, deferred until the duration is known (so
+  // it never delays playback start or transcription), aborted on source
+  // change. Bucket count is fixed, so no dependency on track width — resize
+  // only redraws the canvas. Caching per path lives in lib/waveform.ts.
+  useEffect(() => {
+    const path = filmstripPath ?? null;
+    const durSec = fps > 0 ? durationFrames / fps : 0;
+    if (dim || !path || durSec <= 0 || waveformOn === false) { setWavePeaks(null); return; }
+
+    const ctrl = new AbortController();
+    let alive = true;
+    void (async () => {
+      const peaks = await extractWaveformPeaks(path, { signal: ctrl.signal });
+      if (!alive || ctrl.signal.aborted) return;
+      setWavePeaks(peaks);
+    })();
+    return () => { alive = false; ctrl.abort(); };
+  }, [filmstripPath, durationFrames, fps, dim, waveformOn]);
+
   const pct = (f: number) => durationFrames > 0 ? (f / durationFrames) * 100 : 0;
   const ticks = Array.from({ length: 11 }, (_, i) => i);
 
   return (
-    <div className="cp-timeline" style={{ opacity: dim ? 0.3 : 1 }}>
+    <div className="cp-timeline" role="region" aria-label="Timeline" style={{ opacity: dim ? 0.3 : 1 }}>
       <div className="cp-timeline-ruler">
         {!dim && ticks.map((i) => {
           const left = (i / 10) * 100;
@@ -194,7 +236,7 @@ export function Timeline({
         })}
       </div>
       <div
-        className={"cp-track" + (dragging ? " dragging" : "") + (filmstrip.length > 0 ? " has-filmstrip" : "")}
+        className={"cp-track" + (dragging ? " dragging" : "") + (filmstrip.length > 0 ? " has-filmstrip" : "") + (wavePeaks ? " has-wave" : "")}
         ref={trackRef}
         onMouseDown={onMouseDown}
       >
@@ -209,6 +251,9 @@ export function Timeline({
             ))}
           </div>
         )}
+        {/* Audio waveform lane — muted peaks over the filmstrip, under the
+            scrim and every overlay (playhead/marks/comments stay dominant). */}
+        {wavePeaks && <TimelineWaveform peaks={wavePeaks} widthPx={trackW} />}
         {/* Speaker lanes — who talks when, as tinted bands hugging the bottom
             edge. Pointer-events off in CSS so clicks still seek the track. */}
         {speakerLanes && speakerLanes.length > 0 && !dim && (
@@ -265,6 +310,22 @@ export function Timeline({
             {outFrames != null && inFrames == null && (
               <div className="cp-track-mark out" style={{ left: `${pct(outFrames)}%` }} title="Mark out" />
             )}
+            {/* Chapter ticks — thin neutral lines hugging the TOP edge so they
+                never obscure the filmstrip, waveform, or speaker lanes below.
+                Hover reveals the title chip; click seeks to the chapter. */}
+            {chapterMarkers?.map((c, i) => {
+              const r = Math.max(1, Math.round(fps));
+              return (
+                <div
+                  key={`ch-${c.time}-${i}`}
+                  className="cp-track-chapter"
+                  style={{ left: `${pct(c.time * r)}%` }}
+                  onMouseDown={(e) => { e.stopPropagation(); onSeek(Math.floor(c.time * r)); }}
+                >
+                  <span className="cp-track-chapter-tip">{c.title}</span>
+                </div>
+              );
+            })}
             {/* Review comment RANGES — a thin reviewer-tinted bar with bracket
                 caps in the comment lane. Deliberately unlike the orange clip
                 selection: it sits low on the track and carries the note's

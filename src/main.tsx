@@ -32,6 +32,8 @@ registerLocalDecoders();
 
 import "./styles/app.css";
 
+import { hydrateReviewStore } from "./lib/review-store";
+
 // Single-bundle multi-window: the floating side-panel window loads the
 // same `index.html?window=panel` URL, and we route here based on the
 // query string. Keeps the Vite build to one entry and lets PanelApp
@@ -39,8 +41,24 @@ import "./styles/app.css";
 const isPanelWindow =
   new URLSearchParams(window.location.search).get("window") === "panel";
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    {isPanelWindow ? <PanelApp /> : <App />}
-  </React.StrictMode>
-);
+function renderApp(): void {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      {isPanelWindow ? <PanelApp /> : <App />}
+    </React.StrictMode>
+  );
+}
+
+// Review docs persist as real files (~/Documents/Sauce Bunny/Reviews/) —
+// fill the store before the first render so the SYNC loadReview sees them.
+// Local JSON reads land in milliseconds, but boot must never hang on them:
+// hydrate tolerates every failure internally, and the 2 s race falls through
+// to render while hydration keeps filling the store in the background. Only
+// the main window migrates legacy localStorage docs (single library writer).
+const hydrateDeadline = new Promise<void>((resolve) => setTimeout(resolve, 2000));
+void Promise.race([
+  hydrateReviewStore({ migrate: !isPanelWindow }).catch((err) => {
+    console.warn("review-store hydration failed; starting empty:", err);
+  }),
+  hydrateDeadline,
+]).then(renderApp);

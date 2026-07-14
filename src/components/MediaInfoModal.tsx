@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useModalFocus } from "../hooks/use-modal-focus";
 import type { MediaInfo } from "../bindings/MediaInfo";
 import type { MediaInfoVideo } from "../bindings/MediaInfoVideo";
 import { formatError } from "../lib/error-format";
@@ -215,6 +216,10 @@ export function MediaInfoModal({ path, onClose }: Props) {
     return () => { alive = false; };
   }, [path]);
 
+  // Trap Tab inside the dialog + restore focus on close (mounted = open).
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(true, dialogRef);
+
   // Close on Esc — same pattern as SettingsModal.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -297,12 +302,20 @@ export function MediaInfoModal({ path, onClose }: Props) {
 
   return (
     <div className="cp-modal-backdrop" onClick={onClose}>
-      <div className="cp-modal cp-mediainfo" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="cp-modal cp-mediainfo"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Media info"
+        ref={dialogRef}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="cp-modal-header">
           <h2>Media info</h2>
           <span className="crumb" title={path}>{filename}</span>
           <div className="filler" />
-          <button className="cp-modal-close" onClick={onClose} title="Close (Esc)">
+          <button className="cp-modal-close" onClick={onClose} title="Close (Esc)" aria-label="Close">
             ✕
           </button>
         </div>

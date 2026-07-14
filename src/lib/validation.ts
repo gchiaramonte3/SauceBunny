@@ -126,6 +126,62 @@ export function needsCookiesError(msg: string): boolean {
   );
 }
 
+/**
+ * True when an error reads like a STALE yt-dlp extractor — the classic
+ * "YouTube changed something and yt-dlp shipped a fix days later" breakage
+ * class (nsig/signature solvers, player-response parsing, format maps, CDN
+ * 403s on stale URLs). These failures are fixed by updating yt-dlp and
+ * retrying, so they drive the one-click "Update yt-dlp & retry" action on
+ * the canvas error overlay.
+ *
+ * Precedence contract (tested): the auth/cookies flow OWNS its error class —
+ * any message `needsCookiesError` claims is NEVER rot, even when a rot
+ * signature appears in the same text (a sign-in wall isn't fixed by an
+ * update). Genuinely-unavailable videos (unavailable/private/removed/
+ * age-gated) are excluded the same way.
+ */
+export function looksLikeExtractorRot(errText: string): boolean {
+  if (!errText) return false;
+  const m = errText.toLowerCase();
+  // 1) Auth flow wins — the sign-in reminder (YouTubeAuthModal) already
+  //    handles these; offering an engine update would point users away
+  //    from the actual fix.
+  if (needsCookiesError(errText)) return false;
+  // 2) Genuinely unavailable — no yt-dlp update will bring these back.
+  if (
+    m.includes("video unavailable") ||
+    m.includes("private video") ||
+    m.includes("this video is private") ||
+    m.includes("removed") ||
+    m.includes("confirm your age") ||
+    m.includes("age-restricted") ||
+    m.includes("age restricted")
+  ) {
+    return false;
+  }
+  // 3) The classic extractor-rot signatures.
+  if (
+    // player response / player js / initial data / ytcfg / signature
+    // timestamp… — all surface as "Unable to extract <thing>".
+    m.includes("unable to extract") ||
+    m.includes("nsig extraction failed") ||
+    m.includes("signature extraction failed") ||
+    m.includes("precondition check failed") ||
+    m.includes("requested format is not available") ||
+    // "Failed to extract any player response", "player response is not
+    // valid JSON" — variants that don't say "unable to extract".
+    m.includes("player response")
+  ) {
+    return true;
+  }
+  // A 403 from the video CDN is rot ONLY in a YouTube/googlevideo context
+  // (stale signed URLs) — anywhere else it's a real permissions refusal.
+  if (m.includes("http error 403") && /youtube|googlevideo|youtu\.be/.test(m)) {
+    return true;
+  }
+  return false;
+}
+
 /** Human-friendly site name from a hostname, for cookie-reminder copy.
  *  "www.reddit.com" → "Reddit", "youtu.be" → "YouTube". */
 export function prettyHost(host: string): string {

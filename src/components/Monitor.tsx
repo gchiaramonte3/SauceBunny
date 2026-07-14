@@ -1,13 +1,15 @@
 import { forwardRef, useLayoutEffect, useRef, useState } from "react";
-import { IconAlert } from "./Icons";
+import { IconAlert, IconHistory } from "./Icons";
 import { CanvasToast, type ToastKind } from "./CanvasToast";
 import { CaptionOverlay, type CaptionStyle } from "./CaptionOverlay";
 import { AnnotationOverlay } from "./AnnotationOverlay";
 import type { AnnotationStrokes } from "../lib/review";
+import type { OnboardingStep, OnboardingStepId } from "../lib/onboarding";
 import { LocalMediaPlayer } from "./LocalMediaPlayer";
 import { MediaBunnyPlayer } from "./MediaBunnyPlayer";
 import { MSEStreamPlayer } from "./MSEStreamPlayer";
 import type { PlayerHandle } from "./player-handle";
+import { formatPlaybackRate } from "../lib/playback-rate";
 import type { AppStatus, Metadata, SourceKind } from "../types";
 
 export type AspectId = "off" | "16:9" | "9:16" | "1:1" | "2.39";
@@ -16,6 +18,30 @@ type Props = {
   status: AppStatus;
   metadata: Metadata | null;
   errorDetail: string | null;
+  /**
+   * Stale-yt-dlp recovery for the error overlay. When the surfaced error
+   * matches a known extractor-rot signature (lib/validation.ts
+   * looksLikeExtractorRot), App passes "offer" → the overlay renders a
+   * primary "Update yt-dlp & retry" action ("busy" while the update runs).
+   * "spent" — that URL already used its one update+retry cycle — renders
+   * an engine-is-current hint under the plain error instead.
+   */
+  extractorRot?:
+    | { phase: "offer" | "busy"; onUpdateAndRetry: () => void }
+    | { phase: "spent"; version: string }
+    | null;
+  /** Most-recent recent-source title — renders a one-click "Resume last
+   *  session" button in the empty state. Null hides the affordance. */
+  resumeTitle?: string | null;
+  onResume?: () => void;
+  /** First-run "getting started" checklist for the empty state. Null hides it
+   *  (dismissed, or every step already completed once — see lib/onboarding). */
+  onboarding?: {
+    steps: OnboardingStep[];
+    /** Pending step clicked — App routes it (focus URL bar, open Settings…). */
+    onStep: (id: OnboardingStepId) => void;
+    onDismiss: () => void;
+  } | null;
   aspect: AspectId;
   /** "youtube" → web source (any host yt-dlp supports — including YouTube
    *  itself, which used to use the IFrame embed until r53 dropped it);
@@ -90,6 +116,9 @@ type Props = {
   tcOverlay?: string | null;
   /** Signed J-K-L shuttle rate (e.g. -4 = rewind 4×); 0/undefined hides the badge. */
   shuttleRate?: number;
+  /** Transient playback-speed HUD — the just-chosen rate (e.g. 1.5), flashed
+   *  briefly by App when the speed changes; null hides it. */
+  playbackRateHud?: number | null;
   /** Review drawing annotation to render over the frame (draft or saved). */
   annotation?: AnnotationStrokes | null;
   /** True while the Review panel is in draw mode (overlay captures input). */
@@ -98,6 +127,10 @@ type Props = {
   annotationOpacity?: number;
   onAnnotationChange?: (a: AnnotationStrokes) => void;
   onAnnotationDismiss?: () => void;
+  /** True while the Review label tool is active (clicks place text labels). */
+  annotationLabelMode?: boolean;
+  /** Reviewer colour for annotation label chips. */
+  annotationLabelColor?: string;
 };
 
 /**
@@ -136,7 +169,8 @@ function useContainSize(aspect: number) {
 export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, ref) {
   const {
     status, metadata,
-    errorDetail,
+    errorDetail, extractorRot,
+    resumeTitle, onResume, onboarding,
     aspect,
     sourceKind, localFilePath, webStreamUrl, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs,
@@ -144,8 +178,9 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     toast, onToastDismiss,
     onPlayerTimeUpdate, onPlayerStateChange, onPlayerReady, onSurfaceClick,
     transcriptPath, transcriptReloadToken, currentSec, captionsOn, captionStyle, tcOverlay,
-    shuttleRate,
+    shuttleRate, playbackRateHud,
     annotation, annotationDrawing, annotationOpacity, onAnnotationChange, onAnnotationDismiss,
+    annotationLabelMode, annotationLabelColor,
   } = props;
 
   const natural = metadata?.width && metadata?.height ? metadata.width / metadata.height : 16 / 9;
@@ -158,17 +193,79 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
   const { ref: monitorRef, dims } = useContainSize(ratio);
   const monitorStyle = dims ? { width: `${dims.w}px`, height: `${dims.h}px` } : undefined;
 
+  /* Floating toast — hoisted above the status early-returns so feedback that
+     fires with NO source loaded (a rejected drag-and-drop, a transcript that
+     failed to open) is still visible instead of only ticking the bell. */
+  const toastEl = toast && (
+    <CanvasToast
+      /* Keyed on the monotonic id: replacing a visible toast remounts
+         with a FRESH countdown instead of inheriting the old timer. */
+      key={toast.id}
+      kind={toast.kind}
+      title={toast.title}
+      body={toast.body}
+      /* When the bottom-left prep banner is up (e.g. the web-preview
+         download), lift the centered toast above it so the two don't
+         collide in the same bottom band. */
+      className={playbackPrepBusy ? "cp-canvas-toast--above-banner" : undefined}
+      onDismiss={onToastDismiss}
+    />
+  );
+
   if (status === "empty") {
     return (
       <div className="cp-monitor-area">
         <div className="cp-monitor" ref={monitorRef} style={monitorStyle}>
           <div className="cp-empty">
-            <div className="cp-empty-perf">
-              <span /><span /><span /><span /><span /><span /><span /><span />
-            </div>
-            <h3>Paste a video URL</h3>
-            <p>YouTube, Vimeo, TikTok, Twitter/X, Reddit, Instagram, or any page with embedded video. Sauce Bunny resolves the highest-quality stream available — no host branding, no metadata you didn't ask for.</p>
+            <h3>Paste a link or drop a file</h3>
+            <p className="cp-empty-sources" aria-label="Supported sources">
+              YouTube · Vimeo · TikTok · X · Reddit · Instagram · local video
+            </p>
+            {resumeTitle && onResume && (
+              <button
+                type="button"
+                className="btn btn-ghost cp-empty-resume"
+                onClick={onResume}
+                title="Reopen the most recent source"
+              >
+                <IconHistory size={13} />
+                <span>Resume last session: <strong>{resumeTitle}</strong></span>
+              </button>
+            )}
+            {/* First-run checklist — a compact card, not a wizard. Steps derive
+                from existing signals (lib/onboarding.ts); done steps are inert. */}
+            {onboarding && (
+              <div className="cp-getting-started">
+                <div className="cp-getting-started-head">
+                  <span>Getting started</span>
+                  <button
+                    type="button"
+                    className="cp-getting-started-dismiss"
+                    onClick={onboarding.onDismiss}
+                    title="Hide this checklist permanently"
+                  >
+                    Don't show again
+                  </button>
+                </div>
+                {onboarding.steps.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className={"cp-getting-started-step" + (s.done ? " done" : "")}
+                    disabled={s.done}
+                    onClick={() => onboarding.onStep(s.id)}
+                  >
+                    <span className="cp-getting-started-check" aria-hidden>{s.done ? "✓" : ""}</span>
+                    <span className="cp-getting-started-text">
+                      <strong>{s.label}</strong>
+                      <em>{s.hint}</em>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+          {toastEl}
         </div>
       </div>
     );
@@ -185,6 +282,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               yt-dlp · probing manifests
             </div>
           </div>
+          {toastEl}
         </div>
       </div>
     );
@@ -202,7 +300,34 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             <div className="icon"><IconAlert size={20} /></div>
             <div className="label">Couldn't resolve source</div>
             <div className="detail">{errorDetail ?? "Unknown error"}</div>
+            {/* Stale-yt-dlp recovery. Sites change their players constantly;
+                yt-dlp ships fixes within days — so when the error matches a
+                known extractor-breakage signature, the fix is one click, not
+                a bug report. Same command as Settings → Web sources. */}
+            {extractorRot && extractorRot.phase !== "spent" && (
+              <>
+                <div className="cp-error-hint">
+                  This usually means the app's video engine (yt-dlp) is out of
+                  date for this site — updating takes a few seconds.
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary cp-error-update"
+                  onClick={extractorRot.onUpdateAndRetry}
+                  disabled={extractorRot.phase === "busy"}
+                >
+                  {extractorRot.phase === "busy" ? "Updating yt-dlp…" : "Update yt-dlp & retry"}
+                </button>
+              </>
+            )}
+            {extractorRot?.phase === "spent" && (
+              <div className="cp-error-hint">
+                yt-dlp is up to date ({extractorRot.version}) — the site may
+                have changed; check for a Sauce Bunny update.
+              </div>
+            )}
           </div>
+          {toastEl}
         </div>
       </div>
     );
@@ -316,6 +441,8 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
           opacity={annotationOpacity ?? 1}
           onChange={onAnnotationChange ?? (() => {})}
           onDismiss={onAnnotationDismiss}
+          labelMode={!!annotationLabelMode}
+          labelColor={annotationLabelColor}
         />
 
         {/* Type-a-timecode HUD — appears the moment the user types a digit
@@ -335,6 +462,16 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
         {typeof shuttleRate === "number" && shuttleRate !== 0 && (
           <div className="cp-shuttle-badge" aria-hidden>
             {shuttleRate < 0 ? "◀◀" : "▶▶"} {Math.abs(shuttleRate)}×
+          </div>
+        )}
+
+        {/* Playback-speed HUD — same pill, flashed briefly when the user's
+            persistent rate changes (speed picker / [ ] \ shortcuts). The
+            shuttle badge wins while a shuttle is engaged: the shuttle rate is
+            what's actually playing at that moment. */}
+        {typeof playbackRateHud === "number" && !shuttleRate && (
+          <div className="cp-shuttle-badge" aria-hidden>
+            {formatPlaybackRate(playbackRateHud)}
           </div>
         )}
 
@@ -401,21 +538,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
 
         {/* Completion is announced via the floating toast + the notification
             bell up in the toolbar — the canvas stays clean. */}
-        {toast && (
-          <CanvasToast
-            /* Keyed on the monotonic id: replacing a visible toast remounts
-               with a FRESH countdown instead of inheriting the old timer. */
-            key={toast.id}
-            kind={toast.kind}
-            title={toast.title}
-            body={toast.body}
-            /* When the bottom-left prep banner is up (e.g. the web-preview
-               download), lift the centered toast above it so the two don't
-               collide in the same bottom band. */
-            className={playbackPrepBusy ? "cp-canvas-toast--above-banner" : undefined}
-            onDismiss={onToastDismiss}
-          />
-        )}
+        {toastEl}
       </div>
     </div>
   );

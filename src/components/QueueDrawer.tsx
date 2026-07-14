@@ -80,11 +80,26 @@ type Props = {
   /** r84: re-time loose YouTube captions with Whisper. Optional (omitted in the
    *  popped-out panel, where the banner is hidden rather than wired over the bus). */
   onFixCaptionTiming?: () => void;
+  /** True when a media source is loaded — gates the transcript empty-state's
+   *  "Generate transcript" button. */
+  transcriptHasSource?: boolean;
+  /** Inline cue editing rewrote the SRT in place — App bumps the arrived tick
+   *  so the caption overlay / AI summary / speaker lanes re-read the file. */
+  onTranscriptEdited?: () => void;
   /** AI Summary: the summarization model + output style chosen in Settings. */
   aiModelId?: string | null;
   aiStyle?: SummaryStyle;
   /** Open Settings → AI Summary (manage/download/switch the model). */
   onOpenAiSettings?: () => void;
+  /** Auto-chapters: source identity to persist under (main's reviewSourceKey —
+   *  the panel receives it through the bus snapshot). */
+  chapterSourceKey?: string | null;
+  /** Auto-chapters: source duration in seconds (clamps model timestamps). */
+  chapterDurationSec?: number | null;
+  /** Auto-chapters changed (generate/delete) — the popped-out panel forwards
+   *  this over the bus so main's timeline markers re-read. Omit when docked
+   *  (the same-window CHAPTERS_CHANGED_EVENT already covers it). */
+  onChaptersChanged?: () => void;
   /** Review tab: stable id for the current source (local path / URL), or null. */
   reviewSourceKey?: string | null;
   /** Review tab: human label for the source (title/filename). */
@@ -95,10 +110,15 @@ type Props = {
   reviewDraft?: AnnotationStrokes | null;
   /** Toggle draw mode on/off. */
   onToggleReviewDraw?: () => void;
+  /** Review labels: true while the text-label tool is active in draw mode. */
+  reviewLabelActive?: boolean;
+  /** Toggle the label tool (App enters draw mode first when needed). */
+  onToggleReviewLabel?: () => void;
   /** Called once the draft has been attached to a comment (clears + exits draw). */
   onReviewDraftConsumed?: () => void;
-  /** Show a saved annotation read-only over the frame (null to hide). */
-  onShowAnnotation?: (a: AnnotationStrokes | null) => void;
+  /** Show a saved annotation read-only over the frame (null to hide).
+   *  `color` = the note author's reviewer colour, for the label chips. */
+  onShowAnnotation?: (a: AnnotationStrokes | null, color?: string) => void;
   /** Re-open a past-review source (local path or URL) from the history popover. */
   onOpenReviewSource?: (path: string) => void;
   /** Live review-comment range being set → previewed on the App's timeline.
@@ -185,9 +205,11 @@ export function QueueDrawer({
   onRegenerateTranscript, regenerateBusy, canRegenerate,
   onRedetectSpeakers, canRedetect,
   onImportTranscript, sourceKind, onFixCaptionTiming,
+  transcriptHasSource, onTranscriptEdited,
   aiModelId, aiStyle, onOpenAiSettings,
+  chapterSourceKey, chapterDurationSec, onChaptersChanged,
   reviewSourceKey, reviewSourceTitle,
-  reviewDrawActive, reviewDraft, onToggleReviewDraw, onReviewDraftConsumed, onShowAnnotation,
+  reviewDrawActive, reviewDraft, onToggleReviewDraw, reviewLabelActive, onToggleReviewLabel, onReviewDraftConsumed, onShowAnnotation,
   onOpenReviewSource, onReviewRangeDraft, onRegisterRangeHotkeys,
   reviewSessionActive, reviewSessionDoc, onReviewSessionOp,
   onRenameClip, onRenameAll,
@@ -476,8 +498,9 @@ export function QueueDrawer({
 
   return (
     <aside
-      className={"cp-queue-drawer" + (open ? " open" : "") + (embedded ? " embedded" : "")}
+      className={"cp-queue-drawer" + (open ? " open" : "") + (embedded ? " embedded" : "") + (resizing ? " resizing" : "")}
       aria-hidden={!open}
+      aria-label="Queue and tools"
       // Inline width only when docked + open. In embedded (floating) mode
       // the parent layout dictates size — let it fill the OS window.
       style={!embedded && open ? { width: drawerWidth } : undefined}
@@ -511,8 +534,10 @@ export function QueueDrawer({
           return (
             <button
               key={t.id}
+              id={"cp-tab-" + t.id}
               role="tab"
               aria-selected={isActive}
+              aria-controls={"cp-tabpanel-" + t.id}
               aria-disabled={t.disabled}
               className={
                 "cp-tab" +
@@ -582,7 +607,7 @@ export function QueueDrawer({
           the ACTIVE tab so hidden bodies do no karaoke/timecode work while
           keeping all their internal state. Add a case here for a new tab. */}
       {visited.has("queue") && (
-        <div className="cp-tab-keep" hidden={activeTab !== "queue"}>
+        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-queue" aria-labelledby="cp-tab-queue" hidden={activeTab !== "queue"}>
         {/* === existing queue body kept untouched below === */}
 
       <div className="cp-queue-list">
@@ -663,6 +688,7 @@ export function QueueDrawer({
                   <button
                     className="cp-queue-iconbtn"
                     title="Reveal in Finder"
+                    aria-label={`Reveal ${c.filename} in Finder`}
                     onClick={() => invoke("reveal_in_finder", { path: c.path }).catch(() => {})}
                   >
                     <IconReveal size={13} />
@@ -672,6 +698,7 @@ export function QueueDrawer({
                   <button
                     className="cp-queue-iconbtn danger"
                     title="Remove from queue"
+                    aria-label={`Remove ${c.filename} from queue`}
                     onClick={() => onRemove(c.id)}
                   >
                     <IconTrash size={13} />
@@ -746,7 +773,7 @@ export function QueueDrawer({
         </div>
       )}
       {visited.has("transcript") && (
-        <div className="cp-tab-keep" hidden={activeTab !== "transcript"}>
+        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-transcript" aria-labelledby="cp-tab-transcript" hidden={activeTab !== "transcript"}>
         <TranscriptViewer
           path={transcriptPath}
           /* Same-path overwrites (Regenerate / Fix-timing) re-read via the tick. */
@@ -768,11 +795,13 @@ export function QueueDrawer({
           onImportTranscript={onImportTranscript}
           sourceKind={sourceKind}
           onFixCaptionTiming={onFixCaptionTiming}
+          hasSource={transcriptHasSource}
+          onTranscriptEdited={onTranscriptEdited}
         />
         </div>
       )}
       {visited.has("ai") && (
-        <div className="cp-tab-keep" hidden={activeTab !== "ai"}>
+        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-ai" aria-labelledby="cp-tab-ai" hidden={activeTab !== "ai"}>
         <AiSummary
           transcriptPath={transcriptPath}
           reloadToken={transcriptArrivedTick}
@@ -780,11 +809,14 @@ export function QueueDrawer({
           style={aiStyle}
           onOpenSettings={onOpenAiSettings}
           onSeek={onTranscriptSeek}
+          sourceKey={chapterSourceKey ?? null}
+          durationSec={chapterDurationSec ?? null}
+          onChaptersChanged={onChaptersChanged}
         />
         </div>
       )}
       {visited.has("review") && (
-        <div className="cp-tab-keep" hidden={activeTab !== "review"}>
+        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-review" aria-labelledby="cp-tab-review" hidden={activeTab !== "review"}>
         <ReviewPanel
           sourceKey={reviewSourceKey ?? null}
           sourceTitle={reviewSourceTitle}
@@ -795,6 +827,8 @@ export function QueueDrawer({
           drawActive={!!reviewDrawActive}
           draft={reviewDraft ?? null}
           onToggleDraw={onToggleReviewDraw}
+          labelActive={!!reviewLabelActive}
+          onToggleLabel={onToggleReviewLabel}
           onDraftConsumed={onReviewDraftConsumed}
           onShowAnnotation={onShowAnnotation}
           onOpenReview={onOpenReviewSource}

@@ -163,5 +163,20 @@
   --dur-fast: 120ms;
   --dur-base: 180ms;
   --dur-slow: 280ms;
+
+  /* Shared side-panel collapse/expand slide. Both the left sidebar
+     (.cp-sidebar) and the right drawer (.cp-queue-drawer) reference this so
+     their open/close motion is identical by construction. Width is animated
+     because the panels PUSH the layout rather than overlay it; the floating
+     gutter margin and the border-color fade move in step. */
+  --panel-slide:
+    width var(--dur-slow) var(--ease-out),
+    margin var(--dur-slow) var(--ease-out),
+    border-color var(--dur-slow) var(--ease-out);
+}
+
+/* Reduced motion: panels snap instead of sliding (honours the a11y pass). */
+@media (prefers-reduced-motion: reduce) {
+  :root { --panel-slide: none; }
 }
 

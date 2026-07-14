@@ -19,7 +19,7 @@ npm run tauri dev
 
 Prerequisites:
 
-- **macOS 13+** (14+ recommended — diarization needs the FluidAudio Core ML
+- **macOS 14+** (the diarizer’s FluidAudio Core ML dependency
   models, which platform-pin at 14)
 - **Xcode Command Line Tools** (`xcode-select --install`)
 - **Rust 1.77+** (`rustup default stable`)

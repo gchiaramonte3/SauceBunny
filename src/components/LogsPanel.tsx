@@ -10,6 +10,9 @@ type Props = {
   lines: ClientLog[];
   onClear: () => void;
   onCopy: () => void;
+  /** Save a diagnostics report (versions + settings + this log) to a file —
+   *  the local, no-telemetry way to hand support the context of a bug. */
+  onExportDiagnostics?: () => void;
   /** Optional secondary phase that overrides the status pill when active. */
   transcriptState?: "idle" | "running" | "done" | "error";
   transcriptProgress?: number;
@@ -62,7 +65,7 @@ function transcriptPillLabel(
 }
 
 export function LogsPanel({
-  open, onToggle, status, progress, lines, onClear, onCopy,
+  open, onToggle, status, progress, lines, onClear, onCopy, onExportDiagnostics,
   transcriptState, transcriptProgress, transcriptPhase, transcriptEngine,
   metadataLoading, playbackPrepBusy,
   canStop, onStop,
@@ -100,7 +103,21 @@ export function LogsPanel({
 
   return (
     <div className={"cp-logs " + (open ? "open" : "collapsed")}>
-      <div className="cp-logs-header" onClick={onToggle}>
+      <div
+        className="cp-logs-header"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        aria-label="Pipeline log"
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          // Only handle keys pressed on the header itself — Enter/Space on the
+          // nested Stop/Copy/Clear buttons bubbles up here, and preventDefault
+          // would cancel the button's own activation and toggle the panel.
+          if (e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); }
+        }}
+      >
         <IconChevronDown size={11} className="chev" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }} />
         <span className="title">Pipeline</span>
         <span className={"status-pill " + pill.cls}>{pill.label}</span>
@@ -120,9 +137,19 @@ export function LogsPanel({
             <span className="dot" /> Stop
           </button>
         )}
-        {/* Copy/Clear use the same .btn-ghost styling as the top toolbar's
-            Clear button — single button system across the app. */}
+        {/* Copy/Clear/Export use the same .btn-ghost styling as the top
+            toolbar's Clear button — single button system across the app. */}
         <div className="actions" onClick={(e) => e.stopPropagation()}>
+          {onExportDiagnostics && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-compact"
+              onClick={onExportDiagnostics}
+              title="Save a diagnostics report (app + sidecar versions, settings, recent log) to attach to a bug report"
+            >
+              Export diagnostics
+            </button>
+          )}
           <button type="button" className="btn btn-ghost btn-compact" onClick={onCopy}>Copy</button>
           <button type="button" className="btn btn-ghost btn-compact" onClick={onClear}>Clear</button>
         </div>

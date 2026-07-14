@@ -99,9 +99,9 @@ pub struct CacheStats {
 #[tauri::command]
 pub fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppError> {
     // Proof-of-concept migration for r50 — first command on the typed-error
-    // (AppError) surface. See CLAUDE.md refactor priority #4. The rest of
-    // the commands still return `Result<T, String>` and migrate
-    // opportunistically (or in an r51 bulk sweep).
+    // (AppError) surface. See CLAUDE.md refactor priority #4. The migration
+    // completed in r108: every command + helper now returns
+    // `Result<T, AppError>`.
     let cache = app
         .path()
         .app_cache_dir()
@@ -349,7 +349,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-06-r104-host-name";
+pub const BACKEND_BUILD_ID: &str = "2026-07-08-r108-lang-apperror";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

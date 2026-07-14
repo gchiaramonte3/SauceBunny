@@ -6,9 +6,10 @@
 //! the frontend can `switch (e.kind)` on. The shape is exported to
 //! `src/bindings/AppError.ts` via ts-rs (r49 infrastructure).
 //!
-//! See CLAUDE.md refactor priority #4 (r50). Migration is incremental
-//! — pre-existing commands still return `Result<T, String>`; convert
-//! them opportunistically when you touch them, OR in a bulk r51 sweep.
+//! See CLAUDE.md refactor priority #4 (r50). The migration is COMPLETE
+//! as of r108 — every command and helper in `commands/` returns
+//! `Result<T, AppError>`. New code should never introduce a
+//! `Result<T, String>` signature.
 //!
 //! ## Adding a new variant
 //!

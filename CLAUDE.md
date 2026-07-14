@@ -11,7 +11,7 @@
 Sauce Bunny is a **local-first macOS desktop app** for transcribing, diarizing, and editing video/audio content. It runs entirely on the user's machine — no cloud, no accounts, no telemetry.
 
 - **Shell:** Tauri 2 (Rust backend → WKWebView frontend)
-- **Target:** macOS 13+, Apple Silicon only. No Windows/Linux builds.
+- **Target:** macOS 14+, Apple Silicon only. No Windows/Linux builds. (Floor raised from 13: the diarizer's FluidAudio dependency and native dictation need 14 — a 13 install whose headline features silently fail was worse than requiring 14.)
 - **License:** MIT
 - **Distribution:** self-hosted notarized `.dmg` (NOT Mac App Store). See `DISTRIBUTION.md` for the full reasoning and release flow. The app intentionally cannot pass App Store review (bundled yt-dlp + arbitrary subprocess spawning + cookie reads across apps), and we have decided that's the right tradeoff. Do NOT add MAS-compliance code (App Sandbox entitlements, security-scoped bookmarks, helper-app refactor of sidecars) — it would cost product features without unlocking any distribution channel we want.
 
@@ -138,7 +138,7 @@ Do not add new Tauri plugins without explaining what existing capability is insu
 - It **must** build with `swift build` from the command line.
 - It **must** open in Xcode via `File > Open > swift-sidecar/Package.swift`.
 - **Never** add `.xcodeproj` or `.xcworkspace` files to git — SPM generates these on demand.
-- Target macOS 13+, Swift 5.9+.
+- Target macOS 14+, Swift 5.9+ (matches the app's minimumSystemVersion — FluidAudio's floor).
 - Use AVFoundation for audio loading — do not introduce a WhisperKit dependency.
 - The JSON envelope schema (v1) is a contract between Swift, Rust, and JS. Changing it requires updating all three layers.
 - **Never** import UIKit (this is macOS, not iOS).
@@ -179,7 +179,8 @@ When adding a new cross-window interaction, use this event pattern. Do not intro
 | Whisper models | `app_data_dir()/whisper-models/` |
 | Diarizer models | Bundled or downloaded on first run, cached locally |
 | Transcript library | `~/Documents/Sauce Bunny/Transcripts/YYYY-MM/` |
-| User prefs | `localStorage` namespaced `saucebunny.*` |
+| Review docs | `~/Documents/Sauce Bunny/Reviews/` — one `<slug>-<hash>.json` per source + `index.json`; hydrated at boot, debounced write-through (`src/lib/review-store.ts`); legacy localStorage docs migrated out on first boot |
+| User prefs | `localStorage` namespaced `saucebunny.*` (incl. review history/fingerprint index/reviewer identity — only review DOCS moved to files) |
 
 Do not change these paths without updating both the Rust backend and the frontend.
 
@@ -294,12 +295,12 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
 1. ~~**Split `commands.rs`**~~ — DONE in r47 (`commands/{download,media,transcript,system}.rs`, thin wrappers, `mod.rs` re-exports).
 2. ~~**CSS organization**~~ — DONE in r48 (per-section files imported from `index.css`; tokens stay in `tokens.css`).
 3. ~~**Type consolidation**~~ — DONE in r49. Shared types are generated from canonical Rust structs via the `ts-rs` crate. Cross-boundary structs carry `#[derive(ts_rs::TS)] #[ts(export, export_to = "../../src/bindings/")]`. Run `cargo test --lib` from `src-tauri/` to refresh `src/bindings/*.ts`. `src/types.ts` re-exports the generated types + adds frontend-only types (form state, narrowed enums like `LogTag`, etc.). When adding a new Rust struct that crosses the invoke boundary, derive TS on it; do not hand-write the TS shape in `types.ts`.
-4. ~~**Error handling**~~ — DONE through r51 (bulk migration to `AppError`). The typed error system is wired (`src-tauri/src/error.rs`'s `AppError` enum, generated TS binding at `src/bindings/AppError.ts`, frontend bridge at `src/lib/error-format.ts`). One command (`get_cache_stats`) is migrated end-to-end as the reference. **Remaining work (r51)**: bulk-migrate the other 32 `Result<T, String>` handlers to `Result<T, AppError>`. The pattern is mechanical:
-   - Change return type `Result<T, String>` → `Result<T, AppError>`
-   - Replace `.map_err(|e| e.to_string())` with appropriate `AppError` variant (`AppError::internal(...)`, `AppError::not_found(...)`, etc.) OR rely on the `From` impls for `std::io::Error` / `reqwest::Error` / `serde_json::Error` (then `?` just works).
+4. ~~**Error handling**~~ — DONE (r51 bulk migration; last stragglers swept in r108). The typed error system is wired (`src-tauri/src/error.rs`'s `AppError` enum, generated TS binding at `src/bindings/AppError.ts`, frontend bridge at `src/lib/error-format.ts`), and every remaining `Result<T, String>` fn in `src-tauri/src/commands/` now returns `Result<T, AppError>` — zero `Result<T, String>` signatures left. The pattern for NEW commands stays mechanical:
+   - Return `Result<T, AppError>` from the handler (and from domain helpers it calls).
+   - Use the appropriate `AppError` variant (`AppError::internal(...)`, `AppError::not_found(...)`, etc.) OR rely on the `From` impls for `std::io::Error` / `reqwest::Error` / `serde_json::Error` / `String` (then `?` just works; a bare `String` becomes `Invalid`, which renders its text verbatim — use it when preserving an established user-facing message matters).
    - Update frontend callers to use `formatError(e)` from `lib/error-format.ts` instead of `String(e)`.
    - Re-run `cargo test --lib` if you add new `AppError` variants — the binding regenerates automatically.
-5. **UI smoke harness** — unit tests (vitest + `cargo test --lib`) cover the parsers/timecode/proxy logic since r86; playback and the transcript pipeline are still verified manually. A Playwright/tauri-driver smoke run is the open item.
+5. ~~**UI smoke harness**~~ — DONE (r105): `npm run test:e2e` drives the Vite-served frontend in Chromium with the Tauri IPC layer mocked at the `__TAURI_INTERNALS__` seam (`e2e/tauri-mock.ts`) — tauri-driver has no macOS/WKWebView support, so this is deliberately a *shell* smoke (boot, toolbar/sidebar/monitor render, settings modal, co-review popover, drawer — zero pageerrors), run in CI. Native playback/transcription pipelines remain covered by cargo/swift tests + manual verification.
 6. ~~**Transcript render performance**~~ — DONE (`68d4a25`): the karaoke render's O(turns²) cue-offset scan, per-turn name/alias resolution, and search-match lookup are precomputed in memos keyed on turns/overrides, so a playhead tick only re-marks the active cue.
 
 ---

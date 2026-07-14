@@ -21,6 +21,8 @@
  * when the source already tells us who's talking.
  */
 
+import { secondsToClock } from "./timecode";
+
 export type Cue = {
   /** Sequential index from the original file (or our fallback). Stable. */
   index: number;
@@ -446,15 +448,71 @@ export function groupIntoTurns(
 }
 
 /**
+ * Format seconds as an SRT/VTT cue timestamp (`HH:MM:SS,mmm` / `HH:MM:SS.mmm`).
+ * Millisecond-rounds first so 1.9996s carries to "00:00:02,000" instead of
+ * emitting an out-of-range ",1000".
+ */
+export function secondsToCueTc(seconds: number, msSep: "," | "." = ","): string {
+  const totalMs = Math.max(0, Math.round(seconds * 1000));
+  const h = Math.floor(totalMs / 3_600_000);
+  const m = Math.floor((totalMs % 3_600_000) / 60_000);
+  const s = Math.floor((totalMs % 60_000) / 1000);
+  const ms = totalMs % 1000;
+  const p = (n: number, w: number) => String(n).padStart(w, "0");
+  return `${p(h, 2)}:${p(m, 2)}:${p(s, 2)}${msSep}${p(ms, 3)}`;
+}
+
+/** True for our diarizer's machine labels (`SPEAKER_00`, `SPEAKER_UNK`, `S1`). */
+const MACHINE_TAG = /^(?:SPEAKER_(?:\d+|UNK)|S\d+)$/;
+
+/**
+ * Serialize parsed cues back into SRT (or VTT) text — the inverse of
+ * {@link parseSrt}, used by the transcript viewer's inline cue editing to
+ * rewrite the transcript file in place. The contract is ROUND-TRIP STABILITY:
+ * `parseSrt(serializeCues(cues))` must yield the same cues (same timing, text,
+ * speakers), because every consumer (viewer, on-video captions, exports,
+ * AI summary) re-parses the file.
+ *
+ * Speaker encoding, chosen for lossless re-parse:
+ *  - machine labels → `[SPEAKER_00] text` (the MACHINE prefix our own
+ *    diarizer emits; parseSrt normalizes it back byte-identically)
+ *  - human names    → `<v Name>text</v>` (WebVTT voice tag — the ONLY prefix
+ *    parseSrt honours unconditionally; `NAME:` / `>> NAME:` are gated by
+ *    name-shape heuristics, so e.g. a lowercase name would silently lose its
+ *    speaker on re-parse)
+ *  - null           → plain text
+ *
+ * Note the output is normalized (parse transforms like rolling-caption dedupe
+ * and punctuation relocation are already baked into the cues) — writing it
+ * back intentionally replaces the original producer formatting.
+ */
+export function serializeCues(cues: Cue[], format: "srt" | "vtt" = "srt"): string {
+  const sep = format === "vtt" ? "." : ",";
+  const blocks: string[] = [];
+  let n = 0;
+  for (const c of cues) {
+    const text = c.text.replace(/\s+/g, " ").trim();
+    if (!text) continue; // parseSrt drops empty cues; don't write what it can't read back
+    n += 1;
+    let body = text;
+    if (c.speaker != null) {
+      // ">" would terminate the voice tag early; it can't appear in any tag
+      // we produce, but a corrupted one must not corrupt the whole file.
+      const safe = c.speaker.replace(/>/g, "").trim();
+      if (MACHINE_TAG.test(safe)) body = `[${safe}] ${text}`;
+      else if (safe) body = `<v ${safe}>${text}</v>`;
+    }
+    blocks.push(`${n}\n${secondsToCueTc(c.start, sep)} --> ${secondsToCueTc(c.end, sep)}\n${body}`);
+  }
+  const joined = blocks.join("\n\n") + (blocks.length ? "\n" : "");
+  return format === "vtt" ? "WEBVTT\n\n" + joined : joined;
+}
+
+/**
  * Format seconds as "M:SS" for short content or "H:MM:SS" for hour+.
  * Used in the cue-row timestamp pill; the player has its own SMPTE
- * formatter elsewhere.
+ * formatter elsewhere. Delegates to the canonical clock formatter.
  */
 export function fmtTime(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  if (h > 0) return `${h}:${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
-  return `${m}:${sec.toString().padStart(2, "0")}`;
+  return secondsToClock(seconds);
 }

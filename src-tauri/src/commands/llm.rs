@@ -84,15 +84,19 @@ fn spec(id: &str) -> Option<&'static LlmSpec> {
     LLM_MODELS.iter().find(|m| m.id == id)
 }
 
-fn llm_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let base = app.path().app_data_dir().map_err(|e| format!("app_data_dir: {e}"))?;
+fn llm_models_dir(app: &AppHandle) -> Result<PathBuf, crate::AppError> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| crate::AppError::internal(format!("app_data_dir: {e}")))?;
     let dir = base.join("models").join("llm");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("create models dir: {e}"))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| crate::AppError::internal(format!("create models dir: {e}")))?;
     Ok(dir)
 }
 
-fn llm_model_path(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
-    let s = spec(id).ok_or_else(|| format!("Unknown model: {id}"))?;
+fn llm_model_path(app: &AppHandle, id: &str) -> Result<PathBuf, crate::AppError> {
+    let s = spec(id).ok_or_else(|| crate::AppError::invalid(format!("Unknown model: {id}")))?;
     Ok(llm_models_dir(app)?.join(s.file))
 }
 
@@ -111,7 +115,7 @@ pub struct LlmModel {
 
 #[tauri::command]
 pub fn list_llm_models(app: AppHandle) -> Result<Vec<LlmModel>, crate::AppError> {
-    let dir = llm_models_dir(&app).map_err(crate::AppError::internal)?;
+    let dir = llm_models_dir(&app)?;
     Ok(LLM_MODELS
         .iter()
         .map(|m| LlmModel {
@@ -151,7 +155,7 @@ pub async fn download_llm_model(
                 Ok(()) => DoneEvent { job_id: job_id.clone(), success: true, code: Some(0), path: dest.to_str().map(String::from), error: None },
                 Err(e) => { let _ = std::fs::remove_file(&tmp); DoneEvent { job_id: job_id.clone(), success: false, code: None, path: None, error: Some(format!("Rename failed: {e}")) } }
             },
-            Err(e) => { let _ = std::fs::remove_file(&tmp); DoneEvent { job_id: job_id.clone(), success: false, code: None, path: None, error: Some(e.clone()) } }
+            Err(e) => { let _ = std::fs::remove_file(&tmp); DoneEvent { job_id: job_id.clone(), success: false, code: None, path: None, error: Some(e.to_string()) } }
         };
         let _ = app_for.emit("model-download-done", done);
     });
@@ -218,9 +222,13 @@ fn mint_api_key() -> String {
     URL_SAFE_NO_PAD.encode(buf)
 }
 
-fn free_loopback_port() -> Result<u16, String> {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| format!("bind: {e}"))?;
-    let port = l.local_addr().map_err(|e| format!("addr: {e}"))?.port();
+fn free_loopback_port() -> Result<u16, crate::AppError> {
+    let l = std::net::TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| crate::AppError::internal(format!("bind: {e}")))?;
+    let port = l
+        .local_addr()
+        .map_err(|e| crate::AppError::internal(format!("addr: {e}")))?
+        .port();
     Ok(port) // dropped here; tiny TOCTOU window, fine for single-user local
 }
 
@@ -257,7 +265,7 @@ pub async fn start_llm_server(
         return Err(crate::AppError::not_found(format!("Model {model_id} not downloaded")));
     }
 
-    let port = free_loopback_port().map_err(crate::AppError::internal)?;
+    let port = free_loopback_port()?;
     let api_key = mint_api_key();
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
 

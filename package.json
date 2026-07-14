@@ -18,7 +18,8 @@
     "refresh:ffprobe": "bash scripts/fetch-ffprobe.sh",
     "build:whisper": "bash scripts/build-whisper.sh",
     "build:llama": "bash scripts/build-llama.sh",
-    "check:release": "bash scripts/check-notarization-ready.sh"
+    "check:release": "bash scripts/check-notarization-ready.sh",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@fontsource/nunito-sans": "^5.2.7",
@@ -37,6 +38,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tauri-apps/cli": "^2.1.0",
     "@types/node": "^25.9.1",
     "@types/react": "^18.3.12",

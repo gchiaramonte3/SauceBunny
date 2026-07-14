@@ -126,28 +126,29 @@ fn sidecar_path(name: &str) -> Result<PathBuf, crate::AppError> {
 /// pages that just embed video) decide whether the source is actually
 /// usable. We only enforce the bare minimum so the rest of the pipeline
 /// gets a parseable URL instead of a malformed string.
-fn validate_source_url(url: &str) -> Result<(), String> {
-    let parsed = url::Url::parse(url).map_err(|_| "Not a valid URL".to_string())?;
+fn validate_source_url(url: &str) -> Result<(), crate::AppError> {
+    let parsed =
+        url::Url::parse(url).map_err(|_| crate::AppError::invalid("Not a valid URL"))?;
     if parsed.scheme() != "https" && parsed.scheme() != "http" {
-        return Err("URL must be http(s)".into());
+        return Err(crate::AppError::invalid("URL must be http(s)"));
     }
     if parsed.host_str().unwrap_or("").is_empty() {
-        return Err("URL has no host".into());
+        return Err(crate::AppError::invalid("URL has no host"));
     }
     Ok(())
 }
 
 // HH:MM:SS:FF (frame-accurate) → fractional seconds. Falls back to HH:MM:SS.
-fn timecode_to_seconds(tc: &str, fps: f64) -> Result<f64, String> {
+fn timecode_to_seconds(tc: &str, fps: f64) -> Result<f64, crate::AppError> {
     let parts: Vec<&str> = tc.trim().split(':').collect();
     if parts.is_empty() || parts.len() > 4 {
-        return Err(format!("Invalid timecode: {tc}"));
+        return Err(crate::AppError::invalid(format!("Invalid timecode: {tc}")));
     }
     let mut nums: Vec<u32> = Vec::with_capacity(parts.len());
     for p in &parts {
         let n: u32 = p
             .parse()
-            .map_err(|_| format!("Invalid timecode: {tc}"))?;
+            .map_err(|_| crate::AppError::invalid(format!("Invalid timecode: {tc}")))?;
         nums.push(n);
     }
     // Pad to [HH, MM, SS, FF] depending on length.
@@ -159,11 +160,13 @@ fn timecode_to_seconds(tc: &str, fps: f64) -> Result<f64, String> {
         _ => unreachable!(),
     };
     if m >= 60 || s >= 60 {
-        return Err(format!("Invalid timecode: {tc}"));
+        return Err(crate::AppError::invalid(format!("Invalid timecode: {tc}")));
     }
     let fps = if fps > 0.0 { fps } else { 24.0 };
     if f as f64 >= fps {
-        return Err(format!("Frame index {f} out of range for {fps:.3} fps"));
+        return Err(crate::AppError::invalid(format!(
+            "Frame index {f} out of range for {fps:.3} fps"
+        )));
     }
     let seconds = h as f64 * 3600.0 + m as f64 * 60.0 + s as f64 + (f as f64 / fps);
     Ok(seconds)

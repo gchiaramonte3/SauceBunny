@@ -174,7 +174,7 @@ async fn spawn_video_clip(
     section_secs: Option<(f64, f64)>,
     output_str: String,
     ffmpeg_str: String,
-) -> Result<(), String> {
+) -> Result<(), crate::AppError> {
     let mut cmd_args: Vec<String> = vec![
         "-f".into(),
         yt_dlp_video_format(&args.format).into(),
@@ -341,13 +341,14 @@ async fn spawn_audio_clip(
     output_str: String,
     ffmpeg_str: String,
     cookies_browser: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), crate::AppError> {
     // Phase 1: yt-dlp downloads raw bestaudio to cache.
     let cache = app
         .path()
         .app_cache_dir()
-        .map_err(|e| format!("app_cache_dir: {e}"))?;
-    std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
+        .map_err(|e| crate::AppError::internal(format!("app_cache_dir: {e}")))?;
+    std::fs::create_dir_all(&cache)
+        .map_err(|e| crate::AppError::internal(format!("mkdir cache: {e}")))?;
     let raw_prefix = format!("saucebunny-{}-raw", job_id);
     let raw_template = cache
         .join(format!("{}.%(ext)s", raw_prefix))
@@ -894,7 +895,10 @@ fn parse_ffmpeg_audio(stderr: &str) -> Option<String> {
 pub async fn probe_local_file(app: AppHandle, path: String) -> Result<LocalFileMeta, crate::AppError> {
     let p = PathBuf::from(&path);
     if !p.exists() {
-        return Err(format!("File not found: {path}").into());
+        // Typed NotFound (not prose in an `Invalid`): the frontend prunes
+        // stale recents by branching on `kind === "NotFound"` (App.tsx
+        // handleOpenRecentSource), so this must stay machine-readable.
+        return Err(crate::AppError::not_found(path));
     }
     let size_bytes = p.metadata().map(|m| m.len()).unwrap_or(0);
     let filename = p
@@ -933,6 +937,55 @@ pub async fn probe_local_file(app: AppHandle, path: String) -> Result<LocalFileM
         has_video: vcodec.is_some(),
         has_audio: acodec.is_some(),
     })
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// LOCAL FILE BYTE READS (mediabunny CustomSource backend)
+//
+// mediabunny's `UrlSource` range-fetches a local file over the Tauri
+// `asset://` protocol, which stalls on large local files (an 800 MB mp4
+// won't load). The frontend instead backs mediabunny's `CustomSource` with
+// these two thin commands: `get_file_size` for the total length and
+// `read_file_range` for a lazy `[offset, offset+length)` slice.
+//
+// This is a hot read path during scrub/playback, so `read_file_range`
+// returns `tauri::ipc::Response` — RAW bytes → an ArrayBuffer on the JS
+// side. Do NOT change it to `Vec<u8>`: Tauri JSON-encodes that as a decimal
+// number array (~4× bloat) and would cripple performance here.
+// ────────────────────────────────────────────────────────────────────────
+
+/// Total byte length of a local file — mediabunny's `CustomSource.getSize`.
+#[tauri::command]
+pub fn get_file_size(path: String) -> Result<u64, crate::AppError> {
+    Ok(std::fs::metadata(&path)?.len())
+}
+
+/// Byte-reading core, split out so it's unit-testable without a Tauri
+/// `Response` (whose body is opaque). Reads at most `length` bytes starting
+/// at `offset`, clamped at EOF — a request past the tail returns a short (or
+/// empty) buffer rather than erroring.
+fn read_file_range_bytes(path: &str, offset: u64, length: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    f.seek(SeekFrom::Start(offset))?;
+    // `Take` caps the read at `length`; `read_to_end` stops early at EOF, so
+    // the two together clamp the range without any explicit size math.
+    let mut buf = Vec::new();
+    f.take(length).read_to_end(&mut buf)?;
+    Ok(buf)
+}
+
+/// Read a byte slice of a local file for mediabunny's `CustomSource.read`.
+/// Returns RAW bytes via `tauri::ipc::Response` (→ ArrayBuffer on the JS
+/// side). See the section header for why this must not return `Vec<u8>`.
+#[tauri::command]
+pub fn read_file_range(
+    path: String,
+    offset: u64,
+    length: u64,
+) -> Result<tauri::ipc::Response, crate::AppError> {
+    let bytes = read_file_range_bytes(&path, offset, length)?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -1136,6 +1189,162 @@ pub async fn generate_local_thumbnail(
 // this prepared temp file.
 // ────────────────────────────────────────────────────────────────────────
 
+// ─── Playback color routing ──────────────────────────────────────────────
+// WKWebView can only present 8-bit SDR: it has no 10-bit VideoFrame path
+// (see the ProRes caveat in CLAUDE.md) and no HDR surface, so the prep
+// transcode must cut bit depth / dynamic range itself. The old bare
+// `-pix_fmt yuv420p` did that with an undithered swscale truncation (sky
+// banding) and no tonemap (PQ/HLG washed out), at a flat 4M (blocky HD).
+// Routing: 8-bit SDR keeps the untouched fast path; 10-bit SDR goes through
+// zscale error-diffusion dither (dither kills banding); HDR is tonemapped
+// to bt709 SDR because WKWebView is SDR-only, then dithered to 8-bit.
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PlaybackColorClass {
+    Sdr8,
+    Sdr10,
+    Hdr,
+}
+
+#[derive(Default)]
+struct PlaybackColorProbe {
+    width: u32,
+    height: u32,
+    pix_fmt: Option<String>,
+    color_space: Option<String>,
+    color_transfer: Option<String>,
+    color_primaries: Option<String>,
+}
+
+fn classify_playback_color(p: &PlaybackColorProbe) -> PlaybackColorClass {
+    if matches!(p.color_transfer.as_deref(), Some("smpte2084" | "arib-std-b67")) {
+        return PlaybackColorClass::Hdr;
+    }
+    let deep = p.pix_fmt.as_deref().is_some_and(|f| {
+        ["9le", "9be", "10le", "10be", "12le", "12be", "14le", "14be", "16le", "16be"]
+            .iter()
+            .any(|d| f.contains(d))
+    });
+    if deep { PlaybackColorClass::Sdr10 } else { PlaybackColorClass::Sdr8 }
+}
+
+/// `-b:v` by long edge (portrait-safe). Local temp file — size is cheap,
+/// starving h264_videotoolbox is what made HD/4K playback copies blocky.
+fn playback_bitrate(width: u32, height: u32) -> &'static str {
+    match width.max(height) {
+        0..=1280 => "6M",
+        1281..=1920 => "10M",
+        1921..=2560 => "14M",
+        _ => "20M",
+    }
+}
+
+// Only names verified against the bundled zscale/setparams option tables
+// are passed through; anything else gets the stated default — a close-but
+// -assumed value beats zimg's hard "no path between colorspaces" abort on
+// untagged frames.
+fn safe_matrix<'a>(p: &'a PlaybackColorProbe, default: &'a str) -> &'a str {
+    match p.color_space.as_deref() {
+        Some(m @ ("bt709" | "bt470bg" | "smpte170m" | "smpte240m" | "bt2020nc" | "bt2020c")) => m,
+        _ => default,
+    }
+}
+fn safe_primaries<'a>(p: &'a PlaybackColorProbe, default: &'a str) -> &'a str {
+    match p.color_primaries.as_deref() {
+        Some(m @ ("bt709" | "bt470m" | "bt470bg" | "smpte170m" | "smpte240m" | "film" | "bt2020")) => m,
+        _ => default,
+    }
+}
+fn safe_sdr_transfer(p: &PlaybackColorProbe) -> &str {
+    match p.color_transfer.as_deref() {
+        Some(t @ ("bt709" | "bt470m" | "bt470bg" | "smpte170m" | "smpte240m")) => t,
+        _ => "bt709",
+    }
+}
+
+/// Encoder/filter args that replace the legacy `-pix_fmt yuv420p -b:v 4M`
+/// pair in the video branch, plus a log label. `None` (probe failed) →
+/// exactly the legacy args, so prep never fails harder than before.
+fn playback_video_quality_args(probe: Option<&PlaybackColorProbe>) -> (Vec<String>, String) {
+    let Some(p) = probe else {
+        return (
+            vec!["-pix_fmt".into(), "yuv420p".into(), "-b:v".into(), "4M".into()],
+            "probe failed, legacy yuv420p @ 4M".into(),
+        );
+    };
+    let br = playback_bitrate(p.width, p.height);
+    let dims = format!("{}x{}", p.width, p.height);
+    match classify_playback_color(p) {
+        PlaybackColorClass::Sdr8 => (
+            vec!["-pix_fmt".into(), "yuv420p".into(), "-b:v".into(), br.into()],
+            format!("sdr-8bit fast path ({dims} @ {br})"),
+        ),
+        PlaybackColorClass::Sdr10 => {
+            // Same colorimetry in and out — only depth (and chroma) change,
+            // with error-diffusion dither. min= doubles as the assumption
+            // for untagged frames; setparams stamps tags the encoder keeps.
+            let mtx = safe_matrix(p, "bt709");
+            let prim = safe_primaries(p, "bt709");
+            let trc = safe_sdr_transfer(p);
+            let vf = format!(
+                "zscale=min={mtx}:m={mtx}:dither=error_diffusion,format=yuv420p,setparams=colorspace={mtx}:color_primaries={prim}:color_trc={trc}"
+            );
+            (
+                vec![
+                    "-vf".into(), vf,
+                    "-colorspace".into(), mtx.into(),
+                    "-color_primaries".into(), prim.into(),
+                    "-color_trc".into(), trc.into(),
+                    "-b:v".into(), br.into(),
+                ],
+                format!(
+                    "sdr-10bit dithered ({}, {dims} @ {br})",
+                    p.pix_fmt.as_deref().unwrap_or("?")
+                ),
+            )
+        }
+        PlaybackColorClass::Hdr => {
+            // PQ/HLG → linear light → hable tonemap → bt709 SDR, dithered
+            // to 8-bit. HDR defaults are bt2020 — virtually every HDR file.
+            let tin = p.color_transfer.as_deref().unwrap_or("smpte2084");
+            let pin = safe_primaries(p, "bt2020");
+            let min = safe_matrix(p, "bt2020nc");
+            let vf = format!(
+                "zscale=tin={tin}:pin={pin}:min={min}:t=linear:npl=100,tonemap=hable:desat=0,zscale=p=bt709:t=bt709:m=bt709:r=tv:dither=error_diffusion,format=yuv420p"
+            );
+            (
+                vec![
+                    "-vf".into(), vf,
+                    "-colorspace".into(), "bt709".into(),
+                    "-color_primaries".into(), "bt709".into(),
+                    "-color_trc".into(), "bt709".into(),
+                    "-b:v".into(), br.into(),
+                ],
+                format!("hdr tonemap → sdr ({tin}, {dims} @ {br})"),
+            )
+        }
+    }
+}
+
+/// Best-effort v:0 probe for the prep transcode. `None` on any failure —
+/// the caller falls back to the legacy args rather than failing the prep.
+async fn probe_playback_color(app: &AppHandle, path: &str) -> Option<PlaybackColorProbe> {
+    let v = ffprobe_json(app, &[
+        "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,pix_fmt,color_space,color_transfer,color_primaries",
+        "-print_format", "json", path,
+    ]).await.ok()?;
+    let s = v.get("streams")?.as_array()?.first()?;
+    Some(PlaybackColorProbe {
+        width: s.get("width").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+        height: s.get("height").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+        pix_fmt: jstr(s, "pix_fmt"),
+        color_space: jstr(s, "color_space"),
+        color_transfer: jstr(s, "color_transfer"),
+        color_primaries: jstr(s, "color_primaries"),
+    })
+}
+
 #[derive(Deserialize)]
 pub struct PreparePlaybackArgs {
     pub input_path: String,
@@ -1189,9 +1398,10 @@ pub async fn prepare_local_for_playback(
     // Argument list — split video vs. audio path:
     //   • Video: h264_videotoolbox is the hardware encoder on macOS.
     //     5–15× real time on Apple Silicon. yuv420p is the one pixel format
-    //     WKWebView reliably renders. +faststart moves the moov atom to the
-    //     head of the file so progressive playback works without a full
-    //     download.
+    //     WKWebView reliably renders — depth/HDR reduction is routed per
+    //     source by `playback_video_quality_args` (see the color-routing
+    //     block above). +faststart moves the moov atom to the head of the
+    //     file so progressive playback works without a full download.
     //   • Audio: libmp3lame is universal in WebKit; we keep 320 kbps so
     //     audio quality is preserved.
     let mut cmd_args: Vec<String> = vec![
@@ -1201,12 +1411,21 @@ pub async fn prepare_local_for_playback(
         args.input_path.clone(),
     ];
     if args.has_video {
+        let probe = probe_playback_color(&app, &args.input_path).await;
+        let (quality_args, color_label) = playback_video_quality_args(probe.as_ref());
+        let _ = app.emit("playback-prep-log", LogEvent {
+            job_id: args.job_id.clone(),
+            stream: "stderr".into(),
+            tag: "info".into(),
+            line: format!("[playback-prep] color path: {color_label}"),
+        });
         cmd_args.extend([
             "-map".into(), "0:v:0".into(),
             "-map".into(), "0:a:0?".into(), // optional audio track
             "-c:v".into(), "h264_videotoolbox".into(),
-            "-pix_fmt".into(), "yuv420p".into(),
-            "-b:v".into(), "4M".into(),
+        ]);
+        cmd_args.extend(quality_args);
+        cmd_args.extend([
             "-c:a".into(), "aac".into(),
             "-b:a".into(), "160k".into(),
             "-movflags".into(), "+faststart".into(),
@@ -1537,6 +1756,167 @@ pub async fn probe_media_info(app: AppHandle, path: String) -> Result<MediaInfo,
         video,
         audio,
     })
+}
+
+#[cfg(test)]
+mod playback_color_tests {
+    use super::{
+        classify_playback_color, playback_bitrate, playback_video_quality_args,
+        PlaybackColorClass, PlaybackColorProbe,
+    };
+
+    fn probe(
+        w: u32, h: u32,
+        pix_fmt: Option<&str>, space: Option<&str>, transfer: Option<&str>, primaries: Option<&str>,
+    ) -> PlaybackColorProbe {
+        PlaybackColorProbe {
+            width: w,
+            height: h,
+            pix_fmt: pix_fmt.map(Into::into),
+            color_space: space.map(Into::into),
+            color_transfer: transfer.map(Into::into),
+            color_primaries: primaries.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn classifies_hdr_by_transfer_regardless_of_depth() {
+        for trc in ["smpte2084", "arib-std-b67"] {
+            let p = probe(3840, 2160, Some("yuv422p10le"), Some("bt2020nc"), Some(trc), Some("bt2020"));
+            assert_eq!(classify_playback_color(&p), PlaybackColorClass::Hdr, "{trc}");
+        }
+        // 8-bit HLG is still HDR — the tonemap is about transfer, not depth.
+        let p = probe(1920, 1080, Some("yuv420p"), None, Some("arib-std-b67"), None);
+        assert_eq!(classify_playback_color(&p), PlaybackColorClass::Hdr);
+    }
+
+    #[test]
+    fn classifies_deep_sdr_by_pix_fmt() {
+        for f in ["yuv422p10le", "yuv420p10le", "p010le", "yuv444p12le", "yuv420p16be"] {
+            let p = probe(1920, 1080, Some(f), Some("bt709"), Some("bt709"), Some("bt709"));
+            assert_eq!(classify_playback_color(&p), PlaybackColorClass::Sdr10, "{f}");
+        }
+    }
+
+    #[test]
+    fn classifies_plain_and_unknown_as_sdr8() {
+        let p = probe(1920, 1080, Some("yuv420p"), Some("bt709"), Some("bt709"), Some("bt709"));
+        assert_eq!(classify_playback_color(&p), PlaybackColorClass::Sdr8);
+        // No color/pix_fmt info at all → don't invent a slow path.
+        let p = probe(1920, 1080, None, None, None, None);
+        assert_eq!(classify_playback_color(&p), PlaybackColorClass::Sdr8);
+    }
+
+    #[test]
+    fn bitrate_ladder_by_long_edge() {
+        assert_eq!(playback_bitrate(1280, 720), "6M");
+        assert_eq!(playback_bitrate(1920, 1080), "10M");
+        assert_eq!(playback_bitrate(1080, 1920), "10M"); // portrait 1080p
+        assert_eq!(playback_bitrate(2560, 1440), "14M");
+        assert_eq!(playback_bitrate(3840, 2160), "20M");
+        assert_eq!(playback_bitrate(0, 0), "6M"); // degenerate probe → floor
+    }
+
+    #[test]
+    fn no_probe_keeps_legacy_args_exactly() {
+        let (args, label) = playback_video_quality_args(None);
+        assert_eq!(args, vec!["-pix_fmt", "yuv420p", "-b:v", "4M"]);
+        assert!(label.contains("legacy"));
+    }
+
+    #[test]
+    fn sdr8_fast_path_scales_bitrate_only() {
+        let p = probe(3840, 2160, Some("yuv420p"), Some("bt709"), Some("bt709"), Some("bt709"));
+        let (args, _) = playback_video_quality_args(Some(&p));
+        assert_eq!(args, vec!["-pix_fmt", "yuv420p", "-b:v", "20M"]);
+    }
+
+    #[test]
+    fn hdr_gets_tonemap_chain_and_bt709_tags() {
+        let p = probe(3840, 2160, Some("yuv422p10le"), Some("bt2020nc"), Some("smpte2084"), Some("bt2020"));
+        let (args, label) = playback_video_quality_args(Some(&p));
+        let vf = &args[args.iter().position(|a| a == "-vf").unwrap() + 1];
+        assert_eq!(
+            vf,
+            "zscale=tin=smpte2084:pin=bt2020:min=bt2020nc:t=linear:npl=100,tonemap=hable:desat=0,zscale=p=bt709:t=bt709:m=bt709:r=tv:dither=error_diffusion,format=yuv420p"
+        );
+        for pair in [["-colorspace", "bt709"], ["-color_primaries", "bt709"], ["-color_trc", "bt709"], ["-b:v", "20M"]] {
+            let i = args.iter().position(|a| a == pair[0]).unwrap();
+            assert_eq!(args[i + 1], pair[1]);
+        }
+        assert!(label.contains("hdr"));
+    }
+
+    #[test]
+    fn hdr_with_missing_tags_assumes_bt2020() {
+        let p = probe(1920, 1080, Some("yuv420p10le"), None, Some("arib-std-b67"), None);
+        let (args, _) = playback_video_quality_args(Some(&p));
+        let vf = &args[args.iter().position(|a| a == "-vf").unwrap() + 1];
+        assert!(vf.starts_with("zscale=tin=arib-std-b67:pin=bt2020:min=bt2020nc:t=linear"));
+    }
+
+    #[test]
+    fn sdr10_dithers_and_preserves_probed_colorimetry() {
+        let p = probe(1920, 1080, Some("yuv422p10le"), Some("smpte170m"), Some("smpte170m"), Some("smpte170m"));
+        let (args, label) = playback_video_quality_args(Some(&p));
+        let vf = &args[args.iter().position(|a| a == "-vf").unwrap() + 1];
+        assert_eq!(
+            vf,
+            "zscale=min=smpte170m:m=smpte170m:dither=error_diffusion,format=yuv420p,setparams=colorspace=smpte170m:color_primaries=smpte170m:color_trc=smpte170m"
+        );
+        assert!(!vf.contains("tonemap"));
+        for pair in [["-colorspace", "smpte170m"], ["-b:v", "10M"]] {
+            let i = args.iter().position(|a| a == pair[0]).unwrap();
+            assert_eq!(args[i + 1], pair[1]);
+        }
+        assert!(label.contains("sdr-10bit"));
+    }
+
+    #[test]
+    fn sdr10_untagged_or_exotic_defaults_to_bt709() {
+        // Untagged frames abort zimg without an explicit min= assumption.
+        let p = probe(1280, 720, Some("yuv422p10le"), None, None, None);
+        let (args, _) = playback_video_quality_args(Some(&p));
+        let vf = &args[args.iter().position(|a| a == "-vf").unwrap() + 1];
+        assert!(vf.starts_with("zscale=min=bt709:m=bt709:dither=error_diffusion"));
+        // A matrix zscale doesn't know must not be passed through verbatim.
+        let p = probe(1280, 720, Some("yuv422p10le"), Some("ycgco"), None, None);
+        let (args, _) = playback_video_quality_args(Some(&p));
+        let vf = &args[args.iter().position(|a| a == "-vf").unwrap() + 1];
+        assert!(vf.starts_with("zscale=min=bt709:m=bt709:"));
+    }
+}
+
+#[cfg(test)]
+mod file_range_tests {
+    use super::read_file_range_bytes;
+
+    #[test]
+    fn reads_middle_range_and_clamps_at_eof() {
+        // 256-byte file where byte value == index, so slices are easy to assert.
+        let data: Vec<u8> = (0..=255u8).collect();
+        let path = std::env::temp_dir()
+            .join(format!("saucebunny-range-test-{}.bin", std::process::id()));
+        std::fs::write(&path, &data).unwrap();
+        let p = path.to_string_lossy().to_string();
+
+        // Middle slice [100, 110) → exactly 10 bytes, values 100..110.
+        assert_eq!(
+            read_file_range_bytes(&p, 100, 10).unwrap(),
+            (100..110).collect::<Vec<u8>>()
+        );
+        // Whole file.
+        assert_eq!(read_file_range_bytes(&p, 0, 256).unwrap(), data);
+        // Runs past EOF → clamped to the 6 bytes that exist (250..=255).
+        assert_eq!(
+            read_file_range_bytes(&p, 250, 20).unwrap(),
+            (250..=255).collect::<Vec<u8>>()
+        );
+        // Offset exactly at EOF → empty buffer, not an error.
+        assert!(read_file_range_bytes(&p, 256, 10).unwrap().is_empty());
+
+        let _ = std::fs::remove_file(&path);
+    }
 }
 
 #[cfg(test)]
