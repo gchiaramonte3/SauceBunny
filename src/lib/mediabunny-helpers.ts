@@ -34,36 +34,168 @@ export async function extractFrameAsBlob(
     const sink = new CanvasSink(vt, { poolSize: 1 });
     const wrapped = await sink.getCanvas(Math.max(0, atSeconds));
     if (!wrapped) return null;
-    const src = wrapped.canvas;
-
-    // Optionally downscale (used for thumbnails). Keeps aspect ratio.
-    let outW = src.width;
-    let outH = src.height;
-    const maxW = opts?.maxWidth;
-    if (maxW && src.width > maxW) {
-      outW = maxW;
-      outH = Math.round(src.height * (maxW / src.width));
-    }
-
-    // Normalise OffscreenCanvas → HTMLCanvasElement so toBlob's surface
-    // is consistent across mediabunny's pool implementations.
-    const out = document.createElement("canvas");
-    out.width = outW;
-    out.height = outH;
-    const ctx = out.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(src as CanvasImageSource, 0, 0, outW, outH);
-
     const mimeType = opts?.mimeType ?? "image/jpeg";
     const quality = opts?.quality ?? 0.95;
-    return await new Promise<Blob | null>((resolve) => {
-      out.toBlob((b) => resolve(b), mimeType, quality);
-    });
+    return await canvasToBlob(wrapped.canvas, opts?.maxWidth, mimeType, quality);
   } catch {
     // Any decode/demux failure → null → ffmpeg fallback path takes over.
     return null;
   } finally {
     // Always release decoders + source streams, even on error.
+    void input.dispose();
+  }
+}
+
+/**
+ * Normalise a (possibly Offscreen) decode canvas → an HTMLCanvasElement JPEG
+ * Blob, optionally downscaled to `maxWidth` (aspect kept). Shared by
+ * extractFrameAsBlob and extractPosterBlob so the toBlob surface is consistent
+ * across mediabunny's pool implementations. Null when a 2D context can't be
+ * acquired (headless / lost context).
+ */
+async function canvasToBlob(
+  src: HTMLCanvasElement | OffscreenCanvas,
+  maxWidth: number | undefined,
+  mimeType: string,
+  quality: number,
+): Promise<Blob | null> {
+  let outW = src.width;
+  let outH = src.height;
+  if (maxWidth && src.width > maxWidth) {
+    outW = maxWidth;
+    outH = Math.round(src.height * (maxWidth / src.width));
+  }
+  const out = document.createElement("canvas");
+  out.width = outW;
+  out.height = outH;
+  const ctx = out.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(src as CanvasImageSource, 0, 0, outW, outH);
+  return await new Promise<Blob | null>((resolve) => {
+    out.toBlob((b) => resolve(b), mimeType, quality);
+  });
+}
+
+/**
+ * Mean luma (0-255) of a decoded frame, sampled through a tiny 16×9 canvas so
+ * the read is a fixed ~144-pixel cost regardless of source resolution. Used by
+ * extractPosterBlob to reject black intro/fade frames. Rec. 601 coefficients.
+ */
+function meanLuma(
+  scratch: CanvasRenderingContext2D,
+  src: HTMLCanvasElement | OffscreenCanvas,
+): number {
+  const w = scratch.canvas.width;
+  const h = scratch.canvas.height;
+  scratch.drawImage(src as CanvasImageSource, 0, 0, w, h);
+  const { data } = scratch.getImageData(0, 0, w, h);
+  let sum = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    sum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  }
+  return sum / (w * h);
+}
+
+/**
+ * Probe just the playback duration of a local file via mediabunny — one Input,
+ * `computeDuration()`, disposed immediately. Returns seconds, or `null` when
+ * the file has no measurable duration (NaN / ≤0) or can't be opened. Used by
+ * the poster picker to bound its scrub slider.
+ */
+export async function probeVideoDuration(localPath: string): Promise<number | null> {
+  const input = new Input({ source: mediabunnySource(localPath), formats: ALL_FORMATS });
+  try {
+    const dur = await input.computeDuration();
+    return Number.isFinite(dur) && dur > 0 ? dur : null;
+  } catch {
+    return null;
+  } finally {
+    void input.dispose();
+  }
+}
+
+/**
+ * Extract a *representative* poster frame — the auto-thumbnail that never lands
+ * on a black fade-in. Two modes:
+ *
+ *  - `atSeconds` given → decode exactly that frame (a user-chosen poster; no
+ *    luma test — the user picked it deliberately).
+ *  - otherwise → probe a handful of offsets spread across the file, measure
+ *    each frame's mean luma, and accept the FIRST that clears a black-frame
+ *    threshold; if none clears it, fall back to the brightest one seen.
+ *
+ * Returns `null` when mediabunny can't decode the file's video (no track /
+ * unsupported codec) — the caller then drops to the ffmpeg fallback. Disposes
+ * the Input in every path.
+ */
+export async function extractPosterBlob(
+  localPath: string,
+  opts?: { atSeconds?: number; maxWidth?: number; quality?: number },
+): Promise<Blob | null> {
+  const input = new Input({ source: mediabunnySource(localPath), formats: ALL_FORMATS });
+  try {
+    const vt = await input.getPrimaryVideoTrack();
+    if (!vt) return null;
+    if (!(await vt.canDecode())) return null;
+    // One shared sink reused across every candidate decode (poolSize 1).
+    const sink = new CanvasSink(vt, { poolSize: 1 });
+    const maxWidth = opts?.maxWidth;
+    const quality = opts?.quality ?? 0.8;
+
+    // ── Chosen frame: decode that one, no luma test. ──
+    if (typeof opts?.atSeconds === "number" && Number.isFinite(opts.atSeconds)) {
+      const wrapped = await sink.getCanvas(Math.max(0, opts.atSeconds));
+      if (!wrapped) return null;
+      return await canvasToBlob(wrapped.canvas, maxWidth, "image/jpeg", quality);
+    }
+
+    // ── Representative: scan candidate offsets for the first non-black frame. ──
+    let dur = 0;
+    try {
+      const d = await input.computeDuration();
+      if (Number.isFinite(d) && d > 0) dur = d;
+    } catch {
+      /* unknown duration → fixed-second fallback offsets below */
+    }
+    const hi = Math.max(0, dur - 0.05);
+    const clamp = (t: number) => (dur > 0 ? Math.min(Math.max(0, t), hi) : Math.max(0, t));
+    const candidates = dur > 0
+      ? [0.2, 0.45, 0.1, 0.65, 0.03].map((f) => f * dur)
+      : [2, 5, 0];
+
+    // Tiny scratch canvas for the mean-luma read (see meanLuma).
+    const scratch = document.createElement("canvas");
+    scratch.width = 16;
+    scratch.height = 9;
+    const sctx = scratch.getContext("2d", { willReadFrequently: true });
+
+    const LUMA_OK = 16; // below this the frame reads as effectively black
+    let bestOffset: number | null = null;
+    let bestLuma = -1;
+    for (const raw of candidates) {
+      const t = clamp(raw);
+      const wrapped = await sink.getCanvas(t);
+      if (!wrapped) continue;
+      // No 2D scratch context (headless) → can't luma-test; take the first frame.
+      const luma = sctx ? meanLuma(sctx, wrapped.canvas) : 255;
+      if (luma >= LUMA_OK) {
+        // Accept now — the pooled canvas is still valid (no getCanvas since).
+        return await canvasToBlob(wrapped.canvas, maxWidth, "image/jpeg", quality);
+      }
+      if (luma > bestLuma) {
+        bestLuma = luma;
+        bestOffset = t;
+      }
+    }
+    // Everything was dim — re-decode the brightest candidate (a fresh getCanvas,
+    // so we never hold a poolSize-1 canvas across another decode).
+    if (bestOffset == null) return null;
+    const wrapped = await sink.getCanvas(bestOffset);
+    if (!wrapped) return null;
+    return await canvasToBlob(wrapped.canvas, maxWidth, "image/jpeg", quality);
+  } catch {
+    return null;
+  } finally {
     void input.dispose();
   }
 }

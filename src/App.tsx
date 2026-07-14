@@ -81,7 +81,8 @@ import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouT
 import { sanitizeFilename, stripExt, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
 import { buildDiagnosticsReport, diagnosticsFilename } from "./lib/diagnostics";
-import { extractFrameAsBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
+import { extractFrameAsBlob, extractPosterBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
+import { chosenPosterFor } from "./lib/library";
 import { exportLocalClipViaMediabunny } from "./lib/mediabunny-export";
 import { extractAudioAsWav16k } from "./lib/mediabunny-audio";
 
@@ -2159,17 +2160,20 @@ export default function App() {
       // square without blocking the rest of the import.
       //
       // Two paths, mediabunny preferred (no ffmpeg subprocess):
-      //   1. extractFrameAsBlob → object URL → set as data thumbnail
+      //   1. extractPosterBlob → object URL → set as data thumbnail (a chosen
+      //      poster time, else the representative frame — never a black fade)
       //   2. generate_local_thumbnail (ffmpeg) → asset:// URL (legacy
       //      fallback for codecs WebCodecs can't decode). Has its own
       //      hash-based cache so re-imports stay instant.
       if (lf.has_video) {
         (async () => {
-          const thumbTime = lf.duration ? Math.min(5, lf.duration * 0.1) : 0;
+          // Respect a user-chosen poster; otherwise the representative frame
+          // (extractPosterBlob skips black intro fades) — never frame 0.
+          const chosen = chosenPosterFor(lf.path);
           try {
             // Step 1: try mediabunny if the user has it enabled.
             const blob = defaults.useWebCodecsDecoder
-              ? await extractFrameAsBlob(lf.path, thumbTime, { maxWidth: 640, mimeType: "image/jpeg", quality: 0.85 })
+              ? await extractPosterBlob(lf.path, { atSeconds: chosen ?? undefined, maxWidth: 640, quality: 0.85 })
               : null;
             if (blob) {
               if (sourceSeqRef.current !== seq) return;
@@ -2183,7 +2187,7 @@ export default function App() {
             }
             // Step 2: ffmpeg fallback (legacy path).
             const thumbPath = await invoke<string>("generate_local_thumbnail", {
-              args: { input_path: lf.path, duration_seconds: lf.duration },
+              args: { input_path: lf.path, duration_seconds: lf.duration, time_seconds: chosen ?? null },
             });
             if (sourceSeqRef.current !== seq) return;
             const { convertFileSrc } = await import("@tauri-apps/api/core");

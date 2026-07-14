@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { IconFilm, IconPlay, IconVolume } from "./Icons";
+import { IconCamera, IconFilm, IconPlay, IconVolume } from "./Icons";
 import { useLazyThumbnails } from "../hooks/use-lazy-thumbnails";
 
 /** Where a card's poster art comes from. */
@@ -21,6 +21,9 @@ type Props = {
   onOpen: () => void;
   /** LibraryView's cached, concurrency-capped thumbnail loader. */
   requestThumb: (path: string) => Promise<string | null>;
+  /** Opens the "Set thumbnail…" picker for this path. Only wired for
+   *  local-VIDEO cards (audio/remote have no frame to pick). */
+  onChoosePoster?: (path: string) => void;
 };
 
 /**
@@ -31,19 +34,31 @@ type Props = {
  * (CSS, reduced-motion aware). A broken poster (evicted blob URL, dead
  * remote) falls back to the tokens-styled placeholder via onError.
  */
-export function LibraryCard({ title, detail, art, badge, onOpen, requestThumb }: Props) {
+export function LibraryCard({ title, detail, art, badge, onOpen, requestThumb, onChoosePoster }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [broken, setBroken] = useState(false);
-  const lazyPaths = art.kind === "local" && art.media === "video" ? [art.path] : [];
+  const isVideo = art.kind === "local" && art.media === "video";
+  const lazyPaths = isVideo ? [art.path] : [];
   const [lazyUrl = null] = useLazyThumbnails(btnRef, lazyPaths, requestThumb);
 
   const url = art.kind === "remote" ? art.url : lazyUrl;
   const showImg = !!url && !broken;
   const isAudio = art.kind === "local" && art.media === "audio";
+  // Only local-video cards can pick a poster (narrows art to the local case,
+  // so `posterPath`/`onChoosePoster` are non-null inside the closure).
+  const posterPath = art.kind === "local" && art.media === "video" ? art.path : null;
+  const choose = posterPath && onChoosePoster ? () => onChoosePoster(posterPath) : null;
 
   return (
     <div role="listitem" className="cp-lib-cell">
-      <button ref={btnRef} type="button" className="cp-lib-card" onClick={onOpen} title={title}>
+      <button
+        ref={btnRef}
+        type="button"
+        className="cp-lib-card"
+        onClick={onOpen}
+        title={title}
+        onContextMenu={choose ? (e) => { e.preventDefault(); choose(); } : undefined}
+      >
         <span className="cp-lib-card-art">
           {showImg ? (
             <img src={url} alt="" draggable={false} onError={() => setBroken(true)} />
@@ -61,6 +76,19 @@ export function LibraryCard({ title, detail, art, badge, onOpen, requestThumb }:
         <span className="cp-lib-card-title">{title}</span>
         <span className="cp-lib-card-detail">{detail}</span>
       </button>
+      {choose && (
+        // Sibling of the card <button> (buttons can't nest) — absolutely
+        // positioned over the art's top-right corner. Revealed with the card.
+        <button
+          type="button"
+          className="cp-lib-setposter"
+          title="Set thumbnail…"
+          aria-label="Set thumbnail"
+          onClick={(e) => { e.stopPropagation(); choose(); }}
+        >
+          <IconCamera size={13} />
+        </button>
+      )}
     </div>
   );
 }

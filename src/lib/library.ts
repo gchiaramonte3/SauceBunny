@@ -12,6 +12,7 @@ import type { LibraryFolder, LibraryItem } from "../types";
 import { loadJson, saveJson } from "./storage";
 
 const ROOTS_KEY = "saucebunny.libraryRoots";
+const POSTERS_KEY = "saucebunny.libraryPosters";
 
 /** Folder levels `scan_library_folder` descends (see library.rs module docs). */
 export const LIBRARY_SCAN_DEPTH = 3;
@@ -158,4 +159,45 @@ export function loadLibraryRoots(): string[] {
 
 export function saveLibraryRoots(roots: readonly string[]): void {
   saveJson(ROOTS_KEY, roots);
+}
+
+// ── Chosen posters: path → timestamp (seconds) the user picked in the
+//    "Set thumbnail…" picker. Absence means the auto/representative frame. ──
+
+/**
+ * Load the chosen-poster map, tolerating junk: only string→finite-number
+ * entries survive (a corrupt blob yields {} rather than crashing the Library).
+ */
+export function loadChosenPosters(): Record<string, number> {
+  const raw = loadJson<unknown>(POSTERS_KEY, {});
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof k === "string" && k !== "" && typeof v === "number" && Number.isFinite(v) && v >= 0) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+/** The chosen poster timestamp for one path, or null when it uses the auto frame. */
+export function chosenPosterFor(path: string): number | null {
+  const map = loadChosenPosters();
+  return Object.prototype.hasOwnProperty.call(map, path) ? map[path] : null;
+}
+
+/** Persist a user-chosen poster timestamp for `path`. */
+export function setChosenPoster(path: string, seconds: number): void {
+  if (!Number.isFinite(seconds) || seconds < 0) return;
+  const map = loadChosenPosters();
+  map[path] = seconds;
+  saveJson(POSTERS_KEY, map);
+}
+
+/** Forget a chosen poster so `path` reverts to the auto/representative frame. */
+export function clearChosenPoster(path: string): void {
+  const map = loadChosenPosters();
+  if (!Object.prototype.hasOwnProperty.call(map, path)) return;
+  delete map[path];
+  saveJson(POSTERS_KEY, map);
 }

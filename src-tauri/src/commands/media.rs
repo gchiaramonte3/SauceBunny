@@ -1094,9 +1094,35 @@ pub async fn extract_local_frame(
 #[derive(Deserialize)]
 pub struct LocalThumbnailArgs {
     pub input_path: String,
-    /// Duration in seconds — we pick min(5s, 10% of duration) so very
-    /// short clips don't grab a black post-roll frame.
+    /// Duration in seconds — the representative grab starts at min(5s, 10%
+    /// of duration) so very short clips don't grab a black post-roll frame.
     pub duration_seconds: Option<f64>,
+    /// A user-chosen poster timestamp (from the "Set thumbnail…" picker).
+    /// `None` = auto/representative (the `thumbnail` filter picks the frame).
+    pub time_seconds: Option<f64>,
+}
+
+/// Fast-seek head offset for a *representative* poster grab: min(5s, 10% of
+/// duration) when the duration is known, else 0. The `thumbnail` filter then
+/// scans forward from here, so a black intro fade never wins the pick.
+fn poster_head_seconds(duration_seconds: Option<f64>) -> f64 {
+    match duration_seconds {
+        Some(d) if d > 0.0 => (d * 0.10).clamp(0.0, 5.0),
+        _ => 0.0,
+    }
+}
+
+/// The `-vf` filter value for a poster grab.
+///   - `Some(_)` (a chosen timestamp) → scale only; the user picked the exact
+///     frame, so no representative-frame scan.
+///   - `None` (auto) → `thumbnail=90` emits the most representative of the next
+///     90 frames (uniform black is skipped), then the same scale.
+fn poster_vf(chosen: Option<f64>) -> String {
+    const SCALE: &str = "scale=640:-2:force_original_aspect_ratio=decrease";
+    match chosen {
+        Some(_) => SCALE.to_string(),
+        None => format!("thumbnail=90,{SCALE}"),
+    }
 }
 
 #[tauri::command]
@@ -1121,28 +1147,39 @@ pub async fn generate_local_thumbnail(
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    // A chosen poster (valid, finite, ≥0) forces an exact-frame grab; anything
+    // else is the representative auto-thumbnail.
+    let chosen: Option<f64> = match args.time_seconds {
+        Some(t) if t.is_finite() && t >= 0.0 => Some(t),
+        _ => None,
+    };
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     use std::hash::{Hash, Hasher};
     args.input_path.hash(&mut hasher);
     mtime.hash(&mut hasher);
+    // Fold the chosen time (bucketed to whole ms) into the key so each chosen
+    // poster gets its own cache file — and the representative grab (bucket -1)
+    // is distinct from any chosen time AND from the pre-r111 (path, mtime)-only
+    // key, so upgrading never reuses a stale black frame.
+    let time_bucket: i64 = chosen.map(|t| (t * 1000.0) as i64).unwrap_or(-1);
+    time_bucket.hash(&mut hasher);
     let key = format!("{:016x}", hasher.finish());
     let out_path = cache.join(format!("saucebunny-thumb-{key}.jpg"));
     if out_path.exists() {
         return Ok(out_path.to_string_lossy().to_string());
     }
 
-    let ts_secs = match args.duration_seconds {
-        Some(d) if d > 0.0 => (d * 0.10).clamp(0.0, 5.0),
-        _ => 0.0,
-    };
+    let ts_secs = chosen.unwrap_or_else(|| poster_head_seconds(args.duration_seconds));
     let ts = format!("{:.3}", ts_secs);
+    let vf = poster_vf(chosen);
 
     let ff = app
         .shell()
         .sidecar("ffmpeg")
         .map_err(|e| format!("sidecar ffmpeg not found: {e}"))?;
-    // Scale to a max width of 640 — sidebar thumb is ~280px, anything
-    // larger is bandwidth waste. `force_original_aspect_ratio` keeps
+    // `-ss` BEFORE `-i` = fast seek (the `thumbnail` filter then scans forward
+    // from the head). Scale to a max width of 640 — the card/sidebar thumb is
+    // ~280px, larger is bandwidth waste; `force_original_aspect_ratio` keeps
     // portrait videos from being squished.
     let out = ff
         .args([
@@ -1150,7 +1187,7 @@ pub async fn generate_local_thumbnail(
             "-ss", &ts,
             "-i", &args.input_path,
             "-frames:v", "1",
-            "-vf", "scale=640:-2:force_original_aspect_ratio=decrease",
+            "-vf", &vf,
             "-q:v", "3",
             out_path.to_str().ok_or_else(|| crate::AppError::internal("thumb path not utf-8"))?,
         ])
@@ -1170,6 +1207,34 @@ pub async fn generate_local_thumbnail(
         _ => return Err("ffmpeg produced no thumbnail (likely no video stream or seek past EOF)".into()),
     }
     Ok(out_path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod poster_tests {
+    use super::{poster_head_seconds, poster_vf};
+
+    #[test]
+    fn head_is_ten_percent_capped_at_five() {
+        assert_eq!(poster_head_seconds(Some(100.0)), 5.0); // 10% = 10s → capped
+        assert_eq!(poster_head_seconds(Some(20.0)), 2.0); // 10% = 2s
+        assert_eq!(poster_head_seconds(None), 0.0); // unknown duration → start
+        assert_eq!(poster_head_seconds(Some(0.0)), 0.0); // degenerate → start
+        assert_eq!(poster_head_seconds(Some(-5.0)), 0.0); // junk → start
+    }
+
+    #[test]
+    fn representative_vf_scans_then_scales() {
+        let vf = poster_vf(None);
+        assert!(vf.starts_with("thumbnail=90,scale="), "got: {vf}");
+        assert!(vf.contains("force_original_aspect_ratio=decrease"));
+    }
+
+    #[test]
+    fn chosen_vf_is_scale_only() {
+        let vf = poster_vf(Some(12.5));
+        assert!(!vf.contains("thumbnail="), "chosen frame must not re-scan: {vf}");
+        assert_eq!(vf, "scale=640:-2:force_original_aspect_ratio=decrease");
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────
