@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseSrt, type Cue } from "../lib/srt";
 import {
   loadSpeakerOverrides,
@@ -140,12 +141,17 @@ export function CaptionOverlay({ path, reloadToken, currentSec, enabled, style }
 
   // Speaker renames live in the transcript panel's localStorage store; mirror
   // them here so a rename ("Speaker 1" → "Tom Jonathan") updates the on-video
-  // caption immediately. The panel fires SPEAKERS_CHANGED_EVENT on every edit.
+  // caption immediately. The panel fires SPEAKERS_CHANGED_EVENT on every edit
+  // — as a window CustomEvent (same-window) AND a Tauri event (cross-window,
+  // for renames made in the popped-out panel). Gated on `enabled`: with
+  // captions off there are no listeners, no poll, no reads at all; toggling
+  // them back on re-seeds from storage.
   const [overrides, setOverrides] = useState<SpeakerOverrides>(() => loadSpeakerOverrides(path));
   // Last raw localStorage string we applied — skip setState when unchanged so
-  // the cross-window poll below doesn't re-render every tick.
+  // the backstop channels below don't re-render on every check.
   const overridesRawRef = useRef<string | null>(null);
   useEffect(() => {
+    if (!enabled) return;
     const key = path ? speakerOverridesKey(path) : null;
     const reload = (force = false) => {
       let raw: string | null = null;
@@ -161,23 +167,34 @@ export function CaptionOverlay({ path, reloadToken, currentSec, enabled, style }
     };
     // Same-window fast path (the panel fires this on every edit)…
     window.addEventListener(SPEAKERS_CHANGED_EVENT, onChange);
-    // …plus cross-WINDOW paths: renames made in the popped-out panel land in
-    // shared localStorage but its CustomEvent never reaches this webview.
-    // `storage` is the native cross-window signal; WKWebView delivery is
-    // unreliable enough (see use-panel-bus) that a slow poll + focus re-read
-    // back it up. The raw-string dedupe makes all three cheap.
+    // …and the cross-WINDOW primary: the same event name over the Tauri bus.
+    // (The emitting window also receives its own broadcast — the raw-string
+    // dedupe in reload() makes that echo free.)
+    let unlistenTauri: UnlistenFn | undefined;
+    let cancelled = false;
+    void listen<{ path: string | null }>(SPEAKERS_CHANGED_EVENT, (e) => {
+      if (cancelled) return;
+      if (!e.payload || e.payload.path === path) reload();
+    }).then((off) => {
+      if (cancelled) off(); else unlistenTauri = off;
+    });
+    // Backstops, all deduped by raw string so they cost ~nothing: the native
+    // `storage` event (cross-window signal WKWebView delivers inconsistently),
+    // a focus re-read, and a slow reconciliation poll in case events flake.
     const onStorage = (e: StorageEvent) => { if (!key || e.key === null || e.key === key) reload(); };
     const onFocus = () => reload();
     window.addEventListener("storage", onStorage);
     window.addEventListener("focus", onFocus);
-    const poll = window.setInterval(() => reload(), 1500);
+    const poll = window.setInterval(() => reload(), 5000);
     return () => {
+      cancelled = true;
+      unlistenTauri?.();
       window.removeEventListener(SPEAKERS_CHANGED_EVENT, onChange);
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("focus", onFocus);
       window.clearInterval(poll);
     };
-  }, [path]);
+  }, [path, enabled]);
 
   useEffect(() => {
     if (!path || !loadKey) { setCues([]); loadedFor.current = null; return; }

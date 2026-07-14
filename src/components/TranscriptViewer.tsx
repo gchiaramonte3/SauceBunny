@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { IconReveal, IconAlert, IconChevronDown, IconInfo } from "./Icons";
 import { parseSrt, groupIntoTurns, serializeCues, fmtTime, type Turn } from "../lib/srt";
@@ -236,9 +237,13 @@ export function TranscriptViewer({
       try { localStorage.setItem(storageKey, JSON.stringify(overrides)); } catch { /* quota */ }
     }
     // Tell live consumers (the on-video caption overlay) to re-read, so a
-    // rename shows up on the video immediately. Same-window: the native
-    // `storage` event won't fire here, so we dispatch our own.
+    // rename shows up on the video immediately. Two buses, one name:
+    //   - window CustomEvent: synchronous same-window fast path (the native
+    //     `storage` event doesn't fire in the tab that wrote it);
+    //   - Tauri event: crosses webviews, so a rename made in the popped-out
+    //     panel updates main's caption overlay without polling.
     window.dispatchEvent(new CustomEvent(SPEAKERS_CHANGED_EVENT, { detail: { path } }));
+    void emit(SPEAKERS_CHANGED_EVENT, { path });
   }, [storageKey, overrides, path]);
 
   /**

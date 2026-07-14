@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit, type UnlistenFn } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { QueuedClip } from "../types";
 import type { TranscriptHistoryEntry } from "../lib/transcript-history";
 
@@ -10,8 +11,18 @@ import type { TranscriptHistoryEntry } from "../lib/transcript-history";
  * one of the largest self-contained blocks.
  *
  * Architecture:
- *   - main → panel:  emits `panel:state` whenever the snapshot changes.
- *   - panel → main:  fires `panel:action:<kind>` for each user action.
+ *   - main → panel:  emits `panel:state` when the snapshot CONTENT changes
+ *                    (debounced ~50ms), and mirrors the same payload to
+ *                    localStorage for the panel's boot seed + slow
+ *                    reconciliation poll. Idle = zero emits, zero writes.
+ *   - panel → main:  fires `panel:action:<kind>` for each user action,
+ *                    plus `panel:request-state` on mount — main replies
+ *                    with an immediate `panel:state` publish. The panel
+ *                    registers its listener BEFORE requesting, and main's
+ *                    reply listener lives from app start, so the handshake
+ *                    can't race (Tauri events are fire-and-forget: anything
+ *                    emitted before a webview's listener exists is dropped,
+ *                    which is why a fresh panel must pull, not be pushed).
  *   - rust → main:   fires `panel:closed` / `panel:popped-out` to flip
  *                    the `panelDetached` state.
  *
@@ -76,10 +87,42 @@ export type PanelHandlers = {
   onChaptersChanged: () => void;
 };
 
-/** Shared key the main window writes the live snapshot to and the popped-out
- *  panel reads. localStorage is shared across same-origin webviews, which makes
- *  it a reliable channel even when cross-window Tauri events don't arrive. */
+/** Shared key the main window mirrors the snapshot to on every publish.
+ *  localStorage is shared across same-origin webviews; the panel uses it to
+ *  seed its FIRST render synchronously (no flash of empty panel) and as the
+ *  read target of its slow reconciliation poll. Written only when the
+ *  snapshot content actually changed — never on a timer. */
 export const PANEL_SNAPSHOT_KEY = "saucebunny.panelSnapshot";
+
+/** Content equality for the publish gate — `queue` by reference (App only
+ *  ever replaces it immutably), everything else by value. Runs on every App
+ *  render, so it must stay allocation-free. Adding a field to PanelSnapshot?
+ *  Compare it here too, or the panel won't hear about changes to it. */
+export function panelSnapshotsEqual(a: PanelSnapshot, b: PanelSnapshot): boolean {
+  return (
+    a.queue === b.queue &&
+    a.fps === b.fps &&
+    a.running === b.running &&
+    a.hasFolder === b.hasFolder &&
+    a.transcriptPath === b.transcriptPath &&
+    a.transcriptOrigin === b.transcriptOrigin &&
+    a.transcriptPlayhead === b.transcriptPlayhead &&
+    a.transcriptArrivedTick === b.transcriptArrivedTick &&
+    a.regenerateBusy === b.regenerateBusy &&
+    a.canRegenerate === b.canRegenerate &&
+    a.hasSource === b.hasSource &&
+    a.aiModelId === b.aiModelId &&
+    a.aiStyle.format === b.aiStyle.format &&
+    a.aiStyle.length === b.aiStyle.length &&
+    a.chapterSourceKey === b.chapterSourceKey &&
+    a.durationSec === b.durationSec
+  );
+}
+
+/** Debounce window for change-driven publishes. Long enough to coalesce the
+ *  per-frame playhead into ~20 events/sec while playing, short enough that a
+ *  queue edit feels instant in the floating window. */
+const PUBLISH_DEBOUNCE_MS = 50;
 
 const INITIAL_SNAPSHOT: PanelSnapshot = {
   queue: [],
@@ -114,42 +157,62 @@ export function usePanelBus({
   const snapshotRef = useRef<PanelSnapshot>(INITIAL_SNAPSHOT);
   const handlersRef = useRef<PanelHandlers>(handlers);
 
-  // Push the current snapshot to the floating window whenever any
-  // tracked piece of state changes. Also keep snapshotRef fresh for
-  // the `panel:request-state` reply path. The single coalesced effect
-  // (vs per-field events) keeps the payload small + the wire simple.
+  // ── Change-driven publish ────────────────────────────────────────
+  // One path pushes state to the floating window: when the snapshot CONTENT
+  // changes (the object is rebuilt every App render, so identity is
+  // meaningless), a trailing 50ms timer flushes the latest snapshot as a
+  // `panel:state` event + a localStorage mirror write. At idle nothing is
+  // serialized, emitted, or written — this replaced the always-on 120ms
+  // localStorage timer + per-render emit + the panel's 400ms poll. Events
+  // are the primary channel now: post-registration delivery is reliable in
+  // Tauri 2.x (the historical "panel rendered empty" failures were the
+  // fresh-webview mount race, which the request/response handshake removes);
+  // the mirror stays as the panel's boot seed + 5s reconciliation backstop.
+  const lastPublishedRef = useRef<PanelSnapshot | null>(null);
+  const publishTimer = useRef<number | null>(null);
+
+  // Write-then-emit so the mirror is never behind the event a consumer is
+  // reacting to. Not debounced itself — callers gate it.
+  const publishNow = useCallback(() => {
+    if (publishTimer.current != null) {
+      window.clearTimeout(publishTimer.current);
+      publishTimer.current = null;
+    }
+    const snap = snapshotRef.current;
+    lastPublishedRef.current = snap;
+    try { localStorage.setItem(PANEL_SNAPSHOT_KEY, JSON.stringify(snap)); } catch { /* quota */ }
+    void emit("panel:state", snap);
+  }, []);
+
   useEffect(() => {
     snapshotRef.current = snapshot;
     if (!panelDetached) return;
-    void emit("panel:state", snapshot);
-  }, [panelDetached, snapshot]);
+    if (lastPublishedRef.current && panelSnapshotsEqual(lastPublishedRef.current, snapshot)) return;
+    if (publishTimer.current != null) return; // flush already scheduled — it reads the ref
+    publishTimer.current = window.setTimeout(() => {
+      publishTimer.current = null;
+      // Re-check: the snapshot may have settled back to the published value
+      // within the debounce window (e.g. a transient render-only flip).
+      if (lastPublishedRef.current && panelSnapshotsEqual(lastPublishedRef.current, snapshotRef.current)) return;
+      publishNow();
+    }, PUBLISH_DEBOUNCE_MS);
+  }, [panelDetached, snapshot, publishNow]);
 
-  // Authoritative cross-window channel: mirror the snapshot to localStorage so
-  // the popped-out panel (a separate same-origin webview) can READ it directly
-  // — Tauri events to that window proved unreliable (it kept rendering the
-  // initial empty snapshot). Throttled with a leading timer so the per-frame
-  // playhead doesn't hammer storage; the timer always flushes the LATEST.
-  const lsTimer = useRef<number | null>(null);
+  // The panel window outlives a main-window reload (dev reload, crash
+  // recovery): React state resets to docked and publishing would stop
+  // forever while the floating window sits open and stale. Re-detect the
+  // live panel once at mount and re-adopt it.
   useEffect(() => {
-    if (lsTimer.current != null) return;
-    lsTimer.current = window.setTimeout(() => {
-      lsTimer.current = null;
-      try { localStorage.setItem(PANEL_SNAPSHOT_KEY, JSON.stringify(snapshotRef.current)); } catch { /* quota */ }
-    }, 120);
-  }, [snapshot]);
-
-  // Just popped out: the brand-new panel webview may not have its
-  // `panel:state` listener wired when the emit above fires, so its
-  // `panel:request-state` is the only thing that delivers the initial
-  // snapshot — and if THAT races too, the window renders empty. Re-push a few
-  // times over the first ~600ms so a fresh window reliably gets populated.
-  useEffect(() => {
-    if (!panelDetached) return;
-    const timers = [120, 350, 650].map((ms) =>
-      window.setTimeout(() => { void emit("panel:state", snapshotRef.current); }, ms),
-    );
-    return () => { timers.forEach((t) => window.clearTimeout(t)); };
-  }, [panelDetached]);
+    let cancelled = false;
+    void WebviewWindow.getByLabel("panel").then((w) => {
+      if (cancelled || !w) return;
+      setPanelDetached(true);
+      setQueueOpen(false);
+      publishNow();
+    }).catch(() => { /* window enumeration unavailable — docked is the safe default */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Pin latest handlers into the ref so the listeners (registered
   // once below) always invoke fresh closures. Single ref assignment
@@ -178,8 +241,9 @@ export function usePanelBus({
           setQueueOpen(false);
         }),
         listen("panel:request-state", () => {
-          // Floating window just mounted — re-emit our last snapshot.
-          void emit("panel:state", snapshotRef.current);
+          // Floating window just mounted — publish immediately (event +
+          // mirror). This is the response half of the mount handshake.
+          publishNow();
         }),
         listen<{ id: string }>("panel:action:remove",
           (e) => handlersRef.current.onRemove(e.payload.id)),
@@ -209,11 +273,22 @@ export function usePanelBus({
       if (cancelled) { off.forEach((u) => u()); return; }
       unlistens = off;
     })();
-    return () => { cancelled = true; unlistens.forEach((u) => u()); };
+    return () => {
+      cancelled = true;
+      unlistens.forEach((u) => u());
+      if (publishTimer.current != null) {
+        window.clearTimeout(publishTimer.current);
+        publishTimer.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handlePopOut = useCallback(() => {
+    // Seed the mirror synchronously BEFORE the window exists so the panel's
+    // first render (which reads localStorage synchronously) shows current
+    // state — the request/response handshake then confirms it via events.
+    try { localStorage.setItem(PANEL_SNAPSHOT_KEY, JSON.stringify(snapshotRef.current)); } catch { /* quota */ }
     // Optimistic: hide the docked drawer immediately so there's no
     // moment of "both visible". Rust will also fire `panel:popped-out`
     // shortly which idempotently sets the same state.
