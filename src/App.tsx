@@ -4314,6 +4314,7 @@ export default function App() {
             clipShortcut={clipCombo ? formatCombo(clipCombo) : undefined}
             coreviewShortcut={coreviewCombo ? formatCombo(coreviewCombo) : undefined}
             sessionActive={coSessionActive}
+            sessionPeers={coSession.peers.length}
           />
         </div>
         <div className="cp-views">

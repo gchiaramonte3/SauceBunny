@@ -17,6 +17,9 @@
   align-items: flex-start;
   padding: var(--s-12) var(--s-6);
   background: var(--bg-0);
+  /* The cards grid collapses to one column against THIS view's width (not the
+     window's), so a narrow Clip-shrunk lobby still wraps — @container below. */
+  container-type: inline-size;
 }
 .cp-coreview-lobby::before {
   content: "";
@@ -28,11 +31,12 @@
   opacity: 0.7;
 }
 
-/* ── Centered column — comfortable reading width. ── */
+/* ── Centered column — wide enough for the two-column lobby; the header +
+      intro and the single in-session card stay reading-width within it. ── */
 .cp-colobby-inner {
   position: relative;
   width: 100%;
-  max-width: 440px;
+  max-width: 720px;
   display: flex;
   flex-direction: column;
   gap: var(--s-6);
@@ -43,6 +47,19 @@
   display: flex;
   align-items: flex-start;
   gap: var(--s-4);
+  max-width: 560px;
+}
+
+/* ── Cards row — Host beside Join on wide windows, stacking to one column on
+      narrow ones. Container query (not viewport) so it tracks the view. ── */
+.cp-colobby-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-4);
+  align-items: start;
+}
+@container (max-width: 620px) {
+  .cp-colobby-cards { grid-template-columns: 1fr; }
 }
 .cp-colobby-mark {
   flex-shrink: 0;
@@ -83,10 +100,42 @@
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-soft);
 }
-/* Off state: the join form stacks its own controls full-width (matching the
-   popover's flex column). */
-.cp-colobby-start {
-  gap: var(--s-2);
+/* In-session card is a single focused surface — keep it reading-width and
+   centered inside the wider inner column the two-card lobby needs. */
+.cp-colobby-session {
+  align-self: center;
+  width: 100%;
+  max-width: 440px;
+}
+
+/* ── Card fields (Host name, Join name + code). ── */
+.cp-colobby-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.cp-colobby-field-label {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-3);
+}
+.cp-colobby-input {
+  height: 32px;
+  padding: 0 var(--s-3);
+  background: var(--bg-0);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+}
+.cp-colobby-input:focus { outline: none; border-color: var(--accent); }
+/* Full-width primary action closing each card. */
+.cp-colobby-cta {
+  width: 100%;
+  justify-content: center;
+  margin-top: var(--s-1);
 }
 
 /* ── Role banner (in a session). ── */
@@ -171,13 +220,23 @@
   font-size: 12.5px;
   color: var(--fg-2);
 }
-.cp-colobby-dot {
+/* Initials avatar — a colored chip tinted to the participant's review colour
+   (matches the timeline markers + ghost cursors). */
+.cp-colobby-avatar {
   flex-shrink: 0;
-  width: 9px;
-  height: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: var(--co-color, var(--fg-4));
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: #0b0b0d;
 }
 .cp-colobby-name {
   flex: 1;
@@ -225,6 +284,16 @@
 }
 .cp-colobby-enter { flex: 1; }
 .cp-colobby-leave:hover { color: #ff8a8a; border-color: rgba(255, 138, 138, 0.4); }
+
+/* ── How-it-works + eligibility line, below the cards. ── */
+.cp-colobby-note {
+  margin: 0;
+  max-width: 560px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--fg-4);
+}
 
 @media (prefers-reduced-motion: reduce) {
   .cp-colobby-live.host { animation: none; }

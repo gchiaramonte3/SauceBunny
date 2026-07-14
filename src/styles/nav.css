@@ -90,7 +90,7 @@
   background: var(--ella-green);
 }
 
-/* Live-session badge — a small accent dot pinned to the Co-Review item's
+/* Live-session badge — a small accent dot pinned to the Review item's
    top-right, rendered only while a session is active. Decorative
    (aria-hidden); the accessible state rides the button's title. A soft ring
    lifts it off whatever fill sits behind (rest vs .active). */

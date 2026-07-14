@@ -193,6 +193,15 @@ export const IconReview = (p: IconProps) => (
     <path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5z" />
   </Icon>
 );
+// Two overlapping speech bubbles — the Co-Review (watch & review together)
+// nav destination + lobby mark. Same rounded-rect-with-tail vocabulary as
+// IconReview, doubled and offset so it reads as a shared conversation.
+export const IconCoReview = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" />
+    <path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
+  </Icon>
+);
 export const IconMarkIn = (p: IconProps) => (
   <Icon {...p} strokeWidth={2}>
     <path d="M7 4v16" strokeLinecap="square" />

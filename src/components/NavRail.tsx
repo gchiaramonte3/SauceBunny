@@ -1,4 +1,4 @@
-import { IconHome, IconScissors, IconSettings, IconUsers } from "./Icons";
+import { IconHome, IconScissors, IconSettings, IconCoReview } from "./Icons";
 import type { AppView } from "../App";
 import logoUrl from "../assets/saucebunny-128.png";
 
@@ -22,11 +22,13 @@ type Props = {
   homeShortcut?: string;
   clipShortcut?: string;
   coreviewShortcut?: string;
-  /** A co-review session is live — lights the badge dot on the Co-Review item. */
+  /** A co-review session is live — lights the badge dot on the Review item. */
   sessionActive: boolean;
+  /** People connected to the live session — surfaced in the item's title. */
+  sessionPeers?: number;
 };
 
-export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, clipShortcut, coreviewShortcut, sessionActive }: Props) {
+export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, clipShortcut, coreviewShortcut, sessionActive, sessionPeers }: Props) {
   return (
     <nav className="cp-nav" aria-label="Primary">
       {/* Brand mark — a non-interactive logo, NOT a second Home button. The
@@ -61,15 +63,15 @@ export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, clip
         className={"cp-nav-item" + (active === "coreview" ? " active" : "")}
         onClick={() => onNavigate("coreview")}
         title={
-          (coreviewShortcut ? `Co-Review (${coreviewShortcut})` : "Co-Review") +
-          (sessionActive ? " · in session" : "")
+          (coreviewShortcut ? `Review (${coreviewShortcut})` : "Review") +
+          (sessionActive ? ` · ${sessionPeers ?? 0} watching` : "")
         }
-        aria-label="Co-Review"
+        aria-label="Review"
         aria-current={active === "coreview" ? "page" : undefined}
       >
-        <IconUsers size={18} />
-        <span className="cp-nav-label">Co-Review</span>
-        {/* Decorative live-session marker — the accessible "in session" state
+        <IconCoReview size={18} />
+        <span className="cp-nav-label">Review</span>
+        {/* Decorative live-session marker — the accessible "N watching" state
             rides the button title above, so a screen reader isn't handed a
             stray dot. */}
         {sessionActive && <span className="cp-nav-badge" aria-hidden="true" />}

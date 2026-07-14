@@ -78,7 +78,7 @@ export const KEY_ACTIONS: KeyAction[] = [
   // Global like the other ⌘-chords — navigation must work from a text field.
   { id: "view.home",       label: "Go to Home (Library)",  group: "View",      defaults: ["mod+1"],                 global: true },
   { id: "view.clip",       label: "Go to Clip view",       group: "View",      defaults: ["mod+2"],                 global: true },
-  { id: "view.coreview",   label: "Go to Co-Review",       group: "View",      defaults: ["mod+3"],                 global: true },
+  { id: "view.coreview",   label: "Go to Review",          group: "View",      defaults: ["mod+3"],                 global: true },
   { id: "view.logs",       label: "Toggle pipeline log",   group: "View",      defaults: ["mod+\\"],                global: true },
   { id: "app.settings",    label: "Open / close settings", group: "App",       defaults: ["mod+,"],                 global: true },
   { id: "app.palette",     label: "Command palette",       group: "App",       defaults: ["mod+k"],                 global: true },

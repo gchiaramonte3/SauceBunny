@@ -68,9 +68,10 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await page.keyboard.press("Control+1");
   await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
-  // Co-Review is a third first-class destination: rail item + ⌘3 → the lobby
-  // (keep-alive like the others, so the Clip view stays mounted beneath).
-  await rail.getByRole("button", { name: "Co-Review", exact: true }).click();
+  // Co-Review is a third first-class destination: the rail item now reads
+  // "Review" (short rail label) + ⌘3 → the lobby, whose heading keeps the
+  // full "Co-Review" name. Keep-alive like the others (Clip stays mounted).
+  await rail.getByRole("button", { name: "Review", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Co-Review" })).toBeVisible();
   await expect(page.locator(".cp-view-clip")).toBeHidden();
   await expect(page.locator(".cp-view-clip .cp-toolbar")).toBeAttached();

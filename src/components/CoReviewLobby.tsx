@@ -1,19 +1,23 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { IconUsers, IconClipboard, IconFilm, IconCrown } from "./Icons";
-import { CoReviewJoinForm } from "./CoReviewJoinForm";
+import { saveJson } from "../lib/storage";
+import { IconCoReview, IconClipboard, IconFilm, IconCrown } from "./Icons";
+import { AUTHOR_KEY, REVIEW_CHANGED_EVENT, initialsOf, loadReviewer } from "../lib/review";
 import type { Participant } from "./ParticipantRail";
 import type { SessionState } from "../bindings/SessionState";
 
 /**
- * Co-Review lobby — the first-class destination (nav rail ⌘3) that promotes
+ * Co-Review lobby — the first-class destination (nav rail, ⌘3) that promotes
  * the watch-party from a toolbar afterthought to a full surface. It's a
  * parallel view over the SAME useCoReview state the toolbar CoReviewPopover
  * reads; nothing here owns session state (that lives in Rust). Two faces:
- *   · off      → an invite: start hosting, or join by code (CoReviewJoinForm).
- *   · in a session → the join code + roster + a door into the theater.
- * "Enter theater" jumps to Clip AND flips screening on (the theater overlays
- * the Clip player), so the lobby can hand you straight into the screening.
+ *   · off      → an invite: a Host card (name + Start) beside a Join card
+ *                (name + code), two columns on wide windows.
+ *   · in a session → the join code + live roster + a door into the theater.
+ * The display-name field writes the reviewer identity (loadReviewer / AUTHOR_KEY)
+ * because startCoReview() takes no args and hosts under that name — so the typed
+ * name is what the roster shows. "Enter theater" jumps to Clip AND flips
+ * screening on (the theater overlays the Clip player).
  */
 export function CoReviewLobby({ session, localSource, participants, onStart, onJoin, onLeave, onEnterTheater }: {
   session: SessionState;
@@ -26,8 +30,29 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   onEnterTheater: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [name, setName] = useState(() => loadReviewer().name);
+  const [ticket, setTicket] = useState("");
+  const [joining, setJoining] = useState(false);
   const active = session.role !== "off";
+  const isHost = session.role === "host";
+  // Clear the transient "Connecting…" the moment the session resolves either way
+  // (role flips to peer/host on success; an error surfaces on failure).
+  useEffect(() => { setJoining(false); }, [session.role, session.error]);
 
+  // Persist the typed name as the reviewer identity so the roster + host name
+  // reflect it (there's no backend session-name; loadReviewer() is the source).
+  const persistName = (v: string) => {
+    saveJson(AUTHOR_KEY, v);
+    try { window.dispatchEvent(new CustomEvent(REVIEW_CHANGED_EVENT)); } catch { /* non-DOM */ }
+  };
+  const startSession = () => { const v = name.trim(); if (v) persistName(v); onStart(); };
+  const joinSession = () => {
+    const v = name.trim(); const t = ticket.trim();
+    if (!v || !t) return;
+    persistName(v);
+    setJoining(true);
+    onJoin(t, v);
+  };
   const copyCode = async () => {
     if (!session.code) return;
     try {
@@ -41,31 +66,60 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
     <main className="cp-coreview-lobby" aria-label="Co-Review">
       <div className="cp-colobby-inner">
         <header className="cp-colobby-head">
-          <span className="cp-colobby-mark" aria-hidden="true"><IconUsers size={22} /></span>
+          <span className="cp-colobby-mark" aria-hidden="true"><IconCoReview size={22} /></span>
           <div>
             <h1 className="cp-colobby-title">Co-Review</h1>
             <p className="cp-colobby-sub">
               {active
                 ? "Everyone in the session follows the host's playhead — comment and review together, live."
-                : "Watch and review together. Start a session and share the code, or join one you were sent."}
+                : "Watch and review together. Host a session and share the code, or join one you were sent."}
             </p>
           </div>
         </header>
 
         {!active && (
-          <div className="cp-colobby-card cp-colobby-start">
-            <CoReviewJoinForm localSource={localSource} onStart={onStart} onJoin={onJoin} hideHeading />
+          <div className="cp-colobby-cards">
+            <section className="cp-colobby-card">
+              <span className="cp-colobby-label">Host a session</span>
+              <label className="cp-colobby-field">
+                <span className="cp-colobby-field-label">Your name</span>
+                <input className="cp-colobby-input" value={name}
+                  onChange={(e) => setName(e.target.value)} placeholder="Your name" />
+              </label>
+              <button type="button" className="btn btn-primary cp-colobby-cta" onClick={startSession}>
+                Start a session
+              </button>
+            </section>
+
+            <section className="cp-colobby-card">
+              <span className="cp-colobby-label">Join a session</span>
+              <label className="cp-colobby-field">
+                <span className="cp-colobby-field-label">Your name</span>
+                <input className="cp-colobby-input" value={name}
+                  onChange={(e) => setName(e.target.value)} placeholder="Your name" />
+              </label>
+              <label className="cp-colobby-field">
+                <span className="cp-colobby-field-label">Join code</span>
+                <input className="cp-colobby-input" value={ticket} spellCheck={false}
+                  onChange={(e) => setTicket(e.target.value)} placeholder="Paste a join code…" />
+              </label>
+              <button type="button" className="btn btn-ghost cp-colobby-cta"
+                disabled={!ticket.trim() || !name.trim() || joining} onClick={joinSession}>
+                {joining ? "Connecting…" : "Join"}
+              </button>
+              {session.error && <div className="cp-colobby-err">{session.error}</div>}
+            </section>
           </div>
         )}
 
         {active && (
-          <div className="cp-colobby-card">
+          <div className="cp-colobby-card cp-colobby-session">
             <div className="cp-colobby-role">
-              <span className={"cp-colobby-live" + (session.role === "host" ? " host" : "")} />
-              {session.role === "host" ? "Hosting" : "Joined a session"}
+              <span className={"cp-colobby-live" + (isHost ? " host" : "")} />
+              {isHost ? "You're hosting" : "You joined the session"}
             </div>
 
-            {session.role === "host" && (
+            {isHost && (
               <div className="cp-colobby-share">
                 <span className="cp-colobby-label">Join code</span>
                 <div className="cp-colobby-code" title={session.code ?? ""}>{session.code}</div>
@@ -81,13 +135,11 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
               <ul className="cp-colobby-people">
                 {participants.map((p, i) => (
                   <li key={i} className="cp-colobby-person">
-                    <span className="cp-colobby-dot" style={{ ["--co-color" as string]: p.color }} />
+                    <span className="cp-colobby-avatar" style={{ ["--co-color" as string]: p.color }}>
+                      {initialsOf(p.name)}
+                    </span>
                     <span className="cp-colobby-name" title={p.name}>{p.name}</span>
-                    {p.isHost && (
-                      <span className="cp-colobby-chip host">
-                        <IconCrown size={10} /> Host
-                      </span>
-                    )}
+                    {p.isHost && <span className="cp-colobby-chip host"><IconCrown size={10} /> Host</span>}
                     {p.isSelf && <span className="cp-colobby-chip">You</span>}
                   </li>
                 ))}
@@ -101,11 +153,17 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                 <IconFilm size={14} /> Enter theater
               </button>
               <button type="button" className="btn btn-ghost cp-colobby-leave" onClick={onLeave}>
-                Leave session
+                {isHost ? "End session" : "Leave session"}
               </button>
             </div>
           </div>
         )}
+
+        <p className="cp-colobby-note">
+          Media never leaves your machine — everyone in a session streams their own copy; only tiny
+          review messages cross the wire.
+          {localSource && " Co-review is web-source-only: a local file is loaded, so start a session and load a web URL to screen it with guests."}
+        </p>
       </div>
     </main>
   );
