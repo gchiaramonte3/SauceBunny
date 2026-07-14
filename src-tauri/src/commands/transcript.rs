@@ -1273,18 +1273,9 @@ pub async fn generate_transcript(
             }
         };
         // When reusing the cached FULL track, cut the [start,end] section here
-        // (yt-dlp already cut it in the download path). Input-side -ss/-t is
-        // fast and sample-accurate enough for speech.
-        let start_arg = format!("{start_s:.3}");
-        let dur_arg = format!("{:.3}", (end_s - start_s).max(0.0));
-        let mut ff_args: Vec<&str> = vec!["-y"];
-        if cut_section {
-            ff_args.extend(["-ss", start_arg.as_str(), "-i", &raw_path_str, "-t", dur_arg.as_str()]);
-        } else {
-            ff_args.extend(["-i", &raw_path_str]);
-        }
-        ff_args.extend(["-vn", "-ar", "16000", "-ac", "1", &wav_path_str]);
-        let ff_out = ff.args(ff_args).output().await;
+        // (yt-dlp already cut it in the download path).
+        let cut = cut_section.then(|| (start_s, (end_s - start_s).max(0.0)));
+        let ff_out = ff.args(wav_16k_mono_args(&raw_path_str, cut, &wav_path_str)).output().await;
         if !keep_raw {
             let _ = std::fs::remove_file(&raw_path); // temp download — keep the shared cache
         }
@@ -1405,22 +1396,9 @@ pub async fn generate_transcript(
         }
         let lang = normalize_whisper_lang(args.language.as_deref());
         warn_if_english_only_mismatch(&app_for, &job_for, &args.model_id, &lang);
-        let mut wcmd = wsp.args([
-            "-m", &model_str,
-            "-f", &wav_path_str,
-            "-osrt",
-            "-of", &output_base_str,
-            "-l", &lang,
-            // Accuracy + caption-grade segmentation (researched): pin max
-            // beam/best-of, and split-on-word at ~2-line length so each cue
-            // fits the on-video overlay without breaking mid-word.
-            "-bs", "5", "-bo", "5", "-sow", "-ml", "84",
-            "-pp", // print progress
-        ]);
-        if let Some(ref vm) = vad_model {
-            wcmd = wcmd.args(["--vad", "-vm", vm.as_str()]);
-        }
-        let spawn = wcmd.spawn();
+        let spawn = wsp
+            .args(whisper_cli_args(&model_str, &wav_path_str, &output_base_str, &lang, vad_model.as_deref()))
+            .spawn();
 
         let (mut rx, child) = match spawn {
             Ok(c) => c,
@@ -1559,6 +1537,59 @@ pub async fn generate_transcript(
     Ok(job_id)
 }
 
+/// The transcription whisper-cli invocation, shared by all three spawn sites
+/// (generate_transcript, transcribe_local_file, transcribe_prepared_wav) and
+/// exercised against the real binary by the nightly CI smoke — see
+/// `nightly_transcript_tests`. Accuracy + caption-grade segmentation
+/// (researched): pin max beam/best-of, and split-on-word at ~2-line length so
+/// each cue fits the on-video overlay without breaking mid-word. `language`
+/// is a `normalize_whisper_lang` output (r108); `-osrt -of <base>` writes
+/// `<base>.srt`; `-pp` prints progress.
+pub(crate) fn whisper_cli_args(
+    model: &str,
+    wav: &str,
+    output_base: &str,
+    language: &str,
+    vad_model: Option<&str>,
+) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "-m", model,
+        "-f", wav,
+        "-osrt",
+        "-of", output_base,
+        "-l", language,
+        "-bs", "5", "-bo", "5", "-sow", "-ml", "84",
+        "-pp",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    // Best-effort Silero VAD (accuracy: trims silence → fewer hallucinations
+    // + tighter timing). None ⇒ no-VAD.
+    if let Some(vm) = vad_model {
+        args.extend(["--vad".into(), "-vm".into(), vm.into()]);
+    }
+    args
+}
+
+/// The ffmpeg "phase 2" invocation: normalise any audio source to the 16 kHz
+/// mono WAV whisper-cli reads natively. `cut` is `(start_seconds, duration
+/// seconds)` when transcribing a mark-in sub-range of a cached full track —
+/// input-side -ss/-t is fast and sample-accurate enough for speech.
+pub(crate) fn wav_16k_mono_args(input: &str, cut: Option<(f64, f64)>, out_wav: &str) -> Vec<String> {
+    let mut args: Vec<String> = vec!["-y".into()];
+    match cut {
+        Some((start_s, dur_s)) => args.extend([
+            "-ss".into(), format!("{start_s:.3}"),
+            "-i".into(), input.into(),
+            "-t".into(), format!("{dur_s:.3}"),
+        ]),
+        None => args.extend(["-i".into(), input.into()]),
+    }
+    args.extend(["-vn".into(), "-ar".into(), "16000".into(), "-ac".into(), "1".into(), out_wav.into()]);
+    args
+}
+
 // Parses whisper-cli segment lines like "[00:00:04.000 --> 00:00:08.500]" → 8.5
 fn parse_whisper_segment_end(line: &str) -> Option<f64> {
     let after = line.split("--> ").nth(1)?;
@@ -1677,7 +1708,7 @@ pub async fn re_diarize_transcript(
             }
         };
         let ff_out = ff
-            .args(["-y", "-i", &audio_str, "-vn", "-ar", "16000", "-ac", "1", &wav_str])
+            .args(wav_16k_mono_args(&audio_str, None, &wav_str))
             .output()
             .await;
         match ff_out {
@@ -1813,8 +1844,7 @@ pub async fn transcribe_prepared_wav(
         );
 
         // Phase 2 only — whisper-cli on the pre-staged WAV. Mirrors the
-        // existing transcribe_local_file phase-2 block; consolidate
-        // these into one helper when we touch this file next.
+        // transcribe_local_file phase-2 block via whisper_cli_args.
         let _ = app_for.emit(
             "transcript-phase",
             TranscriptPhaseEvent { job_id: job_for.clone(), phase: "whisper".into() },
@@ -1838,23 +1868,11 @@ pub async fn transcribe_prepared_wav(
         }
         let lang = normalize_whisper_lang(args.language.as_deref());
         warn_if_english_only_mismatch(&app_for, &job_for, &args.model_id, &lang);
-        let mut wcmd = wsp
+        let spawn = wsp
             // No DYLD override — whisper-cli is statically linked (see the
             // generate_transcript spawn for the full rationale).
-            .args([
-                "-m", &model_str,
-                "-f", &wav_path_str,
-                "-osrt",
-                "-of", &output_base_str,
-                "-l", &lang,
-                // Accuracy + caption-grade segmentation (see generate_transcript).
-                "-bs", "5", "-bo", "5", "-sow", "-ml", "84",
-                "-pp",
-            ]);
-        if let Some(ref vm) = vad_model {
-            wcmd = wcmd.args(["--vad", "-vm", vm.as_str()]);
-        }
-        let spawn = wcmd.spawn();
+            .args(whisper_cli_args(&model_str, &wav_path_str, &output_base_str, &lang, vad_model.as_deref()))
+            .spawn();
         let (mut rx, child) = match spawn {
             Ok(c) => c,
             Err(e) => {
@@ -2019,11 +2037,7 @@ pub async fn transcribe_local_file(
             }
         };
         let ff_out = ff
-            .args([
-                "-y", "-i", &in_path_str,
-                "-vn", "-ar", "16000", "-ac", "1",
-                &wav_path_str,
-            ])
+            .args(wav_16k_mono_args(&in_path_str, None, &wav_path_str))
             .output()
             .await;
         let ff_out = match ff_out {
@@ -2112,23 +2126,11 @@ pub async fn transcribe_local_file(
                 "Voice-activity detection on (Silero VAD).".into());
         }
         warn_if_english_only_mismatch(&app_for, &job_for, &model_id, &lang);
-        let mut wcmd = wsp
+        let spawn = wsp
             // No DYLD override — whisper-cli is statically linked (see the
             // generate_transcript spawn for the full rationale).
-            .args([
-                "-m", &model_str,
-                "-f", &wav_path_str,
-                "-osrt",
-                "-of", &output_base_str,
-                "-l", &lang,
-                // Accuracy + caption-grade segmentation (see generate_transcript).
-                "-bs", "5", "-bo", "5", "-sow", "-ml", "84",
-                "-pp",
-            ]);
-        if let Some(ref vm) = vad_model {
-            wcmd = wcmd.args(["--vad", "-vm", vm.as_str()]);
-        }
-        let spawn = wcmd.spawn();
+            .args(whisper_cli_args(&model_str, &wav_path_str, &output_base_str, &lang, vad_model.as_deref()))
+            .spawn();
         let (mut rx, child) = match spawn {
             Ok(c) => c,
             Err(e) => {
@@ -2960,5 +2962,107 @@ pub async fn prepare_diarizer_models(app: AppHandle, job_id: String) -> Result<S
     });
 
     Ok(job_id)
+}
+
+// ─── Nightly real-sidecar smoke (see src/nightly.rs; run with --ignored) ────
+//
+// Exercises `wav_16k_mono_args` + `whisper_cli_args` against the REAL bundled
+// ffmpeg and whisper-cli. whisper.cpp is rebuilt from master by the nightly
+// workflow, so a renamed/removed CLI flag or a broken SRT emit fails HERE
+// instead of shipping silently.
+#[cfg(test)]
+mod nightly_transcript_tests {
+    use super::{normalize_whisper_lang, wav_16k_mono_args, whisper_cli_args};
+    use crate::nightly;
+
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_wav_conversion_produces_16k_mono() {
+        let wav = nightly::fixture_speech_wav_16k(); // runs wav_16k_mono_args internally
+        let probe = nightly::probe_json(&wav);
+        let a = nightly::probe_stream(&probe, "audio").expect("wav has an audio stream");
+        assert_eq!(a["codec_name"], "pcm_s16le", "whisper wants 16-bit PCM");
+        assert_eq!(a["sample_rate"], "16000");
+        assert_eq!(a["channels"], 1);
+    }
+
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_wav_conversion_cut_section() {
+        let aiff = nightly::fixture_speech_aiff();
+        let out = nightly::scratch_dir().join("speech-cut.wav");
+        let _ = std::fs::remove_file(&out);
+        // The mark-in path: -ss 1.0 -t 2.0 must yield a ~2 s WAV.
+        let args = wav_16k_mono_args(aiff.to_str().unwrap(), Some((1.0, 2.0)), out.to_str().unwrap());
+        nightly::run_ok(&nightly::sidecar("ffmpeg"), &args, "cut-section wav conversion");
+        let dur = nightly::probe_duration(&nightly::probe_json(&out));
+        assert!((1.8..=2.3).contains(&dur), "expected ~2s cut, got {dur}s");
+    }
+
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_whisper_cli_emits_srt() {
+        let wav = nightly::fixture_speech_wav_16k();
+        let model = nightly::whisper_model();
+        let vad = nightly::vad_model();
+        let base = nightly::scratch_dir().join("whisper-out");
+        let srt = base.with_extension("srt");
+        let _ = std::fs::remove_file(&srt);
+
+        // Same normalization the commands run (r108); "en" exercises an
+        // explicit language rather than auto-detect on a 5 s clip.
+        let lang = normalize_whisper_lang(Some("en"));
+        let args = whisper_cli_args(
+            model.to_str().unwrap(),
+            wav.to_str().unwrap(),
+            base.to_str().unwrap(),
+            &lang,
+            Some(vad.to_str().unwrap()),
+        );
+        nightly::run_ok(&nightly::sidecar("whisper-cli"), &args, "whisper-cli transcription");
+
+        // The contract the app depends on: `-osrt -of <base>` writes
+        // `<base>.srt` with at least one timed, non-empty cue.
+        let text = std::fs::read_to_string(&srt)
+            .unwrap_or_else(|e| panic!("whisper-cli produced no SRT at {}: {e}", srt.display()));
+        eprintln!("[nightly] whisper transcript:\n{text}");
+        assert!(text.contains("-->"), "SRT has no cue timing lines:\n{text}");
+        let has_spoken_text = text.lines().any(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.contains("-->") && t.parse::<u64>().is_err()
+        });
+        assert!(has_spoken_text, "SRT has cues but no text payload:\n{text}");
+    }
+
+    // Sharper diagnostics than the end-to-end run: every flag we pass must
+    // still exist in whisper-cli's own help. If upstream renames one, this
+    // names the exact casualty.
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_whisper_cli_recognizes_every_flag_we_pass() {
+        let out = std::process::Command::new(nightly::sidecar("whisper-cli"))
+            .arg("--help")
+            .output()
+            .expect("spawn whisper-cli --help");
+        let help = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let flags: Vec<String> = whisper_cli_args("M", "W", "O", "en", Some("V"))
+            .into_iter()
+            .filter(|a| a.starts_with('-'))
+            .collect();
+        assert!(flags.contains(&"-osrt".to_string()), "flag extraction is broken: {flags:?}");
+        let missing: Vec<&String> = flags
+            .iter()
+            .filter(|f| !help.contains(&format!("{f},")) && !help.contains(&format!("{f} ")))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "whisper-cli no longer lists flags we pass: {missing:?} — upstream \
+             rename? Fix whisper_cli_args and re-test the app.\n--help was:\n{help}"
+        );
+    }
 }
 

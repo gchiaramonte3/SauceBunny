@@ -1475,3 +1475,75 @@ pub async fn download_audio_track(
         .ok_or_else(|| crate::AppError::internal("cached audio path not utf-8"))
 }
 
+// ─── Nightly real-sidecar smoke (see src/nightly.rs; run with --ignored) ────
+//
+// yt-dlp's CLI churns on a near-weekly cadence and the nightly workflow pulls
+// the LATEST build, so this is where a renamed/removed option we depend on
+// surfaces — without hitting any real video site from CI.
+#[cfg(test)]
+mod nightly_ytdlp_tests {
+    use crate::nightly;
+
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_ytdlp_binary_runs() {
+        let out = nightly::run_ok(&nightly::sidecar("yt-dlp"), ["--version"], "yt-dlp --version");
+        let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        eprintln!("[nightly] yt-dlp {version}");
+        // Release versions are date-stamped (e.g. 2026.06.30).
+        assert!(
+            version.starts_with("20") && version.len() >= 8,
+            "unexpected yt-dlp version output: {version:?}"
+        );
+    }
+
+    // Every `--long-flag` string literal this module passes to yt-dlp must
+    // still exist in `yt-dlp --help`. Scanning our own source keeps the list
+    // self-maintaining: add a flag to any invocation and it's covered.
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_ytdlp_recognizes_every_long_flag_we_pass() {
+        let src = include_str!("download.rs");
+        let mut flags: Vec<String> = Vec::new();
+        for line in src.lines() {
+            let t = line.trim_start();
+            if t.starts_with("//") {
+                continue; // prose can mention hypothetical flags
+            }
+            // Collect "--flag" string literals: a quote, two dashes, then
+            // [a-z-] up to the closing quote.
+            let mut rest = t;
+            while let Some(i) = rest.find("\"--") {
+                let after = &rest[i + 1..];
+                if let Some(end) = after.find('"') {
+                    let cand = &after[..end];
+                    if cand.len() >= 4 && cand[2..].chars().all(|c| c.is_ascii_lowercase() || c == '-') {
+                        flags.push(cand.to_string());
+                    }
+                    rest = &after[end + 1..];
+                } else {
+                    break;
+                }
+            }
+        }
+        flags.sort();
+        flags.dedup();
+        // If the scan itself regresses, fail loudly rather than pass on an
+        // empty list.
+        assert!(
+            flags.iter().any(|f| f == "--dump-json"),
+            "flag scan found no known anchor; scanned flags: {flags:?}"
+        );
+        eprintln!("[nightly] checking {} yt-dlp flags: {flags:?}", flags.len());
+
+        let out = nightly::run_ok(&nightly::sidecar("yt-dlp"), ["--help"], "yt-dlp --help");
+        let help = String::from_utf8_lossy(&out.stdout).to_string();
+        let missing: Vec<&String> = flags.iter().filter(|f| !help.contains(f.as_str())).collect();
+        assert!(
+            missing.is_empty(),
+            "yt-dlp no longer lists flags we pass: {missing:?} — upstream \
+             rename/removal? Update the invocations in commands/download.rs."
+        );
+    }
+}
+
