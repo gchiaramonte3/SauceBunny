@@ -303,3 +303,20 @@ export const IconHistory = (p: IconProps) => (
     <path d="M12 7v5l4 2" />
   </Icon>
 );
+// House — the nav rail's Home (Library) item.
+export const IconHome = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 10.5 12 3l9 7.5" />
+    <path d="M5 9v10a2 2 0 0 0 2 2h3v-6h4v6h3a2 2 0 0 0 2-2V9" />
+  </Icon>
+);
+// Scissors — the nav rail's Clip (editor) item.
+export const IconScissors = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="6" cy="6" r="3" />
+    <circle cx="6" cy="18" r="3" />
+    <path d="M20 4 8.12 15.88" />
+    <path d="M14.47 14.48 20 20" />
+    <path d="M8.12 8.12 12 12" />
+  </Icon>
+);

@@ -11,6 +11,7 @@
  */
 @import "./base.css";
 @import "./shell.css";
+@import "./nav.css";
 @import "./toolbar.css";
 @import "./buttons.css";
 /* Shared primitives — must precede the per-section files that place instances. */

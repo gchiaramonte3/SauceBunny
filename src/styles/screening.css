@@ -6,6 +6,9 @@
    read as a shared theater. Reflow only — the player is never remounted.
    ============================================================ */
 .cp-screening .cp-sidebar { display: none; }
+/* The nav rail leaves too — the theater takes the full window width. Pure
+   CSS reflow, same as the sidebar swap: the player is never remounted. */
+.cp-screening .cp-nav { display: none; }
 /* A touch more cinematic separation around the video panel while screening. */
 .cp-screening .cp-main { background: var(--bg-0); }
 

@@ -37,6 +37,32 @@ test("shell boots: toolbar, sidebar, monitor render without pageerrors", async (
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
+test("nav rail: switches views, keeps the Clip view mounted, persists", async ({ page }) => {
+  await boot(page);
+  const rail = page.getByRole("navigation", { name: "Primary" });
+  await expect(rail).toBeVisible();
+  // Fresh profile boots into Clip (the working view).
+  await expect(page.locator(".cp-view-clip")).toBeVisible();
+  // Home item → the Library stub (phase 3 fills it in).
+  await rail.getByRole("button", { name: "Home", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add a folder" })).toBeDisabled();
+  // KEEP-ALIVE: the Clip view is hidden, NOT unmounted — toolbar/monitor
+  // stay in the DOM so playback and running jobs survive the switch.
+  await expect(page.locator(".cp-view-clip")).toBeHidden();
+  await expect(page.locator(".cp-view-clip .cp-toolbar")).toBeAttached();
+  await expect(page.locator(".cp-view-clip .cp-monitor-area")).toBeAttached();
+  // ⌘2 / ⌘1 (mod serializes ctrl the same) ride the rebindable registry.
+  await page.keyboard.press("Control+2");
+  await expect(page.locator(".cp-view-clip")).toBeVisible();
+  await page.keyboard.press("Control+1");
+  await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
+  // The choice persists (saucebunny.activeView) across reload.
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible({ timeout: 15_000 });
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
 test("a11y landmarks: banner/main/complementary present and uniquely labeled", async ({ page }) => {
   await boot(page);
   // Toolbar = the banner landmark; the canvas column = main.

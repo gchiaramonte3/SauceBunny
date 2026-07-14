@@ -9,6 +9,8 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import { Toolbar } from "./components/Toolbar";
+import { NavRail } from "./components/NavRail";
+import { LibraryView } from "./components/LibraryView";
 import { Sidebar } from "./components/Sidebar";
 import { ParticipantRail } from "./components/ParticipantRail";
 import { Monitor, type AspectId } from "./components/Monitor";
@@ -123,11 +125,20 @@ function migrateCaptionFont(raw: unknown): CaptionFontKey {
   return "verdana";
 }
 
+/**
+ * Top-level views (nav rail): "home" = the Library (phase-3 stub for now),
+ * "clip" = the entire pre-rail app (toolbar + sidebar + monitor + drawer).
+ * A state switch, NOT a router (CLAUDE.md) — and the Clip view is never
+ * unmounted, only [hidden], so playback/jobs/listeners survive navigation.
+ */
+export type AppView = "home" | "clip";
+
 // v2 bump: re-encode default flipped from ON to OFF. Older v1 settings are
 // intentionally abandoned so users get the new, much faster default.
 const DEFAULTS_KEY  = "cp-defaults-v2";
 const RECENTS_KEY   = "cp-recents";
 const ASPECT_KEY    = "cp-aspect";
+const ACTIVE_VIEW_KEY = "saucebunny.activeView";
 
 // One-shot rebrand migration (clippull.* → saucebunny.*). Runs at module load,
 // before App renders so the default-loading useState initializers see the
@@ -649,6 +660,17 @@ export default function App() {
   // ====== Clip queue (multi-section export) ======
   const [clipQueue, setClipQueue] = useState<QueuedClip[]>([]);
   const [queueOpen, setQueueOpen] = useState(false);
+  // ── Top-level view (nav rail): Home (Library) vs Clip (editor) ──
+  // Single state switch — no router (CLAUDE.md). Persisted so the app
+  // reopens where you left it; anything but a stored "home" (missing,
+  // corrupt, future value) falls back to "clip", the working view.
+  // The panel window (?window=panel) never mounts App, so it's untouched.
+  const [activeView, setActiveViewState] = useState<AppView>(() =>
+    loadJson<string>(ACTIVE_VIEW_KEY, "clip") === "home" ? "home" : "clip");
+  const setActiveView = useCallback((v: AppView) => {
+    setActiveViewState(v);
+    saveJson(ACTIVE_VIEW_KEY, v);
+  }, []);
   // Left source/export sidebar visibility — persisted, mirroring the right
   // drawer's toolbar toggle. Defaults open.
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
@@ -3545,6 +3567,11 @@ export default function App() {
         case "edit.undo": performUndo(); break;
         case "edit.redo": performRedo(); break;
         case "src.fetch":    handleFetch(); break;
+        // ⌘1/⌘2 — top-level view switch (nav rail). Global: navigation has
+        // to work from a text field too. The Clip view stays mounted either
+        // way, so this never interrupts playback or a running job.
+        case "view.home":    setActiveView("home"); break;
+        case "view.clip":    setActiveView("clip"); break;
         case "view.logs":    setLogsOpen((p) => !p); break;
         case "queue.add":    handleAddToQueue(); break;
         case "queue.toggle": setQueueOpen((p) => !p); break;
@@ -3659,7 +3686,7 @@ export default function App() {
     onPlayToggle, shuttleStep, onMarkIn, onMarkOut, onClearMarks,
     onGotoIn, onGotoOut, onStep, onSeek,
     handlePlaybackRateStep, handlePlaybackRateChange,
-    performUndo, performRedo,
+    performUndo, performRedo, setActiveView,
   ]);
 
   // ── Native menubar event wiring ─────────────────────────────────
@@ -3677,10 +3704,16 @@ export default function App() {
       };
       await Promise.all([
         bind("open_url_bar",        () => {
-          // Just focus the URL input — it's already in the toolbar.
-          const el = document.querySelector<HTMLInputElement>(".cp-url input");
-          el?.focus();
-          el?.select();
+          // The URL bar lives in the Clip view's toolbar — surface that view
+          // first (a [hidden] subtree can't take focus), then focus once
+          // React has committed the unhide (setTimeout lands after the
+          // microtask-flushed render).
+          setActiveView("clip");
+          setTimeout(() => {
+            const el = document.querySelector<HTMLInputElement>(".cp-url input");
+            el?.focus();
+            el?.select();
+          }, 0);
         }),
         bind("import_local",        () => handleImportFile()),
         bind("import_transcript",   () => handleImportTranscript()),
@@ -3698,7 +3731,7 @@ export default function App() {
       ]);
     })();
     return () => { mounted = false; unlistens.forEach((u) => u()); };
-  }, [handleImportFile, handleImportTranscript, defaults.transcriptLibrary]);
+  }, [handleImportFile, handleImportTranscript, defaults.transcriptLibrary, setActiveView]);
 
   // ── Suppress WKWebView's native context menu on UI chrome ──────
   // WKWebView shows "Look Up", "Translate", "Search with Google" when
@@ -3742,7 +3775,8 @@ export default function App() {
   // when the array was inline, so memoization behaves identically.
   const commands: Command[] = useMemo(() => buildCommands({
     url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
-    captionsOn, playbackRate, logsOpen, clipQueueLength: clipQueue.length, queueRunning,
+    captionsOn, playbackRate, activeView, onNavigateView: setActiveView,
+    logsOpen, clipQueueLength: clipQueue.length, queueRunning,
     activeTranscriptPath: activeTranscript?.path ?? null,
     exportFolder: exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
     handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds, shuttleStep,
@@ -3776,7 +3810,8 @@ export default function App() {
     return c;
   }), [
     url, hasSource, isPlaying, inFrames, outFrames, durationFrames, fps,
-    captionsOn, playbackRate, logsOpen, clipQueue.length, queueRunning, activeTranscript,
+    captionsOn, playbackRate, activeView, setActiveView,
+    logsOpen, clipQueue.length, queueRunning, activeTranscript,
     exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
     handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds, shuttleStep,
     handlePlaybackRateStep, handlePlaybackRateChange,
@@ -4077,6 +4112,10 @@ export default function App() {
   const titleSuffix = (status === "loaded" || status === "exporting" || status === "success") && exportOpts.filename
     ? ` — ${exportOpts.filename}`
     : "";
+  // Nav-rail tooltip shortcuts — resolved from the LIVE bindings so a rebind
+  // in Settings → Commands shows correctly in the rail titles.
+  const homeCombo = bindingsFor("view.home", keybindings)[0];
+  const clipCombo = bindingsFor("view.clip", keybindings)[0];
 
   // ── Stale-binary banner ──────────────────────────────────────────────
   // Only shows when the Rust backend doesn't match the frontend's expected
@@ -4111,455 +4150,477 @@ export default function App() {
         </div>
       </div>
 
-      <Toolbar
-        url={url}
-        onChange={setUrl}
-        onFetch={handleFetch}
-        onClear={handleClear}
-        onImportFile={handleImportFile}
-        recentSources={recentSources}
-        onOpenRecent={handleOpenRecentSource}
-        onRemoveRecent={handleRemoveRecentSource}
-        onClearRecents={handleClearRecentSources}
-        onToggleQueue={() => setQueueOpen((p) => !p)}
-        queueCount={clipQueue.length}
-        queueOpen={queueOpen}
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen((p) => !p)}
-        hasSource={status === "loaded" || status === "exporting" || status === "success" || status === "error"}
-        status={status}
-        onOpenSettings={() => setSettingsOpen(true)}
-        notifications={notifications}
-        onMarkAllRead={onMarkAllRead}
-        onClearNotifications={onClearNotifications}
-        onDismissNotification={onDismissNotification}
-        coSession={coSession}
-        coLocalSource={coLocalSourceLoaded}
-        coScreening={screening}
-        onCoToggleScreening={() => setScreening((s) => !s)}
-        onCoStart={() => { void startCoReview(); }}
-        onCoJoin={(t, n) => { void joinCoReview(t, n); }}
-        onCoLeave={leaveCoReview}
-      />
-
       <div className={"cp-body" + (screening ? " cp-screening" : "")}>
-        {/* Always mounted (stable sibling of <main>) so entering screening
-            never remounts the player; renders nothing when not screening. */}
-        <ParticipantRail
-          active={screening}
-          participants={screeningParticipants}
-          onExit={() => setScreening(false)}
+        <NavRail
+          active={activeView}
+          onNavigate={setActiveView}
+          onOpenSettings={() => setSettingsOpen(true)}
+          homeShortcut={homeCombo ? formatCombo(homeCombo) : undefined}
+          clipShortcut={clipCombo ? formatCombo(clipCombo) : undefined}
         />
-        <Sidebar
-          open={sidebarOpen}
-          status={status}
-          metadata={metadata}
-          exportOpts={exportOpts}
-          setExportOpts={setExportOpts}
-          recents={recents}
-          onExport={handleExport}
-          onReveal={handleReveal}
-          onPickRecent={handlePickRecent}
-          onClearRecents={handleClearRecents}
-          onAddToQueue={handleAddToQueue}
-          queueCount={clipQueue.length}
-          queueRunning={queueRunning}
-          onExportQueue={handleExportQueue}
-          onDownloadCaptions={handleDownloadCaptions}
-          captionsState={captionsState}
-          captionsError={captionsError}
-          onGenerateTranscript={handleGenerateTranscript}
-          transcriptState={transcriptState}
-          transcriptError={transcriptError}
-          transcriptProgress={transcriptProgress}
-          transcriptPhase={transcriptPhase}
-          whisperModelReady={whisperModelReady}
-          whisperModelLabel={whisperModelLabel}
-          onOpenTranscriptionSettings={handleOpenTranscriptionSettings}
-          onOpenGeneralSettings={() => { setSettingsInitialTab("general"); setSettingsOpen(true); }}
-          detectSpeakers={defaults.detectSpeakers}
-          setDetectSpeakers={(v) => setDefaults({ ...defaults, detectSpeakers: v })}
-          expectedSpeakers={defaults.expectedSpeakers}
-          setExpectedSpeakers={(n) => setDefaults({ ...defaults, expectedSpeakers: n })}
-          diarizerReady={diarizerReady}
-          onLog={appendLog}
-          fps={fps}
-          durationTc={durationTc}
-          metadataLoading={metadataLoading}
-        />
+        <div className="cp-views">
+          {/* Home — the Library (phase-3 stub; LibraryView.tsx). */}
+          <div className="cp-view cp-view-home" hidden={activeView !== "home"}>
+            <LibraryView />
+          </div>
+          {/* Clip — the ENTIRE pre-rail app, toolbar included. NEVER
+              unmounted: while Home is active it's [hidden] (the QueueDrawer
+              keep-alive pattern), so playback, export/transcript jobs,
+              co-review sessions, and every listener beneath survive
+              browsing the library. Audio deliberately keeps playing on
+              Home (streaming-platform behavior — no pause-on-leave). */}
+          <div className="cp-view cp-view-clip" hidden={activeView !== "clip"}>
+            <Toolbar
+              url={url}
+              onChange={setUrl}
+              onFetch={handleFetch}
+              onClear={handleClear}
+              onImportFile={handleImportFile}
+              recentSources={recentSources}
+              onOpenRecent={handleOpenRecentSource}
+              onRemoveRecent={handleRemoveRecentSource}
+              onClearRecents={handleClearRecentSources}
+              onToggleQueue={() => setQueueOpen((p) => !p)}
+              queueCount={clipQueue.length}
+              queueOpen={queueOpen}
+              sidebarOpen={sidebarOpen}
+              onToggleSidebar={() => setSidebarOpen((p) => !p)}
+              hasSource={status === "loaded" || status === "exporting" || status === "success" || status === "error"}
+              status={status}
+              notifications={notifications}
+              onMarkAllRead={onMarkAllRead}
+              onClearNotifications={onClearNotifications}
+              onDismissNotification={onDismissNotification}
+              coSession={coSession}
+              coLocalSource={coLocalSourceLoaded}
+              coScreening={screening}
+              onCoToggleScreening={() => setScreening((s) => !s)}
+              onCoStart={() => { void startCoReview(); }}
+              onCoJoin={(t, n) => { void joinCoReview(t, n); }}
+              onCoLeave={leaveCoReview}
+            />
 
-        <main className="cp-main">
-          <div className="cp-monitor-wrap">
-            <div className="cp-view-bar">
-              <ViewOptions
-                aspect={aspect}
-                onAspectChange={setAspect}
-                waveformVisible={waveformVisible}
-                onWaveformVisibleChange={setWaveformVisible}
-                onShowMediaInfo={sourceKind === "file" && localFilePath ? () => setMediaInfoOpen(true) : undefined}
+            <div className="cp-clip-body">
+              {/* Always mounted (stable sibling of <main>) so entering screening
+                  never remounts the player; renders nothing when not screening. */}
+              <ParticipantRail
+                active={screening}
+                participants={screeningParticipants}
+                onExit={() => setScreening(false)}
               />
-            </div>
-            <Monitor
-              ref={playerRef}
-              status={status}
-              metadata={metadata}
-              errorDetail={errorDetail}
-              /* Stale-yt-dlp recovery: "offer"/"busy" renders the one-click
-                 "Update yt-dlp & retry" CTA on the error overlay; "spent"
-                 (this URL already got its one cycle) renders the
-                 engine-is-current hint instead. */
-              extractorRot={
-                rotRecovery == null
-                  ? null
-                  : rotRecovery.phase === "spent"
-                    ? rotRecovery
-                    : { phase: rotRecovery.phase, onUpdateAndRetry: handleUpdateYtdlpAndRetry }
-              }
-              /* Empty-state "Resume last session" — one-click reopen of the
-                 most recent source via the same fetch/import handlers. */
-              resumeTitle={recentSources.length > 0 ? recentSources[0].title : null}
-              onResume={recentSources.length > 0 ? () => handleOpenRecentSource(recentSources[0]) : undefined}
-              /* First-run checklist card — null once done/dismissed. */
-              onboarding={onboardingSteps ? {
-                steps: onboardingSteps,
-                onStep: handleOnboardingStep,
-                onDismiss: () => { saveOnboardingDismissed(); setOnboardingDismissed(true); },
-              } : null}
-              aspect={aspect}
-              sourceKind={sourceKind}
-              /* Prefer the ffmpeg-normalised playback copy when ready —
-                 it's the WKWebView-compatible MP4/MP3. Falls back to the
-                 original so the user still sees a player even if prep is
-                 still running or failed. */
-              localFilePath={playbackPath ?? localFilePath}
-              /* r80: web-playback read-model from useWebPlayback. cachePath
-                 (download fallback) wins over the live stream; both are null
-                 until the machine produces one. */
-              webStreamUrl={webPlayback.cachePath ?? webPlayback.streamUrl}
-              onDiag={(tag, msg) => appendLog(asLogTag(tag), "seek", msg)}
-              /* Audio track + codecs are meaningful only while STREAMING (the
-                 cached file is already muxed and sample-accurate). */
-              audioStreamUrl={webPlayback.audioUrl}
-              streamVideoCodec={webPlayback.videoCodec}
-              streamAudioCodec={webPlayback.audioCodec}
-              initialVolume={muted ? 0 : volume}
-              /* Prep banner is shared with local-file ffmpeg prep — OR the two
-                 sources so the web download lights it up too. */
-              playbackPrepBusy={playbackPrepBusy || webPlayback.downloading}
-              playbackPrepProgress={webPlayback.downloading ? webPlayback.downloadProgress : playbackPrepProgress}
-              /* r62: friendly "what's happening" overlay over the poster
-                 while a web source resolves (yt-dlp ~8s) then buffers
-                 (MSE). Null once the player is ready or for local files /
-                 the download fallback (which has its own banner). */
-              streamLoadingPhase={
-                /* Only while the machine is actually WORKING toward playback
-                   (resolving/streaming/cached). The terminal states — failed,
-                   or inactive after a user cancel — must clear the overlay, or
-                   the canvas stays under an infinite "Preparing your video…"
-                   spinner after the error/cancel toast fades. `downloading` has
-                   its own overlay with a Cancel button. */
-                sourceKind === "youtube" && status === "loaded" && !playerReady
-                  && !playbackPrepBusy
-                  && (webPlayback.state.kind === "resolving"
-                    || webPlayback.state.kind === "streaming"
-                    || webPlayback.state.kind === "cached")
-                  ? ((webPlayback.streamUrl || webPlayback.cachePath) ? "Starting playback…" : "Resolving stream…")
-                  : null
-              }
-              /* r55: on-canvas Cancel for the web-preview download fallback.
-                 Previously the only cancel UI was the Pipeline panel Stop
-                 button — and that panel defaults collapsed (task #45), so
-                 the user often had no visible cancel point during a long
-                 yt-dlp HLS-fragments download. Shares the same handleStop
-                 path as the Pipeline Stop, so cancel semantics are
-                 identical wherever the user clicks. */
-              onCancelPlaybackPrep={handleStop}
-              /* Nonzero while J/L shuttling — renders the "◀◀ 4×" HUD badge. */
-              shuttleRate={shuttleRate}
-              /* Flashed briefly when the persistent playback speed changes. */
-              playbackRateHud={rateHud}
-              useWebCodecs={localPlayer === "mediabunny" && !webCodecsFallbackForImport}
-              onMediaError={(msg) => {
-                // MediaBunnyPlayer prefixes codec-incompatibility errors
-                // with `[WEBCODECS_UNSUPPORTED]` — that's our signal to
-                // transparently kick off ffmpeg prep for THIS import and
-                // swap the Monitor to LocalMediaPlayer pointed at the
-                // prepared copy. The Settings toggle stays on for next time.
-                if (msg.startsWith("[WEBCODECS_UNSUPPORTED]") && localFilePath && metadata) {
-                  // Guard against double-fire: MediaBunnyPlayer can emit
-                  // two unsupported errors (video AND audio track failing
-                  // canDecode() back-to-back). Without this check the
-                  // second one starts a second ffmpeg prep that races the
-                  // first for the same cache output path.
-                  if (playbackPrepBusy || webCodecsFallbackForImport) {
-                    return;
-                  }
-                  // Quiet info-level state change. The pipeline log line
-                  // below + the existing "Preparing playback copy" banner
-                  // already communicate this — a notification-popover
-                  // toast on top of those is noisy. If prep then FAILS,
-                  // the catch block down in runPlaybackPrep already
-                  // surfaces an error toast.
-                  appendLog("warn", "media",
-                    `${msg.replace("[WEBCODECS_UNSUPPORTED]", "WebCodecs doesn't support")} — falling back to ffmpeg prep.`);
-                  setWebCodecsFallbackForImport(true);
-                  // Reuse the same prep pipeline. seq guards against the
-                  // user switching sources before prep finishes.
-                  const seq = sourceSeqRef.current;
-                  void runPlaybackPrep(localFilePath, !!metadata.vcodec, metadata.duration, seq);
-                  return;
-                }
+              <Sidebar
+                open={sidebarOpen}
+                status={status}
+                metadata={metadata}
+                exportOpts={exportOpts}
+                setExportOpts={setExportOpts}
+                recents={recents}
+                onExport={handleExport}
+                onReveal={handleReveal}
+                onPickRecent={handlePickRecent}
+                onClearRecents={handleClearRecents}
+                onAddToQueue={handleAddToQueue}
+                queueCount={clipQueue.length}
+                queueRunning={queueRunning}
+                onExportQueue={handleExportQueue}
+                onDownloadCaptions={handleDownloadCaptions}
+                captionsState={captionsState}
+                captionsError={captionsError}
+                onGenerateTranscript={handleGenerateTranscript}
+                transcriptState={transcriptState}
+                transcriptError={transcriptError}
+                transcriptProgress={transcriptProgress}
+                transcriptPhase={transcriptPhase}
+                whisperModelReady={whisperModelReady}
+                whisperModelLabel={whisperModelLabel}
+                onOpenTranscriptionSettings={handleOpenTranscriptionSettings}
+                onOpenGeneralSettings={() => { setSettingsInitialTab("general"); setSettingsOpen(true); }}
+                detectSpeakers={defaults.detectSpeakers}
+                setDetectSpeakers={(v) => setDefaults({ ...defaults, detectSpeakers: v })}
+                expectedSpeakers={defaults.expectedSpeakers}
+                setExpectedSpeakers={(n) => setDefaults({ ...defaults, expectedSpeakers: n })}
+                diarizerReady={diarizerReady}
+                onLog={appendLog}
+                fps={fps}
+                durationTc={durationTc}
+                metadataLoading={metadataLoading}
+              />
 
-                // Native <video> failed on a local ORIGINAL (msg is NOT the
-                // WebCodecs marker above). The smart-selection routes friendly
-                // codecs (h264/aac/mp4) to the native path assuming asset://
-                // <video> will load them — but that isn't guaranteed (large
-                // files can log MEDIA_ERR_SRC_NOT_SUPPORTED + "duration 0.0s"
-                // and never load). Fall back to MediaBunnyPlayer, which reads
-                // the file via fetch(asset://) + ranged reads and bypasses the
-                // <video> media loader that just failed. If mediabunny ALSO
-                // can't decode it emits [WEBCODECS_UNSUPPORTED], which the
-                // branch above turns into an ffmpeg transcode — giving the full
-                // native → mediabunny → transcode chain.
-                //
-                // Guards keep this from looping or firing on the transcode
-                // path: it requires localPlayer==="native" (the transcode path
-                // leaves localPlayer at "mediabunny" and only flips
-                // webCodecsFallbackForImport), and both !nativeFallbackTried and
-                // !webCodecsFallbackForImport, so a second failure — whether of
-                // the mediabunny attempt or of a prepped transcode copy — falls
-                // through to the terminal error below instead of retrying.
-                if (
-                  sourceKind === "file"
-                  && localPlayer === "native"
-                  && localFilePath
-                  && !nativeFallbackTried
-                  && !playbackPrepBusy
-                  && !webCodecsFallbackForImport
-                ) {
-                  setNativeFallbackTried(true);
-                  setLocalPlayer("mediabunny");
-                  appendLog("warn", "media",
-                    "Native <video> couldn't load this file — decoding in-app via mediabunny.");
-                  return;
-                }
+              <main className="cp-main">
+                <div className="cp-monitor-wrap">
+                  <div className="cp-view-bar">
+                    <ViewOptions
+                      aspect={aspect}
+                      onAspectChange={setAspect}
+                      waveformVisible={waveformVisible}
+                      onWaveformVisibleChange={setWaveformVisible}
+                      onShowMediaInfo={sourceKind === "file" && localFilePath ? () => setMediaInfoOpen(true) : undefined}
+                    />
+                  </div>
+                  <Monitor
+                    ref={playerRef}
+                    status={status}
+                    metadata={metadata}
+                    errorDetail={errorDetail}
+                    /* Stale-yt-dlp recovery: "offer"/"busy" renders the one-click
+                       "Update yt-dlp & retry" CTA on the error overlay; "spent"
+                       (this URL already got its one cycle) renders the
+                       engine-is-current hint instead. */
+                    extractorRot={
+                      rotRecovery == null
+                        ? null
+                        : rotRecovery.phase === "spent"
+                          ? rotRecovery
+                          : { phase: rotRecovery.phase, onUpdateAndRetry: handleUpdateYtdlpAndRetry }
+                    }
+                    /* Empty-state "Resume last session" — one-click reopen of the
+                       most recent source via the same fetch/import handlers. */
+                    resumeTitle={recentSources.length > 0 ? recentSources[0].title : null}
+                    onResume={recentSources.length > 0 ? () => handleOpenRecentSource(recentSources[0]) : undefined}
+                    /* First-run checklist card — null once done/dismissed. */
+                    onboarding={onboardingSteps ? {
+                      steps: onboardingSteps,
+                      onStep: handleOnboardingStep,
+                      onDismiss: () => { saveOnboardingDismissed(); setOnboardingDismissed(true); },
+                    } : null}
+                    aspect={aspect}
+                    sourceKind={sourceKind}
+                    /* Prefer the ffmpeg-normalised playback copy when ready —
+                       it's the WKWebView-compatible MP4/MP3. Falls back to the
+                       original so the user still sees a player even if prep is
+                       still running or failed. */
+                    localFilePath={playbackPath ?? localFilePath}
+                    /* r80: web-playback read-model from useWebPlayback. cachePath
+                       (download fallback) wins over the live stream; both are null
+                       until the machine produces one. */
+                    webStreamUrl={webPlayback.cachePath ?? webPlayback.streamUrl}
+                    onDiag={(tag, msg) => appendLog(asLogTag(tag), "seek", msg)}
+                    /* Audio track + codecs are meaningful only while STREAMING (the
+                       cached file is already muxed and sample-accurate). */
+                    audioStreamUrl={webPlayback.audioUrl}
+                    streamVideoCodec={webPlayback.videoCodec}
+                    streamAudioCodec={webPlayback.audioCodec}
+                    initialVolume={muted ? 0 : volume}
+                    /* Prep banner is shared with local-file ffmpeg prep — OR the two
+                       sources so the web download lights it up too. */
+                    playbackPrepBusy={playbackPrepBusy || webPlayback.downloading}
+                    playbackPrepProgress={webPlayback.downloading ? webPlayback.downloadProgress : playbackPrepProgress}
+                    /* r62: friendly "what's happening" overlay over the poster
+                       while a web source resolves (yt-dlp ~8s) then buffers
+                       (MSE). Null once the player is ready or for local files /
+                       the download fallback (which has its own banner). */
+                    streamLoadingPhase={
+                      /* Only while the machine is actually WORKING toward playback
+                         (resolving/streaming/cached). The terminal states — failed,
+                         or inactive after a user cancel — must clear the overlay, or
+                         the canvas stays under an infinite "Preparing your video…"
+                         spinner after the error/cancel toast fades. `downloading` has
+                         its own overlay with a Cancel button. */
+                      sourceKind === "youtube" && status === "loaded" && !playerReady
+                        && !playbackPrepBusy
+                        && (webPlayback.state.kind === "resolving"
+                          || webPlayback.state.kind === "streaming"
+                          || webPlayback.state.kind === "cached")
+                        ? ((webPlayback.streamUrl || webPlayback.cachePath) ? "Starting playback…" : "Resolving stream…")
+                        : null
+                    }
+                    /* r55: on-canvas Cancel for the web-preview download fallback.
+                       Previously the only cancel UI was the Pipeline panel Stop
+                       button — and that panel defaults collapsed (task #45), so
+                       the user often had no visible cancel point during a long
+                       yt-dlp HLS-fragments download. Shares the same handleStop
+                       path as the Pipeline Stop, so cancel semantics are
+                       identical wherever the user clicks. */
+                    onCancelPlaybackPrep={handleStop}
+                    /* Nonzero while J/L shuttling — renders the "◀◀ 4×" HUD badge. */
+                    shuttleRate={shuttleRate}
+                    /* Flashed briefly when the persistent playback speed changes. */
+                    playbackRateHud={rateHud}
+                    useWebCodecs={localPlayer === "mediabunny" && !webCodecsFallbackForImport}
+                    onMediaError={(msg) => {
+                      // MediaBunnyPlayer prefixes codec-incompatibility errors
+                      // with `[WEBCODECS_UNSUPPORTED]` — that's our signal to
+                      // transparently kick off ffmpeg prep for THIS import and
+                      // swap the Monitor to LocalMediaPlayer pointed at the
+                      // prepared copy. The Settings toggle stays on for next time.
+                      if (msg.startsWith("[WEBCODECS_UNSUPPORTED]") && localFilePath && metadata) {
+                        // Guard against double-fire: MediaBunnyPlayer can emit
+                        // two unsupported errors (video AND audio track failing
+                        // canDecode() back-to-back). Without this check the
+                        // second one starts a second ffmpeg prep that races the
+                        // first for the same cache output path.
+                        if (playbackPrepBusy || webCodecsFallbackForImport) {
+                          return;
+                        }
+                        // Quiet info-level state change. The pipeline log line
+                        // below + the existing "Preparing playback copy" banner
+                        // already communicate this — a notification-popover
+                        // toast on top of those is noisy. If prep then FAILS,
+                        // the catch block down in runPlaybackPrep already
+                        // surfaces an error toast.
+                        appendLog("warn", "media",
+                          `${msg.replace("[WEBCODECS_UNSUPPORTED]", "WebCodecs doesn't support")} — falling back to ffmpeg prep.`);
+                        setWebCodecsFallbackForImport(true);
+                        // Reuse the same prep pipeline. seq guards against the
+                        // user switching sources before prep finishes.
+                        const seq = sourceSeqRef.current;
+                        void runPlaybackPrep(localFilePath, !!metadata.vcodec, metadata.duration, seq);
+                        return;
+                      }
 
-                // Web-source playback fallback (r80): delegate to the state
-                // machine. When it's mid-stream it logs, shows the toast, and
-                // transitions streaming → downloading (exactly once — the
-                // double-download race is gone) and returns true. Any other
-                // state returns false → fall through to the generic error.
-                if (webOnMediaError(msg)) return;
+                      // Native <video> failed on a local ORIGINAL (msg is NOT the
+                      // WebCodecs marker above). The smart-selection routes friendly
+                      // codecs (h264/aac/mp4) to the native path assuming asset://
+                      // <video> will load them — but that isn't guaranteed (large
+                      // files can log MEDIA_ERR_SRC_NOT_SUPPORTED + "duration 0.0s"
+                      // and never load). Fall back to MediaBunnyPlayer, which reads
+                      // the file via fetch(asset://) + ranged reads and bypasses the
+                      // <video> media loader that just failed. If mediabunny ALSO
+                      // can't decode it emits [WEBCODECS_UNSUPPORTED], which the
+                      // branch above turns into an ffmpeg transcode — giving the full
+                      // native → mediabunny → transcode chain.
+                      //
+                      // Guards keep this from looping or firing on the transcode
+                      // path: it requires localPlayer==="native" (the transcode path
+                      // leaves localPlayer at "mediabunny" and only flips
+                      // webCodecsFallbackForImport), and both !nativeFallbackTried and
+                      // !webCodecsFallbackForImport, so a second failure — whether of
+                      // the mediabunny attempt or of a prepped transcode copy — falls
+                      // through to the terminal error below instead of retrying.
+                      if (
+                        sourceKind === "file"
+                        && localPlayer === "native"
+                        && localFilePath
+                        && !nativeFallbackTried
+                        && !playbackPrepBusy
+                        && !webCodecsFallbackForImport
+                      ) {
+                        setNativeFallbackTried(true);
+                        setLocalPlayer("mediabunny");
+                        appendLog("warn", "media",
+                          "Native <video> couldn't load this file — decoding in-app via mediabunny.");
+                        return;
+                      }
 
-                appendLog("err", "media", msg);
-                pushNotification("error", "Playback error", msg);
-              }}
-              toast={toast}
-              onToastDismiss={() => setToast(null)}
-              onPlayerTimeUpdate={onPlayerTimeUpdate}
-              onPlayerStateChange={onPlayerStateChange}
-              onPlayerReady={onPlayerReady}
-              onSurfaceClick={onPlayToggle}
-              /* On-video captions (the transport CC toggle). Driven by the
-                 active transcript + playhead so they work for any source. */
-              transcriptPath={activeTranscript?.path ?? null}
-              transcriptReloadToken={transcriptArrivedTick}
-              fps={fps}
-              captionsOn={captionsOn}
-              /* User-tunable caption look (Settings → Captions). r82: no sync
-                 offset — the audio-master clock keeps captions on the heard
-                 audio across every path. */
-              captionStyle={{
-                sizePx: defaults.captionSizePx,
-                font: defaults.captionFont,
-                bgOpacity: defaults.captionBgOpacity,
-                color: defaults.captionColor,
-              }}
-              /* Type-a-timecode HUD: digits build this string, Return snaps. */
-              tcOverlay={tcOverlay}
-              /* Review drawing annotations — draft while drawing, else the
-                 saved one being viewed; with neither, Monitor's proximity
-                 fade picks from the saved list as the playhead passes. */
-              annotation={annStrokes}
-              annotationDrawing={annDrawing}
-              proximityAnnotations={!annDrawing && !annotationDisplay ? reviewAnnotations : undefined}
-              onAnnotationChange={onReviewDraftChange}
-              onAnnotationDismiss={annPinned ? () => setAnnotationDisplay(null) : undefined}
-              annotationLabelMode={annDrawing && reviewLabelMode}
-              annotationLabelColor={annLabelColor}
-            />
-            <Transport
-              status={status}
-              isPlaying={isPlaying}
-              fps={fps}
-              durationTc={durationTc}
-              /* Green only when captions are actually on-screen (toggled on
-                 AND a transcript is loaded), not just when the flag is set. */
-              captionsOn={captionsActive}
-              snapshotBusy={snapshotBusy}
-              canSnapshot={status === "loaded" || status === "exporting" || status === "success"}
-              volume={volume}
-              muted={muted}
-              playbackRate={playbackRate}
-              playbackRateSupported={rateSupported}
-              onPlayToggle={onPlayToggle}
-              onStep={onStep}
-              onMarkIn={onMarkIn}
-              onMarkOut={onMarkOut}
-              onClearMarks={onClearMarks}
-              onToggleCaptions={onToggleCaptions}
-              onSnapshot={handleSnapshot}
-              onVolumeChange={handleVolumeChange}
-              onMutedChange={handleMutedChange}
-              onPlaybackRateChange={handlePlaybackRateChange}
-            />
-            <Timeline
-              status={status}
-              durationFrames={durationFrames}
-              inFrames={inFrames}
-              outFrames={outFrames}
-              fps={fps}
-              queuedRanges={clipQueue.map((c) => ({
-                id: c.id,
-                inFrames: c.inFrames,
-                outFrames: c.outFrames,
-                status: c.status,
-              }))}
-              commentMarkers={reviewMarkers}
-              chapterMarkers={chapterMarkers}
-              reviewRangeDraft={reviewRangeDraft}
-              filmstripPath={sourceKind === "file" ? (playbackPath ?? localFilePath) : null}
-              waveformOn={waveformVisible}
-              speakerLanes={speakerLaneData}
-              ghosts={coGhostMarkers}
-              onSeek={onSeek}
-            />
-            {/* Status line under the timeline. Stays present so setting or
-                clearing a mark doesn't cause the canvas above to reflow. */}
-            <div className="cp-timeline-hint">
-              {(status === "loaded" || status === "success") ? (
-                inFrames == null && outFrames == null
-                  ? `No marks set — export will grab the entire clip${exportOpts.format === "audio" ? " as MP3" : ""}.`
-                  : inFrames != null && outFrames == null
-                    ? "Mark out (O) to set the end of the selection."
-                    : inFrames == null && outFrames != null
-                      ? "Mark in (I) to set the start of the selection."
-                      : "Selection set — adjust with I / O or drag the playhead."
-              ) : status === "empty" && bindingsFor("app.shortcuts", keybindings)[0]
-                ? `Press ${formatCombo(bindingsFor("app.shortcuts", keybindings)[0])} for keyboard shortcuts.`
-                : ""}
+                      // Web-source playback fallback (r80): delegate to the state
+                      // machine. When it's mid-stream it logs, shows the toast, and
+                      // transitions streaming → downloading (exactly once — the
+                      // double-download race is gone) and returns true. Any other
+                      // state returns false → fall through to the generic error.
+                      if (webOnMediaError(msg)) return;
+
+                      appendLog("err", "media", msg);
+                      pushNotification("error", "Playback error", msg);
+                    }}
+                    toast={toast}
+                    onToastDismiss={() => setToast(null)}
+                    onPlayerTimeUpdate={onPlayerTimeUpdate}
+                    onPlayerStateChange={onPlayerStateChange}
+                    onPlayerReady={onPlayerReady}
+                    onSurfaceClick={onPlayToggle}
+                    /* On-video captions (the transport CC toggle). Driven by the
+                       active transcript + playhead so they work for any source. */
+                    transcriptPath={activeTranscript?.path ?? null}
+                    transcriptReloadToken={transcriptArrivedTick}
+                    fps={fps}
+                    captionsOn={captionsOn}
+                    /* User-tunable caption look (Settings → Captions). r82: no sync
+                       offset — the audio-master clock keeps captions on the heard
+                       audio across every path. */
+                    captionStyle={{
+                      sizePx: defaults.captionSizePx,
+                      font: defaults.captionFont,
+                      bgOpacity: defaults.captionBgOpacity,
+                      color: defaults.captionColor,
+                    }}
+                    /* Type-a-timecode HUD: digits build this string, Return snaps. */
+                    tcOverlay={tcOverlay}
+                    /* Review drawing annotations — draft while drawing, else the
+                       saved one being viewed; with neither, Monitor's proximity
+                       fade picks from the saved list as the playhead passes. */
+                    annotation={annStrokes}
+                    annotationDrawing={annDrawing}
+                    proximityAnnotations={!annDrawing && !annotationDisplay ? reviewAnnotations : undefined}
+                    onAnnotationChange={onReviewDraftChange}
+                    onAnnotationDismiss={annPinned ? () => setAnnotationDisplay(null) : undefined}
+                    annotationLabelMode={annDrawing && reviewLabelMode}
+                    annotationLabelColor={annLabelColor}
+                  />
+                  <Transport
+                    status={status}
+                    isPlaying={isPlaying}
+                    fps={fps}
+                    durationTc={durationTc}
+                    /* Green only when captions are actually on-screen (toggled on
+                       AND a transcript is loaded), not just when the flag is set. */
+                    captionsOn={captionsActive}
+                    snapshotBusy={snapshotBusy}
+                    canSnapshot={status === "loaded" || status === "exporting" || status === "success"}
+                    volume={volume}
+                    muted={muted}
+                    playbackRate={playbackRate}
+                    playbackRateSupported={rateSupported}
+                    onPlayToggle={onPlayToggle}
+                    onStep={onStep}
+                    onMarkIn={onMarkIn}
+                    onMarkOut={onMarkOut}
+                    onClearMarks={onClearMarks}
+                    onToggleCaptions={onToggleCaptions}
+                    onSnapshot={handleSnapshot}
+                    onVolumeChange={handleVolumeChange}
+                    onMutedChange={handleMutedChange}
+                    onPlaybackRateChange={handlePlaybackRateChange}
+                  />
+                  <Timeline
+                    status={status}
+                    durationFrames={durationFrames}
+                    inFrames={inFrames}
+                    outFrames={outFrames}
+                    fps={fps}
+                    queuedRanges={clipQueue.map((c) => ({
+                      id: c.id,
+                      inFrames: c.inFrames,
+                      outFrames: c.outFrames,
+                      status: c.status,
+                    }))}
+                    commentMarkers={reviewMarkers}
+                    chapterMarkers={chapterMarkers}
+                    reviewRangeDraft={reviewRangeDraft}
+                    filmstripPath={sourceKind === "file" ? (playbackPath ?? localFilePath) : null}
+                    waveformOn={waveformVisible}
+                    speakerLanes={speakerLaneData}
+                    ghosts={coGhostMarkers}
+                    onSeek={onSeek}
+                  />
+                  {/* Status line under the timeline. Stays present so setting or
+                      clearing a mark doesn't cause the canvas above to reflow. */}
+                  <div className="cp-timeline-hint">
+                    {(status === "loaded" || status === "success") ? (
+                      inFrames == null && outFrames == null
+                        ? `No marks set — export will grab the entire clip${exportOpts.format === "audio" ? " as MP3" : ""}.`
+                        : inFrames != null && outFrames == null
+                          ? "Mark out (O) to set the end of the selection."
+                          : inFrames == null && outFrames != null
+                            ? "Mark in (I) to set the start of the selection."
+                            : "Selection set — adjust with I / O or drag the playhead."
+                    ) : status === "empty" && bindingsFor("app.shortcuts", keybindings)[0]
+                      ? `Press ${formatCombo(bindingsFor("app.shortcuts", keybindings)[0])} for keyboard shortcuts.`
+                      : ""}
+                  </div>
+                </div>
+
+                <LogsPanel
+                  open={logsOpen}
+                  onToggle={() => setLogsOpen((p) => !p)}
+                  status={status}
+                  progress={progress}
+                  lines={logs}
+                  onClear={handleClearLogs}
+                  onCopy={handleCopyLogs}
+                  onExportDiagnostics={handleExportDiagnostics}
+                  transcriptState={transcriptState}
+                  transcriptProgress={transcriptProgress}
+                  transcriptPhase={transcriptPhase}
+                  transcriptEngine={defaults.transcriptionEngine === "parakeet" ? "parakeet" : "whisper"}
+                  metadataLoading={metadataLoading}
+                  playbackPrepBusy={playbackPrepBusy}
+                  canStop={status === "exporting" || transcriptState === "running" || playbackPrepBusy}
+                  onStop={handleStop}
+                />
+              </main>
+
+              {/* Queue is now a docked sibling of <main> inside .cp-body — when
+                  open it claims its own column and the main area reflows to
+                  give it room (Claude/OpenArt-style push panel), instead of
+                  sliding on top and obscuring the canvas.
+
+                  When the panel is popped out into its own native OS window
+                  (r44.B), this docked instance unmounts entirely — the user
+                  asked for "true detachment", so there's no docked placeholder.
+                  Re-docking happens when the floating window closes (Rust
+                  fires `panel:closed` → setPanelDetached(false)). */}
+              {!panelDetached && <QueueDrawer
+                open={queueOpen}
+                onClose={() => setQueueOpen(false)}
+                onPopOut={handlePopOutPanel}
+                queue={clipQueue}
+                fps={fps}
+                running={queueRunning}
+                hasFolder={!!exportOpts.folder}
+                onRemove={handleQueueRemove}
+                onClearAll={handleQueueClearAll}
+                onExportAll={handleExportQueue}
+                onStop={handleStop}
+                onRenameClip={handleQueueRename}
+                onRenameAll={handleQueueRenameAll}
+                transcriptPath={activeTranscript?.path ?? null}
+                transcriptOrigin={activeTranscript?.origin ?? "unknown"}
+                playheadAvailable={hasSource}
+                transcriptFps={fps}
+                onTranscriptSeek={(seconds) => {
+                  // Clamp to duration so a stale cue past the end doesn't put
+                  // the playhead in a no-man's-land that shows blank video.
+                  const r = Math.max(1, Math.round(fps));
+                  const targetFrame = Math.max(
+                    0,
+                    Math.min(durationFrames - 1, Math.floor(seconds * r)),
+                  );
+                  onSeek(targetFrame);
+                }}
+                transcriptArrivedTick={transcriptArrivedTick}
+                onClearTranscript={handleClearTranscript}
+                onLoadFromHistory={handleLoadFromHistory}
+                onRegenerateTranscript={handleGenerateTranscript}
+                regenerateBusy={transcriptState === "running"}
+                canRegenerate={hasSource && !!selectedModel?.downloaded}
+                onRedetectSpeakers={() => { void handleRediarize(); }}
+                canRedetect={hasSource && !!activeTranscript}
+                onImportTranscript={handleImportTranscript}
+                sourceKind={sourceKind}
+                onFixCaptionTiming={handleFixCaptionTiming}
+                transcriptHasSource={hasSource}
+                /* Inline cue editing rewrote the SRT in place — the arrived tick is
+                   the existing "same path, new contents" signal (see the speaker-
+                   lanes effect), so every reader of the file re-reads: the caption
+                   overlay, AI summary, speaker lanes, and the viewer itself. */
+                onTranscriptEdited={() => setTranscriptArrivedTick((n) => n + 1)}
+                aiModelId={defaults.llmSummarizationModel}
+                aiStyle={{ format: defaults.summaryFormat, length: defaults.summaryLength }}
+                onOpenAiSettings={() => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); }}
+                chapterSourceKey={reviewSourceKey}
+                chapterDurationSec={sourceDurationSec}
+                reviewSourceKey={reviewSourceKey}
+                reviewSourceTitle={metadata?.title ?? null}
+                reviewDrawActive={reviewDrawActive}
+                reviewDraft={reviewDraft}
+                onToggleReviewDraw={() => {
+                  setAnnotationDisplay(null);
+                  // Pen click while the label tool is active = switch back to the
+                  // pen (stay in draw mode); otherwise toggle draw mode itself.
+                  if (reviewDrawActive && reviewLabelMode) { setReviewLabelMode(false); return; }
+                  setReviewLabelMode(false);
+                  setReviewDrawActive((on) => { if (on) { setReviewDraft(null); clearDraftHistory(); } return !on; });
+                }}
+                reviewLabelActive={reviewLabelMode}
+                onToggleReviewLabel={() => {
+                  setAnnotationDisplay(null);
+                  // Label click enters draw mode if needed; inside draw mode it
+                  // toggles between the label tool and the pen.
+                  if (!reviewDrawActive) { setReviewDrawActive(true); setReviewLabelMode(true); return; }
+                  setReviewLabelMode((v) => !v);
+                }}
+                onReviewDraftConsumed={() => { setReviewDraft(null); clearDraftHistory(); setReviewDrawActive(false); setReviewLabelMode(false); }}
+                onShowAnnotation={(a, color) => { setReviewDrawActive(false); setReviewLabelMode(false); setReviewDraft(null); clearDraftHistory(); setAnnotationDisplay(a); setAnnotationDisplayColor(color ?? null); }}
+                onOpenReviewSource={handleOpenReviewSource}
+                onReviewRangeDraft={setReviewRangeDraft}
+                onRegisterRangeHotkeys={registerReviewRangeKeys}
+                reviewSessionActive={coSessionActive}
+                reviewSessionDoc={sessionDoc}
+                onReviewSessionOp={postSessionOp}
+              />}
             </div>
           </div>
-
-          <LogsPanel
-            open={logsOpen}
-            onToggle={() => setLogsOpen((p) => !p)}
-            status={status}
-            progress={progress}
-            lines={logs}
-            onClear={handleClearLogs}
-            onCopy={handleCopyLogs}
-            onExportDiagnostics={handleExportDiagnostics}
-            transcriptState={transcriptState}
-            transcriptProgress={transcriptProgress}
-            transcriptPhase={transcriptPhase}
-            transcriptEngine={defaults.transcriptionEngine === "parakeet" ? "parakeet" : "whisper"}
-            metadataLoading={metadataLoading}
-            playbackPrepBusy={playbackPrepBusy}
-            canStop={status === "exporting" || transcriptState === "running" || playbackPrepBusy}
-            onStop={handleStop}
-          />
-        </main>
-
-        {/* Queue is now a docked sibling of <main> inside .cp-body — when
-            open it claims its own column and the main area reflows to
-            give it room (Claude/OpenArt-style push panel), instead of
-            sliding on top and obscuring the canvas.
-
-            When the panel is popped out into its own native OS window
-            (r44.B), this docked instance unmounts entirely — the user
-            asked for "true detachment", so there's no docked placeholder.
-            Re-docking happens when the floating window closes (Rust
-            fires `panel:closed` → setPanelDetached(false)). */}
-        {!panelDetached && <QueueDrawer
-          open={queueOpen}
-          onClose={() => setQueueOpen(false)}
-          onPopOut={handlePopOutPanel}
-          queue={clipQueue}
-          fps={fps}
-          running={queueRunning}
-          hasFolder={!!exportOpts.folder}
-          onRemove={handleQueueRemove}
-          onClearAll={handleQueueClearAll}
-          onExportAll={handleExportQueue}
-          onStop={handleStop}
-          onRenameClip={handleQueueRename}
-          onRenameAll={handleQueueRenameAll}
-          transcriptPath={activeTranscript?.path ?? null}
-          transcriptOrigin={activeTranscript?.origin ?? "unknown"}
-          playheadAvailable={hasSource}
-          transcriptFps={fps}
-          onTranscriptSeek={(seconds) => {
-            // Clamp to duration so a stale cue past the end doesn't put
-            // the playhead in a no-man's-land that shows blank video.
-            const r = Math.max(1, Math.round(fps));
-            const targetFrame = Math.max(
-              0,
-              Math.min(durationFrames - 1, Math.floor(seconds * r)),
-            );
-            onSeek(targetFrame);
-          }}
-          transcriptArrivedTick={transcriptArrivedTick}
-          onClearTranscript={handleClearTranscript}
-          onLoadFromHistory={handleLoadFromHistory}
-          onRegenerateTranscript={handleGenerateTranscript}
-          regenerateBusy={transcriptState === "running"}
-          canRegenerate={hasSource && !!selectedModel?.downloaded}
-          onRedetectSpeakers={() => { void handleRediarize(); }}
-          canRedetect={hasSource && !!activeTranscript}
-          onImportTranscript={handleImportTranscript}
-          sourceKind={sourceKind}
-          onFixCaptionTiming={handleFixCaptionTiming}
-          transcriptHasSource={hasSource}
-          /* Inline cue editing rewrote the SRT in place — the arrived tick is
-             the existing "same path, new contents" signal (see the speaker-
-             lanes effect), so every reader of the file re-reads: the caption
-             overlay, AI summary, speaker lanes, and the viewer itself. */
-          onTranscriptEdited={() => setTranscriptArrivedTick((n) => n + 1)}
-          aiModelId={defaults.llmSummarizationModel}
-          aiStyle={{ format: defaults.summaryFormat, length: defaults.summaryLength }}
-          onOpenAiSettings={() => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); }}
-          chapterSourceKey={reviewSourceKey}
-          chapterDurationSec={sourceDurationSec}
-          reviewSourceKey={reviewSourceKey}
-          reviewSourceTitle={metadata?.title ?? null}
-          reviewDrawActive={reviewDrawActive}
-          reviewDraft={reviewDraft}
-          onToggleReviewDraw={() => {
-            setAnnotationDisplay(null);
-            // Pen click while the label tool is active = switch back to the
-            // pen (stay in draw mode); otherwise toggle draw mode itself.
-            if (reviewDrawActive && reviewLabelMode) { setReviewLabelMode(false); return; }
-            setReviewLabelMode(false);
-            setReviewDrawActive((on) => { if (on) { setReviewDraft(null); clearDraftHistory(); } return !on; });
-          }}
-          reviewLabelActive={reviewLabelMode}
-          onToggleReviewLabel={() => {
-            setAnnotationDisplay(null);
-            // Label click enters draw mode if needed; inside draw mode it
-            // toggles between the label tool and the pen.
-            if (!reviewDrawActive) { setReviewDrawActive(true); setReviewLabelMode(true); return; }
-            setReviewLabelMode((v) => !v);
-          }}
-          onReviewDraftConsumed={() => { setReviewDraft(null); clearDraftHistory(); setReviewDrawActive(false); setReviewLabelMode(false); }}
-          onShowAnnotation={(a, color) => { setReviewDrawActive(false); setReviewLabelMode(false); setReviewDraft(null); clearDraftHistory(); setAnnotationDisplay(a); setAnnotationDisplayColor(color ?? null); }}
-          onOpenReviewSource={handleOpenReviewSource}
-          onReviewRangeDraft={setReviewRangeDraft}
-          onRegisterRangeHotkeys={registerReviewRangeKeys}
-          reviewSessionActive={coSessionActive}
-          reviewSessionDoc={sessionDoc}
-          onReviewSessionOp={postSessionOp}
-        />}
+        </div>
       </div>
 
       <SettingsModal

@@ -20,6 +20,7 @@ export type KeyActionId =
   | "mark.in" | "mark.out" | "mark.clear" | "mark.gotoIn" | "mark.gotoOut"
   | "review.rangeIn" | "review.rangeOut"
   | "src.fetch" | "export.clip" | "queue.add" | "queue.toggle"
+  | "view.home" | "view.clip"
   | "view.logs" | "app.settings" | "app.palette" | "app.shortcuts"
   | "edit.undo" | "edit.redo";
 
@@ -73,6 +74,10 @@ export const KEY_ACTIONS: KeyAction[] = [
   { id: "export.clip",     label: "Export clip",           group: "Source & export", defaults: ["alt+e"],           global: false },
   { id: "queue.add",       label: "Add selection to queue",group: "Source & export", defaults: ["mod+shift+a"],     global: true },
   { id: "queue.toggle",    label: "Toggle queue panel",    group: "View",      defaults: ["mod+shift+q"],           global: true },
+  // Top-level view switch (nav rail): Home = the Library, Clip = the editor.
+  // Global like the other ⌘-chords — navigation must work from a text field.
+  { id: "view.home",       label: "Go to Home (Library)",  group: "View",      defaults: ["mod+1"],                 global: true },
+  { id: "view.clip",       label: "Go to Clip view",       group: "View",      defaults: ["mod+2"],                 global: true },
   { id: "view.logs",       label: "Toggle pipeline log",   group: "View",      defaults: ["mod+\\"],                global: true },
   { id: "app.settings",    label: "Open / close settings", group: "App",       defaults: ["mod+,"],                 global: true },
   { id: "app.palette",     label: "Command palette",       group: "App",       defaults: ["mod+k"],                 global: true },

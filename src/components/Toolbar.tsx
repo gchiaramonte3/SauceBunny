@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
-import { IconLink, IconClipboard, IconSettings, IconImport, IconPanelRight, IconPanelLeft } from "./Icons";
+import { IconLink, IconClipboard, IconImport, IconPanelRight, IconPanelLeft } from "./Icons";
 import { NotificationBell, type Notif } from "./NotificationBell";
 import { CoReviewPopover } from "./CoReviewPopover";
 import { RecentSources } from "./RecentSources";
@@ -29,7 +29,6 @@ type Props = {
   onToggleSidebar: () => void;
   hasSource: boolean;
   status: AppStatus;
-  onOpenSettings: () => void;
   notifications: Notif[];
   onMarkAllRead: () => void;
   onClearNotifications: () => void;
@@ -55,7 +54,7 @@ export function Toolbar({
   recentSources, onOpenRecent, onRemoveRecent, onClearRecents,
   onToggleQueue, queueCount, queueOpen,
   sidebarOpen, onToggleSidebar,
-  hasSource, status, onOpenSettings,
+  hasSource, status,
   notifications, onMarkAllRead, onClearNotifications, onDismissNotification,
   coSession, coLocalSource, coScreening, onCoToggleScreening, onCoStart, onCoJoin, onCoLeave,
 }: Props) {
@@ -205,15 +204,14 @@ export function Toolbar({
         onJoin={onCoJoin}
         onLeave={onCoLeave}
       />
+      {/* The Settings gear lives in the nav rail now (NavRail.tsx) — the
+          toolbar ends with the bell so the rail owns app-level chrome. */}
       <NotificationBell
         notifications={notifications}
         onMarkAllRead={onMarkAllRead}
         onClearAll={onClearNotifications}
         onDismiss={onDismissNotification}
       />
-      <button type="button" className="btn-icon" title="Settings (⌘,)" aria-label="Settings" onClick={onOpenSettings}>
-        <IconSettings size={15} />
-      </button>
     </header>
   );
 }

@@ -73,6 +73,8 @@ export type CommandDeps = {
   captionsOn: boolean;
   /** Current persistent playback speed (0.5–2×) — shown in the rate commands. */
   playbackRate: number;
+  /** Active top-level view ("home" | "clip") — dims the switch you're on. */
+  activeView: string;
   logsOpen: boolean;
   clipQueueLength: number;
   queueRunning: boolean;
@@ -111,6 +113,8 @@ export type CommandDeps = {
   handleDownloadCaptions: () => void;
   handleStop: () => void;
   onProbeDiarizer: () => void;
+  /** Top-level view switch (nav rail / ⌘1 / ⌘2) — state, not a router. */
+  onNavigateView: (view: "home" | "clip") => void;
   /** Opens the ⌘/ shortcut cheat-sheet (ShortcutSheet). */
   onShowShortcuts: () => void;
   // ── scoped undo/redo (lib/undo.ts) ──
@@ -259,6 +263,18 @@ export function buildCommands(d: CommandDeps): Command[] {
       keywords: ["fluidaudio", "speakers", "swift"],
       run: () => d.onProbeDiarizer() },
     // ── View ────────────────────────────────────────────────────
+    // Top-level view switch — same ids as the KEY_ACTIONS entries, so the
+    // hotkey literals below are overlaid with the live bindings in App.
+    { id: "view.home", label: "Go to Home (Library)", group: "View",
+      hotkey: "⌘1", description: "Browse your library",
+      keywords: ["library", "browse", "nav"],
+      disabled: d.activeView === "home",
+      run: () => d.onNavigateView("home") },
+    { id: "view.clip", label: "Go to Clip view", group: "View",
+      hotkey: "⌘2", description: "Back to the player and editor",
+      keywords: ["editor", "player", "monitor", "nav"],
+      disabled: d.activeView === "clip",
+      run: () => d.onNavigateView("clip") },
     { id: "view.captions", label: d.captionsOn ? "Hide captions" : "Show captions",
       group: "View", disabled: !d.hasSource,
       run: () => d.setCaptionsOn((p) => !p) },

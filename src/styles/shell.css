@@ -77,6 +77,10 @@
 
 /* ============================================================
    APP BODY LAYOUT
+   .cp-body is a flex ROW of [nav rail | view container]. The view
+   container holds BOTH top-level views (Home + Clip); the inactive
+   one is hidden with [hidden] — never unmounted — so playback and
+   running jobs survive switching (QueueDrawer keep-alive pattern).
    ============================================================ */
 .cp-body {
   flex: 1;
@@ -84,6 +88,30 @@
   min-height: 0;
   /* Darker gutter so the rounded panels read as floating cards (Louper feel). */
   background: var(--bg-0);
+}
+.cp-views {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+.cp-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+/* Keep-alive hiding — mirror of .cp-tab-keep[hidden] in queue-drawer.css.
+   The [hidden] attribute also drops the subtree from the a11y tree and
+   makes TranscriptViewer's ⌘F/⌘G closest("[hidden]") gate inert on Home. */
+.cp-view[hidden] { display: none; }
+/* The Clip view's own row — sidebar | monitor | drawer (what .cp-body was
+   before the rail landed). Toolbar sits above it inside .cp-view-clip. */
+.cp-clip-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
 }
 .cp-main {
   flex: 1;

@@ -1,0 +1,127 @@
+/* Left navigation rail (NavRail.tsx) + the Home/Library stub (LibraryView.tsx). */
+/* ============================================================
+   NAV RAIL — slim vertical icon rail on the window's left edge.
+   Sits inside .cp-body (below the titlebar, so it never collides
+   with the macOS traffic lights). Hidden entirely while co-review
+   screening mode is on — see screening.css.
+   ============================================================ */
+.cp-nav {
+  width: 56px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) 0;
+  background: var(--bg-1);
+  border-right: 1px solid var(--line-1);
+}
+
+/* Logo button — clicking the bunny goes Home. */
+.cp-nav-logo {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  margin-bottom: var(--s-1);
+  border: none;
+  background: none;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.cp-nav-logo img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: var(--r-md);
+}
+.cp-nav-logo:hover { transform: scale(1.08); }
+.cp-nav-logo:active { transform: scale(1.0); }
+
+/* One rail item — icon button with an active fill + accent left edge. */
+.cp-nav-item {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: var(--r-md);
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.cp-nav-item:hover {
+  background: rgba(255,255,255,0.05);
+  color: var(--fg-1);
+}
+.cp-nav-item.active {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+/* Accent edge rides the rail's left edge (the 8px gutter between the
+   40px item and the 56px rail), so it reads as "you are here". */
+.cp-nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  border-radius: 0 2px 2px 0;
+  background: var(--ella-green);
+}
+
+.cp-nav-spacer { flex: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-nav-logo { transition: none; }
+  .cp-nav-logo:hover { transform: none; }
+}
+
+/* ============================================================
+   LIBRARY VIEW (Home) — phase-1 empty-state stub, replaced in
+   phase 3. Same floating-card treatment as .cp-main so the two
+   views read as siblings.
+   ============================================================ */
+.cp-library {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  margin: var(--s-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-xl);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.cp-library-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-4);
+  padding: var(--s-10);
+  text-align: center;
+}
+.cp-library-title {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--fg-1);
+}
+.cp-library-hint {
+  margin: 0;
+  max-width: 400px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg-4);
+}
