@@ -3,11 +3,13 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { invoke } from "@tauri-apps/api/core";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { GenerateButton } from "./GenerateButton";
+import { StatefulButton } from "./StatefulButton";
 import {
   IconFilm, IconCaptions, IconReveal,
   IconDownload, IconSparkles, IconPlus,
 } from "./Icons";
 import type { AppStatus, ExportOpts, FormatId, Metadata, RecentClip } from "../types";
+import type { StatefulPhase } from "../lib/stateful-phase";
 import { isValidTc, normalizeTc, tcToFrames } from "../lib/timecode";
 import { formatRelative, formatUploadDate, formatViewCount } from "../lib/upload-date";
 import { sanitizeFilename } from "../lib/filename";
@@ -24,6 +26,10 @@ type Props = {
   setExportOpts: (next: ExportOpts) => void;
   recents: RecentClip[];
   onExport: () => void;
+  /** Animated Export-button phase (loading → success/error flash). */
+  exportPhase: StatefulPhase;
+  /** Returns the Export button to idle after its success/error flash. */
+  onExportResolved: () => void;
   onReveal: () => void;
   onPickRecent: (r: RecentClip) => void;
   /** Purges the recent-exports list. The actual files are NOT deleted. */
@@ -38,6 +44,10 @@ type Props = {
   /** Whisper transcript */
   onGenerateTranscript: () => void;
   transcriptState: "idle" | "running" | "done" | "error";
+  /** Transient run outcome for the GenerateButton flash (check/cross). */
+  transcriptResolution: "success" | "error" | null;
+  /** Clears the flash after it plays. */
+  onTranscriptResolved: () => void;
   transcriptError: string | null;
   transcriptProgress: number;
   whisperModelReady: boolean;
@@ -133,10 +143,11 @@ function extFromUrl(url: string): string {
 export function Sidebar(props: Props) {
   const {
     status, metadata, exportOpts, setExportOpts,
-    recents, onExport, onReveal, onPickRecent, onClearRecents,
+    recents, onExport, exportPhase, onExportResolved, onReveal, onPickRecent, onClearRecents,
     onAddToQueue, queueCount, queueRunning, onExportQueue,
     onDownloadCaptions, captionsState, captionsError,
-    onGenerateTranscript, transcriptState, transcriptError, transcriptProgress,
+    onGenerateTranscript, transcriptState, transcriptResolution, onTranscriptResolved,
+    transcriptError, transcriptProgress,
     transcriptPhase,
     whisperModelReady, whisperModelLabel, onOpenTranscriptionSettings,
     onOpenGeneralSettings,
@@ -402,6 +413,8 @@ export function Sidebar(props: Props) {
                     className="cp-source-action"
                     loading={transcriptState === "running"}
                     progress={transcriptProgress}
+                    resolution={transcriptResolution}
+                    onResolved={onTranscriptResolved}
                     onClick={onGenerateTranscript}
                     disabled={transcriptState === "running"}
                     title={`Local Whisper transcription · model: ${whisperModelLabel ?? "?"}`}
@@ -617,21 +630,22 @@ export function Sidebar(props: Props) {
                   {queueRunning ? "Exporting…" : `Export ${queueCount} ${queueCount === 1 ? "clip" : "clips"}`}
                 </button>
               ) : (
-                <button
-                  className="btn btn-primary cp-export-cta"
-                  style={{ flex: 1, height: 36, fontSize: 13 }}
+                <StatefulButton
+                  className="btn btn-primary cp-export-cta cp-sbtn-export"
+                  phase={exportPhase}
                   onClick={onExport}
+                  onResolved={onExportResolved}
                   disabled={!canExport}
+                  loadingLabel="Exporting…"
                   title={metadataLoading ? "Waiting for yt-dlp to resolve stream metadata…" : undefined}
-                >
-                  {exporting
-                    ? "Exporting…"
-                    : metadataLoading
-                    ? "Resolving metadata…"
-                    : hasMarks
-                    ? "Export clip"
-                    : `Download entire ${exportOpts.format === "audio" ? "MP3" : "clip"}`}
-                </button>
+                  idleContent={
+                    metadataLoading
+                      ? "Resolving metadata…"
+                      : hasMarks
+                      ? "Export clip"
+                      : `Download entire ${exportOpts.format === "audio" ? "MP3" : "clip"}`
+                  }
+                />
               )}
               {!success && hasMarks && (
                 <button

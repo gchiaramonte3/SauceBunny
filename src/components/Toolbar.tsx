@@ -4,7 +4,9 @@ import { IconLink, IconClipboard, IconImport, IconPanelRight, IconPanelLeft } fr
 import { NotificationBell, type Notif } from "./NotificationBell";
 import { CoReviewPopover } from "./CoReviewPopover";
 import { RecentSources } from "./RecentSources";
+import { StatefulButton } from "./StatefulButton";
 import type { RecentSource } from "../lib/recent-sources";
+import type { StatefulPhase } from "../lib/stateful-phase";
 import type { AppStatus } from "../types";
 import type { SessionState } from "../bindings/SessionState";
 
@@ -29,6 +31,11 @@ type Props = {
   onToggleSidebar: () => void;
   hasSource: boolean;
   status: AppStatus;
+  /** Animated Fetch-button phase (loading → success/error flash). Computed in
+   *  App via fetchButtonPhase; the toolbar just renders it. */
+  fetchPhase: StatefulPhase;
+  /** Returns the Fetch button to idle after its success/error flash. */
+  onFetchResolved: () => void;
   notifications: Notif[];
   onMarkAllRead: () => void;
   onClearNotifications: () => void;
@@ -54,7 +61,7 @@ export function Toolbar({
   recentSources, onOpenRecent, onRemoveRecent, onClearRecents,
   onToggleQueue, queueCount, queueOpen,
   sidebarOpen, onToggleSidebar,
-  hasSource, status,
+  hasSource, status, fetchPhase, onFetchResolved,
   notifications, onMarkAllRead, onClearNotifications, onDismissNotification,
   coSession, coLocalSource, coScreening, onCoToggleScreening, onCoStart, onCoJoin, onCoLeave,
 }: Props) {
@@ -149,7 +156,11 @@ export function Toolbar({
         />
       </div>
 
-      {hasSource ? (
+      {/* Clear once a source is loaded AND the Fetch flash has settled — while
+          the flash plays (phase !== idle) the StatefulButton stays mounted so
+          its loading/success/error animation is visible even though the
+          optimistic mount already flipped `hasSource` true. */}
+      {hasSource && fetchPhase === "idle" ? (
         <button
           type="button"
           className="btn btn-ghost"
@@ -160,15 +171,15 @@ export function Toolbar({
           Clear
         </button>
       ) : (
-        <button
-          type="button"
-          className="btn btn-ghost"
+        <StatefulButton
+          className="btn btn-ghost cp-sbtn-fetch"
+          phase={fetchPhase}
+          idleContent="Fetch"
+          loadingLabel="Resolving…"
           onClick={() => onFetch()}
-          disabled={fetching || !display}
-          style={{ minWidth: 86 }}
-        >
-          {fetching ? "Resolving…" : "Fetch"}
-        </button>
+          onResolved={onFetchResolved}
+          disabled={!display}
+        />
       )}
       {/* Text+icon Import button — matches the Fetch/Clear button style
           so the toolbar has a single, consistent action grammar instead

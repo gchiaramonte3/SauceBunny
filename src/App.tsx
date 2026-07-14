@@ -31,6 +31,7 @@ import type {
 } from "./types";
 import { asLogTag } from "./types";
 import { formatError, isAppError } from "./lib/error-format";
+import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase";
 import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, subscribePlayhead } from "./lib/playhead-store";
 import { usePanelBus } from "./hooks/use-panel-bus";
 import { useWebPlayback } from "./hooks/use-web-playback";
@@ -439,6 +440,11 @@ export default function App() {
   const [metadata, setMetadata] = useState<Metadata | null>(null);
   const [status, setStatus] = useState<AppStatus>("empty");
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  // Animated toolbar-Fetch phase. The URL fetch mounts optimistically straight
+  // to status "loaded" (never "fetching"), so the button's loading → success/
+  // error flash rides this explicit state, set at handleFetch's lifecycle points.
+  // `fetchButtonPhase` folds status "fetching" (local imports) back in as loading.
+  const [fetchPhase, setFetchPhase] = useState<StatefulPhase>("idle");
   // YouTube source vs imported local file. Most paths key off this.
   const [sourceKind, setSourceKind] = useState<SourceKind>("youtube");
   const [localFilePath, setLocalFilePath] = useState<string | null>(null);
@@ -616,6 +622,10 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [jobId, setJobId] = useState<string | null>(null);
   const [resultPath, setResultPath] = useState<string | null>(null);
+  // Animated Export-button phase — loading while the clip job runs, then a
+  // success/error flash. Driven by the same clip-done event + local-export
+  // return paths that already move `status`; user cancel goes straight to idle.
+  const [exportPhase, setExportPhase] = useState<StatefulPhase>("idle");
 
   // ====== Captions / transcript ======
   const [captionsJobId, setCaptionsJobId] = useState<string | null>(null);
@@ -627,6 +637,10 @@ export default function App() {
   const [transcriptState, setTranscriptState] = useState<"idle" | "running" | "done" | "error">("idle");
   const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const [transcriptProgress, setTranscriptProgress] = useState(0);
+  // Transient run outcome for the GenerateButton flash (drawn check/cross),
+  // cleared by its onResolved. Separate from the persistent transcriptState
+  // "done"/"error" (which keeps labelling the idle button "· run again").
+  const [transcriptResolution, setTranscriptResolution] = useState<"success" | "error" | null>(null);
   /**
    * Current stage of the in-flight transcript pipeline. Reset to null
    * outside of a running job. The Sidebar phase indicator reads this
@@ -1178,6 +1192,7 @@ export default function App() {
           // Stay on "loaded" so the canvas video stays visible; the toast +
           // notification bell announce completion non-blockingly.
           setStatus("loaded");
+          setExportPhase("success"); // Export button → check flash
           setResultPath(e.payload.path);
           setProgress(0);
           const filename = e.payload.path.split("/").pop() ?? "Done.";
@@ -1204,12 +1219,14 @@ export default function App() {
           }
         } else if (e.payload.error === "Cancelled") {
           setStatus("loaded");
+          setExportPhase("idle"); // user cancel → straight to idle, no error flash
           setErrorDetail(null);
           setProgress(0);
           appendLog("warn", "ffmpeg", "Export cancelled");
           pushNotification("info", "Export cancelled", "");
         } else {
           setStatus("error");
+          setExportPhase("error"); // Export button → cross flash
           setErrorDetail(e.payload.error ?? "Export failed");
           // A yt-dlp export can be the first place stale-extractor breakage
           // surfaces (fetch worked off a cached/streaming path) — offer the
@@ -1264,6 +1281,7 @@ export default function App() {
         if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
         if (e.payload.success && e.payload.path) {
           setTranscriptState("done");
+          setTranscriptResolution("success"); // GenerateButton → check flash
           setTranscriptError(null);
           setTranscriptProgress(100);
           setTranscriptPhase(null);
@@ -1305,12 +1323,14 @@ export default function App() {
           // model, unreadable WAV, OOM) and must fall through to the error
           // branch, not be silently absorbed as a cancel.
           setTranscriptState("idle");
+          setTranscriptResolution(null); // cancel → no flash
           setTranscriptError(null);
           setTranscriptProgress(0);
           setTranscriptPhase(null);
           appendLog("warn", txChannelRef.current, "Transcription cancelled");
         } else {
           setTranscriptState("error");
+          setTranscriptResolution("error"); // GenerateButton → cross flash
           setTranscriptPhase(null);
           const msg = e.payload.error ?? "Transcription failed";
           setTranscriptError(msg);
@@ -1547,6 +1567,7 @@ export default function App() {
     if (!isLikelyVideoUrl(full)) {
       setErrorDetail("Paste a video URL (YouTube, Vimeo, TikTok, Twitter/X, Reddit, Instagram, or any page with embedded video).");
       setStatus("error");
+      setFetchPhase("error");
       return;
     }
     resetForNewSource();
@@ -1609,6 +1630,9 @@ export default function App() {
     }));
     appendLog("info", "yt-dlp", `Extracting URL: ${full}`);
     setMetadataLoading(true);
+    // Toolbar Fetch button → loading; the flash resolves on metadata hydrate
+    // (success) or the catch below (error). See fetchButtonPhase.
+    setFetchPhase("loading");
 
     // ─── PLAYBACK-FIRST (r59) ────────────────────────────────────────────
     // Resolve the stream URL and point the player at the loopback proxy IN
@@ -1652,6 +1676,7 @@ export default function App() {
       });
       if (sourceSeqRef.current !== seq) return; // user already moved on
       setMetadata(m);
+      setFetchPhase("success"); // metadata hydrated → success flash
       // Successful load confirmed → record in recent sources. Title comes
       // from the metadata this fetch already returned (no second request).
       recordRecentSource({
@@ -1695,6 +1720,7 @@ export default function App() {
       // String(err) on an `{ kind, data }` object produces "[object Object]".
       const msg = formatError(err);
       appendLog("err", "yt-dlp", msg);
+      setFetchPhase("error"); // metadata probe failed → error flash
       // Don't blow the canvas away — the direct-stream path is independent
       // of metadata. Just record the error so the sidebar/notification surfaces it.
       setErrorDetail(msg);
@@ -1840,6 +1866,7 @@ export default function App() {
       setResultPath(null);
       setProgress(0);
       setStatus("exporting");
+      setExportPhase("loading");
       appendLog("info", "mediabunny",
         `Exporting local clip ${startSec != null && endSec != null ? `${startSec.toFixed(2)}s → ${endSec.toFixed(2)}s` : "full"} → ${destPath}`);
 
@@ -1854,6 +1881,7 @@ export default function App() {
 
       if (result.kind === "cancelled") {
         setStatus("loaded");
+        setExportPhase("idle"); // user cancel → idle, no error flash
         setProgress(0);
         appendLog("warn", "mediabunny", "Local export cancelled.");
         pushNotification("info", "Export cancelled", "");
@@ -1864,6 +1892,7 @@ export default function App() {
         // For now surface clearly so the user knows what happened.
         appendLog("err", "mediabunny", `Unsupported for mediabunny export: ${result.reason}`);
         setStatus("error");
+        setExportPhase("error");
         setErrorDetail(result.reason);
         pushNotification("error", "Local export not supported",
           "This file's codecs aren't compatible with the in-browser exporter yet. ffmpeg fallback for local clips is on the roadmap.");
@@ -1873,11 +1902,13 @@ export default function App() {
         setErrorDetail(result.message);
         appendLog("err", "mediabunny", result.message);
         setStatus("error");
+        setExportPhase("error");
         pushNotification("error", "Local export failed", result.message);
         return;
       }
 
       setStatus("loaded");
+      setExportPhase("success"); // local clip written → check flash
       setResultPath(destPath);
       setProgress(0);
       const filename = destPath.split("/").pop() ?? "Done.";
@@ -1909,6 +1940,7 @@ export default function App() {
     setResultPath(null);
     setProgress(0);
     setStatus("exporting");
+    setExportPhase("loading"); // success/error flash arrives via the clip-done event
     const hasRange = inFrames != null && outFrames != null;
     const label = hasRange
       ? `${exportOpts.inTc} → ${exportOpts.outTc}`
@@ -1960,6 +1992,7 @@ export default function App() {
       classifyExtractorRot(msg);
       appendLog("err", "ffmpeg", msg);
       setStatus("error");
+      setExportPhase("error"); // create_clip rejected synchronously → cross flash
     }
   }, [metadata, sourceKind, localFilePath, exportOpts, fps, inFrames, outFrames, runLocalClipExport, appendLog, pushNotification, classifyExtractorRot]);
 
@@ -2773,6 +2806,7 @@ export default function App() {
       return;
     }
     setTranscriptState("running");
+    setTranscriptResolution(null); // clear any prior flash before a new run
     setTranscriptError(null);
     setTranscriptProgress(0);
     setTranscriptPhase(null); // backend emits "whisper"/"parakeet" then "diarize-*"
@@ -2882,6 +2916,7 @@ export default function App() {
       return;
     }
     setTranscriptState("running");
+    setTranscriptResolution(null); // clear any prior flash before a new run
     setTranscriptError(null);
     setTranscriptProgress(0);
     setTranscriptPhase(null);
@@ -2956,6 +2991,7 @@ export default function App() {
       return;
     }
     setTranscriptState("running");
+    setTranscriptResolution(null); // clear any prior flash before a new run
     setTranscriptError(null);
     setTranscriptProgress(0);
     setTranscriptPhase(null);
@@ -4245,6 +4281,8 @@ export default function App() {
               onToggleSidebar={() => setSidebarOpen((p) => !p)}
               hasSource={status === "loaded" || status === "exporting" || status === "success" || status === "error"}
               status={status}
+              fetchPhase={fetchButtonPhase(fetchPhase, status)}
+              onFetchResolved={() => setFetchPhase("idle")}
               notifications={notifications}
               onMarkAllRead={onMarkAllRead}
               onClearNotifications={onClearNotifications}
@@ -4274,6 +4312,8 @@ export default function App() {
                 setExportOpts={setExportOpts}
                 recents={recents}
                 onExport={handleExport}
+                exportPhase={exportPhase}
+                onExportResolved={() => setExportPhase("idle")}
                 onReveal={handleReveal}
                 onPickRecent={handlePickRecent}
                 onClearRecents={handleClearRecents}
@@ -4286,6 +4326,8 @@ export default function App() {
                 captionsError={captionsError}
                 onGenerateTranscript={handleGenerateTranscript}
                 transcriptState={transcriptState}
+                transcriptResolution={transcriptResolution}
+                onTranscriptResolved={() => setTranscriptResolution(null)}
                 transcriptError={transcriptError}
                 transcriptProgress={transcriptProgress}
                 transcriptPhase={transcriptPhase}

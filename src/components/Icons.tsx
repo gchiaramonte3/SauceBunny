@@ -78,6 +78,31 @@ export const IconAlert = (p: IconProps) => (
     <circle cx="12" cy="12" r="9" />
   </Icon>
 );
+// ── StatefulButton glyphs ──────────────────────────────────────────────
+// Spinner arc — a ~70% stroked circle; the whole SVG rotates via the
+// `cp-sbtn-spin` keyframe (see buttons.css). `pathLength` normalises the
+// dash math regardless of radius.
+export const IconSpinnerArc = (p: IconProps) => (
+  <Icon {...p} strokeWidth={2.2} className={"cp-sbtn-spin" + (p.className ? " " + p.className : "")}>
+    <circle cx="12" cy="12" r="9" pathLength={100} strokeDasharray="70 100" />
+  </Icon>
+);
+// Circle-check — the mark (`.cp-draw`) draws itself in via a shared
+// stroke-dashoffset keyframe keyed on the button's [data-phase]. `pathLength=1`
+// normalises the dash so the same CSS drives any geometry.
+export const IconCircleCheck = (p: IconProps) => (
+  <Icon {...p} strokeWidth={2.2}>
+    <circle cx="12" cy="12" r="9" />
+    <path className="cp-draw" pathLength={1} d="M8 12.4l2.6 2.6L16 9" />
+  </Icon>
+);
+// Circle-x — same draw technique, two strokes; used with the danger token.
+export const IconCircleX = (p: IconProps) => (
+  <Icon {...p} strokeWidth={2.2}>
+    <circle cx="12" cy="12" r="9" />
+    <path className="cp-draw" pathLength={1} d="M9 9l6 6M15 9l-6 6" />
+  </Icon>
+);
 // Film frame — the source/empty-state glyph. Geometry sits on a 1.5-unit
 // grid (rails at 7.5/16.5, sprockets at 7.5/16.5, center divider at 12) so
 // the strokes land on whole device pixels at the sizes it renders at

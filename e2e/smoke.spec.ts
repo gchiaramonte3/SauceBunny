@@ -37,6 +37,16 @@ test("shell boots: toolbar, sidebar, monitor render without pageerrors", async (
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
+test("toolbar Fetch is a stateful button resting in the idle phase", async ({ page }) => {
+  await boot(page);
+  // No source loaded → the toolbar action is the animated Fetch StatefulButton
+  // (not the Clear button), parked at data-phase="idle" with its idle label.
+  const fetchBtn = page.locator(".cp-toolbar .cp-sbtn-fetch");
+  await expect(fetchBtn).toHaveAttribute("data-phase", "idle");
+  await expect(fetchBtn).toContainText("Fetch");
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
 test("nav rail: switches views, keeps the Clip view mounted, persists", async ({ page }) => {
   await boot(page);
   const rail = page.getByRole("navigation", { name: "Primary" });

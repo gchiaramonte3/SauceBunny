@@ -353,3 +353,122 @@
   .cp-gen-svg, .cp-gen-letter { animation: none; }
   .cp-gen-btn:hover:not(:disabled) { transform: none; }
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   Shared stateful-button primitives — the spinner spin + the result
+   check/cross draw-in. Keyed on a `[data-phase]` ancestor so BOTH
+   StatefulButton (.cp-sbtn) and the extended GenerateButton (.cp-gen-btn)
+   reuse the exact same motion (no duplication).
+   ────────────────────────────────────────────────────────────────── */
+.cp-sbtn-spin {
+  transform-origin: center;
+  animation: cp-sbtn-spin 0.7s linear infinite;
+}
+@keyframes cp-sbtn-spin { to { transform: rotate(360deg); } }
+
+/* The result mark (check polyline / x strokes) writes itself in via a
+   normalised stroke-dashoffset — `pathLength=1` on the path makes the dash
+   math geometry-independent. Icons only mount in success/error, so the
+   keyframe (with `both`) draws from hidden → complete on appearance. */
+.cp-draw { stroke-dasharray: 1; stroke-dashoffset: 0; }
+[data-phase="success"] .cp-draw,
+[data-phase="error"] .cp-draw {
+  animation: cp-draw-in 0.5s var(--ease-out) 0.1s both;
+}
+@keyframes cp-draw-in { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+
+/* Visually-hidden polite status text (a11y) — its own class so it never
+   collides with the app's single .cp-a11y-status live region. */
+.cp-sbtn-status {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   StatefulButton (.cp-sbtn) — composes ON TOP of .btn + a variant
+   (.btn-ghost for Fetch, .btn-primary.cp-export-cta for Export) so it
+   inherits the whole button family (bevel, hover, disabled). It only adds
+   the three cross-fading layers. Width is locked per-usage below.
+   ────────────────────────────────────────────────────────────────── */
+.cp-sbtn { position: relative; overflow: hidden; isolation: isolate; }
+/* Loading is `disabled` for a11y (blocks double-submit) — but it's working,
+   not forbidden, so don't inherit .btn:disabled's not-allowed cursor. */
+.cp-sbtn[data-phase="loading"] { cursor: progress; }
+
+.cp-sbtn-layer {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 10px;
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
+  pointer-events: none;
+  white-space: nowrap;
+}
+/* Idle exits UPWARD (the label "slides up/out"); spinner + result enter from
+   below. */
+.cp-sbtn-idle { transform: translateY(-10px); }
+.cp-sbtn[data-phase="idle"]    .cp-sbtn-idle,
+.cp-sbtn[data-phase="loading"] .cp-sbtn-loading,
+.cp-sbtn[data-phase="success"] .cp-sbtn-result,
+.cp-sbtn[data-phase="error"]   .cp-sbtn-result {
+  opacity: 1;
+  transform: translateY(0);
+}
+.cp-sbtn-result { color: var(--success); }
+.cp-sbtn[data-phase="error"] .cp-sbtn-result { color: var(--danger); }
+
+/* Per-usage width locks (no JS measurement). */
+.cp-sbtn-fetch { min-width: 86px; }
+.cp-sbtn-export { flex: 1; height: 36px; font-size: 13px; }
+
+/* ── GenerateButton resolution flash (extension, not a rewrite) ──
+   Reuses .cp-draw + the shared icons. On success/error the sparkle + text
+   fade out and the drawn check/cross fades in over the same spot. */
+.cp-gen-result {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  opacity: 0;
+  pointer-events: none;
+  color: var(--success);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 700;
+  transition: opacity 0.3s var(--ease-out);
+}
+.cp-gen-btn[data-phase="error"] .cp-gen-result { color: var(--danger); }
+.cp-gen-btn[data-phase="success"] .cp-gen-result,
+.cp-gen-btn[data-phase="error"]   .cp-gen-result { opacity: 1; }
+.cp-gen-btn[data-phase="success"] .cp-gen-txt,
+.cp-gen-btn[data-phase="error"]   .cp-gen-txt { opacity: 0; }
+/* The sparkle carries its own looping opacity flicker — that animation would
+   override a plain `opacity: 0`, so halt it too while the result shows. */
+.cp-gen-btn[data-phase="success"] .cp-gen-svg,
+.cp-gen-btn[data-phase="error"]   .cp-gen-svg { opacity: 0; animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Instant swap — no cross-fade, no draw, no spin. Timers (onResolved)
+     still run, so phases still advance; only the animation is skipped. */
+  .cp-sbtn-layer { transition: none; transform: none; }
+  .cp-sbtn-spin { animation: none; }
+  [data-phase="success"] .cp-draw,
+  [data-phase="error"] .cp-draw { animation: none; stroke-dashoffset: 0; }
+  .cp-gen-result { transition: none; }
+}
