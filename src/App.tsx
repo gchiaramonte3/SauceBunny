@@ -4292,13 +4292,18 @@ export default function App() {
       </div>
 
       <div className={"cp-body" + (screening ? " cp-screening" : "")}>
-        <NavRail
-          active={activeView}
-          onNavigate={navigateView}
-          onOpenSettings={() => setSettingsOpen(true)}
-          homeShortcut={homeCombo ? formatCombo(homeCombo) : undefined}
-          clipShortcut={clipCombo ? formatCombo(clipCombo) : undefined}
-        />
+        {/* display:contents normally (rail is a plain flex child); during
+            screening it becomes the fixed left-edge hover hot-zone that
+            reveals the rail as an overlay — CSS-only, see screening.css. */}
+        <div className="cp-nav-dock">
+          <NavRail
+            active={activeView}
+            onNavigate={navigateView}
+            onOpenSettings={() => setSettingsOpen(true)}
+            homeShortcut={homeCombo ? formatCombo(homeCombo) : undefined}
+            clipShortcut={clipCombo ? formatCombo(clipCombo) : undefined}
+          />
+        </div>
         <div className="cp-views">
           {/* Home — the Library (LibraryView.tsx owns roots/scans/search;
               App only supplies the open handlers + recents). */}

@@ -1,12 +1,19 @@
 /* Left navigation rail (NavRail.tsx). The Home/Library view lives in library.css. */
 /* ============================================================
-   NAV RAIL — slim vertical icon rail on the window's left edge.
+   NAV RAIL — slim vertical icon+label rail on the window's left edge.
    Sits inside .cp-body (below the titlebar, so it never collides
-   with the macOS traffic lights). Hidden entirely while co-review
-   screening mode is on — see screening.css.
+   with the macOS traffic lights). While co-review screening mode is
+   on it becomes a CSS-only edge-reveal overlay — see screening.css.
    ============================================================ */
+
+/* Rail dock — a display:contents pass-through in the normal layout, so the
+   rail is a direct flex child of .cp-body exactly as before. Screening mode
+   re-establishes a box on it and turns it into the reveal hot-zone
+   (screening.css). Keep it transparent to layout here. */
+.cp-nav-dock { display: contents; }
+
 .cp-nav {
-  width: 56px;
+  width: 72px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -17,17 +24,12 @@
   border-right: 1px solid var(--line-1);
 }
 
-/* Logo button — clicking the bunny goes Home. */
+/* Brand mark — a non-interactive logo, NOT a Home button. Default cursor,
+   no hover affordance (the Home nav item owns the home affordance). */
 .cp-nav-logo {
   width: 34px;
   height: 34px;
-  padding: 0;
   margin-bottom: var(--s-1);
-  border: none;
-  background: none;
-  border-radius: var(--r-md);
-  cursor: pointer;
-  transition: transform var(--dur-fast) var(--ease-out);
 }
 .cp-nav-logo img {
   width: 100%;
@@ -35,18 +37,17 @@
   display: block;
   border-radius: var(--r-md);
 }
-.cp-nav-logo:hover { transform: scale(1.08); }
-.cp-nav-logo:active { transform: scale(1.0); }
 
-/* One rail item — icon button with an active fill + accent left edge. */
+/* One rail item — icon over a tiny label, with an active fill + accent edge. */
 .cp-nav-item {
   position: relative;
-  width: 40px;
-  height: 40px;
+  width: 56px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 0;
+  gap: 4px;
+  padding: 7px 0 6px;
   border: none;
   background: none;
   border-radius: var(--r-md);
@@ -63,8 +64,20 @@
   background: var(--bg-3);
   color: var(--fg-0);
 }
+/* Tiny type under each icon. fg-4 at rest, fg-1 when the item is active. */
+.cp-nav-label {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--fg-4);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.cp-nav-item.active .cp-nav-label { color: var(--fg-1); }
 /* Accent edge rides the rail's left edge (the 8px gutter between the
-   40px item and the 56px rail), so it reads as "you are here". */
+   56px item and the 72px rail), so it reads as "you are here". */
 .cp-nav-item.active::before {
   content: "";
   position: absolute;
@@ -78,8 +91,3 @@
 }
 
 .cp-nav-spacer { flex: 1; }
-
-@media (prefers-reduced-motion: reduce) {
-  .cp-nav-logo { transition: none; }
-  .cp-nav-logo:hover { transform: none; }
-}

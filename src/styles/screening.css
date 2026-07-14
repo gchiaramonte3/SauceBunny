@@ -6,9 +6,42 @@
    read as a shared theater. Reflow only — the player is never remounted.
    ============================================================ */
 .cp-screening .cp-sidebar { display: none; }
-/* The nav rail leaves too — the theater takes the full window width. Pure
-   CSS reflow, same as the sidebar swap: the player is never remounted. */
-.cp-screening .cp-nav { display: none; }
+
+/* ── Nav rail: edge-reveal overlay (not display:none) ──
+   The rail is the app's primary nav, so screening can't delete it — it slides
+   off-screen and reveals on hover/focus. The dock (App.tsx wrapper, normally
+   display:contents) becomes a fixed ~16px invisible hot-zone pinned to the
+   left edge, below the titlebar. Because the rail is a DESCENDANT of the dock,
+   hovering the revealed rail keeps :hover on the dock (and keyboard focus
+   trips :focus-within), so it stays out until the pointer leaves BOTH.
+   Everything here is CSS: no timers, no JS mouse tracking, no remount — the
+   rail overlays the theater (position:fixed → no reflow) and the player is
+   never touched. */
+.cp-screening .cp-nav-dock {
+  display: block;
+  position: fixed;
+  left: 0;
+  top: 36px;               /* clear the titlebar */
+  bottom: 0;
+  width: 16px;             /* the invisible hover hot-zone */
+  z-index: 30;             /* above the video panel, below modal overlays */
+}
+.cp-screening .cp-nav-dock .cp-nav {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  transform: translateX(-100%);   /* parked off-screen to the left */
+  transition: transform 200ms var(--ease-out);
+}
+.cp-screening .cp-nav-dock:hover .cp-nav,
+.cp-screening .cp-nav-dock:focus-within .cp-nav {
+  transform: translateX(0);       /* slide in over the video */
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-screening .cp-nav-dock .cp-nav { transition: none; }
+}
+
 /* A touch more cinematic separation around the video panel while screening. */
 .cp-screening .cp-main { background: var(--bg-0); }
 

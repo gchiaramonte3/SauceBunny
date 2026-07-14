@@ -9,8 +9,9 @@ import logoUrl from "../assets/saucebunny-128.png";
  * This is a STATE switch, not a router (CLAUDE.md forbids routers): App owns
  * a single `activeView` useState and both views stay mounted — the inactive
  * one is hidden with [hidden], QueueDrawer-tab style, so playback and
- * running jobs survive navigation. The rail itself hides entirely while
- * co-review screening mode is on (CSS in screening.css, reflow only).
+ * running jobs survive navigation. While co-review screening mode is on the
+ * rail becomes a CSS-only edge-reveal overlay (see screening.css / .cp-nav-dock)
+ * — it never unmounts, so the player is untouched.
  */
 type Props = {
   active: AppView;
@@ -25,15 +26,11 @@ type Props = {
 export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, clipShortcut }: Props) {
   return (
     <nav className="cp-nav" aria-label="Primary">
-      <button
-        type="button"
-        className="cp-nav-logo"
-        onClick={() => onNavigate("home")}
-        title="Home"
-        aria-label="Sauce Bunny — Home"
-      >
-        <img src={logoUrl} alt="Home" draggable={false} />
-      </button>
+      {/* Brand mark — a non-interactive logo, NOT a second Home button. The
+          Home nav item below (and its ⌘1) is the only home affordance. */}
+      <div className="cp-nav-logo" aria-hidden="true">
+        <img src={logoUrl} alt="Sauce Bunny" draggable={false} />
+      </div>
       <button
         type="button"
         className={"cp-nav-item" + (active === "home" ? " active" : "")}
@@ -43,6 +40,7 @@ export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, clip
         aria-current={active === "home" ? "page" : undefined}
       >
         <IconHome size={18} />
+        <span className="cp-nav-label">Home</span>
       </button>
       <button
         type="button"
@@ -53,6 +51,7 @@ export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, clip
         aria-current={active === "clip" ? "page" : undefined}
       >
         <IconScissors size={18} />
+        <span className="cp-nav-label">Clip</span>
       </button>
       <div className="cp-nav-spacer" />
       <button
@@ -63,6 +62,7 @@ export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, clip
         aria-label="Settings"
       >
         <IconSettings size={17} />
+        <span className="cp-nav-label">Settings</span>
       </button>
     </nav>
   );
