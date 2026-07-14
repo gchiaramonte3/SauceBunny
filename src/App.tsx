@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -75,6 +76,7 @@ import {
 import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, looksLikeExtractorRot, prettyHost } from "./lib/validation";
 import { sanitizeFilename, stripExt, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
+import { buildDiagnosticsReport, diagnosticsFilename } from "./lib/diagnostics";
 import { extractFrameAsBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
 import { exportLocalClipViaMediabunny } from "./lib/mediabunny-export";
 import { extractAudioAsWav16k } from "./lib/mediabunny-audio";
@@ -149,6 +151,9 @@ export default function App() {
       // Whisper is the bundled default; Parakeet is opt-in once its model is
       // downloaded (Settings → Transcription). Persisted across sessions.
       transcriptionEngine: stored.transcriptionEngine ?? "whisper",
+      // Whisper `-l` language for every transcription/dictation run, plus the
+      // preferred yt-dlp caption locale. "auto" = whisper.cpp auto-detect.
+      transcriptionLanguage: stored.transcriptionLanguage ?? "auto",
       // AI Summary: default to the recommended small model; the user can
       // download + switch to a larger one in Settings → AI Summary.
       llmSummarizationModel: stored.llmSummarizationModel ?? "qwen3-4b-instruct",
@@ -2763,6 +2768,7 @@ export default function App() {
               job_id: id,
               detect_speakers: defaults.detectSpeakers,
               expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
+              language: defaults.transcriptionLanguage,
             },
           });
         } else {
@@ -2779,6 +2785,7 @@ export default function App() {
               detect_speakers: defaults.detectSpeakers,
               expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
               engine,
+              language: defaults.transcriptionLanguage,
             },
           });
         }
@@ -2801,6 +2808,7 @@ export default function App() {
             detect_speakers: defaults.detectSpeakers,
             expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
             engine,
+            language: defaults.transcriptionLanguage,
           },
         });
       }
@@ -2812,7 +2820,7 @@ export default function App() {
     }
   }, [metadata, metadataLoading, exportOpts, fps, selectedModel, defaults.whisperModel,
       defaults.transcriptionEngine, defaults.useWebCodecsDecoder,
-      defaults.detectSpeakers, defaults.expectedSpeakers,
+      defaults.detectSpeakers, defaults.expectedSpeakers, defaults.transcriptionLanguage,
       appendLog, resolveTranscriptOutDir, localFilePath, sourceKind,
       durationFrames, inFrames, outFrames]);
 
@@ -2931,6 +2939,7 @@ export default function App() {
           cookies_browser: cookiesBrowserOrNone(),
           detect_speakers: defaults.detectSpeakers,
           expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
+          language: defaults.transcriptionLanguage,
         },
       });
     } catch (err) {
@@ -2940,7 +2949,7 @@ export default function App() {
     }
   }, [metadata, metadataLoading, exportOpts.folder, exportOpts.filename, resolveTranscriptOutDir, selectedModel,
       durationFrames, fps, defaults.whisperModel, defaults.transcriptionEngine, defaults.detectSpeakers,
-      defaults.expectedSpeakers, appendLog]);
+      defaults.expectedSpeakers, defaults.transcriptionLanguage, appendLog]);
 
   const handleOpenTranscriptionSettings = useCallback(() => {
     setSettingsInitialTab("transcription");
@@ -3131,6 +3140,13 @@ export default function App() {
           filename: sanitizeFilename(exportOpts.filename || "transcript"),
           job_id: id,
           cookies_browser: cookiesBrowserOrNone(),
+          // Preferred caption locale = the transcription language. Auto →
+          // omit (keeps the battle-tested English defaults); otherwise pass
+          // the bare code — the backend adds base/regional forms itself
+          // (caption_lang_prefs in download.rs).
+          locale: defaults.transcriptionLanguage === "auto"
+            ? undefined
+            : defaults.transcriptionLanguage,
         },
       });
     } catch (err) {
@@ -3141,7 +3157,7 @@ export default function App() {
     }
     // Captions only needs the source URL + where to write the .srt — none
     // of the playback/transcription state matters here.
-  }, [metadata, exportOpts.folder, exportOpts.filename, appendLog, resolveTranscriptOutDir]);
+  }, [metadata, exportOpts.folder, exportOpts.filename, defaults.transcriptionLanguage, appendLog, resolveTranscriptOutDir]);
 
   // Captions are "active" (button green) only when they're actually on
   // SCREEN — toggled on AND a transcript is loaded to draw from. A bare
@@ -3227,6 +3243,53 @@ export default function App() {
     const text = logs.map((l) => `${l.ts} ${l.source.padEnd(8)} ${l.message}`).join("\n");
     navigator.clipboard.writeText(text).catch(() => { /* ignore */ });
   }, [logs]);
+
+  // "Export diagnostics" (Pipeline panel) — saves a plain-text report the
+  // user attaches to a bug report BY HAND: versions + build-id handshake,
+  // the full settings snapshot, sidecar versions, and the recent pipeline
+  // log. This is the no-telemetry answer to remote bug reports; assembly is
+  // pure + unit-tested in lib/diagnostics.ts. Every piece is best-effort so
+  // a dead backend still produces a (maximally useful) report.
+  const handleExportDiagnostics = useCallback(async () => {
+    try {
+      const now = new Date();
+      const path = await saveDialog({
+        defaultPath: diagnosticsFilename(now),
+        filters: [{ name: "Text", extensions: ["txt"] }],
+      });
+      if (!path) return; // user cancelled
+      const appVersion = await getVersion().catch(() => "unknown");
+      // Ask the live binary rather than reusing the startup check — the
+      // report should reflect whatever is running at export time.
+      const backendBuildId = await invoke<string>("get_backend_build_id")
+        .catch((e) => `(unavailable: ${formatError(e)})`);
+      const sidecars: { name: string; version: string }[] = [];
+      try {
+        // yt-dlp is the only sidecar with a version command today; the rest
+        // are pinned by the build scripts and identified by the app version.
+        const yt = await invoke<YtdlpStatus>("ytdlp_version");
+        sidecars.push({
+          name: "yt-dlp",
+          version: `${yt.version}${yt.updated ? " (self-updated copy)" : " (bundled)"}`,
+        });
+      } catch { /* report is still useful without it */ }
+      const report = buildDiagnosticsReport({
+        appVersion,
+        expectedBuildId: EXPECTED_BACKEND_BUILD_ID,
+        backendBuildId,
+        userAgent: navigator.userAgent,
+        generatedAt: now,
+        settings: { ...defaultsRef.current },
+        sidecars,
+        logLines: logs,
+      });
+      const bytes = Array.from(new TextEncoder().encode(report));
+      await invoke("write_bytes_to_path", { path, bytes });
+      pushNotification("success", "Diagnostics saved", "Attach this file to a bug report.");
+    } catch (err) {
+      pushNotification("error", "Diagnostics export failed", formatError(err));
+    }
+  }, [logs, pushNotification]);
 
   const handlePickRecent = useCallback((r: RecentClip) => {
     invoke("reveal_in_finder", { path: r.path }).catch(() => { /* ignore */ });
@@ -4624,6 +4687,7 @@ export default function App() {
             lines={logs}
             onClear={handleClearLogs}
             onCopy={handleCopyLogs}
+            onExportDiagnostics={handleExportDiagnostics}
             transcriptState={transcriptState}
             transcriptProgress={transcriptProgress}
             transcriptPhase={transcriptPhase}

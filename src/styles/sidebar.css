@@ -208,6 +208,13 @@
   overflow-y: auto;
   white-space: pre-wrap;
 }
+.cp-source-hint.warn {
+  /* Advisory (not fatal) — e.g. English-only Whisper model asked for a
+     non-English language. Same amber as the log panel's warn tag. */
+  color: var(--warning);
+  background: rgba(232,120,38,0.08);
+  border: 1px solid rgba(232,120,38,0.22);
+}
 .cp-source-hint.muted {
   color: var(--fg-4);
   background: rgba(255,255,255,0.02);

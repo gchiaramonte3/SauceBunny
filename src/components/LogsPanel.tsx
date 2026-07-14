@@ -10,6 +10,9 @@ type Props = {
   lines: ClientLog[];
   onClear: () => void;
   onCopy: () => void;
+  /** Save a diagnostics report (versions + settings + this log) to a file —
+   *  the local, no-telemetry way to hand support the context of a bug. */
+  onExportDiagnostics?: () => void;
   /** Optional secondary phase that overrides the status pill when active. */
   transcriptState?: "idle" | "running" | "done" | "error";
   transcriptProgress?: number;
@@ -62,7 +65,7 @@ function transcriptPillLabel(
 }
 
 export function LogsPanel({
-  open, onToggle, status, progress, lines, onClear, onCopy,
+  open, onToggle, status, progress, lines, onClear, onCopy, onExportDiagnostics,
   transcriptState, transcriptProgress, transcriptPhase, transcriptEngine,
   metadataLoading, playbackPrepBusy,
   canStop, onStop,
@@ -134,9 +137,19 @@ export function LogsPanel({
             <span className="dot" /> Stop
           </button>
         )}
-        {/* Copy/Clear use the same .btn-ghost styling as the top toolbar's
-            Clear button — single button system across the app. */}
+        {/* Copy/Clear/Export use the same .btn-ghost styling as the top
+            toolbar's Clear button — single button system across the app. */}
         <div className="actions" onClick={(e) => e.stopPropagation()}>
+          {onExportDiagnostics && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-compact"
+              onClick={onExportDiagnostics}
+              title="Save a diagnostics report (app + sidecar versions, settings, recent log) to attach to a bug report"
+            >
+              Export diagnostics
+            </button>
+          )}
           <button type="button" className="btn btn-ghost btn-compact" onClick={onCopy}>Copy</button>
           <button type="button" className="btn btn-ghost btn-compact" onClick={onClear}>Clear</button>
         </div>

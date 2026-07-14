@@ -454,7 +454,14 @@ export function ReviewPanel({
         // Native sidecar unavailable → fall back to ffmpeg → Whisper/Parakeet
         // (batch after stop). Mic chosen in Settings → Transcription.
         const device = loadJson<string>("saucebunny.dictation.device", "default");
-        await invoke("dictate_start", { jobId: job, device });
+        // Dictation language follows Settings → Transcription → Language
+        // (whisper `-l`; "auto" = detect). Read from the persisted defaults
+        // blob at call time — the same live-read pattern as the mic device
+        // above; "cp-defaults-v2" mirrors App's DEFAULTS_KEY (kept as a
+        // literal to avoid an App↔panel import).
+        const language = loadJson<{ transcriptionLanguage?: string }>("cp-defaults-v2", {})
+          .transcriptionLanguage ?? "auto";
+        await invoke("dictate_start", { jobId: job, device, language });
       }
       setRecording(true);
     } catch (e) {
