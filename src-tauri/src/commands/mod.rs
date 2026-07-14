@@ -37,6 +37,8 @@ pub mod llm;
 pub use llm::*;
 pub mod session;
 pub use session::*;
+pub mod library;
+pub use library::*;
 
 
 

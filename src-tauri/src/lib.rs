@@ -166,6 +166,7 @@ pub fn run() {
             commands::prepare_local_for_playback,
             commands::extract_local_frame,
             commands::generate_local_thumbnail,
+            commands::scan_library_folder,
             commands::transcribe_local_file,
             commands::transcribe_prepared_wav,
             commands::re_diarize_transcript,
