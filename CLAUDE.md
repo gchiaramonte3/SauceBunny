@@ -162,11 +162,21 @@ Cross-window communication uses Tauri events, not shared state:
 
 | Event | Direction | Purpose |
 |-------|-----------|---------|
-| `panel:state` | main → panel | Push current state to floating panel |
+| `panel:state` | main → panel | Push state on actual change (debounced ~50ms) + as the `panel:request-state` reply |
 | `panel:action:<kind>` | panel → main | Panel requests an action from main |
-| `panel:request-state` | panel → main | Panel asks for current state on mount |
+| `panel:request-state` | panel → main | Panel asks for current state on mount (listener registered before requesting — the mount handshake) |
 | `panel:popped-out` | Rust → main | Notifies main that panel window was created |
 | `panel:closed` | Rust → main | Notifies main that panel window was destroyed |
+| `saucebunny:speakers-changed` | either window → both | Speaker overrides persisted; consumers re-read localStorage. Same name also fired as a window CustomEvent for the same-window fast path |
+
+Events are the PRIMARY channel — post-registration delivery is reliable in
+Tauri 2.x; the historical "fresh panel rendered empty" failures were the
+mount race (events are dropped, not queued, before a webview registers its
+listener), which the request/response handshake removes. localStorage
+(`saucebunny.panelSnapshot`, written only on publish — never on a timer) is
+the panel's synchronous boot seed plus the target of slow ~5s reconciliation
+polls that only act after event silence. Do NOT reintroduce fixed-interval
+polling as a primary sync channel; idle traffic must stay at zero.
 
 When adding a new cross-window interaction, use this event pattern. Do not introduce a shared state store, BroadcastChannel, or postMessage.
 

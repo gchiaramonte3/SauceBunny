@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
 import { QueueDrawer } from "./components/QueueDrawer";
-import { PANEL_SNAPSHOT_KEY } from "./hooks/use-panel-bus";
-import type { QueuedClip } from "./types";
+import { PANEL_SNAPSHOT_KEY, type PanelSnapshot } from "./hooks/use-panel-bus";
 import type { TranscriptHistoryEntry } from "./lib/transcript-history";
 
 /**
@@ -19,33 +18,17 @@ import type { TranscriptHistoryEntry } from "./lib/transcript-history";
  * into the same handler functions the docked drawer uses.
  *
  * Lifecycle:
- *   - On mount, emit `panel:request-state` so main pushes a fresh
- *     snapshot immediately (otherwise we'd render empty until the
- *     next state change in main).
+ *   - On mount, seed the first render synchronously from the localStorage
+ *     mirror, register the `panel:state` listener, THEN emit
+ *     `panel:request-state` — main replies with a fresh publish. Listener-
+ *     before-request is what makes the handshake race-free (Tauri events
+ *     are dropped, not queued, when no listener exists yet).
  *   - On unmount (window destroyed), Rust fires `panel:closed` to
  *     main — handled there to re-show the docked drawer.
  */
 
-type PanelState = {
-  queue: QueuedClip[];
-  fps: number;
-  running: boolean;
-  hasFolder: boolean;
-  transcriptPath: string | null;
-  transcriptOrigin: "captions" | "whisper" | "unknown";
-  transcriptPlayhead: number | null;
-  transcriptArrivedTick: number;
-  regenerateBusy: boolean;
-  canRegenerate: boolean;
-  hasSource: boolean;
-  aiModelId: string;
-  aiStyle: {
-    format: "bullets" | "numbered" | "prose";
-    length: "brief" | "standard" | "detailed";
-  };
-  chapterSourceKey: string | null;
-  durationSec: number | null;
-};
+/** Mirror of the main window's published snapshot (single shared type). */
+type PanelState = PanelSnapshot;
 
 const INITIAL: PanelState = {
   queue: [],
@@ -100,40 +83,25 @@ function readSnapshotSync(): { raw: string | null; state: PanelState } {
   return { raw: null, state: INITIAL };
 }
 
+/** How long event silence must last before the reconciliation poll bothers
+ *  reading the mirror. Also the poll period itself. */
+const RECONCILE_MS = 5000;
+
 export default function PanelApp() {
   const [boot] = useState(readSnapshotSync);
   const [state, setState] = useState<PanelState>(boot.state);
 
-  // PRIMARY channel: read the snapshot the main window mirrors to localStorage
-  // (shared across same-origin webviews). Seeded synchronously above; then
-  // re-read on the `storage` event + a slow poll backstop (in case WKWebView
-  // doesn't fire cross-window storage events). This is what makes the
-  // popped-out transcript actually populate and track main.
-  const lastRawRef = useRef<string | null>(boot.raw);
-  useEffect(() => {
-    const read = () => {
-      try {
-        const raw = localStorage.getItem(PANEL_SNAPSHOT_KEY);
-        if (raw && raw !== lastRawRef.current) {
-          lastRawRef.current = raw;
-          setState(JSON.parse(raw) as PanelState);
-        }
-      } catch { /* ignore parse/quota */ }
-    };
-    read();
-    const onStorage = (e: StorageEvent) => { if (e.key === PANEL_SNAPSHOT_KEY) read(); };
-    window.addEventListener("storage", onStorage);
-    const poll = window.setInterval(read, 400);
-    return () => { window.removeEventListener("storage", onStorage); window.clearInterval(poll); };
-  }, []);
-
-  // Secondary (fast-path) channel: Tauri events, if they arrive.
+  // PRIMARY channel: `panel:state` Tauri events, pushed by main on every
+  // actual state change (debounced ~50ms). The listener is registered before
+  // `panel:request-state` goes out, so main's reply can't be dropped.
+  const lastEventAtRef = useRef(0);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     (async () => {
       const off = await listen<PanelState>("panel:state", (e) => {
         if (cancelled) return;
+        lastEventAtRef.current = Date.now();
         setState(e.payload);
       });
       if (cancelled) { off(); return; }
@@ -144,6 +112,27 @@ export default function PanelApp() {
       cancelled = true;
       unlisten?.();
     };
+  }, []);
+
+  // SAFETY NET: a slow reconciliation poll against the localStorage mirror
+  // (written by main on every publish). Only consulted after RECONCILE_MS of
+  // event silence, so while events flow it does nothing; if they ever prove
+  // flaky the panel converges within ~5s instead of freezing. getItem + string
+  // compare — no JSON work unless the mirror actually advanced.
+  const lastRawRef = useRef<string | null>(boot.raw);
+  useEffect(() => {
+    const reconcile = () => {
+      if (Date.now() - lastEventAtRef.current < RECONCILE_MS) return;
+      try {
+        const raw = localStorage.getItem(PANEL_SNAPSHOT_KEY);
+        if (raw && raw !== lastRawRef.current) {
+          lastRawRef.current = raw;
+          setState(JSON.parse(raw) as PanelState);
+        }
+      } catch { /* ignore parse/quota */ }
+    };
+    const poll = window.setInterval(reconcile, RECONCILE_MS);
+    return () => window.clearInterval(poll);
   }, []);
 
   return (

@@ -206,9 +206,11 @@ export function speakerOverridesKey(path: string): string {
   return `saucebunny.speakerNames.${path}`;
 }
 
-/** Fired on `window` by the panel whenever overrides change, so live consumers
- *  (the caption overlay) can re-read without polling. Same-window only —
- *  the native `storage` event doesn't fire in the tab that wrote it. */
+/** Fired by the panel whenever overrides change, so live consumers (the
+ *  caption overlay) can re-read without polling. Dispatched on TWO buses
+ *  under this one name: a window CustomEvent (synchronous, same-window —
+ *  the native `storage` event doesn't fire in the tab that wrote it) and a
+ *  Tauri event (crosses webviews, so panel-window renames reach main). */
 export const SPEAKERS_CHANGED_EVENT = "saucebunny:speakers-changed";
 
 /** Read + shape-clamp the persisted overrides for a path. */
