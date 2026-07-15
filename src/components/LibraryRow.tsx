@@ -60,7 +60,13 @@ export function LibraryRow({ title, count, onRemove, removeLabel, children }: Pr
     el.addEventListener("scroll", measure, { passive: true });
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    // One post-layout re-measure: the mount-time measure() can read stale
+    // 0/0 metrics if this row first lays out inside a [hidden] view, so the
+    // edge state (which gates the arrows) is correct before any scroll/resize
+    // event ever fires.
+    const raf = requestAnimationFrame(measure);
     return () => {
+      cancelAnimationFrame(raf);
       el.removeEventListener("scroll", measure);
       ro.disconnect();
     };

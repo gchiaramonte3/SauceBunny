@@ -7,12 +7,19 @@
    playing beneath while this is on screen).
    ============================================================ */
 .cp-lib {
+  position: relative; /* containing block for the ambient backdrop (no z-index →
+                         NOT a stacking context, so the in-tree ThumbnailPicker's
+                         z-index still competes app-wide unchanged). */
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--bg-0);
 }
+/* Content layer — everything except the ambient backdrop rides above it. The
+   backdrop sits at z-index:0, this at z-index:1; the picker stays a bare .cp-lib
+   child (outside this wrapper) so its overlay stacking is untouched. */
+.cp-lib-scroll { position: relative; z-index: 1; }
 
 /* ── Header: title · search · Add Folder · rescan. Sticky so search and
       rescan stay reachable while browsing long shelves. ── */
@@ -168,6 +175,56 @@
 }
 
 /* ============================================================
+   AMBIENT BACKDROP — a slow cross-dissolving montage of the
+   user's own already-cached posters, behind Home's content
+   (AmbientBackdrop.tsx). Apple-TV-screensaver quiet: heavily
+   blurred, low opacity, a very slow Ken Burns drift, feathered
+   to --bg-0 (the hero's gradient language) so it dissolves into
+   the page and never fights the hero/card text above it.
+   ============================================================ */
+.cp-lib-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0; /* below .cp-lib-scroll (z-index:1) — behind all content */
+  overflow: hidden;
+  pointer-events: none;
+}
+.cp-lib-ambient-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0; /* the "on" layer fades to the cap; the other rests at 0 */
+  /* Heavy blur + dim so it reads as atmosphere, not a picture. */
+  filter: blur(24px) brightness(0.5) saturate(1.1);
+  transform: scale(1.1);
+  transition: opacity 2500ms var(--ease-out);
+  will-change: opacity;
+}
+.cp-lib-ambient-layer.on {
+  opacity: 0.22; /* low cap — text contrast on the layer above must survive */
+  animation: cp-lib-ambient-drift 48s ease-in-out infinite alternate;
+}
+@keyframes cp-lib-ambient-drift {
+  from { transform: scale(1.1)  translate3d(-1.5%, -1%, 0); }
+  to   { transform: scale(1.16) translate3d(1.5%, 1.5%, 0); }
+}
+/* Radial + linear feather to --bg-0 (mirrors .cp-lib-hero-shade) so the montage
+   dissolves at the edges and toward the page rather than ending in a hard box. */
+.cp-lib-ambient-veil {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(125% 115% at 50% 22%, transparent 0%, rgba(10, 10, 13, 0.55) 60%, var(--bg-0) 100%),
+    linear-gradient(180deg, rgba(10, 10, 13, 0.3) 0%, rgba(10, 10, 13, 0.45) 55%, var(--bg-0) 100%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-lib-ambient-layer { transition: none; }
+  .cp-lib-ambient-layer.on { animation: none; }
+}
+
+/* ============================================================
    SHELVES — vertical stack of horizontal rows.
    ============================================================ */
 .cp-lib-rows {
@@ -222,6 +279,15 @@
 .cp-lib-row-remove:focus-visible { opacity: 1; }
 .cp-lib-row-remove:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.08); }
 
+/* A flex item of the .cp-lib-rows column. WITHOUT min-width:0, WebKit resolves
+   its cross-axis min-width to the content-based minimum (the track's full
+   ~5700px of cells), so the row expands past the viewport, the .cp-lib-track
+   never overflows ITSELF (scrollWidth == clientWidth → canRight stays false,
+   no arrows, no scroll), and the overflow is silently clipped by .cp-lib's
+   overflow-x:hidden. min-width:0 lets the row shrink to the page so the track
+   overflows and scrolls. (Chromium already resolves this to 0; WKWebView needs
+   it explicit — this is the real "shelves won't scroll" cause.) */
+.cp-lib-row { min-width: 0; }
 .cp-lib-row-body { position: relative; }
 .cp-lib-track {
   display: flex;
@@ -267,7 +333,10 @@
 }
 .cp-lib-row-arrow.left  { left: 0;  background: linear-gradient(90deg, rgba(10, 10, 13, 0.85), transparent); }
 .cp-lib-row-arrow.right { right: 0; background: linear-gradient(270deg, rgba(10, 10, 13, 0.85), transparent); }
-.cp-lib-row-body:hover .cp-lib-row-arrow { opacity: 1; }
+/* Reveal on hover AND keyboard focus — a card focused via ←/→ roving keeps
+   the paging arrows visible so keyboard users see where the shelf continues. */
+.cp-lib-row-body:hover .cp-lib-row-arrow,
+.cp-lib-row-body:focus-within .cp-lib-row-arrow { opacity: 1; }
 .cp-lib-row-arrow:hover { color: var(--ella-green); }
 
 /* ============================================================

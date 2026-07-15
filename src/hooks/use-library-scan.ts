@@ -42,6 +42,10 @@ const THUMB_CONCURRENCY = 3;
 
 let thumbRunning = 0;
 const thumbWaiters: Array<() => void> = [];
+/** Fired when a poster URL lands in the cache — the ambient backdrop subscribes
+ *  so it can pick up frames the library cards materialize AFTER it first
+ *  rendered (its parent doesn't re-render on a card's async thumbnail load). */
+const thumbListeners = new Set<() => void>();
 /** path → decode generation. invalidateThumb bumps it so a decode already in
  *  flight when the user picks a new poster discards its now-stale result
  *  instead of racing the fresh one into the cache. */
@@ -53,6 +57,7 @@ function rememberThumb(path: string, url: string): void {
   const prior = thumbCache.get(path);
   if (prior && prior !== url && prior.startsWith("blob:")) URL.revokeObjectURL(prior);
   thumbCache.set(path, url);
+  for (const cb of thumbListeners) cb();
   while (thumbCache.size > THUMB_CACHE_MAX) {
     const oldest = thumbCache.entries().next().value;
     if (!oldest) break;
@@ -98,6 +103,26 @@ export function invalidateThumb(path: string): void {
   // can take a while): the running job will see the bumped generation and drop
   // its stale result rather than overwriting the cache with the old poster.
   thumbGen.set(path, (thumbGen.get(path) ?? 0) + 1);
+}
+
+/**
+ * Snapshot of every poster URL already materialized in the cache — a pure read
+ * of the shared thumbCache (blob:/asset:// URLs), NO decode or scan triggered.
+ * The ambient backdrop samples these already-paid-for frames; it must never
+ * cause new work, so this only surfaces what the cards have organically loaded.
+ */
+export function listThumbs(): string[] {
+  return Array.from(thumbCache.values());
+}
+
+/**
+ * Subscribe to cache growth — the callback fires whenever a new poster URL is
+ * cached. Returns an unsubscribe fn. Used by the ambient backdrop to re-read
+ * listThumbs() as cards fill the cache (a pure notification, no decode/scan).
+ */
+export function subscribeThumbs(cb: () => void): () => void {
+  thumbListeners.add(cb);
+  return () => { thumbListeners.delete(cb); };
 }
 
 /** Cached + de-duped + concurrency-capped poster fetch for one video path. */

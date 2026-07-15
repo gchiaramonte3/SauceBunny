@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AmbientBackdrop } from "./AmbientBackdrop";
 import { LibraryHero } from "./LibraryHero";
 import { LibraryRow } from "./LibraryRow";
 import { LibraryCard, type LibraryCardArt } from "./LibraryCard";
@@ -47,6 +48,9 @@ type Props = {
   onOpenFolder: (chain: LibraryCrumb[]) => void;
   /** Bumped by App when the nav logo/Home is pressed — clears Home's search. */
   homeResetSignal: number;
+  /** True while Home is the active view. Threaded to the ambient backdrop so its
+   *  cross-fade cycle pauses while Home is [hidden] (the view stays mounted). */
+  homeVisible: boolean;
   // ── Shared scan state (useLibraryScan, owned by App) ──
   roots: string[];
   scans: Record<string, RootScan>;
@@ -72,7 +76,7 @@ type Props = {
  */
 export function LibraryView({
   recentSources, onOpenLocalPath, onOpenRecentSource, onOpenTranscriptHistory,
-  onSwitchToClip, onOpenFolder, homeResetSignal,
+  onSwitchToClip, onOpenFolder, homeResetSignal, homeVisible,
   roots, scans, scanning, addFolder, removeRoot, rescanAll, scanRoot,
   requestThumb, invalidateThumb, posterVersions, bumpPoster, resetPoster,
 }: Props) {
@@ -258,6 +262,12 @@ export function LibraryView({
         }
       }}
     >
+      {/* Behind everything: a slow montage of the user's own already-cached
+          posters. Rendered first, kept below the content layer by z-index (the
+          .cp-lib-scroll wrapper sits above it). aria-hidden + pointer-events
+          none — purely atmospheric. Pauses while Home isn't the active view. */}
+      <AmbientBackdrop active={homeVisible} />
+      <div className="cp-lib-scroll">
       <header className="cp-lib-head">
         <h1 className="cp-lib-title">Home</h1>
         <div className="cp-lib-search">
@@ -348,6 +358,7 @@ export function LibraryView({
           </div>
         </>
       )}
+      </div>
 
       {pickerPath && (
         <ThumbnailPicker

@@ -4362,6 +4362,7 @@ export default function App() {
               onSwitchToClip={handleSwitchToClip}
               onOpenFolder={handleOpenLibraryFolder}
               homeResetSignal={homeResetTick}
+              homeVisible={activeView === "home"}
               roots={lib.roots}
               scans={lib.scans}
               scanning={lib.scanning}
