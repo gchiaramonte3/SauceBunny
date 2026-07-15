@@ -113,8 +113,8 @@ export type CommandDeps = {
   handleDownloadCaptions: () => void;
   handleStop: () => void;
   onProbeDiarizer: () => void;
-  /** Top-level view switch (nav rail / ⌘1 / ⌘2 / ⌘3) — state, not a router. */
-  onNavigateView: (view: "home" | "clip" | "coreview") => void;
+  /** Top-level view switch (nav rail / ⌘1-⌘4) — state, not a router. */
+  onNavigateView: (view: "home" | "library" | "clip" | "coreview") => void;
   /** Opens the ⌘/ shortcut cheat-sheet (ShortcutSheet). */
   onShowShortcuts: () => void;
   // ── scoped undo/redo (lib/undo.ts) ──
@@ -265,18 +265,23 @@ export function buildCommands(d: CommandDeps): Command[] {
     // ── View ────────────────────────────────────────────────────
     // Top-level view switch — same ids as the KEY_ACTIONS entries, so the
     // hotkey literals below are overlaid with the live bindings in App.
-    { id: "view.home", label: "Go to Home (Library)", group: "View",
-      hotkey: "⌘1", description: "Browse your library",
-      keywords: ["library", "browse", "nav"],
+    { id: "view.home", label: "Go to Home", group: "View",
+      hotkey: "⌘1", description: "The landing page — recents & shelves",
+      keywords: ["home", "landing", "start", "nav"],
       disabled: d.activeView === "home",
       run: () => d.onNavigateView("home") },
+    { id: "view.library", label: "Go to Library", group: "View",
+      hotkey: "⌘2", description: "Browse your footage in the detail browser",
+      keywords: ["library", "browse", "folders", "files", "grid", "nav"],
+      disabled: d.activeView === "library",
+      run: () => d.onNavigateView("library") },
     { id: "view.clip", label: "Go to Clip view", group: "View",
-      hotkey: "⌘2", description: "Back to the player and editor",
+      hotkey: "⌘3", description: "Back to the player and editor",
       keywords: ["editor", "player", "monitor", "nav"],
       disabled: d.activeView === "clip",
       run: () => d.onNavigateView("clip") },
     { id: "view.coreview", label: "Go to Review", group: "View",
-      hotkey: "⌘3", description: "Watch & review together",
+      hotkey: "⌘4", description: "Watch & review together",
       keywords: ["co-review", "watch party", "session", "peers", "screening", "nav"],
       disabled: d.activeView === "coreview",
       run: () => d.onNavigateView("coreview") },

@@ -1,29 +1,22 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { LibraryHero } from "./LibraryHero";
 import { LibraryRow } from "./LibraryRow";
 import { LibraryCard, type LibraryCardArt } from "./LibraryCard";
 import { LibraryFolderCard } from "./LibraryFolderCard";
 import { ThumbnailPicker } from "./ThumbnailPicker";
 import { IconPlus, IconRefresh, IconSearch } from "./Icons";
+import type { RootScan } from "../hooks/use-library-scan";
 import {
-  LIBRARY_SCAN_DEPTH,
   chosenPosterFor,
   clearChosenPoster,
   countLibraryItems,
   formatBytes,
   formatModifiedDate,
   libraryPosterPaths,
-  loadLibraryRoots,
-  resolveLibraryChain,
-  saveLibraryRoots,
   searchLibrary,
   setChosenPoster,
   type LibraryCrumb,
 } from "../lib/library";
-import { formatError } from "../lib/error-format";
-import { extractPosterBlob } from "../lib/mediabunny-helpers";
 import { AUDIO_EXTENSIONS, fileExtension } from "../lib/import-extensions";
 import {
   getHistory as getTranscriptHistory,
@@ -34,148 +27,10 @@ import { hostnameOf, youTubeThumbnailUrl } from "../lib/validation";
 import type { RecentSource } from "../lib/recent-sources";
 import type { LibraryFolder, LibraryItem } from "../types";
 
-// ════════════════════════════════════════════════════════════════════════
-// Poster loader — module scope so the cache is one per app, shared by every
-// card/hero and alive across re-renders. Cards call this only once visible
-// (use-lazy-thumbnails), and at most THUMB_CONCURRENCY decodes run at once.
-//
-// Two-step pipeline, mirroring the import thumbnail in App.tsx loadLocalPath:
-//   1. mediabunny extractPosterBlob — in-process WebCodecs decode (~20-80ms,
-//      no subprocess) of the representative (or user-chosen) frame, yields a
-//      blob: object URL.
-//   2. generate_local_thumbnail — the ffmpeg fallback for codecs WebCodecs
-//      can't decode; has its own (path, mtime, time)-keyed disk cache, yields
-//      an asset:// URL via convertFileSrc.
-// Total failure marks the path bad for the session → placeholder, no retry
-// loop. The poster frame is representative (extractPosterBlob skips black
-// intro fades) or, when the user picked one, that exact timestamp.
-// ════════════════════════════════════════════════════════════════════════
-
-/** path → displayable URL. Map insertion order doubles as the eviction queue. */
-const thumbCache = new Map<string, string>();
-const thumbPending = new Map<string, Promise<string | null>>();
-/** Paths that failed both steps — placeholder without re-decoding forever. */
-const thumbFailed = new Set<string>();
-const THUMB_CACHE_MAX = 400;
-const THUMB_CONCURRENCY = 3;
-
-let thumbRunning = 0;
-const thumbWaiters: Array<() => void> = [];
-/** path → decode generation. invalidateThumb bumps it so a decode already in
- *  flight when the user picks a new poster discards its now-stale result
- *  instead of racing the fresh one into the cache. */
-const thumbGen = new Map<string, number>();
-
-function rememberThumb(path: string, url: string): void {
-  // Overwriting an existing entry (e.g. a duplicate same-path job) must release
-  // the prior blob, not just the LRU-evicted ones, or the old decode leaks.
-  const prior = thumbCache.get(path);
-  if (prior && prior !== url && prior.startsWith("blob:")) URL.revokeObjectURL(prior);
-  thumbCache.set(path, url);
-  while (thumbCache.size > THUMB_CACHE_MAX) {
-    const oldest = thumbCache.entries().next().value;
-    if (!oldest) break;
-    thumbCache.delete(oldest[0]);
-    // blob: URLs pin decoded JPEGs in memory — release on eviction. (A still
-    // -mounted <img> holding one degrades to the placeholder via onError.)
-    if (oldest[1].startsWith("blob:")) URL.revokeObjectURL(oldest[1]);
-  }
-}
-
-async function loadThumbnail(path: string): Promise<string | null> {
-  // A user-chosen poster time overrides the representative frame; null → auto.
-  const chosen = chosenPosterFor(path);
-  const blob = await extractPosterBlob(path, {
-    atSeconds: chosen ?? undefined,
-    maxWidth: 480,
-    quality: 0.8,
-  });
-  if (blob) return URL.createObjectURL(blob);
-  const out = await invoke<string>("generate_local_thumbnail", {
-    args: { input_path: path, duration_seconds: null, time_seconds: chosen ?? null },
-  });
-  return typeof out === "string" && out !== "" ? convertFileSrc(out) : null;
-}
-
-/**
- * Bust one path's cached poster so the next request regenerates it — called
- * after a "Set thumbnail…" change. Revokes the old blob URL to free the decoded
- * JPEG, and clears the failed/pending bookkeeping so a fresh decode can run.
- * The card is re-requested by remounting it (a poster-version key in the
- * builders below), which re-runs its lazy-thumbnail hook against this cleared
- * cache.
- */
-export function invalidateThumb(path: string): void {
-  const url = thumbCache.get(path);
-  if (url) {
-    thumbCache.delete(path);
-    if (url.startsWith("blob:")) URL.revokeObjectURL(url);
-  }
-  thumbFailed.delete(path);
-  thumbPending.delete(path);
-  // Supersede any decode already in flight for this path (the ffmpeg fallback
-  // can take a while): the running job will see the bumped generation and drop
-  // its stale result rather than overwriting the cache with the old poster.
-  thumbGen.set(path, (thumbGen.get(path) ?? 0) + 1);
-}
-
-/** Cached + de-duped + concurrency-capped poster fetch for one video path. */
-function requestThumbnail(path: string): Promise<string | null> {
-  const hit = thumbCache.get(path);
-  if (hit) return Promise.resolve(hit);
-  if (thumbFailed.has(path)) return Promise.resolve(null);
-  const pending = thumbPending.get(path);
-  if (pending) return pending;
-  // Snapshot the generation now; invalidateThumb bumps it if the user picks a
-  // new poster while this job is decoding, which is how the job detects it was
-  // superseded (see the checks below).
-  const startGen = thumbGen.get(path) ?? 0;
-  const current = () => (thumbGen.get(path) ?? 0) === startGen;
-  const job = (async () => {
-    if (thumbRunning >= THUMB_CONCURRENCY) {
-      await new Promise<void>((release) => thumbWaiters.push(release));
-    }
-    thumbRunning++;
-    try {
-      const url = await loadThumbnail(path);
-      // Superseded mid-decode: discard rather than caching a stale frame, and
-      // revoke the blob we just made so it doesn't leak. A newer job (spawned
-      // by the remounted card) owns the poster now.
-      if (!current()) {
-        if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
-        return null;
-      }
-      if (url) rememberThumb(path, url);
-      else thumbFailed.add(path);
-      return url;
-    } catch {
-      // Don't poison a path with a failure flag if a pick superseded us.
-      if (current()) thumbFailed.add(path);
-      return null;
-    } finally {
-      // Runs on BOTH resolve and the caught reject, so the slot is always freed
-      // and the next queued waiter always kicked — a failed decode never leaks a
-      // concurrency slot.
-      thumbRunning--;
-      thumbWaiters.shift()?.();
-      // Only clear the pending slot if we still own it. If a pick superseded us,
-      // a newer job now holds thumbPending — deleting it would defeat dedup.
-      if (current()) thumbPending.delete(path);
-    }
-  })();
-  thumbPending.set(path, job);
-  return job;
-}
-
 /** Recents/transcripts don't carry a media kind — infer from the extension. */
 function mediaKindOf(path: string): "video" | "audio" {
   return AUDIO_EXTENSIONS.includes(fileExtension(path)) ? "audio" : "video";
 }
-
-type RootScan =
-  | { status: "loading" }
-  | { status: "ok"; tree: LibraryFolder }
-  | { status: "error"; message: string };
 
 type Props = {
   recentSources: RecentSource[];
@@ -187,116 +42,51 @@ type Props = {
   onOpenTranscriptHistory: (entry: TranscriptHistoryEntry) => void;
   /** Switches to the Clip view; true also focuses the URL field. */
   onSwitchToClip: (focusUrl?: boolean) => void;
-  /** Bumped by App when the nav logo/Home is pressed — always returns the
-   *  Library to its top level (clears drill-in + search). */
+  /** A folder card / folder search-hit was opened → jump to the Library
+   *  browser with that folder selected (one detail browser, not two). */
+  onOpenFolder: (chain: LibraryCrumb[]) => void;
+  /** Bumped by App when the nav logo/Home is pressed — clears Home's search. */
   homeResetSignal: number;
+  // ── Shared scan state (useLibraryScan, owned by App) ──
+  roots: string[];
+  scans: Record<string, RootScan>;
+  scanning: boolean;
+  addFolder: () => Promise<void>;
+  removeRoot: (root: string) => void;
+  rescanAll: () => void;
+  scanRoot: (root: string) => void;
+  requestThumb: (path: string) => Promise<string | null>;
+  invalidateThumb: (path: string) => void;
+  posterVersions: Record<string, number>;
+  bumpPoster: (path: string) => void;
+  resetPoster: (path: string) => void;
 };
 
 /**
- * Home view — the Library. A dark, Netflix-style browser over user-added
- * folders: hero over the most recent source, a Continue shelf (recents),
- * one shelf per root (scan_library_folder), and a Transcripts shelf.
- * Owns ALL library state (roots, scans, search, drill-in) — App only
- * supplies the open handlers, so no scan state leaks up. Scans run on
- * mount and on explicit actions (add root, retry, rescan) — never on a
- * timer.
+ * Home view — the landing page. A dark, Netflix-style wall over the user's
+ * added folders: hero over the most recent source, a Continue shelf (recents),
+ * one shelf per root, and a Transcripts shelf. It no longer owns scan state
+ * (that lifted to useLibraryScan in App, shared with the Library browser) and
+ * no longer drills in place — opening a folder routes to the Library browser
+ * via onOpenFolder. Only UI-local state (search + picker) lives here.
  */
 export function LibraryView({
   recentSources, onOpenLocalPath, onOpenRecentSource, onOpenTranscriptHistory,
-  onSwitchToClip, homeResetSignal,
+  onSwitchToClip, onOpenFolder, homeResetSignal,
+  roots, scans, scanning, addFolder, removeRoot, rescanAll, scanRoot,
+  requestThumb, invalidateThumb, posterVersions, bumpPoster, resetPoster,
 }: Props) {
-  const [roots, setRoots] = useState<string[]>(() => loadLibraryRoots());
-  const [scans, setScans] = useState<Record<string, RootScan>>({});
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
-  const [drill, setDrill] = useState<LibraryCrumb[] | null>(null);
   // Bumped on rescan so the Transcripts shelf re-reads localStorage.
   const [historyTick, setHistoryTick] = useState(0);
-  // "Set thumbnail…" picker target (null = closed) + a per-path poster version.
-  // Bumping a path's version changes the matching card's React key, remounting
-  // it so its lazy-thumbnail hook re-requests the (invalidated) poster.
+  // "Set thumbnail…" picker target (null = closed).
   const [pickerPath, setPickerPath] = useState<string | null>(null);
-  const [posterVersions, setPosterVersions] = useState<Record<string, number>>({});
-  const bumpPoster = useCallback(
-    (path: string) => setPosterVersions((v) => ({ ...v, [path]: (v[path] ?? 0) + 1 })),
-    [],
-  );
-  // Menu "Reset thumbnail" — clear the chosen time, bust the cache (race-guard
-  // + blob revoke), and remount the card via its poster-version key so it
-  // re-requests the auto/representative frame. Same effect as the picker's
-  // "Reset to auto", reachable without opening the picker.
-  const resetPoster = useCallback((path: string) => {
-    clearChosenPoster(path);
-    invalidateThumb(path);
-    bumpPoster(path);
-  }, [bumpPoster]);
-  const scanSweepRef = useRef(0);
 
-  // ── Scan orchestration — sequential, never a Promise.all fan-out ──────
-  const scanOne = useCallback(async (root: string) => {
-    // Snapshot the sweep token so a rescan/removal that supersedes us mid-scan
-    // can't let this stale result clobber the newer state — scanAll only checks
-    // the token between roots, never after this async scan lands.
-    const sweep = scanSweepRef.current;
-    setScans((s) => ({ ...s, [root]: { status: "loading" } }));
-    try {
-      const tree = await invoke<LibraryFolder>("scan_library_folder", {
-        path: root,
-        maxDepth: LIBRARY_SCAN_DEPTH,
-      });
-      if (scanSweepRef.current !== sweep) return; // superseded — drop the write
-      setScans((s) => ({ ...s, [root]: { status: "ok", tree } }));
-    } catch (e) {
-      if (scanSweepRef.current !== sweep) return; // superseded — drop the write
-      // Fail loud: the root renders an inline error row, never a silent skip.
-      setScans((s) => ({ ...s, [root]: { status: "error", message: formatError(e) } }));
-    }
-  }, []);
-
-  const scanAll = useCallback(async (list: readonly string[]) => {
-    const sweep = ++scanSweepRef.current;
-    for (const root of list) {
-      if (scanSweepRef.current !== sweep) return; // superseded by a newer sweep
-      await scanOne(root);
-    }
-  }, [scanOne]);
-
-  // App-boot scan (the view is keep-alive-mounted even while hidden).
-  useEffect(() => {
-    void scanAll(roots);
-    // Mount-only by design — add/remove/rescan trigger their own scans.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const addFolder = useCallback(async () => {
-    const picked = await openDialog({ directory: true, multiple: false });
-    if (typeof picked !== "string" || !picked) return;
-    if (!roots.includes(picked)) {
-      const next = [...roots, picked];
-      setRoots(next);
-      saveLibraryRoots(next);
-    }
-    void scanOne(picked); // new or re-picked — (re)scan just this root
-  }, [roots, scanOne]);
-
-  const removeRoot = useCallback((root: string) => {
-    const name = root.split("/").pop() || root;
-    // Forgets the root only — never touches the disk.
-    if (!confirm(`Remove "${name}" from your library? The folder and its files stay on disk.`)) return;
-    const next = roots.filter((r) => r !== root);
-    setRoots(next);
-    saveLibraryRoots(next);
-    setScans((s) => {
-      const { [root]: _dropped, ...rest } = s;
-      return rest;
-    });
-    setDrill((d) => (d && d[0]?.path === root ? null : d));
-  }, [roots]);
-
-  const rescanAll = useCallback(() => {
+  const rescanHome = useCallback(() => {
     setHistoryTick((t) => t + 1); // Transcripts shelf re-reads history too
-    void scanAll(roots);
-  }, [roots, scanAll]);
+    rescanAll();
+  }, [rescanAll]);
 
   // ── Search: client-side, case-insensitive, debounced 150ms ────────────
   useEffect(() => {
@@ -310,12 +100,9 @@ export function LibraryView({
     setNeedle("");
   }, []);
 
-  // Nav logo / Home always returns to the top level.
+  // Nav logo / Home always returns to the top level (clears the search).
   useEffect(() => {
-    if (homeResetSignal > 0) {
-      setDrill(null);
-      clearSearch();
-    }
+    if (homeResetSignal > 0) clearSearch();
   }, [homeResetSignal, clearSearch]);
 
   const trees = useMemo(
@@ -328,24 +115,8 @@ export function LibraryView({
   const results = useMemo(() => searchLibrary(trees, needle), [trees, needle]);
   const searching = needle.trim() !== "";
   const transcripts = useMemo(() => getTranscriptHistory(), [historyTick]);
-  const scanning = roots.some((r) => scans[r]?.status === "loading");
 
-  // Drill-in resolves against the freshest trees; a settled rescan that no
-  // longer contains the chain (or a failed/forgotten root) resets to top.
-  // In-flight scans are waited out so a rescan doesn't bounce you home.
-  const drilledNode = drill ? resolveLibraryChain(trees, drill) : null;
-  useEffect(() => {
-    if (!drill) return;
-    const rootPath = drill[0]?.path ?? "";
-    const rootScan = scans[rootPath];
-    if (!rootScan || rootScan.status === "loading") {
-      if (!roots.includes(rootPath)) setDrill(null);
-      return;
-    }
-    if (rootScan.status === "error" || !resolveLibraryChain(trees, drill)) setDrill(null);
-  }, [drill, scans, roots, trees]);
-
-  // ── Card builders (shared by shelves, drill pages, and the search grid) ─
+  // ── Card builders (shared by shelves and the search grid) ─────────────
   const itemCard = (it: LibraryItem) => (
     <LibraryCard
       key={`${it.path}#${posterVersions[it.path] ?? 0}`}
@@ -356,7 +127,7 @@ export function LibraryView({
       onOpen={() => onOpenLocalPath(it.path)}
       onChoosePoster={setPickerPath}
       onResetPoster={resetPoster}
-      requestThumb={requestThumbnail}
+      requestThumb={requestThumb}
     />
   );
 
@@ -366,8 +137,8 @@ export function LibraryView({
       name={f.name}
       count={countLibraryItems(f)}
       posterPaths={libraryPosterPaths(f)}
-      onOpen={() => { clearSearch(); setDrill(chain); }}
-      requestThumb={requestThumbnail}
+      onOpen={() => { clearSearch(); onOpenFolder(chain); }}
+      requestThumb={requestThumb}
     />
   );
 
@@ -384,7 +155,7 @@ export function LibraryView({
       onOpen={() => onOpenRecentSource(r)}
       onChoosePoster={setPickerPath}
       onResetPoster={resetPoster}
-      requestThumb={requestThumbnail}
+      requestThumb={requestThumb}
     />
   );
 
@@ -400,7 +171,7 @@ export function LibraryView({
         art={art}
         badge="srt"
         onOpen={() => onOpenTranscriptHistory(t)}
-        requestThumb={requestThumbnail}
+        requestThumb={requestThumb}
       />
     );
   };
@@ -438,7 +209,7 @@ export function LibraryView({
           </div>
           <div className="cp-lib-error" role="alert">
             <span className="cp-lib-error-msg">{scan.message}</span>
-            <button type="button" className="btn btn-compact" onClick={() => void scanOne(root)}>
+            <button type="button" className="btn btn-compact" onClick={() => scanRoot(root)}>
               Retry
             </button>
           </div>
@@ -472,42 +243,15 @@ export function LibraryView({
     );
   };
 
-  // Drilled into a folder: its own loose files first, then one shelf per
-  // subfolder (each showing that subfolder's collections + files) — "that
-  // folder's rows". Deeper folders keep drilling via their collection cards.
-  const drilledRows = (node: LibraryFolder, chain: LibraryCrumb[]) => (
-    <>
-      {node.items.length > 0 && (
-        <LibraryRow title={node.name} count={node.items.length}>
-          {node.items.map(itemCard)}
-        </LibraryRow>
-      )}
-      {node.folders.map((g) => {
-        const gChain = [...chain, { name: g.name, path: g.path }];
-        return (
-          <LibraryRow key={g.path} title={g.name} count={countLibraryItems(g)}>
-            {g.folders.map((h) => folderCard(h, [...gChain, { name: h.name, path: h.path }]))}
-            {g.items.map(itemCard)}
-          </LibraryRow>
-        );
-      })}
-      {node.items.length === 0 && node.folders.length === 0 && (
-        <p className="cp-lib-note">This folder is empty.</p>
-      )}
-    </>
-  );
-
   return (
-    // <main> = the Home view's single main landmark (the Clip view's <main> is
-    // [hidden] and out of the a11y tree while Home is active). The header nests
-    // inside it, so cp-lib-head is a section header, not a second top-level
-    // banner. tabIndex={-1} makes .cp-lib a programmatic focus target for the
-    // view switch (a sibling owns that focus move) without entering tab order.
+    // <main> = the Home view's single main landmark (the other views' roots are
+    // [hidden] and out of the a11y tree while Home is active). tabIndex={-1}
+    // makes .cp-lib a programmatic focus target for the view switch.
     <main
       className="cp-lib"
       tabIndex={-1}
       onKeyDown={(e) => {
-        // Esc anywhere in the Library clears an active search.
+        // Esc anywhere in Home clears an active search.
         if (e.key === "Escape" && query !== "") {
           e.stopPropagation();
           clearSearch();
@@ -515,7 +259,7 @@ export function LibraryView({
       }}
     >
       <header className="cp-lib-head">
-        <h1 className="cp-lib-title">Library</h1>
+        <h1 className="cp-lib-title">Home</h1>
         <div className="cp-lib-search">
           <IconSearch size={13} />
           <input
@@ -547,7 +291,7 @@ export function LibraryView({
           className="btn-icon cp-lib-rescan"
           title="Rescan library"
           aria-label="Rescan library"
-          onClick={rescanAll}
+          onClick={rescanHome}
           disabled={scanning}
         >
           <IconRefresh size={14} />
@@ -568,44 +312,18 @@ export function LibraryView({
             {results.items.map(itemCard)}
           </div>
         </>
-      ) : drill ? (
-        <>
-          <nav className="cp-lib-crumbs" aria-label="Library location">
-            <button type="button" onClick={() => setDrill(null)}>Library</button>
-            {drill.map((c, i) => (
-              <Fragment key={c.path}>
-                <span className="sep" aria-hidden="true">/</span>
-                {i === drill.length - 1 ? (
-                  <span className="cur" aria-current="page">{c.name}</span>
-                ) : (
-                  <button type="button" onClick={() => setDrill(drill.slice(0, i + 1))}>
-                    {c.name}
-                  </button>
-                )}
-              </Fragment>
-            ))}
-          </nav>
-          <div className="cp-lib-rows">
-            {drilledNode
-              ? drilledRows(drilledNode, drill)
-              : <p className="cp-lib-note">Scanning…</p>}
-          </div>
-        </>
       ) : (
         <>
           <LibraryHero
-            /* The hero backdrop is recentSources[0]'s poster; without keying it
-               on that source's poster version, a "Set thumbnail…" pick updates
-               the Continue card but leaves the hero on the old frame (its lazy
-               hook already fired and won't re-request). Keying remounts only the
-               hero for the picked path, re-running its load against the freshly
-               invalidated cache. Web/URL sources have no version bump → stable. */
+            /* Key the hero on recentSources[0]'s poster version so a "Set
+               thumbnail…" pick remounts it (its lazy hook already fired).
+               Web/URL sources have no version bump → stable. */
             key={`hero#${recentSources[0] ? (posterVersions[recentSources[0].value] ?? 0) : 0}`}
             recent={recentSources[0] ?? null}
             onOpen={onOpenRecentSource}
             onAddFolder={() => void addFolder()}
             onPasteUrl={() => onSwitchToClip(true)}
-            requestThumb={requestThumbnail}
+            requestThumb={requestThumb}
           />
           <div className="cp-lib-rows">
             {recentSources.length > 0 && (

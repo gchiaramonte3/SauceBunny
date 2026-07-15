@@ -21,13 +21,21 @@ type Props = {
   /** Small corner tag, e.g. "web" on Continue-row URLs, "srt" on transcripts. */
   badge?: string;
   onOpen: () => void;
-  /** LibraryView's cached, concurrency-capped thumbnail loader. */
+  /** The shared, cached, concurrency-capped thumbnail loader. */
   requestThumb: (path: string) => Promise<string | null>;
   /** Opens the "Choose thumbnail…" picker for this path. Only wired for
    *  local-VIDEO cards (audio/remote have no frame to pick). */
   onChoosePoster?: (path: string) => void;
   /** Clears this path's chosen thumbnail, reverting to the auto frame. */
   onResetPoster?: (path: string) => void;
+  /**
+   * Library-browser selection mode. When present, a single click / Space
+   * SELECTS (shows the detail panel) and double-click / Enter OPENS in Clip.
+   * Absent (Home shelves) → the card opens on a single click, as before.
+   */
+  onSelect?: () => void;
+  /** Highlights the card as the current browser selection. */
+  selected?: boolean;
 };
 
 /**
@@ -45,6 +53,7 @@ type Props = {
  */
 export function LibraryCard({
   title, detail, art, badge, onOpen, requestThumb, onChoosePoster, onResetPoster,
+  onSelect, selected,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [broken, setBroken] = useState(false);
@@ -73,12 +82,19 @@ export function LibraryCard({
       <button
         ref={btnRef}
         type="button"
-        className="cp-lib-card"
-        onClick={onOpen}
+        className={"cp-lib-card" + (selected ? " selected" : "")}
+        // Selection mode: single click selects, double-click opens. Home shelves
+        // (no onSelect) keep the single-click-opens behavior.
+        onClick={onSelect ?? onOpen}
+        onDoubleClick={onSelect ? onOpen : undefined}
+        aria-current={onSelect ? (selected ? "true" : undefined) : undefined}
         title={title}
         onContextMenu={(e) => { e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY }); }}
         onKeyDown={(e) => {
-          if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); openMenuAtRect(); }
+          if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); openMenuAtRect(); return; }
+          // In selection mode Enter opens (preventDefault stops the synthesized
+          // click that would otherwise just re-select). Space still selects.
+          if (onSelect && e.key === "Enter") { e.preventDefault(); onOpen(); }
         }}
       >
         <span className="cp-lib-card-art">

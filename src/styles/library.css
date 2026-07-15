@@ -708,6 +708,12 @@
   color: var(--fg-4);
 }
 
+/* Grid-card selection highlight (Library browser only — Home never sets it). */
+.cp-lib-card.selected .cp-lib-card-art {
+  border-color: var(--ella-green);
+  box-shadow: 0 0 0 1px var(--ella-green);
+}
+
 /* ── Reduced motion: hover scale/reveals snap, no transforms. ── */
 @media (prefers-reduced-motion: reduce) {
   .cp-lib-card-art,
@@ -725,4 +731,358 @@
   .cp-lib-thumb-scrim,
   .cp-lib-thumb,
   .cp-lib-menu { animation: none; }
+}
+
+/* ============================================================
+   LIBRARY BROWSER (the "Library" view) — three regions:
+   folder tree | main pane (bar + grid/list) | detail panel.
+   Plex/Finder grammar, all tokens.
+   ============================================================ */
+.cp-lib-browse {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg-0);
+}
+
+/* ── Left column: the folder tree (collapsible via the bar toggle). ── */
+.cp-lib-tree {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+.cp-lib-tree-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-2);
+}
+.cp-lib-tree-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  width: 100%;
+  /* Disclosure indent scales with tree depth (data-var idiom). */
+  padding: 5px var(--s-2) 5px calc(var(--s-2) + var(--depth, 0) * 13px);
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.cp-lib-tree-row:hover { background: rgba(255, 255, 255, 0.05); }
+.cp-lib-tree-row:focus-visible { outline: none; background: rgba(255, 255, 255, 0.08); }
+.cp-lib-tree-row.selected {
+  background: rgba(108, 255, 141, 0.14); /* --ella-green wash */
+  color: var(--fg-0);
+}
+.cp-lib-tree-tw {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  height: 16px;
+  color: var(--fg-4);
+  border-radius: var(--r-xs);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.cp-lib-tree-tw.open { transform: rotate(90deg); }
+.cp-lib-tree-tw.empty { color: var(--fg-5); }
+.cp-lib-tree-tw:hover { color: var(--fg-1); }
+.cp-lib-tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-lib-tree-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  border-top: 1px solid var(--line-1);
+}
+.cp-lib-tree-foot .btn-compact { flex: 1; }
+.cp-lib-tree-rescan { width: 28px; height: 28px; flex: 0 0 auto; }
+
+/* ── Main pane: bar over the grid/list, next to the detail panel. ── */
+.cp-lib-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.cp-lib-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-5);
+  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-0);
+}
+.cp-lib-bar-tree { width: 30px; height: 30px; flex: 0 0 auto; }
+.cp-lib-bar-tree.active { color: var(--fg-1); background: rgba(255, 255, 255, 0.06); }
+.cp-lib-bcrumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+}
+.cp-lib-bcrumbs button {
+  padding: 2px 5px;
+  border: none;
+  background: none;
+  border-radius: var(--r-xs);
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cp-lib-bcrumbs button:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.06); }
+.cp-lib-bcrumbs .sep { color: var(--fg-5); }
+.cp-lib-bcrumbs .cur { color: var(--fg-1); font-weight: 800; white-space: nowrap; }
+.cp-lib-bar-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+.cp-lib-bar-search {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 180px;
+  height: 28px;
+  padding: 0 var(--s-2) 0 var(--s-3);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  color: var(--fg-3);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.cp-lib-bar-search:focus-within { border-color: var(--line-3); }
+.cp-lib-bar-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  outline: none;
+}
+.cp-lib-bar-search input::placeholder { color: var(--fg-4); }
+.cp-lib-bar-search input:focus-visible { box-shadow: none; }
+.cp-lib-select {
+  height: 28px;
+  padding: 0 var(--s-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cp-lib-select:hover { border-color: var(--line-3); }
+.cp-lib-select:focus-visible { outline: none; border-color: var(--line-3); }
+.cp-lib-bar-dir { width: 28px; height: 28px; font-size: 14px; font-weight: 700; color: var(--fg-2); }
+.cp-lib-viewtoggle {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+}
+.cp-lib-viewtoggle .btn-icon { width: 26px; height: 24px; border-radius: var(--r-sm); }
+.cp-lib-viewtoggle .btn-icon.active { background: rgba(255, 255, 255, 0.10); color: var(--fg-1); }
+
+/* ── Body: scrolling content pane beside the detail panel. ── */
+.cp-lib-browse-body { flex: 1; display: flex; min-height: 0; min-width: 0; }
+.cp-lib-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-4) var(--s-5) var(--s-10);
+}
+.cp-lib-browse-empty { padding: var(--s-8) var(--s-5); }
+/* Grid mode — a poster wall, tighter cells than Home's shelves. */
+.cp-lib-browse-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
+  gap: var(--s-4);
+  align-content: start;
+}
+.cp-lib-browse-grid .cp-lib-cell { width: auto; }
+
+/* ── List mode — a compact table (poster · name · kind · size · modified). ── */
+.cp-lib-list { display: flex; flex-direction: column; }
+.cp-lib-list-head,
+.cp-lib-lrow {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 64px 84px 96px;
+  align-items: center;
+  gap: var(--s-3);
+}
+.cp-lib-list-head {
+  padding: var(--s-1) var(--s-2);
+  border-bottom: 1px solid var(--line-1);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+.cp-lib-lrow {
+  padding: var(--s-1) var(--s-2);
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.cp-lib-lrow:hover { background: rgba(255, 255, 255, 0.04); }
+.cp-lib-lrow:focus-visible { outline: none; background: rgba(255, 255, 255, 0.07); }
+.cp-lib-lrow.selected { background: rgba(108, 255, 141, 0.14); color: var(--fg-0); }
+.cp-lib-lrow-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  width: 34px;
+  border-radius: var(--r-xs);
+  overflow: hidden;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  color: var(--fg-4);
+}
+.cp-lib-lrow-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-lib-lrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--fg-1); }
+.cp-lib-lrow-kind { color: var(--fg-4); text-transform: capitalize; }
+.cp-lib-lrow-size,
+.cp-lib-lrow-date { color: var(--fg-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ── Detail panel: appears on selection (right ~280px). ── */
+.cp-lib-detail {
+  flex: 0 0 280px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-3) var(--s-4) var(--s-6);
+  border-left: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+.cp-lib-detail-head { display: flex; justify-content: flex-end; }
+.cp-lib-detail-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--fg-4);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.cp-lib-detail-close:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.08); }
+.cp-lib-detail-art {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cp-lib-detail-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-lib-detail-ph { color: var(--fg-4); }
+.cp-lib-detail-name {
+  margin: var(--s-1) 0 0;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.3;
+  color: var(--fg-1);
+  overflow-wrap: anywhere;
+}
+.cp-lib-detail-path {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--fg-4);
+  overflow-wrap: anywhere;
+}
+.cp-lib-detail-meta {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+}
+.cp-lib-detail-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  align-self: flex-start;
+  margin-top: var(--s-1);
+  padding: 4px var(--s-3);
+  border: 1px solid rgba(108, 255, 141, 0.4);
+  border-radius: var(--r-pill);
+  background: rgba(108, 255, 141, 0.10);
+  color: var(--ella-green);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.cp-lib-detail-chip:hover { background: rgba(108, 255, 141, 0.18); }
+.cp-lib-detail-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+.cp-lib-detail-actions .btn { justify-content: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-lib-tree-row,
+  .cp-lib-tree-tw,
+  .cp-lib-lrow,
+  .cp-lib-bar-search,
+  .cp-lib-detail-chip { transition: none; }
 }

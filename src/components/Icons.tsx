@@ -392,3 +392,23 @@ export const IconChevronRight = (p: IconProps) => (
     <polyline points="9 6 15 12 9 18" />
   </Icon>
 );
+// 2×2 poster wall — the Library browser's grid-view toggle.
+export const IconGrid = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" />
+    <rect x="14" y="14" width="7" height="7" rx="1" />
+  </Icon>
+);
+// Rows — the Library browser's list-view toggle.
+export const IconList = (p: IconProps) => (
+  <Icon {...p}>
+    <line x1="8" y1="6" x2="21" y2="6" />
+    <line x1="8" y1="12" x2="21" y2="12" />
+    <line x1="8" y1="18" x2="21" y2="18" />
+    <line x1="3.5" y1="6" x2="3.5" y2="6" strokeLinecap="round" />
+    <line x1="3.5" y1="12" x2="3.5" y2="12" strokeLinecap="round" />
+    <line x1="3.5" y1="18" x2="3.5" y2="18" strokeLinecap="round" />
+  </Icon>
+);

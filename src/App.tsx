@@ -11,6 +11,9 @@ import {
 import { Toolbar } from "./components/Toolbar";
 import { NavRail } from "./components/NavRail";
 import { LibraryView } from "./components/LibraryView";
+import { LibraryBrowser } from "./components/LibraryBrowser";
+import { useLibraryScan } from "./hooks/use-library-scan";
+import type { LibraryCrumb } from "./lib/library";
 import { Sidebar } from "./components/Sidebar";
 import { ParticipantRail } from "./components/ParticipantRail";
 import { CoReviewLobby } from "./components/CoReviewLobby";
@@ -136,7 +139,7 @@ function migrateCaptionFont(raw: unknown): CaptionFontKey {
  * A state switch, NOT a router (CLAUDE.md) — and the Clip view is never
  * unmounted, only [hidden], so playback/jobs/listeners survive navigation.
  */
-export type AppView = "home" | "clip" | "coreview";
+export type AppView = "home" | "library" | "clip" | "coreview";
 
 // v2 bump: re-encode default flipped from ON to OFF. Older v1 settings are
 // intentionally abandoned so users get the new, much faster default.
@@ -678,13 +681,16 @@ export default function App() {
   // ====== Clip queue (multi-section export) ======
   const [clipQueue, setClipQueue] = useState<QueuedClip[]>([]);
   const [queueOpen, setQueueOpen] = useState(false);
-  // ── Top-level view (nav rail): Home (Library) vs Clip (editor) ──
+  // ── Top-level view (nav rail): Home / Library / Clip / Co-Review ──
   // Single state switch — no router (CLAUDE.md). Persisted so the app
-  // reopens where you left it; anything but a stored "home" (missing,
-  // corrupt, future value) falls back to "clip", the working view.
+  // reopens where you left it; a stored landing/browser view ("home" or
+  // "library") is restored, anything else (missing, corrupt, future value)
+  // falls back to "clip", the working view.
   // The panel window (?window=panel) never mounts App, so it's untouched.
-  const [activeView, setActiveViewState] = useState<AppView>(() =>
-    loadJson<string>(ACTIVE_VIEW_KEY, "clip") === "home" ? "home" : "clip");
+  const [activeView, setActiveViewState] = useState<AppView>(() => {
+    const stored = loadJson<string>(ACTIVE_VIEW_KEY, "clip");
+    return stored === "home" || stored === "library" ? stored : "clip";
+  });
   const setActiveView = useCallback((v: AppView) => {
     setActiveViewState(v);
     saveJson(ACTIVE_VIEW_KEY, v);
@@ -705,8 +711,17 @@ export default function App() {
   // [hidden] and would orphan focus to <body>, so the shortcut moves focus into
   // the newly-shown view's root (tabindex=-1 containers, see the JSX below).
   const homeViewRef = useRef<HTMLDivElement>(null);
+  const libraryViewRef = useRef<HTMLDivElement>(null);
   const clipViewRef = useRef<HTMLDivElement>(null);
   const coreviewViewRef = useRef<HTMLDivElement>(null);
+  // Shared library scan state — owned here so Home's shelves and the Library
+  // browser read the SAME scan results (switching views never rescans) and
+  // the same thumbnail cache. Both views are keep-alive-mounted below.
+  const lib = useLibraryScan();
+  // Home drill-in → Library handoff: the folder chain to select, plus a tick so
+  // the same chain re-applies on repeat drills. One detail browser, not two.
+  const [librarySelection, setLibrarySelection] = useState<LibraryCrumb[] | null>(null);
+  const [librarySelectTick, setLibrarySelectTick] = useState(0);
   // Left source/export sidebar visibility — persisted, mirroring the right
   // drawer's toolbar toggle. Defaults open.
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
@@ -3205,6 +3220,14 @@ export default function App() {
     void handleLoadFromHistory(entry);
   }, [setActiveView, loadLocalPath, handleFetch, handleLoadFromHistory]);
 
+  // Home folder card / folder search-hit → open the Library browser with that
+  // folder selected. The tick makes a repeat drill re-apply the same chain.
+  const handleOpenLibraryFolder = useCallback((chain: LibraryCrumb[]) => {
+    setLibrarySelection(chain);
+    setLibrarySelectTick((t) => t + 1);
+    setActiveView("library");
+  }, [setActiveView]);
+
   // Hero "Paste a URL" → the same focus lever as the File-menu "Open URL…".
   const handleSwitchToClip = useCallback((focusUrl?: boolean) => {
     setActiveView("clip");
@@ -3700,21 +3723,28 @@ export default function App() {
         // to work from a text field too. The Clip view stays mounted either
         // way, so this never interrupts playback or a running job.
         case "view.home":
+        case "view.library":
         case "view.clip":
         case "view.coreview": {
           // During a co-review screening the theater owns the whole window
           // (nav rail is CSS-hidden and the theater-exit control lives in the
-          // Clip view) — ⌘1/⌘2/⌘3 would strand the user with no way back, so
+          // Clip view) — ⌘1-⌘4 would strand the user with no way back, so
           // no-op until they leave screening.
           if (screeningRef.current) break;
-          const v: AppView = id === "view.home" ? "home" : id === "view.coreview" ? "coreview" : "clip";
+          const v: AppView =
+            id === "view.home" ? "home" :
+            id === "view.library" ? "library" :
+            id === "view.coreview" ? "coreview" : "clip";
           // Route through navigateView (not raw setActiveView) so Home also
           // bumps homeResetTick like every other nav surface does.
           navigateView(v);
           // The outgoing view is about to be [hidden]; if focus lived inside
           // it, it orphans to <body>. Move focus into the newly-shown view's
           // root once React commits the unhide (rAF lands after the paint).
-          const viewRef = v === "home" ? homeViewRef : v === "coreview" ? coreviewViewRef : clipViewRef;
+          const viewRef =
+            v === "home" ? homeViewRef :
+            v === "library" ? libraryViewRef :
+            v === "coreview" ? coreviewViewRef : clipViewRef;
           requestAnimationFrame(() => viewRef.current?.focus());
           break;
         }
@@ -4265,6 +4295,7 @@ export default function App() {
   // Nav-rail tooltip shortcuts — resolved from the LIVE bindings so a rebind
   // in Settings → Commands shows correctly in the rail titles.
   const homeCombo = bindingsFor("view.home", keybindings)[0];
+  const libraryCombo = bindingsFor("view.library", keybindings)[0];
   const clipCombo = bindingsFor("view.clip", keybindings)[0];
   const coreviewCombo = bindingsFor("view.coreview", keybindings)[0];
 
@@ -4311,6 +4342,7 @@ export default function App() {
             onNavigate={navigateView}
             onOpenSettings={() => setSettingsOpen(true)}
             homeShortcut={homeCombo ? formatCombo(homeCombo) : undefined}
+            libraryShortcut={libraryCombo ? formatCombo(libraryCombo) : undefined}
             clipShortcut={clipCombo ? formatCombo(clipCombo) : undefined}
             coreviewShortcut={coreviewCombo ? formatCombo(coreviewCombo) : undefined}
             sessionActive={coSessionActive}
@@ -4318,8 +4350,9 @@ export default function App() {
           />
         </div>
         <div className="cp-views">
-          {/* Home — the Library (LibraryView.tsx owns roots/scans/search;
-              App only supplies the open handlers + recents). */}
+          {/* Home — the landing page. Scan state comes from useLibraryScan
+              (shared with the Library browser); App supplies the open handlers
+              + recents. Drilling into a folder routes to the Library browser. */}
           <div ref={homeViewRef} tabIndex={-1} className="cp-view cp-view-home" hidden={activeView !== "home"}>
             <LibraryView
               recentSources={recentSources}
@@ -4327,7 +4360,40 @@ export default function App() {
               onOpenRecentSource={handleLibraryOpenRecent}
               onOpenTranscriptHistory={handleLibraryOpenTranscript}
               onSwitchToClip={handleSwitchToClip}
+              onOpenFolder={handleOpenLibraryFolder}
               homeResetSignal={homeResetTick}
+              roots={lib.roots}
+              scans={lib.scans}
+              scanning={lib.scanning}
+              addFolder={lib.addFolder}
+              removeRoot={lib.removeRoot}
+              rescanAll={lib.rescanAll}
+              scanRoot={lib.scanRoot}
+              requestThumb={lib.requestThumb}
+              invalidateThumb={lib.invalidateThumb}
+              posterVersions={lib.posterVersions}
+              bumpPoster={lib.bumpPoster}
+              resetPoster={lib.resetPoster}
+            />
+          </div>
+          {/* Library — the Plex/Finder detail browser over the same scanned
+              roots. Keep-alive like the others; shares lib's scan results. */}
+          <div ref={libraryViewRef} tabIndex={-1} className="cp-view cp-view-library" hidden={activeView !== "library"}>
+            <LibraryBrowser
+              roots={lib.roots}
+              scans={lib.scans}
+              scanning={lib.scanning}
+              addFolder={lib.addFolder}
+              rescanAll={lib.rescanAll}
+              requestThumb={lib.requestThumb}
+              invalidateThumb={lib.invalidateThumb}
+              posterVersions={lib.posterVersions}
+              bumpPoster={lib.bumpPoster}
+              resetPoster={lib.resetPoster}
+              selection={librarySelection}
+              selectionTick={librarySelectTick}
+              onOpenLocalPath={handleLibraryOpenLocalPath}
+              onOpenTranscriptHistory={handleLibraryOpenTranscript}
             />
           </div>
           {/* Clip — the ENTIRE pre-rail app, toolbar included. NEVER

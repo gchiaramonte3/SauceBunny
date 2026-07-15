@@ -1,10 +1,11 @@
-import { IconHome, IconScissors, IconSettings, IconCoReview } from "./Icons";
+import { IconHome, IconStack, IconScissors, IconSettings, IconCoReview } from "./Icons";
 import type { AppView } from "../App";
 import logoUrl from "../assets/saucebunny-128.png";
 
 /**
- * Persistent left navigation rail — the app-shell switch between the two
- * top-level views: Home (the Library, phase 3) and Clip (the editor).
+ * Persistent left navigation rail — the app-shell switch between the
+ * top-level views: Home (landing page), Library (detail browser), Clip
+ * (the editor) and Review (co-review).
  *
  * This is a STATE switch, not a router (CLAUDE.md forbids routers): App owns
  * a single `activeView` useState and both views stay mounted — the inactive
@@ -20,6 +21,7 @@ type Props = {
   onOpenSettings: () => void;
   /** Pretty display combos for the tooltips (live rebindable shortcuts). */
   homeShortcut?: string;
+  libraryShortcut?: string;
   clipShortcut?: string;
   coreviewShortcut?: string;
   /** A co-review session is live — lights the badge dot on the Review item. */
@@ -28,7 +30,7 @@ type Props = {
   sessionPeers?: number;
 };
 
-export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, clipShortcut, coreviewShortcut, sessionActive, sessionPeers }: Props) {
+export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libraryShortcut, clipShortcut, coreviewShortcut, sessionActive, sessionPeers }: Props) {
   return (
     <nav className="cp-nav" aria-label="Primary">
       {/* Brand mark — a non-interactive logo, NOT a second Home button. The
@@ -46,6 +48,17 @@ export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, clip
       >
         <IconHome size={18} />
         <span className="cp-nav-label">Home</span>
+      </button>
+      <button
+        type="button"
+        className={"cp-nav-item" + (active === "library" ? " active" : "")}
+        onClick={() => onNavigate("library")}
+        title={libraryShortcut ? `Library (${libraryShortcut})` : "Library"}
+        aria-label="Library"
+        aria-current={active === "library" ? "page" : undefined}
+      >
+        <IconStack size={18} />
+        <span className="cp-nav-label">Library</span>
       </button>
       <button
         type="button"

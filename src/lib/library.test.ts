@@ -1,13 +1,16 @@
 import { describe, it, expect } from "vitest";
 import type { LibraryFolder, LibraryItem } from "../types";
 import {
+  collectLibraryItems,
   countLibraryItems,
+  findLibraryFolder,
   formatBytes,
   formatModifiedDate,
   libraryPosterPaths,
   resolveLibraryChain,
   sanitizeLibraryRoots,
   searchLibrary,
+  sortLibraryItems,
 } from "./library";
 
 function item(name: string, kind: LibraryItem["kind"] = "video"): LibraryItem {
@@ -147,5 +150,54 @@ describe("formatModifiedDate", () => {
     expect(thisYear).toContain("3");
     expect(thisYear).not.toContain("2026");
     expect(formatModifiedDate(Date.UTC(2024, 5, 3, 12), now)).toContain("2024");
+  });
+});
+
+describe("collectLibraryItems", () => {
+  it("flattens every item in the subtree, own files before children", () => {
+    const tree = folder("root", [item("a.mp4"), item("b.mp4")], [
+      folder("sub", [item("c.mp4")], [folder("deep", [item("d.mp4")])]),
+    ]);
+    expect(collectLibraryItems(tree).map((i) => i.name)).toEqual([
+      "a.mp4", "b.mp4", "c.mp4", "d.mp4",
+    ]);
+  });
+  it("matches countLibraryItems on length", () => {
+    const tree = folder("root", [item("a.mp4")], [folder("s", [item("b.mp4"), item("c.m4a", "audio")])]);
+    expect(collectLibraryItems(tree)).toHaveLength(countLibraryItems(tree));
+  });
+});
+
+describe("findLibraryFolder", () => {
+  const trees = [folder("root", [], [folder("sub", [], [], "/lib/root/sub")], "/lib/root")];
+  it("finds a nested folder by absolute path", () => {
+    expect(findLibraryFolder(trees, "/lib/root/sub")?.name).toBe("sub");
+    expect(findLibraryFolder(trees, "/lib/root")?.name).toBe("root");
+  });
+  it("returns null when the path is gone", () => {
+    expect(findLibraryFolder(trees, "/lib/nope")).toBeNull();
+  });
+});
+
+describe("sortLibraryItems", () => {
+  const mk = (name: string, size: number, mod: number): LibraryItem =>
+    ({ name, path: `/x/${name}`, size_bytes: size, modified_ms: mod, kind: "video" });
+  const items = [mk("clip10.mp4", 30, 100), mk("clip2.mp4", 10, 300), mk("clip1.mp4", 20, 200)];
+  it("sorts by name with numeric awareness (clip2 before clip10)", () => {
+    expect(sortLibraryItems(items, "name", "asc").map((i) => i.name)).toEqual([
+      "clip1.mp4", "clip2.mp4", "clip10.mp4",
+    ]);
+  });
+  it("descending reverses the order", () => {
+    expect(sortLibraryItems(items, "size", "desc").map((i) => i.size_bytes)).toEqual([30, 20, 10]);
+  });
+  it("sorts by date and size", () => {
+    expect(sortLibraryItems(items, "date", "asc").map((i) => i.modified_ms)).toEqual([100, 200, 300]);
+    expect(sortLibraryItems(items, "size", "asc").map((i) => i.size_bytes)).toEqual([10, 20, 30]);
+  });
+  it("does not mutate the input", () => {
+    const copy = [...items];
+    sortLibraryItems(items, "name", "asc");
+    expect(items).toEqual(copy);
   });
 });

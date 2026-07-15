@@ -7,7 +7,7 @@ import type { Participant } from "./ParticipantRail";
 import type { SessionState } from "../bindings/SessionState";
 
 /**
- * Co-Review lobby — the first-class destination (nav rail, ⌘3) that promotes
+ * Co-Review lobby — the first-class destination (nav rail, ⌘4) that promotes
  * the watch-party from a toolbar afterthought to a full surface. It's a
  * parallel view over the SAME useCoReview state the toolbar CoReviewPopover
  * reads; nothing here owns session state (that lives in Rust). Two faces:

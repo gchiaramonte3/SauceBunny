@@ -1,5 +1,5 @@
 /* Co-Review lobby (CoReviewLobby.tsx) — the first-class watch-party
-   destination reached from the nav rail (⌘3). A quiet, centered column on the
+   destination reached from the nav rail (⌘4). A quiet, centered column on the
    same dark bg-0 page as the Library, with the app's card/line vocabulary.
    The in-Clip toolbar popover (CoReviewPopover) is the parallel quick-access;
    both read the same useCoReview state. Everything cp-colobby-*. */

@@ -63,21 +63,25 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   await expect(page.locator(".cp-view-clip")).toBeHidden();
   await expect(page.locator(".cp-view-clip .cp-toolbar")).toBeAttached();
   await expect(page.locator(".cp-view-clip .cp-monitor-area")).toBeAttached();
-  // ⌘2 / ⌘1 (mod serializes ctrl the same) ride the rebindable registry.
+  // ⌘-nav (mod serializes ctrl the same) rides the rebindable registry. The
+  // Library detail browser is now ⌘2 (between Home and Clip); Clip shifted to ⌘3.
   await page.keyboard.press("Control+2");
+  await expect(page.locator(".cp-view-library")).toBeVisible();
+  await expect(page.getByRole("tree", { name: "Library folders" })).toBeVisible();
+  await page.keyboard.press("Control+3");
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await page.keyboard.press("Control+1");
   await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
-  // Co-Review is a third first-class destination: the rail item now reads
-  // "Review" (short rail label) + ⌘3 → the lobby, whose heading keeps the
-  // full "Co-Review" name. Keep-alive like the others (Clip stays mounted).
+  // Co-Review is a first-class destination: the rail item reads "Review" (short
+  // rail label) + ⌘4 → the lobby, whose heading keeps the full "Co-Review" name.
+  // Keep-alive like the others (Clip stays mounted).
   await rail.getByRole("button", { name: "Review", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Co-Review" })).toBeVisible();
   await expect(page.locator(".cp-view-clip")).toBeHidden();
   await expect(page.locator(".cp-view-clip .cp-toolbar")).toBeAttached();
   // The lobby is session-first: hosting is available with no source loaded.
   await expect(page.getByRole("button", { name: "Start a session" })).toBeEnabled();
-  await page.keyboard.press("Control+2");
+  await page.keyboard.press("Control+3");
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await page.keyboard.press("Control+1");
   await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
@@ -251,8 +255,9 @@ test("library: seeded root scans into a shelf; search filters a flat grid; Esc r
   });
   await boot(page);
   await goHome(page);
-  // Header chrome: title, search, Add Folder, rescan.
-  await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
+  // Header chrome: title, search, Add Folder, rescan. (Home's H1 is now "Home"
+  // — the landing page — while the detail browser owns the "Library" name.)
+  await expect(page.locator(".cp-lib-head").getByRole("heading", { name: "Home", exact: true })).toBeVisible();
   await expect(page.getByLabel("Search library")).toBeVisible();
   await expect(page.locator(".cp-lib-head").getByRole("button", { name: "Add Folder" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Rescan library" })).toBeVisible();
@@ -334,6 +339,40 @@ test("library: hero + Continue + Transcripts shelves from seeded history; openin
   // Opening a recent routes through the standard handlers → back on Clip.
   await cont.getByRole("button", { name: /seeded\.mp4/ }).click();
   await expect(page.locator(".cp-view-clip")).toBeVisible();
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
+test("library browser: tree + grid render, selection shows detail, list toggle swaps view", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e/Footage"]));
+  });
+  await boot(page);
+  // ⌘2 (or the rail item) opens the Library detail browser.
+  await page.getByRole("navigation", { name: "Primary" })
+    .getByRole("button", { name: "Library", exact: true }).click();
+  await expect(page.locator(".cp-view-library")).toBeVisible();
+  // Left column: an ARIA tree with "All" + the seeded root (no extra IPC).
+  const tree = page.getByRole("tree", { name: "Library folders" });
+  await expect(tree.getByRole("treeitem", { name: "All" })).toBeVisible();
+  await expect(tree.getByRole("treeitem", { name: "Footage" })).toBeVisible();
+  // Main pane: "All" flattens every item across the tree into the poster wall.
+  const grid = page.getByRole("list", { name: "Files" });
+  await expect(grid.getByRole("button", { name: /clip-a\.mp4/ })).toBeVisible();
+  await expect(grid.getByRole("button", { name: /intro\.mp4/ })).toBeVisible();
+  // Single click selects → the detail panel appears with the file's actions.
+  await grid.getByRole("button", { name: /clip-a\.mp4/ }).click();
+  const detail = page.getByRole("complementary", { name: "File details" });
+  await expect(detail).toBeVisible();
+  await expect(detail.getByRole("button", { name: "Open in Clip" })).toBeVisible();
+  // Esc clears the selection.
+  await page.keyboard.press("Escape");
+  await expect(detail).toHaveCount(0);
+  // Grid⇄list toggle swaps the poster wall for the compact list. List rows are
+  // plain buttons (announced as buttons with aria-current), not a table widget.
+  await page.getByRole("button", { name: "List view" }).click();
+  const list = page.getByRole("list", { name: "Files" });
+  await expect(list).toBeVisible();
+  await expect(list.getByRole("button", { name: /clip-a\.mp4/ })).toBeVisible();
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 

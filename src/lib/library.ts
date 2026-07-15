@@ -1,6 +1,6 @@
 /**
- * Library (Home view) pure logic — root-list persistence, scanned-tree math,
- * and client-side search.
+ * Library pure logic — root-list persistence, scanned-tree math, and
+ * client-side search. Shared by the Home shelves and the Library browser.
  *
  * Pure functions live apart from the localStorage wrappers so they unit-test
  * without a DOM (mirrors recent-sources.ts). The tree shape
@@ -51,6 +51,63 @@ export function sanitizeLibraryRoots(raw: unknown): string[] {
 export function countLibraryItems(folder: LibraryFolder): number {
   return folder.items.length +
     folder.folders.reduce((n, f) => n + countLibraryItems(f), 0);
+}
+
+/**
+ * Every playable item in a folder subtree, depth-first (own files before
+ * sub-folder files). The Library browser's main pane is a FLAT media view of
+ * the tree selection, so a selected folder shows everything beneath it —
+ * search/sort/kind-filter then operate over this list.
+ */
+export function collectLibraryItems(folder: LibraryFolder): LibraryItem[] {
+  const out: LibraryItem[] = [...folder.items];
+  for (const sub of folder.folders) out.push(...collectLibraryItems(sub));
+  return out;
+}
+
+/** Find a folder node by absolute path across the scanned trees (self or root). */
+export function findLibraryFolder(
+  trees: readonly LibraryFolder[],
+  path: string,
+): LibraryFolder | null {
+  const walk = (node: LibraryFolder): LibraryFolder | null => {
+    if (node.path === path) return node;
+    for (const sub of node.folders) {
+      const hit = walk(sub);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  for (const t of trees) {
+    const hit = walk(t);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+export type LibrarySortKey = "name" | "date" | "size";
+export type LibrarySortDir = "asc" | "desc";
+export type LibraryKindFilter = "all" | "video" | "audio";
+
+/**
+ * Sort a copy of `items` by name / modified date / size. Name uses a
+ * locale-aware, numeric-aware compare ("clip2" before "clip10"); ties on
+ * date/size fall back to name so the order is stable and never jitters.
+ */
+export function sortLibraryItems(
+  items: readonly LibraryItem[],
+  key: LibrarySortKey,
+  dir: LibrarySortDir,
+): LibraryItem[] {
+  const byName = (a: LibraryItem, b: LibraryItem) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+  const cmp = (a: LibraryItem, b: LibraryItem): number => {
+    if (key === "date") return (a.modified_ms - b.modified_ms) || byName(a, b);
+    if (key === "size") return (a.size_bytes - b.size_bytes) || byName(a, b);
+    return byName(a, b);
+  };
+  const sorted = [...items].sort(cmp);
+  return dir === "desc" ? sorted.reverse() : sorted;
 }
 
 /**

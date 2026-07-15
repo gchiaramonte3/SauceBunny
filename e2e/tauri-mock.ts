@@ -43,6 +43,8 @@ export function tauriMockInit(expectedBuildId: string): void {
     // fallthrough for generate_local_thumbnail lands every card on its
     // placeholder — no decode work, no unhandled rejections.
     get_file_size: 0,
+    // The Library browser's detail panel + card menu "Reveal in Finder".
+    reveal_in_finder: null,
     // Library scan (LibraryView) — a small deterministic tree derived from
     // the requested root: two files + one subfolder with one file. Roots
     // containing "missing" reject with a typed AppError, exercising the
