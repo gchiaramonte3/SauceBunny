@@ -5,7 +5,7 @@ import { LibraryHero } from "./LibraryHero";
 import { LibraryRow } from "./LibraryRow";
 import { LibraryCard, type LibraryCardArt } from "./LibraryCard";
 import { LibraryFolderCard } from "./LibraryFolderCard";
-import { PosterPicker } from "./PosterPicker";
+import { ThumbnailPicker } from "./ThumbnailPicker";
 import { IconPlus, IconRefresh, IconSearch } from "./Icons";
 import {
   LIBRARY_SCAN_DEPTH,
@@ -221,6 +221,15 @@ export function LibraryView({
     (path: string) => setPosterVersions((v) => ({ ...v, [path]: (v[path] ?? 0) + 1 })),
     [],
   );
+  // Menu "Reset thumbnail" — clear the chosen time, bust the cache (race-guard
+  // + blob revoke), and remount the card via its poster-version key so it
+  // re-requests the auto/representative frame. Same effect as the picker's
+  // "Reset to auto", reachable without opening the picker.
+  const resetPoster = useCallback((path: string) => {
+    clearChosenPoster(path);
+    invalidateThumb(path);
+    bumpPoster(path);
+  }, [bumpPoster]);
   const scanSweepRef = useRef(0);
 
   // ── Scan orchestration — sequential, never a Promise.all fan-out ──────
@@ -346,6 +355,7 @@ export function LibraryView({
       art={{ kind: "local", path: it.path, media: it.kind }}
       onOpen={() => onOpenLocalPath(it.path)}
       onChoosePoster={setPickerPath}
+      onResetPoster={resetPoster}
       requestThumb={requestThumbnail}
     />
   );
@@ -373,6 +383,7 @@ export function LibraryView({
       badge={r.kind === "url" ? "web" : undefined}
       onOpen={() => onOpenRecentSource(r)}
       onChoosePoster={setPickerPath}
+      onResetPoster={resetPoster}
       requestThumb={requestThumbnail}
     />
   );
@@ -621,7 +632,7 @@ export function LibraryView({
       )}
 
       {pickerPath && (
-        <PosterPicker
+        <ThumbnailPicker
           path={pickerPath}
           hasChosen={chosenPosterFor(pickerPath) != null}
           onPick={(seconds) => {

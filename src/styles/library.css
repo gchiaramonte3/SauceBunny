@@ -406,9 +406,10 @@
 /* Folder cards: the count IS the payload — keep it visible. */
 .cp-lib-foldercard .cp-lib-card-detail { opacity: 1; }
 
-/* "Set thumbnail…" corner button — sibling of the card button (can't nest),
-   over the art's top-right. Hidden until the cell is hovered/focused. */
-.cp-lib-setposter {
+/* "⋯ more actions" corner button — sibling of the card button (can't nest),
+   over the art's top-right. Opens the same LibraryCardMenu as right-click.
+   Hidden until the cell is hovered/focused. */
+.cp-lib-more {
   position: absolute;
   top: var(--s-2);
   right: var(--s-2);
@@ -429,13 +430,49 @@
               background var(--dur-fast) var(--ease-out),
               color var(--dur-fast) var(--ease-out);
 }
-.cp-lib-cell:hover .cp-lib-setposter,
-.cp-lib-setposter:focus-visible,
-.cp-lib-card:focus-visible ~ .cp-lib-setposter { opacity: 1; }
-.cp-lib-setposter:hover {
+.cp-lib-cell:hover .cp-lib-more,
+.cp-lib-more:focus-visible,
+.cp-lib-card:focus-visible ~ .cp-lib-more { opacity: 1; }
+.cp-lib-more:hover {
   background: rgba(10, 10, 13, 0.9);
   color: var(--fg-0);
 }
+
+/* ============================================================
+   CARD CONTEXT MENU — portaled to <body>, position:fixed at the
+   anchor (LibraryCardMenu). Tokens only.
+   ============================================================ */
+.cp-lib-menu {
+  z-index: 10001; /* above the thumbnail modal's tier so a menu-launched flow reads on top */
+  min-width: 190px;
+  padding: var(--s-1);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
+  animation: cp-fade-in var(--dur-fast) var(--ease-out);
+}
+.cp-lib-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  width: 100%;
+  padding: var(--s-2) var(--s-3);
+  border: none;
+  background: none;
+  border-radius: var(--r-sm);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg-1);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.cp-lib-menu-item:hover:not(:disabled),
+.cp-lib-menu-item:focus-visible { background: rgba(255, 255, 255, 0.07); outline: none; }
+.cp-lib-menu-item:disabled { color: var(--fg-5); cursor: default; }
+.cp-lib-menu-icon { display: flex; color: var(--fg-3); }
 
 /* Stacked-poster fan for folder collections (front = shallowest video). */
 .cp-lib-stack {
@@ -524,10 +561,11 @@
 }
 
 /* ============================================================
-   POSTER PICKER — "Set thumbnail…" modal (fixed overlay + backdrop,
-   16:9 preview, scrub slider, action row). Tokens only.
+   THUMBNAIL PICKER — "Choose thumbnail…" modal (fixed overlay +
+   backdrop, 16:9 preview, scrub slider OR preset tiles, action row).
+   Tokens only.
    ============================================================ */
-.cp-poster-picker-scrim {
+.cp-lib-thumb-scrim {
   position: fixed;
   inset: 0;
   z-index: 10000; /* same tier as the command palette */
@@ -540,7 +578,7 @@
   -webkit-backdrop-filter: blur(10px);
   animation: cp-fade-in var(--dur-fast) var(--ease-out);
 }
-.cp-poster-picker {
+.cp-lib-thumb {
   width: min(560px, 94vw);
   background: var(--bg-2);
   border: 1px solid var(--line-2);
@@ -552,12 +590,12 @@
   gap: var(--s-4);
   animation: cp-palette-in var(--dur-base) var(--ease-out);
 }
-.cp-poster-picker-head {
+.cp-lib-thumb-head {
   display: flex;
   align-items: center;
   gap: var(--s-3);
 }
-.cp-poster-picker-head h2 {
+.cp-lib-thumb-head h2 {
   flex: 1;
   margin: 0;
   font-family: var(--font-ui);
@@ -565,7 +603,7 @@
   font-weight: 800;
   color: var(--fg-1);
 }
-.cp-poster-picker-close {
+.cp-lib-thumb-close {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -579,8 +617,8 @@
   transition: color var(--dur-fast) var(--ease-out),
               background var(--dur-fast) var(--ease-out);
 }
-.cp-poster-picker-close:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.08); }
-.cp-poster-picker-preview {
+.cp-lib-thumb-close:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.08); }
+.cp-lib-thumb-preview {
   position: relative;
   aspect-ratio: 16 / 9;
   width: 100%;
@@ -592,19 +630,19 @@
   align-items: center;
   justify-content: center;
 }
-.cp-poster-picker-preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
-.cp-poster-picker-ph {
+.cp-lib-thumb-preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.cp-lib-thumb-ph {
   font-family: var(--font-ui);
   font-size: 12px;
   color: var(--fg-4);
 }
-.cp-poster-picker-slider {
+.cp-lib-thumb-slider {
   display: flex;
   align-items: center;
   gap: var(--s-3);
 }
-.cp-poster-picker-slider input[type="range"] { flex: 1; accent-color: var(--ella-green); cursor: pointer; }
-.cp-poster-picker-time {
+.cp-lib-thumb-slider input[type="range"] { flex: 1; accent-color: var(--ella-green); cursor: pointer; }
+.cp-lib-thumb-time {
   min-width: 56px;
   text-align: right;
   font-family: var(--font-ui);
@@ -613,13 +651,55 @@
   font-weight: 700;
   color: var(--fg-2);
 }
-.cp-poster-picker-actions {
+/* Preset fallback — three ffmpeg-rendered sample frames for undecodable files. */
+.cp-lib-thumb-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--s-3);
+}
+.cp-lib-thumb-preset {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg-0);
+  border: 1px solid var(--line-2);
+  color: var(--fg-4);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.cp-lib-thumb-preset:hover,
+.cp-lib-thumb-preset:focus-visible {
+  border-color: var(--ella-green);
+  transform: scale(1.03);
+  outline: none;
+}
+.cp-lib-thumb-preset img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-lib-thumb-preset-time {
+  position: absolute;
+  bottom: var(--s-1);
+  right: var(--s-1);
+  padding: 1px 5px;
+  border-radius: var(--r-xs);
+  background: rgba(10, 10, 13, 0.78);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+.cp-lib-thumb-actions {
   display: flex;
   align-items: center;
   gap: var(--s-2);
 }
-.cp-poster-picker-actions .btn-primary { margin-right: auto; }
-.cp-poster-picker-note {
+.cp-lib-thumb-actions .btn-primary { margin-right: auto; }
+.cp-lib-thumb-note {
   margin: 0;
   padding: var(--s-4) 0;
   text-align: center;
@@ -633,12 +713,16 @@
   .cp-lib-card-art,
   .cp-lib-card-play,
   .cp-lib-card-detail,
-  .cp-lib-setposter,
+  .cp-lib-more,
   .cp-lib-row-arrow,
   .cp-lib-row-remove,
   .cp-lib-search { transition: none; }
   .cp-lib-card:hover .cp-lib-card-art,
   .cp-lib-card:focus-visible .cp-lib-card-art { transform: none; }
-  .cp-poster-picker-scrim,
-  .cp-poster-picker { animation: none; }
+  .cp-lib-thumb-preset { transition: none; }
+  .cp-lib-thumb-preset:hover,
+  .cp-lib-thumb-preset:focus-visible { transform: none; }
+  .cp-lib-thumb-scrim,
+  .cp-lib-thumb,
+  .cp-lib-menu { animation: none; }
 }

@@ -12,7 +12,7 @@ import type { LibraryFolder, LibraryItem } from "../types";
 import { loadJson, saveJson } from "./storage";
 
 const ROOTS_KEY = "saucebunny.libraryRoots";
-const POSTERS_KEY = "saucebunny.libraryPosters";
+const THUMB_TIMES_KEY = "saucebunny.libraryThumbTimes";
 
 /** Folder levels `scan_library_folder` descends (see library.rs module docs). */
 export const LIBRARY_SCAN_DEPTH = 3;
@@ -161,15 +161,16 @@ export function saveLibraryRoots(roots: readonly string[]): void {
   saveJson(ROOTS_KEY, roots);
 }
 
-// ── Chosen posters: path → timestamp (seconds) the user picked in the
-//    "Set thumbnail…" picker. Absence means the auto/representative frame. ──
+// ── Chosen thumbnail times (localStorage `saucebunny.libraryThumbTimes`):
+//    path → timestamp (seconds) the user picked in the "Choose thumbnail…"
+//    picker. Absence means the auto/representative frame. ──
 
 /**
  * Load the chosen-poster map, tolerating junk: only string→finite-number
  * entries survive (a corrupt blob yields {} rather than crashing the Library).
  */
 export function loadChosenPosters(): Record<string, number> {
-  const raw = loadJson<unknown>(POSTERS_KEY, {});
+  const raw = loadJson<unknown>(THUMB_TIMES_KEY, {});
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
   const out: Record<string, number> = {};
   for (const [k, v] of Object.entries(raw)) {
@@ -191,7 +192,7 @@ export function setChosenPoster(path: string, seconds: number): void {
   if (!Number.isFinite(seconds) || seconds < 0) return;
   const map = loadChosenPosters();
   map[path] = seconds;
-  saveJson(POSTERS_KEY, map);
+  saveJson(THUMB_TIMES_KEY, map);
 }
 
 /** Forget a chosen poster so `path` reverts to the auto/representative frame. */
@@ -199,5 +200,5 @@ export function clearChosenPoster(path: string): void {
   const map = loadChosenPosters();
   if (!Object.prototype.hasOwnProperty.call(map, path)) return;
   delete map[path];
-  saveJson(POSTERS_KEY, map);
+  saveJson(THUMB_TIMES_KEY, map);
 }

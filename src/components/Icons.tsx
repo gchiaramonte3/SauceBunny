@@ -266,6 +266,13 @@ export const IconCamera = (p: IconProps) => (
     <circle cx="12" cy="13" r="4" />
   </Icon>
 );
+export const IconMore = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="5" cy="12" r="1.4" />
+    <circle cx="12" cy="12" r="1.4" />
+    <circle cx="19" cy="12" r="1.4" />
+  </Icon>
+);
 export const IconStack = (p: IconProps) => (
   <Icon {...p}>
     <polygon points="12 2 2 7 12 12 22 7 12 2" />

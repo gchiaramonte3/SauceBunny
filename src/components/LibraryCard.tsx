@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
-import { IconCamera, IconFilm, IconPlay, IconVolume } from "./Icons";
+import { IconFilm, IconMore, IconPlay, IconVolume } from "./Icons";
+import { LibraryCardMenu } from "./LibraryCardMenu";
+import { chosenPosterFor } from "../lib/library";
 import { useLazyThumbnails } from "../hooks/use-lazy-thumbnails";
 
 /** Where a card's poster art comes from. */
@@ -21,9 +23,11 @@ type Props = {
   onOpen: () => void;
   /** LibraryView's cached, concurrency-capped thumbnail loader. */
   requestThumb: (path: string) => Promise<string | null>;
-  /** Opens the "Set thumbnail…" picker for this path. Only wired for
+  /** Opens the "Choose thumbnail…" picker for this path. Only wired for
    *  local-VIDEO cards (audio/remote have no frame to pick). */
   onChoosePoster?: (path: string) => void;
+  /** Clears this path's chosen thumbnail, reverting to the auto frame. */
+  onResetPoster?: (path: string) => void;
 };
 
 /**
@@ -33,10 +37,18 @@ type Props = {
  * Hover/focus scales the art and reveals the play glyph + detail line
  * (CSS, reduced-motion aware). A broken poster (evicted blob URL, dead
  * remote) falls back to the tokens-styled placeholder via onError.
+ *
+ * Right-click, the ⋯ corner button, and the ContextMenu / Shift+F10 keys all
+ * open the SAME LibraryCardMenu (never the picker directly); local-video cards
+ * get the thumbnail items, everything local gets Reveal in Finder, all get
+ * Open in Clip. The menu never triggers the card's open.
  */
-export function LibraryCard({ title, detail, art, badge, onOpen, requestThumb, onChoosePoster }: Props) {
+export function LibraryCard({
+  title, detail, art, badge, onOpen, requestThumb, onChoosePoster, onResetPoster,
+}: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [broken, setBroken] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
   const isVideo = art.kind === "local" && art.media === "video";
   const lazyPaths = isVideo ? [art.path] : [];
   const [lazyUrl = null] = useLazyThumbnails(btnRef, lazyPaths, requestThumb);
@@ -44,10 +56,17 @@ export function LibraryCard({ title, detail, art, badge, onOpen, requestThumb, o
   const url = art.kind === "remote" ? art.url : lazyUrl;
   const showImg = !!url && !broken;
   const isAudio = art.kind === "local" && art.media === "audio";
-  // Only local-video cards can pick a poster (narrows art to the local case,
-  // so `posterPath`/`onChoosePoster` are non-null inside the closure).
+  // Local-video path (narrows art to the local case) → the thumbnail items.
   const posterPath = art.kind === "local" && art.media === "video" ? art.path : null;
-  const choose = posterPath && onChoosePoster ? () => onChoosePoster(posterPath) : null;
+  const canPick = !!posterPath && !!onChoosePoster;
+  // Any local source has a path to reveal; web sources don't.
+  const revealPath = art.kind === "local" ? art.path : null;
+
+  const closeMenu = () => { setMenuAnchor(null); btnRef.current?.focus(); };
+  const openMenuAtRect = () => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setMenuAnchor({ x: r.left + 12, y: r.bottom - 24 });
+  };
 
   return (
     <div role="listitem" className="cp-lib-cell">
@@ -57,7 +76,10 @@ export function LibraryCard({ title, detail, art, badge, onOpen, requestThumb, o
         className="cp-lib-card"
         onClick={onOpen}
         title={title}
-        onContextMenu={choose ? (e) => { e.preventDefault(); choose(); } : undefined}
+        onContextMenu={(e) => { e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY }); }}
+        onKeyDown={(e) => {
+          if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); openMenuAtRect(); }
+        }}
       >
         <span className="cp-lib-card-art">
           {showImg ? (
@@ -76,18 +98,30 @@ export function LibraryCard({ title, detail, art, badge, onOpen, requestThumb, o
         <span className="cp-lib-card-title">{title}</span>
         <span className="cp-lib-card-detail">{detail}</span>
       </button>
-      {choose && (
-        // Sibling of the card <button> (buttons can't nest) — absolutely
-        // positioned over the art's top-right corner. Revealed with the card.
-        <button
-          type="button"
-          className="cp-lib-setposter"
-          title="Set thumbnail…"
-          aria-label="Set thumbnail"
-          onClick={(e) => { e.stopPropagation(); choose(); }}
-        >
-          <IconCamera size={13} />
-        </button>
+      {/* Sibling of the card <button> (buttons can't nest) — the ⋯ trigger over
+          the art's top-right corner, revealed with the card. Opens the SAME
+          menu as right-click, giving mouse + keyboard users one path. */}
+      <button
+        type="button"
+        className="cp-lib-more"
+        title="More actions"
+        aria-label="More actions"
+        aria-haspopup="menu"
+        onClick={(e) => { e.stopPropagation(); openMenuAtRect(); }}
+      >
+        <IconMore size={15} />
+      </button>
+      {menuAnchor && (
+        <LibraryCardMenu
+          anchor={menuAnchor}
+          canPickThumbnail={canPick}
+          hasChosenThumbnail={!!posterPath && chosenPosterFor(posterPath) != null}
+          revealPath={revealPath}
+          onChooseThumbnail={() => { if (posterPath) onChoosePoster?.(posterPath); }}
+          onResetThumbnail={() => { if (posterPath) onResetPoster?.(posterPath); }}
+          onOpen={onOpen}
+          onClose={closeMenu}
+        />
       )}
     </div>
   );
