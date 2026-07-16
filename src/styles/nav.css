@@ -34,8 +34,10 @@
 .cp-nav-logo img {
   width: 100%;
   height: 100%;
+  /* The mark is portrait; contain keeps its proportions in the square box
+     instead of stretching it wide. */
+  object-fit: contain;
   display: block;
-  border-radius: var(--r-md);
 }
 
 /* One rail item — icon over a tiny label, with an active fill + accent edge. */

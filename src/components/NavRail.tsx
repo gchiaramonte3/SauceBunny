@@ -1,6 +1,6 @@
 import { IconHome, IconStack, IconScissors, IconSettings, IconCoReview } from "./Icons";
 import type { AppView } from "../App";
-import logoUrl from "../assets/saucebunny-128.png";
+import logoUrl from "../assets/saucebunny.svg";
 
 /**
  * Persistent left navigation rail — the app-shell switch between the
