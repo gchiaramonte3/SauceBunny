@@ -60,7 +60,8 @@
     "resources": {
       "../LICENSE": "licenses/",
       "../THIRD-PARTY-LICENSES.md": "licenses/",
-      "../licenses/GPLv3.txt": "licenses/"
+      "../licenses/GPLv3.txt": "licenses/",
+      "icons/Assets.car": "."
     },
     "macOS": {
       "minimumSystemVersion": "14.0",
