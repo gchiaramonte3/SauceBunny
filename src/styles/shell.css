@@ -102,6 +102,12 @@
   min-width: 0;
   min-height: 0;
 }
+/* Views are tabindex=-1 programmatic focus targets (⌘1-4 moves focus into
+   the shown view). WebKit also hands them focus when a non-focusable child
+   (the timeline, the playhead) is clicked, painting a focus ring around the
+   whole view. That ring is noise for a container: suppress it. Interactive
+   children keep their own focus-visible rings from base.css. */
+.cp-view:focus { outline: none; }
 /* Keep-alive hiding — mirror of .cp-tab-keep[hidden] in queue-drawer.css.
    The [hidden] attribute also drops the subtree from the a11y tree and
    makes TranscriptViewer's ⌘F/⌘G closest("[hidden]") gate inert on Home. */

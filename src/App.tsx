@@ -37,6 +37,7 @@ import { asLogTag } from "./types";
 import { formatError, isAppError } from "./lib/error-format";
 import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase";
 import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, subscribePlayhead } from "./lib/playhead-store";
+import { clampSeekFrames, maxSeekSeconds } from "./lib/playhead-clock";
 import { usePanelBus } from "./hooks/use-panel-bus";
 import { useWebPlayback } from "./hooks/use-web-playback";
 import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView } from "./hooks/use-co-review";
@@ -602,7 +603,9 @@ export default function App() {
   // TC sets it. Invalid input is left alone (the field shows the bad value
   // styled in red until the user fixes it).
   useEffect(() => {
-    const max = Math.max(0, durationFrames - 1);
+    // Unknown duration must not reject TC input (max would be 0 and every
+    // entry would fail the <= max check) — same invariant as playhead-clock.
+    const max = durationFrames > 0 ? durationFrames - 1 : Infinity;
     if (exportOpts.inTc === "") {
       if (inFrames !== null) setInFrames(null);
     } else {
@@ -3619,7 +3622,7 @@ export default function App() {
     // Read the live position from the store (action-time read — never a stale
     // closure), compute, THEN write. Also keeps the seek side effect out of a
     // React updater, where StrictMode's double-invoke used to double-seek.
-    const next = Math.max(0, Math.min(Math.max(0, durationFrames - 1), getPlayheadFrames() + delta));
+    const next = clampSeekFrames(getPlayheadFrames() + delta, durationFrames);
     if (p && p.isReady()) {
       p.pause();
       p.seekTo(next / r);
@@ -3632,7 +3635,9 @@ export default function App() {
     const r = Math.max(1, Math.round(fps));
     const p = playerRef.current;
     const currentSec = p?.isReady() ? (p.getCurrentTime?.() ?? 0) : getPlayheadFrames() / r;
-    const targetSec = Math.max(0, Math.min((durationFrames - 1) / r, currentSec + deltaSec));
+    // maxSeekSeconds is Infinity while the duration is unknown, so a jump can
+    // never be dragged backward by a missing/lying metadata duration.
+    const targetSec = Math.max(0, Math.min(maxSeekSeconds(durationFrames, fps), currentSec + deltaSec));
     publishPlayheadFrames(Math.floor(targetSec * r));
     if (p?.isReady()) p.seekTo(targetSec);
   }, [fps, durationFrames, exitShuttle]);
@@ -3706,7 +3711,7 @@ export default function App() {
     // Action-time store read: mark the frame on screen when the key lands.
     const f = getPlayheadFrames();
     const next = (inFrames != null && f <= inFrames)
-      ? Math.min(Math.max(0, durationFrames - 1), inFrames + r)
+      ? clampSeekFrames(inFrames + r, durationFrames)
       : f;
     if (next !== outFrames) pushMarksUndo("mark out", inFrames, outFrames, inFrames, next);
     setOutFrames(next);
@@ -3740,7 +3745,10 @@ export default function App() {
   const onSeek = useCallback((f: number) => {
     exitShuttle();
     const r = Math.max(1, Math.round(fps));
-    const clamped = Math.max(0, Math.min(Math.max(0, durationFrames - 1), f));
+    // clampSeekFrames owns the duration clamp: an unknown duration (0) must
+    // never clamp — the old inline `min(durationFrames - 1, f)` sent every
+    // click to frame 0 whenever metadata hadn't arrived (or lied short).
+    const clamped = clampSeekFrames(f, durationFrames);
     publishPlayheadFrames(clamped);
     playerRef.current?.seekTo?.(clamped / r);
   }, [durationFrames, fps, exitShuttle]);
@@ -4341,14 +4349,10 @@ export default function App() {
       onExportAll: () => { void handleExportQueue(); },
       onStop: () => { void handleStop(); },
       onSeek: (seconds: number) => {
-        // Clamp so a stale cue past the end doesn't put the playhead
-        // in a no-man's-land. Mirrors the docked drawer's inline math.
+        // onSeek owns the duration clamp (playhead-clock) — no inline math
+        // here, or an unknown duration snaps the cue click to frame 0.
         const r = Math.max(1, Math.round(fps));
-        const targetFrame = Math.max(
-          0,
-          Math.min(durationFrames - 1, Math.floor(seconds * r)),
-        );
-        onSeek(targetFrame);
+        onSeek(Math.max(0, Math.floor(seconds * r)));
       },
       onClearTranscript: handleClearTranscript,
       onLoadFromHistory: handleLoadFromHistory,
@@ -4893,14 +4897,11 @@ export default function App() {
                 playheadAvailable={hasSource}
                 transcriptFps={fps}
                 onTranscriptSeek={(seconds) => {
-                  // Clamp to duration so a stale cue past the end doesn't put
-                  // the playhead in a no-man's-land that shows blank video.
+                  // onSeek owns the duration clamp (playhead-clock) — no
+                  // inline math here, or an unknown duration snaps the cue
+                  // click to frame 0.
                   const r = Math.max(1, Math.round(fps));
-                  const targetFrame = Math.max(
-                    0,
-                    Math.min(durationFrames - 1, Math.floor(seconds * r)),
-                  );
-                  onSeek(targetFrame);
+                  onSeek(Math.max(0, Math.floor(seconds * r)));
                 }}
                 transcriptArrivedTick={transcriptArrivedTick}
                 onClearTranscript={handleClearTranscript}
