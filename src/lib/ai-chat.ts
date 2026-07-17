@@ -38,7 +38,7 @@ export async function streamChat(
 
   if (!resp.ok || !resp.body) {
     const detail = await resp.text().catch(() => "");
-    throw new Error(`AI server HTTP ${resp.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+    throw new Error(`AI server HTTP ${resp.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
   }
 
   const reader = resp.body.getReader();

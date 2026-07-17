@@ -93,7 +93,7 @@ export function CoReviewPopover({ session, localSource, hasSource, screening, on
       <button
         type="button"
         className={"btn-icon" + (active ? " cp-coreview-live" : "")}
-        title={active ? `Co-review session · ${session.peers.length} connected` : "Co-review — watch & review together"}
+        title={active ? `Co-review session · ${session.peers.length} connected` : "Co-review · watch and review together"}
         aria-label="Co-review session"
         onClick={() => setOpen((o) => !o)}
       >
@@ -120,10 +120,10 @@ export function CoReviewPopover({ session, localSource, hasSource, screening, on
                 {copied ? "Copied ✓" : "Copy join code"}
               </button>
               {!hasSource && (
-                <div className="cp-coreview-hint">Paste a video URL up top — it loads for everyone in the session.</div>
+                <div className="cp-coreview-hint">Paste a video URL up top. It loads for everyone.</div>
               )}
               {hasSource && localSource && (
-                <div className="cp-coreview-hint">Guests can’t see your local file yet — load a web URL to screen it together.</div>
+                <div className="cp-coreview-hint">Guests can't see local files yet. Load a web URL to screen together.</div>
               )}
               <button className="btn btn-ghost" onClick={onToggleScreening}>
                 {screening ? "Exit screening view" : "Screening view"}

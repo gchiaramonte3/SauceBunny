@@ -250,7 +250,7 @@ export function formatBindings(combos: string[]): string {
 export type ContextualShortcut = { keys: string; label: string; where: string };
 
 export const CONTEXTUAL_SHORTCUTS: ContextualShortcut[] = [
-  { keys: "0–9",       label: "Go to timecode — type digits, ↩ snaps, Esc cancels", where: "Player" },
+  { keys: "0-9",       label: "Go to timecode · type digits, ↩ snaps, Esc cancels", where: "Player" },
   { keys: "K held + J / L", label: "Nudge one frame back / forward",                where: "Player" },
   { keys: "⌘F",        label: "Find in transcript",                                 where: "Transcript tab" },
   { keys: "⌘G / ⇧⌘G",  label: "Next / previous transcript search match",            where: "Transcript tab" },

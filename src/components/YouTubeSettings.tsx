@@ -95,20 +95,19 @@ export function YouTubeSettings({
   // that changes with the selection (progressive disclosure).
   const cookieNote: { text: string; action?: { label: string; fn: () => void } } =
     browser === "safari"
-      ? { text: "Safari needs Full Disk Access — grant it, then it picks up your sign-ins automatically.", action: { label: "Grant access ↗", fn: openFda } }
+      ? { text: "Safari needs Full Disk Access. Grant it, then sign-ins are picked up automatically.", action: { label: "Grant access ↗", fn: openFda } }
       : browser === "firefox"
         ? { text: "Firefox needs no extra permission." }
         : browser === "none"
-          ? { text: "Public videos only — pick a browser to load age-gated or members-only sources." }
+          ? { text: "Public videos only. Pick a browser to load age-gated or members-only sources." }
           : { text: `${browser[0].toUpperCase() + browser.slice(1)} asks for your Mac password once to read its cookies.` };
 
   return (
     <section>
       <h3 className="cp-pane-title">Web sources</h3>
       <p className="cp-pane-sub">
-        How any pasted web video loads — YouTube, Vimeo, Reddit, X, and anywhere yt-dlp supports.
-        100% local: Sauce Bunny borrows your browser's cookies but never sees your password, and
-        nothing leaves your Mac.
+        How pasted web video loads. 100% local: your browser's cookies are borrowed,
+        your password is never seen, and nothing leaves your Mac.
       </p>
 
       <CollapsibleSection id="web-signin" label="Sign in" open={sectionOpen("web-signin")} onToggle={() => toggleSection("web-signin")}>
@@ -150,7 +149,7 @@ export function YouTubeSettings({
         <div className="cp-pane-row">
           <div className="k">
             YouTube account
-            <span className="desc" title={`Opens YouTube in ${browserLabel(browser)} so you can log in; Sauce Bunny then picks up the cookies automatically.`}>
+            <span className="desc" title={`Opens YouTube in ${browserLabel(browser)} so you can log in; the cookies are picked up automatically.`}>
               Sign in once for reliable, bot-check-free loads.
             </span>
           </div>
@@ -167,7 +166,7 @@ export function YouTubeSettings({
           <div className="k">
             Preview quality
             <span className="desc" title="Resolution of the throwaway scrub/mark copy. Lower = smaller + faster. Your exported clip uses the export-form quality, not this.">
-              The scrub copy only — your export uses the export-form quality.
+              The scrub copy only. Exports use the export-form quality.
             </span>
           </div>
           <div className="v">
@@ -195,7 +194,7 @@ export function YouTubeSettings({
           <div className="k">
             yt-dlp version
             <span className="desc">
-              The tool that reads YouTube + other sites — update if videos stop loading.{" "}
+              The tool that reads web video sites. Update if videos stop loading.{" "}
               {status?.updated ? "Using your updated copy." : "Using the bundled copy."}
             </span>
           </div>

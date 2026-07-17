@@ -159,7 +159,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
       } catch (err) {
         if (cancelled) return;
         const msg = formatError(err);
-        h.appendLog("warn", "yt-dlp", `Direct stream failed: ${msg} — falling back to download.`);
+        h.appendLog("warn", "yt-dlp", `Direct stream failed: ${msg}. Falling back to download.`);
         h.maybePromptYtAuth(msg, mySeq);
         dispatch({ t: "RESOLVE_FAILED", seq: mySeq });
       }
@@ -174,7 +174,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     const mySeq = seq;
     const t = window.setTimeout(() => {
       const h = helpersRef.current;
-      h.appendLog("warn", "media", "Stream didn't open in 15s — falling back to download.");
+      h.appendLog("warn", "media", "Stream didn't open in 15s. Falling back to download.");
       h.pushNotification("info", "Downloading preview…", "Fetching the file via yt-dlp so you can scrub and mark in-app.");
       dispatch({ t: "WATCHDOG", seq: mySeq });
     }, WATCHDOG_MS);
@@ -208,7 +208,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
             });
           })().catch(reject);
         });
-      h.appendLog("info", "web-preview", "CDN rejected cross-origin fetch — downloading via yt-dlp…");
+      h.appendLog("info", "web-preview", "CDN rejected cross-origin fetch. Downloading via yt-dlp…");
       try {
         const cookies = h.cookiesBrowser();
         let cachePath: string;
@@ -218,7 +218,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
           const m = formatError(err);
           // Public social posts (LinkedIn…) break with auth cookies — retry public.
           if (cookies && !m.includes("Cancelled") && !m.includes("Source changed") && !cancelled) {
-            h.appendLog("info", "web-preview", "Download failed with sign-in cookies — retrying without…");
+            h.appendLog("info", "web-preview", "Download failed with sign-in cookies. Retrying without…");
             cachePath = await attempt(undefined);
           } else {
             throw err;
@@ -272,8 +272,8 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
       // r81: not a failure from the user's POV — some sources (HLS-only /
       // live broadcasts) just can't decode in WKWebView's MSE pipeline, so
       // we quietly download a playable copy. Keep it `info`, not `warn`.
-      h.appendLog("info", "media", `In-app stream unavailable for this source (${message}) — downloading a playable copy instead…`);
-      h.pushNotification("info", "Downloading preview…", "Couldn't stream this source in-app. Sauce Bunny is fetching the file via yt-dlp so you can scrub and mark.");
+      h.appendLog("info", "media", `In-app stream unavailable for this source (${message}). Downloading a playable copy instead…`);
+      h.pushNotification("info", "Downloading preview…", "Couldn't stream this source in-app. Fetching the file so you can scrub and mark.");
       dispatch({ t: "MEDIA_ERROR", seq: s.seq });
       return true;
     }

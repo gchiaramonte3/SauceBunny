@@ -555,7 +555,7 @@ export function QueueDrawer({
                  release as a click and any cross-tab release as a reorder
                  (handled in pointerup). */
               onClick={() => { if (!t.disabled && (!drag || drag.srcIdx === drag.dropIdx)) setActiveTab(t.id); }}
-              title={t.disabled ? `${t.label} — coming soon` : `${t.label} · drag to reorder`}
+              title={t.disabled ? `${t.label} (coming soon)` : `${t.label} · drag to reorder`}
               onPointerDown={(e) => onTabPointerDown(e, t.id, idx)}
               onPointerMove={onTabPointerMove}
               onPointerUp={onTabPointerUp}
@@ -655,7 +655,7 @@ export function QueueDrawer({
                   ) : (
                     <div
                       className="cp-queue-name"
-                      title={onRenameClip && c.status === "queued" ? `${c.filename} — double-click to rename` : c.filename}
+                      title={onRenameClip && c.status === "queued" ? `${c.filename} · double-click to rename` : c.filename}
                       onDoubleClick={() => {
                         if (!onRenameClip || c.status !== "queued") return;
                         setRenameDraft(c.filename);
@@ -730,7 +730,7 @@ export function QueueDrawer({
                 if (e.key === "Enter") commitRenameAll();
                 if (e.key === "Escape") setRenameAllOpen(false);
               }}
-              placeholder={`Base name — queued clips become name-1 … name-${queuedCount}`}
+              placeholder={`Base name (clips become name-1 … name-${queuedCount})`}
               aria-label="Bulk rename base"
             />
             <button className="btn btn-ghost" onClick={commitRenameAll} disabled={!renameAllBase.trim()}>

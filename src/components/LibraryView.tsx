@@ -314,7 +314,7 @@ export function LibraryView({
             <p className="cp-lib-note cp-lib-grid-note">No matches for “{needle.trim()}”.</p>
           ) : results.totalItems > results.items.length ? (
             <p className="cp-lib-note cp-lib-grid-note">
-              Showing {results.items.length} of {results.totalItems} matching files — refine your search.
+              Showing {results.items.length} of {results.totalItems} matches.
             </p>
           ) : null}
           <div role="list" aria-label="Search results" className="cp-lib-grid">
@@ -344,7 +344,7 @@ export function LibraryView({
             {roots.map(rootRow)}
             {roots.length === 0 && recentSources.length > 0 && (
               <div className="cp-lib-invite">
-                <p className="cp-lib-note">Add a folder to browse your footage as shelves here.</p>
+                <p className="cp-lib-note">Add a folder to browse it here.</p>
                 <button type="button" className="btn" onClick={() => void addFolder()}>
                   Choose a folder…
                 </button>

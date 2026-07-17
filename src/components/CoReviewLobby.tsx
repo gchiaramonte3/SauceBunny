@@ -71,8 +71,8 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
             <h1 className="cp-colobby-title">Co-Review</h1>
             <p className="cp-colobby-sub">
               {active
-                ? "Everyone in the session follows the host's playhead — comment and review together, live."
-                : "Watch and review together. Host a session and share the code, or join one you were sent."}
+                ? "Everyone follows the host's playhead. Comment and review together, live."
+                : "Watch and review together. Host a session or join with a code."}
             </p>
           </div>
         </header>
@@ -160,9 +160,9 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
         )}
 
         <p className="cp-colobby-note">
-          Media never leaves your machine — everyone in a session streams their own copy; only tiny
-          review messages cross the wire.
-          {localSource && " Co-review is web-source-only: a local file is loaded, so start a session and load a web URL to screen it with guests."}
+          Media never leaves your machine. Everyone streams their own copy; only review
+          messages cross the wire.
+          {localSource && " Local files can't be shared yet. Load a web URL to screen together."}
         </p>
       </div>
     </main>

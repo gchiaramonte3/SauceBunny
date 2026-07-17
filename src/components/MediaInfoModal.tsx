@@ -155,25 +155,25 @@ const HINTS = {
   cbr:
     "Bitrate stays flat regardless of scene complexity. Predictable for broadcast and streaming pipelines, slightly less efficient than VBR.",
   vfr:
-    "Frame timing varies across the file — typical of screen recordings and phone footage. Conform or transcode to a constant rate before precision editing, or audio can drift out of sync.",
+    "Frame timing varies across the file, typical of screen recordings and phone footage. Conform or transcode to a constant rate before precision editing, or audio can drift out of sync.",
   progressive:
-    "Every frame is one complete picture — the modern standard. No deinterlacing needed.",
+    "Every frame is one complete picture, the modern standard. No deinterlacing needed.",
   interlaced:
     "Each frame is two half-resolution fields captured at slightly different moments. Deinterlace before delivering to modern screens, and preserve field order when transcoding.",
   container:
-    "The file wrapper that holds the video and audio streams. It affects compatibility, not quality — the same codec can live in MOV, MP4, or MKV.",
+    "The file wrapper that holds the video and audio streams. It affects compatibility, not quality; the same codec can live in MOV, MP4, or MKV.",
   duration:
     "Total runtime, with the container's reported frame count beneath. Frames ≈ duration × frame rate; a mismatch can flag VFR or a damaged index.",
   size:
     "Size on disk. Divided by duration it should roughly match the overall bitrate.",
   overallBitrate:
-    "Total data rate of the whole file — video, audio, and container overhead combined. Higher generally means less compression per frame.",
+    "Total data rate of the whole file: video, audio, and container overhead combined. Higher generally means less compression per frame.",
   timecode:
-    "The start timecode embedded by the camera or recorder. Drop-frame is a counting style for 29.97 fps material that skips numbers to stay in sync with the clock — it doesn't drop actual frames.",
+    "The start timecode embedded by the camera or recorder. Drop-frame is a counting style for 29.97 fps material that skips numbers to stay in sync with the clock; it doesn't drop actual frames.",
   videoCodec:
     "How the picture is compressed. Acquisition codecs (ProRes, DNx) scrub smoothly in an editor; delivery codecs (H.264/HEVC) are far smaller but heavier to edit.",
   fourcc:
-    "The four-character code that identifies the exact codec variant inside the container — e.g. apch is ProRes 422 HQ. Useful when two files claim the same codec but behave differently.",
+    "The four-character code that identifies the exact codec variant inside the container, e.g. apch is ProRes 422 HQ. Useful when two files claim the same codec but behave differently.",
   dimensions:
     "Stored frame size in pixels. Anamorphic footage displays wider than it's stored, so check the display aspect if this looks narrower than expected.",
   frameRate:
@@ -181,7 +181,7 @@ const HINTS = {
   scan:
     "Progressive frames are one complete picture; interlaced frames are two fields captured at different moments. Interlaced material needs deinterlacing for modern delivery.",
   pixelFormat:
-    "Chroma subsampling and bit depth — how much color detail each frame keeps. 4:2:0 8-bit is delivery-grade; 4:2:2 10-bit and up holds up to grading and keying.",
+    "Chroma subsampling and bit depth: how much color detail each frame keeps. 4:2:0 8-bit is delivery-grade; 4:2:2 10-bit and up holds up to grading and keying.",
   color:
     "The color standard the footage was mastered in. Rec. 709 is standard HD; Rec. 2020 with HLG or PQ means HDR.",
   videoBitrate:
@@ -191,9 +191,9 @@ const HINTS = {
   channels:
     "Channel count and layout. Stereo is standard delivery; higher counts on camera files are often discrete mic inputs rather than true surround.",
   sampleRate:
-    "Audio samples per second. 48 kHz is the video-production standard — 44.1 kHz material gets resampled when conformed.",
+    "Audio samples per second. 48 kHz is the video-production standard; 44.1 kHz material gets resampled when conformed.",
   sampleFormat:
-    "The numeric format of each audio sample; more bits means more headroom before quantization noise. \"fltp\" is 32-bit float — plenty for post.",
+    "The numeric format of each audio sample; more bits means more headroom before quantization noise. \"fltp\" is 32-bit float, plenty for post.",
   audioBitrate:
     "Data rate of the audio stream. For lossy codecs, stereo AAC at 192 kb/s and up is generally transparent.",
 } as const;

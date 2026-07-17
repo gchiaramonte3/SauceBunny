@@ -217,7 +217,7 @@ test("shortcut cheat-sheet: opens on mod+/, lists live bindings, Customize deep-
   // Customize… routes to Settings → Commands with the tab preselected.
   await page.keyboard.press("Control+/");
   await page.getByRole("button", { name: "Customize…" }).click();
-  await expect(page.locator(".cp-modal-tab.active")).toContainText("Commands & Shortcuts");
+  await expect(page.locator(".cp-modal-tab.active")).toContainText("Shortcuts");
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 

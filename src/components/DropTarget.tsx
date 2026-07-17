@@ -67,7 +67,7 @@ export function DropTarget({ busy, hasSource, onImportMedia, onImportTranscript,
       const p = propsRef.current;
       if (p.busy) {
         p.notify("info", "Import busy",
-          "A job is already running — wait for it to finish (or stop it), then drop again.");
+          "A job is already running. Wait or stop it, then drop again.");
         return;
       }
       const { kind, path } = classifyDrag(paths);

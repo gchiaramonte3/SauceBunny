@@ -685,7 +685,7 @@ export function ReviewPanel({
     return (
       <div className="cp-review-empty">
         <p>Connecting to the session…</p>
-        <p className="sub">Loading the shared review from the host — comments will appear here.</p>
+        <p className="sub">Loading the shared review from the host.</p>
       </div>
     );
   }
@@ -693,7 +693,7 @@ export function ReviewPanel({
     return (
       <div className="cp-review-empty">
         <p>Load a source to start a review.</p>
-        <p className="sub">Drop timecoded comments on the video, resolve them, and sign off — all stored locally.</p>
+        <p className="sub">Timecoded comments, resolved and signed off. All local.</p>
       </div>
     );
   }
@@ -804,11 +804,11 @@ export function ReviewPanel({
       {/* Comment list */}
       <div className="cp-review-list">
         {roots.length === 0 && (
-          <div className="cp-review-hint">No comments yet — scrub to a spot and add one below.</div>
+          <div className="cp-review-hint">No comments yet. Scrub to a spot and add one below.</div>
         )}
         {roots.length > 0 && visible.length === 0 && (
           <div className="cp-review-hint">
-            {search.trim() ? "No comments match your search." : filter === "open" ? "No open comments — all signed off. 🎉" : "No resolved comments yet."}
+            {search.trim() ? "No comments match your search." : filter === "open" ? "No open comments. All signed off." : "No resolved comments yet."}
           </div>
         )}
         {visible.map((c) => (
@@ -1014,7 +1014,7 @@ function ReviewToolbar({
                   <button
                     className="cp-review-history-clear"
                     onMouseDown={() => { clearReviewHistory(); setHistory([]); }}
-                    title="Clear the list — review notes themselves are kept"
+                    title="Clear the list. Review notes themselves are kept"
                   >Clear all</button>
                 )}
               </div>
@@ -1025,7 +1025,7 @@ function ReviewToolbar({
         <button
           className="cp-review-whoami"
           onClick={openRename}
-          title={author ? `Reviewing as ${author} — click to rename` : "Set your name"}
+          title={author ? `Reviewing as ${author} · click to rename` : "Set your name"}
         >
           <Avatar name={author || "?"} size={26} color={authorColor} />
         </button>
@@ -1155,8 +1155,8 @@ function ReviewComposer({
       {drawActive && (
         <div className="cp-review-drawhint">
           {labelActive
-            ? "Aa Click the video to place a label — Enter commits, Esc cancels."
-            : "✎ Drawing on the frame — your comment will include it."}
+            ? "Aa Click the video to place a label. Enter commits, Esc cancels."
+            : "✎ Drawing on the frame. Your comment will include it."}
         </div>
       )}
       {recording && (
@@ -1197,10 +1197,10 @@ function ReviewComposer({
             </span>
             <span className="cp-review-range-hint">
               {rangeIn != null && rangeOut != null
-                ? "range locked — Post attaches it to your comment"
+                ? "range locked. Post attaches it to your comment"
                 : rangeIn != null
-                  ? "⇧O marks OUT — end follows the playhead until then"
-                  : "⇧I marks IN — start follows the playhead until then"}
+                  ? "⇧O marks OUT. End follows the playhead until then"
+                  : "⇧I marks IN. Start follows the playhead until then"}
             </span>
             <button className="cp-review-range-x" onClick={onRangeClear} title="Clear range" aria-label="Clear range">×</button>
           </div>
@@ -1253,10 +1253,10 @@ function ReviewComposer({
           className={"cp-review-tool" + (rangeIn != null || rangeOut != null ? " active" : "")}
           onClick={() => { if (ensureNamed()) onRangeTap(); }}
           title={rangeIn == null && rangeOut == null
-                 ? "Set a comment time range — mark IN at the playhead (⇧I / ⇧O)"
+                 ? "Set a comment time range. Mark IN at the playhead (⇧I / ⇧O)"
                  : rangeIn == null || rangeOut == null
                    ? "Mark the other end at the playhead (⇧I / ⇧O)"
-                   : "Range set — tap to start a new one"}
+                   : "Range set. Tap to start a new one"}
           aria-label="Set comment time range"
         >
           <IconRange size={16} className="cp-review-glyph" />
@@ -1298,7 +1298,7 @@ function NameGateModal({
       <div className="cp-review-namegate-card">
         <Avatar name={nameInput.trim() || author || "?"} size={44} color={authorColor} />
         <h3>What's your name?</h3>
-        <p>Shown on every note you leave — stored locally, no account.</p>
+        <p>Shown on every note you leave. Stored locally, no account.</p>
         <input
           autoFocus
           value={nameInput}
@@ -1386,7 +1386,7 @@ function CommentRow({
           title={c.timeEnd != null && c.timeEnd > c.timeStart ? "Jump to range start" : (hasDrawing ? "Jump + show drawing" : "Jump to this point")}
         >
           <ClockGlyph /> {secondsToTc(c.timeStart, fps)}
-          {c.timeEnd != null && c.timeEnd > c.timeStart && <> – {secondsToTc(c.timeEnd, fps)}</>}
+          {c.timeEnd != null && c.timeEnd > c.timeStart && <> → {secondsToTc(c.timeEnd, fps)}</>}
         </button>
         {hasDrawing && (
           <button

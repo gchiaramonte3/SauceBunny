@@ -38,7 +38,7 @@ describe("diagnosticsFilename", () => {
 describe("buildDiagnosticsReport", () => {
   it("includes every section with the supplied values", () => {
     const r = buildDiagnosticsReport(baseInput());
-    expect(r).toContain("Sauce Bunny — diagnostics report");
+    expect(r).toContain("Sauce Bunny diagnostics report");
     expect(r).toContain("App version:     0.1.0");
     expect(r).toContain("Build (frontend): 2026-07-08-r108");
     expect(r).toContain("Build (backend):  2026-07-08-r108 (match)");

@@ -129,8 +129,9 @@ export function Toolbar({
               e.currentTarget.blur();
             }
           }}
-          placeholder="paste any video URL — youtube, vimeo, tiktok, twitter, reddit, …"
+          placeholder="Paste a video URL"
           aria-label="Video URL"
+          title="Any site yt-dlp supports, or a direct media URL"
           spellCheck={false}
           autoCorrect="off"
           autoCapitalize="off"
@@ -166,7 +167,7 @@ export function Toolbar({
           className="btn btn-ghost"
           onClick={onClear}
           style={{ minWidth: 86 }}
-          title="Unload current source (does not delete the exported file)"
+          title="Unload the current source"
         >
           Clear
         </button>
@@ -200,7 +201,7 @@ export function Toolbar({
       <button
         type="button"
         className={"btn-icon cp-queue-toggle" + (queueCount > 0 ? " has-items" : "") + (queueOpen ? " active" : "")}
-        title={`Side panel (${queueCount} queued) — ⌘⇧Q`}
+        title={`Side panel (${queueCount} queued) · ⌘⇧Q`}
         aria-label={`Toggle side panel (${queueCount} queued)`}
         aria-pressed={queueOpen}
         onClick={onToggleQueue}

@@ -188,21 +188,8 @@
   color: var(--fg-1);
   letter-spacing: -0.015em;
 }
-/* Supported-sources row — one quiet line, not a paragraph. The `·`
-   separators keep it scannable; -fg-3 (not -fg-4) because 11px muted
-   text needs the contrast headroom. */
-.cp-empty-sources {
-  margin: -8px 0 0;
-  font-family: var(--font-ui);
-  font-size: 11px;
-  color: var(--fg-3);
-  letter-spacing: 0.01em;
-  max-width: 360px;
-  text-align: center;
-  line-height: 1.5;
-}
-/* "Resume last session" — one-click reopen of the most recent source.
-   Rides the .btn/.btn-ghost family; only the title-truncation is local. */
+/* Resume — one-click reopen of the most recent source. Rides the
+   .btn/.btn-ghost family; only the title-truncation is local. */
 .cp-empty-resume {
   max-width: 420px;
   gap: 7px;

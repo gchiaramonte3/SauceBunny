@@ -166,7 +166,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       const el = videoRef.current;
       if (!el) return;
       el.play().catch((err) => {
-        onError?.(`Playback failed: ${err?.name ?? "Error"} — ${err?.message ?? String(err)}`);
+        onError?.(`Playback failed: ${err?.name ?? "Error"}: ${err?.message ?? String(err)}`);
       });
     },
     pause: () => {
@@ -745,7 +745,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       const map: Record<number, string> = {
         1: "MEDIA_ERR_ABORTED", 2: "MEDIA_ERR_NETWORK", 3: "MEDIA_ERR_DECODE", 4: "MEDIA_ERR_SRC_NOT_SUPPORTED",
       };
-      onError?.(`Video error: ${map[me?.code ?? 0] ?? "unknown"}${me?.message ? ` — ${me.message}` : ""}`);
+      onError?.(`Video error: ${map[me?.code ?? 0] ?? "unknown"}${me?.message ? ` (${me.message})` : ""}`);
     };
     // Hide the scrub-preview overlay once the real <video> has a frame at
     // the new position AND the gesture has ended (no pending settle). During
@@ -809,7 +809,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             </div>
             <div className="cp-audio-name">{filename ?? "Streaming audio"}</div>
             <div className="cp-audio-hint">
-              {isPlaying ? "Now playing — use the transport below to scrub." : "Press play to start."}
+              {isPlaying ? "Now playing. Scrub with the transport below." : "Press play to start."}
             </div>
           </div>
         </>

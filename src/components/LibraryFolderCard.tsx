@@ -36,7 +36,7 @@ export function LibraryFolderCard({ name, count, posterPaths, onOpen, requestThu
         type="button"
         className="cp-lib-card cp-lib-foldercard"
         onClick={onOpen}
-        title={`${name} — ${items}`}
+        title={`${name} · ${items}`}
       >
         <span className="cp-lib-card-art">
           {posterPaths.length === 0 ? (

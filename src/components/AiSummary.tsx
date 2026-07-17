@@ -426,7 +426,7 @@ export function AiSummary({
       <div className="cp-ai-empty">
         <IconBrain />
         <div className="cp-ai-empty-title">No transcript yet</div>
-        <div className="cp-ai-empty-sub">Generate or download a transcript first — then chat with it here.</div>
+        <div className="cp-ai-empty-sub">Generate a transcript first, then chat with it here.</div>
       </div>
     );
   }
@@ -440,8 +440,8 @@ export function AiSummary({
           <IconBrain />
           <div className="cp-ai-empty-title">Set up local AI</div>
           <div className="cp-ai-empty-sub">
-            Download a small AI model (runs entirely on your Mac — no cloud, no account) to summarize and
-            pull quotes from your transcripts.
+            Download a small AI model to summarize and pull quotes from your
+            transcripts. Runs entirely on your Mac.
           </div>
           {m && (
             <div className="cp-ai-model-card">
@@ -531,7 +531,7 @@ export function AiSummary({
           <div className="cp-ai-intro">
             <IconBrain />
             <div className="cp-ai-empty-title">Chat with this transcript</div>
-            <div className="cp-ai-empty-sub">Ask anything — it answers only from the words in the video, with timestamps.</div>
+            <div className="cp-ai-empty-sub">Answers come only from the words in the video, with timestamps.</div>
             <div className="cp-ai-suggest">
               {SUGGESTIONS.map((s, i) => (
                 <button key={s} className="cp-ai-chip" style={{ animationDelay: `${i * 40}ms` }} onClick={() => send(s)}>{s}</button>
@@ -569,7 +569,7 @@ export function AiSummary({
           onChange={(e) => setInput(e.target.value)}
           placeholder={chaptersBusy ? "Detecting chapters…" : 'Ask about the transcript… e.g. "pull quotes about pricing"'}
           disabled={streaming || chaptersBusy}
-          title={chaptersBusy ? "Detecting chapters — chat resumes when it finishes" : undefined}
+          title={chaptersBusy ? "Detecting chapters. Chat resumes when it finishes" : undefined}
         />
         {streaming ? (
           <button type="button" className="btn btn-ghost" onClick={stop}>Stop</button>
@@ -578,7 +578,7 @@ export function AiSummary({
             type="submit"
             className="btn btn-primary"
             disabled={!input.trim() || chaptersBusy}
-            title={chaptersBusy ? "Detecting chapters — chat resumes when it finishes" : undefined}
+            title={chaptersBusy ? "Detecting chapters. Chat resumes when it finishes" : undefined}
           >Send</button>
         )}
       </form>

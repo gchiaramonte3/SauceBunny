@@ -39,7 +39,7 @@ export function deriveOnboardingSteps(s: OnboardingSignals): OnboardingStep[] {
       hint: "Settings → General → Default folder",
       done: !!s.exportFolder },
     { id: "transcript", label: "Generate a transcript",
-      hint: "Whisper runs locally — nothing leaves this Mac",
+      hint: "Runs locally. Nothing leaves this Mac",
       done: s.transcriptCount > 0 },
   ];
 }

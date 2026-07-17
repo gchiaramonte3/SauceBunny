@@ -851,7 +851,7 @@ export function TranscriptViewer({
       // so the rewrite silently drops them — say so once instead.
       if (format === "vtt" && !flattenWarnedRef.current.has(path) && VTT_DROPPED_RE.test(raw ?? "")) {
         flattenWarnedRef.current.add(path);
-        notices.push("Saving rewrites this file in a normalized form — VTT NOTE/STYLE blocks and cue settings are not kept.");
+        notices.push("Saving rewrites this file in a normalized form. VTT NOTE/STYLE blocks and cue settings are not kept.");
       }
       const bytes = Array.from(new TextEncoder().encode(serialized));
       await invoke("write_bytes_to_path", { path, bytes });
@@ -1107,9 +1107,7 @@ export function TranscriptViewer({
       <div className="cp-tx-empty">
         <div className="cp-tx-empty-title">No transcript yet</div>
         <div className="cp-tx-empty-body">
-          Transcribe the loaded source with your local transcription engine —
-          the searchable, speaker-labelled result appears here and drives the
-          on-video captions. Or import an existing
+          Transcribe the loaded source, or import an
           <code> .srt</code> / <code>.vtt</code> from disk.
         </div>
         <div className="cp-tx-empty-actions">
@@ -1131,8 +1129,7 @@ export function TranscriptViewer({
         </div>
         {!hasSource && (
           <div className="cp-tx-empty-hint">
-            Load a source first — paste a URL or import a file from the toolbar,
-            then generate from here or the sidebar.
+            Load a source first. Paste a URL or import a file.
           </div>
         )}
       </div>
@@ -1342,7 +1339,7 @@ export function TranscriptViewer({
       {turns.length > 0 && origin === "captions" && sourceKind === "youtube" && canRegenerate && !!onFixCaptionTiming && !timingFixDismissed && (
         <div
           className="cp-tx-hint"
-          title="Re-transcribes the cached audio locally with your transcription engine for exact timing — a few minutes for long clips. Your current captions stay until it finishes."
+          title="Re-transcribes the cached audio locally for exact timing; a few minutes for long clips. Your current captions stay until it finishes."
         >
           <svg className="cp-tx-hint-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <circle cx="12" cy="12" r="9" />
@@ -1370,7 +1367,7 @@ export function TranscriptViewer({
       {turns.length > 0 && roster.length === 1 && roster[0].tag === "Speaker" && canRegenerate && !noticeDismissed && (
         <div
           className="cp-tx-hint"
-          title="Sauce Bunny uses a source's own caption speaker labels automatically when they exist (e.g. YouTube/Vimeo creator captions) — this one's captions didn't carry any. Detect speakers runs diarization to add them."
+          title="Caption speaker labels are used automatically when the source carries them; this one's captions didn't. Detect speakers runs diarization to add them."
         >
           <svg className="cp-tx-hint-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <circle cx="12" cy="12" r="9" />
@@ -1378,7 +1375,7 @@ export function TranscriptViewer({
             <path d="M12 8h.01" />
           </svg>
           <span className="cp-tx-hint-text">
-            No speaker labels — turn on <em>Detect speakers</em> to add them.
+            No speaker labels. Turn on <em>Detect speakers</em> to add them.
           </span>
           <button
             className="cp-tx-hint-action"
@@ -1489,7 +1486,7 @@ export function TranscriptViewer({
                         setAutoScroll(false);
                         setEditingCue(idx);
                       }}
-                      title={`${secondsToTc(cue.start, fps)} — click to jump · double-click to edit`}
+                      title={`${secondsToTc(cue.start, fps)} · click to jump · double-click to edit`}
                     >
                       {/* In speaker mode, don't highlight the body —
                           the query targets the speaker name, not the

@@ -512,7 +512,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
           // custom-registered VIDEO decoder, so ProRes is the only >8-bit sample
           // that reaches here — gate any future one the same way.
           if (vt.codec === "prores") {
-            onError?.(`[WEBCODECS_UNSUPPORTED] ProRes is 10-bit — WKWebView can't paint it to a canvas`);
+            onError?.(`[WEBCODECS_UNSUPPORTED] ProRes is 10-bit; WKWebView can't paint it to a canvas`);
             return;
           }
           videoSinkRef.current = new CanvasSink(vt, {
@@ -618,7 +618,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
           </div>
           <div className="cp-audio-name">{filename ?? "Local audio"}</div>
           <div className="cp-audio-hint">
-            {isPlaying ? "Now playing — use the transport below to scrub." : "Press play to start. Volume is in the transport bar."}
+            {isPlaying ? "Now playing. Scrub with the transport below." : "Press play to start. Volume is in the transport bar."}
           </div>
         </div>
       )}

@@ -53,7 +53,7 @@ export function buildDiagnosticsReport(d: DiagnosticsInput): string {
   const out: string[] = [];
   const push = (s = "") => out.push(s);
 
-  push("Sauce Bunny — diagnostics report");
+  push("Sauce Bunny diagnostics report");
   push(`Generated: ${d.generatedAt.toISOString()}`);
   push("Attach this file to a bug report. It was assembled locally and never leaves your machine unless you send it.");
   push();

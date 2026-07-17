@@ -257,10 +257,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
       <div className="cp-monitor-area">
         <div className="cp-monitor" ref={monitorRef} style={monitorStyle}>
           <div className="cp-empty">
-            <h3>Paste a link or drop a file</h3>
-            <p className="cp-empty-sources" aria-label="Supported sources">
-              YouTube · Vimeo · TikTok · X · Reddit · Instagram · local video
-            </p>
+            <h3>Paste a URL or drop a file.</h3>
             {resumeTitle && onResume && (
               <button
                 type="button"
@@ -269,7 +266,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
                 title="Reopen the most recent source"
               >
                 <IconHistory size={13} />
-                <span>Resume last session: <strong>{resumeTitle}</strong></span>
+                <span>Resume <strong>{resumeTitle}</strong></span>
               </button>
             )}
             {/* First-run checklist — a compact card, not a wizard. Steps derive
@@ -347,8 +344,8 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             {extractorRot && extractorRot.phase !== "spent" && (
               <>
                 <div className="cp-error-hint">
-                  This usually means the app's video engine (yt-dlp) is out of
-                  date for this site — updating takes a few seconds.
+                  The video engine (yt-dlp) is likely out of date for this
+                  site. Updating takes a few seconds.
                 </div>
                 <button
                   type="button"
@@ -362,8 +359,8 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             )}
             {extractorRot?.phase === "spent" && (
               <div className="cp-error-hint">
-                yt-dlp is up to date ({extractorRot.version}) — the site may
-                have changed; check for a Sauce Bunny update.
+                yt-dlp is up to date ({extractorRot.version}). The site may
+                have changed; check for an app update.
               </div>
             )}
           </div>
@@ -538,7 +535,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               <div className="cp-prep-sub">
                 {sourceKind === "file"
                   ? "Transcoding via ffmpeg for in-app compatibility"
-                  : "CDN blocked cross-origin playback — fetching via yt-dlp so you can scrub in-app"}
+                  : "CDN blocked in-app streaming. Fetching via yt-dlp so you can scrub."}
                 {playbackPrepProgress != null && playbackPrepProgress > 0
                   ? ` · ${Math.round(playbackPrepProgress)}%`
                   : ""}
@@ -575,7 +572,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               <div className="cp-stream-spinner" />
               <div className="cp-stream-loading-title">{streamLoadingPhase}</div>
               <div className="cp-stream-loading-sub">
-                Preparing your video — this can take a few seconds.
+                This can take a few seconds.
               </div>
             </div>
           </div>

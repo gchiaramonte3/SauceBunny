@@ -28,12 +28,12 @@ export function CoReviewJoinForm({ localSource, onStart, onJoin, hideHeading = f
     <>
       {!hideHeading && <>
         <div className="cp-coreview-title">Co-review</div>
-        <p className="cp-coreview-sub">Watch together — guests follow your playhead.</p>
+        <p className="cp-coreview-sub">Watch together. Guests follow your playhead.</p>
       </>}
 
       <button className="btn btn-primary" onClick={onStart}>Start a session</button>
       {localSource && (
-        <div className="cp-coreview-hint">Guests can’t see a local file yet — load a web URL after starting to screen it together.</div>
+        <div className="cp-coreview-hint">Guests can't see local files yet. Load a web URL to screen together.</div>
       )}
 
       <div className="cp-coreview-sep">or join</div>

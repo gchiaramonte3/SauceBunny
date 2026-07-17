@@ -65,7 +65,7 @@ export function CueEditor({ initialText, onCommit, onCancel }: Props) {
       rows={1}
       spellCheck
       lang="en"
-      aria-label="Edit cue text — Enter saves, Esc cancels"
+      aria-label="Edit cue text. Enter saves, Esc cancels"
     />
   );
 }

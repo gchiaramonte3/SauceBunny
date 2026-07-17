@@ -40,7 +40,7 @@ const COPY: Record<"welcome" | "blocked" | "severed", { title: string; lead: Rea
       <>
         Sign in once so YouTube stays reliable and you hit far fewer{" "}
         <strong>“confirm you’re not a bot”</strong> checks. Pick a browser you’re already
-        signed into on YouTube — Sauce Bunny borrows its cookies.
+        signed into on YouTube; its cookies are borrowed.
       </>
     ),
     dismiss: "Maybe later",
@@ -49,7 +49,7 @@ const COPY: Record<"welcome" | "blocked" | "severed", { title: string; lead: Rea
     title: "Connect YouTube",
     lead: (
       <>
-        YouTube is asking Sauce Bunny to <strong>confirm you’re not a bot</strong>. Pick a
+        YouTube is asking to <strong>confirm you’re not a bot</strong>. Pick a
         browser you’re already signed into on this Mac and it’ll retry with your login.
       </>
     ),
@@ -59,7 +59,7 @@ const COPY: Record<"welcome" | "blocked" | "severed", { title: string; lead: Rea
     title: "Reconnect YouTube",
     lead: (
       <>
-        Your YouTube sign-in <strong>stopped working</strong> — the cookies likely expired or
+        Your YouTube sign-in <strong>stopped working</strong>. The cookies likely expired or
         you signed out of that browser. Pick your browser again to refresh the connection.
       </>
     ),
@@ -102,7 +102,7 @@ export function YouTubeAuthModal({
           lead: (
             <>
               <strong>{site}</strong> requires you to be signed in to load this video. Pick a
-              browser you’re already logged into {site} on — Sauce Bunny borrows its cookies
+              browser you’re already logged into {site} on; its cookies are borrowed
               (no password is entered, and nothing leaves your Mac).
             </>
           ),
@@ -158,10 +158,10 @@ export function YouTubeAuthModal({
                 onClick={() => onPick(b)}
                 title={
                   b === "firefox"
-                    ? `Use your Firefox ${site} login — no prompt, nothing to grant`
+                    ? `Use your Firefox ${site} login. No prompt, nothing to grant`
                     : b === "safari"
-                      ? "Use your Safari login — needs Full Disk Access for Sauce Bunny"
-                      : `Use your ${LABELS[b]} login — macOS asks for your Mac password once`
+                      ? "Use your Safari login. Needs Full Disk Access for the app"
+                      : `Use your ${LABELS[b]} login. macOS asks for your Mac password once`
                 }
               >
                 <span className="cp-ytauth-browser-name">{LABELS[b]}</span>
@@ -172,10 +172,10 @@ export function YouTubeAuthModal({
           </div>
 
           <p className="cp-ytauth-note">
-            Cookies are read locally and never leave your Mac — no account or password is entered.{" "}
+            Cookies are read locally and never leave your Mac. No account or password is entered.{" "}
             <strong>Firefox</strong> is easiest (no prompt). Chrome/Brave/Edge ask for your Mac login
-            password once — click <strong>Always Allow</strong>. Safari needs <strong>Full Disk
-            Access</strong> granted to Sauce Bunny (so it’s least reliable — prefer Firefox).
+            password once; click <strong>Always Allow</strong>. Safari needs <strong>Full Disk
+            Access</strong> granted to the app, so prefer Firefox.
             Change anytime in <strong>Settings</strong>.
           </p>
         </div>

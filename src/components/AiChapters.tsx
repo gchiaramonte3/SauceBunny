@@ -74,7 +74,7 @@ export function AiChapters({
     setError(null);
     try {
       const info = await ensureServer();
-      if (!info) { setError("The AI model couldn't start — check Settings → AI Summary."); return; }
+      if (!info) { setError("The AI model couldn't start. Check Settings → AI Summary."); return; }
       // Same context math as the summary chat: ~3.5 chars/token, ~65% of the
       // window for the transcript — but sampled EVENLY across the duration
       // (never head-truncated) so late chapters are still found.
@@ -88,7 +88,7 @@ export function AiChapters({
       );
       const parsed = parseChapters(raw, durationSec);
       if (parsed.length < 2) {
-        setError("Couldn't detect chapters in this transcript — try again.");
+        setError("Couldn't detect chapters in this transcript. Try again.");
         return; // keep the existing list, if any
       }
       editedRef.current = false;

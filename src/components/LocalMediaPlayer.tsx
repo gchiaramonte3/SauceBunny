@@ -65,7 +65,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       el.play().catch((err) => {
         // NotAllowedError → autoplay blocked (need user gesture)
         // NotSupportedError → codec/source issue
-        onError?.(`Playback failed: ${err?.name ?? "Error"} — ${err?.message ?? String(err)}`);
+        onError?.(`Playback failed: ${err?.name ?? "Error"}: ${err?.message ?? String(err)}`);
       });
     },
     pause: () => {
@@ -198,7 +198,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       // and scrubbing is dead (seekFromX bails when durationFrames<=0).
       if ((!el.duration || !isFinite(el.duration)) && !retriedLoadRef.current) {
         retriedLoadRef.current = true;
-        onDiagRef.current?.("warn", "duration unread — retrying native load once");
+        onDiagRef.current?.("warn", "duration unread; retrying native load once");
         try { el.load(); } catch { /* ignore */ }
         return;
       }
@@ -238,7 +238,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       };
       const code = me?.code ?? 0;
       const label = hasVideo ? "Video error" : "Audio error";
-      onError?.(`${label}: ${map[code] ?? "unknown"}${me?.message ? ` — ${me.message}` : ""} · src=${el.currentSrc || "(none)"}`);
+      onError?.(`${label}: ${map[code] ?? "unknown"}${me?.message ? ` (${me.message})` : ""} · src=${el.currentSrc || "(none)"}`);
     };
     el.addEventListener("loadedmetadata", onLoaded);
     el.addEventListener("play",  onPlay);
@@ -358,7 +358,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
             </div>
             <div className="cp-audio-name">{filename ?? "Local audio"}</div>
             <div className="cp-audio-hint">
-              {isPlaying ? "Now playing — use the transport below to scrub." : "Press play to start. Volume is in the transport bar."}
+              {isPlaying ? "Now playing. Scrub with the transport below." : "Press play to start. Volume is in the transport bar."}
             </div>
           </div>
         </>

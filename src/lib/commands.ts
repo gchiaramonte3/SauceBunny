@@ -184,11 +184,11 @@ export function buildCommands(d: CommandDeps): Command[] {
     // player is active (PlayerHandle.supportsPlaybackRate = false) the App
     // handlers no-op with an explanatory canvas note instead of lying.
     { id: "play.rateUp",   label: "Increase playback speed", group: "Playback",
-      hotkey: "]", description: `Now ${formatPlaybackRate(d.playbackRate)} — steps up the 0.5–2× list`,
+      hotkey: "]", description: `Now ${formatPlaybackRate(d.playbackRate)} · steps up the speed list`,
       keywords: ["rate", "faster", "2x"],
       run: () => d.onPlaybackRateStep(1) },
     { id: "play.rateDown", label: "Decrease playback speed", group: "Playback",
-      hotkey: "[", description: `Now ${formatPlaybackRate(d.playbackRate)} — steps down the 0.5–2× list`,
+      hotkey: "[", description: `Now ${formatPlaybackRate(d.playbackRate)} · steps down the speed list`,
       keywords: ["rate", "slower", "0.5x"],
       run: () => d.onPlaybackRateStep(-1) },
     { id: "play.rateReset", label: "Reset playback speed", group: "Playback",
@@ -266,7 +266,7 @@ export function buildCommands(d: CommandDeps): Command[] {
     // Top-level view switch — same ids as the KEY_ACTIONS entries, so the
     // hotkey literals below are overlaid with the live bindings in App.
     { id: "view.home", label: "Go to Home", group: "View",
-      hotkey: "⌘1", description: "The landing page — recents & shelves",
+      hotkey: "⌘1", description: "The landing page · recents and shelves",
       keywords: ["home", "landing", "start", "nav"],
       disabled: d.activeView === "home",
       run: () => d.onNavigateView("home") },

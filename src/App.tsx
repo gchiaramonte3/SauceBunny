@@ -306,7 +306,7 @@ export default function App() {
       return await invoke<T>(cmd, buildArgs(cookies));
     } catch (err) {
       if (cookies && !formatError(err).toLowerCase().includes("cancel")) {
-        appendLog("info", "yt-dlp", `${cmd} failed with sign-in cookies — retrying without…`);
+        appendLog("info", "yt-dlp", `${cmd} failed with sign-in cookies. Retrying without…`);
         return await invoke<T>(cmd, buildArgs(undefined));
       }
       throw err;
@@ -1107,7 +1107,7 @@ export default function App() {
         } else {
           setBuildCheck({ kind: "mismatch", expected: EXPECTED_BACKEND_BUILD_ID, got });
           appendLog("err", "build",
-            `Backend build mismatch — frontend expects "${EXPECTED_BACKEND_BUILD_ID}" but binary reports "${got}". Restart \`npm run tauri dev\` to rebuild.`);
+            `Backend build mismatch: frontend expects "${EXPECTED_BACKEND_BUILD_ID}" but binary reports "${got}". Restart \`npm run tauri dev\` to rebuild.`);
         }
       } catch (err) {
         if (cancelled) return;
@@ -1799,7 +1799,7 @@ export default function App() {
     const u = rotRecovery.url;
     const seqAtClick = sourceSeqRef.current;
     setRotRecovery({ phase: "busy", url: u });
-    appendLog("info", "yt-dlp", "Extractor failure looks like a stale yt-dlp — downloading the latest release…");
+    appendLog("info", "yt-dlp", "Extractor failure looks like a stale yt-dlp. Downloading the latest release…");
     let version: string;
     try {
       version = (await invoke<YtdlpStatus>("update_ytdlp")).version;
@@ -1815,7 +1815,7 @@ export default function App() {
       return;
     }
     rotSpentUrlsRef.current.set(u, version);
-    appendLog("ok", "yt-dlp", `yt-dlp updated to ${version} — retrying ${hostnameOf(u)}…`);
+    appendLog("ok", "yt-dlp", `yt-dlp updated to ${version}. Retrying ${hostnameOf(u)}…`);
     // The user may have started a different source while the update ran —
     // never yank it away with an automatic retry of the old URL.
     if (sourceSeqRef.current !== seqAtClick) return;
@@ -2304,7 +2304,7 @@ export default function App() {
       if (canMb) {
         setLocalPlayer("mediabunny");
         appendLog("ok", "import",
-          `In-app decode via mediabunny (${vc || "?"} / ${ac || "?"}) — no transcode.`);
+          `In-app decode via mediabunny (${vc || "?"} / ${ac || "?"}); no transcode.`);
         return null;
       }
 
@@ -2440,7 +2440,7 @@ export default function App() {
     }
     if (inFrames == null || outFrames == null) {
       pushNotification("info", "Set Mark in and Mark out first",
-        "Use the I and O keys to mark the section you want to queue.");
+        "Mark the section with I and O.");
       return;
     }
     if (outFrames <= inFrames) {
@@ -2528,7 +2528,7 @@ export default function App() {
     // A single local export owns the shared cancel token — running the queue
     // concurrently would clobber it and strand the Stop button for both.
     if (localExportCancelRef.current) {
-      pushNotification("info", "Export in progress", "Wait for the current export to finish before running the queue.");
+      pushNotification("info", "Export in progress", "Wait for the current export to finish.");
       return;
     }
     const eligible = clipQueueRef.current.filter((c) => c.status === "queued");
@@ -2631,7 +2631,7 @@ export default function App() {
         cookiesBrowserOrNone() &&
         !(result.error ?? "").toLowerCase().includes("cancel")
       ) {
-        appendLog("info", "queue", "create_clip failed with sign-in cookies — retrying without…");
+        appendLog("info", "queue", "create_clip failed with sign-in cookies. Retrying without…");
         result = await runClip(undefined);
       }
       if (result.error === "Cancelled") {
@@ -2728,7 +2728,7 @@ export default function App() {
           appendLog("info", "snapshot", "Using mediabunny (in-browser WebCodecs decode).");
         } else {
           // Fallback: ffmpeg sidecar. Slower but supports every codec.
-          appendLog("info", "snapshot", "Mediabunny couldn't decode this codec — falling back to ffmpeg.");
+          appendLog("info", "snapshot", "Mediabunny couldn't decode this codec. Falling back to ffmpeg.");
           raw = await invoke("extract_local_frame", {
             args: {
               input_path: localFilePath,
@@ -2822,8 +2822,8 @@ export default function App() {
     if (sourceKind !== "file" && outFrames == null && durationFrames === 0) {
       setTranscriptState("error");
       setTranscriptError(metadataLoading
-        ? "Source info is still loading — try again in a moment."
-        : "This source has no known duration — set an out-mark to transcribe a range.");
+        ? "Source info is still loading. Try again in a moment."
+        : "This source has no known duration. Set an out-mark to transcribe a range.");
       return;
     }
     // Resolve the per-month transcript-library subdir. Falls back to
@@ -2832,7 +2832,7 @@ export default function App() {
     const outDir = await resolveTranscriptOutDir() ?? exportOpts.folder;
     if (!outDir) {
       setTranscriptState("error");
-      setTranscriptError("Transcript library isn't set up yet — open Settings → Transcription and pick a folder.");
+      setTranscriptError("Transcript library isn't set up. Pick a folder in Settings → Transcription.");
       return;
     }
     // Engine gate — Parakeet needs its Core ML model on disk; Whisper needs
@@ -2881,7 +2881,7 @@ export default function App() {
           : null;
         if (wavBlob) {
           appendLog("info", txChannel,
-            `Audio extracted via mediabunny (${(wavBlob.size / 1_000_000).toFixed(1)} MB WAV) — skipping ffmpeg.`);
+            `Audio extracted via mediabunny (${(wavBlob.size / 1_000_000).toFixed(1)} MB WAV); skipping ffmpeg.`);
           const bytes = Array.from(new Uint8Array(await wavBlob.arrayBuffer()));
           await invoke<string>("transcribe_prepared_wav", {
             args: {
@@ -2897,7 +2897,7 @@ export default function App() {
           });
         } else {
           if (engine !== "parakeet") {
-            appendLog("info", txChannel, "Mediabunny can't decode this audio codec — falling back to ffmpeg.");
+            appendLog("info", txChannel, "Mediabunny can't decode this audio codec. Falling back to ffmpeg.");
           }
           await invoke<string>("transcribe_local_file", {
             args: {
@@ -3007,8 +3007,8 @@ export default function App() {
     if (durationFrames === 0) {
       setTranscriptState("error");
       setTranscriptError(metadataLoading
-        ? "Source info is still loading — try again in a moment."
-        : "This source has no known duration — captions can't be re-timed.");
+        ? "Source info is still loading. Try again in a moment."
+        : "This source has no known duration. Captions can't be re-timed.");
       return;
     }
     const outDir = await resolveTranscriptOutDir() ?? exportOpts.folder;
@@ -3016,7 +3016,7 @@ export default function App() {
       // Must flip state to "error" too — the Sidebar only renders transcriptError
       // when transcriptState === "error" (matches handleGenerateTranscript).
       setTranscriptState("error");
-      setTranscriptError("Transcript library isn't set up yet — open Settings → Transcription and pick a folder.");
+      setTranscriptError("Transcript library isn't set up. Pick a folder in Settings → Transcription.");
       return;
     }
     // Engine gate — mirrors handleGenerateTranscript so re-timing works with
@@ -3295,7 +3295,7 @@ export default function App() {
     const outDir = await resolveTranscriptOutDir() ?? exportOpts.folder;
     if (!outDir) {
       setCaptionsState("error");
-      setCaptionsError("Transcript library isn't set up yet — open Settings → Transcription and pick a folder.");
+      setCaptionsError("Transcript library isn't set up. Pick a folder in Settings → Transcription.");
       return;
     }
     setCaptionsState("running");
@@ -3353,11 +3353,11 @@ export default function App() {
     if (activeTranscript || captionsState === "running") return;
     if (sourceKind === "youtube" && metadata) {
       pushNotification("info", "Fetching captions…",
-        "Grabbing this source's transcript so captions can show on the video.");
+        "Grabbing the source transcript for on-video captions.");
       void handleDownloadCaptions();
     } else if (sourceKind === "file") {
       pushNotification("info", "No transcript yet",
-        "Generate a transcript (Transcribe) to show captions for this file.");
+        "Run Transcribe to show captions for this file.");
     }
   }, [captionsActive, activeTranscript, captionsState, sourceKind, metadata, pushNotification, handleDownloadCaptions]);
 
@@ -3398,11 +3398,11 @@ export default function App() {
         // current session is playing from, and it matches on raw paths.
         webAudioCachedPathRef.current = path;
         setWebAudioCachedSrc(convertFileSrc(path));
-        appendLog("ok", "audio-cache", "Audio cached — Transcribe will be instant for this source.");
+        appendLog("ok", "audio-cache", "Audio cached. Transcribe will be instant for this source.");
       } catch (err) {
         if (cancelled || sourceSeqRef.current !== seq) return;
         appendLog("warn", "audio-cache",
-          `Audio pre-cache skipped (${formatError(err)}) — Transcribe will fetch it on demand.`);
+          `Audio pre-cache skipped (${formatError(err)}). Transcribe will fetch it on demand.`);
       } finally {
         audioCacheJobRef.current = null;
       }
@@ -4290,7 +4290,7 @@ export default function App() {
   const tcOverlay = tcEntry == null ? null
     : (() => { const d = tcEntry.slice(-8).padStart(8, "0"); return `${d.slice(0, 2)}:${d.slice(2, 4)}:${d.slice(4, 6)}:${d.slice(6, 8)}`; })();
   const titleSuffix = (status === "loaded" || status === "exporting" || status === "success") && exportOpts.filename
-    ? ` — ${exportOpts.filename}`
+    ? ` · ${exportOpts.filename}`
     : "";
   // Nav-rail tooltip shortcuts — resolved from the LIVE bindings so a rebind
   // in Settings → Commands shows correctly in the rail titles.
@@ -4599,7 +4599,7 @@ export default function App() {
                         // the catch block down in runPlaybackPrep already
                         // surfaces an error toast.
                         appendLog("warn", "media",
-                          `${msg.replace("[WEBCODECS_UNSUPPORTED]", "WebCodecs doesn't support")} — falling back to ffmpeg prep.`);
+                          `${msg.replace("[WEBCODECS_UNSUPPORTED]", "WebCodecs doesn't support")}. Falling back to ffmpeg prep.`);
                         setWebCodecsFallbackForImport(true);
                         // Reuse the same prep pipeline. seq guards against the
                         // user switching sources before prep finishes.
@@ -4638,7 +4638,7 @@ export default function App() {
                         setNativeFallbackTried(true);
                         setLocalPlayer("mediabunny");
                         appendLog("warn", "media",
-                          "Native <video> couldn't load this file — decoding in-app via mediabunny.");
+                          "Native <video> couldn't load this file. Decoding in-app via mediabunny.");
                         return;
                       }
 
@@ -4737,15 +4737,20 @@ export default function App() {
                   <div className="cp-timeline-hint">
                     {(status === "loaded" || status === "success") ? (
                       inFrames == null && outFrames == null
-                        ? `No marks set — export will grab the entire clip${exportOpts.format === "audio" ? " as MP3" : ""}.`
+                        ? `No marks set. Export grabs the whole clip${exportOpts.format === "audio" ? " as MP3" : ""}.`
                         : inFrames != null && outFrames == null
-                          ? "Mark out (O) to set the end of the selection."
+                          ? "Mark out (O) to set the end."
                           : inFrames == null && outFrames != null
-                            ? "Mark in (I) to set the start of the selection."
-                            : "Selection set — adjust with I / O or drag the playhead."
-                    ) : status === "empty" && bindingsFor("app.shortcuts", keybindings)[0]
-                      ? `Press ${formatCombo(bindingsFor("app.shortcuts", keybindings)[0])} for keyboard shortcuts.`
-                      : ""}
+                            ? "Mark in (I) to set the start."
+                            : "Selection set. Adjust with I and O."
+                    ) : status === "empty" && bindingsFor("app.shortcuts", keybindings)[0] ? (
+                      <>
+                        <kbd className="cp-keycap">
+                          {formatCombo(bindingsFor("app.shortcuts", keybindings)[0])}
+                        </kbd>
+                        {" Shortcuts"}
+                      </>
+                    ) : ""}
                   </div>
                 </div>
 
@@ -4963,7 +4968,7 @@ export default function App() {
           : transcriptState === "running"
             ? (transcriptPhase?.startsWith("diarize") ? "Detecting speakers…" : "Transcribing…")
             : status === "success" ? "Export complete"
-              : status === "error" ? "Operation failed — check the pipeline log"
+              : status === "error" ? "Operation failed. Check the pipeline log"
                 : transcriptState === "error" ? "Transcription failed"
                   : transcriptState === "done" ? "Transcript ready"
                     : ""}

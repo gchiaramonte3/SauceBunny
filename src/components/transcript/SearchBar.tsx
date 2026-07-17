@@ -65,7 +65,7 @@ export const TranscriptSearchBar = forwardRef<HTMLInputElement, Props>(
           ref={inputRef}
           className="cp-tx-search-input"
           placeholder={mode === "speakers" ? "Find a speaker…" : "Search transcript…"}
-          title={mode === "speakers" ? "Search by speaker name" : "Search the transcript — ⌘F focus · ↩ next · ⇧↩ previous · ⌘G cycles"}
+          title={mode === "speakers" ? "Search by speaker name" : "Search the transcript · ⌘F focus · ↩ next · ⇧↩ previous · ⌘G cycles"}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           onKeyDown={onSearchKey}

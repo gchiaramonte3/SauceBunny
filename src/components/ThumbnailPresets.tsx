@@ -68,8 +68,8 @@ export function ThumbnailPresets({ path, offsets, dur, approx, hasChosen, onPick
       </div>
       <p className="cp-lib-thumb-note">
         {approx
-          ? "This file can’t be scrubbed and its length is unknown — pick a sample frame."
-          : "This file can’t be scrubbed here — pick one of these sample frames."}
+          ? "This file can't be scrubbed and its length is unknown. Pick a sample frame."
+          : "This file can't be scrubbed here. Pick a sample frame."}
       </p>
       <div className="cp-lib-thumb-actions">
         {hasChosen && <button type="button" className="btn" onClick={onResetAuto}>Reset to auto</button>}

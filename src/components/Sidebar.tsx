@@ -365,7 +365,7 @@ export function Sidebar(props: Props) {
                   <label
                     className="cp-toggle-row"
                     title={diarizerReady
-                      ? "Run FluidAudio speaker diarization after Whisper. Models cached locally — only adds 10–60s of compute."
+                      ? "Run FluidAudio speaker diarization after Whisper. Models cached locally; adds 10 to 60 seconds of compute."
                       : "Run FluidAudio speaker diarization after Whisper. First run downloads a few hundred MB; pre-warm via Settings → Transcription."}
                   >
                     <input
@@ -389,7 +389,7 @@ export function Sidebar(props: Props) {
                     <label
                       className="cp-toggle-row"
                       style={{ marginLeft: 20 }}
-                      title="Tell the diarizer how many distinct voices are in the audio. Pyannote's clustering stage is the weak link — a known count is the single biggest quality improver."
+                      title="Tell the diarizer how many distinct voices are in the audio. A known count is the single biggest quality improver."
                     >
                       <span className="lbl" style={{ color: "var(--fg-3)" }}>
                         Expected speakers
@@ -584,7 +584,7 @@ export function Sidebar(props: Props) {
                 if (cap > 0 && metadata.height < cap) {
                   return (
                     <div className="cp-fullclip-hint" style={{ marginTop: 6 }}>
-                      Source is {metadata.width}×{metadata.height} — you'll get the source resolution (no upscale).
+                      Source is {metadata.width}×{metadata.height}. Exports at source resolution, no upscale.
                     </div>
                   );
                 }
@@ -664,7 +664,7 @@ export function Sidebar(props: Props) {
                 General (the Choose button above also works for this session). */}
             {!success && !exporting && !exportOpts.folder && (
               <div className="cp-folder-nudge">
-                No output folder set — choose one above, or{" "}
+                No output folder set. Choose one above, or{" "}
                 <button type="button" className="cp-folder-nudge-link" onClick={onOpenGeneralSettings}>
                   set a default in Settings
                 </button>

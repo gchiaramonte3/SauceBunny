@@ -51,7 +51,7 @@ export function SpeedControl({ rate, supported, onRateChange }: Props) {
         type="button"
         className={"cp-icon-btn speed" + (supported && rate !== 1 ? " engaged" : "") + (open ? " active" : "")}
         title={supported
-          ? "Playback speed — right-click to reset to 1×"
+          ? "Playback speed · right-click resets to 1×"
           : "Speed control isn't available for the WebCodecs player"}
         aria-label={`Playback speed: ${formatPlaybackRate(rate)}`}
         aria-expanded={open}

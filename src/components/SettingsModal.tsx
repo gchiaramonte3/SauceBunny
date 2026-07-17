@@ -188,7 +188,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "youtube",       label: "Web sources" },
   { id: "transcription", label: "Transcription" },
   { id: "ai-summary",    label: "AI Summary" },
-  { id: "commands",      label: "Commands & Shortcuts" },
+  { id: "commands",      label: "Shortcuts" },
   { id: "about",         label: "About" },
 ];
 
@@ -267,13 +267,13 @@ type ModelInfo = {
 };
 const MODEL_INFO: Record<string, ModelInfo> = {
   "tiny.en": {
-    tagline: "Fastest — lowest accuracy.",
+    tagline: "Fastest, lowest accuracy.",
     accuracy: "Decent for clean speech; struggles with accents, jargon, overlapping speakers.",
     speed: "~32× realtime on Apple Silicon.",
     whenToUse: "Quick rough drafts when you'll hand-edit the transcript anyway.",
   },
   "base.en": {
-    tagline: "Balanced — recommended starting point.",
+    tagline: "Balanced, the recommended starting point.",
     accuracy: "Good for most podcasts and interviews; trips on technical terms.",
     speed: "~16× realtime on Apple Silicon.",
     whenToUse: "Default for most clips. Best size:accuracy trade-off.",
@@ -285,7 +285,7 @@ const MODEL_INFO: Record<string, ModelInfo> = {
     whenToUse: "Long-form interviews, anything you'd publish without heavy editing.",
   },
   "medium.en": {
-    tagline: "High accuracy — slow.",
+    tagline: "High accuracy, slow.",
     accuracy: "Near-pro quality. Robust to noise, overlapping voices, varied audio.",
     speed: "~2× realtime on Apple Silicon.",
     whenToUse: "Final captions for delivery; archival transcripts.",
@@ -472,13 +472,13 @@ export function SettingsModal(props: Props) {
       const text = await invoke<string>("read_text_file_capped", { path: picked, maxBytes: 4 * 1024 * 1024 });
       const parsed = JSON.parse(text) as { kind?: string; version?: number; defaults?: unknown; keybindings?: unknown; sections?: unknown };
       if (parsed.kind !== "settings") {
-        setBackupMsg("That file isn't a Sauce Bunny settings export.");
+        setBackupMsg("That file isn't a settings export from this app.");
         return;
       }
       // Forward-compat guard: refuse a file written by a newer schema rather
       // than silently importing fields this build doesn't understand.
       if (typeof parsed.version === "number" && parsed.version > SETTINGS_EXPORT_VERSION) {
-        setBackupMsg(`This file was exported by a newer version of Sauce Bunny (v${parsed.version}). Update the app, then import.`);
+        setBackupMsg(`This file was exported by a newer app version (v${parsed.version}). Update the app, then import.`);
         return;
       }
       // Only accept plain objects (reject arrays / null) per field; a malformed
@@ -737,7 +737,7 @@ export function SettingsModal(props: Props) {
                   <div className="cp-pane-row">
                     <div className="k">
                       Default folder
-                      <span className="desc">Pre-fills the output folder when Sauce Bunny starts.</span>
+                      <span className="desc">Pre-fills the output folder at launch.</span>
                     </div>
                     <div className="v">
                       <div className="cp-folder" style={{ minWidth: 320 }}>
@@ -801,7 +801,7 @@ export function SettingsModal(props: Props) {
                   <div className="cp-pane-row">
                     <div className="k">
                       Stream while you watch
-                      <span className="desc">On (default) — stream instantly so you can watch and mark in/out without waiting, then export downloads only the clip you marked. If a stream fails it falls back to downloading automatically. Off — download the full video first before playing (slower, but the most reliable on flaky connections).</span>
+                      <span className="desc">On (default): stream instantly and mark in/out without waiting; export downloads only the marked clip, and a failed stream falls back to downloading. Off: download the full video before playing (slower, most reliable on flaky connections).</span>
                     </div>
                     <div className="v">
                       <button
@@ -906,7 +906,7 @@ export function SettingsModal(props: Props) {
                   <div className="cp-pane-row">
                     <div className="k">
                       Size
-                      <span className="desc">Caption text size in pixels — drag or type a number.</span>
+                      <span className="desc">Caption text size in pixels.</span>
                     </div>
                     <div className="v cp-cap-range">
                       <input
@@ -995,9 +995,9 @@ export function SettingsModal(props: Props) {
               <section>
                 <h3 className="cp-pane-title">Transcription</h3>
                 <p className="cp-pane-sub">
-                  Transcription runs <strong>100% on your Mac</strong> — choose an engine below,
-                  download a model once, and Sauce Bunny generates an .srt for your clips. Audio is
-                  extracted with yt-dlp + ffmpeg; nothing ever leaves your machine.
+                  Transcription runs <strong>100% on your Mac</strong>. Choose an engine,
+                  download a model once, and every clip can get an .srt. Nothing leaves
+                  your machine.
                 </p>
 
                 <CollapsibleSection id="tx-engine" label="Transcription engine" open={sectionOpen("tx-engine")} onToggle={() => toggleSection("tx-engine")}>
@@ -1098,8 +1098,8 @@ export function SettingsModal(props: Props) {
                   >
                     <div className="cp-source-hint muted" style={{ lineHeight: 1.6, marginBottom: 12 }}>
                       <strong>Parakeet TDT v3</strong> (NVIDIA) runs fully on-device on Apple
-                      Silicon via Core ML and emits <strong>word-level</strong> timestamps —
-                      multilingual, with tighter caption sync than Whisper's segment timing.
+                      Silicon via Core ML and emits <strong>word-level</strong> timestamps.
+                      Multilingual, with tighter caption sync than Whisper's segment timing.
                       One-time download is about 0.5 GB.
                     </div>
                     {(() => {
@@ -1153,8 +1153,8 @@ export function SettingsModal(props: Props) {
                     })()}
                     {parakeetBusy && (
                       <div className="cp-source-hint muted" style={{ marginTop: 10 }}>
-                        Downloading the Parakeet model — this runs once and can take a few
-                        minutes on the first go. You can keep using the app meanwhile.
+                        Downloading the Parakeet model. This runs once and can take a few
+                        minutes. You can keep using the app meanwhile.
                       </div>
                     )}
                     {parakeetError && (
@@ -1191,17 +1191,15 @@ export function SettingsModal(props: Props) {
                     && defaults.transcriptionLanguage !== "auto"
                     && defaults.transcriptionLanguage !== "en" && (
                     <div className="cp-source-hint warn" style={{ marginTop: 8 }}>
-                      The selected model is English-only — pick a multilingual model for other languages.
+                      The selected model is English-only. Pick a multilingual model for other languages.
                     </div>
                   )}
                 </CollapsibleSection>
 
                 <CollapsibleSection id="tx-library" label="Transcript library" open={sectionOpen("tx-library")} onToggle={() => toggleSection("tx-library")}>
                   <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: "0 0 10px" }}>
-                    All generated transcripts (Whisper output + downloaded YouTube
-                    captions) land here, sub-organized by month. Decoupled from your
-                    clip-export folder — transcripts are byproducts you want to find
-                    later, exports are deliverables you point at a specific place.
+                    All generated transcripts land here, sub-organized by month.
+                    Kept separate from your clip-export folder.
                   </p>
                   <div className="cp-folder-row">
                     <span className="cp-folder-path" title={defaults.transcriptLibrary}>
@@ -1257,8 +1255,8 @@ export function SettingsModal(props: Props) {
                 <CollapsibleSection id="tx-dictation" label="Dictation microphone" open={sectionOpen("tx-dictation")} onToggle={() => toggleSection("tx-dictation")}>
                   <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: "0 0 10px" }}>
                     The mic the review composer records from when you dictate a comment.
-                    Leave on <em>System default</em> unless that's picking up the wrong
-                    input (e.g. a capture card) — then choose your real mic here.
+                    Leave on <em>System default</em> unless that picks up the wrong
+                    input (e.g. a capture card).
                   </p>
                   <div className="cp-pane-row">
                     <div className="k">
@@ -1285,11 +1283,11 @@ export function SettingsModal(props: Props) {
 
                 <CollapsibleSection id="tx-diarization" label="Speaker diarization" open={sectionOpen("tx-diarization")} onToggle={() => toggleSection("tx-diarization")}>
                   <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: "0 0 10px" }}>
-                    When <em>Detect speakers</em> is on in the sidebar, Sauce Bunny also runs the
-                    FluidAudio Swift sidecar after Whisper and stitches speaker labels into the SRT
+                    When <em>Detect speakers</em> is on in the sidebar, the FluidAudio sidecar
+                    runs after Whisper and stitches speaker labels into the SRT
                     (<code>SPEAKER_00</code>, <code>SPEAKER_01</code>, etc., renameable in the
-                    transcript viewer). First run downloads a few hundred MB of Core ML models —
-                    pre-warm here so the first real transcript doesn't pause.
+                    transcript viewer). First run downloads a few hundred MB of models.
+                    Pre-warm here so the first real transcript doesn't pause.
                   </p>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     {diarizerPrepareState === "running" ? (
@@ -1343,9 +1341,9 @@ export function SettingsModal(props: Props) {
               <section>
                 <h3 className="cp-pane-title">AI Summary</h3>
                 <p className="cp-pane-sub">
-                  Summarize and chat with transcripts using a local AI model — runs entirely on
-                  your Mac via llama.cpp (Metal). No cloud, no account, nothing leaves the machine.
-                  Pick the model that fits your Mac's memory below.
+                  Summarize and chat with transcripts using a local AI model. Runs entirely on
+                  your Mac via llama.cpp (Metal); nothing leaves the machine.
+                  Pick the model that fits your Mac's memory.
                 </p>
 
                 <CollapsibleSection id="ai-model" label="Model" open={sectionOpen("ai-model")} onToggle={() => toggleSection("ai-model")}>
@@ -1404,7 +1402,7 @@ export function SettingsModal(props: Props) {
                   <div className="cp-pane-row">
                     <div className="k">
                       Format
-                      <span className="desc">How answers are structured — real bullets / numbers, not asterisks.</span>
+                      <span className="desc">How answers are structured.</span>
                     </div>
                     <div className="v">
                       <div className="cp-segmented" style={segStyle(["bullets", "numbered", "prose"].indexOf(defaults.summaryFormat), 3, { minWidth: 270 })}>
@@ -1445,12 +1443,10 @@ export function SettingsModal(props: Props) {
 
             {tab === "commands" && (
               <section>
-                <h3 className="cp-pane-title">Commands &amp; shortcuts</h3>
+                <h3 className="cp-pane-title">Shortcuts</h3>
                 <p className="cp-pane-sub">
-                  Every action Sauce Bunny exposes, plus the source-monitor keymap. Open the
-                  palette anywhere with <kbd>⌘</kbd><kbd>K</kbd> to run any command with fuzzy
-                  search. The command list is generated from the same registry the palette uses —
-                  it can't drift out of sync with what actually runs.
+                  Every action the app exposes, plus the source-monitor keymap. Open the
+                  palette anywhere with <kbd>⌘</kbd><kbd>K</kbd>.
                 </p>
 
                 {/* Editable keymap — Record re-binds any action; transport &
@@ -1616,7 +1612,7 @@ function CacheControls({ excludePaths }: { excludePaths?: string[] }) {
     <div className="cp-pane-row">
       <div className="k">
         Cache
-        <span className="desc">Playback-prep copies, thumbnails, and audio buffers Sauce Bunny writes while working. Safe to clear any time — does not delete your exported clips.</span>
+        <span className="desc">Playback-prep copies, thumbnails, and audio buffers written while working. Safe to clear; exported clips are untouched.</span>
       </div>
       <div className="v" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-3)" }}>

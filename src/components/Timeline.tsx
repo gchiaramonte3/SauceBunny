@@ -357,7 +357,7 @@ export function Timeline({
                   key={"rng-" + m.id}
                   className={"cp-track-comment-range" + (m.resolved ? " resolved" : "")}
                   style={{ left: `${pct(m.time * r)}%`, width: `${Math.max(0.4, pct((m.timeEnd - m.time) * r))}%`, ["--marker-color" as string]: m.color }}
-                  title="Review range — click to jump to its start"
+                  title="Review range · click to jump to its start"
                   onMouseDown={(e) => { e.stopPropagation(); onSeek(Math.floor(m.time * r)); }}
                 />
               );
@@ -384,7 +384,7 @@ export function Timeline({
                   key={m.id}
                   className={"cp-track-comment" + (m.resolved ? " resolved" : "")}
                   style={{ left: `${pct(m.time * r)}%`, ["--marker-color" as string]: m.color }}
-                  title="Review comment — click to jump"
+                  title="Review comment · click to jump"
                   onMouseDown={(e) => { e.stopPropagation(); onSeek(Math.floor(m.time * r)); }}
                 >
                   <span className="cp-track-comment-ini">{m.initials}</span>

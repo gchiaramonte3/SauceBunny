@@ -44,8 +44,7 @@ export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl, requestTh
         <div className="cp-lib-hero-content">
           <h2 className="cp-lib-hero-title">Your library</h2>
           <p className="cp-lib-hero-sub">
-            Add a folder of footage to browse it here, or paste a URL to pull
-            something new into the Clip view.
+            Add a folder of footage, or paste a URL.
           </p>
           <div className="cp-lib-hero-actions">
             <button type="button" className="btn btn-primary" onClick={onAddFolder}>

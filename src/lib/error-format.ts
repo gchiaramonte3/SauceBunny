@@ -44,7 +44,7 @@ export function formatError(e: unknown): string {
       case "Cancelled":
         return "Cancelled";
       case "SidecarMissing":
-        return `Sidecar \`${e.data.name}\` is missing — the install is broken.`;
+        return `Sidecar \`${e.data.name}\` is missing. The install is broken.`;
       case "SidecarFailed": {
         const code = e.data.exit_code != null ? ` (exit ${e.data.exit_code})` : "";
         return `Sidecar \`${e.data.name}\` failed${code}: ${e.data.tail}`;

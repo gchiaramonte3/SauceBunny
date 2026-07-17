@@ -83,7 +83,7 @@ export function RecentSources({ entries, onOpen, onRemove, onClearAll }: Props) 
       <button
         type="button"
         className={"btn-icon cp-recents-trigger" + (open ? " active" : "")}
-        title={entries.length > 0 ? "Recent sources" : "Recent sources — nothing yet"}
+        title={entries.length > 0 ? "Recent sources" : "Recent sources (none yet)"}
         disabled={entries.length === 0}
         onClick={(e) => { e.stopPropagation(); setActive(0); setOpen((o) => !o); }}
       >

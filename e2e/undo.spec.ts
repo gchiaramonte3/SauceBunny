@@ -52,7 +52,7 @@ test("palette shows Undo/Redo disabled on an empty stack", async ({ page }) => {
 test("mod+z in a text field is left to the native undo (no preventDefault, no crash)", async ({ page }) => {
   await boot(page);
   const prevented = await page.evaluate(() => {
-    const el = document.querySelector<HTMLInputElement>("input[placeholder^='paste any video URL']")!;
+    const el = document.querySelector<HTMLInputElement>("input[placeholder^='Paste a video URL']")!;
     el.focus();
     el.value = "hello";
     const ev = new KeyboardEvent("keydown", {
