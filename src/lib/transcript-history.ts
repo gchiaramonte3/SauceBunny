@@ -17,6 +17,19 @@
 const STORAGE_KEY = "saucebunny.transcriptHistory";
 const MAX_ENTRIES = 50;
 
+/** Fired as a same-window CustomEvent after every history write, mirroring
+ *  saucebunny:speakers-changed — the native `storage` event doesn't fire in
+ *  the window that wrote it, and live consumers (the Home Transcribed shelf)
+ *  must not poll. Listeners re-read via getHistory(). */
+export const TRANSCRIPTS_CHANGED_EVENT = "saucebunny:transcripts-changed";
+
+function notifyChanged(): void {
+  // Guarded: this module also runs under vitest's node environment (no DOM).
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(TRANSCRIPTS_CHANGED_EVENT));
+  }
+}
+
 export type TranscriptHistoryEntry = {
   /** Stable id (uuid-ish). Used as React key + de-dup target. */
   id: string;
@@ -139,6 +152,7 @@ export function recordTranscript(input: {
   }
 
   safeWrite(entries);
+  notifyChanged();
   return merged;
 }
 
@@ -149,16 +163,19 @@ export function touchEntry(id: string): void {
   if (i < 0) return;
   entries[i] = { ...entries[i], lastOpenedAt: Date.now() };
   safeWrite(entries);
+  notifyChanged();
 }
 
 /** Remove an entry by id — for the history popover's per-row delete. */
 export function removeEntry(id: string): void {
   safeWrite(safeRead().filter((e) => e.id !== id));
+  notifyChanged();
 }
 
 /** Wipe everything. Used by a future "Clear history" action. */
 export function clearHistory(): void {
   safeWrite([]);
+  notifyChanged();
 }
 
 /**

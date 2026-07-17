@@ -7,22 +7,22 @@
    playing beneath while this is on screen).
    ============================================================ */
 .cp-lib {
-  position: relative; /* containing block for the ambient backdrop (no z-index →
-                         NOT a stacking context, so the in-tree ThumbnailPicker's
-                         z-index still competes app-wide unchanged). */
+  position: relative; /* no z-index → NOT a stacking context, so the in-tree
+                         ThumbnailPicker's z-index still competes app-wide
+                         unchanged. */
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--bg-0);
 }
-/* Content layer — everything except the ambient backdrop rides above it. The
-   backdrop sits at z-index:0, this at z-index:1; the picker stays a bare .cp-lib
-   child (outside this wrapper) so its overlay stacking is untouched. */
-.cp-lib-scroll { position: relative; z-index: 1; }
+/* Content wrapper — the picker stays a bare .cp-lib child (outside this
+   wrapper) so its overlay stacking is untouched. */
+.cp-lib-scroll { position: relative; }
 
-/* ── Header: title · search · Add Folder · rescan. Sticky so search and
-      rescan stay reachable while browsing long shelves. ── */
+/* ── Header: just the search field, right-aligned (Add Folder and rescan
+      live in the Library browser). Sticky so search stays reachable while
+      browsing long shelves; borderless so it floats over the hero. ── */
 .cp-lib-head {
   position: sticky;
   top: 0;
@@ -31,17 +31,21 @@
   align-items: center;
   gap: var(--s-3);
   padding: var(--s-3) var(--s-7);
-  background: rgba(10, 10, 13, 0.86); /* --bg-0 at 86% — tokens carry no alpha variants */
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--line-1);
+  /* Float over the hero: the band slides up under this row, so the search
+     chip sits over the art (Plex/Apple TV grammar) instead of over a bar. */
+  margin-bottom: calc(-1 * (30px + 2 * var(--s-3)));
+  pointer-events: none; /* the chip re-enables — the empty strip must not eat hero clicks */
 }
-.cp-lib-title {
-  margin: 0;
-  font-family: var(--font-ui);
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  color: var(--fg-1);
+/* Search branch — no hero to float over. The pull-up would tuck the results
+   grid under the chip (dead-clicking the first row's ⋯ buttons), so the flat
+   variant drops it and regains a translucent strip bg (--bg-0 at 72% — tokens
+   carry no alpha variants) so the sticky chip doesn't float bare over
+   scrolling results. */
+.cp-lib-head.cp-lib-head-flat {
+  margin-bottom: 0;
+  background: rgba(10, 10, 13, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 .cp-lib-search {
   display: flex;
@@ -51,7 +55,10 @@
   height: 30px;
   margin-left: auto;
   padding: 0 var(--s-2) 0 var(--s-3);
-  background: rgba(255, 255, 255, 0.05);
+  pointer-events: auto;
+  background: rgba(10, 10, 13, 0.55); /* --bg-0 at 55% — tokens carry no alpha variants */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   color: var(--fg-3);
@@ -88,33 +95,41 @@
   cursor: pointer;
 }
 .cp-lib-search-clear:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.08); }
-.cp-lib-rescan { width: 30px; height: 30px; }
 
 /* ============================================================
-   HERO — most recent source as a blurred/darkened backdrop under
-   a gradient that dissolves into the bg-0 page.
+   HERO — the most recent source as a SHARP still anchored to the
+   band's right edge, dissolving into the bg-0 page through a
+   two-axis gradient (Apple TV grammar). No blur.
    ============================================================ */
 .cp-lib-hero {
   position: relative;
-  min-height: 260px;
+  min-height: clamp(280px, 36vh, 440px);
   display: flex;
   overflow: hidden;
+  background: var(--bg-0);
 }
+/* Sharp poster frame — right-anchored and right-weighted; the shade below
+   owns the dissolve, so the art itself stays untreated. */
 .cp-lib-hero-bg {
   position: absolute;
-  inset: 0;
-  width: 100%;
+  inset: 0 0 0 30%;
+  width: 70%;
   height: 100%;
   object-fit: cover;
-  filter: blur(18px) brightness(0.55) saturate(1.1);
-  transform: scale(1.12); /* hide the blur's soft edges */
+  object-position: right center;
 }
+/* Two-axis dissolve: fully opaque bg-0 behind the text block on the left,
+   and a bottom fade into the page. rgba stops are --bg-0 at N% — tokens
+   carry no alpha variants. Horizontal stops are PIXEL-FLOORED with max():
+   the title column extends to ~580px regardless of window width, so the
+   opaque zone must never dip below ~600px (percentages alone collapse it
+   at narrow widths and the title lands on raw art). */
 .cp-lib-hero-shade {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(10, 10, 13, 0.35) 0%, rgba(10, 10, 13, 0.55) 55%, var(--bg-0) 100%),
-    linear-gradient(90deg, rgba(10, 10, 13, 0.75) 0%, transparent 60%);
+    linear-gradient(90deg, var(--bg-0) 0%, var(--bg-0) max(32%, 600px), rgba(10, 10, 13, 0.66) max(52%, 740px), transparent max(78%, 900px)),
+    linear-gradient(180deg, transparent 42%, rgba(10, 10, 13, 0.5) 76%, var(--bg-0) 100%);
 }
 .cp-lib-hero-content {
   position: relative;
@@ -127,22 +142,26 @@
   max-width: 620px;
   padding: var(--s-10) var(--s-10) var(--s-7);
 }
+/* Eyebrow — small caps, neutral (green is reserved for the primary action). */
 .cp-lib-hero-kicker {
   font-family: var(--font-ui);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--ella-green);
+  color: var(--fg-3);
 }
 .cp-lib-hero-title {
   margin: 0;
   font-family: var(--font-ui);
-  font-size: 25px;
+  font-size: 28px;
   font-weight: 800;
   letter-spacing: -0.015em;
   line-height: 1.2;
   color: var(--fg-0);
+  /* Belt and braces under the shade's pixel floor — keeps the title legible
+     even if a stop ever lands short of the text block. --bg-0 at 80%. */
+  text-shadow: 0 1px 12px rgba(10, 10, 13, 0.8);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -176,16 +195,17 @@
 
 /* ============================================================
    AMBIENT BACKDROP — a slow cross-dissolving montage of the
-   user's own already-cached posters, behind Home's content
-   (AmbientBackdrop.tsx). Apple-TV-screensaver quiet: heavily
-   blurred, low opacity, a very slow Ken Burns drift, feathered
-   to --bg-0 (the hero's gradient language) so it dissolves into
-   the page and never fights the hero/card text above it.
+   user's own already-cached posters, beneath Home's SHELVES only
+   (AmbientBackdrop.tsx renders inside .cp-lib-rows — never behind
+   the hero, which owns its art and dissolves into flat bg-0).
+   Apple-TV-screensaver quiet: heavily blurred, very low opacity,
+   a slow Ken Burns drift, feathered to --bg-0 at both ends so the
+   hero seam and the page tail stay clean.
    ============================================================ */
 .cp-lib-ambient {
   position: absolute;
   inset: 0;
-  z-index: 0; /* below .cp-lib-scroll (z-index:1) — behind all content */
+  z-index: -1; /* under the rows' content; .cp-lib-rows isolates the context */
   overflow: hidden;
   pointer-events: none;
 }
@@ -203,21 +223,20 @@
   will-change: opacity;
 }
 .cp-lib-ambient-layer.on {
-  opacity: 0.22; /* low cap — text contrast on the layer above must survive */
+  opacity: 0.12; /* much subtler than the hero — atmosphere, never a picture */
   animation: cp-lib-ambient-drift 48s ease-in-out infinite alternate;
 }
 @keyframes cp-lib-ambient-drift {
   from { transform: scale(1.1)  translate3d(-1.5%, -1%, 0); }
   to   { transform: scale(1.16) translate3d(1.5%, 1.5%, 0); }
 }
-/* Radial + linear feather to --bg-0 (mirrors .cp-lib-hero-shade) so the montage
-   dissolves at the edges and toward the page rather than ending in a hard box. */
+/* Feather to --bg-0 above (the hero's dissolve lands on flat page color) and
+   below (no hard box at the end of the shelves). */
 .cp-lib-ambient-veil {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(125% 115% at 50% 22%, transparent 0%, rgba(10, 10, 13, 0.55) 60%, var(--bg-0) 100%),
-    linear-gradient(180deg, rgba(10, 10, 13, 0.3) 0%, rgba(10, 10, 13, 0.45) 55%, var(--bg-0) 100%);
+    linear-gradient(180deg, var(--bg-0) 0%, rgba(10, 10, 13, 0.35) 24%, rgba(10, 10, 13, 0.4) 62%, var(--bg-0) 100%);
 }
 @media (prefers-reduced-motion: reduce) {
   .cp-lib-ambient-layer { transition: none; }
@@ -228,6 +247,8 @@
    SHELVES — vertical stack of horizontal rows.
    ============================================================ */
 .cp-lib-rows {
+  position: relative;
+  isolation: isolate; /* contains the ambient's z-index:-1 above the page bg */
   display: flex;
   flex-direction: column;
   gap: var(--s-6);
@@ -344,6 +365,8 @@
    the stacked-poster folder collections.
    ============================================================ */
 .cp-lib-cell { position: relative; flex: 0 0 auto; width: 216px; }
+/* Featured size — the Continue row's large landscape cards (~2x standard). */
+.cp-lib-cell.lg { width: 432px; }
 .cp-lib-card {
   display: flex;
   flex-direction: column;
@@ -380,6 +403,18 @@
   object-fit: cover;
   display: block;
 }
+/* Hover frame cycling (use-hover-frames) — preview frames stacked over the
+   poster; the "on" one fades in for the cross-dissolve. Leaving hover
+   unmounts the overlays, so the snap back to the poster is instant by
+   construction. */
+.cp-lib-card-frame {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 450ms var(--ease-in-out);
+  pointer-events: none;
+}
+.cp-lib-card-frame.on { opacity: 1; }
 /* Tokens-styled placeholder — glyph + filename on the card surface. */
 .cp-lib-card-ph {
   position: absolute;
@@ -783,11 +818,14 @@
   box-shadow: 0 0 0 1px var(--ella-green);
 }
 
-/* ── Reduced motion: hover scale/reveals snap, no transforms. ── */
+/* ── Reduced motion: hover scale/reveals snap, no transforms. The hover
+      frame cycle never STARTS under reduced motion (use-hover-frames checks
+      the media query) — the transition kill here is belt and braces. ── */
 @media (prefers-reduced-motion: reduce) {
   .cp-lib-card-art,
   .cp-lib-card-play,
   .cp-lib-card-detail,
+  .cp-lib-card-frame,
   .cp-lib-more,
   .cp-lib-row-arrow,
   .cp-lib-row-remove,

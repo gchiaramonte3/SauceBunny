@@ -1,9 +1,14 @@
 import { useRef, useState } from "react";
 import { IconPlay } from "./Icons";
+import { requestHeroStill } from "../hooks/use-library-scan";
 import { useLazyThumbnails } from "../hooks/use-lazy-thumbnails";
 import { formatTimeAgo } from "../lib/transcript-history";
 import { secondsToHms } from "../lib/timecode";
-import { hostnameOf, youTubeThumbnailUrl } from "../lib/validation";
+import {
+  hostnameOf,
+  youTubeHeroThumbnailUrl,
+  youTubeThumbnailUrl,
+} from "../lib/validation";
 import type { RecentSource } from "../lib/recent-sources";
 
 type Props = {
@@ -15,28 +20,34 @@ type Props = {
   onAddFolder: () => void;
   /** Switches to the Clip view and focuses the URL field. */
   onPasteUrl: () => void;
-  requestThumb: (path: string) => Promise<string | null>;
 };
 
 /**
- * Full-width hero over the most recent source: its poster as a blurred,
- * darkened backdrop under a gradient that dissolves into the bg-0 page
- * (Netflix treatment), title + host/recency line, and Resume / Open in
- * Clip actions — both open the source through the same callback. With no
- * recents yet it flips to the empty invitation (Add a folder / Paste a
- * URL) on the app's brand-wash gradient.
+ * Full-width hero over the most recent source — the Apple TV grammar: a
+ * SHARP still anchored to the band's right edge (no blur), dissolving into
+ * the bg-0 page through a two-axis gradient (opaque behind the text block on
+ * the left, fading out at the bottom). Eyebrow + title + one metadata line +
+ * Resume / Open in Clip, both routed through the same open callback.
+ *
+ * Local files decode a hero-resolution still through the shared thumbnail
+ * infrastructure (requestHeroStill — same cache/gate/generation as the card
+ * posters), lazily via the intersection hook so a hidden Home costs nothing.
+ * Web sources walk a candidate list (YouTube maxres → hqdefault) with onError
+ * chaining; when every candidate fails the shade over bg-0 carries the band.
+ * With no recents yet it flips to the empty invitation on the brand wash.
  */
-export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl, requestThumb }: Props) {
+export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl }: Props) {
   const ref = useRef<HTMLElement>(null);
-  // Local-file backdrops ride the same lazy loader as the cards; web
-  // sources derive a poster URL locally (YouTube) or go without.
+  // Local-file art rides the same lazy intersection gate as the cards, but
+  // asks for the hero-resolution still (sharp at band size, not the 480px
+  // card poster upscaled).
   const filePaths = recent?.kind === "file" ? [recent.value] : [];
-  const [fileThumb = null] = useLazyThumbnails(ref, filePaths, requestThumb);
-  // Backdrop URL that failed to load — a dead remote thumb or an evicted blob
-  // falls back to the shade over bg-0 instead of WKWebView's broken-image
-  // chrome (mirrors LibraryCard's onError). Stored as the URL, not a boolean:
-  // the Hero persists across source changes, so a new recent must clear it.
-  const [brokenBg, setBrokenBg] = useState<string | null>(null);
+  const [fileStill = null] = useLazyThumbnails(ref, filePaths, requestHeroStill);
+  // Backdrop URLs that failed to load (dead remote, evicted blob) — walk to
+  // the next candidate instead of WKWebView's broken-image chrome. Stored as
+  // URLs, not booleans: the hero persists across source changes, so a new
+  // recent's candidates must not inherit another source's failures.
+  const [failed, setFailed] = useState<string[]>([]);
 
   if (!recent) {
     return (
@@ -59,7 +70,12 @@ export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl, requestTh
     );
   }
 
-  const backdrop = recent.kind === "url" ? youTubeThumbnailUrl(recent.value) : fileThumb;
+  const candidates = (
+    recent.kind === "url"
+      ? [youTubeHeroThumbnailUrl(recent.value), youTubeThumbnailUrl(recent.value)]
+      : [fileStill]
+  ).filter((u): u is string => u != null);
+  const backdrop = candidates.find((u) => !failed.includes(u)) ?? null;
   const sub = [
     recent.kind === "url" ? hostnameOf(recent.value) : "Local file",
     formatTimeAgo(recent.lastOpenedAt),
@@ -68,13 +84,13 @@ export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl, requestTh
 
   return (
     <section ref={ref} className="cp-lib-hero" aria-label="Continue watching">
-      {backdrop && backdrop !== brokenBg && (
+      {backdrop && (
         <img
           className="cp-lib-hero-bg"
           src={backdrop}
           alt=""
           draggable={false}
-          onError={() => setBrokenBg(backdrop)}
+          onError={() => setFailed((f) => [...f, backdrop])}
         />
       )}
       <div className="cp-lib-hero-shade" />

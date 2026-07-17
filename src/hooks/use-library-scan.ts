@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { extractPosterBlob } from "../lib/mediabunny-helpers";
+import {
+  extractFrameAsBlob,
+  extractPosterBlob,
+  probeVideoDuration,
+} from "../lib/mediabunny-helpers";
 import { formatError } from "../lib/error-format";
 import {
   LIBRARY_SCAN_DEPTH,
@@ -51,6 +55,26 @@ const thumbListeners = new Set<() => void>();
  *  instead of racing the fresh one into the cache. */
 const thumbGen = new Map<string, number>();
 
+/**
+ * Acquire one of the THUMB_CONCURRENCY decode slots around `job`. ONE gate for
+ * every mediabunny/ffmpeg decode this module runs — card posters, hero stills,
+ * and hover preview frames — so the total simultaneous decode load stays
+ * capped no matter which surface asks. The finally runs on both resolve and
+ * reject, so a failed decode never leaks a slot or strands a queued waiter.
+ */
+async function withDecodeSlot<T>(job: () => Promise<T>): Promise<T> {
+  if (thumbRunning >= THUMB_CONCURRENCY) {
+    await new Promise<void>((release) => thumbWaiters.push(release));
+  }
+  thumbRunning++;
+  try {
+    return await job();
+  } finally {
+    thumbRunning--;
+    thumbWaiters.shift()?.();
+  }
+}
+
 function rememberThumb(path: string, url: string): void {
   // Overwriting an existing entry (e.g. a duplicate same-path job) must release
   // the prior blob, not just the LRU-evicted ones, or the old decode leaks.
@@ -99,9 +123,15 @@ export function invalidateThumb(path: string): void {
   }
   thumbFailed.delete(path);
   thumbPending.delete(path);
+  // Hero stills and hover frames are derived from the same source frame set —
+  // a poster invalidation evicts them too (each helper revokes its blobs).
+  evictHeroStill(path);
+  evictHoverFrames(path);
   // Supersede any decode already in flight for this path (the ffmpeg fallback
   // can take a while): the running job will see the bumped generation and drop
   // its stale result rather than overwriting the cache with the old poster.
+  // Hero/hover jobs snapshot the SAME generation, so one bump supersedes all
+  // three kinds of in-flight decode at once.
   thumbGen.set(path, (thumbGen.get(path) ?? 0) + 1);
 }
 
@@ -138,12 +168,8 @@ export function requestThumbnail(path: string): Promise<string | null> {
   const startGen = thumbGen.get(path) ?? 0;
   const current = () => (thumbGen.get(path) ?? 0) === startGen;
   const job = (async () => {
-    if (thumbRunning >= THUMB_CONCURRENCY) {
-      await new Promise<void>((release) => thumbWaiters.push(release));
-    }
-    thumbRunning++;
     try {
-      const url = await loadThumbnail(path);
+      const url = await withDecodeSlot(() => loadThumbnail(path));
       // Superseded mid-decode: discard rather than caching a stale frame, and
       // revoke the blob we just made so it doesn't leak. A newer job (spawned
       // by the remounted card) owns the poster now.
@@ -159,17 +185,217 @@ export function requestThumbnail(path: string): Promise<string | null> {
       if (current()) thumbFailed.add(path);
       return null;
     } finally {
-      // Runs on BOTH resolve and the caught reject, so the slot is always freed
-      // and the next queued waiter always kicked — a failed decode never leaks a
-      // concurrency slot.
-      thumbRunning--;
-      thumbWaiters.shift()?.();
       // Only clear the pending slot if we still own it. If a pick superseded us,
       // a newer job now holds thumbPending — deleting it would defeat dedup.
       if (current()) thumbPending.delete(path);
     }
   })();
   thumbPending.set(path, job);
+  return job;
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Hero still — the Home hero's sharp full-band art, also the Continue row's
+// featured (`large`) card posters. Same two-step idea as the posters but
+// decoded at hero resolution: the 480px card poster upscaled across a
+// ~1000px band (or a 432px card on Retina) reads soft, and the hero grammar
+// (a SHARP still dissolving into the page) depends on crisp pixels. Small
+// cache — one hero + the featured row rotate through it.
+// ════════════════════════════════════════════════════════════════════════
+
+const heroCache = new Map<string, string>();
+const heroPending = new Map<string, Promise<string | null>>();
+/** One hero + up to 8 Continue-row featured cards (which also decode at hero
+ *  resolution) must fit WITHOUT LRU churn — an eviction revokes the blob a
+ *  still-mounted <img> may re-request on remount. */
+const HERO_CACHE_MAX = 12;
+
+function rememberHeroStill(path: string, url: string): void {
+  const prior = heroCache.get(path);
+  if (prior && prior !== url) URL.revokeObjectURL(prior);
+  heroCache.set(path, url);
+  while (heroCache.size > HERO_CACHE_MAX) {
+    const oldest = heroCache.entries().next().value;
+    if (!oldest) break;
+    heroCache.delete(oldest[0]);
+    URL.revokeObjectURL(oldest[1]); // hero stills are always blob: URLs
+  }
+}
+
+/** invalidateThumb's hero hook — evict + revoke so a new pick can't show stale art. */
+function evictHeroStill(path: string): void {
+  const url = heroCache.get(path);
+  if (url) {
+    heroCache.delete(path);
+    URL.revokeObjectURL(url);
+  }
+  heroPending.delete(path);
+}
+
+/**
+ * Cached + de-duped hero-resolution poster fetch. Shares the poster pipeline's
+ * decode gate, chosen-poster override, failure bookkeeping (a path that failed
+ * the poster pipeline is never retried here), and generation guard. When
+ * WebCodecs can't decode the file it falls through to requestThumbnail (whose
+ * ffmpeg fallback owns that case) — soft art beats a blank band.
+ */
+export function requestHeroStill(path: string): Promise<string | null> {
+  const hit = heroCache.get(path);
+  if (hit) return Promise.resolve(hit);
+  if (thumbFailed.has(path)) return Promise.resolve(null);
+  const pending = heroPending.get(path);
+  if (pending) return pending;
+  const startGen = thumbGen.get(path) ?? 0;
+  const current = () => (thumbGen.get(path) ?? 0) === startGen;
+  const job = (async () => {
+    try {
+      const chosen = chosenPosterFor(path);
+      const blob = await withDecodeSlot(() =>
+        extractPosterBlob(path, {
+          atSeconds: chosen ?? undefined,
+          maxWidth: 1600,
+          quality: 0.85,
+        }),
+      );
+      if (!current()) return null; // superseded — a newer job owns the hero now
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        rememberHeroStill(path, url);
+        return url;
+      }
+      // Not decodable in-process → the card poster path (ffmpeg fallback +
+      // thumbFailed bookkeeping live there). Its URL belongs to thumbCache —
+      // do NOT put it in heroCache, or eviction would revoke it twice.
+      return await requestThumbnail(path);
+    } catch {
+      return current() ? requestThumbnail(path) : null;
+    } finally {
+      if (current()) heroPending.delete(path);
+    }
+  })();
+  heroPending.set(path, job);
+  return job;
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Hover preview frames — the card hover cycle (use-hover-frames.ts). Up to
+// three extra frames at 25/50/75% of duration, decoded LAZILY on hover
+// intent (never on render), through the same decode gate and generation
+// guard as the posters. Own small LRU (revoke-on-evict) so a burst of
+// hovered cards can't grow memory unbounded or churn the poster cache.
+// ════════════════════════════════════════════════════════════════════════
+
+const HOVER_FRACS = [0.25, 0.5, 0.75] as const;
+const hoverCache = new Map<string, string>(); // `${path}#${frac}` → blob: URL
+const hoverPending = new Map<string, Promise<string[]>>();
+/** Paths whose hover decode failed (bad duration / no decodable frame) — the
+ *  poster stays, and re-hovers don't spin up a doomed decode every 600ms. */
+const hoverFailed = new Set<string>();
+/** Individual `${path}#${frac}` frames that resolved null while siblings
+ *  succeeded — treated as settled so a partial failure doesn't re-probe the
+ *  duration and re-attempt the doomed decode on every re-hover. Cleared with
+ *  the path's frames (evictHoverFrames) so a poster pick/reset re-arms retries. */
+const hoverFracFailed = new Set<string>();
+const HOVER_CACHE_MAX = 120; // 40 videos × 3 frames
+
+function rememberHoverFrame(key: string, url: string): void {
+  const prior = hoverCache.get(key);
+  if (prior && prior !== url) URL.revokeObjectURL(prior);
+  hoverCache.set(key, url);
+  while (hoverCache.size > HOVER_CACHE_MAX) {
+    const oldest = hoverCache.entries().next().value;
+    if (!oldest) break;
+    hoverCache.delete(oldest[0]);
+    URL.revokeObjectURL(oldest[1]); // hover frames are always blob: URLs
+  }
+}
+
+/** invalidateThumb's hover hook — a poster pick/reset drops the derived frames. */
+function evictHoverFrames(path: string): void {
+  for (const frac of HOVER_FRACS) {
+    const key = `${path}#${frac}`;
+    const url = hoverCache.get(key);
+    if (url) {
+      hoverCache.delete(key);
+      URL.revokeObjectURL(url);
+    }
+    hoverFracFailed.delete(key);
+  }
+  hoverFailed.delete(path);
+  hoverPending.delete(path);
+}
+
+/**
+ * The hover cycle's frame fetch: up to three frames at 25/50/75% of the
+ * file's duration, cached per-frame (`path#frac`), de-duped in flight per
+ * path, and gated through the shared decode slots. Bails to [] for paths the
+ * poster pipeline already marked bad. No ffmpeg fallback here — a frame that
+ * won't decode in-process just leaves the poster covering that beat of the
+ * cycle. Callers only invoke this after hover intent (see use-hover-frames).
+ */
+export function requestHoverFrames(path: string): Promise<string[]> {
+  if (thumbFailed.has(path) || hoverFailed.has(path)) return Promise.resolve([]);
+  // A frac is settled once it's cached OR known-undecodable — a partial
+  // failure must not re-probe duration and re-attempt the doomed frac forever.
+  const settled = HOVER_FRACS.every((f) => {
+    const key = `${path}#${f}`;
+    return hoverCache.has(key) || hoverFracFailed.has(key);
+  });
+  if (settled) {
+    return Promise.resolve(
+      HOVER_FRACS.map((f) => hoverCache.get(`${path}#${f}`))
+        .filter((u): u is string => u != null),
+    );
+  }
+  const pending = hoverPending.get(path);
+  if (pending) return pending;
+  const startGen = thumbGen.get(path) ?? 0;
+  const current = () => (thumbGen.get(path) ?? 0) === startGen;
+  const job = (async () => {
+    try {
+      const dur = await withDecodeSlot(() => probeVideoDuration(path));
+      if (!current()) return [];
+      if (!dur) {
+        hoverFailed.add(path);
+        return [];
+      }
+      const out: string[] = [];
+      for (const frac of HOVER_FRACS) {
+        const key = `${path}#${frac}`;
+        const hit = hoverCache.get(key);
+        if (hit) {
+          // Touch the hit to the Map tail: this same call's LATER insertions
+          // could otherwise LRU-evict + revoke a URL we're about to return.
+          hoverCache.delete(key);
+          hoverCache.set(key, hit);
+          out.push(hit);
+          continue;
+        }
+        if (hoverFracFailed.has(key)) continue; // settled — don't re-attempt
+        const blob = await withDecodeSlot(() =>
+          extractFrameAsBlob(path, dur * frac, { maxWidth: 480, quality: 0.8 }),
+        );
+        // Superseded mid-cycle: frames cached before the invalidation were
+        // already evicted+revoked by evictHoverFrames; drop the rest.
+        if (!current()) return [];
+        if (!blob) {
+          hoverFracFailed.add(key);
+          continue;
+        }
+        const url = URL.createObjectURL(blob);
+        rememberHoverFrame(key, url);
+        out.push(url);
+      }
+      if (out.length === 0) hoverFailed.add(path);
+      return out;
+    } catch {
+      if (current()) hoverFailed.add(path);
+      return [];
+    } finally {
+      if (current()) hoverPending.delete(path);
+    }
+  })();
+  hoverPending.set(path, job);
   return job;
 }
 

@@ -5,7 +5,7 @@ import { LibraryRow } from "./LibraryRow";
 import { LibraryCard, type LibraryCardArt } from "./LibraryCard";
 import { LibraryFolderCard } from "./LibraryFolderCard";
 import { ThumbnailPicker } from "./ThumbnailPicker";
-import { IconPlus, IconRefresh, IconSearch } from "./Icons";
+import { IconSearch } from "./Icons";
 import type { RootScan } from "../hooks/use-library-scan";
 import {
   chosenPosterFor,
@@ -22,9 +22,14 @@ import { AUDIO_EXTENSIONS, fileExtension } from "../lib/import-extensions";
 import {
   getHistory as getTranscriptHistory,
   formatTimeAgo,
+  TRANSCRIPTS_CHANGED_EVENT,
   type TranscriptHistoryEntry,
 } from "../lib/transcript-history";
-import { hostnameOf, youTubeThumbnailUrl } from "../lib/validation";
+import {
+  hostnameOf,
+  youTubeHeroThumbnailUrl,
+  youTubeThumbnailUrl,
+} from "../lib/validation";
 import type { RecentSource } from "../lib/recent-sources";
 import type { LibraryFolder, LibraryItem } from "../types";
 
@@ -54,10 +59,8 @@ type Props = {
   // ── Shared scan state (useLibraryScan, owned by App) ──
   roots: string[];
   scans: Record<string, RootScan>;
-  scanning: boolean;
   addFolder: () => Promise<void>;
   removeRoot: (root: string) => void;
-  rescanAll: () => void;
   scanRoot: (root: string) => void;
   requestThumb: (path: string) => Promise<string | null>;
   invalidateThumb: (path: string) => void;
@@ -67,9 +70,10 @@ type Props = {
 };
 
 /**
- * Home view — the landing page. A dark, Netflix-style wall over the user's
- * added folders: hero over the most recent source, a Continue shelf (recents),
- * one shelf per root, and a Transcripts shelf. It no longer owns scan state
+ * Home view — the landing page. A dark, Apple TV-style wall over the user's
+ * added folders: hero over the most recent source, a featured-size Continue
+ * shelf (recents), one shelf per root, and a Transcribed shelf. Its header is
+ * just the search field. It no longer owns scan state
  * (that lifted to useLibraryScan in App, shared with the Library browser) and
  * no longer drills in place — opening a folder routes to the Library browser
  * via onOpenFolder. Only UI-local state (search + picker) lives here.
@@ -77,20 +81,31 @@ type Props = {
 export function LibraryView({
   recentSources, onOpenLocalPath, onOpenRecentSource, onOpenTranscriptHistory,
   onSwitchToClip, onOpenFolder, homeResetSignal, homeVisible,
-  roots, scans, scanning, addFolder, removeRoot, rescanAll, scanRoot,
+  roots, scans, addFolder, removeRoot, scanRoot,
   requestThumb, invalidateThumb, posterVersions, bumpPoster, resetPoster,
 }: Props) {
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
-  // Bumped on rescan so the Transcripts shelf re-reads localStorage.
+  // Bumped when Home becomes the active view so the Transcribed shelf
+  // re-reads localStorage — new transcripts land while the user works in
+  // Clip, and this view is keep-alive-mounted the whole time.
   const [historyTick, setHistoryTick] = useState(0);
   // "Set thumbnail…" picker target (null = closed).
   const [pickerPath, setPickerPath] = useState<string | null>(null);
 
-  const rescanHome = useCallback(() => {
-    setHistoryTick((t) => t + 1); // Transcripts shelf re-reads history too
-    rescanAll();
-  }, [rescanAll]);
+  useEffect(() => {
+    if (homeVisible) setHistoryTick((t) => t + 1);
+  }, [homeVisible]);
+
+  // Live refresh: transcript-history fires a same-window CustomEvent on every
+  // write (the speakers-changed pattern), so the shelf updates even while
+  // Home stays the active view. The homeVisible bump above remains as the
+  // cheap catch-all for anything that slipped past the event.
+  useEffect(() => {
+    const onChange = () => setHistoryTick((t) => t + 1);
+    window.addEventListener(TRANSCRIPTS_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(TRANSCRIPTS_CHANGED_EVENT, onChange);
+  }, []);
 
   // ── Search: client-side, case-insensitive, debounced 150ms ────────────
   useEffect(() => {
@@ -119,6 +134,9 @@ export function LibraryView({
   const results = useMemo(() => searchLibrary(trees, needle), [trees, needle]);
   const searching = needle.trim() !== "";
   const transcripts = useMemo(() => getTranscriptHistory(), [historyTick]);
+  // Continue shelf — the 8 most recent (the featured row stays a row, not an
+  // archive; recents themselves are capped at 12 upstream).
+  const continueRow = recentSources.slice(0, 8);
 
   // ── Card builders (shared by shelves and the search grid) ─────────────
   const itemCard = (it: LibraryItem) => (
@@ -146,6 +164,9 @@ export function LibraryView({
     />
   );
 
+  // Continue-row card — featured size (large landscape, the ref's front row).
+  // Local entries route through the SAME requestThumb loader as the folder
+  // rows (one representative-frame pipeline, no legacy path).
   const recentCard = (r: RecentSource) => (
     <LibraryCard
       key={`${r.value}#${posterVersions[r.value] ?? 0}`}
@@ -153,9 +174,18 @@ export function LibraryView({
       detail={[r.kind === "url" ? hostnameOf(r.value) : "Local file",
         formatTimeAgo(r.lastOpenedAt)].join(" · ")}
       art={r.kind === "url"
-        ? { kind: "remote", url: youTubeThumbnailUrl(r.value) }
+        // Featured size shows 480px hqdefault soft — try maxres first, and the
+        // card walks the list on 404 (maxres is missing on older/low-res
+        // videos, same chain the hero uses).
+        ? {
+            kind: "remote",
+            url: youTubeThumbnailUrl(r.value),
+            urls: [youTubeHeroThumbnailUrl(r.value), youTubeThumbnailUrl(r.value)]
+              .filter((u): u is string => u != null),
+          }
         : { kind: "local", path: r.value, media: mediaKindOf(r.value) }}
       badge={r.kind === "url" ? "web" : undefined}
+      large
       onOpen={() => onOpenRecentSource(r)}
       onChoosePoster={setPickerPath}
       onResetPoster={resetPoster}
@@ -262,14 +292,12 @@ export function LibraryView({
         }
       }}
     >
-      {/* Behind everything: a slow montage of the user's own already-cached
-          posters. Rendered first, kept below the content layer by z-index (the
-          .cp-lib-scroll wrapper sits above it). aria-hidden + pointer-events
-          none — purely atmospheric. Pauses while Home isn't the active view. */}
-      <AmbientBackdrop active={homeVisible} />
       <div className="cp-lib-scroll">
-      <header className="cp-lib-head">
-        <h1 className="cp-lib-title">Home</h1>
+      {/* Home's header is just the search field, right-aligned. Add Folder
+          and rescan live in the Library browser (its tree footer). The hero
+          pull-up only applies when the hero is actually rendered — the search
+          branch flattens it so results never tuck under the chip. */}
+      <header className={"cp-lib-head" + (searching ? " cp-lib-head-flat" : "")}>
         <div className="cp-lib-search">
           <IconSearch size={13} />
           <input
@@ -293,19 +321,6 @@ export function LibraryView({
             </button>
           )}
         </div>
-        <button type="button" className="btn" onClick={() => void addFolder()}>
-          <IconPlus size={13} /> Add Folder
-        </button>
-        <button
-          type="button"
-          className="btn-icon cp-lib-rescan"
-          title="Rescan library"
-          aria-label="Rescan library"
-          onClick={rescanHome}
-          disabled={scanning}
-        >
-          <IconRefresh size={14} />
-        </button>
       </header>
 
       {searching ? (
@@ -333,12 +348,16 @@ export function LibraryView({
             onOpen={onOpenRecentSource}
             onAddFolder={() => void addFolder()}
             onPasteUrl={() => onSwitchToClip(true)}
-            requestThumb={requestThumb}
           />
           <div className="cp-lib-rows">
-            {recentSources.length > 0 && (
-              <LibraryRow title="Continue" count={recentSources.length}>
-                {recentSources.map(recentCard)}
+            {/* Ambient montage of already-cached posters — beneath the SHELVES
+                only, never behind the hero (the hero owns its art and must
+                dissolve into flat bg-0). aria-hidden + pointer-events none;
+                pauses while Home isn't the active view. */}
+            <AmbientBackdrop active={homeVisible} />
+            {continueRow.length > 0 && (
+              <LibraryRow title="Continue" count={continueRow.length}>
+                {continueRow.map(recentCard)}
               </LibraryRow>
             )}
             {roots.map(rootRow)}
@@ -351,7 +370,7 @@ export function LibraryView({
               </div>
             )}
             {transcripts.length > 0 && (
-              <LibraryRow title="Transcripts" count={transcripts.length}>
+              <LibraryRow title="Transcribed" count={transcripts.length}>
                 {transcripts.map(transcriptCard)}
               </LibraryRow>
             )}

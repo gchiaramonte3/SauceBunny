@@ -4384,10 +4384,8 @@ export default function App() {
               homeVisible={activeView === "home"}
               roots={lib.roots}
               scans={lib.scans}
-              scanning={lib.scanning}
               addFolder={lib.addFolder}
               removeRoot={lib.removeRoot}
-              rescanAll={lib.rescanAll}
               scanRoot={lib.scanRoot}
               requestThumb={lib.requestThumb}
               invalidateThumb={lib.invalidateThumb}

@@ -23,13 +23,15 @@ function shuffle(list: string[]): string[] {
 }
 
 /**
- * Apple-TV-quiet montage of the user's OWN already-cached posters behind Home.
- * Two stacked, blurred layers cross-dissolve every ~14s; only frames the library
- * cards have already materialized feed it — listThumbs() is a pure read of the
- * shared thumbnail cache, so the backdrop never triggers a decode or scan.
- * Renders nothing until at least three posters exist. Purely decorative:
- * aria-hidden, pointer-events:none, behind the content layer. Reduced motion →
- * one static frame, no cycle, no drift.
+ * Apple-TV-quiet montage of the user's OWN already-cached posters beneath
+ * Home's SHELVES (rendered inside .cp-lib-rows — never behind the hero, which
+ * owns its art and must dissolve into flat bg-0). Two stacked, blurred layers
+ * cross-dissolve every ~14s; only frames the library cards have already
+ * materialized feed it — listThumbs() is a pure read of the shared thumbnail
+ * cache, so the backdrop never triggers a decode or scan. Renders nothing
+ * until at least three posters exist. Purely decorative: aria-hidden,
+ * pointer-events:none, under the rows' content. Reduced motion → one static
+ * frame, no cycle, no drift.
  */
 export function AmbientBackdrop({ active }: Props) {
   const reduce = reducedMotion.matches;

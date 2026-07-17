@@ -270,12 +270,14 @@ test("library: seeded root scans into a shelf; search filters a flat grid; Esc r
   });
   await boot(page);
   await goHome(page);
-  // Header chrome: title, search, Add Folder, rescan. (Home's H1 is now "Home"
-  // — the landing page — while the detail browser owns the "Library" name.)
-  await expect(page.locator(".cp-lib-head").getByRole("heading", { name: "Home", exact: true })).toBeVisible();
+  // Home's header is JUST the search field (right-aligned). No H1, and Add
+  // Folder + rescan belong to the Library browser now — the hero anchors the
+  // page instead.
   await expect(page.getByLabel("Search library")).toBeVisible();
-  await expect(page.locator(".cp-lib-head").getByRole("button", { name: "Add Folder" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Rescan library" })).toBeVisible();
+  await expect(page.locator(".cp-lib-head").getByRole("heading")).toHaveCount(0);
+  await expect(page.locator(".cp-lib-head").getByRole("button", { name: "Add Folder" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Rescan library" })).toHaveCount(0);
+  await expect(page.locator(".cp-lib-hero")).toBeVisible();
   // The mocked scan renders one shelf: folder collection + video + audio cards.
   const row = page.getByRole("list", { name: "Footage" });
   await expect(row).toBeVisible();
@@ -289,9 +291,14 @@ test("library: seeded root scans into a shelf; search filters a flat grid; Esc r
   await expect(grid).toBeVisible();
   await expect(grid.getByRole("button", { name: /intro\.mp4/ })).toBeVisible();
   await expect(page.getByRole("list", { name: "Footage" })).toHaveCount(0);
-  // Esc clears back to the shelves.
+  // No hero in the search branch → the header drops its hero pull-up (flat
+  // variant), so the results grid never tucks under the floating search chip
+  // (which dead-clicked the first row's ⋯ buttons).
+  await expect(page.locator(".cp-lib-head")).toHaveClass(/cp-lib-head-flat/);
+  // Esc clears back to the shelves — and the hero pull-up returns with them.
   await page.keyboard.press("Escape");
   await expect(page.getByRole("list", { name: "Footage" })).toBeVisible();
+  await expect(page.locator(".cp-lib-head")).not.toHaveClass(/cp-lib-head-flat/);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
@@ -326,7 +333,7 @@ test("library hero: empty-state Paste a URL jumps to Clip and focuses the URL ba
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
-test("library: hero + Continue + Transcripts shelves from seeded history; opening returns to Clip", async ({ page }) => {
+test("library: hero + Continue + Transcribed shelves from seeded history; opening returns to Clip", async ({ page }) => {
   await page.addInitScript(() => {
     // v=abc is deliberately NOT a valid 11-char YouTube id → no poster URL is
     // derived → no external image requests from the e2e run.
@@ -345,12 +352,15 @@ test("library: hero + Continue + Transcripts shelves from seeded history; openin
   await expect(hero).toContainText("Seeded web source");
   await expect(hero.getByRole("button", { name: "Resume" })).toBeVisible();
   await expect(hero.getByRole("button", { name: "Open in Clip" })).toBeVisible();
-  // Continue shelf lists both recents; Transcripts shelf lists the history entry.
+  // Continue shelf lists both recents at featured size; the Transcribed shelf
+  // (renamed from Transcripts) lists the history entry with its SRT badge.
   const cont = page.getByRole("list", { name: "Continue" });
   await expect(cont.getByRole("button", { name: /Seeded web source/ })).toBeVisible();
   await expect(cont.getByRole("button", { name: /seeded\.mp4/ })).toBeVisible();
-  await expect(page.getByRole("list", { name: "Transcripts" })
-    .getByRole("button", { name: /Seeded transcript/ })).toBeVisible();
+  await expect(cont.locator(".cp-lib-cell.lg")).toHaveCount(2);
+  const transcribed = page.getByRole("list", { name: "Transcribed" });
+  await expect(transcribed.getByRole("button", { name: /Seeded transcript/ })).toBeVisible();
+  await expect(transcribed.locator(".cp-lib-card-badge")).toHaveText("srt");
   // Opening a recent routes through the standard handlers → back on Clip.
   await cont.getByRole("button", { name: /seeded\.mp4/ }).click();
   await expect(page.locator(".cp-view-clip")).toBeVisible();
@@ -370,6 +380,12 @@ test("library browser: tree + grid render, selection shows detail, list toggle s
   const tree = page.getByRole("tree", { name: "Library folders" });
   await expect(tree.getByRole("treeitem", { name: "All" })).toBeVisible();
   await expect(tree.getByRole("treeitem", { name: "Footage" })).toBeVisible();
+  // Add Folder + Rescan moved OFF Home and live in the tree footer — positive
+  // coverage that the affordances actually landed here (Home only asserts
+  // their absence).
+  const foot = page.locator(".cp-lib-tree-foot");
+  await expect(foot.getByRole("button", { name: "Add Folder" })).toBeVisible();
+  await expect(foot.getByRole("button", { name: "Rescan library" })).toBeVisible();
   // Main pane: "All" flattens every item across the tree into the poster wall.
   const grid = page.getByRole("list", { name: "Files" });
   await expect(grid.getByRole("button", { name: /clip-a\.mp4/ })).toBeVisible();

@@ -2,15 +2,19 @@ import { useRef, useState } from "react";
 import { IconFilm, IconMore, IconPlay, IconVolume } from "./Icons";
 import { LibraryCardMenu } from "./LibraryCardMenu";
 import { chosenPosterFor } from "../lib/library";
+import { useHoverFrames } from "../hooks/use-hover-frames";
 import { useLazyThumbnails } from "../hooks/use-lazy-thumbnails";
+import { requestHeroStill } from "../hooks/use-library-scan";
 
 /** Where a card's poster art comes from. */
 export type LibraryCardArt =
   /** Scanned/recent local file — video posters load lazily on intersection;
    *  audio always keeps the glyph placeholder (nothing to frame-grab). */
   | { kind: "local"; path: string; media: "video" | "audio" }
-  /** Web source — a derivable poster URL (YouTube) or null → placeholder. */
-  | { kind: "remote"; url: string | null };
+  /** Web source — a derivable poster URL (YouTube) or null → placeholder.
+   *  `urls` (optional, wins over `url`) is a resolution candidate list tried
+   *  in order (e.g. maxres → hqdefault); onError advances to the next. */
+  | { kind: "remote"; url: string | null; urls?: string[] };
 
 type Props = {
   title: string;
@@ -20,6 +24,8 @@ type Props = {
   art: LibraryCardArt;
   /** Small corner tag, e.g. "web" on Continue-row URLs, "srt" on transcripts. */
   badge?: string;
+  /** Featured size — the Continue row's large landscape cards (~2x width). */
+  large?: boolean;
   onOpen: () => void;
   /** The shared, cached, concurrency-capped thumbnail loader. */
   requestThumb: (path: string) => Promise<string | null>;
@@ -45,6 +51,10 @@ type Props = {
  * Hover/focus scales the art and reveals the play glyph + detail line
  * (CSS, reduced-motion aware). A broken poster (evicted blob URL, dead
  * remote) falls back to the tokens-styled placeholder via onError.
+ * Local-video cards also run the hover frame cycle (use-hover-frames):
+ * dwell 600ms and the poster cross-dissolves through frames at 25/50/75%
+ * of duration; leaving snaps back. Skipped for remote/audio and under
+ * prefers-reduced-motion.
  *
  * Right-click, the ⋯ corner button, and the ContextMenu / Shift+F10 keys all
  * open the SAME LibraryCardMenu (never the picker directly); local-video cards
@@ -52,17 +62,35 @@ type Props = {
  * Open in Clip. The menu never triggers the card's open.
  */
 export function LibraryCard({
-  title, detail, art, badge, onOpen, requestThumb, onChoosePoster, onResetPoster,
+  title, detail, art, badge, large, onOpen, requestThumb, onChoosePoster, onResetPoster,
   onSelect, selected,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [broken, setBroken] = useState(false);
+  // Remote candidate cursor — onError advances through art.urls; past the end
+  // the placeholder takes over (url resolves undefined → showImg false).
+  const [remoteIdx, setRemoteIdx] = useState(0);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
   const isVideo = art.kind === "local" && art.media === "video";
   const lazyPaths = isVideo ? [art.path] : [];
-  const [lazyUrl = null] = useLazyThumbnails(btnRef, lazyPaths, requestThumb);
+  // Featured (`large`) cards display ~432px wide (864 on Retina) — the 480px
+  // card poster upscales soft, so they ask for the hero-resolution still
+  // instead (same cache/decode gate/generation guard; it falls back to the
+  // poster pipeline internally when WebCodecs can't decode).
+  const [lazyUrl = null] = useLazyThumbnails(
+    btnRef, lazyPaths, large ? requestHeroStill : requestThumb,
+  );
+  // Hover frame cycling — local video only (null disables the hook entirely
+  // for remote/audio cards). Decodes ONLY after 600ms of hover/focus intent.
+  // Frames stay 480px even on large cards: they're a transient dissolve, not
+  // resting art — acceptable softness beats doubling the decode cost.
+  const { frames, active, start: startCycle, stop: stopCycle } =
+    useHoverFrames(isVideo ? art.path : null);
 
-  const url = art.kind === "remote" ? art.url : lazyUrl;
+  const remoteUrls = art.kind === "remote"
+    ? (art.urls ?? (art.url != null ? [art.url] : []))
+    : null;
+  const url = remoteUrls ? (remoteUrls[remoteIdx] ?? null) : lazyUrl;
   const showImg = !!url && !broken;
   const isAudio = art.kind === "local" && art.media === "audio";
   // Local-video path (narrows art to the local case) → the thumbnail items.
@@ -78,11 +106,21 @@ export function LibraryCard({
   };
 
   return (
-    <div role="listitem" className="cp-lib-cell">
+    <div
+      role="listitem"
+      className={"cp-lib-cell" + (large ? " lg" : "")}
+      // Cycling tracks the whole cell (so dwelling on the ⋯ corner counts as
+      // hover) plus the button's keyboard focus below — as SEPARATE intents,
+      // so a blur can't kill a pointer-held cycle (or vice versa).
+      onMouseEnter={isVideo ? () => startCycle("hover") : undefined}
+      onMouseLeave={isVideo ? () => stopCycle("hover") : undefined}
+    >
       <button
         ref={btnRef}
         type="button"
         className={"cp-lib-card" + (selected ? " selected" : "")}
+        onFocus={isVideo ? () => startCycle("focus") : undefined}
+        onBlur={isVideo ? () => stopCycle("focus") : undefined}
         // Selection mode: single click selects, double-click opens. Home shelves
         // (no onSelect) keep the single-click-opens behavior.
         onClick={onSelect ?? onOpen}
@@ -99,7 +137,31 @@ export function LibraryCard({
       >
         <span className="cp-lib-card-art">
           {showImg ? (
-            <img src={url} alt="" draggable={false} onError={() => setBroken(true)} />
+            <>
+              <img
+                src={url}
+                alt=""
+                draggable={false}
+                // Remote art walks its candidate list before the placeholder;
+                // local art (one URL) breaks straight to it.
+                onError={() => {
+                  if (remoteUrls) setRemoteIdx((i) => i + 1);
+                  else setBroken(true);
+                }}
+              />
+              {/* Hover cycle overlays — stacked over the poster, one "on" at a
+                  time (CSS cross-dissolve). Unmounting them (stopCycle) IS the
+                  instant snap back to the poster. */}
+              {frames.map((f, i) => (
+                <img
+                  key={f}
+                  className={"cp-lib-card-frame" + (i === active ? " on" : "")}
+                  src={f}
+                  alt=""
+                  draggable={false}
+                />
+              ))}
+            </>
           ) : (
             <span className="cp-lib-card-ph">
               {isAudio ? <IconVolume size={22} /> : <IconFilm size={22} />}

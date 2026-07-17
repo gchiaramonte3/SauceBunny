@@ -84,6 +84,16 @@ export function youTubeThumbnailUrl(raw: string): string | null {
   return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
 }
 
+/**
+ * Large hero poster (1280x720). 404s on older/low-res videos, so callers
+ * must chain onError down to youTubeThumbnailUrl's always-present 480px
+ * hqdefault (the Home hero does exactly that with its candidate list).
+ */
+export function youTubeHeroThumbnailUrl(raw: string): string | null {
+  const id = youTubeVideoId(raw);
+  return id ? `https://i.ytimg.com/vi/${id}/maxresdefault.jpg` : null;
+}
+
 /** Pretty display of the source host, e.g. "vimeo.com" or "youtu.be". */
 export function hostnameOf(raw: string): string {
   try {
