@@ -199,7 +199,7 @@ const HINTS = {
 } as const;
 
 type Row = { label: string; value: string; secondary?: string | null; hint: string };
-type Badge = { key: string; label: string; tone?: "accent" | "warn"; hint: string };
+type Badge = { key: string; label: string; tone?: "warn"; hint: string };
 
 export function MediaInfoModal({ path, onClose }: Props) {
   const [info, setInfo] = useState<MediaInfo | null>(null);
@@ -245,7 +245,7 @@ export function MediaInfoModal({ path, onClose }: Props) {
   const badges: Badge[] = [];
   if (v) {
     if (v.all_intra) {
-      badges.push({ key: "intra", label: "All-intra", tone: "accent", hint: HINTS.allIntra });
+      badges.push({ key: "intra", label: "All-intra", hint: HINTS.allIntra });
     } else if (v.keyframe_ratio != null && v.keyframe_ratio > 0) {
       badges.push({
         key: "gop",

@@ -315,39 +315,6 @@
   padding: 0 8px;
   text-align: left;
 }
-.cp-input-wrap { position: relative; }
-/* Sub-label hint under a field (e.g. "Saves as foo.mp4"). */
-.cp-field-hint {
-  margin-top: 6px;
-  font-family: var(--font-ui);
-  font-size: 10px;
-  color: var(--fg-5);
-  letter-spacing: 0.02em;
-}
-.cp-field-hint .mono {
-  font-family: var(--font-mono);
-  color: var(--fg-3);
-}
-.cp-input-suffix {
-  position: absolute;
-  right: 1px;
-  top: 1px;
-  bottom: 1px;
-  display: flex;
-  align-items: center;
-  padding: 0 10px 0 12px;
-  font-family: var(--font-ui);
-  font-size: 10px;
-  color: var(--fg-5);
-  pointer-events: none;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-radius: 0 5px 5px 0;
-  /* Solid + gradient fade so the input text behind doesn't bleed through. */
-  background:
-    linear-gradient(to right, transparent 0, rgba(10,10,13,0.95) 40%),
-    var(--bg-3);
-}
 
 /* Folder picker */
 .cp-folder {
@@ -526,15 +493,12 @@
               box-shadow var(--dur-fast) var(--ease-out),
               transform var(--dur-fast) var(--ease-out);
 }
-/* Hover lift + soft green-tint border + faint accent glow. Reads as
-   "this card is alive" without competing with the active selection
-   treatment on the format pills. */
+/* Hover lift on a neutral tint — green is reserved for actions and live
+   states, so the card signals "clickable" with light alone. */
 .cp-recent:hover {
-  background: linear-gradient(180deg, rgba(108,255,141,0.04), rgba(255,255,255,0.02));
-  border-color: rgba(108,255,141,0.18);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.06),
-    0 0 8px rgba(108,255,141,0.05);
+  background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+  border-color: var(--line-3);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
   transform: translateY(-1px);
 }
 .cp-recent:active { transform: translateY(0); }

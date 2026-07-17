@@ -21,7 +21,7 @@
 }
 .cp-ai-setup { margin: auto 0; }
 .cp-ai-intro { padding-top: 36px; }
-.cp-ai-icon { color: var(--color-accent-green); opacity: 0.85; }
+.cp-ai-icon { color: var(--fg-3); opacity: 0.85; }
 .cp-ai-empty-title { font-size: 14px; font-weight: 700; color: var(--fg-1); margin-top: 4px; }
 .cp-ai-empty-sub { font-size: 12px; line-height: 1.5; color: var(--fg-4); max-width: 320px; }
 
@@ -52,9 +52,9 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--color-accent-green);
-  background: rgba(108, 255, 141, 0.10);
-  border: 1px solid rgba(108, 255, 141, 0.20);
+  color: var(--fg-3);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line-2);
   border-radius: 999px;
   padding: 1px 6px;
 }
@@ -120,7 +120,7 @@
   transition: background 80ms ease, border-color 80ms ease, transform 80ms ease;
   animation: cp-ai-chip-in var(--dur-base) var(--ease-out) backwards;
 }
-.cp-ai-chip:hover { background: rgba(108, 255, 141, 0.06); border-color: rgba(108, 255, 141, 0.25); transform: translateX(2px); }
+.cp-ai-chip:hover { background: rgba(255, 255, 255, 0.05); border-color: var(--line-3); transform: translateX(2px); }
 .cp-ai-chip::after {
   content: "→";
   position: absolute;
@@ -128,7 +128,7 @@
   top: 50%;
   transform: translateY(-50%) translateX(-3px);
   opacity: 0;
-  color: var(--color-accent-green);
+  color: var(--fg-2);
   transition: opacity 80ms ease, transform 80ms ease;
 }
 .cp-ai-chip:hover::after { opacity: 1; transform: translateY(-50%) translateX(0); }
@@ -143,7 +143,7 @@
   text-transform: uppercase;
   color: var(--fg-5);
 }
-.cp-ai-msg.user .cp-ai-msg-role { color: var(--color-accent-green); }
+.cp-ai-msg.user .cp-ai-msg-role { color: var(--fg-3); }
 .cp-ai-msg-body {
   font-size: 13px;
   line-height: 1.55;
@@ -151,10 +151,10 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
-/* The answer gets a hairline brand-accent rail so it reads as a unit and the
-   thread has a clear scan line. */
+/* The answer gets a hairline neutral rail so it reads as a unit and the
+   thread has a clear scan line (green is reserved for actions/live states). */
 .cp-ai-msg.assistant .cp-ai-msg-body {
-  border-left: 2px solid rgba(108, 255, 141, 0.22);
+  border-left: 2px solid var(--line-3);
   padding-left: 11px;
   margin-left: 1px;
 }

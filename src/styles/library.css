@@ -594,31 +594,9 @@
 .cp-lib-stack.front { transform: translate(0, 3%); }
 
 /* ============================================================
-   BREADCRUMB, SEARCH GRID, NOTES
+   SEARCH GRID, NOTES
+   (Breadcrumbs live in the browser bar — .cp-lib-bcrumbs below.)
    ============================================================ */
-.cp-lib-crumbs {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-4) var(--s-7) 0;
-  font-family: var(--font-ui);
-  font-size: 12px;
-}
-.cp-lib-crumbs button {
-  padding: 2px 4px;
-  border: none;
-  background: none;
-  border-radius: var(--r-xs);
-  color: var(--fg-3);
-  font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.cp-lib-crumbs button:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.06); }
-.cp-lib-crumbs .sep { color: var(--fg-5); }
-.cp-lib-crumbs .cur { color: var(--fg-1); font-weight: 800; }
-
 /* Flat results grid — replaces the shelves while a query is active. */
 .cp-lib-grid {
   display: grid;

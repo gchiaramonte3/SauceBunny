@@ -173,7 +173,7 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.cp-review-export-menu button:hover { background: rgba(var(--accent-rgb), 0.14); color: var(--fg-1); }
+.cp-review-export-menu button:hover { background: rgba(255,255,255,0.07); color: var(--fg-1); }
 /* Two labeled groups (Notes / Markers) — a quiet small-caps section label. */
 .cp-review-export-group {
   padding: 6px 10px 3px;
@@ -282,7 +282,7 @@
   flex-direction: column;
   gap: 2px;
 }
-.cp-review-history-open:hover { background: rgba(var(--accent-rgb), 0.14); }
+.cp-review-history-open:hover { background: rgba(255,255,255,0.07); }
 .cp-review-history-title {
   font-family: var(--font-ui);
   font-size: 12.5px;

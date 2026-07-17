@@ -8,7 +8,6 @@
 
 :root {
   --ella-green:      #6CFF8D;
-  --ella-green-2:    #88F362;
   --novella-purple:  #8627FF;
   --novella-purple-2:#4826E8;
   --novella-violet:  #6D52ED;
@@ -57,7 +56,6 @@
      crisp 1px lines instead of blur. */
   --shadow-soft:   0 1px 4px rgba(0,0,0,0.35);
   --shadow-card:   0 4px 16px rgba(0,0,0,0.50);
-  --shadow-glow-green:  0 0 12px rgba(108,255,141,0.25);
   --shadow-glow-purple: 0 0 16px rgba(134,39,255,0.32);
   --shadow-inset-hair:  inset 0 0 0 1px rgba(255,255,255,0.08);
 

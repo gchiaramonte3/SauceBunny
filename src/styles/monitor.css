@@ -303,39 +303,6 @@
   color: var(--fg-4);
 }
 
-/* Monitor overlays — minimal: only timecodes by default. */
-.cp-monitor-overlay {
-  position: absolute; inset: 0;
-  pointer-events: none;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  padding: 12px 14px;
-  z-index: 3;
-}
-.cp-monitor-overlay.minimal { justify-content: flex-end; }
-.cp-monitor-overlay .bl, .cp-monitor-overlay .br {
-  display: flex; align-items: center; gap: 8px;
-}
-.cp-monitor-overlay.minimal {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  align-items: flex-end;
-}
-.cp-monitor-overlay .tc-overlay {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  color: rgba(255,255,255,0.92);
-  background: rgba(0,0,0,0.6);
-  padding: 4px 8px;
-  border-radius: 4px;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-}
-.cp-monitor-overlay .tc-overlay.muted { color: var(--fg-3); }
-
 /* Non-blocking "preparing playback…" banner — pinned to the bottom-left of
    the monitor while ffmpeg normalises an imported file. The player itself
    stays interactive underneath. */
@@ -1040,44 +1007,9 @@
   border-radius: 4px;
   transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
-.cp-notif-meta .reveal:hover  { color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
+.cp-notif-meta .reveal:hover  { color: var(--fg-1);   background: rgba(255,255,255,0.04); }
 .cp-notif-meta .dismiss:hover { color: var(--fg-1);   background: rgba(255,255,255,0.04); }
 
-/* Legacy success overlay (kept in case anything else still references it). */
-.cp-success-overlay {
-  position: absolute; inset: 0;
-  background: rgba(0,0,0,0.55);
-  backdrop-filter: blur(8px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  animation: fadeIn var(--dur-slow) var(--ease-out);
-}
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-.cp-success-overlay .check {
-  width: 56px; height: 56px;
-  border-radius: 50%;
-  background: rgba(var(--accent-rgb), 0.12);
-  border: 1px solid rgba(var(--accent-rgb), 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-}
-.cp-success-overlay .label {
-  font-family: var(--font-sans);
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--fg-1);
-  letter-spacing: -0.005em;
-}
-.cp-success-overlay .meta {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--fg-3);
-}
 
 /* Error state */
 .cp-error-overlay {

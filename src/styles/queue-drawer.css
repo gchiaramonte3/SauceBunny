@@ -66,7 +66,7 @@
      two affordances feel paired in the tab-strip right edge. */
   color: var(--fg-3);
 }
-.cp-tab-popout:hover { color: var(--color-accent-green); }
+.cp-tab-popout:hover { color: var(--fg-1); }
 /* Inner content respects the current drawer width — let it shrink. */
 .cp-queue-drawer > * { min-width: 0; }
 
@@ -209,8 +209,8 @@ body.cp-tab-dragging { cursor: grabbing; }
   min-width: 16px;
   height: 16px;
   padding: 0 5px;
-  background: rgba(108,255,141,0.18);
-  color: var(--color-accent-green);
+  background: rgba(255,255,255,0.08);
+  color: var(--fg-2);
   border-radius: 999px;
   font-family: var(--font-mono);
   font-size: 9.5px;

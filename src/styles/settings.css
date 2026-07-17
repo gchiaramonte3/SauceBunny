@@ -150,19 +150,6 @@
   max-width: 580px;
   line-height: 1.5;
 }
-.cp-pane-section { margin-bottom: 28px; }
-.cp-pane-section-label {
-  font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--fg-4);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin: 0 0 10px;
-}
-/* Adds breathing room above a stacked sub-section head (e.g. the second
-   group in the merged Commands & Shortcuts pane). */
-.cp-pane-subhead-gap { margin-top: 22px; }
 
 /* Top-level Settings sections reuse the sidebar's collapsible chevron
    (.cp-section.collapsible, styled in sidebar.css). That styling indents the
@@ -460,19 +447,22 @@
   gap: 22px;
   margin-bottom: 18px;
 }
+/* Brand mark tile — hosts the canonical bunny SVG (the mark itself carries
+   the brand green; the tile stays neutral). */
 .cp-about-hero .mark {
   width: 56px; height: 56px;
   border-radius: 12px;
-  background: linear-gradient(135deg, var(--accent), rgba(var(--accent-rgb), 0.4));
+  background: var(--bg-3);
+  border: 1px solid var(--line-1);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-sans);
-  font-weight: 800;
-  font-size: 22px;
-  color: #0A0A0D;
-  letter-spacing: -0.04em;
-  box-shadow: 0 6px 10px rgba(var(--accent-rgb), 0.12);
+}
+.cp-about-hero .mark img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  display: block;
 }
 .cp-about-name {
   font-family: var(--font-sans);
@@ -561,12 +551,6 @@
   transition: border-color var(--dur-fast) var(--ease-out);
 }
 .cp-mediainfo-badge.open { border-color: currentColor; }
-.cp-mediainfo-badge.accent {
-  color: var(--color-accent-green);
-  background: rgba(108,255,141,0.08);
-  border-color: rgba(108,255,141,0.2);
-}
-.cp-mediainfo-badge.accent.open { border-color: rgba(108,255,141,0.55); }
 .cp-mediainfo-badge.warn {
   color: var(--color-warning);
   background: rgba(255,181,69,0.08);
@@ -652,7 +636,7 @@
   grid-column: 1 / -1;
   margin: 4px 0 3px;
   padding: 8px;
-  border-left: 2px solid rgba(108,255,141,0.35);
+  border-left: 2px solid var(--line-3);
   background: rgba(255,255,255,0.02);
   color: var(--fg-3);
   font-size: 11.5px;
@@ -766,10 +750,11 @@
   letter-spacing: 0.03em;
   color: var(--fg-4);
 }
+/* "Recommended" is advice, not a state — it rides the default chrome
+   (green is reserved for the .active selection + the "current" tag). */
 .cp-ytauth-browser.recommended {
-  border-color: rgba(108,255,141,0.30);
+  border-color: var(--line-3);
 }
-.cp-ytauth-browser.recommended .cp-ytauth-browser-hint { color: var(--color-accent-green); }
 
 /* YouTube Settings tab — yt-dlp engine row */
 .cp-ytdlp-actions {
@@ -959,7 +944,7 @@
   margin-top: 4px;
   font-family: var(--font-ui);
   font-size: 11.5px;
-  color: var(--color-accent-green, #7bdcb5);
+  color: var(--fg-3);
 }
 .cp-keybind-foot {
   margin-top: 6px;

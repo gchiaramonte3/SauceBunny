@@ -21,27 +21,6 @@
   border-bottom: 1px solid var(--line-1);
   background: rgba(255,255,255,0.015);
 }
-.cp-tx-origin { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
-.cp-tx-origin-tag {
-  flex-shrink: 0;
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--color-accent-green);
-  background: rgba(108, 255, 141, 0.08);
-  border: 1px solid rgba(108, 255, 141, 0.18);
-}
-.cp-tx-filename {
-  font-size: 11px;
-  color: var(--fg-4);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
 .cp-tx-head-actions { display: flex; gap: 4px; flex-shrink: 0; }
 /* Left-side actions row pushes the right side away — replaces a
    marginRight: "auto" inline style (r46). */
@@ -119,7 +98,7 @@
   border-left: 2px solid transparent;
   transition: background 80ms ease;
 }
-.cp-tx-history-row:hover { background: rgba(108, 255, 141, 0.06); }
+.cp-tx-history-row:hover { background: rgba(255, 255, 255, 0.04); }
 .cp-tx-history-row.active {
   background: rgba(108, 255, 141, 0.08);
   border-left-color: var(--color-accent-green);
@@ -388,7 +367,7 @@
   cursor: pointer;
 }
 .cp-tx-jump:hover {
-  color: var(--color-accent-green);
+  color: var(--fg-1);
   background: rgba(255,255,255,0.04);
 }
 /* No-speaker transcripts (un-diarized whisper output, or a caption file
@@ -551,8 +530,8 @@
   cursor: pointer;
 }
 .cp-tx-dl-menu button:hover {
-  background: rgba(108, 255, 141, 0.08);
-  color: var(--color-accent-green);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-1);
 }
 .cp-tx-dl-sep {
   height: 1px;
@@ -565,7 +544,7 @@
 .cp-tx-speaker { cursor: pointer; transition: transform 80ms ease, box-shadow 80ms ease; }
 .cp-tx-speaker:hover { transform: scale(1.05); }
 .cp-tx-speaker.renamed {
-  box-shadow: 0 0 0 2px var(--bg-0, #0a0a0a), 0 0 0 3px var(--color-accent-green);
+  box-shadow: 0 0 0 2px var(--bg-0, #0a0a0a), 0 0 0 3px var(--fg-4);
 }
 
 /* Rename popover — portaled to body, positioned next to the chip. */
@@ -606,11 +585,6 @@
   border-color: rgba(108, 255, 141, 0.5);
   background: rgba(108, 255, 141, 0.05);
 }
-/* Merge-confirm variant — shares the rename popover's chrome. The body
-   and hint lines used to be inline-styled in r34; promoted to classes
-   in r46.B when the popover was extracted into its own file. */
-.cp-tx-merge-body { font-size: 12px; color: var(--fg-2); line-height: 1.45; }
-.cp-tx-merge-hint { font-size: 11px; color: var(--fg-4); }
 /* "…or this turn is actually" — per-turn reassignment to a known speaker.
    Chip-per-speaker row under the scope radios; pip colour mirrors the
    roster so the target is recognizable at a glance. */
@@ -633,8 +607,8 @@
   max-width: 100%;
 }
 .cp-tx-rename-assign-btn:hover {
-  border-color: rgba(108, 255, 141, 0.5);
-  background: rgba(108, 255, 141, 0.06);
+  border-color: var(--line-3);
+  background: rgba(255, 255, 255, 0.05);
   color: var(--fg-1);
 }
 .cp-tx-rename-assign-pip {
@@ -699,16 +673,9 @@
   text-transform: uppercase;
   padding: 1px 5px;
   border-radius: 4px;
-  background: rgba(108, 255, 141, 0.10);
-  color: var(--color-accent-green);
-  border: 1px solid rgba(108, 255, 141, 0.18);
-}
-.cp-toggle-row .cp-hint-ok {
-  font-size: 10px;
-  color: var(--color-accent-green);
-  font-weight: 600;
-  margin-left: 4px;
-  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg-3);
+  border: 1px solid var(--line-2);
 }
 
 /* Small inline select used for the "Expected speakers" dropdown
@@ -875,8 +842,9 @@
 .cp-phase-track .sep { opacity: 0.3; }
 
 /* ─────────────────────────────────────────────────────────────────
-   Transcript roster — horizontal strip of speaker chips above the
-   transcript body. Drag any chip onto another to merge speakers.
+   Transcript roster — slim header strip above the transcript body:
+   label + Manage button. The speaker chips (rename / drag-to-merge)
+   live in SpeakerRosterModal (.cp-spk-*).
    ───────────────────────────────────────────────────────────────── */
 
 .cp-tx-roster {
@@ -896,117 +864,6 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-.cp-tx-roster-hint {
-  font-weight: 500;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--fg-5);
-  font-size: 10px;
-}
-/* Single horizontally-scrollable strip — one line tall no matter how many
-   speakers, so a 20-speaker transcript never wraps into a wall that buries the
-   reading area. The edge fade is applied INLINE (see TranscriptViewer) only on
-   the side that actually has off-screen chips, so a short cast isn't clipped. */
-.cp-tx-roster-chips {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 6px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 2px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255,255,255,0.18) transparent;
-}
-.cp-tx-roster-chips::-webkit-scrollbar { height: 6px; }
-.cp-tx-roster-chips::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.14);
-  border-radius: 3px;
-}
-.cp-tx-roster-chips::-webkit-scrollbar-track { background: transparent; }
-/* Edge fade — toggled by TranscriptViewer from scroll position, only on the
-   side that has off-screen chips (so a short cast that already fits is never
-   clipped). The `#000` stops are mask alpha, not colour. */
-.cp-tx-roster-chips.fade-l {
-  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px);
-          mask-image: linear-gradient(to right, transparent 0, #000 16px);
-}
-.cp-tx-roster-chips.fade-r {
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
-          mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
-}
-.cp-tx-roster-chips.fade-l.fade-r {
-  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
-          mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
-}
-.cp-tx-roster-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  white-space: nowrap;
-  padding: 4px 8px 4px 4px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--line-2);
-  border-radius: 999px;
-  font-size: 11px;
-  color: var(--fg-2);
-  cursor: grab;
-  user-select: none;
-  transition: transform 80ms ease, border-color 80ms ease, background 80ms ease;
-}
-.cp-tx-roster-chip:hover {
-  background: rgba(255,255,255,0.07);
-}
-.cp-tx-roster-chip:active { cursor: grabbing; }
-.cp-tx-roster-chip.dragging {
-  opacity: 0.55;
-  transform: scale(0.97);
-}
-.cp-tx-roster-chip.drop-hover {
-  border-color: var(--color-accent-green);
-  background: rgba(108, 255, 141, 0.10);
-  box-shadow: 0 0 0 1px var(--color-accent-green), 0 0 6px rgba(108, 255, 141, 0.2);
-  transform: scale(1.04);
-}
-.cp-tx-roster-pip {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  font-size: 9px;
-  font-weight: 700;
-  color: #0a0a0a;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  letter-spacing: -0.02em;
-  flex-shrink: 0;
-  pointer-events: none;
-}
-.cp-tx-roster-name { font-weight: 600; pointer-events: none; }
-.cp-tx-roster-count {
-  font-size: 10px;
-  color: var(--fg-4);
-  font-variant-numeric: tabular-nums;
-  background: rgba(255,255,255,0.05);
-  padding: 1px 5px;
-  border-radius: 4px;
-  pointer-events: none;
-}
-.cp-tx-roster-unmerge {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: rgba(108, 255, 141, 0.10);
-  color: var(--color-accent-green);
-  border: 1px solid rgba(108, 255, 141, 0.18);
-  cursor: pointer;
-  margin-left: 2px;
-}
-.cp-tx-roster-unmerge:hover {
-  background: rgba(108, 255, 141, 0.18);
 }
 
 /* Transient write-failure note under the Download button (downloadAs). The

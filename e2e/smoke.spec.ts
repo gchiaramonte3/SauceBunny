@@ -33,6 +33,14 @@ test("shell boots: toolbar, sidebar, monitor render without pageerrors", async (
   // and the left panel toggle is the toolbar's FIRST item (Lore-style),
   // hugging the rail; the right panel toggle mirrors it on the far edge.
   await expect(page.locator(".cp-wordmark")).toHaveCount(0);
+  // The rail mark is the canonical bunny SVG and actually decodes —
+  // naturalWidth 0 would mean a broken src quietly rendering as a fallback.
+  // Vite may inline the asset as a data: URI, so accept the file path OR the
+  // inlined SVG (identified by the brand-green fill it carries).
+  const railLogo = page.locator(".cp-nav-logo img");
+  await expect(railLogo).toBeVisible();
+  expect(await railLogo.getAttribute("src")).toMatch(/saucebunny|6CFF8D/i);
+  expect(await railLogo.evaluate((el) => (el as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await expect(page.locator(".cp-toolbar > *").first()).toHaveClass(/cp-sidebar-toggle/);
   // Fresh profile (no saved prefs): BOTH side panels boot open.
   await expect(page.locator(".cp-sidebar")).toBeVisible();

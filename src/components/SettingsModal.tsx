@@ -30,6 +30,7 @@ import { formatError } from "../lib/error-format";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { YouTubeSettings } from "./YouTubeSettings";
 import { useModalFocus } from "../hooks/use-modal-focus";
+import logoUrl from "../assets/saucebunny.svg";
 
 type TabId = "general" | "captions" | "transcription" | "youtube" | "ai-summary" | "commands" | "about";
 
@@ -1510,7 +1511,11 @@ export function SettingsModal(props: Props) {
             {tab === "about" && (
               <section>
                 <div className="cp-about-hero">
-                  <div className="mark">sb</div>
+                  {/* Canonical brand mark (src/assets/saucebunny.svg) — same
+                      asset the nav rail renders; no placeholder tiles. */}
+                  <div className="mark">
+                    <img src={logoUrl} alt="" draggable={false} />
+                  </div>
                   <div>
                     <div className="cp-about-name">
                       Sauce Bunny <span className="ver">v0.1.0</span>

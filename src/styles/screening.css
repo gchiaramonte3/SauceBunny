@@ -169,8 +169,8 @@
   flex-shrink: 0;
   padding: 1px 6px;
   border-radius: var(--r-pill);
-  background: rgba(var(--accent-rgb), 0.16);
-  color: var(--accent);
+  background: rgba(255,255,255,0.08);
+  color: var(--fg-2);
   font-family: var(--font-ui);
   font-size: 9.5px;
   font-weight: 700;

@@ -28,7 +28,7 @@
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.08),
     var(--shadow-card),
-    0 0 0 1px rgba(108,255,141,0.08);
+    0 0 0 1px var(--line-2);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -194,7 +194,7 @@
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.08),
     var(--shadow-card),
-    0 0 0 1px rgba(108,255,141,0.08);
+    0 0 0 1px var(--line-2);
   display: flex;
   flex-direction: column;
   overflow: hidden;
