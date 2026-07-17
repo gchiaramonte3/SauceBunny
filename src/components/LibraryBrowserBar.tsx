@@ -1,8 +1,6 @@
 import { Fragment } from "react";
 import { IconGrid, IconList, IconPanelLeft, IconSearch } from "./Icons";
-import type {
-  LibraryCrumb, LibraryKindFilter, LibrarySortDir, LibrarySortKey,
-} from "../lib/library";
+import type { LibraryCrumb, LibrarySortDir, LibrarySortKey } from "../lib/library";
 
 export type LibraryViewMode = "grid" | "list";
 
@@ -12,37 +10,41 @@ type Props = {
   onCrumb: (chain: LibraryCrumb[] | null) => void;
   query: string;
   onQuery: (q: string) => void;
-  kind: LibraryKindFilter;
   sort: LibrarySortKey;
   dir: LibrarySortDir;
   view: LibraryViewMode;
-  onPrefs: (patch: { kind?: LibraryKindFilter; sort?: LibrarySortKey; dir?: LibrarySortDir; view?: LibraryViewMode }) => void;
+  onPrefs: (patch: { sort?: LibrarySortKey; dir?: LibrarySortDir; view?: LibraryViewMode }) => void;
+  /** Panel visibility — the bar only shows a reopen affordance while hidden
+   *  (the collapse control lives in the panel's own header). */
   treeOpen: boolean;
-  onToggleTree: () => void;
+  onShowTree: () => void;
 };
 
 /**
- * The Library browser's main-pane header: tree-collapse toggle, clickable
- * breadcrumb, scoped search, kind filter, sort select + asc/desc toggle, and
- * the grid⇄list toggle. All the sort/filter/view prefs persist upstream in one
- * localStorage key; this bar is a pure controlled surface.
+ * The Library browser's main-pane header: clickable breadcrumb, scoped
+ * search, sort select + asc/desc toggle, and the grid⇄list toggle. The kind
+ * filter moved to the library panel's chips (LibraryTree); the panel's
+ * collapse toggle moved into its header, so the bar only carries the Show
+ * folders button while the panel is hidden. All the sort/view prefs persist
+ * upstream in one localStorage key; this bar is a pure controlled surface.
  */
 export function LibraryBrowserBar({
-  chain, onCrumb, query, onQuery, kind, sort, dir, view, onPrefs, treeOpen, onToggleTree,
+  chain, onCrumb, query, onQuery, sort, dir, view, onPrefs, treeOpen, onShowTree,
 }: Props) {
   const last = chain ? chain.length - 1 : -1;
   return (
     <div className="cp-lib-bar">
-      <button
-        type="button"
-        className={"cp-lib-bar-tree btn-icon" + (treeOpen ? " active" : "")}
-        title={treeOpen ? "Hide folders" : "Show folders"}
-        aria-label={treeOpen ? "Hide folder tree" : "Show folder tree"}
-        aria-pressed={treeOpen}
-        onClick={onToggleTree}
-      >
-        <IconPanelLeft size={15} />
-      </button>
+      {!treeOpen && (
+        <button
+          type="button"
+          className="cp-lib-bar-tree btn-icon"
+          title="Show folders"
+          aria-label="Show folder tree"
+          onClick={onShowTree}
+        >
+          <IconPanelLeft size={15} />
+        </button>
+      )}
       <nav className="cp-lib-bcrumbs" aria-label="Location">
         {chain === null
           ? <span className="cur" aria-current="page">All</span>
@@ -74,17 +76,6 @@ export function LibraryBrowserBar({
             <button type="button" className="cp-lib-search-clear" aria-label="Clear search" onClick={() => onQuery("")}>×</button>
           )}
         </div>
-
-        <select
-          className="cp-lib-select"
-          aria-label="Filter by kind"
-          value={kind}
-          onChange={(e) => onPrefs({ kind: e.target.value as LibraryKindFilter })}
-        >
-          <option value="all">All</option>
-          <option value="video">Video</option>
-          <option value="audio">Audio</option>
-        </select>
 
         <select
           className="cp-lib-select"

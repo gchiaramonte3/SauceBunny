@@ -62,9 +62,11 @@
   background: rgba(255,255,255,0.05);
   color: var(--fg-1);
 }
+/* One notch quieter (v3 color sweep): neutral bg-3 fill + fg-1 icon/label —
+   the green accent edge below is the only accent; no green fills anywhere. */
 .cp-nav-item.active {
   background: var(--bg-3);
-  color: var(--fg-0);
+  color: var(--fg-1);
 }
 /* Tiny type under each icon. fg-4 at rest, fg-1 when the item is active. */
 .cp-nav-label {

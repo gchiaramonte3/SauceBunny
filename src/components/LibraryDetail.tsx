@@ -22,7 +22,8 @@ type Props = {
 
 /**
  * The Library browser's right detail panel — appears on selection. Large
- * poster, name, shortened path, size · date, and the file's actions. A
+ * poster, name, one metadata line (size · date), the shortened path, and
+ * the file's actions — the grid card's type scale, not a key-value table. A
  * "Has transcript" chip shows when transcript-history has an entry for this
  * exact path; clicking it opens the source and that transcript. Remounted by
  * the parent (keyed on path + poster version) so a thumbnail change refreshes.
@@ -62,8 +63,8 @@ export function LibraryDetail({
           )}
       </div>
       <h2 className="cp-lib-detail-name" title={item.name}>{item.name}</h2>
-      <p className="cp-lib-detail-path" title={item.path}>{shortenPath(item.path, 44)}</p>
       {meta && <p className="cp-lib-detail-meta">{meta}</p>}
+      <p className="cp-lib-detail-path" title={item.path}>{shortenPath(item.path, 44)}</p>
 
       {transcript && (
         <button

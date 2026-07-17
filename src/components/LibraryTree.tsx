@@ -1,13 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { IconChevronRight, IconPlus, IconRefresh, IconStack } from "./Icons";
+import { IconChevronRight, IconPanelLeft, IconPlus, IconRefresh, IconStack } from "./Icons";
+import { LibraryTreeArt } from "./LibraryTreeArt";
 import type { LibraryFolder } from "../types";
-import type { LibraryCrumb } from "../lib/library";
+import { libraryPosterPaths, type LibraryCrumb, type LibraryKindFilter } from "../lib/library";
 
 type Props = {
   trees: LibraryFolder[];
   /** Current selection chain, or null for the "All" aggregate. */
   selection: LibraryCrumb[] | null;
   onSelect: (chain: LibraryCrumb[] | null) => void;
+  /** Kind filter — the panel chips patch the same persisted prefs key. */
+  kind: LibraryKindFilter;
+  onKind: (kind: LibraryKindFilter) => void;
+  /** Hides the panel (the bar's Show folders button brings it back). */
+  onCollapse: () => void;
+  /** The shared, cached, concurrency-capped thumbnail loader (root art). */
+  requestThumb: (path: string) => Promise<string | null>;
   addFolder: () => Promise<void>;
   rescanAll: () => void;
   scanning: boolean;
@@ -21,7 +29,15 @@ type Row = {
   name: string;
   hasChildren: boolean;
   expanded: boolean;
+  /** Root rows only — the first video under the root, for the folder art. */
+  artPath?: string | null;
 };
+
+const KIND_CHIPS: Array<{ kind: LibraryKindFilter; label: string }> = [
+  { kind: "all", label: "All" },
+  { kind: "video", label: "Video" },
+  { kind: "audio", label: "Audio" },
+];
 
 function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
   const rows: Row[] = [
@@ -32,6 +48,9 @@ function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
     rows.push({
       key: node.path, chain, depth, name: node.name,
       hasChildren: node.folders.length > 0, expanded: isExp,
+      // Roots carry small folder art (first video's poster, BFS) — the
+      // Spotify library-row read. Subfolders stay text rows.
+      artPath: depth === 0 ? (libraryPosterPaths(node, 1)[0] ?? null) : undefined,
     });
     if (isExp) {
       for (const sub of node.folders) {
@@ -44,13 +63,20 @@ function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
 }
 
 /**
- * The Library browser's left column — an ARIA tree over the already-scanned
- * folder trees (no extra IPC). "All" aggregates every root; roots and their
- * subfolders carry disclosure triangles. Selection drives the main pane.
+ * The Library browser's left column — a proper library panel: a "Library"
+ * header with the collapse toggle, kind filter chips (All / Video / Audio —
+ * they patch the same persisted prefs key the bar's select used to), then an
+ * ARIA tree over the already-scanned folder trees (no extra IPC). "All"
+ * aggregates every root; roots render with small folder art (first video's
+ * poster, lazily via the shared thumbnail gate) and disclosure triangles.
+ * Selection drives the main pane.
  * Keyboard: ↑↓ move, →/← expand/collapse (or step in/out), Enter/Space select.
- * Add Folder + Rescan sit at the bottom.
+ * Add folder + rescan stay pinned at the bottom.
  */
-export function LibraryTree({ trees, selection, onSelect, addFolder, rescanAll, scanning }: Props) {
+export function LibraryTree({
+  trees, selection, onSelect, kind, onKind, onCollapse, requestThumb,
+  addFolder, rescanAll, scanning,
+}: Props) {
   // Roots open by default; ancestors of the current selection are auto-revealed.
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   // Each root is default-opened only ONCE (on first appearance) — re-adding it
@@ -112,6 +138,31 @@ export function LibraryTree({ trees, selection, onSelect, addFolder, rescanAll, 
 
   return (
     <div className="cp-lib-tree">
+      <div className="cp-lib-tree-head">
+        <h2 className="cp-lib-tree-title">Library</h2>
+        <button
+          type="button"
+          className="cp-lib-tree-collapse"
+          title="Hide folders"
+          aria-label="Hide folder tree"
+          onClick={onCollapse}
+        >
+          <IconPanelLeft size={14} />
+        </button>
+      </div>
+      <div className="cp-lib-tree-chips" role="group" aria-label="Filter by kind">
+        {KIND_CHIPS.map((c) => (
+          <button
+            key={c.kind}
+            type="button"
+            className={"cp-lib-chip" + (kind === c.kind ? " active" : "")}
+            aria-pressed={kind === c.kind}
+            onClick={() => onKind(c.kind)}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
       <div className="cp-lib-tree-scroll" role="tree" aria-label="Library folders" onKeyDown={onKeyDown}>
         {rows.map((row) => {
           const isSel = row.key === selKey;
@@ -142,19 +193,22 @@ export function LibraryTree({ trees, selection, onSelect, addFolder, rescanAll, 
                   {row.key === "all" ? <IconStack size={13} /> : null}
                 </span>
               )}
+              {row.artPath !== undefined && (
+                <LibraryTreeArt path={row.artPath} requestThumb={requestThumb} />
+              )}
               <span className="cp-lib-tree-name">{row.name}</span>
             </button>
           );
         })}
       </div>
       <div className="cp-lib-tree-foot">
-        <button type="button" className="btn btn-compact" onClick={() => void addFolder()}>
-          <IconPlus size={12} /> Add Folder
+        <button type="button" className="btn btn-primary btn-compact" onClick={() => void addFolder()}>
+          <IconPlus size={12} /> Add folder
         </button>
         <button
           type="button"
-          className="btn-icon cp-lib-tree-rescan"
-          title="Rescan library"
+          className={"btn-icon cp-lib-tree-rescan" + (scanning ? " scanning" : "")}
+          title={scanning ? "Scanning…" : "Rescan library"}
           aria-label="Rescan library"
           onClick={rescanAll}
           disabled={scanning}

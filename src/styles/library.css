@@ -358,7 +358,7 @@
    the paging arrows visible so keyboard users see where the shelf continues. */
 .cp-lib-row-body:hover .cp-lib-row-arrow,
 .cp-lib-row-body:focus-within .cp-lib-row-arrow { opacity: 1; }
-.cp-lib-row-arrow:hover { color: var(--ella-green); }
+.cp-lib-row-arrow:hover { color: var(--fg-0); }
 
 /* ============================================================
    CARDS — 16:9 posters (shared by item, recent, transcript) and
@@ -812,10 +812,11 @@
   color: var(--fg-4);
 }
 
-/* Grid-card selection highlight (Library browser only — Home never sets it). */
+/* Grid-card selection highlight (Library browser only — Home never sets it).
+   Neutral ring: selection is not a live state, so no green. */
 .cp-lib-card.selected .cp-lib-card-art {
-  border-color: var(--ella-green);
-  box-shadow: 0 0 0 1px var(--ella-green);
+  border-color: var(--fg-1);
+  box-shadow: 0 0 0 1px var(--fg-1);
 }
 
 /* ── Reduced motion: hover scale/reveals snap, no transforms. The hover
@@ -853,14 +854,74 @@
   background: var(--bg-0);
 }
 
-/* ── Left column: the folder tree (collapsible via the bar toggle). ── */
+/* ── Left column: the library panel (header + kind chips + folder tree,
+      collapsible via its own header toggle). ── */
 .cp-lib-tree {
-  flex: 0 0 200px;
+  flex: 0 0 224px;
   display: flex;
   flex-direction: column;
   min-height: 0;
   border-right: 1px solid var(--line-1);
   background: var(--bg-1);
+}
+.cp-lib-tree-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-2) var(--s-2) var(--s-3);
+}
+.cp-lib-tree-title {
+  flex: 1;
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--fg-1);
+}
+.cp-lib-tree-collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--fg-4);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out);
+}
+.cp-lib-tree-collapse:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.06); }
+/* Kind chips — neutral per the color contract: bg-3 fill + fg-1 when active,
+   quiet outline at rest. They patch the same persisted prefs key the bar's
+   kind select used to. */
+.cp-lib-tree-chips {
+  display: flex;
+  gap: var(--s-2);
+  padding: 0 var(--s-3) var(--s-3);
+}
+.cp-lib-chip {
+  padding: 3px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  background: none;
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.cp-lib-chip:hover { color: var(--fg-1); border-color: var(--line-3); }
+.cp-lib-chip.active {
+  background: var(--bg-3);
+  border-color: transparent;
+  color: var(--fg-1);
 }
 .cp-lib-tree-scroll {
   flex: 1;
@@ -888,10 +949,28 @@
 }
 .cp-lib-tree-row:hover { background: rgba(255, 255, 255, 0.05); }
 .cp-lib-tree-row:focus-visible { outline: none; background: rgba(255, 255, 255, 0.08); }
+/* Neutral selection (color contract: green is the primary action + live
+   states only) — bg-3 fill, fg-1 text. */
 .cp-lib-tree-row.selected {
-  background: rgba(108, 255, 141, 0.14); /* --ella-green wash */
-  color: var(--fg-0);
+  background: var(--bg-3);
+  color: var(--fg-1);
 }
+/* Root folder art — the root's first video poster in a small tile (lazy via
+   the shared thumbnail gate); folder glyph until it lands. */
+.cp-lib-tree-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-xs);
+  overflow: hidden;
+  background: var(--bg-2);
+  border: 1px solid var(--line-1);
+  color: var(--fg-4);
+}
+.cp-lib-tree-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cp-lib-tree-tw {
   display: flex;
   align-items: center;
@@ -921,6 +1000,11 @@
 }
 .cp-lib-tree-foot .btn-compact { flex: 1; }
 .cp-lib-tree-rescan { width: 28px; height: 28px; flex: 0 0 auto; }
+/* Live scan — the one green live state in the browser: the rescan glyph goes
+   accent and spins while a scan runs. */
+.cp-lib-tree-rescan.scanning { color: var(--ella-green); border-color: var(--stroke-green); }
+.cp-lib-tree-rescan.scanning svg { animation: cp-lib-scan-spin 900ms linear infinite; }
+@keyframes cp-lib-scan-spin { to { transform: rotate(360deg); } }
 
 /* ── Main pane: bar over the grid/list, next to the detail panel. ── */
 .cp-lib-main {
@@ -938,8 +1022,9 @@
   border-bottom: 1px solid var(--line-1);
   background: var(--bg-0);
 }
+/* Reopen affordance only — rendered while the panel is hidden (the collapse
+   control lives in the panel header). */
 .cp-lib-bar-tree { width: 30px; height: 30px; flex: 0 0 auto; }
-.cp-lib-bar-tree.active { color: var(--fg-1); background: rgba(255, 255, 255, 0.06); }
 .cp-lib-bcrumbs {
   display: flex;
   align-items: center;
@@ -1020,7 +1105,7 @@
   border-radius: var(--r-md);
 }
 .cp-lib-viewtoggle .btn-icon { width: 26px; height: 24px; border-radius: var(--r-sm); }
-.cp-lib-viewtoggle .btn-icon.active { background: rgba(255, 255, 255, 0.10); color: var(--fg-1); }
+.cp-lib-viewtoggle .btn-icon.active { background: var(--bg-3); color: var(--fg-1); }
 
 /* ── Body: scrolling content pane beside the detail panel. ── */
 .cp-lib-browse-body { flex: 1; display: flex; min-height: 0; min-width: 0; }
@@ -1032,14 +1117,39 @@
   padding: var(--s-4) var(--s-5) var(--s-10);
 }
 .cp-lib-browse-empty { padding: var(--s-8) var(--s-5); }
-/* Grid mode — a poster wall, tighter cells than Home's shelves. */
+/* Rootless library — one centered line + the primary button, nothing else. */
+.cp-lib-browse-zero {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-4);
+}
+.cp-lib-browse-zero p {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--fg-3);
+}
+/* Grid mode — a dense poster wall: tighter cells and gutters than Home's
+   shelves, smaller title type, detail line on hover only (the shared card
+   already does that). 30 files should read as a wall of media. */
 .cp-lib-browse-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
-  gap: var(--s-4);
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--s-3);
   align-content: start;
 }
 .cp-lib-browse-grid .cp-lib-cell { width: auto; }
+.cp-lib-browse-grid .cp-lib-card-title {
+  margin-top: var(--s-1);
+  font-size: 11px;
+}
+.cp-lib-browse-grid .cp-lib-card-detail {
+  height: 14px;
+  font-size: 10px;
+}
 
 /* ── List mode — a compact table (poster · name · kind · size · modified). ── */
 .cp-lib-list { display: flex; flex-direction: column; }
@@ -1063,7 +1173,7 @@
 .cp-lib-lrow {
   padding: var(--s-1) var(--s-2);
   border: none;
-  border-radius: var(--r-sm);
+  border-radius: 0;
   background: none;
   color: var(--fg-2);
   font-family: var(--font-ui);
@@ -1072,9 +1182,12 @@
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out);
 }
+/* Zebra-free hairline separation — one weight (--line-1), no alternating fills. */
+.cp-lib-list .cp-lib-lrow + .cp-lib-lrow { border-top: 1px solid var(--line-1); }
 .cp-lib-lrow:hover { background: rgba(255, 255, 255, 0.04); }
 .cp-lib-lrow:focus-visible { outline: none; background: rgba(255, 255, 255, 0.07); }
-.cp-lib-lrow.selected { background: rgba(108, 255, 141, 0.14); color: var(--fg-0); }
+/* Neutral selection — bg-3 fill, fg-1 text (green = primary + live only). */
+.cp-lib-lrow.selected { background: var(--bg-3); color: var(--fg-1); }
 .cp-lib-lrow-art {
   display: flex;
   align-items: center;
@@ -1136,30 +1249,33 @@
 }
 .cp-lib-detail-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cp-lib-detail-ph { color: var(--fg-4); }
+/* Type scale rhymes with the grid cards: title, one metadata line, quiet
+   path — a media page, not a key-value table. */
 .cp-lib-detail-name {
   margin: var(--s-1) 0 0;
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 800;
-  line-height: 1.3;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
   color: var(--fg-1);
-  overflow-wrap: anywhere;
-}
-.cp-lib-detail-path {
-  margin: 0;
-  font-family: var(--font-ui);
-  font-size: 11px;
-  color: var(--fg-4);
   overflow-wrap: anywhere;
 }
 .cp-lib-detail-meta {
   margin: 0;
   font-family: var(--font-ui);
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--fg-3);
   font-variant-numeric: tabular-nums;
 }
+.cp-lib-detail-path {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--fg-4);
+  overflow-wrap: anywhere;
+}
+/* "Has transcript" — a neutral state chip (green = primary + live only). */
 .cp-lib-detail-chip {
   display: inline-flex;
   align-items: center;
@@ -1167,17 +1283,18 @@
   align-self: flex-start;
   margin-top: var(--s-1);
   padding: 4px var(--s-3);
-  border: 1px solid rgba(108, 255, 141, 0.4);
+  border: 1px solid var(--line-2);
   border-radius: var(--r-pill);
-  background: rgba(108, 255, 141, 0.10);
-  color: var(--ella-green);
+  background: var(--bg-3);
+  color: var(--fg-2);
   font-family: var(--font-ui);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
 }
-.cp-lib-detail-chip:hover { background: rgba(108, 255, 141, 0.18); }
+.cp-lib-detail-chip:hover { background: var(--bg-4); color: var(--fg-1); }
 .cp-lib-detail-actions {
   display: flex;
   flex-direction: column;
@@ -1189,7 +1306,11 @@
 @media (prefers-reduced-motion: reduce) {
   .cp-lib-tree-row,
   .cp-lib-tree-tw,
+  .cp-lib-tree-collapse,
+  .cp-lib-chip,
   .cp-lib-lrow,
   .cp-lib-bar-search,
   .cp-lib-detail-chip { transition: none; }
+  /* Live scan stays green, just doesn't spin. */
+  .cp-lib-tree-rescan.scanning svg { animation: none; }
 }

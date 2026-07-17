@@ -71,9 +71,13 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   await expect(page.locator(".cp-view-clip .cp-monitor-area")).toBeAttached();
   // ⌘-nav (mod serializes ctrl the same) rides the rebindable registry. The
   // Library detail browser is now ⌘2 (between Home and Clip); Clip shifted to ⌘3.
+  // Rootless profile → the browser is JUST the invite: one centered line + the
+  // primary button, no panel/bar chrome.
   await page.keyboard.press("Control+2");
   await expect(page.locator(".cp-view-library")).toBeVisible();
-  await expect(page.getByRole("tree", { name: "Library folders" })).toBeVisible();
+  await expect(page.getByText("Add a folder to build your library.")).toBeVisible();
+  await expect(page.locator(".cp-lib-browse-zero").getByRole("button", { name: "Add folder" })).toBeVisible();
+  await expect(page.getByRole("tree", { name: "Library folders" })).toHaveCount(0);
   await page.keyboard.press("Control+3");
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await page.keyboard.press("Control+1");
@@ -376,20 +380,40 @@ test("library browser: tree + grid render, selection shows detail, list toggle s
   await page.getByRole("navigation", { name: "Primary" })
     .getByRole("button", { name: "Library", exact: true }).click();
   await expect(page.locator(".cp-view-library")).toBeVisible();
-  // Left column: an ARIA tree with "All" + the seeded root (no extra IPC).
+  // Left column is a proper library panel: "Library" header + an ARIA tree
+  // with "All" + the seeded root (no extra IPC).
+  await expect(page.locator(".cp-lib-tree-head")).toContainText("Library");
   const tree = page.getByRole("tree", { name: "Library folders" });
   await expect(tree.getByRole("treeitem", { name: "All" })).toBeVisible();
   await expect(tree.getByRole("treeitem", { name: "Footage" })).toBeVisible();
-  // Add Folder + Rescan moved OFF Home and live in the tree footer — positive
+  // Add folder + Rescan moved OFF Home and live in the panel footer — positive
   // coverage that the affordances actually landed here (Home only asserts
   // their absence).
   const foot = page.locator(".cp-lib-tree-foot");
-  await expect(foot.getByRole("button", { name: "Add Folder" })).toBeVisible();
+  await expect(foot.getByRole("button", { name: "Add folder" })).toBeVisible();
   await expect(foot.getByRole("button", { name: "Rescan library" })).toBeVisible();
   // Main pane: "All" flattens every item across the tree into the poster wall.
   const grid = page.getByRole("list", { name: "Files" });
   await expect(grid.getByRole("button", { name: /clip-a\.mp4/ })).toBeVisible();
   await expect(grid.getByRole("button", { name: /intro\.mp4/ })).toBeVisible();
+  // Kind filter is panel CHIPS now (the bar's <select> is gone). Audio scopes
+  // the wall and persists to the same prefs key the select used.
+  await expect(page.locator(".cp-lib-bar").getByLabel("Filter by kind")).toHaveCount(0);
+  const chips = page.getByRole("group", { name: "Filter by kind" });
+  await expect(chips.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+  await chips.getByRole("button", { name: "Audio" }).click();
+  await expect(grid.getByRole("button", { name: /voice-memo\.m4a/ })).toBeVisible();
+  await expect(grid.getByRole("button", { name: /clip-a\.mp4/ })).toHaveCount(0);
+  const prefs = await page.evaluate(() => localStorage.getItem("saucebunny.libraryBrowser"));
+  expect(JSON.parse(prefs ?? "{}").kind).toBe("audio");
+  await chips.getByRole("button", { name: "All" }).click();
+  await expect(grid.getByRole("button", { name: /clip-a\.mp4/ })).toBeVisible();
+  // Panel collapse lives in its header; the bar grows a Show-folders button
+  // only while the panel is hidden.
+  await page.getByRole("button", { name: "Hide folder tree" }).click();
+  await expect(page.getByRole("tree", { name: "Library folders" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Show folder tree" }).click();
+  await expect(tree.getByRole("treeitem", { name: "All" })).toBeVisible();
   // Single click selects → the detail panel appears with the file's actions.
   await grid.getByRole("button", { name: /clip-a\.mp4/ }).click();
   const detail = page.getByRole("complementary", { name: "File details" });

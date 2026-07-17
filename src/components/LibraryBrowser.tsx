@@ -52,10 +52,11 @@ type Props = {
 
 /**
  * The Library view — a Plex/Finder-hybrid detail browser over the same scanned
- * roots as Home. Three regions: a folder tree (LibraryTree), a main pane with a
- * breadcrumb/search/sort/filter/view bar over a grid or list of the selection's
- * media, and a detail panel (LibraryDetail) on selection. Scan state is shared
- * from useLibraryScan, so switching to/from Home never rescans.
+ * roots as Home. Three regions: a library panel (LibraryTree — header, kind
+ * chips, folder tree), a main pane with a breadcrumb/search/sort/view bar over
+ * a grid or list of the selection's media, and a detail panel (LibraryDetail)
+ * on selection. Scan state is shared from useLibraryScan, so switching to/from
+ * Home never rescans.
  */
 export function LibraryBrowser({
   roots, scans, scanning, addFolder, rescanAll, requestThumb, invalidateThumb,
@@ -153,9 +154,22 @@ export function LibraryBrowser({
     return sortLibraryItems(bySearch, prefs.sort, prefs.dir);
   }, [selected, selectedNode, trees, prefs, needle]);
 
-  const emptyText = roots.length === 0
-    ? "Add a folder to start browsing your library."
-    : needle.trim() ? `No matches for “${needle.trim()}”.` : "No playable media here.";
+  const emptyText = needle.trim() ? `No matches for “${needle.trim()}”.` : "No playable media here.";
+
+  // Rootless library — one centered line + the primary action. Nothing else
+  // (no panel, no bar): there is nothing to browse, filter, or sort yet.
+  if (roots.length === 0) {
+    return (
+      <div className="cp-lib-browse">
+        <div className="cp-lib-browse-zero">
+          <p>Add a folder to build your library.</p>
+          <button type="button" className="btn btn-primary" onClick={() => void addFolder()}>
+            Add folder
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -171,6 +185,10 @@ export function LibraryBrowser({
           trees={trees}
           selection={selected}
           onSelect={(chain) => { setSelected(chain); setDetailItem(null); }}
+          kind={prefs.kind}
+          onKind={(kind) => patchPrefs({ kind })}
+          onCollapse={() => setTreeOpen(false)}
+          requestThumb={requestThumb}
           addFolder={addFolder}
           rescanAll={rescanAll}
           scanning={scanning}
@@ -182,13 +200,12 @@ export function LibraryBrowser({
           onCrumb={(chain) => { setSelected(chain); setDetailItem(null); }}
           query={query}
           onQuery={setQuery}
-          kind={prefs.kind}
           sort={prefs.sort}
           dir={prefs.dir}
           view={prefs.view}
           onPrefs={patchPrefs}
           treeOpen={treeOpen}
-          onToggleTree={() => setTreeOpen((o) => !o)}
+          onShowTree={() => setTreeOpen(true)}
         />
         <div className="cp-lib-browse-body">
           <LibraryBrowserPane
