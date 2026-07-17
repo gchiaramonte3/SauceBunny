@@ -92,25 +92,19 @@ export function Toolbar({
   return (
     // <header> = the banner landmark (screen-reader "jump to toolbar").
     <header className="cp-toolbar">
-      {/* Left cluster: wordmark + the sidebar toggle. When the sidebar is
-          open, the cluster is sized so the toggle sits exactly on the
-          sidebar's right-edge line — the mirror of the right panel toggle. */}
-      <div className={"cp-toolbar-left" + (sidebarOpen ? " sidebar-open" : "")}>
-        <div className="cp-wordmark">
-          <span>sauce bunny</span>
-          <span className="dot" />
-        </div>
-        <button
-          type="button"
-          className={"btn-icon cp-sidebar-toggle" + (sidebarOpen ? " active" : "")}
-          onClick={onToggleSidebar}
-          title={sidebarOpen ? "Hide source panel" : "Show source panel"}
-          aria-label={sidebarOpen ? "Hide source panel" : "Show source panel"}
-          aria-pressed={sidebarOpen}
-        >
-          <IconPanelLeft size={15} />
-        </button>
-      </div>
+      {/* First item, hugging the nav rail: the left panel toggle — the
+          mirror of the right panel toggle on the far edge. No wordmark;
+          the rail's bunny mark is the app's only brand presence. */}
+      <button
+        type="button"
+        className={"btn-icon cp-sidebar-toggle" + (sidebarOpen ? " active" : "")}
+        onClick={onToggleSidebar}
+        title={sidebarOpen ? "Hide source panel" : "Show source panel"}
+        aria-label={sidebarOpen ? "Hide source panel" : "Show source panel"}
+        aria-pressed={sidebarOpen}
+      >
+        <IconPanelLeft size={15} />
+      </button>
 
       <div className="cp-url" onClick={() => inputRef.current?.focus()}>
         <IconLink size={14} stroke="var(--fg-3)" />
@@ -139,7 +133,6 @@ export function Toolbar({
         <button
           type="button"
           className="btn-icon"
-          style={{ width: 22, height: 22, border: "none" }}
           title="Paste & fetch"
           aria-label="Paste URL and fetch"
           onClick={(e) => {

@@ -680,7 +680,24 @@ export default function App() {
 
   // ====== Clip queue (multi-section export) ======
   const [clipQueue, setClipQueue] = useState<QueuedClip[]>([]);
-  const [queueOpen, setQueueOpen] = useState(false);
+  // Right queue/tools drawer visibility — boots OPEN for a fresh profile
+  // (both side panels visible, so the Clip view explains itself), and only
+  // an explicit user toggle persists a preference (setQueueOpenChoice
+  // below). Programmatic opens/closes — transcript auto-open, Clear-all,
+  // the panel pop-out bridge — use setQueueOpen and never write the pref,
+  // so session mechanics can't overwrite the user's choice.
+  const [queueOpen, setQueueOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem("saucebunny.queueOpen") !== "0"; } catch { return true; }
+  });
+  /** User-initiated drawer visibility (toolbar toggle, ⌘⇧Q, palette, menu,
+   *  the drawer's close button) — applies AND persists the choice. */
+  const setQueueOpenChoice = useCallback((next: boolean | ((p: boolean) => boolean)) => {
+    setQueueOpen((p) => {
+      const v = typeof next === "function" ? next(p) : next;
+      try { localStorage.setItem("saucebunny.queueOpen", v ? "1" : "0"); } catch { /* quota */ }
+      return v;
+    });
+  }, []);
   // ── Top-level view (nav rail): Home / Library / Clip / Co-Review ──
   // Single state switch — no router (CLAUDE.md). Persisted so the app
   // reopens where you left it; a stored landing/browser view ("home" or
@@ -3750,7 +3767,7 @@ export default function App() {
         }
         case "view.logs":    setLogsOpen((p) => !p); break;
         case "queue.add":    handleAddToQueue(); break;
-        case "queue.toggle": setQueueOpen((p) => !p); break;
+        case "queue.toggle": setQueueOpenChoice((p) => !p); break;
         case "export.clip":  if (status === "loaded") handleExport(); break;
         case "play.toggle":  onPlayToggle(); break;
         // J / L — NLE transport: each press walks the shuttle ladder
@@ -3902,7 +3919,7 @@ export default function App() {
         }),
         bind("open_settings",       () => setSettingsOpen(true)),
         bind("toggle_pipeline",     () => setLogsOpen((p) => !p)),
-        bind("toggle_queue",        () => setQueueOpen((p) => !p)),
+        bind("toggle_queue",        () => setQueueOpenChoice((p) => !p)),
         bind("show_command_palette", () => setPaletteOpen(true)),
       ]);
     })();
@@ -3962,7 +3979,9 @@ export default function App() {
     handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
     handleQueueClearAll, handleImportTranscript, handleGenerateTranscript,
     handleDownloadCaptions, handleStop,
-    setQueueOpen, setTranscriptArrivedTick, setCaptionsOn, setLogsOpen,
+    // The palette's queue.toggle is a user choice — route it through the
+    // persisting setter (mechanical opens elsewhere use the raw setter).
+    setQueueOpen: setQueueOpenChoice, setTranscriptArrivedTick, setCaptionsOn, setLogsOpen,
     setSettingsOpen, setPaletteOpen,
     onShowShortcuts: () => setShortcutsOpen(true),
     canUndo: undoSnap.canUndo, canRedo: undoSnap.canRedo,
@@ -4414,7 +4433,7 @@ export default function App() {
               onOpenRecent={handleOpenRecentSource}
               onRemoveRecent={handleRemoveRecentSource}
               onClearRecents={handleClearRecentSources}
-              onToggleQueue={() => setQueueOpen((p) => !p)}
+              onToggleQueue={() => setQueueOpenChoice((p) => !p)}
               queueCount={clipQueue.length}
               queueOpen={queueOpen}
               sidebarOpen={sidebarOpen}
@@ -4786,7 +4805,7 @@ export default function App() {
                   fires `panel:closed` → setPanelDetached(false)). */}
               {!panelDetached && <QueueDrawer
                 open={queueOpen}
-                onClose={() => setQueueOpen(false)}
+                onClose={() => setQueueOpenChoice(false)}
                 onPopOut={handlePopOutPanel}
                 queue={clipQueue}
                 fps={fps}

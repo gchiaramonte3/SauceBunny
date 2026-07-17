@@ -126,70 +126,6 @@
   backdrop-filter: blur(20px);
 }
 
-.cp-wordmark {
-  font-family: var(--font-sans);
-  font-weight: 800;
-  font-size: 17px;
-  letter-spacing: -0.02em;
-  display: flex;
-  align-items: baseline;
-  gap: 1px;
-  user-select: none;
-}
-/* Gradient-text fill for the wordmark itself — uses the brand wash
-   constant so any future palette tweak propagates. `background-clip:
-   text` requires transparent color. Solid white fallback (legacy WebKit
-   pre-clip support) is implicit via the `color` declaration if a host
-   ever fails to honour the clip property. */
-.cp-wordmark > span:first-child {
-  background: var(--grad-text-brand);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
-.cp-wordmark .dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  display: inline-block;
-  transform: translateY(-1px);
-  /* Two-stop glow — inner halo + tight outer ambient — for a more
-     "alive" indicator than the previous flat single-shadow. */
-  box-shadow:
-    0 0 0 1px rgba(108,255,141,0.35),
-    0 0 6px rgba(108,255,141,0.65),
-    0 0 7px rgba(108,255,141,0.15);
-  animation: cp-dot-pulse 2.8s var(--ease-in-out) infinite;
-}
-@keyframes cp-dot-pulse {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(108,255,141,0.35), 0 0 6px rgba(108,255,141,0.65), 0 0 7px rgba(108,255,141,0.15); }
-  50%      { box-shadow: 0 0 0 1px rgba(108,255,141,0.45), 0 0 10px rgba(108,255,141,0.85), 0 0 11px rgba(108,255,141,0.25); }
-}
-
-/* Reusable gradient-text utility — apply with className="cp-grad-text"
-   on any inline element to give it the brand wash treatment. Tasteful
-   sprinkle only — use on max 1-2 headline words per surface so it
-   stays an accent rather than noise. */
-.cp-grad-text {
-  background: var(--grad-text-brand);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
-.cp-wordmark-sub {
-  font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--fg-4);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-left: 10px;
-  padding-left: 10px;
-  border-left: 1px solid var(--line-1);
-}
-
 .cp-url {
   flex: 1;
   height: 32px;
@@ -224,6 +160,26 @@
   font-size: 11px;
   color: var(--fg-4);
 }
+/* In-field icon buttons (paste + history trigger): one shared size so the
+   pair reads as twins — 13px glyphs centered in a 24px hit target (padding,
+   not icon size, provides the target). Flat inside the capsule: the raised
+   30px .btn-icon chip is for buttons OUTSIDE the field. */
+.cp-url .btn-icon {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+.cp-url .btn-icon:hover {
+  background: rgba(255,255,255,0.08);
+  box-shadow: none;
+  transform: none;
+}
+.cp-url .btn-icon:active {
+  background: rgba(255,255,255,0.05);
+  box-shadow: none;
+}
 
 /* ── Recent sources (URL-bar history popover) ────────────────────────
    Trigger lives inside .cp-url beside the paste button; the popover
@@ -231,13 +187,7 @@
    the toolbar's backdrop-filter traps in-flow popovers under the
    canvas). position/top/right come from the component's anchor math. */
 .cp-recents { display: inline-flex; }
-.cp-recents-trigger {
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: transparent;
-  box-shadow: none;
-}
+/* Size/flatness comes from the shared .cp-url .btn-icon rule above. */
 .cp-recents-trigger:disabled {
   opacity: 0.35;
   cursor: default;
@@ -303,7 +253,6 @@
   text-transform: uppercase;
   color: var(--fg-4);
 }
-.cp-recents-badge.url { color: var(--accent); border-color: rgba(var(--accent-rgb), 0.35); }
 .cp-recents-meta {
   display: flex;
   gap: 10px;
@@ -348,25 +297,13 @@
 .cp-recents-clear:hover { color: var(--fg-1); }
 
 
-/* ── Left cluster: wordmark + sidebar toggle ─────────────────────────
-   When the sidebar is open the cluster is sized so the toggle's right
-   edge rides the sidebar's right-edge line (sidebar 320px − toolbar
-   18px padding = 302px); collapsed, it hugs the wordmark. Mirrors the
-   right panel's cp-queue-toggle. */
-.cp-toolbar-left {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-shrink: 0;
-  transition: width var(--dur-base) var(--ease-out);
-}
-.cp-toolbar-left.sidebar-open { width: 302px; }
+/* ── Left panel toggle — first toolbar item, hugging the nav rail;
+   mirrors the right panel's cp-queue-toggle on the far edge. ── */
+.cp-sidebar-toggle { flex-shrink: 0; }
 .cp-sidebar-toggle.active { background: rgba(255,255,255,0.06); }
 
-/* Reduced motion: still the wordmark dot's glow pulse and the co-review
-   live-session blink (both infinite attention pulses). */
+/* Reduced motion: still the co-review live-session blink (an infinite
+   attention pulse). */
 @media (prefers-reduced-motion: reduce) {
-  .cp-wordmark .dot { animation: none; }
   .cp-coreview-dot { animation: none; }
 }

@@ -179,13 +179,11 @@
   border-color: var(--line-3);
 }
 
-/* Toolbar ghost buttons get a brighter neon-green hover treatment than
-   the rest of the app. The toolbar is where the user lives ~80% of the
-   time (Clear / Fetch / Import), so these buttons earning more visual
-   attention is good — but we don't want every .btn-ghost across the app
-   to flare green on hover (queue Export N, Reveal in Finder, settings
-   Clear cache, etc. should stay subtle). Scoped to .cp-toolbar only. */
-.cp-toolbar .btn.btn-ghost:hover:not(:disabled) {
+/* Fetch — the toolbar's primary action — is the ONLY toolbar button that
+   flares green (color contract: green marks the primary action and live
+   states, nothing else). Clear / Import / panel toggles stay neutral
+   ghosts on the shared .btn-ghost hover. */
+.cp-toolbar .btn.cp-sbtn-fetch:hover:not(:disabled) {
   background: linear-gradient(180deg, rgba(108,255,141,0.14), rgba(108,255,141,0.04));
   border-color: rgba(108,255,141,0.55);
   color: var(--fg-1);
@@ -196,7 +194,7 @@
     0 0 11px rgba(108,255,141,0.22);
   transform: translateY(-1px);
 }
-.cp-toolbar .btn.btn-ghost:active:not(:disabled) {
+.cp-toolbar .btn.cp-sbtn-fetch:active:not(:disabled) {
   transform: translateY(0);
   /* Pressed state — bevel inverts, glow dampens but stays present so
      the click feels like the button absorbing the input. */

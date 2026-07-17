@@ -127,10 +127,6 @@
     radial-gradient(at 12% 8%,  rgba(108,255,141,0.10) 0%, transparent 42%),
     radial-gradient(at 88% 92%, rgba(109,82,237,0.10) 0%, transparent 48%),
     radial-gradient(at 70% 10%, rgba(197,74,247,0.06) 0%, transparent 40%);
-  /* Inline-text gradient for the wordmark + occasional headline accent. */
-  --grad-text-brand:
-    linear-gradient(96deg, #6CFF8D 0%, #88F362 30%, #6D52ED 70%, #C54AF7 100%);
-
   --r-xs: 4px;
   --r-sm: 6px;
   --r-md: 8px;

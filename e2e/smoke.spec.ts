@@ -29,8 +29,14 @@ async function boot(page: Page): Promise<void> {
 
 test("shell boots: toolbar, sidebar, monitor render without pageerrors", async ({ page }) => {
   await boot(page);
-  await expect(page.locator(".cp-wordmark")).toContainText("sauce bunny");
+  // No text wordmark — the nav rail's bunny mark is the only brand presence,
+  // and the left panel toggle is the toolbar's FIRST item (Lore-style),
+  // hugging the rail; the right panel toggle mirrors it on the far edge.
+  await expect(page.locator(".cp-wordmark")).toHaveCount(0);
+  await expect(page.locator(".cp-toolbar > *").first()).toHaveClass(/cp-sidebar-toggle/);
+  // Fresh profile (no saved prefs): BOTH side panels boot open.
   await expect(page.locator(".cp-sidebar")).toBeVisible();
+  await expect(page.locator(".cp-queue-drawer.open")).toBeVisible();
   await expect(page.locator(".cp-monitor-area")).toBeVisible();
   // No stale-binary warning — the mocked build-id matches the frontend's.
   await expect(page.getByText(/stale/i)).toHaveCount(0);
@@ -101,8 +107,8 @@ test("a11y landmarks: banner/main/complementary present and uniquely labeled", a
   // Transport + timeline are labeled regions.
   await expect(page.getByRole("region", { name: "Playback transport" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Timeline" })).toBeVisible();
-  // Opening the drawer exposes the second complementary panel + tablist.
-  await page.locator(".cp-queue-toggle").click();
+  // The drawer boots open (fresh-profile default) — the second
+  // complementary panel + tablist are present without any click.
   await expect(page.getByRole("complementary", { name: "Queue and tools" })).toBeVisible();
   await expect(page.getByRole("tablist", { name: "Right panel sections" })).toBeVisible();
   await expect(page.getByRole("tabpanel")).toBeVisible(); // active tab body
@@ -150,8 +156,17 @@ test("co-review popover opens with session-first Start available", async ({ page
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
-test("side panel toggles open", async ({ page }) => {
+test("side panel boots open; an explicit close persists across reload", async ({ page }) => {
   await boot(page);
+  // Fresh profile: the drawer is open by default.
+  await expect(page.locator(".cp-queue-drawer.open")).toBeVisible();
+  // The toolbar toggle is a USER choice — it closes the drawer and persists.
+  await page.locator(".cp-queue-toggle").click();
+  await expect(page.locator(".cp-queue-drawer.open")).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator(".cp-toolbar")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".cp-queue-drawer.open")).toHaveCount(0);
+  // Toggling back open persists too.
   await page.locator(".cp-queue-toggle").click();
   await expect(page.locator(".cp-queue-drawer.open")).toBeVisible();
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
@@ -159,7 +174,7 @@ test("side panel toggles open", async ({ page }) => {
 
 test("transcript tab shows the empty state with Generate gated on a source", async ({ page }) => {
   await boot(page);
-  await page.locator(".cp-queue-toggle").click();
+  // The drawer boots open — jump straight to the Transcript tab.
   await page.getByRole("tab", { name: /Transcript/ }).click();
   const empty = page.locator(".cp-tx-empty");
   await expect(empty).toBeVisible();

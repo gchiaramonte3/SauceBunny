@@ -910,7 +910,9 @@
 .cp-notif-trigger {
   position: relative;
 }
-.cp-notif-trigger.has-unread { color: var(--fg-1); border-color: rgba(var(--accent-rgb), 0.35); }
+/* Unread state stays neutral (color contract: the bell is chrome, not a
+   live state) — a bright dot + lifted border carry the signal. */
+.cp-notif-trigger.has-unread { color: var(--fg-1); border-color: var(--line-3); }
 .cp-notif-dot {
   position: absolute;
   top: 6px;
@@ -918,8 +920,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.6);
+  background: var(--fg-1);
 }
 .cp-notif-popover {
   /* `position` + `top`/`right` come from inline style (NotificationBell
