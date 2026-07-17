@@ -1,7 +1,8 @@
 /* Co-Review lobby (CoReviewLobby.tsx) — the first-class watch-party
-   destination reached from the nav rail (⌘4). A quiet, centered column on the
-   same dark bg-0 page as the Library, with the app's card/line vocabulary.
-   The in-Clip toolbar popover (CoReviewPopover) is the parallel quick-access;
+   destination reached from the nav rail (⌘4). A calm centered "green room":
+   ONE 560px column with generous top space, identical in the idle and
+   in-session faces so the layout never jumps — only content swaps. The
+   in-Clip toolbar popover (CoReviewPopover) is the parallel quick-access;
    both read the same useCoReview state. Everything cp-colobby-*. */
 
 /* ── Page: the view's own scroll context (Clip keeps playing beneath). A
@@ -15,11 +16,8 @@
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding: var(--s-12) var(--s-6);
+  padding: 0 var(--s-6);
   background: var(--bg-0);
-  /* The cards grid collapses to one column against THIS view's width (not the
-     window's), so a narrow Clip-shrunk lobby still wraps — @container below. */
-  container-type: inline-size;
 }
 .cp-coreview-lobby::before {
   content: "";
@@ -29,52 +27,40 @@
   pointer-events: none;
   background: var(--grad-brand-wash);
   opacity: 0.7;
+  /* Fade the strip's bottom edge — the radials otherwise cut off in a
+     visible horizontal seam against bg-0. */
+  -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
 }
 
-/* ── Centered column — wide enough for the two-column lobby; the header +
-      intro and the single in-session card stay reading-width within it. ── */
+/* ── The one centered column. Top space is generous and CONSTANT across
+      both faces — that constancy is what guarantees no idle↔active jump. ── */
 .cp-colobby-inner {
   position: relative;
   width: 100%;
-  max-width: 720px;
+  max-width: 560px;
+  padding-top: clamp(var(--s-12), 16vh, 160px);
+  padding-bottom: var(--s-12);
   display: flex;
   flex-direction: column;
-  gap: var(--s-6);
+  gap: var(--s-4);
 }
 
-/* ── Header: brand-tinted glyph + title + one-line explainer. ── */
+/* ── Quiet header — centered title + one line. In session the title swaps
+      to the live badge + "In session" inside the same elements. ── */
 .cp-colobby-head {
   display: flex;
-  align-items: flex-start;
-  gap: var(--s-4);
-  max-width: 560px;
-}
-
-/* ── Cards row — Host beside Join on wide windows, stacking to one column on
-      narrow ones. Container query (not viewport) so it tracks the view. ── */
-.cp-colobby-cards {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--s-4);
-  align-items: start;
-}
-@container (max-width: 620px) {
-  .cp-colobby-cards { grid-template-columns: 1fr; }
-}
-.cp-colobby-mark {
-  flex-shrink: 0;
-  display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: var(--r-lg);
-  background: rgba(108, 255, 141, 0.10);
-  border: 1px solid rgba(108, 255, 141, 0.28);
-  color: var(--ella-green);
+  gap: var(--s-2);
+  text-align: center;
+  margin-bottom: var(--s-2);
 }
 .cp-colobby-title {
-  margin: 0 0 var(--s-1);
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
   font-family: var(--font-ui);
   font-size: 22px;
   font-weight: 800;
@@ -83,32 +69,35 @@
 }
 .cp-colobby-sub {
   margin: 0;
+  max-width: 44ch;
   font-family: var(--font-ui);
   font-size: 12.5px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--fg-3);
 }
 
-/* ── Card — the shared surface for both faces. ── */
+/* ── Cards — Host and Join, stacked, visually identical surfaces. ── */
 .cp-colobby-card {
   display: flex;
   flex-direction: column;
-  gap: var(--s-4);
+  gap: var(--s-3);
   padding: var(--s-5);
   background: var(--bg-2);
   border: 1px solid var(--line-1);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-soft);
 }
-/* In-session card is a single focused surface — keep it reading-width and
-   centered inside the wider inner column the two-card lobby needs. */
-.cp-colobby-session {
-  align-self: center;
-  width: 100%;
-  max-width: 440px;
+.cp-colobby-card-title {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--fg-4);
 }
 
-/* ── Card fields (Host name, Join name + code). ── */
+/* ── Fields — one style everywhere. Focus comes from the house
+      focus-visible ring (base.css); no bespoke treatment. ── */
 .cp-colobby-field {
   display: flex;
   flex-direction: column;
@@ -130,171 +119,192 @@
   font-family: var(--font-ui);
   font-size: 12.5px;
 }
-.cp-colobby-input:focus { outline: none; border-color: var(--accent); }
-/* Full-width primary action closing each card. */
+.cp-colobby-input::placeholder { color: var(--fg-5); }
+/* Full-width action closing each card — one button height (.btn's 30px). */
 .cp-colobby-cta {
   width: 100%;
   justify-content: center;
   margin-top: var(--s-1);
 }
 
-/* ── Role banner (in a session). ── */
-.cp-colobby-role {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
+/* ── Local-file caveat — a single quiet line tucked under the Host card. ── */
+.cp-colobby-hint {
+  margin: calc(-1 * var(--s-2)) 0 0;
+  padding: 0 var(--s-2);
   font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--fg-1);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-4);
 }
+
+/* ── Live badge in the in-session title. Subtle pulse; static under
+      reduced motion. ── */
 .cp-colobby-live {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
-  background: var(--fg-4);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
-}
-.cp-colobby-live.host {
   background: var(--ella-green);
-  box-shadow: 0 0 0 3px rgba(108, 255, 141, 0.14), 0 0 8px rgba(108, 255, 141, 0.4);
-  animation: cp-colobby-blink 2s ease-in-out infinite;
+  box-shadow:
+    0 0 0 3px rgba(var(--accent-rgb), 0.14),
+    0 0 8px rgba(var(--accent-rgb), 0.4);
+  animation: cp-colobby-pulse 2s ease-in-out infinite;
 }
-@keyframes cp-colobby-blink {
+@keyframes cp-colobby-pulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.45; }
 }
 
-/* ── Shared micro-label above each block. ── */
-.cp-colobby-label {
-  font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--fg-4);
-}
-
-/* ── Join code + copy. ── */
+/* ── Join code — a large click-to-copy chip built on the shared keycap
+      (base.css .cp-keycap); host only. Codes are long, so it wraps. ── */
 .cp-colobby-share {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: var(--s-2);
 }
-.cp-colobby-code {
-  padding: var(--s-2) var(--s-3);
-  background: var(--bg-0);
-  border: 1px solid var(--line-1);
-  border-radius: var(--r-sm);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--fg-2);
+.cp-keycap.cp-colobby-code {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: var(--s-3) var(--s-4);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: 0.02em;
+  text-align: center;
+  color: var(--fg-1);
+  border-radius: var(--r-md);
   word-break: break-all;
-  max-height: 72px;
+  max-height: 96px;
   overflow-y: auto;
-  user-select: text;
-  -webkit-user-select: text;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
 }
-.cp-colobby-copy { align-self: flex-start; }
+.cp-keycap.cp-colobby-code:hover {
+  background: var(--bg-4);
+  border-color: var(--line-3);
+}
+.cp-keycap.cp-colobby-code:active { transform: translateY(1px); }
+.cp-colobby-code-hint {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--fg-4);
+}
+/* "Copied" is live feedback — the one green moment in this block. */
+.cp-colobby-code-hint.copied { color: var(--ella-green); }
 
-/* ── Roster — one row per participant. ── */
-.cp-colobby-roster {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-}
+/* ── Roster — a horizontal row of avatars, names beneath. Host wears a
+      small crown badge on the avatar; "You" is the caption under your
+      own name (both are also in the item's aria-label). ── */
 .cp-colobby-people {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: var(--s-2) 0;
   display: flex;
-  flex-direction: column;
-  gap: var(--s-1);
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--s-4) var(--s-5);
 }
 .cp-colobby-person {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-1) 0;
-  font-family: var(--font-ui);
-  font-size: 12.5px;
-  color: var(--fg-2);
+  gap: var(--s-1);
+  width: 84px;
 }
-/* Initials avatar — a colored chip tinted to the participant's review colour
-   (matches the timeline markers + ghost cursors). */
+/* Initials avatar — tinted to the participant's review colour (matches the
+   timeline markers + ghost cursors). */
 .cp-colobby-avatar {
-  flex-shrink: 0;
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   background: var(--co-color, var(--fg-4));
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 2px var(--bg-0);
   font-family: var(--font-ui);
-  font-size: 9.5px;
+  font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.01em;
-  color: #0b0b0d;
+  color: var(--bg-0);
+}
+.cp-colobby-avatar.host {
+  box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 3px var(--gold);
+}
+.cp-colobby-crown {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg-3);
+  border: 1px solid var(--gold);
+  color: var(--gold);
 }
 .cp-colobby-name {
-  flex: 1;
-  min-width: 0;
+  max-width: 100%;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.cp-colobby-chip {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 7px;
-  border-radius: var(--r-pill);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--line-1);
+.cp-colobby-person-tag {
+  min-height: 13px;
   font-family: var(--font-ui);
   font-size: 9.5px;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--fg-3);
-}
-.cp-colobby-chip.host {
-  background: rgba(245, 196, 81, 0.12);
-  border-color: rgba(245, 196, 81, 0.35);
-  color: var(--gold);
-}
-
-/* ── Error surface + actions. ── */
-.cp-colobby-err {
-  padding: var(--s-2) var(--s-3);
-  border: 1px solid rgba(255, 138, 138, 0.4);
-  border-radius: var(--r-sm);
-  background: rgba(232, 38, 38, 0.08);
-  font-family: var(--font-ui);
-  font-size: 11.5px;
-  line-height: 1.4;
-  color: #ff8a8a;
-}
-.cp-colobby-actions {
-  display: flex;
-  gap: var(--s-2);
-  margin-top: var(--s-1);
-}
-.cp-colobby-enter { flex: 1; }
-.cp-colobby-leave:hover { color: #ff8a8a; border-color: rgba(255, 138, 138, 0.4); }
-
-/* ── How-it-works + eligibility line, below the cards. ── */
-.cp-colobby-note {
-  margin: 0;
-  max-width: 560px;
-  font-family: var(--font-ui);
-  font-size: 11.5px;
-  line-height: 1.55;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--fg-4);
 }
 
+/* ── Error — one quiet line, no slab. ── */
+.cp-colobby-err {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--color-destructive);
+}
+.cp-colobby-err.center { text-align: center; }
+
+/* ── In-session actions — a primary door into the theater and a quiet
+      danger text-button beneath it (not a big red slab). ── */
+.cp-colobby-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  margin-top: var(--s-2);
+}
+.cp-colobby-enter {
+  min-width: 220px;
+  justify-content: center;
+}
+.cp-colobby-leave {
+  background: none;
+  border: none;
+  padding: var(--s-1) var(--s-2);
+  border-radius: var(--r-sm);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-4);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.cp-colobby-leave:hover { color: var(--color-destructive); }
+
 @media (prefers-reduced-motion: reduce) {
-  .cp-colobby-live.host { animation: none; }
+  .cp-colobby-live { animation: none; }
 }

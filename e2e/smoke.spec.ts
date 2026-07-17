@@ -83,14 +83,17 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   await page.keyboard.press("Control+1");
   await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
   // Co-Review is a first-class destination: the rail item reads "Review" (short
-  // rail label) + ⌘4 → the lobby, whose heading keeps the full "Co-Review" name.
-  // Keep-alive like the others (Clip stays mounted).
+  // rail label) + ⌘4 → the lobby, a centered green room titled "Review together"
+  // with the Host and Join cards stacked. Keep-alive like the others (Clip
+  // stays mounted).
   await rail.getByRole("button", { name: "Review", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Co-Review" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Review together" })).toBeVisible();
   await expect(page.locator(".cp-view-clip")).toBeHidden();
   await expect(page.locator(".cp-view-clip .cp-toolbar")).toBeAttached();
   // The lobby is session-first: hosting is available with no source loaded.
-  await expect(page.getByRole("button", { name: "Start a session" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Start session", exact: true })).toBeEnabled();
+  // Join stays gated (neutral) until both the code and a name are present.
+  await expect(page.getByRole("button", { name: "Join", exact: true })).toBeDisabled();
   await page.keyboard.press("Control+3");
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await page.keyboard.press("Control+1");
