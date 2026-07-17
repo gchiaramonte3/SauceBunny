@@ -35,6 +35,14 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
   const playingRef = useRef(false);
   const onDiagRef = useRef<Props["onDiag"]>(undefined);
   useEffect(() => { onDiagRef.current = onDiag; }, [onDiag]);
+  // Latest-callback ref: the media effects below run on [path] only, so they
+  // would close over the mount-time onTimeUpdate. App's callback converts
+  // seconds to frames with the CURRENT fps; a mount-time capture uses the
+  // pre-metadata fallback and republishes the playhead at the wrong ratio
+  // (visible as post-seek backward slides). Matters here since the warm-boot
+  // cached-copy fast path plays WEB sources whose fps hydrates late.
+  const onTimeUpdateRef = useRef<Props["onTimeUpdate"]>(undefined);
+  useEffect(() => { onTimeUpdateRef.current = onTimeUpdate; }, [onTimeUpdate]);
   // Shuttle (J-K-L): forward = native playbackRate (capped 8×); reverse = a
   // wall-clock rAF scan walking currentTime backward (the whole local file is
   // buffered, so it's smooth). Audio is muted while |rate| > 2 — the
@@ -173,7 +181,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
         if (next <= 0) {
           // Hit the head — exit the shuttle, settle paused at 0.
           try { mm.currentTime = 0; } catch { /* ignore */ }
-          onTimeUpdate?.(0);
+          onTimeUpdateRef.current?.(0);
           shuttleRateRef.current = 0;
           mm.playbackRate = userRateRef.current; // self-exit restores the user rate too
           if (preShuttleMutedRef.current != null) { mm.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
@@ -181,7 +189,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
           return;
         }
         try { mm.currentTime = next; } catch { /* ignore */ }
-        onTimeUpdate?.(next);
+        onTimeUpdateRef.current?.(next);
         shuttleRafRef.current = requestAnimationFrame(tick);
       };
       shuttleRafRef.current = requestAnimationFrame(tick);
@@ -216,7 +224,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     // than skipping ~4 frames per tick. App floors to a frame number and React
     // bails when it's unchanged, so this only re-renders on a real frame change.
     let rafId = 0;
-    const reportTime = () => onTimeUpdate?.(el.currentTime);
+    const reportTime = () => onTimeUpdateRef.current?.(el.currentTime);
     const tick = () => { rafId = 0; if (!playingRef.current) return; reportTime(); rafId = requestAnimationFrame(tick); };
     const startTick = () => { if (!rafId) rafId = requestAnimationFrame(tick); };
     // While scrubbing we pause/resume the element internally — don't surface

@@ -106,6 +106,14 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   useEffect(() => { audioCodecRef.current = audioCodec ?? null; }, [audioCodec]);
   const onDiagRef = useRef<Props["onDiag"]>(undefined);
   useEffect(() => { onDiagRef.current = onDiag; }, [onDiag]);
+  // Latest-callback ref for onTimeUpdate: the media effect below runs on
+  // [path] only, so its handlers would otherwise close over the callback from
+  // MOUNT time. App's callback converts seconds to frames with the CURRENT
+  // fps; the mount-time one used the pre-metadata fallback (24), so every
+  // tick republished the playhead at 24/30 of the true position and every
+  // seek visibly slid backward to 0.8x the clicked time.
+  const onTimeUpdateRef = useRef<Props["onTimeUpdate"]>(undefined);
+  useEffect(() => { onTimeUpdateRef.current = onTimeUpdate; }, [onTimeUpdate]);
 
   const msRef = useRef<MediaSource | null>(null);
   const sbRef = useRef<SourceBuffer | null>(null);
@@ -201,7 +209,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       if (newGesture) wantPlayRef.current = !!v && !v.paused;
       seekingRef.current = true;
       try { v?.pause(); } catch { /* ignore */ }
-      onTimeUpdate?.(target);
+      onTimeUpdateRef.current?.(target);
       // Frame-accurate preview overlay while scrubbing (r68). The decoded
       // frame at `target` is drawn instantly to a canvas above the <video>,
       // hiding the video's laggier native seek. The 'seeked'/'loadeddata'
@@ -336,7 +344,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
           // Hit the buffered head — exit the shuttle, settle paused there.
           next = floor;
           try { vv.currentTime = next; } catch { /* ignore */ }
-          onTimeUpdate?.(baseTimeRef.current + Math.max(0, next - clockOriginRef.current));
+          onTimeUpdateRef.current?.(baseTimeRef.current + Math.max(0, next - clockOriginRef.current));
           shuttleRateRef.current = 0;
           vv.playbackRate = userRateRef.current; // self-exit restores the user rate too
           if (preShuttleMutedRef.current != null) { vv.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
@@ -344,12 +352,12 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
           return;
         }
         try { vv.currentTime = next; } catch { /* ignore */ }
-        onTimeUpdate?.(baseTimeRef.current + Math.max(0, next - clockOriginRef.current));
+        onTimeUpdateRef.current?.(baseTimeRef.current + Math.max(0, next - clockOriginRef.current));
         shuttleRafRef.current = requestAnimationFrame(tick);
       };
       shuttleRafRef.current = requestAnimationFrame(tick);
     },
-  }), [onError, onTimeUpdate]);
+  }), [onError]);
 
   // ─── Pipeline lifecycle ─────────────────────────────────────────────
   useEffect(() => {
@@ -595,7 +603,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             // New pipeline is positioned at baseTime (video.currentTime 0) —
             // safe to report time again, and resume if we were playing.
             seekingRef.current = false;
-            onTimeUpdate?.(baseTimeRef.current);
+            onTimeUpdateRef.current?.(baseTimeRef.current);
             onDiagRef.current?.("ok", `pipeline open at ${fromSeconds.toFixed(1)}s → playhead ${baseTimeRef.current.toFixed(1)}s`);
             if (wantPlayRef.current) {
               wantPlayRef.current = false;
@@ -708,7 +716,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     const reportTime = () => {
       // Suppress while an out-of-buffer seek resolves — the old/transitional
       // video reports a stale position that would fight the playhead.
-      if (!seekingRef.current) onTimeUpdate?.(corrected(el.currentTime));
+      if (!seekingRef.current) onTimeUpdateRef.current?.(corrected(el.currentTime));
     };
     // Drive the playhead from currentTime every frame via
     // requestVideoFrameCallback (smooth, ~display refresh); rAF is the fallback
