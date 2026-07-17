@@ -1566,11 +1566,22 @@ export function SettingsModal(props: Props) {
   );
 }
 
+/** The user-clearable cache categories (r112), in display order. */
+const CACHE_CATEGORIES = [
+  { id: "downloads", label: "Downloads", hint: "Full copies of web sources, reused on re-open" },
+  { id: "audio", label: "Audio", hint: "Cached audio tracks for instant transcription" },
+  { id: "meta", label: "Metadata", hint: "Saved titles, durations, and stream links" },
+  { id: "thumbnails", label: "Thumbnails", hint: "Poster frames for imported files" },
+] as const;
+
 /**
- * Settings row that surfaces total cache size + a one-click purge.
- * Cache = `saucebunny-*` files in `app_cache_dir()` — playback prep copies,
- * thumbnails, whisper wavs, audio raw downloads. Files NOT under that
- * prefix (e.g. whisper-models/) are never touched.
+ * Settings row that surfaces cache sizes + user-controlled purges.
+ * Cache = `saucebunny-*` in `app_cache_dir()`: the persistent media cache
+ * (`saucebunny-media/` — downloads, audio, metadata; reused across sessions,
+ * exempt from the startup sweep), keyed thumbnails, and short-lived working
+ * files. Files NOT under that prefix (e.g. whisper-models/) are never
+ * touched. Per-category sizes + Clear buttons — no automatic size caps,
+ * just visibility and control (everything regenerates on demand).
  */
 function CacheControls({ excludePaths }: { excludePaths?: string[] }) {
   // CacheStats now comes from the canonical Rust definition (r49 +
@@ -1590,13 +1601,13 @@ function CacheControls({ excludePaths }: { excludePaths?: string[] }) {
       // formatError() handles both the new shape and any pre-migration
       // String errors that might come back from other commands.
       console.error("get_cache_stats:", formatError(e));
-      setStats({ file_count: 0, bytes_total: 0, path: "" });
+      setStats(null);
     }
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const onClear = async () => {
+  const onClearAll = async () => {
     if (!stats || stats.file_count === 0) return;
     if (!confirm(`Delete ${stats.file_count} cached file${stats.file_count === 1 ? "" : "s"} (${formatBytes(stats.bytes_total)})? This won't affect your exported clips.`)) return;
     setBusy(true);
@@ -1610,6 +1621,18 @@ function CacheControls({ excludePaths }: { excludePaths?: string[] }) {
     }
   };
 
+  const onClearCategory = async (category: string) => {
+    setBusy(true);
+    try {
+      await invoke<number>("clear_cache_category", { category, exclude: excludePaths ?? [] });
+    } catch (err) {
+      console.warn("clear_cache_category failed", err);
+    } finally {
+      setBusy(false);
+      refresh();
+    }
+  };
+
   const sizeLabel = stats ? formatBytes(stats.bytes_total) : "—";
   const countLabel = stats ? `${stats.file_count} file${stats.file_count === 1 ? "" : "s"}` : "checking…";
 
@@ -1617,26 +1640,44 @@ function CacheControls({ excludePaths }: { excludePaths?: string[] }) {
     <div className="cp-pane-row">
       <div className="k">
         Cache
-        <span className="desc">Playback-prep copies, thumbnails, and audio buffers written while working. Safe to clear; exported clips are untouched.</span>
+        <span className="desc">Downloaded copies, audio tracks, saved details, thumbnails, and working files. Safe to clear; everything regenerates and exported clips are untouched.</span>
       </div>
-      <div className="v" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-3)" }}>
+      <div className="v cp-cache-controls">
+        <span className="cp-cache-total">
           {countLabel} · {sizeLabel}
         </span>
+        <div className="cp-cache-cats">
+          {CACHE_CATEGORIES.map(({ id, label, hint }) => {
+            const cat = stats?.[id];
+            return (
+              <div className="cp-cache-cat" key={id} title={hint}>
+                <span className="cp-cache-cat-name">{label}</span>
+                <span className="cp-cache-cat-size">
+                  {cat ? `${cat.file_count} · ${formatBytes(cat.bytes_total)}` : "—"}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-compact"
+                  onClick={() => onClearCategory(id)}
+                  disabled={busy || !cat || cat.file_count === 0}
+                >
+                  Clear
+                </button>
+              </div>
+            );
+          })}
+        </div>
         {cachePath && (
           // Cache path visibility (r39 — user asked for "set a cache
           // folder in settings"). Setting a custom path is r40 work
           // (needs Rust to honour the override on every cache write);
           // for now we surface the OS default + a Reveal so users can
           // SEE where files land.
-          <span
-            style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-5)", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-            title={cachePath}
-          >
+          <span className="cp-cache-path" title={cachePath}>
             {cachePath}
           </span>
         )}
-        <div style={{ display: "flex", gap: 6 }}>
+        <div className="cp-cache-actions">
           {cachePath && (
             <button
               type="button"
@@ -1650,10 +1691,10 @@ function CacheControls({ excludePaths }: { excludePaths?: string[] }) {
           <button
             type="button"
             className="btn btn-ghost btn-compact"
-            onClick={onClear}
+            onClick={onClearAll}
             disabled={busy || !stats || stats.file_count === 0}
           >
-            {busy ? "Clearing…" : "Clear cache"}
+            {busy ? "Clearing…" : "Clear all"}
           </button>
         </div>
       </div>

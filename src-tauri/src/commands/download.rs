@@ -320,7 +320,10 @@ pub(crate) fn humanize_ytdlp_error(stderr: &str) -> String {
         .to_string()
 }
 
-#[derive(Serialize, ts_rs::TS)]
+// Deserialize + Clone (r112): the warm-boot cache persists the parsed
+// Metadata to disk (media/meta/<urlhash>.json) and reads it back on re-open,
+// so the struct must round-trip through serde, not just serialize out.
+#[derive(Serialize, Deserialize, Clone, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct Metadata {
     pub title: String,
@@ -442,7 +445,7 @@ pub async fn fetch_metadata(
     let height = max_h.or_else(|| v["height"].as_u64().map(|n| n as u32));
     let fps    = max_fps.or_else(|| v["fps"].as_f64());
 
-    Ok(Metadata {
+    let m = Metadata {
         title: v["title"].as_str().unwrap_or("Untitled").to_string(),
         duration: v["duration"].as_f64(),
         thumbnail: v["thumbnail"].as_str().map(String::from),
@@ -457,7 +460,12 @@ pub async fn fetch_metadata(
         acodec: v["acodec"].as_str().map(String::from),
         ext: v["ext"].as_str().map(String::from),
         has_subs,
-    })
+    };
+    // Warm-boot cache (r112): remember the parsed metadata so re-opening this
+    // source hydrates the UI instantly instead of re-paying the ~1-3s probe.
+    // Best-effort — a cache write failure must never fail the fetch.
+    persist_metadata_cache(&app, &url, &m);
+    Ok(m)
 }
 
 #[derive(Deserialize)]
@@ -883,16 +891,21 @@ pub async fn get_direct_stream_url(
     // sites (LinkedIn) serve a logged-in page variant yt-dlp can't parse
     // ("Unable to extract video"), while the public page resolves fine.
     // Genuinely gated content still errors → download fallback / sign-in modal.
-    match resolve_stream_tiers(&app, &url, cookies_browser.as_deref(), max_height).await {
-        Ok(r) => Ok(r),
+    let resolved = match resolve_stream_tiers(&app, &url, cookies_browser.as_deref(), max_height).await {
+        Ok(r) => r,
         Err(e) => {
             if !cookies_active(cookies_browser.as_deref()) {
                 return Err(e);
             }
             eprintln!("[stream] resolve with cookies failed; retrying without cookies");
-            resolve_stream_tiers(&app, &url, None, max_height).await
+            resolve_stream_tiers(&app, &url, None, max_height).await?
         }
-    }
+    };
+    // Warm-boot cache (r112): remember the signed URLs + their expiry so a
+    // re-open inside the validity window skips extraction entirely.
+    // Best-effort — a cache write failure must never fail the resolve.
+    persist_stream_cache(&app, &url, &resolved, max_height);
+    Ok(resolved)
 }
 
 /// Resolve a playable stream URL through the muxed → DASH-split → HLS tiers for
@@ -1128,8 +1141,40 @@ pub async fn download_web_preview(
         .app_cache_dir()
         .map_err(|e| format!("app_cache_dir: {e}"))?;
     std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
+
+    // A COMPLETE copy already in the persistent downloads cache → reuse it
+    // instantly, no yt-dlp. The frontend's warm-start probe usually catches
+    // this before ever entering the download path; this in-command check
+    // covers the fallback chain (e.g. a cached stream URL died mid-session
+    // and the machine fell back to download for a source we already hold).
+    if let Some(existing) = find_cached_download(&cache, &args.url) {
+        if let Some(path_str) = existing.to_str().map(String::from) {
+            let app_for = app.clone();
+            let job_for = args.job_id.clone();
+            tokio::spawn(async move {
+                let _ = app_for.emit("playback-prep-log", LogEvent {
+                    job_id: job_for.clone(),
+                    stream: "stderr".into(),
+                    tag: "ok".into(),
+                    line: "[web-preview] Reusing the downloaded copy already in cache".into(),
+                });
+                let _ = app_for.emit("playback-prep-done", PreparePlaybackDone {
+                    job_id: job_for,
+                    success: true,
+                    path: Some(path_str),
+                    error: None,
+                });
+            });
+            return Ok(args.job_id);
+        }
+    }
+
     // yt-dlp picks the ext from the format selector — we let it choose
-    // and probe the resulting file after to find the actual path.
+    // and probe the resulting file after to find the actual path. The
+    // download lands under a JOB-scoped temp prefix in the cache ROOT (so an
+    // abandoned partial is swept by the 24h cleanup), then atomically renames
+    // into the persistent downloads cache on success — a file there is
+    // complete by construction.
     let prefix = format!("saucebunny-webcache-{}", args.job_id);
     let template = cache
         .join(format!("{}.%(ext)s", prefix))
@@ -1223,6 +1268,7 @@ pub async fn download_web_preview(
     let job_for = args.job_id.clone();
     let cache_for = cache.clone();
     let prefix_for = prefix.clone();
+    let final_prefix_for = download_cache_prefix(&args.url);
 
     tokio::spawn(async move {
         let mut saw_auth_error = false;
@@ -1275,8 +1321,24 @@ pub async fn download_web_preview(
                         break;
                     }
                     // Locate the file yt-dlp actually wrote — the ext
-                    // depends on what it picked from the format selector.
-                    let written = find_audio_in_cache(&cache_for, &prefix_for);
+                    // depends on what it picked from the format selector —
+                    // then move the complete copy into the persistent
+                    // downloads cache (source-keyed, atomic rename) so the
+                    // next open of this URL plays from disk with no network.
+                    // A failed rename falls back to the temp path: playback
+                    // still works this session, reuse just isn't persisted.
+                    let written = find_audio_in_cache(&cache_for, &prefix_for).and_then(|p| {
+                        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
+                        let dl_dir = media_cache_dir(&cache_for, "downloads");
+                        if std::fs::create_dir_all(&dl_dir).is_err() {
+                            return Some(p);
+                        }
+                        let dest = dl_dir.join(format!("{final_prefix_for}.{ext}"));
+                        match std::fs::rename(&p, &dest) {
+                            Ok(()) => Some(dest),
+                            Err(_) => Some(p),
+                        }
+                    });
                     let path_str = written
                         .as_ref()
                         .and_then(|p| p.to_str())
@@ -1340,6 +1402,280 @@ pub(crate) fn source_audio_prefix(url: &str) -> String {
     format!("saucebunny-audio-{}", source_audio_hash(url))
 }
 
+/// Locate the cached full audio track for `url`. Checks the persistent
+/// media cache (`saucebunny-media/audio/`, r112) first, then the pre-r112
+/// cache root — MIGRATING a legacy hit into the media dir so it stops being
+/// eligible for the 24h startup sweep (one-time lazy migration). Only
+/// non-empty files count; the atomic-rename convention means any file under
+/// the final prefix is complete.
+pub(crate) fn find_cached_source_audio(cache_root: &std::path::Path, url: &str) -> Option<PathBuf> {
+    let prefix = source_audio_prefix(url);
+    let nonempty = |p: &PathBuf| p.metadata().map(|m| m.len() > 0).unwrap_or(false);
+    let audio_dir = media_cache_dir(cache_root, "audio");
+    if let Some(p) = find_audio_in_cache(&audio_dir, &prefix).filter(nonempty) {
+        return Some(p);
+    }
+    let legacy = find_audio_in_cache(cache_root, &prefix).filter(nonempty)?;
+    if std::fs::create_dir_all(&audio_dir).is_err() {
+        return Some(legacy); // can't migrate; still reusable where it is
+    }
+    let dest = audio_dir.join(legacy.file_name()?);
+    match std::fs::rename(&legacy, &dest) {
+        Ok(()) => Some(dest),
+        Err(_) => Some(legacy),
+    }
+}
+
+/// COMPLETE-file prefix for a full downloaded source copy in
+/// `saucebunny-media/downloads/`. Same deterministic URL key (and the same
+/// temp-download → atomic-rename convention) as the audio cache.
+pub(crate) fn download_cache_prefix(url: &str) -> String {
+    format!("saucebunny-download-{}", source_audio_hash(url))
+}
+
+/// A complete, non-empty downloaded copy of `url` in the persistent
+/// downloads cache, if one exists. This is what powers the r112 fast path:
+/// re-opening a source that was ever fully downloaded boots LocalMediaPlayer
+/// straight from disk, skipping resolve + proxy entirely.
+pub(crate) fn find_cached_download(cache_root: &std::path::Path, url: &str) -> Option<PathBuf> {
+    find_audio_in_cache(&media_cache_dir(cache_root, "downloads"), &download_cache_prefix(url))
+        .filter(|p| p.metadata().map(|m| m.len() > 0).unwrap_or(false))
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// WARM-BOOT META CACHE  (r112)
+//
+// Re-opening a previously loaded web source used to re-pay yt-dlp's full
+// extraction (~10-15s) every time. Two artifacts make it warm instead:
+//
+//   1. The parsed Metadata JSON (title/duration/thumbnail/…) — hydrates the
+//      UI instantly; revalidated in the background only when >24h old.
+//   2. The resolved direct-stream URLs + their signed expiry — while still
+//      valid (minus a 10-minute safety margin) the frontend hands them
+//      straight to the proxy/MSE path and skips extraction entirely.
+//
+// Both live in ONE file per source: media/meta/<urlhash>.json, keyed by the
+// same canonical FNV-1a URL hash as the audio/download caches. If a cached
+// URL turns out dead anyway (403 after key rotation), the playback machine
+// retries with ONE fresh resolve before the download fallback — see
+// src/lib/web-playback-machine.ts.
+// ────────────────────────────────────────────────────────────────────────
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Re-fetch metadata in the background when the cached copy is older than this.
+const META_REVALIDATE_SECS: u64 = 24 * 60 * 60;
+/// Don't trust a cached stream URL within this margin of its expiry — a URL
+/// that dies mid-watch costs a resolve anyway, plus a visible hiccup.
+const STREAM_EXPIRY_MARGIN_SECS: u64 = 10 * 60;
+/// Conservative validity for signed URLs that carry no parseable expiry.
+const STREAM_FALLBACK_VALIDITY_SECS: u64 = 30 * 60;
+
+/// One source's on-disk warm-boot record (media/meta/<urlhash>.json).
+/// Metadata and stream sections fill in independently — playback-first means
+/// the stream resolve can land before (or without) the metadata probe.
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct SourceMeta {
+    pub url: String,
+    #[serde(default)]
+    pub metadata: Option<Metadata>,
+    /// Unix seconds when `metadata` was fetched.
+    #[serde(default)]
+    pub fetched_at: Option<u64>,
+    #[serde(default)]
+    pub stream: Option<CachedStream>,
+}
+
+/// A resolved direct-stream result + its validity window, persisted so a
+/// re-open inside the window skips yt-dlp entirely.
+#[derive(Serialize, Deserialize, Clone, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct CachedStream {
+    pub video_url: String,
+    /// Raw DASH audio URL (the proxy merges it); None when muxed.
+    pub audio_url: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub vcodec: Option<String>,
+    pub acodec: Option<String>,
+    /// The preview height cap active at resolve time. A cached URL is only
+    /// reused when the caller's cap matches — the resolver picks a different
+    /// format per cap, and silently serving yesterday's 480p after the user
+    /// bumped quality to 1080p would be wrong.
+    pub max_height: Option<u32>,
+    /// Unix seconds when the resolve happened.
+    #[ts(type = "number")]
+    pub resolved_at: u64,
+    /// Unix seconds after which the signed URLs are invalid.
+    #[ts(type = "number")]
+    pub expires_at: u64,
+}
+
+/// Everything the frontend needs to decide the re-open path, in one call.
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct WarmStart {
+    /// Cached parsed metadata — hydrate the UI from this immediately.
+    pub metadata: Option<Metadata>,
+    /// True when the metadata is missing or >24h old: revalidate in the
+    /// background (the UI still hydrates from the cached copy first).
+    pub metadata_stale: bool,
+    /// A still-valid resolved stream (expiry margin + height cap already
+    /// checked): hand it straight to the proxy/MSE path, skip extraction.
+    pub stream: Option<CachedStream>,
+    /// A complete downloaded copy on disk: boot LocalMediaPlayer from this
+    /// and skip resolve/proxy altogether (the strongest fast path).
+    pub cached_copy: Option<String>,
+}
+
+fn meta_path(cache_root: &std::path::Path, url: &str) -> PathBuf {
+    media_cache_dir(cache_root, "meta").join(format!("{}.json", source_audio_hash(url)))
+}
+
+fn read_source_meta(cache_root: &std::path::Path, url: &str) -> Option<SourceMeta> {
+    let bytes = std::fs::read(meta_path(cache_root, url)).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// Write-temp-then-rename so a crash mid-write can't leave a truncated JSON
+/// that poisons every future warm boot of this source.
+fn write_source_meta(cache_root: &std::path::Path, meta: &SourceMeta) -> std::io::Result<()> {
+    let dir = media_cache_dir(cache_root, "meta");
+    std::fs::create_dir_all(&dir)?;
+    let bytes = serde_json::to_vec_pretty(meta)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let tmp = dir.join(format!(".tmp-{}", source_audio_hash(&meta.url)));
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, meta_path(cache_root, &meta.url))
+}
+
+fn load_or_new_meta(cache_root: &std::path::Path, url: &str) -> SourceMeta {
+    read_source_meta(cache_root, url).unwrap_or(SourceMeta {
+        url: url.to_string(),
+        metadata: None,
+        fetched_at: None,
+        stream: None,
+    })
+}
+
+/// Best-effort: persist freshly fetched metadata (keeps any cached stream).
+fn persist_metadata_cache(app: &AppHandle, url: &str, m: &Metadata) {
+    let Ok(cache) = app.path().app_cache_dir() else { return };
+    let mut sm = load_or_new_meta(&cache, url);
+    sm.metadata = Some(m.clone());
+    sm.fetched_at = Some(unix_now());
+    if let Err(e) = write_source_meta(&cache, &sm) {
+        eprintln!("[warm-cache] metadata write failed: {e}");
+    }
+}
+
+/// Best-effort: persist a fresh stream resolve (keeps any cached metadata).
+fn persist_stream_cache(app: &AppHandle, url: &str, r: &DirectStreamResult, max_height: Option<u32>) {
+    let Ok(cache) = app.path().app_cache_dir() else { return };
+    let now = unix_now();
+    let mut sm = load_or_new_meta(&cache, url);
+    sm.stream = Some(CachedStream {
+        video_url: r.url.clone(),
+        audio_url: r.audio_url.clone(),
+        width: r.width,
+        height: r.height,
+        vcodec: r.vcodec.clone(),
+        acodec: r.acodec.clone(),
+        max_height,
+        resolved_at: now,
+        expires_at: stream_expires_at(&r.url, r.audio_url.as_deref(), now),
+    });
+    if let Err(e) = write_source_meta(&cache, &sm) {
+        eprintln!("[warm-cache] stream write failed: {e}");
+    }
+}
+
+/// Parse the expiry unix timestamp out of a signed CDN URL. googlevideo
+/// carries `expire=<unix>` as a query param (path-style signing uses an
+/// `/expire/<unix>/` segment pair instead); other hosts commonly use
+/// `expires=`. Returns None for URLs with no parseable, plausible value —
+/// callers then apply the conservative 30-minute fallback.
+pub(crate) fn parse_url_expiry(url: &str) -> Option<u64> {
+    let parsed = url::Url::parse(url).ok()?;
+    // Plausibility window: 2001..2286. Rejects garbage like `expire=42`
+    // without rejecting any real signed-URL timestamp.
+    let plausible = |v: u64| (1_000_000_000..10_000_000_000).contains(&v);
+    for (k, v) in parsed.query_pairs() {
+        if k == "expire" || k == "expires" {
+            if let Ok(n) = v.parse::<u64>() {
+                if plausible(n) {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    let mut segs = parsed.path_segments()?;
+    while let Some(s) = segs.next() {
+        if s == "expire" {
+            if let Some(n) = segs.next().and_then(|v| v.parse::<u64>().ok()) {
+                if plausible(n) {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Effective expiry for a resolved stream: the EARLIEST expiry across the
+/// video and (optional) audio URL, where a URL with no parseable expiry
+/// contributes the conservative `resolved_at + 30min`.
+pub(crate) fn stream_expires_at(video_url: &str, audio_url: Option<&str>, resolved_at: u64) -> u64 {
+    let one = |u: &str| {
+        parse_url_expiry(u).unwrap_or(resolved_at + STREAM_FALLBACK_VALIDITY_SECS)
+    };
+    let mut expires = one(video_url);
+    if let Some(a) = audio_url {
+        expires = expires.min(one(a));
+    }
+    expires
+}
+
+/// The re-open fast-path probe (r112). Called by the frontend at fetch time,
+/// BEFORE any yt-dlp work: returns whatever warm state exists for this
+/// source so the UI can hydrate instantly and playback can skip extraction.
+/// Pure local-disk reads — never touches the network.
+#[tauri::command]
+pub fn get_warm_start(
+    app: AppHandle,
+    url: String,
+    max_height: Option<u32>,
+) -> Result<WarmStart, crate::AppError> {
+    validate_source_url(&url)?;
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| crate::AppError::internal(format!("app_cache_dir: {e}")))?;
+    let now = unix_now();
+    let meta = read_source_meta(&cache, &url);
+    let (metadata, metadata_stale) = match &meta {
+        Some(m) => (
+            m.metadata.clone(),
+            m.metadata.is_none()
+                || m.fetched_at
+                    .map(|t| now.saturating_sub(t) > META_REVALIDATE_SECS)
+                    .unwrap_or(true),
+        ),
+        None => (None, true),
+    };
+    let stream = meta.and_then(|m| m.stream).filter(|s| {
+        s.max_height == max_height && now + STREAM_EXPIRY_MARGIN_SECS < s.expires_at
+    });
+    let cached_copy =
+        find_cached_download(&cache, &url).and_then(|p| p.to_str().map(String::from));
+    Ok(WarmStart { metadata, metadata_stale, stream, cached_copy })
+}
+
 #[derive(Deserialize)]
 pub struct AudioTrackArgs {
     pub url: String,
@@ -1363,11 +1699,11 @@ pub async fn download_audio_track(
     // Persistent, source-keyed cache (shared with the Whisper pipeline).
     let final_prefix = source_audio_prefix(&args.url); // saucebunny-audio-<hash>
     // Already fully cached (non-empty) → reuse instantly, no re-download.
-    if let Some(existing) = find_audio_in_cache(&cache, &final_prefix) {
-        if existing.metadata().map(|m| m.len() > 0).unwrap_or(false) {
-            if let Some(s) = existing.to_str() {
-                return Ok(s.to_string());
-            }
+    // Checks the r112 media dir first, then lazily migrates any pre-r112
+    // copy out of the sweep's reach.
+    if let Some(existing) = find_cached_source_audio(&cache, &args.url) {
+        if let Some(s) = existing.to_str() {
+            return Ok(s.to_string());
         }
     }
     // Download under a JOB-scoped temp prefix — distinct from the final name
@@ -1459,7 +1795,9 @@ pub async fn download_audio_track(
     }
 
     // Find the temp file yt-dlp wrote, then atomically rename it to the final
-    // source-keyed name so the cache hit is all-or-nothing.
+    // source-keyed name in the persistent media cache (r112: sweep-exempt —
+    // this track is downloaded ONCE and reused across sessions) so the cache
+    // hit is all-or-nothing.
     let dl_file = find_audio_in_cache(&cache, &dl_prefix).ok_or_else(|| {
         crate::AppError::internal("yt-dlp exited cleanly but no audio file was found in cache")
     })?;
@@ -1467,12 +1805,91 @@ pub async fn download_audio_track(
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("m4a");
-    let final_path = cache.join(format!("{final_prefix}.{ext}"));
+    let audio_dir = media_cache_dir(&cache, "audio");
+    std::fs::create_dir_all(&audio_dir).map_err(|e| format!("mkdir audio cache: {e}"))?;
+    let final_path = audio_dir.join(format!("{final_prefix}.{ext}"));
     std::fs::rename(&dl_file, &final_path).map_err(|e| format!("cache rename: {e}"))?;
     final_path
         .to_str()
         .map(String::from)
         .ok_or_else(|| crate::AppError::internal("cached audio path not utf-8"))
+}
+
+#[cfg(test)]
+mod warm_cache_tests {
+    use super::{parse_url_expiry, stream_expires_at};
+
+    // Shape of a real yt-dlp-resolved googlevideo URL (format 18), trimmed of
+    // the volatile signature blobs but keeping the real param layout.
+    const GOOGLEVIDEO_URL: &str = "https://rr3---sn-p5qlsnsr.googlevideo.com/videoplayback?\
+        expire=1752696869&ei=xTt4aPLxEuOTsfIPxvXFyQI&ip=203.0.113.7&\
+        id=o-AAeGm1kX&itag=18&source=youtube&requiressl=yes&xpc=Eghonf3xInoBAQ%3D%3D&\
+        mh=8V&mm=31%2C29&mn=sn-p5qlsnsr%2Csn-p5qs7nzk&ms=au%2Crdu&mv=m&mvi=3&\
+        pl=21&ratebypass=yes&dur=213.envelope&lmt=1750000000000000&\
+        sig=AJfQdSswRQIhAO&lsparams=mh%2Cmm%2Cmn%2Cms%2Cmv%2Cmvi%2Cpl&lsig=ACuhMU0wRAIg";
+
+    #[test]
+    fn parses_expire_from_googlevideo_query() {
+        assert_eq!(parse_url_expiry(GOOGLEVIDEO_URL), Some(1_752_696_869));
+    }
+
+    #[test]
+    fn parses_expires_variant() {
+        assert_eq!(
+            parse_url_expiry("https://cdn.example.com/v.mp4?expires=1752700000&sig=abc"),
+            Some(1_752_700_000)
+        );
+    }
+
+    #[test]
+    fn parses_path_style_expire_segments() {
+        assert_eq!(
+            parse_url_expiry("https://host.googlevideo.com/videoplayback/expire/1752696869/ei/xyz/itag/18"),
+            Some(1_752_696_869)
+        );
+    }
+
+    #[test]
+    fn url_without_expiry_yields_none() {
+        assert_eq!(parse_url_expiry("https://cdn.example.com/video.mp4?token=abc&v=2"), None);
+    }
+
+    #[test]
+    fn garbage_expiry_values_yield_none() {
+        // Non-numeric.
+        assert_eq!(parse_url_expiry("https://h.example.com/v?expire=banana"), None);
+        // Numeric but not a plausible unix timestamp (would "expire" in 1970).
+        assert_eq!(parse_url_expiry("https://h.example.com/v?expire=42"), None);
+        // Not a URL at all.
+        assert_eq!(parse_url_expiry("expire=1752696869"), None);
+    }
+
+    #[test]
+    fn stream_expiry_is_earliest_of_video_and_audio() {
+        let video = "https://h.example.com/v?expire=2000000000";
+        let audio = "https://h.example.com/a?expire=1900000000";
+        assert_eq!(stream_expires_at(video, Some(audio), 1_800_000_000), 1_900_000_000);
+    }
+
+    #[test]
+    fn stream_expiry_falls_back_to_30_minutes_when_unparseable() {
+        let resolved_at = 1_800_000_000;
+        // Neither URL carries an expiry → conservative fetched_at + 30min.
+        assert_eq!(
+            stream_expires_at("https://h.example.com/v", None, resolved_at),
+            resolved_at + 30 * 60
+        );
+        // Video has one, audio doesn't → the audio's conservative window
+        // wins when it is earlier (a dead audio leg kills the stream too).
+        assert_eq!(
+            stream_expires_at(
+                "https://h.example.com/v?expire=2000000000",
+                Some("https://h.example.com/a"),
+                resolved_at
+            ),
+            resolved_at + 30 * 60
+        );
+    }
 }
 
 // ─── Nightly real-sidecar smoke (see src/nightly.rs; run with --ignored) ────

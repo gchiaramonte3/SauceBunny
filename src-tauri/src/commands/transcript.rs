@@ -1128,8 +1128,7 @@ pub async fn generate_transcript(
         // audio the captions are clocked against, so they're aligned by
         // construction. Phase 2 cuts the [start,end] section from it. Otherwise
         // yt-dlp downloads just the section (the original path).
-        let cached_full = find_audio_in_cache(&cache_for, &source_audio_prefix(&args.url))
-            .filter(|p| p.metadata().map(|m| m.len() > 0).unwrap_or(false));
+        let cached_full = find_cached_source_audio(&cache_for, &args.url);
         let (raw_path, cut_section, keep_raw) = if let Some(cached) = cached_full {
             emit_transcript_log(
                 &app_for, &job_for, "info",
@@ -1673,8 +1672,7 @@ pub async fn re_diarize_transcript(
         pb
     } else if let Some(url) = args.url.as_deref().filter(|s| !s.is_empty()) {
         validate_source_url(url)?;
-        find_audio_in_cache(&cache, &source_audio_prefix(url))
-            .filter(|p| p.metadata().map(|m| m.len() > 0).unwrap_or(false))
+        find_cached_source_audio(&cache, url)
             .ok_or_else(|| crate::AppError::not_found(
                 "Source audio isn't cached — use Regenerate to transcribe and detect speakers.",
             ))?

@@ -72,16 +72,55 @@ pub fn cancel_job(registry: State<'_, JobRegistry>, job_id: String) -> Result<bo
 }
 
 // ============================================================
-// CACHE SWEEP
+// CACHE SWEEP + MEDIA-CACHE LAYOUT (r112)
 // Every transient artifact we write to app_cache_dir() shares the
-// `saucebunny-` prefix (playback prep copies, audio raw downloads, whisper
-// wavs, etc). On startup we glob that prefix and delete anything older
-// than 24 hours so the cache can't grow unbounded across sessions.
+// `saucebunny-` prefix (playback prep copies, whisper wavs, in-flight
+// download temps, etc). On startup we glob that prefix and delete anything
+// older than 24 hours so the cache can't grow unbounded across sessions.
+//
+// Deliberately-REUSABLE artifacts are different: full downloaded source
+// copies, cached audio tracks, and the warm-boot metadata files are
+// "download once, reuse forever" by design — the sweep used to destroy
+// them, defeating that design. They now live under an organized,
+// sweep-exempt subtree:
+//
+//   app_cache_dir()/saucebunny-media/
+//     downloads/   full source copies   (saucebunny-download-<urlhash>.<ext>)
+//     audio/       cached audio tracks  (saucebunny-audio-<urlhash>.<ext>)
+//     meta/        warm-boot metadata   (<urlhash>.json — see download.rs)
+//
+// The user still has full control: Settings → Cache shows per-category
+// sizes with per-category Clear buttons (everything regenerates). No
+// automatic size caps.
 // ============================================================
 const CACHE_TTL_SECONDS: u64 = 24 * 60 * 60;
 
-/// Cache stats for the Settings UI — sum of all `saucebunny-*` files in
-/// app_cache_dir(). Returns `(file_count, bytes_total, path)`.
+/// Directory name of the sweep-exempt media cache under `app_cache_dir()`.
+pub(crate) const MEDIA_CACHE_DIRNAME: &str = "saucebunny-media";
+
+/// A subdirectory of the persistent media cache ("downloads" / "audio" /
+/// "meta"). Does not create it — writers `create_dir_all` before writing.
+pub(crate) fn media_cache_dir(cache_root: &std::path::Path, sub: &str) -> PathBuf {
+    cache_root.join(MEDIA_CACHE_DIRNAME).join(sub)
+}
+
+/// Per-category slice of the cache, for the Settings breakdown.
+#[derive(serde::Serialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct CacheCategoryStats {
+    pub file_count: u32,
+    // See Metadata::view_count for the bigint→number rationale (r49).
+    #[ts(type = "number")]
+    pub bytes_total: u64,
+}
+
+/// Cache stats for the Settings UI. `file_count`/`bytes_total` are the grand
+/// totals across every category; the named fields break them down so the
+/// user can see (and clear) each kind independently:
+///   - `downloads` / `audio` / `meta` — the persistent media cache (r112).
+///   - `thumbnails` — the keyed `saucebunny-thumb-*` files in the cache root.
+///   - `scratch` — every other `saucebunny-*` root file (job temps, playback
+///     prep copies, whisper wavs); the 24h startup sweep owns these.
 ///
 /// The `path` field surfaces the cache location in Settings so users
 /// can find / reveal it. Settable-from-Settings is r40 work; r39 just
@@ -94,6 +133,25 @@ pub struct CacheStats {
     #[ts(type = "number")]
     pub bytes_total: u64,
     pub path: String,
+    pub downloads: CacheCategoryStats,
+    pub audio: CacheCategoryStats,
+    pub meta: CacheCategoryStats,
+    pub thumbnails: CacheCategoryStats,
+    pub scratch: CacheCategoryStats,
+}
+
+/// Flat (non-recursive) file count + byte total of one directory.
+fn dir_category_stats(dir: &std::path::Path) -> CacheCategoryStats {
+    let mut out = CacheCategoryStats::default();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let meta = match entry.metadata() { Ok(m) => m, Err(_) => continue };
+            if meta.is_dir() { continue; }
+            out.file_count += 1;
+            out.bytes_total += meta.len();
+        }
+    }
+    out
 }
 
 #[tauri::command]
@@ -107,11 +165,12 @@ pub fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppError> {
         .app_cache_dir()
         .map_err(|e| crate::AppError::internal(format!("app_cache_dir: {e}")))?;
     let path = cache.to_string_lossy().to_string();
-    if !cache.is_dir() {
-        return Ok(CacheStats { file_count: 0, bytes_total: 0, path });
-    }
-    let mut file_count: u32 = 0;
-    let mut bytes_total: u64 = 0;
+
+    let downloads = dir_category_stats(&media_cache_dir(&cache, "downloads"));
+    let audio = dir_category_stats(&media_cache_dir(&cache, "audio"));
+    let meta_cat = dir_category_stats(&media_cache_dir(&cache, "meta"));
+    let mut thumbnails = CacheCategoryStats::default();
+    let mut scratch = CacheCategoryStats::default();
     if let Ok(entries) = std::fs::read_dir(&cache) {
         for entry in entries.flatten() {
             let name = match entry.file_name().to_str() {
@@ -121,11 +180,25 @@ pub fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppError> {
             if !name.starts_with("saucebunny-") { continue; }
             let meta = match entry.metadata() { Ok(m) => m, Err(_) => continue };
             if meta.is_dir() { continue; }
-            file_count += 1;
-            bytes_total += meta.len();
+            let bucket = if name.starts_with("saucebunny-thumb-") { &mut thumbnails } else { &mut scratch };
+            bucket.file_count += 1;
+            bucket.bytes_total += meta.len();
         }
     }
-    Ok(CacheStats { file_count, bytes_total, path })
+    let file_count = downloads.file_count + audio.file_count + meta_cat.file_count
+        + thumbnails.file_count + scratch.file_count;
+    let bytes_total = downloads.bytes_total + audio.bytes_total + meta_cat.bytes_total
+        + thumbnails.bytes_total + scratch.bytes_total;
+    Ok(CacheStats {
+        file_count,
+        bytes_total,
+        path,
+        downloads,
+        audio,
+        meta: meta_cat,
+        thumbnails,
+        scratch,
+    })
 }
 
 /// Purge `saucebunny-*` cache files. Files whose names contain a currently-
@@ -164,22 +237,104 @@ pub fn clear_all_cache(
                 None => continue,
             };
             if !name.starts_with("saucebunny-") { continue; }
-            if active.iter().any(|jid| name.contains(jid)) {
-                // In-flight job is writing to this file — skip.
-                continue;
-            }
-            if excluded.contains(&entry.path().to_string_lossy().to_string()) {
-                // The current session is playing from this file — skip.
-                continue;
-            }
             let meta = match entry.metadata() { Ok(m) => m, Err(_) => continue };
             if meta.is_dir() { continue; }
-            if std::fs::remove_file(entry.path()).is_ok() {
-                removed += 1;
-            }
+            removed += remove_cache_file(&entry.path(), &name, &active, &excluded);
         }
     }
+    // "Clear all" really means all: the persistent media cache (downloads /
+    // audio / meta) is sweep-EXEMPT but user-clearable — everything in it
+    // regenerates on demand.
+    for sub in ["downloads", "audio", "meta"] {
+        removed += remove_files_in_dir(&media_cache_dir(&cache, sub), &active, &excluded);
+    }
     Ok(removed)
+}
+
+/// Delete one cache file unless an in-flight job is writing it or the
+/// current session is playing from it. Returns 1 on delete, 0 otherwise.
+fn remove_cache_file(
+    path: &std::path::Path,
+    name: &str,
+    active: &std::collections::HashSet<String>,
+    excluded: &std::collections::HashSet<String>,
+) -> u32 {
+    if active.iter().any(|jid| name.contains(jid)) {
+        // In-flight job is writing to this file — skip.
+        return 0;
+    }
+    if excluded.contains(&path.to_string_lossy().to_string()) {
+        // The current session is playing from this file — skip.
+        return 0;
+    }
+    u32::from(std::fs::remove_file(path).is_ok())
+}
+
+/// Delete every file (flat, no recursion) in `dir`, honoring the same
+/// active-job and exclusion guards as `clear_all_cache`.
+fn remove_files_in_dir(
+    dir: &std::path::Path,
+    active: &std::collections::HashSet<String>,
+    excluded: &std::collections::HashSet<String>,
+) -> u32 {
+    let mut removed: u32 = 0;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = match entry.file_name().to_str() {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            let meta = match entry.metadata() { Ok(m) => m, Err(_) => continue };
+            if meta.is_dir() { continue; }
+            removed += remove_cache_file(&entry.path(), &name, &active, &excluded);
+        }
+    }
+    removed
+}
+
+/// Clear ONE cache category (Settings → Cache row buttons). Categories:
+///   - "downloads" / "audio" / "meta" — the persistent media cache dirs.
+///   - "thumbnails" — keyed `saucebunny-thumb-*` files in the cache root.
+/// Clearing is always safe: every artifact regenerates on demand. The same
+/// active-job / currently-playing guards as `clear_all_cache` apply.
+#[tauri::command]
+pub fn clear_cache_category(
+    app: AppHandle,
+    registry: State<'_, JobRegistry>,
+    category: String,
+    exclude: Option<Vec<String>>,
+) -> Result<u32, crate::AppError> {
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("app_cache_dir: {e}"))?;
+    if !cache.is_dir() {
+        return Ok(0);
+    }
+    let active: std::collections::HashSet<String> = registry.active_ids().into_iter().collect();
+    let excluded: std::collections::HashSet<String> = exclude.unwrap_or_default().into_iter().collect();
+    match category.as_str() {
+        "downloads" | "audio" | "meta" => {
+            Ok(remove_files_in_dir(&media_cache_dir(&cache, &category), &active, &excluded))
+        }
+        "thumbnails" => {
+            let mut removed: u32 = 0;
+            if let Ok(entries) = std::fs::read_dir(&cache) {
+                for entry in entries.flatten() {
+                    let name = match entry.file_name().to_str() {
+                        Some(n) => n.to_string(),
+                        None => continue,
+                    };
+                    if !name.starts_with("saucebunny-thumb-") { continue; }
+                    let meta = match entry.metadata() { Ok(m) => m, Err(_) => continue };
+                    if meta.is_dir() { continue; }
+                    removed += remove_cache_file(&entry.path(), &name, &active, &excluded);
+                }
+            }
+            Ok(removed)
+        }
+        other => Err(crate::AppError::invalid(format!("unknown cache category: {other}"))),
+    }
 }
 
 #[tauri::command]
@@ -191,11 +346,21 @@ pub fn cleanup_stale_cache(app: AppHandle) -> Result<u32, crate::AppError> {
     if !cache.is_dir() {
         return Ok(0);
     }
-    let now = std::time::SystemTime::now();
+    Ok(sweep_stale_files(&cache, std::time::SystemTime::now()))
+}
+
+/// Core of the startup sweep, parameterised on `now` so the >24h cutoff is
+/// unit-testable without faking file mtimes. Deletes stale `saucebunny-*`
+/// FILES in the cache root only; `saucebunny-media/` (the persistent
+/// downloads/audio/meta cache, r112) is exempt by name AND by the
+/// directories-are-skipped rule — its artifacts are downloaded once and
+/// deliberately reused across sessions, so aging them out would just make
+/// the user re-pay yt-dlp's full extraction cost.
+fn sweep_stale_files(cache: &std::path::Path, now: std::time::SystemTime) -> u32 {
     let mut removed: u32 = 0;
-    let entries = match std::fs::read_dir(&cache) {
+    let entries = match std::fs::read_dir(cache) {
         Ok(it) => it,
-        Err(_) => return Ok(0), // missing cache dir is fine
+        Err(_) => return 0, // missing cache dir is fine
     };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -204,6 +369,11 @@ pub fn cleanup_stale_cache(app: AppHandle) -> Result<u32, crate::AppError> {
             None => continue,
         };
         if !name.starts_with("saucebunny-") {
+            continue;
+        }
+        // The persistent media cache is NEVER swept — explicit by name so
+        // the exemption survives any future recursive-sweep refactor.
+        if name == MEDIA_CACHE_DIRNAME {
             continue;
         }
         // Whisper model files live under a separate `whisper-models/`
@@ -223,7 +393,7 @@ pub fn cleanup_stale_cache(app: AppHandle) -> Result<u32, crate::AppError> {
                 removed += 1;
             }
     }
-    Ok(removed)
+    removed
 }
 
 /// Write raw bytes (e.g. a frame Blob marshalled from the frontend) to
@@ -349,7 +519,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-14-r111-poster-time";
+pub const BACKEND_BUILD_ID: &str = "2026-07-17-r112-warm-boot";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {
@@ -445,5 +615,69 @@ pub async fn close_panel_window(app: AppHandle) -> Result<(), crate::AppError> {
         w.close().map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::{media_cache_dir, sweep_stale_files, MEDIA_CACHE_DIRNAME};
+    use std::time::{Duration, SystemTime};
+
+    /// Fresh scratch dir per test (tests run in parallel in one process, so
+    /// each gets its own name).
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("sb-cache-test-{}-{}", tag, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir scratch");
+        dir
+    }
+
+    // The heart of part B3: artifacts inside `saucebunny-media/` are
+    // downloaded once and REUSED — the >24h sweep must never touch them,
+    // while an equally-old sibling in the cache root is still cleaned.
+    #[test]
+    fn sweep_exempts_media_cache_but_cleans_stale_siblings() {
+        let cache = scratch("exempt");
+        let downloads = media_cache_dir(&cache, "downloads");
+        std::fs::create_dir_all(&downloads).unwrap();
+        let kept = downloads.join("saucebunny-download-abc123.mp4");
+        std::fs::write(&kept, b"full source copy").unwrap();
+        let stale = cache.join("saucebunny-webcache-oldjob.mp4");
+        std::fs::write(&stale, b"temp remux output").unwrap();
+        let foreign = cache.join("unrelated.txt");
+        std::fs::write(&foreign, b"not ours").unwrap();
+
+        // Both files were written just now; pretending "now" is 25h in the
+        // future makes them both older than the 24h TTL.
+        let removed = sweep_stale_files(&cache, SystemTime::now() + Duration::from_secs(25 * 60 * 60));
+
+        assert_eq!(removed, 1, "exactly the stale root sibling is swept");
+        assert!(kept.exists(), "media-cache artifact must survive the sweep");
+        assert!(!stale.exists(), "stale saucebunny-* root file must be swept");
+        assert!(foreign.exists(), "non-saucebunny files are never touched");
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    // Fresh files (younger than the TTL) stay, even in the root.
+    #[test]
+    fn sweep_keeps_fresh_root_files() {
+        let cache = scratch("fresh");
+        let fresh = cache.join("saucebunny-playback-live.mp4");
+        std::fs::write(&fresh, b"in use").unwrap();
+
+        let removed = sweep_stale_files(&cache, SystemTime::now());
+
+        assert_eq!(removed, 0);
+        assert!(fresh.exists());
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    #[test]
+    fn media_cache_dir_layout_is_stable() {
+        let root = std::path::Path::new("/cache");
+        assert_eq!(
+            media_cache_dir(root, "audio"),
+            root.join(MEDIA_CACHE_DIRNAME).join("audio")
+        );
+    }
 }
 

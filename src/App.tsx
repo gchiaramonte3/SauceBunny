@@ -31,7 +31,7 @@ import type { PlayerHandle } from "./components/player-handle";
 import type {
   AppError, AppStatus, ClientLog, DoneEvent, ExportOpts,
   LocalFileMeta, LogEvent, Metadata, ProgressEvent, QueuedClip, QueueSource, RecentClip,
-  SourceKind, WhisperModel,
+  SourceKind, WarmStart, WhisperModel,
 } from "./types";
 import { asLogTag } from "./types";
 import { formatError, isAppError } from "./lib/error-format";
@@ -1071,6 +1071,7 @@ export default function App() {
   });
   const {
     loadWeb: loadWebPlayback,
+    loadCached: loadCachedWebPlayback,
     reset: resetWebPlayback,
     stop: stopWebPlayback,
     onPlayerReady: webOnPlayerReady,
@@ -1637,6 +1638,17 @@ export default function App() {
     // source the user has since started.
     const seq = ++sourceSeqRef.current;
 
+    // ─── Warm-start probe (r112) ─────────────────────────────────────────
+    // One local-disk read (no network): cached metadata to hydrate the UI
+    // instantly, a still-valid resolved stream URL to skip extraction, and
+    // a complete downloaded copy to skip resolve/proxy entirely. Best
+    // effort: any failure means a normal cold boot.
+    const warm = await invoke<WarmStart>("get_warm_start", {
+      url: full,
+      maxHeight: defaults.previewMaxHeight,
+    }).catch(() => null);
+    if (sourceSeqRef.current !== seq) return; // user already moved on
+
     // ─── Optimistic mount ────────────────────────────────────────────────
     // The Monitor extracts a video ID from `metadata.webpage_url` and mounts
     // the IFrame player as soon as one is present. So instead of blocking on
@@ -1644,7 +1656,11 @@ export default function App() {
     // we seed a stub metadata object that's just enough to render the player.
     // The user can hit play and watch immediately; we hydrate width/height/
     // duration/title/thumbnail in the background and reflow when they arrive.
-    const stub: Metadata = {
+    //
+    // Known source (r112): the cached Metadata takes the stub's place — real
+    // title, duration, and thumbnail on screen immediately, through the SAME
+    // setMetadata path a fresh fetch uses.
+    const stub: Metadata = warm?.metadata ?? {
       title: "Loading…",
       duration: null,
       // r62: show the YouTube poster INSTANTLY (derived from the video ID,
@@ -1684,7 +1700,19 @@ export default function App() {
         ? prev.filename
         : "clip",
     }));
-    appendLog("info", "yt-dlp", `Extracting URL: ${full}`);
+    if (warm?.metadata) {
+      appendLog("ok", "cache", `Details for ${hostnameOf(full)} loaded from cache`);
+      // Mirror the fresh-fetch hydrate: caption availability + a filename
+      // suggestion from the real title (user-typed names always win).
+      const wm = warm.metadata;
+      setExportOpts((prev) => ({
+        ...prev,
+        captions: defaults.captions && wm.has_subs,
+        filename: prev.filename && prev.filename !== "clip"
+          ? prev.filename
+          : suggestFilename(wm.title),
+      }));
+    }
     setMetadataLoading(true);
     // Toolbar Fetch button → loading; the flash resolves on metadata hydrate
     // (success) or the catch below (error). See fetchButtonPhase.
@@ -1712,19 +1740,56 @@ export default function App() {
     // and exposes a read-model the Monitor consumes (see webPlayback.* below).
     // `streamPreview` ON = stream-first (instant, fall back to download on any
     // failure); OFF = download-first (slower, max reliability on flaky links).
-    appendLog(
-      "info",
-      "yt-dlp",
-      defaults.streamPreview
-        ? `Resolving stream URL for ${hostnameOf(full)}…`
-        : `Downloading ${hostnameOf(full)} for in-app playback…`,
-    );
-    loadWebPlayback(full, defaults.streamPreview ? "stream-first" : "download-first", seq);
+    //
+    // Warm boot (r112), strongest fast path first:
+    //   1. A COMPLETE downloaded copy on disk → play the file immediately
+    //      (LocalMediaPlayer via the machine's `cached` state); no resolve,
+    //      no proxy, no yt-dlp. Source identity stays the URL throughout —
+    //      recents, history, transcripts, and review docs all key off
+    //      `full` / `webpage_url`, never the cache path.
+    //   2. A still-valid resolved stream URL → hand it to the proxy/MSE path
+    //      and skip extraction (the hook logs "Stream ready from cache").
+    //   3. Otherwise: the normal cold resolve/download.
+    if (warm?.cached_copy) {
+      appendLog("ok", "cache", `Playing the saved copy of ${hostnameOf(full)} from disk`);
+      loadCachedWebPlayback(full, warm.cached_copy, seq);
+    } else {
+      const warmStream = defaults.streamPreview ? warm?.stream ?? null : null;
+      if (!warmStream) {
+        appendLog(
+          "info",
+          "yt-dlp",
+          defaults.streamPreview
+            ? `Resolving stream URL for ${hostnameOf(full)}…`
+            : `Downloading ${hostnameOf(full)} for in-app playback…`,
+        );
+      }
+      loadWebPlayback(full, defaults.streamPreview ? "stream-first" : "download-first", seq, warmStream);
+    }
 
     // ─── Background metadata hydration ───────────────────────────────────
+    // Fresh cached metadata (<24h) skips the network probe entirely — the UI
+    // is already hydrated from the warm start above. Stale (or missing)
+    // cached metadata still shows instantly, then revalidates here in the
+    // background through the exact same path a cold fetch uses.
+    if (warm?.metadata && !warm.metadata_stale) {
+      const wm = warm.metadata;
+      setFetchPhase("success");
+      setMetadataLoading(false);
+      // A warm open is a successful load — record it (URL identity).
+      recordRecentSource({
+        kind: "url",
+        value: full,
+        title: wm.title,
+        durationSeconds: wm.duration ?? undefined,
+      });
+      appendLog("ok", "probe", `${wm.width ?? "?"}×${wm.height ?? "?"} · ${wm.fps ?? "?"} fps · ${wm.duration?.toFixed(1) ?? "?"}s · from cache`);
+      return;
+    }
     // If this fails we leave the player visible (the user is probably already
     // watching) and surface the error via the notification bell instead of
     // tearing the canvas down.
+    appendLog("info", "yt-dlp", `Extracting URL: ${full}`);
     try {
       const m = await invoke<Metadata>("fetch_metadata", {
         url: full,
@@ -1790,7 +1855,7 @@ export default function App() {
     } finally {
       if (sourceSeqRef.current === seq) setMetadataLoading(false);
     }
-  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, classifyExtractorRot, loadWebPlayback, recordRecentSource]);
+  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, classifyExtractorRot, loadWebPlayback, loadCachedWebPlayback, recordRecentSource]);
 
   // Re-run the current fetch after the user picks a browser in the YouTube
   // auth modal. By the time this fires, `defaults.ytCookiesBrowser` (and thus
@@ -2075,7 +2140,7 @@ export default function App() {
       setPlaybackPrepProgress(0);
       const jobId = await invoke<string>("new_job_id");
       setPlaybackPrepJobId(jobId);
-      appendLog("info", "import", `Preparing playback copy (h264_videotoolbox)…`);
+      appendLog("info", "local", `Preparing playback copy (h264_videotoolbox)…`);
       const prepared = await new Promise<string>((resolve, reject) => {
         playbackPrepResolverRef.current = { resolve, reject };
         invoke("prepare_local_for_playback", {
@@ -2115,19 +2180,19 @@ export default function App() {
       // the rest of this import. Frame-accurate scrubbing via the prep
       // file would be nice for the AV1-style case but isn't worth the
       // loop risk for the AAC-style case.
-      appendLog("ok", "import", `Playback copy ready → ${prepared}`);
+      appendLog("ok", "local", `Playback copy ready → ${prepared}`);
     } catch (err) {
       if (sourceSeqRef.current !== seq) return;
       const msg = formatError(err);
       if (msg.includes("Source changed")) return;
       if (isMissingCommandError(err)) {
         const hint = staleBinaryMessage("prepare_local_for_playback");
-        appendLog("err", "import", hint);
+        appendLog("err", "local", hint);
         pushNotification("error", "Rust backend out of date", hint);
       } else if (msg.includes("Cancelled") || msg === "Error: Cancelled") {
-        appendLog("warn", "import", "Playback prep cancelled by user");
+        appendLog("warn", "local", "Playback prep cancelled by user");
       } else {
-        appendLog("warn", "import", `Playback prep failed, using original: ${msg}`);
+        appendLog("warn", "local", `Playback prep failed, using original: ${msg}`);
       }
       setPlaybackPath(null);
     } finally {
@@ -2156,13 +2221,21 @@ export default function App() {
     skipAutoTranscript = false,
   ): Promise<{ message: string; kind: AppError["kind"] | null } | null> => {
     try {
+      // Local-path purity (r112): the local pipeline must never receive a
+      // web URL — web sources go through handleFetch (yt-dlp + proxy). The
+      // backend guards this too (probe_local_file rejects URLs); failing
+      // here as well keeps the mistake loud and immediate. AppError-shaped
+      // so the catch below formats and classifies it like any backend error.
+      if (/^https?:\/\//i.test(picked.trim())) {
+        throw { kind: "Invalid", data: `Local import got a web URL (${picked}). This is a bug: web sources must go through Fetch.` } satisfies AppError;
+      }
       // Loading a local source belongs in the Clip view — surface it so a
       // drop / File-menu import / recent open from the Library is visible.
       setActiveView("clip");
       resetForNewSource();
       const seq = ++sourceSeqRef.current;
       setStatus("fetching");
-      appendLog("info", "import", `Probing local file: ${picked}`);
+      appendLog("info", "local", `Opening local file: ${picked}`);
 
       const lf = await invoke<LocalFileMeta>("probe_local_file", { path: picked });
       if (sourceSeqRef.current !== seq) return null;
@@ -2226,7 +2299,7 @@ export default function App() {
             setMetadata((prev) => (prev ? { ...prev, thumbnail: convertFileSrc(thumbPath) } : prev));
           } catch (err) {
             if (sourceSeqRef.current !== seq) return;
-            appendLog("warn", "import", `Thumbnail generation failed: ${formatError(err)}`);
+            appendLog("warn", "local", `Thumbnail generation failed: ${formatError(err)}`);
           }
         })();
       }
@@ -2253,7 +2326,7 @@ export default function App() {
       }));
       appendLog(
         "ok",
-        "import",
+        "local",
         `${lf.has_video ? `${lf.width ?? "?"}×${lf.height ?? "?"} · ${lf.fps ?? "?"} fps · ${lf.vcodec ?? "?"} · ` : ""}${
           lf.acodec ?? "no audio"
         } · ${lf.duration?.toFixed(1) ?? "?"}s`
@@ -2320,8 +2393,8 @@ export default function App() {
       if (sourceSeqRef.current !== seq) return null;
       if (canMb) {
         setLocalPlayer("mediabunny");
-        appendLog("ok", "import",
-          `In-app decode via mediabunny (${vc || "?"} / ${ac || "?"}); no transcode.`);
+        appendLog("ok", "local",
+          `Decoding via mediabunny (${vc || "?"} / ${ac || "?"}); no transcode.`);
         return null;
       }
 
@@ -2334,14 +2407,14 @@ export default function App() {
       if (!videoNative) reasonParts.push(`video ${vc || "?"} → h264`);
       if (!audioNative) reasonParts.push(`audio ${ac || "?"} → aac`);
       if (!containerOk)  reasonParts.push(`container .${ext} → .mp4`);
-      appendLog("info", "import",
+      appendLog("info", "local",
         `Transcoding for playback: ${reasonParts.join(", ")}.`);
       await runPlaybackPrep(lf.path, lf.has_video, lf.duration, seq);
       return null;
     } catch (err) {
       const msg = formatError(err);
       setErrorDetail(msg);
-      appendLog("err", "import", msg);
+      appendLog("err", "local", msg);
       setStatus("error");
       return { message: msg, kind: isAppError(err) ? err.kind : null };
     }

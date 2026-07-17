@@ -1,0 +1,145 @@
+import { describe, it, expect } from "vitest";
+import {
+  webPlaybackReducer,
+  INITIAL_WEB_PLAYBACK,
+  type WebPlaybackState,
+  type WebPlaybackAction,
+  type StreamInfo,
+} from "./web-playback-machine";
+
+const URL = "https://www.youtube.com/watch?v=abc123";
+
+const stream = (tag: string): StreamInfo => ({
+  url: `http://127.0.0.1:5555/v1/${tag}`,
+  audioUrl: null,
+  videoCodec: "avc1.42001E",
+  audioCodec: "mp4a.40.2",
+});
+
+function run(actions: WebPlaybackAction[], from: WebPlaybackState = INITIAL_WEB_PLAYBACK): WebPlaybackState {
+  return actions.reduce(webPlaybackReducer, from);
+}
+
+describe("web-playback machine: core lifecycle", () => {
+  it("LOAD stream-first enters resolving (not a fresh retry)", () => {
+    const s = run([{ t: "LOAD", seq: 1, url: URL, mode: "stream-first" }]);
+    expect(s).toEqual({ kind: "resolving", seq: 1, url: URL, fresh: false });
+  });
+
+  it("LOAD download-first enters downloading directly", () => {
+    const s = run([{ t: "LOAD", seq: 1, url: URL, mode: "download-first" }]);
+    expect(s.kind).toBe("downloading");
+  });
+
+  it("resolve failure falls back to download", () => {
+    const s = run([
+      { t: "LOAD", seq: 1, url: URL, mode: "stream-first" },
+      { t: "RESOLVE_FAILED", seq: 1 },
+    ]);
+    expect(s.kind).toBe("downloading");
+  });
+
+  it("stale-seq actions are dropped", () => {
+    const s = run([
+      { t: "LOAD", seq: 2, url: URL, mode: "stream-first" },
+      { t: "RESOLVED", seq: 1, stream: stream("old"), fromCache: false },
+    ]);
+    expect(s.kind).toBe("resolving");
+  });
+
+  it("a fresh stream's media error goes to the download fallback", () => {
+    const s = run([
+      { t: "LOAD", seq: 1, url: URL, mode: "stream-first" },
+      { t: "RESOLVED", seq: 1, stream: stream("fresh"), fromCache: false },
+      { t: "MEDIA_ERROR", seq: 1 },
+    ]);
+    expect(s.kind).toBe("downloading");
+  });
+
+  it("downloading ignores MEDIA_ERROR/WATCHDOG (no double-download race)", () => {
+    const base = run([
+      { t: "LOAD", seq: 1, url: URL, mode: "stream-first" },
+      { t: "RESOLVED", seq: 1, stream: stream("fresh"), fromCache: false },
+      { t: "MEDIA_ERROR", seq: 1 },
+      { t: "DOWNLOAD_STARTED", seq: 1, jobId: "job-1" },
+    ]);
+    const s = run([{ t: "WATCHDOG", seq: 1 }, { t: "MEDIA_ERROR", seq: 1 }], base);
+    expect(s).toEqual(base);
+  });
+});
+
+describe("web-playback machine: warm boot (r112)", () => {
+  it("LOAD_CACHED boots straight to cached playback", () => {
+    const s = run([{ t: "LOAD_CACHED", seq: 1, url: URL, cachePath: "/cache/saucebunny-media/downloads/x.mp4" }]);
+    expect(s).toEqual({
+      kind: "cached",
+      seq: 1,
+      url: URL,
+      cachePath: "/cache/saucebunny-media/downloads/x.mp4",
+    });
+  });
+
+  it("a cached stream URL's media error retries with ONE fresh resolve, not download", () => {
+    const s = run([
+      { t: "LOAD", seq: 1, url: URL, mode: "stream-first" },
+      { t: "RESOLVED", seq: 1, stream: stream("warm"), fromCache: true },
+      { t: "MEDIA_ERROR", seq: 1 },
+    ]);
+    // The retry must go back through resolving with the cache bypassed.
+    expect(s).toEqual({ kind: "resolving", seq: 1, url: URL, fresh: true });
+  });
+
+  it("the watchdog on a cached stream also retries with a fresh resolve", () => {
+    const s = run([
+      { t: "LOAD", seq: 1, url: URL, mode: "stream-first" },
+      { t: "RESOLVED", seq: 1, stream: stream("warm"), fromCache: true },
+      { t: "WATCHDOG", seq: 1 },
+    ]);
+    expect(s).toEqual({ kind: "resolving", seq: 1, url: URL, fresh: true });
+  });
+
+  it("full chain: cached stream fails, fresh stream fails, THEN download (retry cannot loop)", () => {
+    const afterRetry = run([
+      { t: "LOAD", seq: 1, url: URL, mode: "stream-first" },
+      { t: "RESOLVED", seq: 1, stream: stream("warm"), fromCache: true },
+      { t: "MEDIA_ERROR", seq: 1 },
+      { t: "RESOLVED", seq: 1, stream: stream("fresh"), fromCache: false },
+    ]);
+    // The retry lands the fresh URL in the SAME streaming/MSE path — no
+    // player swap, so position handling stays whatever it is today (RC4 is
+    // tracked separately and deliberately not touched here).
+    expect(afterRetry.kind).toBe("streaming");
+    if (afterRetry.kind === "streaming") {
+      expect(afterRetry.fromCache).toBe(false);
+      expect(afterRetry.stream.url).toBe(stream("fresh").url);
+    }
+    const s = run([{ t: "MEDIA_ERROR", seq: 1 }], afterRetry);
+    expect(s.kind).toBe("downloading");
+  });
+
+  it("cached-stream failure of a stale seq is dropped", () => {
+    const base = run([
+      { t: "LOAD", seq: 2, url: URL, mode: "stream-first" },
+      { t: "RESOLVED", seq: 2, stream: stream("warm"), fromCache: true },
+    ]);
+    const s = run([{ t: "MEDIA_ERROR", seq: 1 }], base);
+    expect(s).toEqual(base);
+  });
+
+  it("PLAYER_READY on a cached stream marks ready and keeps fromCache", () => {
+    const s = run([
+      { t: "LOAD", seq: 1, url: URL, mode: "stream-first" },
+      { t: "RESOLVED", seq: 1, stream: stream("warm"), fromCache: true },
+      { t: "PLAYER_READY", seq: 1 },
+    ]);
+    expect(s).toMatchObject({ kind: "streaming", ready: true, fromCache: true });
+  });
+
+  it("RESET tears down a warm-booted cached state", () => {
+    const s = run([
+      { t: "LOAD_CACHED", seq: 1, url: URL, cachePath: "/cache/x.mp4" },
+      { t: "RESET" },
+    ]);
+    expect(s).toEqual(INITIAL_WEB_PLAYBACK);
+  });
+});

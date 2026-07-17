@@ -187,6 +187,8 @@ pub fn run() {
             commands::cleanup_stale_cache,
             commands::get_cache_stats,
             commands::clear_all_cache,
+            commands::clear_cache_category,
+            commands::get_warm_start,
             commands::get_backend_build_id,
             commands::get_stream_proxy_base,
             commands::ytdlp_version,

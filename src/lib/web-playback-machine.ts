@@ -13,16 +13,27 @@
 //
 //   inactive ──LOAD(stream-first)──▶ resolving ──RESOLVED──▶ streaming
 //      │                                  │                      │
-//      └──LOAD(download-first)─┐          │ RESOLVE_FAILED       │ PLAYER_READY → ready
-//                             ▼           ▼                      │ MEDIA_ERROR / WATCHDOG
-//                         downloading ◀───┴──────────────────────┘
-//                             │ DOWNLOAD_DONE ──▶ cached
-//                             │ DOWNLOAD_FAILED ─▶ failed
+//      ├──LOAD(download-first)─┐          │ RESOLVE_FAILED       │ PLAYER_READY → ready
+//      │                       ▼          ▼                      │ MEDIA_ERROR / WATCHDOG
+//      │                   downloading ◀──┴──────────────────────┤ (fromCache: false)
+//      │                       │ DOWNLOAD_DONE ──▶ cached        │
+//      │                       │ DOWNLOAD_FAILED ─▶ failed       │ MEDIA_ERROR / WATCHDOG
+//      │                                                         ▼ (fromCache: true)
+//      │                                            resolving{fresh:true} ── one retry
+//      └──LOAD_CACHED (warm boot, complete copy on disk)──▶ cached
 //   (any) ──RESET──▶ inactive
 //
-// The ONLY edge out of `streaming` on failure goes to `downloading`, and
-// `downloading` ignores MEDIA_ERROR/WATCHDOG — so a stream error and the 15s
-// watchdog can never both start a download. The race is gone structurally.
+// The ONLY edge out of a FRESHLY-resolved `streaming` on failure goes to
+// `downloading`, and `downloading` ignores MEDIA_ERROR/WATCHDOG — so a stream
+// error and the 15s watchdog can never both start a download. The race is
+// gone structurally.
+//
+// r112 warm boot: a stream may start from a CACHED signed URL (skipping
+// yt-dlp). Signed URLs rot (403 after key rotation), so a cached stream's
+// failure edge goes back to `resolving` with `fresh: true` — ONE retry with a
+// fresh yt-dlp resolve — instead of straight to the download fallback. The
+// fresh resolve produces a `fromCache: false` stream, whose failure edge is
+// the normal download fallback, so the retry cannot loop.
 
 export type StreamInfo = {
   /** Proxied loopback URL, ready to hand to the player (already through buildProxyUrl). */
@@ -36,15 +47,22 @@ export type StreamInfo = {
 
 export type WebPlaybackState =
   | { kind: "inactive" }
-  | { kind: "resolving"; seq: number; url: string }
-  | { kind: "streaming"; seq: number; url: string; stream: StreamInfo; ready: boolean }
+  /** `fresh: true` = the retry after a cached stream URL failed — the
+   *  resolver must bypass the warm cache and ask yt-dlp for new URLs. */
+  | { kind: "resolving"; seq: number; url: string; fresh: boolean }
+  /** `fromCache: true` = playing cached signed URLs (warm boot). Its failure
+   *  edge is a fresh resolve, not the download fallback. */
+  | { kind: "streaming"; seq: number; url: string; stream: StreamInfo; ready: boolean; fromCache: boolean }
   | { kind: "downloading"; seq: number; url: string; jobId: string | null; progress: number }
   | { kind: "cached"; seq: number; url: string; cachePath: string }
   | { kind: "failed"; seq: number; url: string; message: string };
 
 export type WebPlaybackAction =
   | { t: "LOAD"; seq: number; url: string; mode: "stream-first" | "download-first" }
-  | { t: "RESOLVED"; seq: number; stream: StreamInfo }
+  /** Warm boot: a complete downloaded copy exists on disk — skip
+   *  resolve/proxy entirely and boot LocalMediaPlayer from the file. */
+  | { t: "LOAD_CACHED"; seq: number; url: string; cachePath: string }
+  | { t: "RESOLVED"; seq: number; stream: StreamInfo; fromCache: boolean }
   | { t: "RESOLVE_FAILED"; seq: number }
   | { t: "PLAYER_READY"; seq: number }
   | { t: "MEDIA_ERROR"; seq: number }
@@ -70,12 +88,15 @@ export function webPlaybackReducer(
   state: WebPlaybackState,
   action: WebPlaybackAction,
 ): WebPlaybackState {
-  // RESET and LOAD are seq-agnostic (they (re)start the lifecycle).
+  // RESET, LOAD and LOAD_CACHED are seq-agnostic (they (re)start the lifecycle).
   if (action.t === "RESET") return INITIAL_WEB_PLAYBACK;
   if (action.t === "LOAD") {
     return action.mode === "download-first"
       ? startDownload(action.seq, action.url)
-      : { kind: "resolving", seq: action.seq, url: action.url };
+      : { kind: "resolving", seq: action.seq, url: action.url, fresh: false };
+  }
+  if (action.t === "LOAD_CACHED") {
+    return { kind: "cached", seq: action.seq, url: action.url, cachePath: action.cachePath };
   }
 
   // Every other action is seq-scoped: silently drop anything that doesn't
@@ -86,13 +107,30 @@ export function webPlaybackReducer(
   switch (state.kind) {
     case "resolving":
       if (action.t === "RESOLVED")
-        return { kind: "streaming", seq: state.seq, url: state.url, stream: action.stream, ready: false };
+        return {
+          kind: "streaming",
+          seq: state.seq,
+          url: state.url,
+          stream: action.stream,
+          ready: false,
+          fromCache: action.fromCache,
+        };
       if (action.t === "RESOLVE_FAILED") return startDownload(state.seq, state.url);
       return state;
 
     case "streaming":
       if (action.t === "PLAYER_READY") return state.ready ? state : { ...state, ready: true };
-      if (action.t === "MEDIA_ERROR" || action.t === "WATCHDOG") return startDownload(state.seq, state.url);
+      if (action.t === "MEDIA_ERROR" || action.t === "WATCHDOG") {
+        // A CACHED signed URL died (expired/rotated) — that says nothing
+        // about the source itself, so spend one fresh resolve before the
+        // download fallback. A fresh stream's failure means the MSE path
+        // genuinely can't play this source → download. No player swap
+        // happens on the retry edge: the fresh URL lands in the SAME
+        // streaming state / MSE path.
+        return state.fromCache
+          ? { kind: "resolving", seq: state.seq, url: state.url, fresh: true }
+          : startDownload(state.seq, state.url);
+      }
       return state;
 
     case "downloading":

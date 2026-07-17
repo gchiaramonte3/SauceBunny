@@ -40,6 +40,25 @@ pub(crate) fn find_audio_in_cache(dir: &std::path::Path, prefix: &str) -> Option
     })
 }
 
+/// Local-path purity guard (r112). The local pipeline — probe → mediabunny
+/// CustomSource → ffmpeg playback prep — must never receive a web URL: web
+/// sources belong to the fetch/resolve path (yt-dlp + stream proxy). A URL
+/// landing in a local command means a caller mis-routed a source; fail LOUD
+/// (the team's philosophy) instead of letting PathBuf treat "https://…" as a
+/// weird relative filename and produce a confusing downstream ffmpeg error.
+/// The mirror-image guard already exists on the web side: every yt-dlp
+/// command calls `validate_source_url`, which rejects non-http(s) input.
+pub(crate) fn reject_web_url(command: &str, path: &str) -> Result<(), crate::AppError> {
+    let lower = path.trim_start().to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        return Err(crate::AppError::invalid(format!(
+            "{command} got a web URL instead of a local file path ({path}). \
+             This is a bug: web sources must go through the fetch pipeline."
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 pub struct ClipArgs {
     pub url: String,
@@ -893,6 +912,7 @@ fn parse_ffmpeg_audio(stderr: &str) -> Option<String> {
 
 #[tauri::command]
 pub async fn probe_local_file(app: AppHandle, path: String) -> Result<LocalFileMeta, crate::AppError> {
+    reject_web_url("probe_local_file", &path)?;
     let p = PathBuf::from(&path);
     if !p.exists() {
         // Typed NotFound (not prose in an `Invalid`): the frontend prunes
@@ -1130,6 +1150,7 @@ pub async fn generate_local_thumbnail(
     app: AppHandle,
     args: LocalThumbnailArgs,
 ) -> Result<String, crate::AppError> {
+    reject_web_url("generate_local_thumbnail", &args.input_path)?;
     let in_path = PathBuf::from(&args.input_path);
     if !in_path.is_file() {
         return Err(format!("File not found: {}", args.input_path).into());
@@ -1488,6 +1509,7 @@ pub async fn prepare_local_for_playback(
     app: AppHandle,
     args: PreparePlaybackArgs,
 ) -> Result<String, crate::AppError> {
+    reject_web_url("prepare_local_for_playback", &args.input_path)?;
     let in_path = PathBuf::from(&args.input_path);
     if !in_path.is_file() {
         return Err(format!("Input not found: {}", args.input_path).into());

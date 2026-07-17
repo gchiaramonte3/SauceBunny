@@ -30,9 +30,24 @@ export function tauriMockInit(expectedBuildId: string): void {
   // that whole path; the null fallthrough for read_text_file_capped reads as
   // "no index yet" (fresh store), and ensure_dir_exists/write_bytes_to_path
   // null-resolve as success — boot never blocks on hydration.
+  const emptyCacheCategory = { file_count: 0, bytes_total: 0 };
   const table: Record<string, unknown> = {
     get_backend_build_id: expectedBuildId,
-    get_cache_stats: { total_bytes: 0, entries: 0, files: [] },
+    get_cache_stats: {
+      file_count: 0,
+      bytes_total: 0,
+      path: "/e2e-mock/Caches/com.saucebunny.app",
+      downloads: emptyCacheCategory,
+      audio: emptyCacheCategory,
+      meta: emptyCacheCategory,
+      thumbnails: emptyCacheCategory,
+      scratch: emptyCacheCategory,
+    },
+    clear_all_cache: 0,
+    clear_cache_category: 0,
+    // Warm-boot probe (r112): the smoke run never loads a real web source,
+    // so a cold-boot shape keeps any fetch path on the normal route.
+    get_warm_start: { metadata: null, metadata_stale: true, stream: null, cached_copy: null },
     list_whisper_models: [],
     list_llm_models: [],
     list_audio_input_devices: [],

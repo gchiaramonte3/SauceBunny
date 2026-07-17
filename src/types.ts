@@ -29,6 +29,9 @@ export type { LibraryItemKind } from "./bindings/LibraryItemKind";
 export type { LocalFileMeta } from "./bindings/LocalFileMeta";
 export type { LogEvent } from "./bindings/LogEvent";
 export type { Metadata } from "./bindings/Metadata";
+export type { CacheCategoryStats } from "./bindings/CacheCategoryStats";
+export type { CachedStream } from "./bindings/CachedStream";
+export type { WarmStart } from "./bindings/WarmStart";
 /** Kept under the legacy frontend name; the Rust struct is `ModelProgressEvent`. */
 export type { ModelProgressEvent as ModelDownloadEvent } from "./bindings/ModelProgressEvent";
 export type { ProgressEvent } from "./bindings/ProgressEvent";

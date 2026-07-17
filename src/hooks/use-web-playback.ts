@@ -21,6 +21,7 @@ import { asLogTag, type LogTag } from "../types";
 import type { ProgressEvent } from "../bindings/ProgressEvent";
 import type { DoneEvent } from "../bindings/DoneEvent";
 import type { LogEvent } from "../bindings/LogEvent";
+import type { CachedStream } from "../bindings/CachedStream";
 import {
   webPlaybackReducer,
   INITIAL_WEB_PLAYBACK,
@@ -63,7 +64,13 @@ export type WebPlayback = {
   downloadProgress: number;
   downloadJobId: string | null;
   // ── Actions (stable identities) ──
-  loadWeb: (url: string, mode: "stream-first" | "download-first", seq: number) => void;
+  /** `warmStream` (r112): a still-valid cached resolve from get_warm_start.
+   *  Stream-first loads skip yt-dlp and hand it straight to the proxy/MSE
+   *  path; if it then fails, the machine retries with ONE fresh resolve. */
+  loadWeb: (url: string, mode: "stream-first" | "download-first", seq: number, warmStream?: CachedStream | null) => void;
+  /** Warm boot from a COMPLETE downloaded copy: skip resolve/proxy entirely
+   *  and play the file (LocalMediaPlayer) immediately. */
+  loadCached: (url: string, cachePath: string, seq: number) => void;
   onPlayerReady: () => void;
   /** Returns true if the error was handled (→ download fallback); false if the
    *  caller should fall through to its generic error handling. */
@@ -87,6 +94,10 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
   const proxyBaseFetchedRef = useRef(false);
   const downloadJobIdRef = useRef<string | null>(null);
   const attemptResolverRef = useRef<{ resolve: (p: string) => void; reject: (e: unknown) => void } | null>(null);
+  // Warm-boot stream (r112): cached signed URLs handed in by loadWeb. The
+  // resolve effect consumes this instead of calling yt-dlp — unless the
+  // machine is in a `fresh: true` retry, which bypasses (and clears) it.
+  const warmStreamRef = useRef<{ seq: number; stream: CachedStream } | null>(null);
 
   // Effect keys: only kind / seq / streaming-readiness re-trigger work — NOT
   // download progress (which keeps kind+seq stable, so the download isn't
@@ -123,16 +134,39 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     return () => { mounted = false; unlistens.forEach((u) => u()); };
   }, []);
 
-  // ── Resolve effect: kicks off get_direct_stream_url on entering `resolving`. ──
+  // ── Resolve effect: kicks off get_direct_stream_url on entering `resolving`.
+  //    Warm boot (r112): when loadWeb carried still-valid cached URLs and this
+  //    is NOT a fresh retry, skip yt-dlp entirely and stream from the cache. ──
   useEffect(() => {
     if (kind !== "resolving") return;
     const s = stateRef.current;
     if (s.kind !== "resolving") return;
     const mySeq = s.seq;
     const url = s.url;
+    const fresh = s.fresh;
     let cancelled = false;
     void (async () => {
       const h = helpersRef.current;
+      const warm = warmStreamRef.current;
+      if (fresh) warmStreamRef.current = null; // a failed cached URL must not be replayed
+      if (!fresh && warm && warm.seq === mySeq) {
+        // Cached signed URLs, still inside their validity window: no
+        // extraction. Same proxy/MSE path as a fresh resolve.
+        if (!proxyBaseFetchedRef.current) {
+          proxyBaseRef.current = await invoke<string | null>("get_stream_proxy_base").catch(() => null);
+          proxyBaseFetchedRef.current = true;
+        }
+        if (cancelled) return;
+        const info: StreamInfo = {
+          url: buildProxyUrl(proxyBaseRef.current, warm.stream.video_url),
+          audioUrl: warm.stream.audio_url ?? null,
+          videoCodec: warm.stream.vcodec ?? null,
+          audioCodec: warm.stream.acodec ?? null,
+        };
+        h.appendLog("ok", "cache", "Stream ready from cache");
+        dispatch({ t: "RESOLVED", seq: mySeq, stream: info, fromCache: true });
+        return;
+      }
       try {
         const stream = await invoke<DirectStream>("get_direct_stream_url", {
           url,
@@ -155,7 +189,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
           "yt-dlp",
           `Direct stream ready · ${stream.width ?? "?"}×${stream.height ?? "?"} ${stream.vcodec ?? ""}${stream.audio_url ? " · split A/V merged" : ""} · via 127.0.0.1 proxy`.trim(),
         );
-        dispatch({ t: "RESOLVED", seq: mySeq, stream: info });
+        dispatch({ t: "RESOLVED", seq: mySeq, stream: info, fromCache: false });
       } catch (err) {
         if (cancelled) return;
         const msg = formatError(err);
@@ -168,14 +202,20 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
   }, [kind, seq]);
 
   // ── Watchdog: if the MSE pipeline doesn't open within 15s, fall back. Re-runs
-  //    when `ready` flips (which clears the timer). ──
+  //    when `ready` flips (which clears the timer). For a CACHED stream the
+  //    fallback is a fresh resolve (the URL likely expired), not a download. ──
   useEffect(() => {
     if (kind !== "streaming" || streamingReady) return;
     const mySeq = seq;
     const t = window.setTimeout(() => {
       const h = helpersRef.current;
-      h.appendLog("warn", "media", "Stream didn't open in 15s. Falling back to download.");
-      h.pushNotification("info", "Downloading preview…", "Fetching the file via yt-dlp so you can scrub and mark in-app.");
+      const s = stateRef.current;
+      if (s.kind === "streaming" && s.fromCache) {
+        h.appendLog("info", "cache", "Cached stream didn't open in 15s. Getting a fresh URL.");
+      } else {
+        h.appendLog("warn", "media", "Stream didn't open in 15s. Falling back to download.");
+        h.pushNotification("info", "Downloading preview…", "Fetching the file via yt-dlp so you can scrub and mark in-app.");
+      }
       dispatch({ t: "WATCHDOG", seq: mySeq });
     }, WATCHDOG_MS);
     return () => window.clearTimeout(t);
@@ -256,8 +296,16 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     if (id) void invoke("cancel_job", { jobId: id }).catch(() => { /* best-effort */ });
   }, []);
 
-  const loadWeb = useCallback((url: string, mode: "stream-first" | "download-first", seqArg: number) => {
+  const loadWeb = useCallback((url: string, mode: "stream-first" | "download-first", seqArg: number, warmStream?: CachedStream | null) => {
+    warmStreamRef.current = mode === "stream-first" && warmStream
+      ? { seq: seqArg, stream: warmStream }
+      : null;
     dispatch({ t: "LOAD", seq: seqArg, url, mode });
+  }, []);
+
+  const loadCached = useCallback((url: string, cachePath: string, seqArg: number) => {
+    warmStreamRef.current = null;
+    dispatch({ t: "LOAD_CACHED", seq: seqArg, url, cachePath });
   }, []);
 
   const onPlayerReady = useCallback(() => {
@@ -269,6 +317,13 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     const s = stateRef.current;
     if (s.kind === "streaming") {
       const h = helpersRef.current;
+      if (s.fromCache) {
+        // The cached signed URL rotted (403/expired). One fresh resolve
+        // before the download fallback — no toast, this self-heals fast.
+        h.appendLog("info", "cache", `Cached stream URL failed (${message}). Getting a fresh URL.`);
+        dispatch({ t: "MEDIA_ERROR", seq: s.seq });
+        return true;
+      }
       // r81: not a failure from the user's POV — some sources (HLS-only /
       // live broadcasts) just can't decode in WKWebView's MSE pipeline, so
       // we quietly download a playable copy. Keep it `info`, not `warn`.
@@ -282,6 +337,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
 
   const reset = useCallback(() => {
     cancelActiveJob();
+    warmStreamRef.current = null;
     dispatch({ t: "RESET" });
   }, [cancelActiveJob]);
 
@@ -306,6 +362,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     downloadProgress: state.kind === "downloading" ? state.progress : 0,
     downloadJobId: state.kind === "downloading" ? state.jobId : null,
     loadWeb,
+    loadCached,
     onPlayerReady,
     onMediaError,
     reset,
