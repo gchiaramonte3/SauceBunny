@@ -333,8 +333,22 @@ export function TranscriptViewer({
 
   useEffect(() => {
     if (!autoScroll || activeCueIdx < 0 || !scrollRef.current) return;
-    const el = scrollRef.current.querySelector<HTMLElement>(`[data-cue-idx="${activeCueIdx}"]`);
-    el?.scrollIntoView({ block: "center", behavior: scrollBehavior() });
+    const scroller = scrollRef.current;
+    const el = scroller.querySelector<HTMLElement>(`[data-cue-idx="${activeCueIdx}"]`);
+    if (!el) return;
+    // Follow-scroll exists for PLAYBACK walking the highlight out of view —
+    // never for clicks. A cue that is already visible (you just clicked it,
+    // or it advanced within the viewport) must not move the scroll position;
+    // recentering on every active-cue change made the panel lurch on every
+    // word/speaker click. When the highlight does leave the viewport,
+    // "nearest" nudges it back in at the closest edge instead of yanking it
+    // to center.
+    const sRect = scroller.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const pad = 8;
+    const visible = r.top >= sRect.top + pad && r.bottom <= sRect.bottom - pad;
+    if (visible) return;
+    el.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
   }, [activeCueIdx, autoScroll]);
 
   function onScroll(e: React.UIEvent<HTMLDivElement>) {

@@ -413,17 +413,25 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
     // HLS segments carry AAC in ADTS framing; the MP4 muxer DROPS the audio
     // ("Malformed AAC bitstream") unless it's converted to ASC. Apply ONLY for
     // HLS inputs — running it on already-ASC MP4/DASH audio would corrupt those.
-    if upstream.contains("m3u8") || audio.as_deref().is_some_and(|a| a.contains("m3u8")) {
+    let hls = upstream.contains("m3u8") || audio.as_deref().is_some_and(|a| a.contains("m3u8"));
+    if hls {
         cmd.arg("-bsf:a").arg("aac_adtstoasc");
     }
-    // Re-base the output timeline to zero so the MSE <video>'s currentTime
-    // maps 1:1 to real media time. Without this, the source's start-PTS
-    // offset rides into the fMP4 and the playhead drifts from the audio,
-    // making captions show late. muxpreload/muxdelay 0 drop mux offsets.
-    // make_zero shifts ALL tracks by a single offset, so audio/video stay
-    // aligned (it is NOT a per-stream shift).
-    cmd.arg("-avoid_negative_ts").arg("make_zero")
-        .arg("-muxpreload").arg("0")
+    // Timeline mode (X-Timeline response header tells the frontend which):
+    //  · MP4/DASH → `-copyts`: the fMP4 carries ABSOLUTE source timestamps, so
+    //    the <video>'s currentTime IS source time. This kills the class of bug
+    //    where input-side `-ss` lands on the keyframe AT-OR-BEFORE the request
+    //    (up to a GOP early) while the frontend asserts the requested time:
+    //    audio played content behind the transcript highlight, and the exact
+    //    landing point was unknowable client-side because the rebase erased it.
+    //  · HLS → legacy make_zero rebase: HLS segment PTS is an arbitrary stream
+    //    epoch, not media time, so absolute timestamps would break the clock.
+    if hls {
+        cmd.arg("-avoid_negative_ts").arg("make_zero");
+    } else {
+        cmd.arg("-copyts");
+    }
+    cmd.arg("-muxpreload").arg("0")
         .arg("-muxdelay").arg("0")
         // Pin the video track to a clean 90kHz timescale. A weird source
         // timescale can round each frame's duration and make WKWebView's
@@ -457,9 +465,14 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
     };
 
     let mut headers: Vec<tiny_http::Header> = Vec::new();
+    let timeline_mode = if hls { "rebased" } else { "absolute" };
     for (name, value) in [
         ("Content-Type", "video/mp4"),
         ("Access-Control-Allow-Origin", "*"),
+        // Without the expose header, cross-origin fetch() cannot READ
+        // X-Timeline and the player would silently fall back to rebased math.
+        ("Access-Control-Expose-Headers", "X-Timeline"),
+        ("X-Timeline", timeline_mode),
         ("Cache-Control", "no-store"),
     ] {
         if let Ok(h) = tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()) {

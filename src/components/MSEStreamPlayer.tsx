@@ -114,6 +114,14 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   // seek visibly slid backward to 0.8x the clicked time.
   const onTimeUpdateRef = useRef<Props["onTimeUpdate"]>(undefined);
   useEffect(() => { onTimeUpdateRef.current = onTimeUpdate; }, [onTimeUpdate]);
+  // Timeline mode of the current source's proxy stream (X-Timeline header):
+  // absolute → the fMP4 carries real source timestamps, video.currentTime IS
+  // source time (baseTime/clockOrigin stay 0, rebuilds land exactly on the
+  // requested second); rebased (HLS) → the legacy asserted-baseTime model.
+  const timelineAbsRef = useRef(false);
+  // Absolute-mode rebuilds land here once the buffer covers the request —
+  // input-side -ss starts the stream at the keyframe AT-OR-BEFORE it.
+  const pendingLandRef = useRef<number | null>(null);
 
   const msRef = useRef<MediaSource | null>(null);
   const sbRef = useRef<SourceBuffer | null>(null);
@@ -253,7 +261,8 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         const t = pendingSeekRef.current;
         pendingSeekRef.current = null;
         if (t == null) return;
-        baseTimeRef.current = t;
+        pendingLandRef.current = t;
+        baseTimeRef.current = timelineAbsRef.current ? 0 : t;
         onDiagRef.current?.("info", `seek out-of-buffer → rebuilding from ${t.toFixed(1)}s`);
         teardownRef.current?.();
         rebuildRef.current?.(t);
@@ -367,6 +376,8 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     playingRef.current = false;
     setIsPlaying(false);
     baseTimeRef.current = 0;
+    timelineAbsRef.current = false; // re-learned from the new source's header
+    pendingLandRef.current = null;
     mimeRef.current = null;
     seekingRef.current = false;
     failedRef.current = false;
@@ -570,14 +581,26 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             sb.mode = "segments";
             sbRef.current = sb;
             clockOriginSetRef.current = false; // re-capture for this pipeline
-            const localDur = total > fromSeconds ? total - fromSeconds : 0;
+            const localDur = timelineAbsRef.current ? total : (total > fromSeconds ? total - fromSeconds : 0);
             if (localDur > 0) { try { ms.duration = localDur; } catch { /* ignore */ } }
             sb.addEventListener("updateend", () => {
               // Capture the timeline origin from the first buffered range (later
               // ranges shift forward as old data is evicted, so capture ONCE).
               if (!clockOriginSetRef.current && sb.buffered.length > 0) {
                 clockOriginSetRef.current = true;
-                clockOriginRef.current = sb.buffered.start(0);
+                // Absolute timeline: currentTime IS source time; origin stays 0.
+                clockOriginRef.current = timelineAbsRef.current ? 0 : sb.buffered.start(0);
+              }
+              // Absolute-mode landing: seek to the requested second once the
+              // buffer covers it, so a rebuild lands exactly where the user
+              // clicked instead of the preceding keyframe.
+              if (timelineAbsRef.current && pendingLandRef.current != null && sb.buffered.length > 0) {
+                const land = pendingLandRef.current;
+                const v = videoRef.current;
+                if (v && sb.buffered.end(sb.buffered.length - 1) >= land) {
+                  pendingLandRef.current = null;
+                  try { v.currentTime = land; } catch { /* ignore */ }
+                }
               }
               // First real media data is in the buffer → the pipeline genuinely
               // delivered. NOW fire onReady so the watchdog covered the full path
@@ -603,8 +626,8 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             // New pipeline is positioned at baseTime (video.currentTime 0) —
             // safe to report time again, and resume if we were playing.
             seekingRef.current = false;
-            onTimeUpdateRef.current?.(baseTimeRef.current);
-            onDiagRef.current?.("ok", `pipeline open at ${fromSeconds.toFixed(1)}s → playhead ${baseTimeRef.current.toFixed(1)}s`);
+            onTimeUpdateRef.current?.(fromSeconds);
+            onDiagRef.current?.("ok", `pipeline open at ${fromSeconds.toFixed(1)}s → playhead ${fromSeconds.toFixed(1)}s`);
             if (wantPlayRef.current) {
               wantPlayRef.current = false;
               video.play().catch(() => { /* gesture/autoplay — ignore */ });
@@ -627,6 +650,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
               const resp = await fetch(fmp4Url);
               if (disposed || g !== genRef.current) { try { await resp.body?.cancel(); } catch { /* ignore */ } return; }
               if (!resp.ok || !resp.body) { fail(`fMP4 stream HTTP ${resp.status}`); return; }
+              timelineAbsRef.current = resp.headers.get("x-timeline") === "absolute";
               const reader = resp.body.getReader();
               readerRef.current = reader;
               for (;;) {

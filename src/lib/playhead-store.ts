@@ -42,15 +42,45 @@ export function getPlayheadFrames(): number {
   return playheadFrames;
 }
 
+/** Set by App's seek entry points; arms the dev-only backward-motion canary. */
+let lastUserSeekAt = 0;
+let lastUserSeekFrames = 0;
+export function markUserSeek(frames: number): void {
+  lastUserSeekAt = Date.now();
+  lastUserSeekFrames = frames;
+}
+
 /**
  * Move the playhead. No-ops (and doesn't notify) when the frame is unchanged,
  * so a paused player's timeupdate ticks don't cause re-renders.
  */
 export function setPlayheadFrames(frames: number): void {
   if (frames === playheadFrames) return;
+  // Dev canary (fix-plan step 7): the recurring regression class is "the
+  // playhead moves backward right after a user seek without a user action".
+  // Catch the NEXT one at the single publish point instead of letting the
+  // user rediscover it. Dev-only: stripped from production builds.
+  if (import.meta.env.DEV) {
+    const sinceSeek = Date.now() - lastUserSeekAt;
+    if (sinceSeek < 2000 && lastUserSeekFrames - frames > 30) {
+      console.error(
+        `[playhead-canary] backward publish ${playheadFrames} → ${frames} ` +
+        `(${sinceSeek}ms after a user seek to ${lastUserSeekFrames}). ` +
+        "A writer is fighting the seek. Check fps conversions and stale closures.",
+      );
+    }
+  }
   playheadFrames = frames;
   // Snapshot the set so a listener unsubscribing mid-notify can't skip peers.
   for (const l of [...listeners]) l();
+}
+
+/** The `seconds → frames` conversion every WRITER uses — the exact inverse of
+ *  playheadFramesToSeconds below. Publishing through any other formula is how
+ *  the 24-vs-30 fps split (the 0.8x post-seek slide) shipped: one conversion,
+ *  one place. */
+export function playheadSecondsToFrames(seconds: number, fps: number): number {
+  return Math.floor(seconds * Math.max(1, Math.round(fps)));
 }
 
 /** Subscribe to playhead changes. Returns the unsubscribe function. */

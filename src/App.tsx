@@ -36,7 +36,7 @@ import type {
 import { asLogTag } from "./types";
 import { formatError, isAppError } from "./lib/error-format";
 import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase";
-import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, subscribePlayhead } from "./lib/playhead-store";
+import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek, subscribePlayhead } from "./lib/playhead-store";
 import { clampSeekFrames, maxSeekSeconds } from "./lib/playhead-clock";
 import { usePanelBus } from "./hooks/use-panel-bus";
 import { useWebPlayback } from "./hooks/use-web-playback";
@@ -1467,8 +1467,9 @@ export default function App() {
   // ====== Player callbacks ======
   // Sync our playhead from the YouTube player's current time while it's playing.
   const onPlayerTimeUpdate = useCallback((seconds: number) => {
-    const r = Math.max(1, Math.round(fps));
-    publishPlayheadFrames(Math.floor(seconds * r));
+    // ONE conversion formula, owned by the store — publishing through any
+    // other math is how the 24-vs-30 fps split (0.8x post-seek slide) shipped.
+    publishPlayheadFrames(playheadSecondsToFrames(seconds, fps));
   }, [fps]);
 
   const onPlayerStateChange = useCallback((playing: boolean) => {
@@ -3638,7 +3639,7 @@ export default function App() {
     // maxSeekSeconds is Infinity while the duration is unknown, so a jump can
     // never be dragged backward by a missing/lying metadata duration.
     const targetSec = Math.max(0, Math.min(maxSeekSeconds(durationFrames, fps), currentSec + deltaSec));
-    publishPlayheadFrames(Math.floor(targetSec * r));
+    publishPlayheadFrames(playheadSecondsToFrames(targetSec, fps));
     if (p?.isReady()) p.seekTo(targetSec);
   }, [fps, durationFrames, exitShuttle]);
 
@@ -3749,6 +3750,7 @@ export default function App() {
     // never clamp — the old inline `min(durationFrames - 1, f)` sent every
     // click to frame 0 whenever metadata hadn't arrived (or lied short).
     const clamped = clampSeekFrames(f, durationFrames);
+    markUserSeek(clamped); // arms the store's dev backward-motion canary
     publishPlayheadFrames(clamped);
     playerRef.current?.seekTo?.(clamped / r);
   }, [durationFrames, fps, exitShuttle]);
