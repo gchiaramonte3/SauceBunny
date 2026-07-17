@@ -89,7 +89,7 @@ export function Transport({
           <button className="cp-icon-btn" title="Mark out (O)" aria-label="Mark out" onClick={onMarkOut}>
             <IconMarkOut size={15} />
           </button>
-          <button className="cp-icon-btn" title="Clear marks (G)" aria-label="Clear marks" onClick={onClearMarks}>
+          <button className="cp-icon-btn" title="Clear in/out (G)" aria-label="Clear in/out" onClick={onClearMarks}>
             <IconClearMarks size={15} />
           </button>
         </div>

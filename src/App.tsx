@@ -2493,7 +2493,7 @@ export default function App() {
     setClipQueue((prev) => [...prev, item]);
     // Queueing consumes the selection — record the clear so ⌘Z restores the
     // marks (the queued item itself stays put; queue ops aren't undoable).
-    pushMarksUndo("clear marks", inFrames, outFrames, null, null);
+    pushMarksUndo("clear in/out", inFrames, outFrames, null, null);
     setInFrames(null);
     setOutFrames(null);
     setQueueOpen(true);
@@ -3642,7 +3642,7 @@ export default function App() {
   // Clear literally clears — no selection at all.
   const onClearMarks = useCallback(() => {
     if (inFrames != null || outFrames != null) {
-      pushMarksUndo("clear marks", inFrames, outFrames, null, null);
+      pushMarksUndo("clear in/out", inFrames, outFrames, null, null);
     }
     setInFrames(null);
     setOutFrames(null);

@@ -202,20 +202,22 @@ export const IconCoReview = (p: IconProps) => (
     <path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
   </Icon>
 );
+// NLE mark pair — the bracket glyphs every editor's muscle memory expects:
+// Mark In is "[" (bar LEFT, arms opening right), Mark Out is "]". The pair is
+// an exact pixel mirror (x → 24−x: bar 9↔15, arm tips 15↔9), not two freehand
+// drawings. Same bar-plus-arms stroke style as IconClearMarks / IconRange.
 export const IconMarkIn = (p: IconProps) => (
   <Icon {...p} strokeWidth={2}>
-    <path d="M7 4v16" strokeLinecap="square" />
-    <path d="M7 4h6" />
-    <path d="M7 20h6" />
-    <polygon points="13 8 19 12 13 16" fill="currentColor" stroke="none" />
+    <path d="M9 5v14" strokeLinecap="square" />
+    <path d="M9 5h6" />
+    <path d="M9 19h6" />
   </Icon>
 );
 export const IconMarkOut = (p: IconProps) => (
   <Icon {...p} strokeWidth={2}>
-    <path d="M17 4v16" strokeLinecap="square" />
-    <path d="M17 4h-6" />
-    <path d="M17 20h-6" />
-    <polygon points="11 8 5 12 11 16" fill="currentColor" stroke="none" />
+    <path d="M15 5v14" strokeLinecap="square" />
+    <path d="M15 5h-6" />
+    <path d="M15 19h-6" />
   </Icon>
 );
 export const IconClearMarks = (p: IconProps) => (

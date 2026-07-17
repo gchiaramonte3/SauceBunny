@@ -62,7 +62,7 @@ export const KEY_ACTIONS: KeyAction[] = [
   { id: "play.rateReset",  label: "Reset playback speed",    group: "Transport", defaults: ["\\"],                  global: false },
   { id: "mark.in",         label: "Mark in",               group: "Marking",   defaults: ["i"],                     global: false },
   { id: "mark.out",        label: "Mark out",              group: "Marking",   defaults: ["o"],                     global: false },
-  { id: "mark.clear",      label: "Clear marks",           group: "Marking",   defaults: ["g"],                     global: false },
+  { id: "mark.clear",      label: "Clear in/out",          group: "Marking",   defaults: ["g"],                     global: false },
   { id: "mark.gotoIn",     label: "Go to mark in",         group: "Marking",   defaults: ["q"],                     global: false },
   { id: "mark.gotoOut",    label: "Go to mark out",        group: "Marking",   defaults: ["w"],                     global: false },
   // Review comment-range marks — the ⇧-flavored twins of I/O. Bare I/O set the

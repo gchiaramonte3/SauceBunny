@@ -311,8 +311,10 @@ export function Timeline({
                 />
               );
             })}
-            {/* Full range when both marks are set — the orange fill IS the
-                visual, no decorative handles needed. */}
+            {/* Full range when both marks are set. The edges carry small
+                "[" / "]" bracket caps (CSS pseudo-elements on
+                .cp-track-selection) echoing the IconMarkIn / IconMarkOut
+                transport glyphs — one dialect from button to timeline. */}
             {inFrames != null && outFrames != null && outFrames > inFrames && (
               <div
                 className="cp-track-selection"

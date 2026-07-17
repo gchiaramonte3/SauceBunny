@@ -306,6 +306,22 @@
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -1px 0 rgba(255,255,255,0.14);
   z-index: 2;
 }
+/* Bracket caps on the selection edges — the same "[" / "]" dialect as the
+   transport's IconMarkIn / IconMarkOut: short arms at top and bottom opening
+   INTO the selection. Pseudo-elements only (pointer-events: none), so the
+   scrub hit area and drag behavior are untouched. */
+.cp-track-selection::before,
+.cp-track-selection::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 5px;
+  border-top: 2px solid var(--marker);
+  border-bottom: 2px solid var(--marker);
+  pointer-events: none;
+}
+.cp-track-selection::before { left: 0; }
+.cp-track-selection::after  { right: 0; }
 /* Already-queued ranges — the section visibly RECEDES: the film beneath goes
    dark + desaturated (backdrop-filter) under a scrim + faint hatching, with
    bright edge posts. The old 10%-white wash was invisible over a filmstrip.
@@ -378,6 +394,23 @@
   background: var(--marker);
   box-shadow: 0 0 0 1px rgba(0,0,0,0.55);
 }
+/* Solo-mark bracket caps — arms open toward where the selection will grow:
+   right from an in mark ("["), left from an out mark ("]"). Same 2px weight
+   and dark outline as the bar so they hold up over bright filmstrip frames. */
+.cp-track-mark::before,
+.cp-track-mark::after {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 2px;
+  background: var(--marker);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.55);
+  pointer-events: none;
+}
+.cp-track-mark::before { top: 0; }
+.cp-track-mark::after  { bottom: 0; }
+.cp-track-mark.in::before,  .cp-track-mark.in::after  { left: 100%; }
+.cp-track-mark.out::before, .cp-track-mark.out::after { right: 100%; }
 /* Chapter markers — thin NEUTRAL ticks hugging the TOP edge of the track
    (auto-chapters, AI Summary tab). Deliberately unlike the reviewer-tinted
    comment dots: short, quiet, and top-anchored so they never obscure the
