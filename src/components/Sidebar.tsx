@@ -20,6 +20,9 @@ import { decodeHtmlEntities } from "../lib/text";
 type Props = {
   /** False → collapsed to zero width (toolbar's sidebar toggle). */
   open?: boolean;
+  /** Arms App's filename dirty flag: a user-typed name survives source
+   *  switches; a seeded name reseeds from the next source. */
+  onFilenameEdit?: () => void;
   status: AppStatus;
   metadata: Metadata | null;
   exportOpts: ExportOpts;
@@ -142,7 +145,7 @@ function extFromUrl(url: string): string {
 
 export function Sidebar(props: Props) {
   const {
-    status, metadata, exportOpts, setExportOpts,
+    status, metadata, exportOpts, setExportOpts, onFilenameEdit,
     recents, onExport, exportPhase, onExportResolved, onReveal, onPickRecent, onClearRecents,
     onAddToQueue, queueCount, queueRunning, onExportQueue,
     onDownloadCaptions, captionsState, captionsError,
@@ -536,7 +539,7 @@ export function Sidebar(props: Props) {
                 type="text"
                 className="cp-input"
                 value={exportOpts.filename}
-                onChange={(e) => setExportOpts({ ...exportOpts, filename: e.target.value })}
+                onChange={(e) => { onFilenameEdit?.(); setExportOpts({ ...exportOpts, filename: e.target.value }); }}
                 style={{ fontFamily: "var(--font-ui)" }}
                 /* Spell-check ON — filenames are usually prose ("interview
                    with marc", "demo final cut") and a misspelled file is

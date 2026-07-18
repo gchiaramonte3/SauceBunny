@@ -473,3 +473,26 @@ test("recent sources: popover lists seeded entries, empty state offers resume", 
   await expect(pop).toHaveCount(0);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
+
+test("new-source reset: filename reseeds per source, user-typed name survives", async ({ page }) => {
+  await boot(page);
+  const url = page.locator("input[placeholder^='Paste a video URL']");
+  const filename = page.locator(".cp-field", { hasText: "Filename" }).locator("input");
+
+  // Fetch A → filename seeds from A's title (dirty flag off).
+  await url.fill("https://youtube.com/watch?v=aaaa");
+  await page.getByRole("button", { name: /^Fetch/ }).click();
+  await expect(filename).toHaveValue("Source-A-title", { timeout: 10_000 });
+
+  // Fetch B → the seed MUST reseed (the old prev.filename heuristic kept A).
+  await url.fill("https://youtube.com/watch?v=bbbb");
+  await page.getByRole("button", { name: /^Fetch/ }).click();
+  await expect(filename).toHaveValue("Source-B-title", { timeout: 10_000 });
+
+  // Type a custom name (arms the dirty flag), refetch A → custom SURVIVES.
+  await filename.fill("my-custom-name");
+  await url.fill("https://youtube.com/watch?v=aaaa");
+  await page.getByRole("button", { name: /^Fetch/ }).click();
+  await expect(filename).toHaveValue("my-custom-name", { timeout: 10_000 });
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});

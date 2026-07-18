@@ -1526,7 +1526,43 @@ export default function App() {
    * from a clean slate. Critically resets `sourceKind` + `localFilePath` so
    * the Monitor doesn't render the old player while the new source loads.
    */
+  // ── Filename dirty flag ──────────────────────────────────────────
+  // True ONLY after the user edits the filename input (Sidebar calls
+  // markFilenameEdited); reset on every new source load. The hydrate rule:
+  // edited → keep the user's name; not edited → ALWAYS reseed from the new
+  // source. Replaces the old `prev.filename !== "clip"` heuristic, which
+  // could not tell "user typed a name" from "seeded from the PREVIOUS
+  // source's title" and left source A's name (and the window title) on
+  // source B.
+  const filenameEditedRef = useRef(false);
+  const markFilenameEdited = useCallback(() => { filenameEditedRef.current = true; }, []);
+
+  /**
+   * Source-scoped reset — called at the TOP of every load path (handleFetch,
+   * loadLocalPath, transcript-history opens). THE invariant: any future
+   * source-scoped state must be cleared here.
+   * CLEARED: playback/prep + captions/transcript jobs (canceled + disowned),
+   *   metadata, error detail, rot verdict, logs, result path, progress,
+   *   captions/transcript state, marks + TC fields, fetch/export phases,
+   *   transcript resolution, ffmpeg clip job, filename dirty flag, and the
+   *   filename itself when not user-edited (so the field and the WINDOW
+   *   TITLE never show the previous source while the new one hydrates).
+   * KEPT (deliberately): the export queue + its history (job log spans
+   *   sources), notifications, settings/prefs, review docs (keyed per
+   *   source; they swap on their own), recents, the spent-URL rot map.
+   *   The undo stack clears via its own sourceKey effect.
+   */
   const resetForNewSource = useCallback(() => {
+    // NOTE the flag deliberately does NOT reset here: the spec's own e2e
+    // requires a user-typed name to SURVIVE a refetch, which contradicts a
+    // literal reset-on-every-load. Sticky-once-edited is the behavior the
+    // acceptance test demands; the flag only ever arms on a real keystroke.
+    if (!filenameEditedRef.current) {
+      // Clear a non-edited filename immediately: titleSuffix derives from
+      // it, so the previous source's name must not linger in the titlebar
+      // during the fetch window. Hydrate reseeds from the new title.
+      setExportOpts((prev) => (prev.filename === "clip" ? prev : { ...prev, filename: "clip" }));
+    }
     // Stop any currently-playing media before swapping components.
     try { playerRef.current?.pause(); } catch { /* ignore */ }
     // Kill any in-flight ffmpeg playback-prep job from the previous source —
@@ -1720,7 +1756,7 @@ export default function App() {
       setExportOpts((prev) => ({
         ...prev,
         captions: defaults.captions && wm.has_subs,
-        filename: prev.filename && prev.filename !== "clip"
+        filename: filenameEditedRef.current && prev.filename
           ? prev.filename
           : suggestFilename(wm.title),
       }));
@@ -1830,8 +1866,9 @@ export default function App() {
       setExportOpts((prev) => ({
         ...prev,
         captions: defaults.captions && m.has_subs,
-        // Only auto-suggest a filename if the user hasn't typed their own.
-        filename: prev.filename && prev.filename !== "clip"
+        // Keep the name only if the USER typed it (dirty flag) — a seed from
+        // the previous source must not survive onto this one.
+        filename: filenameEditedRef.current && prev.filename
           ? prev.filename
           : suggestFilename(m.title),
       }));
@@ -2332,7 +2369,7 @@ export default function App() {
         // back on if they actually want audio-only.
         format: prev.format === "audio" ? "1080" : prev.format,
         filename:
-          prev.filename && prev.filename !== "clip"
+          filenameEditedRef.current && prev.filename
             ? prev.filename
             : suggestFilename(lf.filename.replace(/\.[^.]+$/, "")),
       }));
@@ -4549,6 +4586,7 @@ export default function App() {
                 onExit={() => setScreening(false)}
               />
               <Sidebar
+                onFilenameEdit={markFilenameEdited}
                 open={sidebarOpen}
                 status={status}
                 metadata={metadata}

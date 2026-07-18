@@ -48,6 +48,30 @@ export function tauriMockInit(expectedBuildId: string): void {
     // Warm-boot probe (r112): the smoke run never loads a real web source,
     // so a cold-boot shape keeps any fetch path on the normal route.
     get_warm_start: { metadata: null, metadata_stale: true, stream: null, cached_copy: null },
+    // Two-source reset spec: per-URL titles so filename seeding is
+    // observable. The stream resolver rejects benignly (caught by the web
+    // machine as a fetch failure) — metadata hydrate still runs, which is
+    // all the filename/title assertions need.
+    fetch_metadata: (args: Record<string, unknown>) => {
+      const url = String((args as { url?: string }).url ?? "");
+      const which = url.includes("bbbb") ? "B" : "A";
+      return {
+        title: `Source ${which} title`,
+        webpage_url: url,
+        uploader: "e2e",
+        duration: 120,
+        fps: 30,
+        width: 1920,
+        height: 1080,
+        has_subs: false,
+        thumbnail: null,
+        extractor: "youtube",
+        view_count: null,
+        upload_date: null,
+      };
+    },
+    get_direct_stream_url: () => Promise.reject(new Error("e2e: no stream")),
+    download_audio_track: () => Promise.reject(new Error("e2e: no audio")),
     list_whisper_models: [],
     list_llm_models: [],
     list_audio_input_devices: [],
