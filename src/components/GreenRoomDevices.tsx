@@ -144,7 +144,12 @@ export function GreenRoomDevices({ cap, onContinue }: {
       {cap.error && <p className="cp-colobby-err" role="alert">{cap.error}</p>}
 
       <div className="cp-gr-devices-foot">
-        <button type="button" className="btn btn-primary cp-colobby-cta" onClick={onContinue}>
+        {/* P7 one-green-per-face: pre-grant, "Enable camera and microphone"
+            is the face's primary - Continue stays quiet until a stream
+            exists (or the user is skipping devices entirely). */}
+        <button type="button"
+          className={"btn " + (cap.stream || cap.permission === "denied" ? "btn-primary" : "btn-ghost") + " cp-colobby-cta"}
+          onClick={onContinue}>
           Continue
         </button>
         {!cap.stream && cap.permission !== "granted" && (

@@ -169,8 +169,11 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                     <input className="cp-colobby-input" value={ticket} spellCheck={false}
                       onChange={(e) => setTicket(e.target.value)} placeholder="Paste a join code" />
                   </label>
+                  {/* P7: neutral until code + name validate, then it arms to
+                      the primary green; the .join floor stops the width jump
+                      while "Connecting…" is in flight. */}
                   <button type="button"
-                    className={"btn " + (joinReady ? "btn-primary" : "btn-ghost") + " cp-colobby-cta"}
+                    className={"btn " + (joinReady ? "btn-primary" : "btn-ghost") + " cp-colobby-cta join"}
                     disabled={!joinReady || joining} onClick={joinSession}>
                     {joining ? "Connecting…" : "Join"}
                   </button>

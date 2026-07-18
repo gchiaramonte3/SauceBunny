@@ -286,3 +286,11 @@ Commit: `session: short invite codes; ytdlp: verified update path everywhere`
   collapsed handle + Copy invite; joins accept chat-wrapped pastes.
   yt-dlp updates verify (--version parses date-shaped) before replacing
   the previous copy; the resolver logs which copy runs on every spawn.
+
+- P7 (added after the first run): lobby buttons hug their labels (88px
+  floor, 280px cap, centered); Join arms green only when code + name
+  validate and holds its width through "Connecting…"; the devices step
+  keeps ONE green (Enable pre-grant, Continue after); End/Leave is a
+  quiet text button. Deviation: "Enter theater" no longer exists - the
+  session ROOM replaces the in-session lobby automatically, so that face
+  has no green primary by design.

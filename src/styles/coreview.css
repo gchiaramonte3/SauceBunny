@@ -121,11 +121,21 @@
 }
 .cp-colobby-input::placeholder { color: var(--fg-5); }
 /* Full-width action closing each card — one button height (.btn's 30px). */
+/* P7: buttons hug their labels - no card-spanning CTAs. min-width keeps
+   short labels stable; the cap stops any label from going banner-wide. */
 .cp-colobby-cta {
-  width: 100%;
+  width: auto;
+  min-width: 88px;
+  max-width: 280px;
+  align-self: center;
   justify-content: center;
   margin-top: var(--s-1);
+  padding-left: 18px;
+  padding-right: 18px;
 }
+/* The join CTA swaps "Join" for "Connecting…" - a fixed floor stops the
+   width jump while it is in flight. */
+.cp-colobby-cta.join { min-width: 132px; }
 
 /* ── Local-file caveat — a single quiet line tucked under the Host card. ── */
 .cp-colobby-hint {
@@ -299,11 +309,11 @@
   font-family: var(--font-ui);
   font-size: 12px;
   font-weight: 600;
-  color: var(--fg-4);
+  color: var(--fg-3);
   cursor: pointer;
   transition: color var(--dur-fast) var(--ease-out);
 }
-.cp-colobby-leave:hover { color: var(--color-destructive); }
+.cp-colobby-leave:hover { color: var(--fg-1); }
 
 @media (prefers-reduced-motion: reduce) {
   .cp-colobby-live { animation: none; }
