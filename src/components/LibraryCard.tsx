@@ -148,6 +148,12 @@ export function LibraryCard({
                   if (remoteUrls) setRemoteIdx((i) => i + 1);
                   else setBroken(true);
                 }}
+                // YouTube serves its "no thumbnail" placeholder with HTTP 200
+                // (always 120x90; real thumbs are >= 320 wide), so onError never
+                // fires for it. Detect it on LOAD and advance the walk.
+                onLoad={(e) => {
+                  if (remoteUrls && e.currentTarget.naturalWidth <= 120) setRemoteIdx((i) => i + 1);
+                }}
               />
               {/* Hover cycle overlays — stacked over the poster, one "on" at a
                   time (CSS cross-dissolve). Unmounting them (stopCycle) IS the

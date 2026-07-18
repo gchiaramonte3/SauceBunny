@@ -91,6 +91,11 @@ export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl }: Props) 
           alt=""
           draggable={false}
           onError={() => setFailed((f) => [...f, backdrop])}
+          // YouTube's 120x90 "no thumbnail" placeholder arrives with HTTP 200;
+          // treat a placeholder-sized load as a miss so the walk advances.
+          onLoad={(e) => {
+            if (e.currentTarget.naturalWidth <= 120) setFailed((f) => [...f, backdrop]);
+          }}
         />
       )}
       <div className="cp-lib-hero-shade" />

@@ -714,6 +714,14 @@ export default function App() {
   const setActiveView = useCallback((v: AppView) => {
     setActiveViewState(v);
     saveJson(ACTIVE_VIEW_KEY, v);
+    // Arriving at Clip always presents the full workbench: both side panels
+    // open on EVERY entry (nav, shortcut, imports all route through here).
+    // Raw setters on purpose — this is an arrival default, not a user toggle,
+    // so it must not overwrite the persisted preference the toggles write.
+    if (v === "clip") {
+      setSidebarOpen(true);
+      setQueueOpen(true);
+    }
   }, []);
   /**
    * Home-reset signal for the Library: bumped whenever Home is chosen
