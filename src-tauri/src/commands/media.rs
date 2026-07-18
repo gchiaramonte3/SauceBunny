@@ -156,9 +156,11 @@ pub async fn create_clip(app: AppHandle, args: ClipArgs) -> Result<String, crate
     if cur_ext.as_deref() != Some(target_ext) {
         output_path.set_extension(target_ext);
     }
-    if output_path.exists() {
-        return Err(format!("File already exists: {}", output_path.display()).into());
-    }
+    // Collisions NEVER fail: walk -2, -3, ... at the final path (the byte
+    // budget in sanitize_filename reserved room for the suffix). The chosen
+    // path flows back through the existing done event, so the notification
+    // shows the name actually written.
+    output_path = unique_output_path(&out_dir, &output_path, target_ext);
     let output_str = output_path
         .to_str()
         .ok_or_else(|| crate::AppError::internal("output path is not valid utf-8"))?
@@ -2210,3 +2212,61 @@ mod nightly_media_tests {
     }
 }
 
+/// Disk-level filename uniquing: if `<dir>/<base>.<ext>` exists, try
+/// `<base>-2.<ext>`, `<base>-3.<ext>`, ... Never errors on collision; the
+/// caller gets the first free path. 10_000 is an absurdity backstop.
+pub(crate) fn unique_output_path(dir: &std::path::Path, wanted: &std::path::Path, ext: &str) -> std::path::PathBuf {
+    if !wanted.exists() {
+        return wanted.to_path_buf();
+    }
+    let stem = wanted
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("clip")
+        .to_string();
+    let mut n = 2u32;
+    loop {
+        let candidate = dir.join(format!("{stem}-{n}.{ext}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        n += 1;
+        if n > 10_000 {
+            return dir.join(format!("{stem}-{}.{ext}", std::process::id()));
+        }
+    }
+}
+
+#[cfg(test)]
+mod filename_tests {
+    use super::*;
+    use crate::commands::{truncate_utf8_bytes, MAX_BASE_BYTES};
+
+    #[test]
+    fn truncate_never_splits_multibyte() {
+        // Emoji are 4 bytes; a cut mid-emoji must back off to the boundary.
+        let s = "clip-\u{1F600}\u{1F600}\u{1F600}";
+        let t = truncate_utf8_bytes(s, 7); // "clip-" is 5 bytes; emoji needs 4
+        assert_eq!(t, "clip-");
+        // CJK (3 bytes each): budget 8 fits two, not three.
+        let c = "\u{65E5}\u{672C}\u{8A9E}";
+        assert_eq!(truncate_utf8_bytes(c, 8), "\u{65E5}\u{672C}");
+        // Within budget passes through untouched.
+        assert_eq!(truncate_utf8_bytes("short", MAX_BASE_BYTES), "short");
+    }
+
+    #[test]
+    fn uniquing_walks_and_never_errors() {
+        let dir = std::env::temp_dir().join(format!("sb-uniq-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = dir.join("take.mp4");
+        // Free path returns itself.
+        assert_eq!(unique_output_path(&dir, &base, "mp4"), base);
+        std::fs::write(&base, b"x").unwrap();
+        let two = unique_output_path(&dir, &base, "mp4");
+        assert_eq!(two, dir.join("take-2.mp4"));
+        std::fs::write(&two, b"x").unwrap();
+        assert_eq!(unique_output_path(&dir, &base, "mp4"), dir.join("take-3.mp4"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

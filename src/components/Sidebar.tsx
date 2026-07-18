@@ -12,7 +12,7 @@ import type { AppStatus, ExportOpts, FormatId, Metadata, RecentClip } from "../t
 import type { StatefulPhase } from "../lib/stateful-phase";
 import { isValidTc, normalizeTc, tcToFrames } from "../lib/timecode";
 import { formatRelative, formatUploadDate, formatViewCount } from "../lib/upload-date";
-import { sanitizeFilename } from "../lib/filename";
+import { middleEllipsize, sanitizeFilename } from "../lib/filename";
 import { formatError } from "../lib/error-format";
 import { hostnameOf } from "../lib/validation";
 import { decodeHtmlEntities } from "../lib/text";
@@ -545,9 +545,20 @@ export function Sidebar(props: Props) {
                 spellCheck
                 lang="en"
                 autoCorrect="off" /* don't silently rewrite the filename */
+                title={exportOpts.filename}
               />
-              {/* "Saves as" preview row was removed (r39) — the filename
-                  input + format pill already telegraph the same info. */}
+              {/* Live preview of the ACTUAL final name: the TS mirror of the
+                  byte-budget pipeline (sanitize + 180-byte cut). Typing is
+                  never blocked; this line is how truncation shows itself.
+                  Disk-level uniquing (-2, -3) happens in Rust at export. */}
+              {filenameValid && (
+                <div
+                  className="cp-save-preview"
+                  title={`${sanitizeFilename(exportOpts.filename)}.${exportOpts.format === "audio" ? "mp3" : "mp4"}`}
+                >
+                  Saves as {middleEllipsize(sanitizeFilename(exportOpts.filename))}.{exportOpts.format === "audio" ? "mp3" : "mp4"}
+                </div>
+              )}
             </div>
 
             <div className="cp-field">

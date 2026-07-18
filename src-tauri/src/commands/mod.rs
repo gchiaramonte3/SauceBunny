@@ -174,6 +174,25 @@ fn timecode_to_seconds(tc: &str, fps: f64) -> Result<f64, crate::AppError> {
     Ok(seconds)
 }
 
+/// Byte budget for the user-visible BASE filename. macOS/APFS caps a full
+/// filename at 255 UTF-8 BYTES; 180 leaves room for uniquing suffixes
+/// ("-12"), pipeline suffixes, and extensions. MIRRORED in
+/// src/lib/filename.ts MAX_BASE_BYTES — keep both in sync (vitest parity
+/// cases pin the shared behavior).
+pub(crate) const MAX_BASE_BYTES: usize = 180;
+
+/// Truncate to a UTF-8 byte budget WITHOUT splitting a multi-byte character.
+pub(crate) fn truncate_utf8_bytes(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 fn sanitize_filename(name: &str) -> String {
     let trimmed = name.trim();
     let cleaned: String = trimmed
@@ -184,7 +203,13 @@ fn sanitize_filename(name: &str) -> String {
             c => c,
         })
         .collect();
-    cleaned.trim_matches('.').to_string()
+    let cleaned = cleaned.trim_matches('.');
+    // Enforce the byte budget here so EVERY consumer (create_clip, the
+    // download path) inherits it; trailing separators left by the cut are
+    // noise, not meaning.
+    truncate_utf8_bytes(cleaned, MAX_BASE_BYTES)
+        .trim_end_matches(['-', '_', '.', ' '])
+        .to_string()
 }
 
 

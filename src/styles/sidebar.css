@@ -572,3 +572,15 @@
   text-underline-offset: 2px;
 }
 .cp-folder-nudge-link:hover { color: var(--fg-0); }
+
+/* "Saves as" preview under the filename field — the visible truth of the
+   byte-budget pipeline. One quiet line; full name in its tooltip. */
+.cp-save-preview {
+  margin-top: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
