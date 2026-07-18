@@ -319,6 +319,73 @@ fn ffmpeg_path() -> Option<std::path::PathBuf> {
         .clone()
 }
 
+/// Resolve the bundled ffprobe sidecar (same layout rules as ffmpeg_path).
+fn ffprobe_path() -> Option<std::path::PathBuf> {
+    static FFPROBE: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+    FFPROBE
+        .get_or_init(|| {
+            let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+            for name in ["ffprobe", "ffprobe-aarch64-apple-darwin"] {
+                let p = dir.join(name);
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+            None
+        })
+        .clone()
+}
+
+/// Probe the first video packet at-or-before `start` in `upstream` — the
+/// keyframe that ffmpeg's input-side `-ss {start}` lands on, whose dts is
+/// exactly the constant the fragmented-MP4 muxer subtracts from the whole
+/// remux (RC7). Both use the same avformat backward seek, so they land on
+/// the same packet. `%+#48` bounds the read window while guaranteeing a
+/// video packet shows up even when a muxed source interleaves audio first.
+fn probe_stream_epoch(upstream: &str, start: f64) -> Option<f64> {
+    let fp = ffprobe_path()?;
+    let out = std::process::Command::new(fp)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            // Bound each network read (µs) — a stalled CDN must not wedge
+            // the stream request behind a hung probe.
+            "-rw_timeout",
+            "8000000",
+            "-user_agent",
+            SAFARI_UA,
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "packet=pts_time,dts_time",
+            "-of",
+            "json",
+            "-read_intervals",
+        ])
+        .arg(format!("{start}%+#48"))
+        .arg(upstream)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_stream_epoch(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Extract the epoch from ffprobe's JSON packet list: the first video
+/// packet's dts, falling back to pts when dts is absent ("N/A") — off by at
+/// most the b-frame reorder delay, still far inside the keyframe gap.
+fn parse_stream_epoch(json: &str) -> Option<f64> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let p = v.get("packets")?.get(0)?;
+    let t = ["dts_time", "pts_time"]
+        .iter()
+        .find_map(|k| p.get(*k)?.as_str()?.parse::<f64>().ok())?;
+    (t.is_finite() && t >= 0.0).then_some(t)
+}
+
 /// Pull the `start=<seconds>` query value out of the request path. Returns
 /// 0.0 when absent/malformed. Fractional seconds are allowed (ffmpeg `-ss`).
 fn parse_start_query(url_path: &str) -> f64 {
@@ -418,12 +485,19 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
         cmd.arg("-bsf:a").arg("aac_adtstoasc");
     }
     // Timeline mode (X-Timeline response header tells the frontend which):
-    //  · MP4/DASH → `-copyts`: the fMP4 carries ABSOLUTE source timestamps, so
-    //    the <video>'s currentTime IS source time. This kills the class of bug
-    //    where input-side `-ss` lands on the keyframe AT-OR-BEFORE the request
-    //    (up to a GOP early) while the frontend asserts the requested time:
-    //    audio played content behind the transcript highlight, and the exact
-    //    landing point was unknowable client-side because the rebase erased it.
+    //  · MP4/DASH → `-copyts` + X-Stream-Epoch: the goal is ABSOLUTE source
+    //    time on the wire, killing the class of bug where input-side `-ss`
+    //    lands on the keyframe AT-OR-BEFORE the request (up to a GOP early)
+    //    while the frontend asserts the requested time: audio played content
+    //    behind the transcript highlight, and the exact landing point was
+    //    unknowable client-side because the rebase erased it. `-copyts` alone
+    //    is NOT enough (RC7): the demuxer preserves source pts, but the
+    //    fragmented-MP4 muxer re-zeros every track to its first dts (verified
+    //    against ffmpeg 8.1 — first tfdt is 0 regardless of -copyts,
+    //    -avoid_negative_ts disabled, or +frag_discont). The subtraction is a
+    //    CONSTANT though, so serve_fmp4 probes it (probe_stream_epoch below)
+    //    and ships it in X-Stream-Epoch; the player re-adds it via MSE
+    //    timestampOffset, making buffered time genuinely absolute.
     //  · HLS → legacy make_zero rebase: HLS segment PTS is an arbitrary stream
     //    epoch, not media time, so absolute timestamps would break the clock.
     if hls {
@@ -464,18 +538,40 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
         }
     };
 
+    // RC7: recover the timeline origin the muxer is about to erase (see the
+    // timeline-mode comment above). Runs AFTER the ffmpeg spawn so the probe
+    // overlaps ffmpeg's own connection warm-up — headers only have to exist
+    // before respond() sends them, ahead of the first body bytes. No seek
+    // (start 0) needs no probe: the muxer's re-zero is the identity there.
+    // Probe failure falls back to the rebased header, i.e. the player's
+    // asserted-baseTime math — playhead continuity is preserved and only
+    // landing precision degrades to the keyframe gap.
+    let epoch = if hls {
+        None
+    } else if start > 0.0 {
+        probe_stream_epoch(&upstream, start)
+    } else {
+        Some(0.0)
+    };
+    let timeline_mode = if epoch.is_some() { "absolute" } else { "rebased" };
+    let epoch_header = epoch.map(|e| format!("{e:.6}"));
+
     let mut headers: Vec<tiny_http::Header> = Vec::new();
-    let timeline_mode = if hls { "rebased" } else { "absolute" };
     for (name, value) in [
         ("Content-Type", "video/mp4"),
         ("Access-Control-Allow-Origin", "*"),
         // Without the expose header, cross-origin fetch() cannot READ
         // X-Timeline and the player would silently fall back to rebased math.
-        ("Access-Control-Expose-Headers", "X-Timeline"),
+        ("Access-Control-Expose-Headers", "X-Timeline, X-Stream-Epoch"),
         ("X-Timeline", timeline_mode),
         ("Cache-Control", "no-store"),
     ] {
         if let Ok(h) = tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()) {
+            headers.push(h);
+        }
+    }
+    if let Some(v) = &epoch_header {
+        if let Ok(h) = tiny_http::Header::from_bytes("X-Stream-Epoch".as_bytes(), v.as_bytes()) {
             headers.push(h);
         }
     }
@@ -539,6 +635,30 @@ mod tests {
 
     fn b64(url: &str) -> String {
         URL_SAFE_NO_PAD.encode(url.as_bytes())
+    }
+
+    // ── parse_stream_epoch — RC7 timeline-origin recovery ───────────────
+    #[test]
+    fn stream_epoch_takes_first_video_packet_dts() {
+        let json = r#"{"packets":[
+            {"pts_time":"33.333333","dts_time":"33.266667"},
+            {"pts_time":"33.400000","dts_time":"33.300000"}]}"#;
+        assert_eq!(parse_stream_epoch(json), Some(33.266667));
+    }
+
+    #[test]
+    fn stream_epoch_falls_back_to_pts_when_dts_is_na() {
+        let json = r#"{"packets":[{"pts_time":"12.500000","dts_time":"N/A"}]}"#;
+        assert_eq!(parse_stream_epoch(json), Some(12.5));
+    }
+
+    #[test]
+    fn stream_epoch_rejects_garbage_and_negatives() {
+        assert_eq!(parse_stream_epoch(""), None);
+        assert_eq!(parse_stream_epoch("{}"), None);
+        assert_eq!(parse_stream_epoch(r#"{"packets":[]}"#), None);
+        assert_eq!(parse_stream_epoch(r#"{"packets":[{"dts_time":"-5.0"}]}"#), None);
+        assert_eq!(parse_stream_epoch(r#"{"packets":[{"dts_time":"nan"}]}"#), None);
     }
 
     // ── parse_start_query — feeds ffmpeg -ss; attacker-reachable ────────

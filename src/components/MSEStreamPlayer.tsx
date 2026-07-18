@@ -660,6 +660,19 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
               if (disposed || g !== genRef.current) { try { await resp.body?.cancel(); } catch { /* ignore */ } return; }
               if (!resp.ok || !resp.body) { fail(`fMP4 stream HTTP ${resp.status}`); return; }
               timelineAbsRef.current = resp.headers.get("x-timeline") === "absolute";
+              // RC7: ffmpeg's fragmented-MP4 muxer re-zeros the remux to its
+              // first dts, so the wire timestamps are NOT absolute on their
+              // own. The proxy probes the erased origin (the first video dts
+              // at the same -ss keyframe) and sends it as X-Stream-Epoch;
+              // re-adding it via timestampOffset shifts the whole SourceBuffer
+              // into true source time, so buffered ranges, the landing seek,
+              // and the playhead math all hold exactly. Safe to set here:
+              // appends for this pipeline begin only after this response.
+              const epoch = parseFloat(resp.headers.get("x-stream-epoch") ?? "");
+              const sbNow = sbRef.current;
+              if (timelineAbsRef.current && Number.isFinite(epoch) && epoch > 0 && sbNow && !sbNow.updating) {
+                try { sbNow.timestampOffset = epoch; } catch { /* ignore */ }
+              }
               const reader = resp.body.getReader();
               readerRef.current = reader;
               for (;;) {
