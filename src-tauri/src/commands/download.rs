@@ -105,10 +105,14 @@ pub(crate) fn ytdlp(
     if let Ok(data) = app.path().app_data_dir() {
         let bin_dir = data.join("bin");
         if bin_dir.join("yt-dlp").is_file() {
+            // 10a: make WHICH copy runs inspectable - every call site (resolve,
+            // metadata, captions, downloads) funnels through here.
+            eprintln!("[yt-dlp] using {} copy: {}", resolved_ytdlp_kind(true), bin_dir.join("yt-dlp").display());
             let path = format!("{}:{}", bin_dir.display(), HOMEBREW_PATH);
             return Ok(app.shell().command("yt-dlp").env("PATH", path));
         }
     }
+    eprintln!("[yt-dlp] using {} copy (sidecar)", resolved_ytdlp_kind(false));
     Ok(app
         .shell()
         .sidecar("yt-dlp")
@@ -117,6 +121,32 @@ pub(crate) fn ytdlp(
         // established message text must survive the r108 AppError sweep.
         .map_err(|e| crate::AppError::invalid(format!("sidecar yt-dlp not found: {e}")))?
         .env("PATH", HOMEBREW_PATH))
+}
+
+/// Pure (unit-tested): the resolution order in one word - an existing
+/// user-updated copy ALWAYS wins over the bundled sidecar.
+pub(crate) fn resolved_ytdlp_kind(updated_exists: bool) -> &'static str {
+    if updated_exists { "updated" } else { "bundled" }
+}
+
+/// Pure (unit-tested): yt-dlp versions are date-shaped (YYYY.MM.DD, dev
+/// builds append segments). Anything else means the downloaded file is NOT
+/// a working yt-dlp - the guard that keeps a bad download from replacing a
+/// good binary.
+pub(crate) fn parse_ytdlp_version(output: &str) -> Option<String> {
+    let v = output.trim();
+    let b = v.as_bytes();
+    if b.len() < 10 {
+        return None;
+    }
+    let date_ok = b[..10]
+        .iter()
+        .enumerate()
+        .all(|(i, c)| if i == 4 || i == 7 { *c == b'.' } else { c.is_ascii_digit() });
+    if !date_ok || v.lines().count() != 1 {
+        return None;
+    }
+    Some(v.to_string())
 }
 
 /// Path to the user-updated yt-dlp binary in app-data (whether or not it exists).
@@ -181,8 +211,29 @@ pub async fn update_ytdlp(app: AppHandle) -> Result<YtdlpStatus, crate::AppError
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
         .map_err(|e| crate::AppError::internal(format!("chmod yt-dlp: {e}")))?;
+    // 10a guard rail: verify the download actually RUNS and reports a
+    // date-shaped version before it replaces the working copy. A failed
+    // verification keeps the previous binary and fails loud.
+    let probe = tokio::process::Command::new(&tmp)
+        .arg("--version")
+        .output()
+        .await
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            crate::AppError::internal(format!("downloaded yt-dlp would not run: {e}"))
+        })?;
+    let version_out = String::from_utf8_lossy(&probe.stdout).to_string();
+    if !probe.status.success() || parse_ytdlp_version(&version_out).is_none() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(crate::AppError::internal(format!(
+            "downloaded yt-dlp failed verification (output: {:?}); keeping the previous copy",
+            version_out.trim()
+        )));
+    }
     std::fs::rename(&tmp, bin_dir.join("yt-dlp"))
         .map_err(|e| crate::AppError::internal(format!("install yt-dlp: {e}")))?;
+    // No cached resolved path exists to clear - ytdlp() re-resolves on every
+    // spawn (same reason Reset needs no invalidation beyond removing the file).
     ytdlp_version(app).await
 }
 
@@ -1967,3 +2018,30 @@ mod nightly_ytdlp_tests {
     }
 }
 
+#[cfg(test)]
+mod ytdlp_update_tests {
+    use super::*;
+
+    #[test]
+    fn version_parse_accepts_date_shapes() {
+        assert_eq!(parse_ytdlp_version("2026.07.04\n").as_deref(), Some("2026.07.04"));
+        assert_eq!(
+            parse_ytdlp_version("2026.07.04.232010").as_deref(),
+            Some("2026.07.04.232010") // dev builds append a segment
+        );
+    }
+
+    #[test]
+    fn version_parse_rejects_non_ytdlp_output() {
+        assert!(parse_ytdlp_version("").is_none());
+        assert!(parse_ytdlp_version("404: Not Found").is_none());
+        assert!(parse_ytdlp_version("<!DOCTYPE html>").is_none());
+        assert!(parse_ytdlp_version("error\n2026.07.04").is_none());
+    }
+
+    #[test]
+    fn updated_copy_always_outranks_bundled() {
+        assert_eq!(resolved_ytdlp_kind(true), "updated");
+        assert_eq!(resolved_ytdlp_kind(false), "bundled");
+    }
+}

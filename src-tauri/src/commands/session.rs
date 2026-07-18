@@ -279,8 +279,7 @@ pub async fn session_join(
         return Err(crate::AppError::invalid("A co-review session is already active"));
     }
 
-    let parsed: EndpointTicket = ticket
-        .trim()
+    let parsed: EndpointTicket = parse_invite(&ticket)
         .parse()
         .map_err(|_| crate::AppError::invalid("That join code doesn't look valid"))?;
 
@@ -773,7 +772,9 @@ async fn snapshot_state(inner: &Inner) -> SessionState {
         },
         Session::Host { ticket, shared, .. } => SessionState {
             role: "host".into(),
-            code: Some(ticket.clone()),
+            // The SHAREABLE form (13a): SAUC- prefix + dash groups. The raw
+            // ticket never renders as a paragraph blob again.
+            code: Some(format_invite(ticket)),
             peers: shared
                 .peers
                 .lock()
@@ -976,5 +977,71 @@ mod member_id_tests {
         let r = build_roster("Ada", members(&[("m1", "Ada"), ("m4", "Ada")]).into_iter());
         let ids: Vec<_> = r.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["m0", "m1", "m4"]);
+    }
+}
+
+// ============================================================
+// INVITE FORMAT (13a) - the wire payload stays the full iroh ticket
+// (NodeId-only dialing is not verifiable on our setup without live
+// discovery, so the pack's option B applies), but it travels dressed:
+// "SAUC-" + dash-separated groups. Parsing accepts EVERY pasted form -
+// prefixed or raw, dashed or not, wrapped across chat-app line breaks.
+// ============================================================
+
+/// Shareable invite: "SAUC-" + the ticket in dash groups of 5.
+pub(crate) fn format_invite(ticket: &str) -> String {
+    let mut out = String::with_capacity(ticket.len() + ticket.len() / 5 + 5);
+    out.push_str("SAUC-");
+    for (i, c) in ticket.chars().enumerate() {
+        if i > 0 && i % 5 == 0 {
+            out.push('-');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Recover the raw ticket from any pasted form. Whitespace (incl. the
+/// newlines chat apps wrap long pastes with) and group dashes are display
+/// sugar; the SAUC prefix is optional and case-insensitive. A legacy raw
+/// ticket passes through untouched (base32 - it contains neither).
+pub(crate) fn parse_invite(input: &str) -> String {
+    let stripped: String = input.chars().filter(|c| !c.is_whitespace() && *c != '-').collect();
+    if stripped.len() > 4 && stripped[..4].eq_ignore_ascii_case("sauc") {
+        stripped[4..].to_string()
+    } else {
+        stripped
+    }
+}
+
+#[cfg(test)]
+mod invite_tests {
+    use super::*;
+
+    const TICKET: &str = "endpointadkp7j4e4l3knzhmk4ze6iyke4ejiuv4otpugpg3ku5aenz5tikrgc";
+
+    #[test]
+    fn invite_round_trips() {
+        let invite = format_invite(TICKET);
+        assert!(invite.starts_with("SAUC-"));
+        assert_eq!(parse_invite(&invite), TICKET);
+    }
+
+    #[test]
+    fn parse_survives_chat_wrapping_and_case() {
+        let invite = format_invite(TICKET);
+        let wrapped = invite
+            .chars()
+            .enumerate()
+            .flat_map(|(i, c)| if i > 0 && i % 20 == 0 { vec!['\n', c] } else { vec![c] })
+            .collect::<String>();
+        assert_eq!(parse_invite(&format!("  {wrapped}  \n")), TICKET);
+        assert_eq!(parse_invite(&invite.to_lowercase()), TICKET);
+    }
+
+    #[test]
+    fn legacy_raw_ticket_passes_through() {
+        assert_eq!(parse_invite(TICKET), TICKET);
+        assert_eq!(parse_invite(&format!("{TICKET}\n")), TICKET);
     }
 }

@@ -267,3 +267,22 @@ Commit: `session: short invite codes; ytdlp: verified update path everywhere`
    join from second instance with a chat-wrapped paste.
 7. Settings: Update yt-dlp then restart the app; confirm the updated
    version is still the one running (pipeline log shows path + version).
+
+## Appended overnight (all six prompts ran; per-prompt notes)
+
+- P1: converted list is in the commit; kept green: primaries, live dots,
+  playing equaliser, progress fills, ghost colors, mark statuses (P3).
+- P2: hover-reveal visibility raised per live feedback (10% white fill +
+  1px outline + 150ms intent delay).
+- P3: done/failed range colors flip from live queue state; e2e covers
+  queued class + helper-line collapse (run one real failed export in the
+  morning pass for the red flip).
+- P4: loader has NO resting outline now; reduced-motion is the only full
+  outline. BunnyMark replaced the film glyph in all three players.
+- P5: aspect cache lives in lib/art-aspect.ts (measured at img onLoad);
+  fingerprint note: none - aspect keys on the thumb URL everywhere.
+- P6: invites are SAUC- dressed full tickets (NodeId-only dialing was not
+  verifiable without live discovery, so option B); the lobby shows the
+  collapsed handle + Copy invite; joins accept chat-wrapped pastes.
+  yt-dlp updates verify (--version parses date-shaped) before replacing
+  the previous copy; the resolver logs which copy runs on every spawn.
