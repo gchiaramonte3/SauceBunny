@@ -345,3 +345,18 @@ Claude Code appends per-prompt items here overnight. Baseline list:
 - Clip cmd-3 mid-call keeps audio + the rail dot; cmd-4 restores the room;
   leave/end closes every peer connection and the camera light dies.
 - TURN: Settings -> General -> Co-review calls (leave empty for STUN).
+
+### Appended overnight (prompt 4)
+
+- Screen share, two instances: share each display from the picker (names +
+  resolutions); remote tile switches to the screen content with the
+  "Sharing screen" badge and lag stays under ~1s (100ms fragments,
+  zerolatency x264; if it lags, the fragment size in serve_share is the
+  dial); your own tile previews the share un-mirrored; stopping restores
+  the camera on both sides.
+- TCC: first share triggers the ONE screen-recording prompt; grant then
+  quit-and-reopen (macOS quirk, stated in the picker); denied path's
+  System Settings button lands on Privacy & Security > Screen Recording.
+- Cleanup: stop button, ending the session, and killing ffmpeg by hand all
+  restore the camera; `pgrep ffmpeg` shows NO capture process after a
+  force-quit of the app (the proxy socket teardown kills the child).

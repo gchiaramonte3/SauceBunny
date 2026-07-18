@@ -102,6 +102,9 @@ pub enum SessionMsg {
     ReviewDoc { doc: String },
     /// Live playhead for a ghost cursor. position = seconds. Relayed like ReviewOp.
     Presence { name: String, position: f64 },
+    /// Screen-share flag for the tile badge. Dumb relay; `from` is rewritten
+    /// by the host to the true sender (like Rtc) so it can't be spoofed.
+    Sharing { from: String, on: bool },
 }
 
 /// One session member: a session-scoped id (m0 = host, m1, m2, ... minted
@@ -373,6 +376,10 @@ pub async fn session_broadcast(
     // Host-originated signaling goes to the addressed member ONLY (and the
     // host is always the true sender - stamp m0 regardless of what the
     // frontend filled in).
+    let msg = match msg {
+        SessionMsg::Sharing { on, .. } => SessionMsg::Sharing { from: "m0".into(), on },
+        other => other,
+    };
     if let SessionMsg::Rtc { to, payload, .. } = msg {
         let stamped = SessionMsg::Rtc { from: "m0".into(), to: to.clone(), payload };
         relay_to_member(shared, &to, &stamped).await;
@@ -523,6 +530,11 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
                             // clamp here — otherwise a peer can flood an
                             // unbounded ghost-cursor label to everyone.
                             let msg = SessionMsg::Presence { name: clean_name(&name), position };
+                            let _ = app.emit("session:msg", &msg);
+                            relay_to_others(&shared, id, &msg).await;
+                        }
+                        SessionMsg::Sharing { on, .. } => {
+                            let msg = SessionMsg::Sharing { from: member.clone(), on };
                             let _ = app.emit("session:msg", &msg);
                             relay_to_others(&shared, id, &msg).await;
                         }
@@ -677,7 +689,8 @@ async fn peer_read_loop(
                     | SessionMsg::Transport { .. }
                     | SessionMsg::ReviewOp { .. }
                     | SessionMsg::ReviewDoc { .. }
-                    | SessionMsg::Presence { .. }) => {
+                    | SessionMsg::Presence { .. }
+                    | SessionMsg::Sharing { .. }) => {
                         let _ = app.emit("session:msg", &msg);
                     }
                     SessionMsg::Hello { .. } => {} // host never sends Hello

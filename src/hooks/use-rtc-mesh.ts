@@ -103,6 +103,11 @@ export function useRtcMesh(args: {
     meshRef.current?.setMembers(memberIds);
   }, [memberIds]);
 
+  /** Screen share: route the share track to every peer (null = camera). */
+  const setVideoOverride = useCallback((track: MediaStreamTrack | null) => {
+    void meshRef.current?.setVideoOverride(track);
+  }, []);
+
   /** Incoming SessionMsg::Rtc line (already addressed to us). */
   const handleSignal = useCallback((from: string, payloadJson: string) => {
     try {
@@ -111,5 +116,5 @@ export function useRtcMesh(args: {
     } catch { /* malformed signaling line */ }
   }, []);
 
-  return { remoteStreams, peerStates, handleSignal };
+  return { remoteStreams, peerStates, handleSignal, setVideoOverride };
 }

@@ -183,6 +183,12 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
     // mediabunny's muxed fMP4 plays video but NOT audio in WKWebView,
     // whereas ffmpeg's reference muxing plays both. `-ss` gives clean
     // keyframe seeks for scrubbing.
+    // `/share/v1?display=N` → ffmpeg avfoundation display capture piped as
+    // low-latency fragmented MP4 (the session room's screen share; the
+    // frontend plays it hidden and captureStream()s it into the mesh).
+    if raw_path.trim_start_matches('/').starts_with("share/v1") {
+        return serve_share(request, parse_share_display(&raw_path));
+    }
     if raw_path.trim_start_matches('/').starts_with("fmp4/v1/") {
         match decode_after("fmp4/v1/", &raw_path) {
             Some(u) => return serve_fmp4(request, u, parse_start_query(&raw_path), parse_audio_query(&raw_path)),
@@ -693,6 +699,14 @@ mod tests {
         URL_SAFE_NO_PAD.encode(url.as_bytes())
     }
 
+    // ── parse_share_display — share route query ─────────────────────────
+    #[test]
+    fn share_display_parses_and_defaults_to_zero() {
+        assert_eq!(parse_share_display("/share/v1?display=2"), 2);
+        assert_eq!(parse_share_display("/share/v1"), 0);
+        assert_eq!(parse_share_display("/share/v1?display=banana"), 0);
+    }
+
     // ── parse_stream_epoch — RC7 timeline-origin recovery ───────────────
     #[test]
     fn stream_epoch_takes_first_video_packet_dts() {
@@ -958,4 +972,125 @@ mod nightly_proxy_tests {
         // into ONE fMP4 with both tracks.
         assert_fmp4_with_tracks(&bytes, true, "DASH-split 2-input merge");
     }
+}
+
+// ============================================================
+// SCREEN SHARE ROUTE - /share/v1?display=N (token-gated like every route).
+// ============================================================
+
+/// The live share child's pid, so stop_screen_share (and a replacement
+/// share) can kill it. The serve loop also kills it when the client
+/// disconnects, so nothing can orphan the capture.
+static SHARE_CHILD: OnceLock<std::sync::Mutex<Option<u32>>> = OnceLock::new();
+
+fn share_child_cell() -> &'static std::sync::Mutex<Option<u32>> {
+    SHARE_CHILD.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+/// Kill the live share ffmpeg (invoke: stop_screen_share). SIGKILL is fine:
+/// the output is a pipe we own; there is nothing to finalize.
+pub fn stop_share_child() {
+    if let Ok(mut cell) = share_child_cell().lock() {
+        if let Some(pid) = cell.take() {
+            unsafe { libc_kill(pid as i32) };
+        }
+    }
+}
+
+/// Tiny raw kill(2) so one call doesn't grow a libc crate dependency.
+unsafe fn libc_kill(pid: i32) {
+    extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    kill(pid, 9);
+}
+
+/// Pure (unit-tested): display ordinal from the share route's query.
+fn parse_share_display(url_path: &str) -> u32 {
+    url_path
+        .split('?')
+        .nth(1)
+        .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("display=")))
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0)
+}
+
+/// ffmpeg display capture -> low-latency fragmented MP4 piped to the
+/// response. Latency levers: ultrafast+zerolatency, 30-frame GOP, 100ms
+/// fragments; scale caps at 1600w so a 5K display doesn't melt the mesh.
+fn serve_share(request: tiny_http::Request, display_index: u32) -> std::io::Result<()> {
+    let ff = match ffmpeg_path() {
+        Some(p) => p,
+        None => {
+            return request.respond(
+                tiny_http::Response::from_string("ffmpeg not found").with_status_code(500),
+            );
+        }
+    };
+    // One share at a time: a new request replaces the previous child.
+    stop_share_child();
+
+    let mut cmd = std::process::Command::new(ff);
+    cmd.arg("-hide_banner").arg("-loglevel").arg("error")
+        .arg("-f").arg("avfoundation")
+        .arg("-capture_cursor").arg("1")
+        .arg("-framerate").arg("30")
+        .arg("-i").arg(format!("Capture screen {display_index}"))
+        .arg("-an")
+        .arg("-vf").arg("scale='min(1600,iw)':-2")
+        .arg("-c:v").arg("libx264")
+        .arg("-preset").arg("ultrafast")
+        .arg("-tune").arg("zerolatency")
+        .arg("-profile:v").arg("high")
+        .arg("-pix_fmt").arg("yuv420p")
+        .arg("-g").arg("30")
+        .arg("-movflags").arg("frag_keyframe+empty_moov+default_base_moof")
+        .arg("-frag_duration").arg("100000")
+        .arg("-f").arg("mp4")
+        .arg("pipe:1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            return request.respond(
+                tiny_http::Response::from_string(format!("ffmpeg spawn failed: {e}"))
+                    .with_status_code(500),
+            );
+        }
+    };
+    if let Ok(mut cell) = share_child_cell().lock() {
+        *cell = Some(child.id());
+    }
+    let stdout = match child.stdout.take() {
+        Some(s) => s,
+        None => {
+            let _ = child.kill();
+            return request.respond(
+                tiny_http::Response::from_string("no ffmpeg stdout").with_status_code(500),
+            );
+        }
+    };
+
+    let mut headers: Vec<tiny_http::Header> = Vec::new();
+    for (name, value) in [
+        ("Content-Type", "video/mp4"),
+        ("Access-Control-Allow-Origin", "*"),
+        ("Cache-Control", "no-store"),
+    ] {
+        if let Ok(h) = tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()) {
+            headers.push(h);
+        }
+    }
+    let response = tiny_http::Response::new(tiny_http::StatusCode(200), headers, stdout, None, None);
+    let result = request.respond(response);
+    // Client gone (stop button, session end, window closed, force-quit's
+    // socket teardown) -> the capture dies here, every path converging.
+    let _ = child.kill();
+    let _ = child.wait();
+    if let Ok(mut cell) = share_child_cell().lock() {
+        *cell = None;
+    }
+    result
 }

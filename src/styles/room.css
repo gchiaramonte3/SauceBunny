@@ -316,3 +316,66 @@
   background: rgba(255,255,255,0.12);
   margin: 0 4px;
 }
+
+/* Share badge on a tile. */
+.cp-person-share {
+  position: absolute;
+  top: 5px;
+  left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: rgba(0,0,0,0.55);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* Display picker popover above the bar's share button. */
+.cp-share-pick {
+  position: absolute;
+  bottom: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: var(--s-2);
+  background: var(--bg-1);
+  border-radius: var(--r-lg);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+.cp-share-pick-line {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--fg-2);
+  margin: 2px 4px;
+}
+.cp-share-pick-line.dim { color: var(--fg-4); font-size: 11px; }
+.cp-share-pick-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--r-lg);
+  background: transparent;
+  cursor: pointer;
+}
+.cp-share-pick-row:hover { background: rgba(255,255,255,0.06); }
+.cp-share-pick-name {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.cp-share-pick-res {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-4);
+}
+.cp-share-pick-cancel { align-self: center; }

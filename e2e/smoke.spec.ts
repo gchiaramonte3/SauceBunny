@@ -616,7 +616,7 @@ test("session room: people tiles + control bar render; clip furniture stays out"
   await expect(people.getByText("Nika (You)")).toBeVisible();
   const bar = page.locator(".cp-room-bar");
   await expect(bar).toBeVisible();
-  await expect(bar.getByRole("button", { name: "Share screen (coming soon)" })).toBeDisabled();
+  await expect(bar.getByRole("button", { name: "Share your screen" })).toBeEnabled();
   // Room purity: no Clip furniture, and the nav rail stays fully visible.
   await expect(page.locator(".cp-view-clip .cp-toolbar")).toBeHidden();
   await expect(page.locator(".cp-sidebar")).toBeHidden();

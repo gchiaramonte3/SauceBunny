@@ -18,11 +18,15 @@ export type Participant = { id: string; name: string; color: string; isHost: boo
  * the old participant rail's roster duties; leave/end lives in the room
  * control bar.
  */
-export function PeoplePanel({ active, participants, remoteStreams, peerStates }: {
+export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream }: {
   active: boolean;
   participants: Participant[];
   remoteStreams: ReadonlyMap<string, MediaStream>;
   peerStates: ReadonlyMap<string, MeshPeerState>;
+  /** Members flagged as screen-sharing (their tile badges "Sharing screen"). */
+  sharingMembers: ReadonlySet<string>;
+  /** Your own live share preview (v1: it replaces your camera tile). */
+  shareStream: MediaStream | null;
 }) {
   const [selfStream, setSelfStream] = useState<MediaStream | null>(() => getSessionCapture());
   const [collapsed, setCollapsed] = useState(false);
@@ -51,8 +55,9 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates }:
           <PersonTile
             key={p.id}
             p={p}
-            stream={p.isSelf ? selfStream : remoteStreams.get(p.id) ?? null}
+            stream={p.isSelf ? (shareStream ?? selfStream) : remoteStreams.get(p.id) ?? null}
             state={p.isSelf ? "live" : peerStates.get(p.id) ?? "connecting"}
+            sharing={p.isSelf ? shareStream != null : sharingMembers.has(p.id)}
           />
         ))}
       </div>
@@ -63,10 +68,11 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates }:
 /** One member: camera tile when a video track flows, avatar card when not.
  *  Speaking glow rides an AnalyserNode threshold on the tile's own audio
  *  (reduced motion: no glow animation, static ring). */
-function PersonTile({ p, stream, state }: {
+function PersonTile({ p, stream, state, sharing }: {
   p: Participant;
   stream: MediaStream | null;
   state: MeshPeerState;
+  sharing: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [speaking, setSpeaking] = useState(false);
@@ -128,7 +134,7 @@ function PersonTile({ p, stream, state }: {
       style={{ ["--pr-color" as string]: p.color }}
     >
       {hasVideo ? (
-        <video ref={videoRef} className={p.isSelf ? "mirror" : undefined} muted playsInline aria-hidden />
+        <video ref={videoRef} className={p.isSelf && !sharing ? "mirror" : undefined} muted playsInline aria-hidden />
       ) : (
         <div className="cp-person-avatar" aria-hidden>
           <span className="cp-person-initials">{initialsOf(p.name)}</span>
@@ -136,6 +142,7 @@ function PersonTile({ p, stream, state }: {
           {state === "failed" && <span className="cp-person-conn">No connection</span>}
         </div>
       )}
+      {sharing && <span className="cp-person-share">Sharing screen</span>}
       <div className="cp-person-meta">
         {p.isHost && <span className="cp-person-crown" title="Host"><IconCrown size={10} /></span>}
         <span className="cp-person-name" title={p.name}>{p.isSelf ? `${p.name} (You)` : p.name}</span>

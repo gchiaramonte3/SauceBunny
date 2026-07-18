@@ -34,6 +34,8 @@ import type { SessionMsg } from "../bindings/SessionMsg";
 import type { SessionState as CoSessionState } from "../bindings/SessionState";
 import { useRtcMesh, type TurnConfig } from "./use-rtc-mesh";
 import type { MeshPeerState } from "../lib/rtc-mesh";
+import { ShareController, type ShareState } from "../lib/share-machine";
+import { openShareStream } from "../lib/share-stream";
 
 /** Timeline/monitor read-model of one review comment marker. Shared by the
  *  solo path (App's local-review reload effect) and the session path (the
@@ -102,6 +104,13 @@ export type CoReview = {
   meshStreams: ReadonlyMap<string, MediaStream>;
   /** Per-member mesh connection state (connecting / live / failed). */
   meshStates: ReadonlyMap<string, MeshPeerState>;
+  /** Screen share (native ffmpeg pipeline; v1 replaces your camera tile). */
+  shareState: ShareState;
+  shareStream: MediaStream | null;
+  /** Member ids currently flagged as sharing (tile badges). */
+  sharingMembers: ReadonlySet<string>;
+  startShare: (displayIndex: number) => void;
+  stopShare: () => void;
   startCoReview: () => Promise<void>;
   joinCoReview: (ticket: string, name: string) => Promise<void>;
   leaveCoReview: () => void;
@@ -120,6 +129,9 @@ export function useCoReview({
   // Incoming SessionMsg::Rtc -> the mesh (assigned each render below; the
   // mesh hook must be declared after the message handler's closure).
   const rtcSignalRef = useRef<((from: string, payload: string) => void) | null>(null);
+  const [sharingMembers, setSharingMembers] = useState<ReadonlySet<string>>(new Set());
+  const [shareState, setShareState] = useState<ShareState>("idle");
+  const [shareStream, setShareStream] = useState<MediaStream | null>(null);
   const coSessionActive = coSession.role !== "off";
   // The shared review doc while in a session (null = solo).
   const [sessionDoc, setSessionDoc] = useState<ReviewDoc | null>(null);
@@ -182,6 +194,13 @@ export function useCoReview({
         return;
       case "rtc":
         rtcSignalRef.current?.(m.from, m.payload);
+        return;
+      case "sharing":
+        setSharingMembers((prev) => {
+          const next = new Set(prev);
+          if (m.on) next.add(m.from); else next.delete(m.from);
+          return next;
+        });
         return;
       case "presence": {
         const now = Date.now();
@@ -403,10 +422,45 @@ export function useCoReview({
   });
   rtcSignalRef.current = mesh.handleSignal;
 
+  // ── Screen share controller (pure machine; pipeline injected) ────
+  // Every ending - bar button, session end, ffmpeg death - converges on
+  // the same cleanup: camera restored, peers un-flagged, child stopped.
+  const shareRef = useRef<ShareController | null>(null);
+  const meshOverrideRef = useRef(mesh.setVideoOverride);
+  meshOverrideRef.current = mesh.setVideoOverride;
+  if (!shareRef.current) {
+    shareRef.current = new ShareController({
+      start: (i) => invoke<string>("start_screen_share", { displayIndex: i }),
+      stopPipeline: () => invoke("stop_screen_share").then(() => undefined),
+      open: openShareStream,
+      setOverride: (t) => meshOverrideRef.current(t),
+      announce: (on) => {
+        const msg = { kind: "sharing", from: coRoleRef.current === "host" ? "m0" : "", on };
+        const cmd = coRoleRef.current === "host" ? "session_broadcast" : "session_send";
+        void invoke(cmd, { msg }).catch(() => { /* session raced closed */ });
+      },
+      onChange: (state, stream) => { setShareState(state); setShareStream(stream); },
+      log: (tag, msg) => {
+        if (tag === "err") console.error("[screen-share]", msg);
+        else console.warn("[screen-share]", msg);
+      },
+    });
+  }
+  const startShare = useCallback((displayIndex: number) => { void shareRef.current?.start(displayIndex); }, []);
+  const stopShare = useCallback(() => { void shareRef.current?.stop(); }, []);
+  // Session over -> the share dies with it (same converged cleanup).
+  useEffect(() => {
+    if (!coSessionActive) {
+      void shareRef.current?.stop();
+      setSharingMembers(new Set());
+    }
+  }, [coSessionActive]);
+
   return {
     coSession, coSessionActive, sessionDoc, postSessionOp, coGhostMarkers,
     screening, setScreening, screeningParticipants,
     meshStreams: mesh.remoteStreams, meshStates: mesh.peerStates,
+    shareState, shareStream, sharingMembers, startShare, stopShare,
     startCoReview, joinCoReview, leaveCoReview,
   };
 }

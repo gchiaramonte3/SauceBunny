@@ -46,12 +46,19 @@ type PeerSlot = {
   pc: RTCPeerConnection;
   state: MeshPeerState;
   restarted: boolean;
+  /** Senders by kind, recorded at addTrack so replace/override never has
+   *  to guess a null-track sender's kind. */
+  videoSenders: RTCRtpSender[];
+  audioSenders: RTCRtpSender[];
 };
 
 export class RtcMesh {
   private deps: MeshDeps;
   private slots = new Map<string, PeerSlot>();
   private closed = false;
+  /** Screen share: when set, every video sender carries THIS track instead
+   *  of the camera; null restores the capture's video. */
+  private videoOverride: MediaStreamTrack | null = null;
 
   constructor(deps: MeshDeps) {
     this.deps = deps;
@@ -99,14 +106,29 @@ export class RtcMesh {
   }
 
   /** Device switch: swap every outbound sender track in place (no renegotiation
-   *  needed for same-kind replaceTrack). */
+   *  needed for same-kind replaceTrack). A live share override keeps owning
+   *  the video senders; the new camera takes over when the share ends. */
   async replaceLocalStream(stream: MediaStream | null): Promise<void> {
+    const video = this.videoOverride ?? stream?.getVideoTracks()[0] ?? null;
+    const audio = stream?.getAudioTracks()[0] ?? null;
     for (const [, slot] of this.slots) {
-      for (const sender of slot.pc.getSenders()) {
-        const kind = sender.track?.kind;
-        if (!kind) continue;
-        const next = stream?.getTracks().find((t) => t.kind === kind) ?? null;
-        try { await sender.replaceTrack(next); } catch { /* sender gone */ }
+      for (const sender of slot.videoSenders) {
+        try { await sender.replaceTrack(video); } catch { /* sender gone */ }
+      }
+      for (const sender of slot.audioSenders) {
+        try { await sender.replaceTrack(audio); } catch { /* sender gone */ }
+      }
+    }
+  }
+
+  /** Screen share in/out: the share track replaces the camera on every
+   *  video sender; null restores the capture's camera track. */
+  async setVideoOverride(track: MediaStreamTrack | null): Promise<void> {
+    this.videoOverride = track;
+    const video = track ?? this.deps.getLocalStream()?.getVideoTracks()[0] ?? null;
+    for (const [, slot] of this.slots) {
+      for (const sender of slot.videoSenders) {
+        try { await sender.replaceTrack(video); } catch { /* sender gone */ }
       }
     }
   }
@@ -137,7 +159,7 @@ export class RtcMesh {
 
   private connectTo(id: string): PeerSlot | null {
     const pc = this.deps.createPc({ iceServers: this.deps.iceServers });
-    const slot: PeerSlot = { pc, state: "connecting", restarted: false };
+    const slot: PeerSlot = { pc, state: "connecting", restarted: false, videoSenders: [], audioSenders: [] };
     this.slots.set(id, slot);
     this.deps.onState(id, "connecting");
 
@@ -146,7 +168,12 @@ export class RtcMesh {
     const local = this.deps.getLocalStream();
     if (local) {
       for (const track of local.getTracks()) {
-        const sender = pc.addTrack(track, local);
+        // A live share owns the video slot from the first frame a new
+        // member sees (they joined mid-share).
+        const outTrack = track.kind === "video" && this.videoOverride ? this.videoOverride : track;
+        const sender = pc.addTrack(outTrack, local);
+        if (track.kind === "video") slot.videoSenders.push(sender);
+        else slot.audioSenders.push(sender);
         if (track.kind === "video") {
           const h = track.getSettings?.().height ?? 720;
           const down = Math.max(1, h / 360);

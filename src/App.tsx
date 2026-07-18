@@ -4302,6 +4302,7 @@ export default function App() {
     coSession, coSessionActive, sessionDoc, postSessionOp, coGhostMarkers,
     screening, setScreening, screeningParticipants,
     meshStreams, meshStates,
+    shareState, shareStream, sharingMembers, startShare, stopShare,
     startCoReview, joinCoReview, leaveCoReview,
   } = useCoReview({
     isPlaying, fps,
@@ -4659,6 +4660,8 @@ export default function App() {
                 participants={screeningParticipants}
                 remoteStreams={meshStreams}
                 peerStates={meshStates}
+                sharingMembers={sharingMembers}
+                shareStream={shareStream}
               />
               <Sidebar
                 onFilenameEdit={markFilenameEdited}
@@ -4733,6 +4736,9 @@ export default function App() {
                     camOn={!capture.choice.cameraOff}
                     onToggleMic={() => capture.setEnabled("audio", capture.choice.micMuted)}
                     onToggleCam={() => capture.setEnabled("video", capture.choice.cameraOff)}
+                    shareState={shareState}
+                    onStartShare={startShare}
+                    onStopShare={stopShare}
                     theater={screening}
                     onToggleTheater={() => setScreening((v) => !v)}
                     onLeave={leaveCoReview}

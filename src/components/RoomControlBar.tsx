@@ -1,24 +1,31 @@
+import { useState } from "react";
 import {
   IconCamera, IconCameraOff, IconFullscreen, IconFullscreenExit,
   IconMic, IconMicOff, IconScreenShare,
 } from "./Icons";
+import { SharePicker } from "./SharePicker";
+import type { ShareState } from "../lib/share-machine";
 
 /**
  * The session room's floating control bar (bottom-center): mic, camera,
- * share screen (disabled until the native pipeline lands next build),
- * theater, leave/end. Terse - labels are hover titles only. The bar rests
- * dimmed and wakes on hover/focus (reduced motion: always full).
+ * share screen (native ffmpeg display capture; SharePicker owns the TCC
+ * dance), theater, leave/end. Terse - labels are hover titles only. The
+ * bar rests dimmed and wakes on hover/focus (reduced motion: always full).
  */
-export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, theater, onToggleTheater, onLeave, isHost }: {
+export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareState, onStartShare, onStopShare, theater, onToggleTheater, onLeave, isHost }: {
   micOn: boolean;
   camOn: boolean;
   onToggleMic: () => void;
   onToggleCam: () => void;
+  shareState: ShareState;
+  onStartShare: (displayIndex: number) => void;
+  onStopShare: () => void;
   theater: boolean;
   onToggleTheater: () => void;
   onLeave: () => void;
   isHost: boolean;
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
   return (
     <div className="cp-room-bar" role="toolbar" aria-label="Room controls">
       <button
@@ -43,13 +50,24 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, theater
       </button>
       <button
         type="button"
-        className="cp-room-bar-btn"
-        title="Screen share arrives with the next build"
-        aria-label="Share screen (coming soon)"
-        disabled
+        className={"cp-room-bar-btn" + (shareState === "sharing" ? " active" : "")}
+        title={shareState === "sharing" ? "Stop sharing" : "Share screen"}
+        aria-label={shareState === "sharing" ? "Stop sharing your screen" : "Share your screen"}
+        aria-pressed={shareState === "sharing"}
+        disabled={shareState === "starting"}
+        onClick={() => {
+          if (shareState === "sharing") onStopShare();
+          else setPickerOpen((v) => !v);
+        }}
       >
         <IconScreenShare size={16} />
       </button>
+      {pickerOpen && shareState === "idle" && (
+        <SharePicker
+          onPick={onStartShare}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
       <span className="cp-room-bar-sep" aria-hidden />
       <button
         type="button"

@@ -52,7 +52,11 @@ function fakeTrack(kind: string) {
 }
 function fakeStream(kinds: string[]) {
   const tracks = kinds.map(fakeTrack);
-  return { getTracks: () => tracks } as unknown as MediaStream;
+  return {
+    getTracks: () => tracks,
+    getVideoTracks: () => tracks.filter((t) => t.kind === "video"),
+    getAudioTracks: () => tracks.filter((t) => t.kind === "audio"),
+  } as unknown as MediaStream;
 }
 
 function makeMesh(selfId: string, overrides: Partial<MeshDeps> = {}) {
@@ -150,5 +154,25 @@ describe("rtc mesh", () => {
     mesh.setMembers(["m2"]);
     expect(FakePc.instances[0].closed).toBe(true);
     expect(FakePc.instances[1].closed).toBe(false);
+  });
+
+
+  it("share override owns video senders through a device switch, camera returns on null", async () => {
+    const local = fakeStream(["video", "audio"]);
+    const { mesh } = makeMesh("m0", { getLocalStream: () => local });
+    mesh.setMembers(["m1"]);
+    await flush();
+    const share = { kind: "video", getSettings: () => ({ height: 900 }) } as unknown as MediaStreamTrack;
+    await mesh.setVideoOverride(share);
+    const pc = FakePc.instances[0];
+    const vs = pc.senders.find((s) => s.track?.kind === "video");
+    expect(vs?.replaced.at(-1)).toBe(share);
+    // Device switch mid-share: the share KEEPS the video slot.
+    await mesh.replaceLocalStream(fakeStream(["video", "audio"]));
+    expect(vs?.replaced.at(-1)).toBe(share);
+    // Share ends: the camera track returns.
+    await mesh.setVideoOverride(null);
+    expect((vs?.replaced.at(-1) as { kind?: string })?.kind).toBe("video");
+    expect(vs?.replaced.at(-1)).not.toBe(share);
   });
 });

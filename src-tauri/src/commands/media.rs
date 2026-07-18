@@ -2270,3 +2270,116 @@ mod filename_tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+
+// ============================================================
+// SCREEN SHARE (session room) - TCC preflight, display list, and the
+// ffmpeg display-capture pipeline served through the loopback proxy.
+// WKWebView has NO getDisplayMedia (tauri #2338 / wry #1101), so share
+// is built from parts the app already owns: CoreGraphics for permission
+// + displays (raw extern "C" - no new crates), ffmpeg avfoundation for
+// capture, the token-gated proxy for delivery, captureStream() on the
+// frontend to feed the mesh.
+// ============================================================
+
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+    fn CGGetActiveDisplayList(max: u32, displays: *mut u32, count: *mut u32) -> i32;
+    fn CGDisplayPixelsWide(display: u32) -> usize;
+    fn CGDisplayPixelsHigh(display: u32) -> usize;
+    fn CGMainDisplayID() -> u32;
+}
+
+/// One capturable display. `index` is the avfoundation screen ordinal
+/// (ffmpeg's "Capture screen N"), which follows CG's active-display order.
+#[derive(Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct DisplayInfo {
+    pub id: u32,
+    pub index: u32,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Screen-recording TCC state. CG exposes only granted-or-not, so a
+/// non-granted preflight WITHOUT `request` reports "undetermined" (the
+/// honest tri-state approximation); with `request: true` the OS prompt
+/// runs and the answer is definitive. macOS quirk the UI must state: a
+/// grant takes effect after the app restarts.
+#[tauri::command]
+pub fn screen_capture_access(request: Option<bool>) -> String {
+    unsafe {
+        if CGPreflightScreenCaptureAccess() {
+            return "granted".into();
+        }
+        if request.unwrap_or(false) {
+            return if CGRequestScreenCaptureAccess() { "granted" } else { "denied" }.into();
+        }
+    }
+    "undetermined".into()
+}
+
+/// Active displays for the share picker (whole displays only; window-level
+/// capture is a later ScreenCaptureKit sidecar).
+#[tauri::command]
+pub fn list_displays() -> Result<Vec<DisplayInfo>, crate::AppError> {
+    let mut ids = [0u32; 16];
+    let mut count: u32 = 0;
+    let rc = unsafe { CGGetActiveDisplayList(16, ids.as_mut_ptr(), &mut count) };
+    if rc != 0 {
+        return Err(crate::AppError::internal(format!("CGGetActiveDisplayList: {rc}")));
+    }
+    let main = unsafe { CGMainDisplayID() };
+    Ok(ids[..count as usize]
+        .iter()
+        .enumerate()
+        .map(|(i, &id)| DisplayInfo {
+            id,
+            index: i as u32,
+            name: display_name(i, id == main),
+            width: unsafe { CGDisplayPixelsWide(id) } as u32,
+            height: unsafe { CGDisplayPixelsHigh(id) } as u32,
+        })
+        .collect())
+}
+
+/// Pure (unit-tested): picker display name from ordinal + main flag.
+pub(crate) fn display_name(index: usize, is_main: bool) -> String {
+    if is_main {
+        format!("Display {} (Main)", index + 1)
+    } else {
+        format!("Display {}", index + 1)
+    }
+}
+
+/// Start sharing a display: returns the token-gated proxy URL the hidden
+/// <video> plays (the proxy route spawns/owns the ffmpeg child; it dies
+/// with the connection, so a crash or force-quit can't orphan it).
+#[tauri::command]
+pub fn start_screen_share(display_index: u32) -> Result<String, crate::AppError> {
+    let base = crate::stream_proxy::base_url()
+        .ok_or_else(|| crate::AppError::internal("media proxy not running"))?;
+    Ok(format!("{base}/share/v1?display={display_index}"))
+}
+
+/// Stop the live share pipeline (bar button / session end). The proxy
+/// kills the child; the frontend's fetch reader sees EOF and converges on
+/// the same cleanup as a pipeline death.
+#[tauri::command]
+pub fn stop_screen_share() -> Result<(), crate::AppError> {
+    crate::stream_proxy::stop_share_child();
+    Ok(())
+}
+
+#[cfg(test)]
+mod screen_share_tests {
+    use super::*;
+
+    #[test]
+    fn display_names_are_one_based_and_flag_main() {
+        assert_eq!(display_name(0, true), "Display 1 (Main)");
+        assert_eq!(display_name(1, false), "Display 2");
+    }
+}
