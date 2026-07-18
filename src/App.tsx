@@ -28,6 +28,7 @@ import { ViewOptions } from "./components/ViewOptions";
 import { LogsPanel } from "./components/LogsPanel";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { RoomControlBar } from "./components/RoomControlBar";
+import { ReviewStatusChip } from "./components/ReviewStatusChip";
 import { useMediaCapture } from "./hooks/use-media-capture";
 import { SettingsModal, type Defaults, type CaptionFontKey } from "./components/SettingsModal";
 import { YouTubeAuthModal } from "./components/YouTubeAuthModal";
@@ -76,7 +77,7 @@ import { parseSrt } from "./lib/srt";
 import { speakerLanes } from "./lib/speaker-stats";
 import { speakerColor } from "./components/transcript/helpers";
 import { MediaInfoModal } from "./components/MediaInfoModal";
-import { loadReview, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
+import { loadReview, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
 import { loadChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
 import { appUndo } from "./lib/undo";
 import { loadJson, saveJson } from "./lib/storage";
@@ -4279,6 +4280,15 @@ export default function App() {
   const reviewSourceKey = (sourceKind === "file" && localFilePath && metadata)
     ? (resolveByFingerprint(reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize)) ?? localFilePath)
     : (metadata?.webpage_url ?? null);
+  // Current source's approval verdict for the header chips (Clip sidebar +
+  // room stage title). Live session -> the shared doc; solo -> the stored
+  // doc, re-read on every review mutation via REVIEW_CHANGED_EVENT.
+  const [reviewTick, setReviewTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setReviewTick((t) => t + 1);
+    window.addEventListener(REVIEW_CHANGED_EVENT, bump);
+    return () => window.removeEventListener(REVIEW_CHANGED_EVENT, bump);
+  }, []);
   const [reviewMarkers, setReviewMarkers] = useState<ReviewMarkerView[]>([]);
   const [reviewAnnotations, setReviewAnnotations] = useState<ReviewAnnotationView[]>([]);
   // Live range being set in the review composer → previewed on the timeline.
@@ -4318,6 +4328,13 @@ export default function App() {
   // stage into the room dressing (CSS only; the player subtree is untouched
   // and never remounts). Switching to Clip mid-session is allowed - the
   // session stays connected and the rail's Review badge is the way back.
+  const reviewStatus = useMemo(() => {
+    void reviewTick; // re-derive on review mutations
+    const doc = sessionDoc ?? (reviewSourceKey ? loadReview(reviewSourceKey) : null);
+    if (!doc) return null;
+    const st = statusOf(doc, doc.activeVersionId);
+    return st.updatedAt > 0 || st.state !== "pending" ? st : null;
+  }, [sessionDoc, reviewSourceKey, reviewTick]);
   const roomActive = coSessionActive && activeView === "coreview";
   // Room bar device toggles ride the same capture singleton the green room
   // opened; enabled-bit flips propagate to every mesh sender live.
@@ -4664,6 +4681,7 @@ export default function App() {
                 shareStream={shareStream}
               />
               <Sidebar
+                reviewStatus={reviewStatus}
                 onFilenameEdit={markFilenameEdited}
                 open={sidebarOpen}
                 status={status}
@@ -4714,6 +4732,9 @@ export default function App() {
                       <span>Review session</span>
                       {metadata?.title && (
                         <span className="cp-room-source" title={metadata.title}>{metadata.title}</span>
+                      )}
+                      {reviewStatus && reviewStatus.state !== "pending" && (
+                        <ReviewStatusChip state={reviewStatus.state} reviewer={reviewStatus.reviewer || undefined} />
                       )}
                     </div>
                     <div className="cp-room-head-actions">

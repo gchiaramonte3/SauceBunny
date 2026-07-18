@@ -360,3 +360,15 @@ Claude Code appends per-prompt items here overnight. Baseline list:
 - Cleanup: stop button, ending the session, and killing ffmpeg by hand all
   restore the camera; `pgrep ffmpeg` shows NO capture process after a
   force-quit of the app (the proxy socket teardown kills the child).
+
+### Appended overnight (prompt 5)
+
+- Approval sync: set "Request changes" from instance A mid-session; B's
+  panel chip, sidebar header chip, and room title chip update live and
+  show who set it; Approve from B overrides (LWW); cmd-Z on the setter
+  restores the prior verdict on both sides.
+- Solo pass: approve in Clip with no session; the Home/Library card for
+  that source shows the corner chip after the doc saves (cards read the
+  hydrated store; fingerprint-keyed local docs may need a reopen first -
+  known best-effort).
+- Export: the review Markdown/notes carry the final "Status:" line.

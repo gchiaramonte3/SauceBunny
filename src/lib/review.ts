@@ -71,7 +71,13 @@ export type ReviewVersion = {
   addedAt: number;
 };
 
-export type ReviewStatus = { state: ReviewStatusState; note: string; updatedAt: number };
+export type ReviewStatus = {
+  state: ReviewStatusState;
+  note: string;
+  updatedAt: number;
+  /** Who set it ("Approved · Nika"). Empty on legacy docs. */
+  reviewer: string;
+};
 
 export type ReviewDoc = {
   sourceKey: string;
@@ -375,7 +381,10 @@ export type ReviewOp =
   | { t: "resolve"; id: string; resolved: boolean; at: number }
   | { t: "like"; id: string; name: string; liked: boolean }
   | { t: "editReply"; versionId: string; commentId: string; replyId: string; body: string; at: number }
-  | { t: "delReply"; versionId: string; commentId: string; replyId: string };
+  | { t: "delReply"; versionId: string; commentId: string; replyId: string }
+  /** Source-level verdict (per active version). LWW like edits; relayed in
+   *  co-review with zero Rust changes (the star is payload-agnostic). */
+  | { t: "status"; versionId: string; state: ReviewStatusState; reviewer: string; at: number };
 
 // LWW with a deterministic tiebreak: a stale op (older timestamp) is skipped;
 // a same-millisecond collision from two machines is broken by a value both
@@ -389,6 +398,19 @@ function editLoses(op: { at: number; body: string }, cur: ReviewComment): boolea
  *  LWW-guarded edits). Unknown op shapes return the doc unchanged. */
 export function applyReviewOp(doc: ReviewDoc, op: ReviewOp): ReviewDoc {
   switch (op.t) {
+    case "status": {
+      const cur = statusOf(doc, op.versionId);
+      // LWW; same-millisecond collisions break on the state string so both
+      // sides converge no matter the arrival order.
+      if (op.at < cur.updatedAt || (op.at === cur.updatedAt && op.state <= cur.state)) return doc;
+      return {
+        ...doc,
+        status: {
+          ...doc.status,
+          [op.versionId]: { state: op.state, note: cur.note, updatedAt: op.at, reviewer: op.reviewer },
+        },
+      };
+    }
     case "add":
       return insertComment(doc, op.comment);
     case "edit": {
@@ -459,6 +481,10 @@ export function inverseReviewOps(before: ReviewDoc, op: ReviewOp, at = Date.now(
     }
     case "like":
       return [{ t: "like", id: op.id, name: op.name, liked: !op.liked }];
+    case "status": {
+      const prev = statusOf(before, op.versionId);
+      return [{ t: "status", versionId: op.versionId, state: prev.state, reviewer: prev.reviewer, at }];
+    }
     default:
       return [];
   }
@@ -495,19 +521,26 @@ export function mergeReviewDoc(local: ReviewDoc, incoming: ReviewDoc): ReviewDoc
     base.likes = likes.length ? likes : undefined;
     byId.set(lc.id, base);
   }
-  return { ...incoming, comments: Array.from(byId.values()) };
+  const status: Record<string, ReviewStatus> = { ...incoming.status };
+  for (const [vid, st] of Object.entries(local.status)) {
+    const other = status[vid];
+    if (!other || st.updatedAt > other.updatedAt) status[vid] = st;
+  }
+  return { ...incoming, comments: Array.from(byId.values()), status };
 }
 
 // ── approval status ──────────────────────────────────────────────────────────
 
 export function setStatus(
-  doc: ReviewDoc, versionId: string, state: ReviewStatusState, note = "", now = Date.now(),
+  doc: ReviewDoc, versionId: string, state: ReviewStatusState, note = "", now = Date.now(), reviewer = "",
 ): ReviewDoc {
-  return { ...doc, status: { ...doc.status, [versionId]: { state, note, updatedAt: now } } };
+  return { ...doc, status: { ...doc.status, [versionId]: { state, note, updatedAt: now, reviewer } } };
 }
 
 export function statusOf(doc: ReviewDoc, versionId: string | null): ReviewStatus {
-  return (versionId && doc.status[versionId]) || { state: "pending", note: "", updatedAt: 0 };
+  const st = (versionId && doc.status[versionId]) || { state: "pending" as const, note: "", updatedAt: 0 };
+  // Legacy docs predate the reviewer field.
+  return { reviewer: "", ...st };
 }
 
 // ── selectors (pure, for the panel + timeline markers) ───────────────────────
@@ -604,7 +637,7 @@ export function annotationsOf(
 // portable artifacts: human-readable notes (Markdown), a marker spreadsheet
 // (CSV), and an NLE marker list (CMX3600 EDL — Resolve/Premiere import markers).
 
-const STATUS_LABEL: Record<ReviewStatusState, string> = {
+export const STATUS_LABEL: Record<ReviewStatusState, string> = {
   pending: "Pending", approved: "Approved", changes: "Changes requested",
 };
 

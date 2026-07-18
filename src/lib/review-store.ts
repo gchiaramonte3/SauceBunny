@@ -374,3 +374,16 @@ function migrateLegacyLocalStorageDocs(): void {
     console.warn("review-store: localStorage migration failed:", err);
   }
 }
+
+/** Card-surface lookup: the ACTIVE version's verdict for a source, or null
+ *  when there is no doc / no explicit verdict (cards never show a default
+ *  chip). Reads the hydrated in-memory map - cheap enough per card render.
+ *  Fingerprint-keyed local docs resolve only via their fingerprint alias,
+ *  so a raw-path lookup can miss those; the chip is best-effort by design. */
+export function reviewStatusForKey(sourceKey: string): { state: "approved" | "changes"; reviewer: string } | null {
+  const doc = docs.get(sourceKey);
+  if (!doc) return null;
+  const st = doc.activeVersionId ? doc.status[doc.activeVersionId] : undefined;
+  if (!st || st.state === "pending") return null;
+  return { state: st.state, reviewer: (st as { reviewer?: string }).reviewer ?? "" };
+}

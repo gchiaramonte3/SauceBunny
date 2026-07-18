@@ -899,3 +899,59 @@
   cursor: pointer;
 }
 .cp-review-drawbadge:hover { background: rgba(var(--accent-rgb), 0.22); }
+
+/* ── Approval status (chip shared by panel/sidebar/room/cards) ────── */
+.cp-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.cp-status-chip.approved {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
+}
+.cp-status-chip.changes {
+  background: color-mix(in srgb, var(--gold) 18%, transparent);
+  color: var(--gold);
+}
+.cp-status-chip.pending {
+  background: rgba(255,255,255,0.07);
+  color: var(--fg-3);
+}
+.cp-status-chip-who {
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: normal;
+  color: inherit;
+  opacity: 0.85;
+}
+.cp-source-title .cp-status-chip { margin-right: 6px; }
+
+/* The panel's approval row (under the toolbar). */
+.cp-review-approval {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  padding: 6px 10px;
+}
+.cp-review-approval-actions { display: flex; gap: var(--s-1); }
+
+/* Card corner chip (Home/Library) - existing badge grammar corner. */
+.cp-lib-cell { position: relative; }
+.cp-lib-cell-status {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  pointer-events: none;
+}

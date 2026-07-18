@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type { DictateDoneEvent, DictateLevelEvent, DictatePartialEvent } from "../types";
 import { DictationWave } from "./DictationWave";
+import { ReviewStatusChip } from "./ReviewStatusChip";
 import { EmojiPicker } from "./EmojiPicker";
 import { IconDownload, IconRange } from "./Icons";
 import { usePlayheadSeconds } from "../lib/playhead-store";
@@ -20,6 +21,7 @@ import {
   avatarColor, initialsOf, loadReviewer, AVATAR_COLORS, AUTHOR_KEY, AUTHOR_COLOR_KEY, REVIEW_CHANGED_EVENT,
   loadReviewHistory, removeReviewHistory, clearReviewHistory, annotationHasContent,
   type ReviewDoc, type ReviewComment, type CommentSort, type AnnotationStrokes, type ReviewHistoryEntry, type ReviewOp,
+  statusOf,
 } from "../lib/review";
 import {
   markersToAvidTxt, markersToPremiereXml, markersToResolveEdl, markersToFcpxml, markersToCsv,
@@ -786,6 +788,36 @@ export function ReviewPanel({
         history={history} setHistory={setHistory} now={now}
         author={author} authorColor={authorColor} openRename={openRename}
       />
+      {/* Approval: the review's verdict, set from either workspace and
+          relayed in a session like any other op (undoable). */}
+      {viewDoc && versionId && (() => {
+        const st = statusOf(viewDoc, versionId);
+        const setVerdict = (state: "approved" | "changes" | "pending") => {
+          const op = { t: "status" as const, versionId, state, reviewer: author, at: Date.now() };
+          dispatchUndoable("Set review status", op, (d) => applyReviewOp(d, op));
+        };
+        return (
+          <div className="cp-review-approval">
+            <ReviewStatusChip state={st.state} reviewer={st.reviewer || undefined} />
+            <div className="cp-review-approval-actions">
+              {st.state !== "approved" ? (
+                <button type="button" className="btn btn-ghost btn-compact" onClick={() => setVerdict("approved")}>
+                  Approve
+                </button>
+              ) : (
+                <button type="button" className="btn btn-ghost btn-compact" onClick={() => setVerdict("pending")}>
+                  Reopen
+                </button>
+              )}
+              {st.state !== "changes" && (
+                <button type="button" className="btn btn-ghost btn-compact" onClick={() => setVerdict("changes")}>
+                  Request changes
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
       {searchOpen && (
         <div className="cp-review-search" ref={searchRowRef}>
           <SearchGlyph />

@@ -146,7 +146,7 @@ describe("migration decision logic (pure)", () => {
   it("reviewDocHasContent keeps comment/status docs and drops version-only shells", () => {
     expect(reviewDocHasContent(mkDoc("/a.mp4"))).toBe(false);
     expect(reviewDocHasContent(mkDoc("/a.mp4", { comments: [mkComment("v1", "c1")] }))).toBe(true);
-    expect(reviewDocHasContent(mkDoc("/a.mp4", { status: { v1: { state: "approved", note: "", updatedAt: 1 } } }))).toBe(true);
+    expect(reviewDocHasContent(mkDoc("/a.mp4", { status: { v1: { state: "approved", note: "", updatedAt: 1, reviewer: "Nika" } } }))).toBe(true);
   });
 });
 

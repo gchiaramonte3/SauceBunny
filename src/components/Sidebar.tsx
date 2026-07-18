@@ -9,6 +9,7 @@ import {
   IconFilm, IconCaptions, IconReveal,
   IconDownload, IconSparkles, IconPlus,
 } from "./Icons";
+import { ReviewStatusChip } from "./ReviewStatusChip";
 import type { AppStatus, ExportOpts, FormatId, Metadata, RecentClip } from "../types";
 import type { StatefulPhase } from "../lib/stateful-phase";
 import { isValidTc, normalizeTc, tcToFrames } from "../lib/timecode";
@@ -24,6 +25,8 @@ type Props = {
   /** Arms App's filename dirty flag: a user-typed name survives source
    *  switches; a seeded name reseeds from the next source. */
   onFilenameEdit?: () => void;
+  /** Current source's approval verdict (null = no explicit verdict). */
+  reviewStatus: { state: "pending" | "approved" | "changes"; reviewer: string } | null;
   status: AppStatus;
   metadata: Metadata | null;
   exportOpts: ExportOpts;
@@ -146,7 +149,7 @@ function extFromUrl(url: string): string {
 
 export function Sidebar(props: Props) {
   const {
-    status, metadata, exportOpts, setExportOpts, onFilenameEdit,
+    status, metadata, exportOpts, setExportOpts, onFilenameEdit, reviewStatus,
     recents, onExport, exportPhase, onExportResolved, onReveal, onPickRecent, onClearRecents,
     onAddToQueue, queueCount, queueRunning, onExportQueue,
     onDownloadCaptions, captionsState, captionsError,
@@ -356,6 +359,9 @@ export function Sidebar(props: Props) {
                   hover so the user can read the full string when the
                   visible text is clamped. */}
               <h2 className="cp-source-title" title={decodeHtmlEntities(metadata.title)}>
+                {reviewStatus && reviewStatus.state !== "pending" && (
+                  <ReviewStatusChip state={reviewStatus.state} reviewer={reviewStatus.reviewer || undefined} compact />
+                )}
                 {decodeHtmlEntities(metadata.title)}
               </h2>
               <div className="cp-meta-row">

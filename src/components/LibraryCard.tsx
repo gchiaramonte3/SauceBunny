@@ -3,6 +3,8 @@
  *  state so a sibling split would thread 6+ props for zero reuse; keeping
  *  one file was the deliberate call. Revisit if another media layer lands. */
 import { useRef, useState } from "react";
+import { reviewStatusForKey } from "../lib/review-store";
+import { ReviewStatusChip } from "./ReviewStatusChip";
 import { IconFilm, IconMore, IconPlay, IconVolume } from "./Icons";
 import { LibraryCardMenu } from "./LibraryCardMenu";
 import { chosenPosterFor } from "../lib/library";
@@ -102,6 +104,9 @@ export function LibraryCard({
   const canPick = !!posterPath && !!onChoosePoster;
   // Any local source has a path to reveal; web sources don't.
   const revealPath = art.kind === "local" ? art.path : null;
+  // Corner verdict chip - only when this source has an explicit approval
+  // status (review-store's hydrated map; best-effort for fingerprint keys).
+  const reviewVerdict = reviewStatusForKey(art.kind === "local" ? art.path : art.url ?? "");
 
   const closeMenu = () => { setMenuAnchor(null); btnRef.current?.focus(); };
   const openMenuAtRect = () => {
@@ -119,6 +124,11 @@ export function LibraryCard({
       onMouseEnter={isVideo ? () => startCycle("hover") : undefined}
       onMouseLeave={isVideo ? () => stopCycle("hover") : undefined}
     >
+      {reviewVerdict && (
+        <span className="cp-lib-cell-status">
+          <ReviewStatusChip state={reviewVerdict.state} compact />
+        </span>
+      )}
       <button
         ref={btnRef}
         type="button"

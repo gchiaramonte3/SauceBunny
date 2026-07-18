@@ -316,6 +316,35 @@ describe("approval status", () => {
     expect(statusOf(d, v)).toMatchObject({ state: "changes", note: "fix audio at 0:12" });
     expect(statusOf(setStatus(d, v, "approved"), v).state).toBe("approved");
   });
+
+  it("status op sets + overrides with LWW (stale op skipped)", () => {
+    const { doc, v } = seed();
+    const d1 = applyReviewOp(doc, { t: "status", versionId: v, state: "approved", reviewer: "Nika", at: 100 });
+    expect(statusOf(d1, v)).toMatchObject({ state: "approved", reviewer: "Nika" });
+    const d2 = applyReviewOp(d1, { t: "status", versionId: v, state: "changes", reviewer: "Ada", at: 200 });
+    expect(statusOf(d2, v)).toMatchObject({ state: "changes", reviewer: "Ada" });
+    // Late-arriving stale op loses.
+    const d3 = applyReviewOp(d2, { t: "status", versionId: v, state: "approved", reviewer: "Nika", at: 150 });
+    expect(statusOf(d3, v).state).toBe("changes");
+  });
+
+  it("undo inverse restores the prior verdict, reviewer included", () => {
+    const { doc, v } = seed();
+    const before = applyReviewOp(doc, { t: "status", versionId: v, state: "changes", reviewer: "Ada", at: 100 });
+    const op = { t: "status" as const, versionId: v, state: "approved" as const, reviewer: "Nika", at: 200 };
+    const after = applyReviewOp(before, op);
+    const inv = inverseReviewOps(before, op, 300);
+    const undone = inv.reduce(applyReviewOp, after);
+    expect(statusOf(undone, v)).toMatchObject({ state: "changes", reviewer: "Ada" });
+  });
+
+  it("merge keeps the NEWER verdict per version from either side", () => {
+    const { doc, v } = seed();
+    const local = applyReviewOp(doc, { t: "status", versionId: v, state: "approved", reviewer: "Nika", at: 500 });
+    const incoming = applyReviewOp(doc, { t: "status", versionId: v, state: "changes", reviewer: "Ada", at: 300 });
+    expect(statusOf(mergeReviewDoc(local, incoming), v)).toMatchObject({ state: "approved", reviewer: "Nika" });
+    expect(statusOf(mergeReviewDoc(incoming, local), v)).toMatchObject({ state: "approved", reviewer: "Nika" });
+  });
 });
 
 describe("export", () => {
