@@ -260,8 +260,8 @@
 }
 .cp-tx-search-mode-btn:hover { color: var(--fg-1); }
 .cp-tx-search-mode-btn.active {
-  background: rgba(108, 255, 141, 0.10);
-  color: var(--color-accent-green);
+  background: var(--bg-5);
+  color: var(--fg-0);
 }
 .cp-tx-search-input {
   flex: 1;
@@ -802,10 +802,10 @@
   padding: 0 14px;
   border-radius: 999px;
   font: 600 11px var(--font-sans);
-  color: #0a0a0a;
-  background: var(--color-accent-green);
-  border: none;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.4), 0 0 0 1px rgba(108,255,141,0.4);
+  color: var(--fg-0);
+  background: var(--bg-5);
+  border: 1px solid var(--line-3);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.4);
   cursor: pointer;
   animation: cp-fade-in var(--dur-fast, 140ms) var(--ease-out, ease);
 }
@@ -1197,4 +1197,11 @@
 .cp-colorpick-swatch:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--color-surface-elevated), 0 0 0 3px var(--focus-ring);
+}
+
+/* Follow playback beside Manage speakers (3d): the roster-button grammar
+   with a lifted grey fill so the disengaged state is findable. */
+.cp-tx-follow-btn {
+  background: var(--bg-5);
+  color: var(--fg-0);
 }

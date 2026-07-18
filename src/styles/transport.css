@@ -68,11 +68,12 @@
   background: rgba(255,255,255,0.07);
   border-color: var(--line-2);
 }
+/* Grey-active (green audit 7a): green is for primaries + notifications;
+   the icon swap is the state signal, the fill just lifts it. */
 .cp-transport-btn.play.active {
-  background: var(--accent);
-  color: #0A0A0D;
-  border-color: transparent;
-  box-shadow: 0 0 7px rgba(var(--accent-rgb), 0.18);
+  background: var(--bg-5);
+  color: var(--fg-0);
+  border-color: var(--line-3);
 }
 .cp-transport-btn:active { transform: scale(0.96); }
 
@@ -102,9 +103,8 @@
 }
 .cp-icon-btn:hover { background: rgba(255,255,255,0.05); color: var(--fg-1); }
 .cp-icon-btn.active {
-  background: rgba(var(--accent-rgb), 0.16);
-  color: var(--accent);
-  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.2);
+  background: var(--bg-5);
+  color: var(--fg-0);
 }
 .cp-icon-btn.cc,
 .cp-icon-btn.snapshot {
@@ -116,12 +116,13 @@
 .cp-icon-btn.cc:hover,
 .cp-icon-btn.snapshot:hover { background: rgba(255,255,255,0.06); }
 .cp-icon-btn.cc.active {
-  background: rgba(var(--accent-rgb), 0.16);
-  border-color: rgba(var(--accent-rgb), 0.35);
+  background: var(--bg-5);
+  border-color: var(--line-3);
+  color: var(--fg-0);
 }
 .cp-icon-btn.snapshot.busy {
-  background: rgba(var(--accent-rgb), 0.12);
-  color: var(--accent);
+  background: var(--bg-5);
+  color: var(--fg-0);
 }
 .cp-icon-btn.snapshot:disabled {
   opacity: 0.35;

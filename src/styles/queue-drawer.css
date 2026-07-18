@@ -432,7 +432,8 @@ body.cp-tab-dragging { cursor: grabbing; }
   height: 16px;
   padding: 0 4px;
   border-radius: 8px;
-  background: var(--fg-2);
+  /* Count badge = a notification (5a): brand green with dark text. */
+  background: var(--ella-green);
   color: var(--bg-0);
   font-family: var(--font-mono);
   font-size: 9.5px;

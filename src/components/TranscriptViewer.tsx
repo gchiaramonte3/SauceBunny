@@ -637,6 +637,9 @@ export function TranscriptViewer({
     list.sort((a, b) => (orderMap.get(a.tag)! - orderMap.get(b.tag)!));
     return list;
   }, [turns, resolveAlias, overrides.global, hasIdentifiedSpeakers]);
+  // The roster header row renders only for real rosters; the follow
+  // control falls back to the floating pill without it (3d).
+  const rosterVisible = roster.length > 1 || (roster.length === 1 && roster[0].tag !== "Speaker");
 
   // True when the transcript actually carries speaker identity — either
   // more than one speaker, or a single one that's been labeled (not the
@@ -1408,7 +1411,7 @@ export function TranscriptViewer({
         </div>
       )}
 
-      {(roster.length > 1 || (roster.length === 1 && roster[0].tag !== "Speaker")) && (
+      {rosterVisible && (
         <div className="cp-tx-roster" role="toolbar" aria-label="Speakers in this transcript">
           <div className="cp-tx-roster-label">
             {roster.length} speaker{roster.length === 1 ? "" : "s"}
@@ -1420,6 +1423,19 @@ export function TranscriptViewer({
             >
               Manage speakers
             </button>
+            {/* Follow playback lives beside Manage speakers (3d): same
+                control group, grey-active grammar. Appears only while
+                auto-scroll is disengaged, exactly like the old pill. */}
+            {!autoScroll && (
+              <button
+                type="button"
+                className="cp-tx-roster-manage cp-tx-follow-btn"
+                onClick={() => setAutoScroll(true)}
+                title="Resume auto-scroll to follow playback"
+              >
+                Follow playback
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1518,11 +1534,10 @@ export function TranscriptViewer({
         <div style={{ height: 32 }} />
       </div>
 
-      {/* Floating "Follow playback" pill (r65) — appears over the transcript
-          body when the user has scrolled away from the playhead. Recognizable
-          chat-style "jump back to live" pattern; keeps it out of the cramped
-          search row where it used to clip. */}
-      {!autoScroll && (
+      {/* Floating "Follow playback" pill — FALLBACK only: transcripts with
+          no speaker roster have no header row to host the control (3d moved
+          it beside Manage speakers), so the chat-style pill covers them. */}
+      {!autoScroll && !rosterVisible && (
         <button
           className="cp-tx-follow-pill"
           onClick={() => setAutoScroll(true)}
