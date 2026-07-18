@@ -1193,7 +1193,10 @@
   min-height: 0;
   overflow-y: auto;
   padding: var(--s-3) var(--s-4) var(--s-6);
-  border-left: 1px solid var(--line-1);
+  /* Tone-card (Claude Terminal grammar), matching the Clip panels: bg-1 on
+     the page, one radius, gutter instead of a border-left hairline. */
+  margin: var(--s-2);
+  border-radius: var(--r-lg);
   background: var(--bg-1);
 }
 .cp-lib-detail-head { display: flex; justify-content: flex-end; }

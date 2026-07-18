@@ -10,10 +10,10 @@
   background: var(--bg-1);
   overflow-y: auto;
   overflow-x: hidden;
-  /* Floating rounded side panel (matches the drawer + main viewport). */
-  margin: var(--s-2) 3px var(--s-2) var(--s-2);
-  border: 1px solid var(--line-1);
-  border-radius: 16px;
+  /* Tone-card (Claude Terminal grammar): matches the drawer + viewport —
+     bg-1 tone, one radius, uniform 8px gutters, no border. */
+  margin: var(--s-2) 4px var(--s-2) var(--s-2);
+  border-radius: var(--r-lg);
 }
 .cp-sidebar::-webkit-scrollbar { width: 6px; }
 .cp-sidebar::-webkit-scrollbar-track { background: transparent; }
@@ -546,9 +546,9 @@
    pattern: zero width, contents keep intrinsic size for a clean
    slide-back. Toggled from the toolbar's cp-sidebar-toggle. */
 .cp-sidebar { transition: var(--panel-slide); }
-/* Fully collapse the floating panel (drop its gutter margins + border) so no
-   sliver is left when hidden. */
-.cp-sidebar.closed { width: 0; margin: 0; border-color: transparent; }
+/* Fully collapse the floating panel (drop its gutter margins) so no sliver
+   is left when hidden. */
+.cp-sidebar.closed { width: 0; margin: 0; }
 
 /* Export-folder nudge — one-line explanation under the export CTA when the
    button is disabled because no folder is set, with a deep-link into

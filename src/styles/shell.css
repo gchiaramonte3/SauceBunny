@@ -124,11 +124,11 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  /* Floating rounded viewport panel: full border + radius, clipping the video's
-     corners round. Portaled overlays (notifications, view popover) escape it. */
-  margin: var(--s-2) 3px;
-  border: 1px solid var(--line-1);
-  border-radius: 16px;
+  /* Tone-card (Claude Terminal grammar): bg-1 on the bg-0 page, ONE radius,
+     uniform 8px gutters, NO border — tone does the separation. Radius still
+     clips the video's corners; portaled overlays escape it. */
+  margin: var(--s-2) 4px;
+  border-radius: var(--r-lg);
   overflow: hidden;
   background: var(--bg-1);
 }

@@ -14,10 +14,9 @@
   width: 0;
   flex-shrink: 0;
   background: var(--bg-1);
-  /* Full transparent border (not just border-left) so opening only fades the
-     colour — mirrors the left sidebar exactly rather than snapping in 3 sides. */
-  border: 1px solid transparent;
-  border-radius: 16px;
+  /* Tone-card (Claude Terminal grammar): bg-1 tone, one radius, no border —
+     mirrors the sidebar + viewport exactly. */
+  border-radius: var(--r-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -25,10 +24,8 @@
   transition: var(--panel-slide);
 }
 .cp-queue-drawer.open {
-  /* Floating rounded side panel (matches the sidebar + main viewport). width is
-     set inline from React state (resize-drag persistence). */
-  border-color: var(--line-1);
-  margin: var(--s-2) var(--s-2) var(--s-2) 3px;
+  /* width is set inline from React state (resize-drag persistence). */
+  margin: var(--s-2) var(--s-2) var(--s-2) 4px;
 }
 /* During a live resize-drag the width is driven frame-by-frame from the
    pointer — animating it here would make the panel lag the cursor. */
