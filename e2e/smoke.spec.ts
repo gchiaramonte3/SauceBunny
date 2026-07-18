@@ -496,3 +496,35 @@ test("new-source reset: filename reseeds per source, user-typed name survives", 
   await expect(filename).toHaveValue("my-custom-name", { timeout: 10_000 });
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
+
+test("recent exports: grouped per source, chevron reveals older exports", async ({ page }) => {
+  await page.addInitScript(() => {
+    // App.tsx RECENTS_KEY — storage stays flat, newest-first; the per-source
+    // grouping under test is purely render-time (Sidebar groupedRecents).
+    const mk = (id: string, title: string, when: number) => ({
+      id, title, path: `/e2e/out/${id}.mp4`, dur: "0:42", when, thumbnail: null,
+    });
+    localStorage.setItem("cp-recents", JSON.stringify([
+      mk("r4", "Source A", 4000),
+      mk("r3", "Source A", 3000),
+      mk("r2", "Source B", 2000),
+      mk("r1", "Source A", 1000),
+    ]));
+  });
+  await boot(page);
+  // Two groups: Source A leads with its newest export plus a chevron for the
+  // two older ones; Source B is a singleton, so it gets no chevron.
+  await expect(page.locator(".cp-recent-group")).toHaveCount(2);
+  const chev = page.locator(".cp-recent-chev");
+  await expect(chev).toHaveCount(1);
+  await expect(chev).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator(".cp-recent.nested")).toHaveCount(0);
+  // Open: the two older Source A exports unfold as nested rows.
+  await chev.click();
+  await expect(chev).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".cp-recent.nested")).toHaveCount(2);
+  // Close: they fold away again.
+  await chev.click();
+  await expect(page.locator(".cp-recent.nested")).toHaveCount(0);
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
