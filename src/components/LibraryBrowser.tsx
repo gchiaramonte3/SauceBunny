@@ -47,6 +47,8 @@ type Props = {
   /** Bumped on each handoff so the same chain re-applies. */
   selectionTick: number;
   onOpenLocalPath: (path: string) => void;
+  /** "Review this clip": open the source and land in Review. */
+  onReviewLocalPath?: (path: string) => void;
   onOpenTranscriptHistory: (entry: TranscriptHistoryEntry) => void;
 };
 
@@ -61,7 +63,7 @@ type Props = {
 export function LibraryBrowser({
   roots, scans, scanning, addFolder, rescanAll, requestThumb, invalidateThumb,
   posterVersions, bumpPoster, resetPoster, selection, selectionTick,
-  onOpenLocalPath, onOpenTranscriptHistory,
+  onOpenLocalPath, onReviewLocalPath, onOpenTranscriptHistory,
 }: Props) {
   const [selected, setSelected] = useState<LibraryCrumb[] | null>(selection);
   const [prefs, setPrefs] = useState<BrowserPrefs>(() => normalizePrefs(loadJson<unknown>(BROWSER_KEY, {})));
@@ -215,6 +217,7 @@ export function LibraryBrowser({
             posterVersions={posterVersions}
             requestThumb={requestThumb}
             onOpen={onOpenLocalPath}
+            onReview={onReviewLocalPath}
             onSelectItem={openDetail}
             onChoosePoster={setPickerPath}
             onResetPoster={resetPoster}

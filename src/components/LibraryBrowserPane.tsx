@@ -12,6 +12,7 @@ type Props = {
   posterVersions: Record<string, number>;
   requestThumb: (path: string) => Promise<string | null>;
   onOpen: (path: string) => void;
+  onReview?: (path: string) => void;
   onSelectItem: (item: LibraryItem) => void;
   onChoosePoster: (path: string) => void;
   onResetPoster: (path: string) => void;
@@ -28,7 +29,7 @@ type Props = {
  */
 export function LibraryBrowserPane({
   items, view, selectedPath, posterVersions, requestThumb,
-  onOpen, onSelectItem, onChoosePoster, onResetPoster, onClearSelection, emptyText,
+  onOpen, onReview, onSelectItem, onChoosePoster, onResetPoster, onClearSelection, emptyText,
 }: Props) {
   const clearOnBlank = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClearSelection();
@@ -48,6 +49,7 @@ export function LibraryBrowserPane({
             detail={[formatBytes(it.size_bytes), formatModifiedDate(it.modified_ms)].filter(Boolean).join(" · ")}
             art={{ kind: "local", path: it.path, media: it.kind }}
             onOpen={() => onOpen(it.path)}
+            onReview={onReview ? () => onReview(it.path) : undefined}
             onSelect={() => onSelectItem(it)}
             selected={selectedPath === it.path}
             onChoosePoster={onChoosePoster}

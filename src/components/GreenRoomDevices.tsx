@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { invoke } from "@tauri-apps/api/core";
 import type { useMediaCapture } from "../hooks/use-media-capture";
 
 /**
@@ -56,8 +56,11 @@ export function GreenRoomDevices({ cap, onContinue }: {
     };
   }, [cap.stream]);
 
+  // The opener plugin's default scope blocks x-apple.systempreferences:
+  // links (the old deep link silently no-oped) - macOS `open` via Rust is
+  // the app's proven path.
   const openPrivacySettings = () => {
-    void openUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera").catch(() => { /* opener denied */ });
+    void invoke("open_privacy_pane", { anchor: "Privacy_Camera" }).catch(() => { /* surfaced in logs */ });
   };
   const label = (d: MediaDeviceInfo, i: number, kind: string) => d.label || `${kind} ${i + 1}`;
 
@@ -68,6 +71,7 @@ export function GreenRoomDevices({ cap, onContinue }: {
       {cap.permission === "denied" ? (
         <div className="cp-gr-denied">
           <p>Camera and microphone are blocked for Sauce Bunny.</p>
+          <p className="cp-colobby-hint">After allowing them in System Settings, quit and reopen the app. macOS requires it.</p>
           <div className="cp-gr-denied-row">
             <button type="button" className="btn btn-ghost btn-compact" onClick={openPrivacySettings}>
               Open System Settings

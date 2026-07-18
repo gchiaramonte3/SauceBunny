@@ -71,6 +71,11 @@ export async function openCapture(c: DeviceChoice): Promise<MediaStream | null> 
   const wantVideo = !c.cameraOff;
   const wantAudio = true; // mic-mute is track.enabled, not a missing track
   if (!wantVideo && !wantAudio) return null;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    // WKWebView without capture support (or a non-secure context): say so
+    // instead of masquerading as a permissions denial.
+    throw new DOMException("Capture is unavailable in this webview", "NotSupportedError");
+  }
   const stream = await navigator.mediaDevices.getUserMedia({
     video: wantVideo
       ? (c.cameraId ? { deviceId: { ideal: c.cameraId }, width: { ideal: 1280 }, height: { ideal: 720 } } : { width: { ideal: 1280 }, height: { ideal: 720 } })

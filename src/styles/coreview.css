@@ -88,6 +88,7 @@
 }
 .cp-colobby-card-title {
   margin: 0;
+  text-align: center;
   font-family: var(--font-ui);
   font-size: 10px;
   font-weight: 800;
@@ -104,6 +105,7 @@
   gap: var(--s-1);
 }
 .cp-colobby-field-label {
+  text-align: center;
   font-family: var(--font-ui);
   font-size: 11px;
   font-weight: 600;
@@ -141,6 +143,7 @@
 .cp-colobby-hint {
   margin: calc(-1 * var(--s-2)) 0 0;
   padding: 0 var(--s-2);
+  text-align: center;
   font-family: var(--font-ui);
   font-size: 11.5px;
   line-height: 1.5;
@@ -281,6 +284,7 @@
 /* ── Error — one quiet line, no slab. ── */
 .cp-colobby-err {
   margin: 0;
+  text-align: center;
   font-family: var(--font-ui);
   font-size: 11.5px;
   line-height: 1.5;
@@ -366,18 +370,20 @@
   .cp-gr-meter-bar { transition: none; }
 }
 .cp-gr-selects { display: flex; flex-direction: column; gap: var(--s-2); }
-.cp-gr-toggles { display: flex; gap: var(--s-2); }
-.cp-gr-devices-foot { display: flex; flex-direction: column; gap: var(--s-2); }
+.cp-gr-toggles { display: flex; justify-content: center; gap: var(--s-2); }
+.cp-gr-devices-foot { display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
 .cp-gr-denied {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  text-align: center;
   gap: var(--s-2);
   font-family: var(--font-ui);
   font-size: 13px;
   color: var(--fg-2);
 }
-.cp-gr-denied-row { display: flex; gap: var(--s-2); }
-.cp-gr-swatches { display: flex; gap: var(--s-2); padding: 2px 0; }
+.cp-gr-denied-row { display: flex; justify-content: center; gap: var(--s-2); }
+.cp-gr-swatches { display: flex; justify-content: center; gap: var(--s-2); padding: 2px 0; }
 .cp-gr-swatch {
   width: 22px;
   height: 22px;

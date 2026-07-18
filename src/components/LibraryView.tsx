@@ -42,6 +42,9 @@ type Props = {
   recentSources: RecentSource[];
   /** Routes to the same loadLocalPath flow as drag-drop/import. */
   onOpenLocalPath: (path: string) => void;
+  /** "Review this clip": open the source and land in Review. */
+  onReviewLocalPath: (path: string) => void;
+  onReviewRecentSource: (r: RecentSource) => void;
   /** Same handler as the URL-bar history popover — no parallel load path. */
   onOpenRecentSource: (entry: RecentSource) => void;
   /** Loads a past transcript's source through the existing history handler. */
@@ -80,6 +83,7 @@ type Props = {
  */
 export function LibraryView({
   recentSources, onOpenLocalPath, onOpenRecentSource, onOpenTranscriptHistory,
+  onReviewLocalPath, onReviewRecentSource,
   onSwitchToClip, onOpenFolder, homeResetSignal, homeVisible,
   roots, scans, addFolder, removeRoot, scanRoot,
   requestThumb, invalidateThumb, posterVersions, bumpPoster, resetPoster,
@@ -147,6 +151,7 @@ export function LibraryView({
         .filter(Boolean).join(" · ")}
       art={{ kind: "local", path: it.path, media: it.kind }}
       onOpen={() => onOpenLocalPath(it.path)}
+      onReview={() => onReviewLocalPath(it.path)}
       onChoosePoster={setPickerPath}
       onResetPoster={resetPoster}
       requestThumb={requestThumb}
@@ -187,6 +192,7 @@ export function LibraryView({
       badge={r.kind === "url" ? "web" : undefined}
       large
       onOpen={() => onOpenRecentSource(r)}
+      onReview={() => onReviewRecentSource(r)}
       onChoosePoster={setPickerPath}
       onResetPoster={resetPoster}
       requestThumb={requestThumb}

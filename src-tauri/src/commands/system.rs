@@ -434,6 +434,23 @@ pub fn write_bytes_to_path(
     Ok(p.to_string_lossy().into_owned())
 }
 
+/// Open a System Settings privacy pane. The opener plugin's default scope
+/// allows only http(s), so x-apple.systempreferences: links silently no-op
+/// from the frontend - macOS `open` via std::process is the app's proven
+/// escape hatch (see open_youtube_signin / open_full_disk_access). The
+/// anchor is allowlisted so this can't become an arbitrary-URL opener.
+#[tauri::command]
+pub fn open_privacy_pane(anchor: String) -> Result<(), crate::AppError> {
+    if !matches!(anchor.as_str(), "Privacy_Camera" | "Privacy_Microphone" | "Privacy_ScreenCapture") {
+        return Err(crate::AppError::invalid("Unknown settings pane"));
+    }
+    std::process::Command::new("open")
+        .arg(format!("x-apple.systempreferences:com.apple.preference.security?{anchor}"))
+        .spawn()
+        .map_err(|e| crate::AppError::internal(format!("open settings pane: {e}")))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn reveal_in_finder(path: String) -> Result<(), crate::AppError> {
     let p = PathBuf::from(&path);
@@ -531,7 +548,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-19-r115-review-workspace";
+pub const BACKEND_BUILD_ID: &str = "2026-07-19-r116-session-titles";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

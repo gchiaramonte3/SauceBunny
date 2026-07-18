@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { saveJson } from "../lib/storage";
+import { loadJson, saveJson } from "../lib/storage";
 import { IconCrown } from "./Icons";
 import {
   AUTHOR_COLOR_KEY, AUTHOR_KEY, AVATAR_COLORS, REVIEW_CHANGED_EVENT,
@@ -29,7 +29,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   /** A local file is loaded - guests can't receive it yet (hosting still allowed). */
   localSource: boolean;
   participants: Participant[];
-  onStart: () => void;
+  onStart: (title?: string) => void;
   onJoin: (ticket: string, name: string) => void;
   onLeave: () => void;
 }) {
@@ -38,6 +38,9 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   const [name, setName] = useState(() => loadReviewer().name);
   const [color, setColor] = useState(() => loadReviewer().color);
   const [ticket, setTicket] = useState("");
+  // Optional session name (13a follow-up): shows in the room header and on
+  // every guest's side via Welcome. Last used name is the friendly default.
+  const [sessionTitle, setSessionTitle] = useState(() => loadJson<string>("saucebunny.sessionTitle", ""));
   const [joining, setJoining] = useState(false);
   const [step, setStep] = useState<Step>(() => (loadReviewer().name ? "devices" : "identity"));
   const active = session.role !== "off";
@@ -75,7 +78,12 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
     persistIdentity(v, color);
     setStep("devices");
   };
-  const startSession = () => { const v = name.trim(); if (v) persistIdentity(v, color); onStart(); };
+  const startSession = () => {
+    const v = name.trim();
+    if (v) persistIdentity(v, color);
+    saveJson("saucebunny.sessionTitle", sessionTitle.trim());
+    onStart(sessionTitle.trim() || undefined);
+  };
   const joinSession = () => {
     const v = name.trim(); const t = ticket.trim();
     if (!v || !t) return;
@@ -152,6 +160,12 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
 
                 <section className="cp-colobby-card">
                   <h2 className="cp-colobby-card-title">Host</h2>
+                  <label className="cp-colobby-field">
+                    <span className="cp-colobby-field-label">Session name</span>
+                    <input className="cp-colobby-input" value={sessionTitle}
+                      onChange={(e) => setSessionTitle(e.target.value)}
+                      placeholder="Rough cut review" maxLength={80} />
+                  </label>
                   <button type="button" className="btn btn-primary cp-colobby-cta" onClick={startSession}>
                     Start session
                   </button>

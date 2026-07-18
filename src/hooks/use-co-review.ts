@@ -111,7 +111,7 @@ export type CoReview = {
   sharingMembers: ReadonlySet<string>;
   startShare: (displayIndex: number) => void;
   stopShare: () => void;
-  startCoReview: () => Promise<void>;
+  startCoReview: (title?: string) => Promise<void>;
   joinCoReview: (ticket: string, name: string) => Promise<void>;
   leaveCoReview: () => void;
 };
@@ -125,7 +125,7 @@ export function useCoReview({
   setReviewMarkers, setReviewAnnotations,
   turn,
 }: Args): CoReview {
-  const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], selfId: null, error: null });
+  const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], selfId: null, title: null, error: null });
   // Incoming SessionMsg::Rtc -> the mesh (assigned each render below; the
   // mesh hook must be declared after the message handler's closure).
   const rtcSignalRef = useRef<((from: string, payload: string) => void) | null>(null);
@@ -323,11 +323,12 @@ export function useCoReview({
     const iv = window.setInterval(send, 350);
     return () => window.clearInterval(iv);
   }, [coSessionActive, sendSessionMsg]);
-  const startCoReview = useCallback(async () => {
+  const startCoReview = useCallback(async (title?: string) => {
     try {
       // Host under the review identity's name (falls back to "Host" in Rust)
       // so guests see a real person heading the roster, not a role label.
-      await invoke<string>("session_start", { name: loadReviewer().name || null });
+      // The optional title names the SESSION (room header + peers' Welcome).
+      await invoke<string>("session_start", { name: loadReviewer().name || null, title: title?.trim() || null });
     }
     catch (e) { pushNotification("error", "Couldn't start co-review", formatError(e)); }
   }, [pushNotification]);

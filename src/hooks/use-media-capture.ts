@@ -75,7 +75,10 @@ export function useMediaCapture() {
       if (name === "NotAllowedError" || name === "SecurityError") {
         setPermission("denied");
       } else {
-        setError(err instanceof Error ? err.message : String(err));
+        // Every other failure (no device, unsupported webview, hardware in
+        // use) surfaces with its real name - a wrong "blocked" message sent
+        // people to System Settings for nothing.
+        setError(`${name || "CaptureError"}: ${err instanceof Error ? err.message : String(err)}`);
       }
       return false;
     }

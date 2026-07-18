@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import type { DisplayInfo } from "../bindings/DisplayInfo";
 
 /**
@@ -43,7 +42,7 @@ export function SharePicker({ onPick, onClose }: {
           <button
             type="button"
             className="btn btn-ghost btn-compact"
-            onClick={() => { void openUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture").catch(() => {}); }}
+            onClick={() => { void invoke("open_privacy_pane", { anchor: "Privacy_ScreenCapture" }).catch(() => {}); }}
           >
             Open System Settings
           </button>

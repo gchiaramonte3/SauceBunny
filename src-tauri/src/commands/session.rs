@@ -74,9 +74,10 @@ const ONLINE_TIMEOUT: Duration = Duration::from_secs(8);
 pub enum SessionMsg {
     /// peer → host right after connect
     Hello { name: String },
-    /// host → the just-registered peer: your session-scoped member id.
-    /// (PeerList alone can't tell you which entry is you - names collide.)
-    Welcome { you: String },
+    /// host → the just-registered peer: your session-scoped member id and
+    /// the session's display title. (PeerList alone can't tell you which
+    /// entry is you - names collide.)
+    Welcome { you: String, title: Option<String> },
     /// host → everyone whenever membership changes (host is always m0, first)
     PeerList { peers: Vec<PeerInfo> },
     /// WebRTC signaling (SDP/ICE), OPAQUE JSON relayed to the addressed
@@ -125,6 +126,7 @@ pub struct SessionState {
     pub code: Option<String>,  // host: the join ticket to share
     pub peers: Vec<PeerInfo>,  // host: connected peers / peer: full roster via PeerList
     pub self_id: Option<String>, // your member id: host "m0"; peer via Welcome
+    pub title: Option<String>, // session display name (host-chosen, optional)
     pub error: Option<String>, // last error, cleared on state change
 }
 
@@ -167,6 +169,7 @@ enum Session {
     Host {
         endpoint: Endpoint,
         ticket: String,
+        title: Option<String>,
         shared: Arc<HostShared>,
         accept_task: JoinHandle<()>,
     },
@@ -174,6 +177,7 @@ enum Session {
         endpoint: Endpoint,
         roster: Arc<Mutex<Vec<PeerInfo>>>,
         self_id: Arc<Mutex<Option<String>>>,
+        title: Arc<Mutex<Option<String>>>,
         read_task: JoinHandle<()>,
         // Held so the QUIC stream/connection stay open for the session's
         // lifetime (dropping the send half would RESET the stream and the
@@ -193,6 +197,8 @@ struct HostShared {
     /// Session-scoped member-id mint (m1, m2, ...; the host is m0). Never
     /// reused within a session, so ids stay stable across disconnects.
     next_member: AtomicU64,
+    /// Session display title, carried to each newcomer in Welcome.
+    title: Option<String>,
     /// Send halves + names. tokio Mutex: broadcast writes are async.
     peers: AsyncMutex<Vec<PeerConn>>,
     /// Per-connection task handles, so `session_leave` can abort them.
@@ -223,6 +229,7 @@ pub async fn session_start(
     app: AppHandle,
     state: State<'_, SessionManager>,
     name: Option<String>,
+    title: Option<String>,
 ) -> Result<String, crate::AppError> {
     let mut inner = state.inner.lock().await;
     if !matches!(inner.session, Session::Off) {
@@ -241,9 +248,13 @@ pub async fn session_start(
     let _ = tokio::time::timeout(ONLINE_TIMEOUT, endpoint.online()).await;
 
     let ticket = EndpointTicket::new(endpoint.addr()).to_string();
+    let title = title
+        .map(|t| t.trim().chars().take(80).collect::<String>())
+        .filter(|t| !t.is_empty());
     let shared = Arc::new(HostShared {
         host_name: clean_host_name(name.as_deref().unwrap_or("")),
         next_member: AtomicU64::new(1), // m0 is the host
+        title: title.clone(),
         ..HostShared::default()
     });
     let accept_task = tokio::spawn(accept_loop(app.clone(), endpoint.clone(), shared.clone()));
@@ -253,6 +264,7 @@ pub async fn session_start(
     inner.session = Session::Host {
         endpoint,
         ticket: ticket.clone(),
+        title,
         shared,
         accept_task,
     };
@@ -323,13 +335,15 @@ pub async fn session_join(
     let generation = inner.generation;
     let roster: Arc<Mutex<Vec<PeerInfo>>> = Arc::new(Mutex::new(Vec::new()));
     let self_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let peer_title: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let read_task = tokio::spawn(peer_read_loop(
-        app.clone(), recv, roster.clone(), self_id.clone(), generation,
+        app.clone(), recv, roster.clone(), self_id.clone(), peer_title.clone(), generation,
     ));
     inner.session = Session::Peer {
         endpoint,
         roster,
         self_id,
+        title: peer_title,
         read_task,
         _conn: conn,
         send,
@@ -489,7 +503,7 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
     let mut send = send;
     // Tell the newcomer who THEY are before the roster lands (PeerList can't
     // disambiguate same-name members; the mesh keys everything on this id).
-    if write_msg_line(&mut send, &SessionMsg::Welcome { you: member.clone() }).await.is_err() {
+    if write_msg_line(&mut send, &SessionMsg::Welcome { you: member.clone(), title: shared.title.clone() }).await.is_err() {
         conn.close(1u32.into(), b"welcome write failed");
         return;
     }
@@ -644,6 +658,7 @@ async fn peer_read_loop(
     recv: iroh::endpoint::RecvStream,
     roster: Arc<Mutex<Vec<PeerInfo>>>,
     self_id: Arc<Mutex<Option<String>>>,
+    peer_title: Arc<Mutex<Option<String>>>,
     generation: u64,
 ) {
     let mut reader = BufReader::new(recv);
@@ -673,9 +688,12 @@ async fn peer_read_loop(
                         }
                         emit_state_now(&app).await;
                     }
-                    SessionMsg::Welcome { you } => {
+                    SessionMsg::Welcome { you, title } => {
                         if let Ok(mut me) = self_id.lock() {
                             *me = Some(you);
+                        }
+                        if let Ok(mut t) = peer_title.lock() {
+                            *t = title;
                         }
                         emit_state_now(&app).await;
                     }
@@ -768,9 +786,10 @@ async fn snapshot_state(inner: &Inner) -> SessionState {
             code: None,
             peers: Vec::new(),
             self_id: None,
+            title: None,
             error: inner.last_error.clone(),
         },
-        Session::Host { ticket, shared, .. } => SessionState {
+        Session::Host { ticket, title, shared, .. } => SessionState {
             role: "host".into(),
             // The SHAREABLE form (13a): SAUC- prefix + dash groups. The raw
             // ticket never renders as a paragraph blob again.
@@ -783,13 +802,15 @@ async fn snapshot_state(inner: &Inner) -> SessionState {
                 .map(|p| PeerInfo { id: p.member.clone(), name: p.name.clone() })
                 .collect(),
             self_id: Some("m0".into()),
+            title: title.clone(),
             error: inner.last_error.clone(),
         },
-        Session::Peer { roster, self_id, .. } => SessionState {
+        Session::Peer { roster, self_id, title, .. } => SessionState {
             role: "peer".into(),
             code: None,
             peers: roster.lock().map(|r| r.clone()).unwrap_or_default(),
             self_id: self_id.lock().map(|s| s.clone()).unwrap_or(None),
+            title: title.lock().map(|t| t.clone()).unwrap_or(None),
             error: inner.last_error.clone(),
         },
     }

@@ -34,6 +34,8 @@ type Props = {
   /** Featured size — the Continue row's large landscape cards (~2x width). */
   large?: boolean;
   onOpen: () => void;
+  /** Optional: open this source straight into the Review workspace. */
+  onReview?: () => void;
   /** The shared, cached, concurrency-capped thumbnail loader. */
   requestThumb: (path: string) => Promise<string | null>;
   /** Opens the "Choose thumbnail…" picker for this path. Only wired for
@@ -69,7 +71,7 @@ type Props = {
  * Open in Clip. The menu never triggers the card's open.
  */
 export function LibraryCard({
-  title, detail, art, badge, large, onOpen, requestThumb, onChoosePoster, onResetPoster,
+  title, detail, art, badge, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   onSelect, selected,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -225,6 +227,7 @@ export function LibraryCard({
           onChooseThumbnail={() => { if (posterPath) onChoosePoster?.(posterPath); }}
           onResetThumbnail={() => { if (posterPath) onResetPoster?.(posterPath); }}
           onOpen={onOpen}
+          onReview={onReview}
           onClose={closeMenu}
         />
       )}

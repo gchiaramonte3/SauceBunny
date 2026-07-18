@@ -102,8 +102,9 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   // Fresh profile lands on the green room's IDENTITY step; Start lives on
   // the READY step behind it (covered by the green-room specs).
   await expect(page.getByPlaceholder("Your name")).toBeVisible();
-  // Join stays gated (neutral) until both the code and a name are present.
-  await expect(page.getByRole("button", { name: "Join", exact: true })).toBeDisabled();
+  // The identity step gates Continue until a name is present (Join lives on
+  // the READY step, covered by the green-room spec below).
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeDisabled();
   await page.keyboard.press("Control+3");
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await page.keyboard.press("Control+1");

@@ -3417,6 +3417,16 @@ export default function App() {
   // the SAME load cores as the toolbar/monitor surfaces (loadLocalPath /
   // handleFetch / handleOpenRecentSource) — no parallel load paths. The
   // Library owns its own scan/search state; App only supplies these levers.
+  // "Review this clip" (library context menu): load the source, then land
+  // in the Review workspace so a session can start with it in hand.
+  const handleReviewLocalPath = useCallback((path: string) => {
+    void loadLocalPath(path);
+    navigateView("coreview");
+  }, [loadLocalPath, navigateView]);
+  const handleReviewRecentSource = useCallback((r: RecentSource) => {
+    handleOpenRecentSource(r);
+    navigateView("coreview");
+  }, [handleOpenRecentSource, navigateView]);
   const handleLibraryOpenLocalPath = useCallback((path: string) => {
     setActiveView("clip");
     void loadLocalPath(path);
@@ -4620,6 +4630,8 @@ export default function App() {
             <LibraryView
               recentSources={recentSources}
               onOpenLocalPath={handleLibraryOpenLocalPath}
+              onReviewLocalPath={handleReviewLocalPath}
+              onReviewRecentSource={handleReviewRecentSource}
               onOpenRecentSource={handleLibraryOpenRecent}
               onOpenTranscriptHistory={handleLibraryOpenTranscript}
               onSwitchToClip={handleSwitchToClip}
@@ -4642,6 +4654,7 @@ export default function App() {
               roots. Keep-alive like the others; shares lib's scan results. */}
           <div ref={libraryViewRef} tabIndex={-1} className="cp-view cp-view-library" hidden={activeView !== "library"}>
             <LibraryBrowser
+              onReviewLocalPath={handleReviewLocalPath}
               roots={lib.roots}
               scans={lib.scans}
               scanning={lib.scanning}
@@ -4752,7 +4765,7 @@ export default function App() {
                   <div className="cp-room-head">
                     <div className="cp-room-title">
                       <span className="cp-room-live" aria-hidden />
-                      <span>Review session</span>
+                      <span>{coSession.title || "Review session"}</span>
                       {metadata?.title && (
                         <span className="cp-room-source" title={metadata.title}>{metadata.title}</span>
                       )}

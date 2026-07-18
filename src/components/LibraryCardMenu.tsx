@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { IconCamera, IconRefresh, IconReveal, IconPlay } from "./Icons";
+import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview } from "./Icons";
 
 /**
  * Right-click / ⋯ context menu for a LibraryCard. PORTALED to document.body
@@ -28,6 +28,8 @@ type Props = {
   onChooseThumbnail: () => void;
   onResetThumbnail: () => void;
   onOpen: () => void;
+  /** Open this source and land in the Review workspace (session-ready). */
+  onReview?: () => void;
   onClose: () => void;
 };
 
@@ -35,7 +37,7 @@ type Item = { icon: ReactNode; label: string; disabled?: boolean; onSelect: () =
 
 export function LibraryCardMenu({
   anchor, canPickThumbnail, hasChosenThumbnail, revealPath,
-  onChooseThumbnail, onResetThumbnail, onOpen, onClose,
+  onChooseThumbnail, onResetThumbnail, onOpen, onReview, onClose,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const btnRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -54,6 +56,9 @@ export function LibraryCardMenu({
     });
   }
   items.push({ icon: <IconPlay size={13} />, label: "Open in Clip", onSelect: onOpen });
+  if (onReview) {
+    items.push({ icon: <IconReview size={13} />, label: "Review this clip", onSelect: onReview });
+  }
 
   // Clamp the fixed anchor so the menu never spills off the right/bottom edge.
   useLayoutEffect(() => {
