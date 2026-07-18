@@ -62,7 +62,10 @@ type Args = {
   playerRef: RefObject<PlayerHandle>;
   /** For the shared doc's version title — read at seed time so it's never stale. */
   metadataRef: MutableRefObject<Metadata | null>;
-  onSeek: (frames: number) => void;
+  /** Chase correction seek. Deliberately NOT App's onSeek: it must not
+   *  arm the user-seek latch (review fix: the chase arming its own latch
+   *  let two quick host scrubs strand a paused guest). */
+  onChaseSeek: (frames: number) => void;
   setUrl: (url: string) => void;
   handleFetch: (url: string) => Promise<void>;
   pushNotification: (kind: ToastKind, title: string, body: string) => void;
@@ -100,7 +103,7 @@ export function useCoReview({
   isPlaying, fps,
   activeSourceUrl, activeSourceUrlRef, reviewSourceKey,
   playerRef, metadataRef,
-  onSeek, setUrl, handleFetch,
+  onChaseSeek, setUrl, handleFetch,
   pushNotification, setQueueOpen,
   setReviewMarkers, setReviewAnnotations,
 }: Args): CoReview {
@@ -186,24 +189,23 @@ export function useCoReview({
         const expected = m.position + (m.playing ? (Math.max(0, Date.now() - m.atMs) / 1000) * m.rate : 0);
         const cur = getPlayheadFrames() / r;
         const hostScrubbed = coLastHostPosRef.current === null || Math.abs(m.position - coLastHostPosRef.current) > 0.25;
-        coLastHostPosRef.current = m.position;
-        // Follow: while playing, chase drift > 0.5 s. While paused, only jump
-        // when the host actually scrubbed — so a paused guest can glance at a
-        // nearby frame without being yanked back on every heartbeat.
         // RC3 latch: a local seek in the last ~1.2s owns the playhead — the
-        // chase yielding here is what lets a guest click a transcript cue
-        // without being yanked back on the next heartbeat. The heartbeat
-        // re-evaluates 500ms later, so genuine drift still corrects.
+        // chase yields so a guest can click a transcript cue without being
+        // yanked back on the next heartbeat. decideChase (pure, unit-tested)
+        // owns the branch logic; crucially a YIELDED heartbeat does NOT
+        // commit the host position as seen (review fix: consuming the scrub
+        // edge while yielding left a paused guest stranded forever).
         const localSeekHot = Date.now() - getLastUserSeekAt() < 1200;
-        if (localSeekHot && !justLoaded) {
-          if (import.meta.env.DEV && Math.abs(cur - expected) > 0.5) {
-            console.info("[co-review] chase yielded to a local seek", { cur, expected });
-          }
-        } else if (m.playing) {
-          if (Math.abs(cur - expected) > 0.5) onSeek(Math.floor(expected * r));
-        } else if (justLoaded || (hostScrubbed && Math.abs(cur - expected) > 0.1)) {
-          onSeek(Math.floor(expected * r));
+        const decision = decideChase({
+          justLoaded, localSeekHot, playing: m.playing,
+          curSeconds: cur, expectedSeconds: expected, hostScrubbed,
+        });
+        if (decision.commitHostPos) {
+          coLastHostPosRef.current = m.position;
+        } else if (import.meta.env.DEV && Math.abs(cur - expected) > 0.5) {
+          console.info("[co-review] chase yielded to a local seek", { cur, expected });
         }
+        if (decision.seekSeconds != null) onChaseSeek(Math.floor(decision.seekSeconds * r));
         if (m.playing !== coPlayingRef.current) {
           if (m.playing) p.play(); else p.pause();
         }
@@ -369,4 +371,39 @@ export function useCoReview({
     screening, setScreening, screeningParticipants,
     startCoReview, joinCoReview, leaveCoReview,
   };
+}
+
+// ── Chase decision (pure — unit-tested in use-co-review.test.ts) ────────
+export type ChaseInput = {
+  /** First heartbeat after our player loaded: snap to the host even paused. */
+  justLoaded: boolean;
+  /** A local user seek in the last ~1.2s owns the playhead. */
+  localSeekHot: boolean;
+  playing: boolean;
+  curSeconds: number;
+  expectedSeconds: number;
+  /** Host moved > 0.25s since the last heartbeat we ACTED on. */
+  hostScrubbed: boolean;
+};
+export type ChaseDecision = {
+  /** Seconds to seek to, or null to leave the playhead alone. */
+  seekSeconds: number | null;
+  /** Whether to record the host position as "seen". A yielded heartbeat
+   *  must NOT commit it — the scrub edge has to survive the latch window. */
+  commitHostPos: boolean;
+};
+export function decideChase(i: ChaseInput): ChaseDecision {
+  if (i.localSeekHot && !i.justLoaded) return { seekSeconds: null, commitHostPos: false };
+  if (i.playing) {
+    return {
+      seekSeconds: Math.abs(i.curSeconds - i.expectedSeconds) > 0.5 ? i.expectedSeconds : null,
+      commitHostPos: true,
+    };
+  }
+  // Paused: only jump when the host actually scrubbed (or we just loaded) —
+  // a paused guest glancing at a nearby frame must not be yanked back.
+  if (i.justLoaded || (i.hostScrubbed && Math.abs(i.curSeconds - i.expectedSeconds) > 0.1)) {
+    return { seekSeconds: i.expectedSeconds, commitHostPos: true };
+  }
+  return { seekSeconds: null, commitHostPos: true };
 }

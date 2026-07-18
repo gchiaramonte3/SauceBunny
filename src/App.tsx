@@ -3708,6 +3708,7 @@ export default function App() {
     // closure), compute, THEN write. Also keeps the seek side effect out of a
     // React updater, where StrictMode's double-invoke used to double-seek.
     const next = clampSeekFrames(getPlayheadFrames() + delta, durationFrames);
+    markUserSeek(next); // review fix: frame-steps must arm the co-review latch too
     if (p && p.isReady()) {
       p.pause();
       p.seekTo(next / r);
@@ -3723,6 +3724,7 @@ export default function App() {
     // maxSeekSeconds is Infinity while the duration is unknown, so a jump can
     // never be dragged backward by a missing/lying metadata duration.
     const targetSec = Math.max(0, Math.min(maxSeekSeconds(durationFrames, fps), currentSec + deltaSec));
+    markUserSeek(playheadSecondsToFrames(targetSec, fps)); // arms the co-review latch
     publishPlayheadFrames(playheadSecondsToFrames(targetSec, fps));
     if (p?.isReady()) p.seekTo(targetSec);
   }, [fps, durationFrames, exitShuttle]);
@@ -3815,6 +3817,7 @@ export default function App() {
     if (inFrames == null) return;
     exitShuttle();
     const r = Math.max(1, Math.round(fps));
+    markUserSeek(inFrames);
     publishPlayheadFrames(inFrames);
     playerRef.current?.seekTo?.(inFrames / r);
   }, [inFrames, fps, exitShuttle]);
@@ -3823,6 +3826,7 @@ export default function App() {
     if (outFrames == null) return;
     exitShuttle();
     const r = Math.max(1, Math.round(fps));
+    markUserSeek(outFrames);
     publishPlayheadFrames(outFrames);
     playerRef.current?.seekTo?.(outFrames / r);
   }, [outFrames, fps, exitShuttle]);
@@ -3835,6 +3839,16 @@ export default function App() {
     // click to frame 0 whenever metadata hadn't arrived (or lied short).
     const clamped = clampSeekFrames(f, durationFrames);
     markUserSeek(clamped); // arms the store's dev backward-motion canary
+    publishPlayheadFrames(clamped);
+    playerRef.current?.seekTo?.(clamped / r);
+  }, [durationFrames, fps, exitShuttle]);
+
+  // Co-review chase corrections: onSeek minus markUserSeek — the chase must
+  // never arm the latch it yields to (review fix).
+  const onChaseSeek = useCallback((f: number) => {
+    exitShuttle();
+    const r = Math.max(1, Math.round(fps));
+    const clamped = clampSeekFrames(f, durationFrames);
     publishPlayheadFrames(clamped);
     playerRef.current?.seekTo?.(clamped / r);
   }, [durationFrames, fps, exitShuttle]);
@@ -4280,7 +4294,7 @@ export default function App() {
     isPlaying, fps,
     activeSourceUrl, activeSourceUrlRef, reviewSourceKey,
     playerRef, metadataRef,
-    onSeek, setUrl, handleFetch,
+    onChaseSeek, setUrl, handleFetch,
     pushNotification, setQueueOpen,
     setReviewMarkers, setReviewAnnotations,
   });
