@@ -87,7 +87,7 @@
   font-family: var(--font-ui);
   font-size: 12px;
 }
-.cp-coreview-input:focus { outline: none; border-color: var(--accent); box-shadow: none; }
+.cp-coreview-input:focus { outline: none; border-color: var(--focus-ring); box-shadow: none; }
 .cp-coreview-code {
   padding: 6px 8px;
   background: var(--bg-0);
@@ -141,9 +141,12 @@
   margin: 0 auto;
 }
 .cp-url:focus-within {
-  border-color: var(--line-3);
+  border-color: var(--focus-ring);
   background: rgba(0, 0, 0, 0.55);
 }
+/* Composed field: the wrapper carries the focus brightening above; the
+   borderless inner input must not draw the global ring inside the pill. */
+.cp-url input:focus-visible { box-shadow: none; }
 .cp-url input {
   flex: 1;
   background: transparent;

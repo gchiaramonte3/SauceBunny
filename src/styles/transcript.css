@@ -276,8 +276,8 @@
   outline: none;
 }
 .cp-tx-search-input:focus {
-  border-color: rgba(108, 255, 141, 0.45);
-  background: rgba(108, 255, 141, 0.04);
+  border-color: var(--focus-ring);
+  background: rgba(255, 255, 255, 0.03);
 }
 .cp-tx-search-count {
   font-size: 10px;
@@ -582,8 +582,8 @@
   outline: none;
 }
 .cp-tx-rename-input:focus {
-  border-color: rgba(108, 255, 141, 0.5);
-  background: rgba(108, 255, 141, 0.05);
+  border-color: var(--focus-ring);
+  background: rgba(255, 255, 255, 0.04);
 }
 /* "…or this turn is actually" — per-turn reassignment to a known speaker.
    Chip-per-speaker row under the scope radios; pip colour mirrors the
@@ -693,7 +693,7 @@
   cursor: pointer;
   outline: none;
 }
-.cp-mini-select:focus { border-color: rgba(108, 255, 141, 0.45); }
+.cp-mini-select:focus { border-color: var(--focus-ring); }
 .cp-mini-select:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Folder-picker row used in Settings → Transcription (library path).
@@ -1011,7 +1011,7 @@
 .cp-spk-name:focus {
   outline: none;
   background: rgba(0,0,0,0.25);
-  border-color: rgba(var(--accent-rgb), 0.5);
+  border-color: var(--focus-ring);
 }
 .cp-spk-count {
   flex-shrink: 0;
@@ -1053,7 +1053,7 @@
 }
 .cp-spk-pip-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px #15151a, 0 0 0 4px rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 0 0 2px #15151a, 0 0 0 3px var(--focus-ring);
 }
 
 /* ── SpeakerColorPicker — hand-rolled premium picker (see SpeakerColorPicker.tsx) ── */
@@ -1077,11 +1077,11 @@
 .cp-colorpick-sv:focus-visible,
 .cp-colorpick-hue:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--color-surface-elevated), 0 0 0 4px rgba(var(--accent-rgb), 0.5);
+  box-shadow: 0 0 0 2px var(--color-surface-elevated), 0 0 0 3px var(--focus-ring);
 }
 .cp-colorpick-sv:focus-visible .cp-colorpick-thumb,
 .cp-colorpick-hue:focus-visible .cp-colorpick-hue-thumb {
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.45), 0 0 0 4px rgba(var(--accent-rgb), 0.35), 0 1px 3px rgba(0,0,0,0.5);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.45), 0 0 0 3px var(--focus-ring), 0 1px 3px rgba(0,0,0,0.5);
 }
 @keyframes cp-colorpick-in {
   from { opacity: 0; transform: translateY(-4px) scale(0.97); }
@@ -1165,7 +1165,7 @@
   font-size: 12px;
   color: var(--fg-3);
 }
-.cp-colorpick-hex:focus-within { border-color: rgba(var(--accent-rgb), 0.5); }
+.cp-colorpick-hex:focus-within { border-color: var(--focus-ring); }
 .cp-colorpick-hex input {
   flex: 1;
   min-width: 0;
@@ -1196,5 +1196,5 @@
 .cp-colorpick-swatch.sel { box-shadow: 0 0 0 2px var(--color-surface-elevated), 0 0 0 3px var(--fg-1); }
 .cp-colorpick-swatch:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--color-surface-elevated), 0 0 0 4px rgba(var(--accent-rgb), 0.5);
+  box-shadow: 0 0 0 2px var(--color-surface-elevated), 0 0 0 3px var(--focus-ring);
 }

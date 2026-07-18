@@ -64,7 +64,7 @@
   color: var(--fg-3);
   transition: border-color var(--dur-fast) var(--ease-out);
 }
-.cp-lib-search:focus-within { border-color: var(--line-3); }
+.cp-lib-search:focus-within { border-color: var(--focus-ring); }
 .cp-lib-search input {
   flex: 1;
   min-width: 0;
@@ -755,9 +755,12 @@
   transition: border-color var(--dur-fast) var(--ease-out),
               transform var(--dur-fast) var(--ease-out);
 }
-.cp-lib-thumb-preset:hover,
-.cp-lib-thumb-preset:focus-visible {
+.cp-lib-thumb-preset:hover {
   border-color: var(--ella-green);
+  transform: scale(1.03);
+}
+.cp-lib-thumb-preset:focus-visible {
+  border-color: var(--focus-ring);
   transform: scale(1.03);
   outline: none;
 }
@@ -1047,7 +1050,7 @@
   color: var(--fg-3);
   transition: border-color var(--dur-fast) var(--ease-out);
 }
-.cp-lib-bar-search:focus-within { border-color: var(--line-3); }
+.cp-lib-bar-search:focus-within { border-color: var(--focus-ring); }
 .cp-lib-bar-search input {
   flex: 1;
   min-width: 0;

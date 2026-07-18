@@ -219,9 +219,9 @@
               box-shadow var(--dur-fast) var(--ease-out);
 }
 .cp-ai-input:focus {
-  border-color: rgba(108, 255, 141, 0.45);
-  background: rgba(108, 255, 141, 0.04);
-  box-shadow: 0 0 0 3px rgba(108, 255, 141, 0.10);
+  border-color: var(--focus-ring);
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: none;
 }
 .cp-ai-input:disabled { opacity: 0.6; }
 
@@ -325,7 +325,7 @@
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 .cp-md-ts-btn:hover { opacity: 1; text-decoration: underline; }
-.cp-md-ts-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.55); }
+.cp-md-ts-btn:focus-visible { outline: none; box-shadow: 0 0 0 1px var(--focus-ring); }
 
 /* ── Auto-chapters (AI Summary tab) ──────────────────────────────── */
 /* Compact block pinned under the model bar: header row (title + Detect/

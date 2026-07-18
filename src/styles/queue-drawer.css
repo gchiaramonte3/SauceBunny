@@ -92,7 +92,7 @@
   font-size: 12.5px;
   font-weight: 600;
 }
-.cp-queue-rename:focus { outline: none; border-color: var(--accent); box-shadow: none; }
+.cp-queue-rename:focus { outline: none; border-color: var(--focus-ring); box-shadow: none; }
 .cp-queue-renameall {
   display: flex;
   gap: 6px;
@@ -110,7 +110,7 @@
   font-family: var(--font-ui);
   font-size: 12px;
 }
-.cp-queue-renameall input:focus { outline: none; border-color: var(--accent); box-shadow: none; }
+.cp-queue-renameall input:focus { outline: none; border-color: var(--focus-ring); box-shadow: none; }
 .cp-queue-renameall input::placeholder { color: var(--fg-4); overflow: hidden; text-overflow: ellipsis; }
 
 /* ── Tab strip — the queue-head is now a real tablist instead of a

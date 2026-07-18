@@ -300,7 +300,7 @@
   width: 100%;
 }
 .cp-input:focus {
-  border-color: rgba(var(--accent-rgb), 0.5);
+  border-color: var(--focus-ring);
   background: rgba(0,0,0,0.45);
 }
 .cp-input.with-suffix { padding-right: 52px; }

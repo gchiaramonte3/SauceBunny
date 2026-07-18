@@ -127,6 +127,7 @@ Do not add new Tauri plugins without explaining what existing capability is insu
 - No inline styles. No CSS-in-JS. No CSS modules.
 - Class names: kebab-case, all prefixed with the stable project namespace `cp-` (carryover from the original ClipPull name — kept intentionally because renaming ~600 classes touches every file and adds no user-visible value). Within that prefix, group by component context (e.g. `cp-player-controls-volume`, `cp-tx-speaker`, `cp-queue-foot-row`). New code MUST use the `cp-` prefix; do not introduce a new prefix.
 - No `!important` unless overriding a third-party style you can't control.
+- **Focus styles: never the green accent.** A focused control brightens its existing outline toward white (`--focus-ring`, defined in `base.css`); composed fields (wrapper + borderless inner input, e.g. `.cp-url`) brighten the wrapper via `:focus-within` and suppress the inner input's ring. Guarded by `src/lib/focus-contract.test.ts` — do not allowlist around it.
 
 ### Rust
 - Invoke handlers in `commands.rs` should be **thin wrappers**: validate input, call business logic, format the response. The business logic itself belongs in dedicated modules (this refactor is in progress).

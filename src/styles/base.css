@@ -64,6 +64,13 @@ body {
      "selected/active" without competing with the success-green CTAs. */
   --marker: #6D52ED;
   --marker-rgb: 109, 82, 237;
+  /* Focus indicator. HOUSE RULE (2026-07-18, user directive): focus NEVER
+     shows the green accent, and never draws a ring INSIDE a composed field.
+     A focused control brightens its outline toward white instead. Composed
+     fields (wrapper pill + borderless inner input: .cp-url, .cp-lib-search,
+     .cp-review-search) brighten the wrapper via :focus-within and suppress
+     the inner ring. Guard: src/lib/focus-contract.test.ts */
+  --focus-ring: rgba(255, 255, 255, 0.45);
 }
 
 /* ============================================================
@@ -71,7 +78,7 @@ body {
    ============================================================ */
 button:focus-visible, input:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.4);
+  box-shadow: 0 0 0 1px var(--focus-ring);
 }
 
 /* ============================================================

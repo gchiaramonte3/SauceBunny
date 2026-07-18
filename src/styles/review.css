@@ -124,7 +124,7 @@
   border-radius: 8px;
   color: var(--fg-4);
 }
-.cp-review-search:focus-within { border-color: var(--accent); color: var(--accent); }
+.cp-review-search:focus-within { border-color: var(--focus-ring); color: var(--fg-2); }
 .cp-review-search input {
   flex: 1;
   min-width: 0;
@@ -227,7 +227,7 @@
   font-variant-numeric: tabular-nums;
 }
 .cp-review-export-tc:focus,
-.cp-review-export-select:focus { outline: none; border-color: var(--accent); }
+.cp-review-export-select:focus { outline: none; border-color: var(--focus-ring); }
 .cp-review-export-tc.invalid { border-color: #ff8a8a; color: #ff8a8a; }
 .cp-review-export-drop {
   display: flex;
@@ -563,7 +563,7 @@
   text-align: center;
   outline: none;
 }
-.cp-review-namegate-card input:focus { border-color: var(--accent); }
+.cp-review-namegate-card input:focus { border-color: var(--focus-ring); }
 .cp-review-namegate-card .btn { width: 100%; justify-content: center; }
 .cp-review-namegate-colors {
   display: flex;
@@ -597,7 +597,7 @@
   font-size: 12px;
 }
 .cp-review-edit input:focus, .cp-review-reply-input input:focus {
-  outline: none; border-color: var(--accent);
+  outline: none; border-color: var(--focus-ring);
 }
 
 /* Composer — tool buttons sit at the bottom so they stay aligned as the
@@ -639,7 +639,7 @@
   resize: none;
   overflow-y: auto;
 }
-.cp-review-input:focus { outline: none; border-color: var(--accent); }
+.cp-review-input:focus { outline: none; border-color: var(--focus-ring); }
 /* Placeholder truncates with an ellipsis instead of wrapping/clipping when the
    panel is narrow (typed text still wraps normally). */
 .cp-review-input::placeholder {
@@ -747,7 +747,7 @@
 }
 /* Search head — an inset rounded field (clones the panel search bar's
    pattern), NOT a bare strip: the wrapper carries the border + focus ring
-   so the borderless inner input never shows the global green focus box. */
+   so the borderless inner input never shows the global focus ring. */
 .cp-emoji-head {
   display: flex;
   align-items: center;
@@ -762,7 +762,7 @@
   color: var(--fg-4);
   transition: border-color var(--dur-fast) var(--ease-out);
 }
-.cp-emoji-head:focus-within { border-color: rgba(255,255,255,0.35); color: var(--fg-2); }
+.cp-emoji-head:focus-within { border-color: var(--focus-ring); color: var(--fg-2); }
 .cp-emoji-searchicon { color: var(--fg-4); flex-shrink: 0; }
 .cp-emoji-search {
   flex: 1;
@@ -776,7 +776,7 @@
 }
 .cp-emoji-search::placeholder { color: var(--fg-4); }
 /* The rounded wrappers above carry the focus treatment — kill the global
-   green focus-visible box (base.css) on these borderless inner inputs. */
+   focus-visible ring (base.css) on these borderless inner inputs. */
 .cp-emoji-search:focus-visible,
 .cp-review-search input:focus-visible { box-shadow: none; }
 .cp-emoji-body {
