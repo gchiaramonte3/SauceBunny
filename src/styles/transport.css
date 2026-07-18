@@ -327,47 +327,32 @@
    dark + desaturated (backdrop-filter) under a scrim + faint hatching, with
    bright edge posts. The old 10%-white wash was invisible over a filmstrip.
    New bands pulse twice on arrival so "Add to queue" has obvious feedback. */
+/* Queued clip ranges (8a): a status color system tied to the queue job.
+   YELLOW (gold) queued/running, GREEN exported, RED failed - soft ~18%
+   fill + a 2px status baseline + thin edge ticks, readable at a glance
+   without shouting over the filmstrip. --range-c drives every part. */
 .cp-track-queued {
   position: absolute;
   top: 0; bottom: 0;
-  background:
-    repeating-linear-gradient(
-      45deg,
-      rgba(255,255,255,0.05) 0,
-      rgba(255,255,255,0.05) 6px,
-      transparent 6px,
-      transparent 12px
-    ),
-    rgba(8, 8, 10, 0.38);
-  backdrop-filter: grayscale(0.9) brightness(0.45);
-  -webkit-backdrop-filter: grayscale(0.9) brightness(0.45);
-  border-left: 1px solid rgba(255,255,255,0.55);
-  border-right: 1px solid rgba(255,255,255,0.55);
+  --range-c: var(--gold);
+  background: color-mix(in srgb, var(--range-c) 18%, transparent);
+  border-bottom: 2px solid var(--range-c);
+  border-left: 2px solid color-mix(in srgb, var(--range-c) 70%, transparent);
+  border-right: 2px solid color-mix(in srgb, var(--range-c) 70%, transparent);
   z-index: 1;
+  cursor: pointer;
   animation: cp-queued-in 1.2s var(--ease-out) 1;
 }
-.cp-track-queued.done {
-  background:
-    repeating-linear-gradient(
-      45deg,
-      rgba(108,255,141,0.06) 0,
-      rgba(108,255,141,0.06) 6px,
-      transparent 6px,
-      transparent 12px
-    ),
-    rgba(8, 20, 12, 0.38);
-  border-color: rgba(108,255,141,0.55);
+.cp-track-queued:hover {
+  background: color-mix(in srgb, var(--range-c) 28%, transparent);
 }
+.cp-track-queued.done  { --range-c: var(--ella-green); }
+.cp-track-queued.error { --range-c: var(--danger); }
 .cp-track-queued.running {
-  /* While exporting, tint with the marker colour + soft pulse so the user
-     can spot which section is currently being processed. */
-  background: rgba(var(--marker-rgb), 0.16);
-  border-color: rgba(var(--marker-rgb), 0.6);
   animation: cp-queued-pulse 1.6s ease-in-out infinite;
 }
-.cp-track-queued.error {
-  background: rgba(232,38,38,0.14);
-  border-color: rgba(232,38,38,0.55);
+@media (prefers-reduced-motion: reduce) {
+  .cp-track-queued.running { animation: none; }
 }
 @keyframes cp-queued-pulse {
   0%, 100% { opacity: 0.6; }

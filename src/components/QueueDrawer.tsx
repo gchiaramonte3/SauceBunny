@@ -160,6 +160,8 @@ type Props = {
   /** Session-room dressing: tab strip and queue chrome hidden, the
    *  Review tab forced (same mounted panel, just the room's face). */
   roomFace?: boolean;
+  /** Timeline range click: switch to the Queue tab and flash the item. */
+  focusItem?: { id: string; tick: number } | null;
 };
 
 function statusLabel(s: QueuedClip["status"]): string {
@@ -218,7 +220,7 @@ export function QueueDrawer({
   onOpenReviewSource, onReviewRangeDraft, onRegisterRangeHotkeys,
   reviewSessionActive, reviewSessionDoc, onReviewSessionOp,
   onRenameClip, onRenameAll,
-  onPopOut, embedded = false, roomFace = false,
+  onPopOut, embedded = false, roomFace = false, focusItem = null,
 }: Props) {
   const counts = queue.reduce(
     (acc, c) => ((acc[c.status] = (acc[c.status] ?? 0) + 1), acc),
@@ -294,6 +296,18 @@ export function QueueDrawer({
   // Restore the last active tab on mount (pop-out, re-dock, and relaunch all
   // land on the tab the user was on) and write every change straight through.
   const [activeTab, setActiveTab] = useState<TabId>(() => loadActiveTab());
+  // Focus request from the timeline (8a): jump to Queue, scroll + flash.
+  useEffect(() => {
+    if (!focusItem) return;
+    setActiveTab("queue");
+    const t = window.setTimeout(() => {
+      const el = document.querySelector(`[data-queue-item="${focusItem.id}"]`);
+      el?.scrollIntoView({ block: "nearest" });
+      el?.classList.add("flash");
+      window.setTimeout(() => el?.classList.remove("flash"), 1200);
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [focusItem]);
   // The room forces the Review face without touching the persisted tab
   // choice - leaving the room lands back on whatever was active before.
   const shownTab: TabId = roomFace ? "review" : activeTab;
@@ -644,7 +658,7 @@ export function QueueDrawer({
           const dur   = secondsToHms(durS);
           const Icon = c.status === "done" ? IconCheck : c.status === "error" ? IconAlert : null;
           return (
-            <div key={c.id} className={"cp-queue-item " + c.status}>
+            <div key={c.id} data-queue-item={c.id} className={"cp-queue-item " + c.status}>
               <div className="cp-queue-num">{i + 1}</div>
               <div className="cp-queue-body">
                 <div className="cp-queue-row">

@@ -453,3 +453,9 @@ body.cp-tab-dragging { cursor: grabbing; }
   height: 36px;
 }
 
+
+/* Timeline-range click lands here: a brief lift so the eye finds the item. */
+.cp-queue-item.flash {
+  background: var(--bg-5);
+  transition: background 200ms var(--ease-out);
+}

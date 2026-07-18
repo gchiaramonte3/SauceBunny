@@ -632,3 +632,29 @@ test("session room: people tiles + control bar render; clip furniture stays out"
   await expect(page.locator(".cp-body.cp-room")).toHaveCount(0);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
+
+test("timeline: helper line yields to marks; queued range renders with status class", async ({ page }) => {
+  await boot(page);
+  const url = page.locator("input[placeholder^='Paste a video URL']");
+  await url.fill("https://youtube.com/watch?v=aaaa");
+  await page.getByRole("button", { name: /^Fetch/ }).click();
+  await expect(page.locator(".cp-timeline-hint")).toContainText("No marks set", { timeout: 10_000 });
+
+  // Marks via the transport buttons (focus-proof): in at 0, step, out.
+  // The helper row disappears ENTIRELY (9a) - no reserved empty line.
+  await page.getByRole("button", { name: "Mark in" }).click();
+  await page.getByRole("button", { name: "Step forward one frame" }).click();
+  await page.getByRole("button", { name: "Mark out" }).click();
+  await expect(page.locator(".cp-timeline-hint")).toHaveCount(0);
+
+  // Queue the section: the range lands on the track with the queued status
+  // class (gold). done/error flips ride the same class from queue state
+  // (covered by the morning visual pass; the export pipeline is mocked out
+  // here).
+  await page.locator(".cp-add-queue").click();
+  await expect(page.locator(".cp-track-queued.queued")).toHaveCount(1);
+  // Clearing marks with something queued: the no-marks helper stays gone.
+  await page.getByRole("button", { name: "Clear in/out" }).click();
+  await expect(page.locator(".cp-timeline-hint")).toHaveCount(0);
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});

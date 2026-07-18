@@ -25,8 +25,11 @@ export type TimelineRange = {
   id: string;
   inFrames: number;
   outFrames: number;
-  /** Optional status — "done" vs "queued" can render slightly differently. */
+  /** Status drives the range's color system (8a): gold queued/running,
+   *  green done, red failed. */
   status?: "queued" | "running" | "done" | "error";
+  /** Clip name for the hover tooltip. */
+  label?: string;
 };
 
 /** The scrub cursor — the one element on the track that moves at up to 60Hz,
@@ -57,6 +60,8 @@ type Props = {
   fps: number;
   /** Ranges already in the queue (or completed) — drawn under the active selection. */
   queuedRanges?: TimelineRange[];
+  /** Click a queued range -> App opens/focuses that item in the queue. */
+  onRangeClick?: (id: string) => void;
   /** Review comment markers (seconds) — Frame.io-style dots on the track,
    *  tinted to the reviewer's colour, expanding to their initials on hover.
    *  When `timeEnd` is set the marker also draws a reviewer-tinted RANGE bar in
@@ -90,7 +95,7 @@ type Props = {
 
 export function Timeline({
   status, durationFrames, inFrames, outFrames, fps,
-  queuedRanges, commentMarkers, reviewRangeDraft, filmstripPath, waveformOn, speakerLanes, ghosts,
+  queuedRanges, onRangeClick, commentMarkers, reviewRangeDraft, filmstripPath, waveformOn, speakerLanes, ghosts,
   chapterMarkers, onSeek,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
@@ -302,12 +307,22 @@ export function Timeline({
               if (r.outFrames <= r.inFrames) return null;
               const left  = pct(r.inFrames);
               const width = Math.max(0, pct(r.outFrames - r.inFrames));
+              const word =
+                r.status === "done" ? "Exported"
+                : r.status === "error" ? "Failed"
+                : r.status === "running" ? "Exporting" : "Queued";
+              const span = `${secondsToHms(r.inFrames / fps)} to ${secondsToHms(r.outFrames / fps)}`;
               return (
                 <div
                   key={r.id}
                   className={"cp-track-queued " + (r.status ?? "queued")}
                   style={{ left: `${left}%`, width: `${width}%` }}
-                  title={r.status === "done" ? "Already exported" : "Already in queue"}
+                  title={`${r.label ?? "Clip"} · ${word} · ${span}`}
+                  onClick={(e) => {
+                    if (!onRangeClick) return;
+                    e.stopPropagation(); // the track itself seeks on click
+                    onRangeClick(r.id);
+                  }}
                 />
               );
             })}

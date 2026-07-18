@@ -701,6 +701,8 @@ export default function App() {
   // loadJson/saveJson like every sibling pref (review fix: this was the
   // one pref hand-rolling "1"/"0" strings, invisible to storage audits).
   const [queueOpen, setQueueOpen] = useState<boolean>(() => loadJson("saucebunny.queueOpen", true));
+  // Timeline range click (8a): open the drawer and focus that queue item.
+  const [queueFocusItem, setQueueFocusItem] = useState<{ id: string; tick: number } | null>(null);
   /** User-initiated drawer visibility (toolbar toggle, ⌘⇧Q, palette, menu,
    *  the drawer's close button) — applies AND persists the choice. */
   const setQueueOpenChoice = useCallback((next: boolean | ((p: boolean) => boolean)) => {
@@ -5026,7 +5028,12 @@ export default function App() {
                       inFrames: c.inFrames,
                       outFrames: c.outFrames,
                       status: c.status,
+                      label: c.filename,
                     }))}
+                    onRangeClick={(id) => {
+                      setQueueOpen(true);
+                      setQueueFocusItem({ id, tick: Date.now() });
+                    }}
                     commentMarkers={reviewMarkers}
                     chapterMarkers={chapterMarkers}
                     reviewRangeDraft={reviewRangeDraft}
@@ -5036,26 +5043,35 @@ export default function App() {
                     ghosts={coGhostMarkers}
                     onSeek={onSeek}
                   />
-                  {/* Status line under the timeline. Stays present so setting or
-                      clearing a mark doesn't cause the canvas above to reflow. */}
-                  <div className="cp-timeline-hint">
-                    {(status === "loaded" || status === "success") ? (
-                      inFrames == null && outFrames == null
-                        ? `No marks set. Export grabs the whole clip${exportOpts.format === "audio" ? " as MP3" : ""}.`
-                        : inFrames != null && outFrames == null
-                          ? "Mark out (O) to set the end."
-                          : inFrames == null && outFrames != null
-                            ? "Mark in (I) to set the start."
-                            : "Selection set. Adjust with I and O."
-                    ) : status === "empty" && bindingsFor("app.shortcuts", keybindings)[0] ? (
-                      <>
-                        <kbd className="cp-keycap">
-                          {formatCombo(bindingsFor("app.shortcuts", keybindings)[0])}
-                        </kbd>
-                        {" Shortcuts"}
-                      </>
-                    ) : ""}
-                  </div>
+                  {/* Status line under the timeline (9a): the no-marks helper
+                      shows ONLY with no marks and an empty queue; a completed
+                      selection (or a queued no-marks state) renders NOTHING -
+                      the row's space collapses, no reserved empty line.
+                      Partial-mark guidance stays (it completes the gesture). */}
+                  {(() => {
+                    const content =
+                      (status === "loaded" || status === "success")
+                        ? (inFrames == null && outFrames == null
+                          ? (clipQueue.length === 0
+                            ? `No marks set. Export grabs the whole clip${exportOpts.format === "audio" ? " as MP3" : ""}.`
+                            : null)
+                          : inFrames != null && outFrames == null
+                            ? "Mark out (O) to set the end."
+                            : inFrames == null && outFrames != null
+                              ? "Mark in (I) to set the start."
+                              : null)
+                        : status === "empty" && bindingsFor("app.shortcuts", keybindings)[0]
+                          ? (
+                            <>
+                              <kbd className="cp-keycap">
+                                {formatCombo(bindingsFor("app.shortcuts", keybindings)[0])}
+                              </kbd>
+                              {" Shortcuts"}
+                            </>
+                          )
+                          : null;
+                    return content ? <div className="cp-timeline-hint">{content}</div> : null;
+                  })()}
                 </div>
 
                 <LogsPanel
@@ -5091,6 +5107,7 @@ export default function App() {
               {!panelDetached && <QueueDrawer
                 open={roomActive ? true : queueOpen}
                 roomFace={roomActive}
+                focusItem={queueFocusItem}
                 onClose={() => setQueueOpenChoice(false)}
                 onPopOut={handlePopOutPanel}
                 queue={clipQueue}
