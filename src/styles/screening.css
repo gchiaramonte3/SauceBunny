@@ -1,11 +1,12 @@
 /* Co-review screening mode — Louper-style cinematic watch-party layout. */
 /* ============================================================
    SCREENING MODE
-   When .cp-body has .cp-screening: the source sidebar is swapped for the
-   participant rail, and the rounded floating panels (rail · viewport · comments)
-   read as a shared theater. Reflow only — the player is never remounted.
+   When .cp-body has .cp-screening: the participant rail joins the layout
+   beside the source sidebar (which STAYS — panels are the page; nothing the
+   user relies on disappears), and the tone-cards read as a shared theater.
+   Reflow only — the player is never remounted. The sidebar's own collapse
+   toggle still works for a wider theater.
    ============================================================ */
-.cp-screening .cp-sidebar { display: none; }
 
 /* ── Nav rail: edge-reveal overlay (not display:none) ──
    The rail is the app's primary nav, so screening can't delete it — it slides
@@ -51,10 +52,12 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  /* Tone-card (Claude Terminal grammar): matches the other panels — bg-1
+     tone, one radius, uniform gutters, no border. Sits between the sidebar
+     and the theater, so its left gutter is a half-gap like theirs. */
   background: var(--bg-1);
-  border: 1px solid var(--line-1);
-  border-radius: var(--r-xl);
-  margin: var(--s-2) 3px var(--s-2) var(--s-2);
+  border-radius: var(--r-lg);
+  margin: var(--s-2) 4px;
   overflow: hidden;
 }
 .cp-prail-head {
