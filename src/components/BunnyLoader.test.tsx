@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BunnyLoader } from "./BunnyLoader";
 
-// Server-render is enough to pin the structure: three traced paths per
-// layer (glow + tail + main), the gradient defs, and the a11y contract.
+// Server-render pins the structure: FOUR traced contours (two ears, body
+// silhouette, inner play triangle) x four layers, gradient defs, a11y.
 describe("BunnyLoader", () => {
   it("renders three paths per layer and the gradient defs", () => {
     const html = renderToStaticMarkup(<BunnyLoader />);
-    expect(html.match(/pathLength="1"/g)?.length).toBe(12);
+    expect(html.match(/pathLength="1"/g)?.length).toBe(16);
     expect(html).toContain("linearGradient");
     expect(html).toContain("bl-grad");
     // The two brand stops mirrored from tokens.css.

@@ -1,7 +1,7 @@
 /* BunnyLoader (BunnyLoader.tsx) — branded stroke-trace loading indicator for
    screen-level waits. The gradient stops live in the component's SVG defs
    (SVG gradients cannot read CSS variables); dash math is normalized by
-   pathLength=1 on every path, so one keyframe drives all three. */
+   pathLength=1 on every path, so one keyframe drives all four contours. */
 .cp-bunny-loader {
   display: flex;
   flex-direction: column;

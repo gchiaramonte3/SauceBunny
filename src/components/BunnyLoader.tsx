@@ -3,25 +3,31 @@
  * overlay, stream buffering). Buttons keep their compact spinners.
  *
  * The Sauce Bunny mark drawn as a STROKE animation: a purple-to-green
- * gradient segment traces the outline of all three paths in phase (ears +
- * play-triangle body), with a soft blurred underlayer and a shorter, fainter
- * comet tail trailing the segment. pathLength=1 normalizes the dash math so
- * every path animates identically regardless of its true length.
+ * gradient segment traces all four contours in phase (two ears, body
+ * silhouette, inner play triangle), with a soft blurred underlayer and a
+ * shorter, fainter comet tail trailing the segment. pathLength=1 normalizes
+ * the dash math so every contour animates identically regardless of length.
  *
- * Path data is inlined from src/assets/saucebunny.svg (the canonical mark —
- * keep in sync if the asset ever changes). Animation lives in
- * styles/loader.css; reduced motion renders the full outline statically.
+ * Animation lives in styles/loader.css; reduced motion renders the full
+ * outline statically.
  */
 
-// Source of truth: src/assets/saucebunny.svg (viewBox 223 115 808 1024).
+// Source of truth: src/assets/saucebunny-outline.svg (the designer's
+// SIMPLIFIED single-contour mark, supplied for this loader). Unlike the
+// detailed rail asset, each ear here is ONE closed line (no inner contour),
+// and the body splits into its outer silhouette + the inner play triangle —
+// so a stroke trace reads as the actual logo: one line around the outside
+// of everything, plus the triangle. viewBox computed from the paths' bbox.
 const EAR_LEFT =
-  "M404.31,238.06c-13.45-10.42-29.79-20.36-46.92-20.6-7.15-.1-14.08,1.35-19.94,5.36-7.97,5.45-13.08,13.87-15.17,23.3-9.34,42.24,29.52,109.82,52.04,146.82,17.17,27.81,34.99,54.65,54.07,81.17l27.2,39.82c-17.75,9.89-34.88,19.56-51.59,30.75-35.03-32.67-66.23-68.13-94.86-106.16-15.26-20.26-29.04-41.21-41.37-63.33-9.28-16.65-17.02-33.37-23.46-51.28-7.27-20.21-11.31-40.73-12.58-62.2-.95-16.16.73-31.33,4.63-46.96,10.22-40.96,38.47-73.73,79.44-85.82,70.02-20.66,135.95,25.11,179.21,77.17,8.51,10.25,16.29,20.3,23.59,31.56,10.87,16.77,20.77,33.78,29.46,51.88,14.3,29.8,25.21,60.46,33.86,92.37,9.39,34.66,15.54,69.73,17.19,105.59.42,9.13.68,17.46-.56,26.23-.09.61-1.2,1.01-1.68.76l-28.18-9.75-27.8-6.63c-9.17-48.28-24.86-93.11-46.22-137.37-13.82-28.64-30.14-55.68-49.51-80.86-12.05-15.67-25.3-29.77-40.84-41.81Z";
+  "M404.31,196.78c-24.76-22.09-72.16-34.5-82.03,8.05-5.07,95.04,85.71,189.95,133.31,267.8-17.75,9.89-34.88,19.56-51.59,30.75-65.45-63.37-126.95-134.85-159.69-220.77-28.35-70.87-10.73-171.73,71.49-194.98,84.17-23.98,159.05,43.18,202.79,108.73,51.62,81.25,82.98,179.43,79.95,276.06,1.54,3.57-29.96-9.79-29.86-8.99,0,0-27.8-6.63-27.8-6.63-20.61-95.75-60.82-194.96-136.57-260.04Z";
 const EAR_RIGHT =
-  "M927.95,354.05c8.81-18.44,23.27-54.67,5.65-67.9-9.21-6.91-26.78-2.82-37.76,2.21-31.89,14.63-62.81,45.79-84.28,73.63-28.78,37.33-51.13,78.66-67.57,122.72l-7.8,21.79-9.88,32.91-8.77,32.73c-.14.52-.65,1.12-.88,1.35-.33.33-1.12.41-1.89-.03l-45.29-25.81c8.63-66.7,28.8-130.7,60.29-189.67,18.06-33.81,40.5-66.48,67.07-94.05,19.4-20.12,41.04-37.2,65.44-50.78l19.46-9.48c13.92-6.78,28.59-10.1,43.99-12.27,25.55-3.6,53.25,2.1,71.51,20.7,11.43,11.65,18.68,26.13,22.16,42.09,8.07,37.07-.41,72.89-14.79,107.26l-12.24,25.84c-13.84,25.69-28.96,50.16-46,73.88l-24.13,33.58c-24.43,31.38-50.61,60.77-78.29,89.35l-40.2,39.19-39.4-22.11c-2.75-1.54-5.21-2.8-7.56-5.27l16.96-24.51,63.78-85.46,25.4-32.91c15.82-20.5,30.87-40.97,44.83-62.8,7.57-11.84,14.17-23.54,20.21-36.18Z";
-const BODY =
-  "M963.98,787.26c-3-9.36-7.04-17.47-12.31-25.68-10.11-15.75-23.81-27.41-40.06-36.67l-192.56-109.71-126.28-72.07c-35.41-20.21-70.93-25.59-110.39-15.07-18.14,4.84-34.02,13.29-48.48,25.06-20.45,16.63-35.31,38.49-42.71,63.86-3.02,10.37-5.33,20.26-5.39,31.16l-.23,39.83.12,311.44c0,17.35,4.61,34.15,11.33,49.94,11.79,27.7,33.1,50.28,59.42,64.71,38.69,21.22,92.18,21.72,129.94-.06l43.08-24.86,41.94-24.61,141.67-81.98,100.66-58.45c47.49-27.58,66.84-85.02,50.25-136.84Z";
+  "M927.95,312.77c19.66-36.17,24.45-90.2-32.11-65.69-31.89,14.63-62.81,45.79-84.27,73.62-48.01,60.82-75.79,135.52-94.02,210.15-.52,1.26-1.25,2.13-2.77,1.32,0,0-45.29-25.81-45.29-25.81,89.73-549.41,656.73-417.62,134.26,75.65-5.89-3.78-42.74-22.83-46.96-27.38,51.57-78.78,127.96-158.35,171.18-241.86Z";
+const BODY_OUTER =
+  "M963.98,745.98c-8.59-26.92-27.71-48.78-52.37-62.36,0,0-192.56-109.71-192.56-109.71-63.03-29.72-161.12-116.17-236.67-87.13-43.09,11.54-78.83,45.98-91.2,88.91-7.65,18.26-4.95,51.45-5.62,70.99,3.65,36.14-10.23,335.35,11.45,361.38,28.42,71.38,123.77,102.64,189.36,64.65,0,0,43.08-24.86,43.08-24.86,27.41-16.39,153.46-89.1,183.6-106.59,74.25-43.7,186.76-85.6,150.91-195.29Z";
+const BODY_INNER =
+  "M853.8,798.31c-3.4,7.98-9.28,14.76-17.26,19.29-42.62,23.58-173.88,98.98-214.16,121.5-26.64,11.49-76.46,55.95-108.15,41.8-16.62-5.54-28.52-19.42-30.63-36.92,0,0,.04-321.22.04-321.22,0-15.97,10.58-30.05,24.25-36.84,29.23-17.55,61.44,9.19,86.1,22.44,0,0,51.62,29.27,51.62,29.27,12.56,7.18,191.06,108.51,196.21,112.4,14.78,11.03,19.17,31.41,11.99,48.29Z";
 
-const PATHS = [EAR_LEFT, EAR_RIGHT, BODY];
+const PATHS = [EAR_LEFT, EAR_RIGHT, BODY_OUTER, BODY_INNER];
 
 type Props = {
   /** Rendered width in px; height follows the mark's aspect. */
@@ -40,7 +46,7 @@ export function BunnyLoader({ size = 96, label = "Loading", sublabel }: Props) {
       aria-live="polite"
       style={{ ["--bl-size" as string]: `${size}px` }}
     >
-      <svg viewBox="223 115 808 1024" aria-hidden="true">
+      <svg viewBox="212 63 831 1046" aria-hidden="true">
         <defs>
           {/* SVG gradients cannot read CSS variables. These two hex values
               mirror tokens.css --novella-purple (#8627FF) and --ella-green
