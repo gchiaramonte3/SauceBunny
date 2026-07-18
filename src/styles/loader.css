@@ -19,6 +19,13 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+/* Persistent base outline: the full mark, always visible, quiet. Neutral
+   dim stroke (rgba: the tokens carry no alpha variants) so the gradient
+   segment reads as light moving over it. */
+.cp-bunny-loader .bl-base path {
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 14;
+}
 /* Main chasing segment: ~30% of each outline, one lap per 1.6s. */
 .cp-bunny-loader .bl-main path {
   stroke-width: 16;
@@ -68,6 +75,7 @@
   }
   .cp-bunny-loader .bl-tail { display: none; }
   .cp-bunny-loader .bl-glow { display: none; }
+  .cp-bunny-loader .bl-base path { stroke: rgba(255, 255, 255, 0.1); }
   .cp-bunny-loader .bl-main path { opacity: 0.55; }
   .cp-bunny-loader svg { animation: cp-bl-pulse 2s ease-in-out infinite; }
 }

@@ -7,7 +7,7 @@ import { BunnyLoader } from "./BunnyLoader";
 describe("BunnyLoader", () => {
   it("renders three paths per layer and the gradient defs", () => {
     const html = renderToStaticMarkup(<BunnyLoader />);
-    expect(html.match(/pathLength="1"/g)?.length).toBe(9);
+    expect(html.match(/pathLength="1"/g)?.length).toBe(12);
     expect(html).toContain("linearGradient");
     expect(html).toContain("bl-grad");
     // The two brand stops mirrored from tokens.css.

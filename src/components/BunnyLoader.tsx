@@ -54,6 +54,15 @@ export function BunnyLoader({ size = 96, label = "Loading", sublabel }: Props) {
             <feGaussianBlur stdDeviation="14" />
           </filter>
         </defs>
+        {/* Persistent base outline: the WHOLE mark stays visible at all
+            times — the animated segments are a highlight sweeping over it,
+            not the only thing on screen (three disconnected arcs never read
+            as the bunny). */}
+        <g className="bl-base">
+          {PATHS.map((d, i) => (
+            <path key={i} d={d} pathLength={1} />
+          ))}
+        </g>
         {/* Feathered glow underlayer: same dash cycle, fat blurred stroke. */}
         <g className="bl-glow" filter="url(#bl-blur)">
           {PATHS.map((d, i) => (
