@@ -825,7 +825,17 @@ export default function App() {
   const whisperModelLabel = selectedModel?.name ?? defaults.whisperModel;
 
   // ====== Recents ======
-  const [recents, setRecents] = useState<RecentClip[]>(() => loadJson<RecentClip[]>(RECENTS_KEY, []));
+  // One row per SOURCE in the sidebar's recent clips: re-exporting from the
+  // same title replaces the old row (newest wins) instead of stacking the
+  // same link over and over. Applied on every record AND once at load, which
+  // migrates lists that accumulated duplicates before this rule existed.
+  const [recents, setRecents] = useState<RecentClip[]>(() => {
+    const loaded = loadJson<RecentClip[]>(RECENTS_KEY, []);
+    const seen = new Set<string>();
+    return loaded.filter((r) => (seen.has(r.title) ? false : (seen.add(r.title), true)));
+  });
+  const pushRecentClip = (prev: RecentClip[], r: RecentClip): RecentClip[] =>
+    [r, ...prev.filter((p) => p.title !== r.title)].slice(0, 6);
   useEffect(() => saveJson(RECENTS_KEY, recents), [recents]);
 
   // ====== Recent sources (URL-bar history + "Resume last session") ======
@@ -1280,7 +1290,7 @@ export default function App() {
               when: Date.now(),
               thumbnail: m.thumbnail,
             };
-            setRecents((prev) => [r, ...prev].slice(0, 6));
+            setRecents((prev) => pushRecentClip(prev, r));
           }
         } else if (e.payload.error === "Cancelled") {
           setStatus("loaded");
@@ -2122,7 +2132,7 @@ export default function App() {
           when: Date.now(),
           thumbnail: m.thumbnail,
         };
-        setRecents((prev) => [rc, ...prev].slice(0, 6));
+        setRecents((prev) => pushRecentClip(prev, rc));
       }
       return;
     }
@@ -2715,7 +2725,7 @@ export default function App() {
           when: Date.now(),
           thumbnail: item.thumbnail,
         };
-        setRecents((prev) => [rc, ...prev].slice(0, 6));
+        setRecents((prev) => pushRecentClip(prev, rc));
       };
 
       // ── Local item → in-browser mediabunny export ──────────────────
