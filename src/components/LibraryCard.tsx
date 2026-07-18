@@ -3,6 +3,7 @@
  *  state so a sibling split would thread 6+ props for zero reuse; keeping
  *  one file was the deliberate call. Revisit if another media layer lands. */
 import { useRef, useState } from "react";
+import { rememberAspect } from "../lib/art-aspect";
 import { reviewStatusForKey } from "../lib/review-store";
 import { ReviewStatusChip } from "./ReviewStatusChip";
 import { IconFilm, IconMore, IconPlay, IconVolume } from "./Icons";
@@ -107,6 +108,9 @@ export function LibraryCard({
   // Corner verdict chip - only when this source has an explicit approval
   // status (review-store's hydrated map; best-effort for fingerprint keys).
   const reviewVerdict = reviewStatusForKey(art.kind === "local" ? art.path : art.url ?? "");
+  // 12a: portrait posters render contained over a blurred fill instead of
+  // being cropped/squeezed to 16:9. Measured for free at the img's onLoad.
+  const [portrait, setPortrait] = useState(false);
 
   const closeMenu = () => { setMenuAnchor(null); btnRef.current?.focus(); };
   const openMenuAtRect = () => {
@@ -149,9 +153,10 @@ export function LibraryCard({
           if (onSelect && e.key === "Enter") { e.preventDefault(); onOpen(); }
         }}
       >
-        <span className="cp-lib-card-art">
+        <span className={"cp-lib-card-art" + (portrait ? " portrait" : "")}>
           {showImg ? (
             <>
+              {portrait && <img className="cp-art-blur" src={url} alt="" aria-hidden draggable={false} />}
               <img
                 src={url}
                 alt=""
@@ -166,7 +171,9 @@ export function LibraryCard({
                 // (always 120x90; real thumbs are >= 320 wide), so onError never
                 // fires for it. Detect it on LOAD and advance the walk.
                 onLoad={(e) => {
-                  if (remoteUrls && e.currentTarget.naturalWidth <= 120) setRemoteIdx((i) => i + 1);
+                  if (remoteUrls && e.currentTarget.naturalWidth <= 120) { setRemoteIdx((i) => i + 1); return; }
+                  const a = rememberAspect(url, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight);
+                  setPortrait(a === "portrait");
                 }}
               />
               {/* Hover cycle overlays — stacked over the poster, one "on" at a

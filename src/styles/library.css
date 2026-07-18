@@ -1298,3 +1298,28 @@
   /* Live scan stays green, just doesn't spin. */
   .cp-lib-tree-rescan.scanning svg { animation: none; }
 }
+
+/* ── Portrait art (12a): contained frame over a blurred fill ────────
+   One shared treatment: .cp-art-blur is the cover-fit, blurred, darkened
+   copy filling the letterbox gutters; the foreground image switches to
+   contain. Rows keep one uniform height; nothing stretches or crops. */
+.cp-art-blur {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(18px) brightness(0.45);
+  transform: scale(1.15); /* hide blur's soft edges */
+}
+.cp-lib-card-art.portrait img { object-fit: contain; position: relative; }
+.cp-lib-card-art.portrait img.cp-art-blur { object-fit: cover; position: absolute; }
+.cp-lib-card-art.portrait .cp-lib-card-frame { object-fit: contain; }
+.cp-lib-hero-bg.portrait { object-fit: contain; }
+/* List rows + the detail panel: contained on bg-2 at small sizes (a
+   landscape thumb in a landscape cell is unchanged by contain). */
+.cp-lib-lrow img,
+.cp-lib-detail img.poster {
+  object-fit: contain;
+  background: var(--bg-2);
+}

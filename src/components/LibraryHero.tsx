@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { rememberAspect } from "../lib/art-aspect";
 import { IconPlay } from "./Icons";
 import { requestHeroStill } from "../hooks/use-library-scan";
 import { useLazyThumbnails } from "../hooks/use-lazy-thumbnails";
@@ -47,6 +48,9 @@ export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl }: Props) 
   // the next candidate instead of WKWebView's broken-image chrome. Stored as
   // URLs, not booleans: the hero persists across source changes, so a new
   // recent's candidates must not inherit another source's failures.
+  // 12a: a portrait feature keeps the right-anchored composition but sits
+  // contained over a blurred fill of itself.
+  const [heroPortrait, setHeroPortrait] = useState(false);
   const [failed, setFailed] = useState<string[]>([]);
 
   if (!recent) {
@@ -85,8 +89,12 @@ export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl }: Props) 
   return (
     <section ref={ref} className="cp-lib-hero" aria-label="Continue watching">
       {backdrop && (
-        <img
-          className="cp-lib-hero-bg"
+        <>
+          {heroPortrait && (
+            <img className="cp-lib-hero-bg cp-art-blur" src={backdrop} alt="" aria-hidden draggable={false} />
+          )}
+          <img
+          className={"cp-lib-hero-bg" + (heroPortrait ? " portrait" : "")}
           src={backdrop}
           alt=""
           draggable={false}
@@ -94,9 +102,12 @@ export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl }: Props) 
           // YouTube's 120x90 "no thumbnail" placeholder arrives with HTTP 200;
           // treat a placeholder-sized load as a miss so the walk advances.
           onLoad={(e) => {
-            if (e.currentTarget.naturalWidth <= 120) setFailed((f) => [...f, backdrop]);
+            if (e.currentTarget.naturalWidth <= 120) { setFailed((f) => [...f, backdrop]); return; }
+            const a = rememberAspect(backdrop, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight);
+            setHeroPortrait(a === "portrait");
           }}
-        />
+          />
+        </>
       )}
       <div className="cp-lib-hero-shade" />
       <div className="cp-lib-hero-content">
