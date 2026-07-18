@@ -10,6 +10,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { Toolbar } from "./components/Toolbar";
 import { NavRail } from "./components/NavRail";
+import { MediaSpikePanel } from "./components/MediaSpikePanel";
 import { LibraryView } from "./components/LibraryView";
 import { LibraryBrowser } from "./components/LibraryBrowser";
 import { useLibraryScan } from "./hooks/use-library-scan";
@@ -932,6 +933,11 @@ export default function App() {
 
   // ====== Settings modal ======
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Dev-only capture spike (live-presence Prompt 0): renders ONLY when the
+  // localStorage flag is set. Ships nothing user-visible.
+  const [mediaSpikeOpen, setMediaSpikeOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem("saucebunny.devMediaSpike") === "1"; } catch { return false; }
+  });
   const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "commands" | "about">("general");
 
   // ====== Media info modal ======
@@ -4484,6 +4490,9 @@ export default function App() {
   return (
     <div className="cp-window">
       {buildBanner}
+      {mediaSpikeOpen && (
+        <MediaSpikePanel appendLog={appendLog} onClose={() => setMediaSpikeOpen(false)} />
+      )}
       <div className="cp-titlebar" data-tauri-drag-region>
         <div className="cp-titlebar-title" data-tauri-drag-region>
           Sauce Bunny{titleSuffix}

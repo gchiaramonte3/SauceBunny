@@ -60,6 +60,24 @@
         proofing if Apple ever adds Documents access prompts outside
         the sandbox.
     -->
+    <!--
+        Required: live review sessions capture the camera in-page
+        (getUserMedia in WKWebView). The hardened runtime gates TCC
+        for notarized builds — without this key the OS permission
+        prompt never fires and capture is denied silently.
+    -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+
+    <!--
+        Required: microphone capture for live review sessions AND for
+        voice dictation (ffmpeg avfoundation / saucebunny-dictate).
+        This was a LATENT GAP: dictation worked in dev (no hardened
+        runtime) but would be silently denied in a notarized build.
+    -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
     <!-- NOTE: intentionally NOT declaring com.apple.security.app-sandbox
          here. We are NOT a sandboxed app. -->
 </dict>
