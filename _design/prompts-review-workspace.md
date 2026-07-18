@@ -48,13 +48,33 @@ architecture is one shared stage, two dressings:
 1. View model: the Review view has two faces.
    - No session: the lobby (kept from CoReviewLobby, restyled to tone-cards
      in prompt 2's onboarding work; structure only for now).
-   - Live session: the SESSION ROOM: the app body renders the theater
-     (today's screening layout: stage + participants + review drawer),
+   - Live session: the SESSION ROOM: the app body renders the theater,
      owned and branded by Review. Implementation: keep the single stage in
      the app body; a `sessionRoom` presentation class on cp-body (the
      successor of cp-screening) drives the reflow, and the nav rail's
      active item shows Review while it's live. Rename screening state/CSS
      to room state where touched; do not duplicate the stage.
+
+   THE ROOM'S OWN DESIGN SYSTEM — what is IN and what is OUT (this is the
+   core correction; the current build leaks Clip furniture into the room):
+   - OUT, unconditionally: the Clip source/export sidebar (metadata,
+     transcript generation, export form, recent exports), the export
+     queue tab, the filename field, the pipeline/logs sheet, the URL
+     toolbar. c90f3e1 kept the source sidebar visible in the theater;
+     REVERSE that. None of Clip's editing furniture renders in the room.
+   - IN, and only this: (1) the nav rail, ALWAYS visible, never hidden,
+     never auto-collapsed — it is the app's main navigation and the room
+     is not an exception; (2) the stage; (3) the PEOPLE panel on the LEFT
+     (Louper model: real camera feeds, prompt 3 fills it; roster
+     avatars until then); (4) the review/approval drawer on the RIGHT,
+     pulled from Clip (same ReviewPanel instance and the approval
+     control, moved by layout); (5) the room control bar bottom-center;
+     (6) minimal transport (play/pause + timeline scrub, host-authorita-
+     tive as today). Nothing else. If a control cannot justify itself to
+     a person REVIEWING (not editing), it does not enter the room.
+   - The room reads as its own place: bg-0 deepens behind the stage, the
+     People panel and drawer use the tone-card grammar, and Clip's
+     layout never flashes during the transition (CSS reflow only).
 2. Entering: starting/joining from the lobby activates the room (activeView
    "review", room class on). Switching to Clip (⌘3) while a session is live
    is ALLOWED: the session stays connected (audio/presence continue), the
@@ -131,15 +151,21 @@ Prereq: prompt 2 merged.
 Members see and hear each other in the session room. Design first,
 transport second.
 
-DESIGN (tone-card grammar):
-1. Room layout: the stage (player) dominates; a TILE STRIP of participant
-   cameras sits along the room's edge (right side on wide windows, bottom
-   under ~1100px), each tile 16:9, rounded, tone-card border; name +
-   host crown bottom-left; mic-muted glyph when muted; a soft speaking
-   glow (AnalyserNode threshold) on the active speaker. Your own tile is
-   first, mirrored, marked You. No stream (declined/failed) = the avatar
-   card. ParticipantRail's roster/exit duties fold INTO this strip;
-   retire the old rail where superseded.
+DESIGN (tone-card grammar; the Louper model — cameras are a PLACE, not a
+decoration):
+1. The PEOPLE panel: a dedicated LEFT column in the room (between the nav
+   rail and the stage, ~240px, collapsible to a 72px avatar spine but
+   never removed), holding the participant camera feeds stacked
+   vertically: each a 16:9 tile, rounded, tone-card border; name + host
+   crown bottom-left; mic-muted glyph when muted; a soft speaking glow
+   (AnalyserNode threshold) on the active speaker. Your own feed is the
+   TOP tile, mirrored, marked You, live from the green-room stream the
+   moment you enter the room (you see your own camera working before any
+   peer connects — this is the "I can see the physical camera" moment).
+   No stream (declined/failed/camera off) = the avatar card in the same
+   slot. Under ~1100px width the panel collapses to the avatar spine and
+   tiles pop over on hover/focus. ParticipantRail's roster/exit duties
+   fold INTO this panel; retire the old rail where superseded.
 2. CONTROL BAR: a floating tone-card bar bottom-center of the room:
    mic toggle, camera toggle, share screen (wired in prompt 4; render it
    disabled with title "Screen share arrives with the next build" until
@@ -279,8 +305,12 @@ Claude Code appends per-prompt items here overnight. Baseline list:
    fails anywhere, the fix seam is src/lib/media-devices.ts.
 2. Green room with real devices: prompt fires once, preview renders,
    device switching works, denied path opens System Settings.
-3. Two-instance session: tiles, audio, speaking glow, mute propagation,
-   Clip ⌘3 mid-call, teardown (no camera light).
+3. Two-instance session: your OWN camera feed visible as the top People
+   tile the moment you enter the room; tiles, audio, speaking glow, mute
+   propagation, Clip ⌘3 mid-call, teardown (no camera light).
+3b. Room purity: the session room contains NO Clip furniture (no source
+   panel, no export form, no queue, no URL bar, no logs) and the nav rail
+   is fully visible at all times in the room.
 4. Screen share on each display; remote lag; TCC denied path; no orphaned
    ffmpeg after force-quit.
 5. Approval status set in a live session syncs to the other instance and
