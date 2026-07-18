@@ -39,7 +39,7 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
         aria-pressed={!micOn}
         onClick={onToggleMic}
       >
-        {micOn ? <IconMic size={16} /> : <IconMicOff size={16} />}
+        {micOn ? <IconMic size={15} /> : <IconMicOff size={15} />}
       </button>
       <button
         type="button"
@@ -49,7 +49,7 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
         aria-pressed={!camOn}
         onClick={onToggleCam}
       >
-        {camOn ? <IconVideo size={16} /> : <IconVideoOff size={16} />}
+        {camOn ? <IconVideo size={15} /> : <IconVideoOff size={15} />}
       </button>
       <button
         type="button"
@@ -63,7 +63,7 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
           else { setDevicesOpen(false); setPickerOpen((v) => !v); }
         }}
       >
-        <IconScreenShare size={16} />
+        <IconScreenShare size={15} />
       </button>
       {pickerOpen && shareState === "idle" && (
         <SharePicker
@@ -91,7 +91,7 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
         aria-pressed={theater}
         onClick={onToggleTheater}
       >
-        {theater ? <IconFullscreenExit size={16} /> : <IconFullscreen size={16} />}
+        {theater ? <IconFullscreenExit size={15} /> : <IconFullscreen size={15} />}
       </button>
       <button
         type="button"

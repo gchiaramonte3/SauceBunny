@@ -285,7 +285,7 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   margin-left: var(--s-2);
   padding-left: var(--s-2);
   border-left: 1px solid rgba(255,255,255,0.12);
@@ -294,23 +294,37 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 30px;
-  height: 28px;
-  padding: 0 7px;
-  border: none;
+  width: 32px;
+  height: 30px;
+  padding: 0;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--line-1);
   border-radius: 6px;
-  background: transparent;
-  color: var(--fg-2);
+  color: var(--fg-3);
   font-family: var(--font-ui);
   font-size: 11.5px;
   font-weight: 700;
   cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
 }
-.cp-room-bar-btn:hover { background: rgba(255,255,255,0.07); }
+.cp-room-bar-btn:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); }
 .cp-room-bar-btn.off { color: var(--warn, #f5a623); }
-.cp-room-bar-btn.active { background: rgba(255,255,255,0.1); }
-.cp-room-bar-btn:disabled { opacity: 0.4; cursor: default; }
-.cp-room-bar-btn.leave { color: var(--danger, #ff6b6b); }
+.cp-room-bar-btn.active {
+  background: var(--bg-5);
+  border-color: var(--line-3);
+  color: var(--fg-0);
+}
+.cp-room-bar-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+/* End/Leave stays a text action (like 1x and the duration readout): the
+   chip frame drops, only the danger color marks it. */
+.cp-room-bar-btn.leave {
+  width: auto;
+  padding: 0 7px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--danger, #ff6b6b);
+}
+.cp-room-bar-btn.leave:hover { background: rgba(255,255,255,0.06); }
 .cp-room-bar-sep {
   width: 1px;
   height: 20px;
