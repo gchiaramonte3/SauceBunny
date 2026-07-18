@@ -158,16 +158,19 @@ test("settings modal opens and closes", async ({ page }) => {
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
-test("co-review popover opens with session-first Start available", async ({ page }) => {
+test("sessions live in Review: no toolbar popover, the lobby owns start/join", async ({ page }) => {
   await boot(page);
-  await page.getByLabel("Co-review session").click();
-  const pop = page.locator(".cp-coreview-pop");
-  await expect(pop).toBeVisible();
-  // Session-first: Start is enabled even with no source loaded.
-  await expect(pop.getByRole("button", { name: "Start a session" })).toBeEnabled();
-  await expect(pop.getByPlaceholder("Paste a join code…")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(pop).toHaveCount(0);
+  // The Clip toolbar carries NO session affordance anymore (the nav rail's
+  // Review badge is the one session surface outside the workspace).
+  await expect(page.getByLabel("Co-review session")).toHaveCount(0);
+  await expect(page.locator(".cp-coreview-pop")).toHaveCount(0);
+  // The Review view hosts the lobby; session-first Start works sourceless.
+  await page.getByRole("button", { name: "Review" }).click();
+  const lobby = page.locator(".cp-view-coreview");
+  await expect(lobby).toBeVisible();
+  await expect(lobby.getByRole("button", { name: "Start session" })).toBeEnabled();
+  // No live session -> the body never carries the room class.
+  await expect(page.locator(".cp-body.cp-room")).toHaveCount(0);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 

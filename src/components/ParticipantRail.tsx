@@ -21,9 +21,9 @@ export function ParticipantRail({ active, participants, onExit }: {
 }) {
   if (!active) return null;
   return (
-    <aside className="cp-prail" aria-label="Screening participants">
+    <aside className="cp-prail" aria-label="Session participants">
       <div className="cp-prail-head">
-        <span className="cp-prail-title">Screening</span>
+        <span className="cp-prail-title">People</span>
         <span className="cp-prail-count">{participants.length}</span>
       </div>
       <div className="cp-prail-list">
@@ -52,7 +52,7 @@ export function ParticipantRail({ active, participants, onExit }: {
         ))}
       </div>
       <button type="button" className="btn btn-ghost cp-prail-exit" onClick={onExit}>
-        Exit screening
+        Leave session
       </button>
     </aside>
   );

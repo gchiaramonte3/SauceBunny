@@ -26,6 +26,7 @@ import { Transport } from "./components/Transport";
 import { Timeline } from "./components/Timeline";
 import { ViewOptions } from "./components/ViewOptions";
 import { LogsPanel } from "./components/LogsPanel";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { SettingsModal, type Defaults, type CaptionFontKey } from "./components/SettingsModal";
 import { YouTubeAuthModal } from "./components/YouTubeAuthModal";
 import type { PlayerHandle } from "./components/player-handle";
@@ -3901,11 +3902,7 @@ export default function App() {
   const registerReviewRangeKeys = useCallback(
     (h: { markIn: () => void; markOut: () => void } | null) => { reviewRangeKeysRef.current = h; }, []);
   const reviewRangeGateRef = useRef({ panelDetached: false, queueOpen: false, reviewSourceKey: null as string | null, hasSource: false });
-  // Latest-value mirror of co-review screening for the keyboard effect — like
-  // reviewRangeGateRef, `screening` is derived later than this effect, so it
-  // can't be a dep. Read in the view-switch cases to no-op ⌘1/⌘2 while the
-  // co-review theater owns the window.
-  const screeningRef = useRef(false);
+
   // Data-driven: the live event is serialized to a combo and matched against the
   // user-editable binding map (Settings → Commands). The three things that aren't
   // simple action triggers — the timecode-entry HUD, Esc-closes-Settings, and
@@ -3935,11 +3932,9 @@ export default function App() {
         case "view.library":
         case "view.clip":
         case "view.coreview": {
-          // During a co-review screening the theater owns the whole window
-          // (nav rail is CSS-hidden and the theater-exit control lives in the
-          // Clip view) — ⌘1-⌘4 would strand the user with no way back, so
-          // no-op until they leave screening.
-          if (screeningRef.current) break;
+          // View switching stays live during a session: the room is a
+          // dressing of the shared stage, not a trap (leaving to Clip keeps
+          // the session connected; the rail's Review badge is the way back).
           const v: AppView =
             id === "view.home" ? "home" :
             id === "view.library" ? "library" :
@@ -4309,10 +4304,12 @@ export default function App() {
     pushNotification, setQueueOpen,
     setReviewMarkers, setReviewAnnotations,
   });
-  // Latest-value mirror of screening for the keyboard view-switch gate (see
-  // screeningRef — declared before that effect, mirrored here where screening
-  // is finally in scope).
-  useEffect(() => { screeningRef.current = screening; });
+  // The SESSION ROOM: Review owns live sessions end to end. When a session
+  // is live and the Review view is active, the room class reflows the Clip
+  // stage into the room dressing (CSS only; the player subtree is untouched
+  // and never remounts). Switching to Clip mid-session is allowed - the
+  // session stays connected and the rail's Review badge is the way back.
+  const roomActive = coSessionActive && activeView === "coreview";
   // Undo hygiene: undoing across sources is nonsense, and entries recorded
   // solo must never replay into a co-review session (or vice versa — their
   // closures route to different docs). Drop the whole stack on either
@@ -4546,10 +4543,10 @@ export default function App() {
         </div>
       </div>
 
-      <div className={"cp-body" + (screening ? " cp-screening" : "")}>
-        {/* display:contents normally (rail is a plain flex child); during
-            screening it becomes the fixed left-edge hover hot-zone that
-            reveals the rail as an overlay — CSS-only, see screening.css. */}
+      <div className={"cp-body" + (roomActive ? " cp-room" : "") + (roomActive && screening ? " cp-room-theater" : "")}>
+        {/* display:contents wrapper (rail is a plain flex child). The rail is
+            ALWAYS visible — the session room is not an exception (the old
+            screening edge-reveal overlay is retired; see room.css). */}
         <div className="cp-nav-dock">
           <NavRail
             active={activeView}
@@ -4639,22 +4636,17 @@ export default function App() {
               onMarkAllRead={onMarkAllRead}
               onClearNotifications={onClearNotifications}
               onDismissNotification={onDismissNotification}
-              coSession={coSession}
-              coLocalSource={coLocalSourceLoaded}
-              coScreening={screening}
-              onCoToggleScreening={() => setScreening((s) => !s)}
-              onCoStart={() => { void startCoReview(); }}
-              onCoJoin={(t, n) => { void joinCoReview(t, n); }}
-              onCoLeave={leaveCoReview}
             />
 
             <div className="cp-clip-body">
-              {/* Always mounted (stable sibling of <main>) so entering screening
-                  never remounts the player; renders nothing when not screening. */}
+              {/* The room's People panel (roster avatars until the webcam
+                  tiles land in the next build). Always mounted as a stable
+                  sibling of <main> so entering the room never remounts the
+                  player; renders nothing outside the room. */}
               <ParticipantRail
-                active={screening}
+                active={roomActive}
                 participants={screeningParticipants}
-                onExit={() => setScreening(false)}
+                onExit={leaveCoReview}
               />
               <Sidebar
                 onFilenameEdit={markFilenameEdited}
@@ -4700,6 +4692,44 @@ export default function App() {
               />
 
               <main className="cp-main">
+                {roomActive && (
+                  <div className="cp-room-head">
+                    <div className="cp-room-title">
+                      <span className="cp-room-live" aria-hidden />
+                      <span>Review session</span>
+                      {metadata?.title && (
+                        <span className="cp-room-source" title={metadata.title}>{metadata.title}</span>
+                      )}
+                    </div>
+                    <div className="cp-room-head-actions">
+                      {coSession.role === "host" && coSession.code && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-compact cp-room-code"
+                          title="Copy the join code"
+                          onClick={() => { if (coSession.code) void writeText(coSession.code).then(() => pushNotification("success", "Join code copied", "")); }}
+                        >
+                          Copy join code
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className={"btn btn-ghost btn-compact" + (screening ? " active" : "")}
+                        aria-pressed={screening}
+                        title="Theater: widen the stage"
+                        onClick={() => setScreening((s) => !s)}
+                      >
+                        Theater
+                      </button>
+                      <button type="button" className="btn btn-ghost btn-compact cp-room-leave" onClick={leaveCoReview}>
+                        {coSession.role === "host" ? "End session" : "Leave"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {roomActive && coSession.role === "guest" && status === "empty" && (
+                  <div className="cp-room-waiting">Waiting for the host to load a source</div>
+                )}
                 <div className="cp-monitor-wrap">
                   <div className="cp-view-bar">
                     <ViewOptions
@@ -4999,7 +5029,8 @@ export default function App() {
                   Re-docking happens when the floating window closes (Rust
                   fires `panel:closed` → setPanelDetached(false)). */}
               {!panelDetached && <QueueDrawer
-                open={queueOpen}
+                open={roomActive ? true : queueOpen}
+                roomFace={roomActive}
                 onClose={() => setQueueOpenChoice(false)}
                 onPopOut={handlePopOutPanel}
                 queue={clipQueue}
@@ -5090,7 +5121,6 @@ export default function App() {
               onStart={() => { void startCoReview(); }}
               onJoin={(t, n) => { void joinCoReview(t, n); }}
               onLeave={leaveCoReview}
-              onEnterTheater={() => { navigateView("clip"); setScreening(true); }}
             />
           </div>
         </div>

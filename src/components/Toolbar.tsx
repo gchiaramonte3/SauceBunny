@@ -2,13 +2,11 @@ import { useRef } from "react";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { IconLink, IconClipboard, IconImport, IconPanelRight, IconPanelLeft } from "./Icons";
 import { NotificationBell, type Notif } from "./NotificationBell";
-import { CoReviewPopover } from "./CoReviewPopover";
 import { RecentSources } from "./RecentSources";
 import { StatefulButton } from "./StatefulButton";
 import type { RecentSource } from "../lib/recent-sources";
 import type { StatefulPhase } from "../lib/stateful-phase";
 import type { AppStatus } from "../types";
-import type { SessionState } from "../bindings/SessionState";
 
 type Props = {
   url: string;
@@ -41,15 +39,8 @@ type Props = {
   onClearNotifications: () => void;
   onDismissNotification: (id: string) => void;
   /** Co-review (P2P watch party) session state + controls. */
-  coSession: SessionState;
   /** A local file is loaded — the popover warns guests can't receive it yet (hosting still allowed). */
-  coLocalSource: boolean;
   /** Screening (cinematic watch-party layout) on/off + toggle. */
-  coScreening: boolean;
-  onCoToggleScreening: () => void;
-  onCoStart: () => void;
-  onCoJoin: (ticket: string, name: string) => void;
-  onCoLeave: () => void;
 };
 
 function stripScheme(s: string): string {
@@ -63,7 +54,6 @@ export function Toolbar({
   sidebarOpen, onToggleSidebar,
   hasSource, status, fetchPhase, onFetchResolved,
   notifications, onMarkAllRead, onClearNotifications, onDismissNotification,
-  coSession, coLocalSource, coScreening, onCoToggleScreening, onCoStart, onCoJoin, onCoLeave,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const fetching = status === "fetching";
@@ -202,16 +192,8 @@ export function Toolbar({
         <IconPanelRight size={15} />
         {queueCount > 0 && <span className="cp-queue-badge">{queueCount}</span>}
       </button>
-      <CoReviewPopover
-        session={coSession}
-        localSource={coLocalSource}
-        hasSource={hasSource}
-        screening={coScreening}
-        onToggleScreening={onCoToggleScreening}
-        onStart={onCoStart}
-        onJoin={onCoJoin}
-        onLeave={onCoLeave}
-      />
+      {/* Sessions live in the Review workspace now; the nav rail's Review
+          badge is the one session affordance outside it. */}
       {/* The Settings gear lives in the nav rail now (NavRail.tsx) — the
           toolbar ends with the bell so the rail owns app-level chrome. */}
       <NotificationBell

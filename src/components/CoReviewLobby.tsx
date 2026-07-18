@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { saveJson } from "../lib/storage";
-import { IconFilm, IconCrown } from "./Icons";
+import { IconCrown } from "./Icons";
 import { AUTHOR_KEY, REVIEW_CHANGED_EVENT, initialsOf, loadReviewer } from "../lib/review";
 import type { Participant } from "./ParticipantRail";
 import type { SessionState } from "../bindings/SessionState";
@@ -24,7 +24,7 @@ import type { SessionState } from "../bindings/SessionState";
  * name is what the roster shows. "Enter theater" jumps to Clip AND flips
  * screening on (the theater overlays the Clip player).
  */
-export function CoReviewLobby({ session, localSource, participants, onStart, onJoin, onLeave, onEnterTheater }: {
+export function CoReviewLobby({ session, localSource, participants, onStart, onJoin, onLeave, }: {
   session: SessionState;
   /** A local file is loaded — guests can't receive it yet (hosting still allowed). */
   localSource: boolean;
@@ -32,7 +32,6 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   onStart: () => void;
   onJoin: (ticket: string, name: string) => void;
   onLeave: () => void;
-  onEnterTheater: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [name, setName] = useState(() => loadReviewer().name);
@@ -160,9 +159,6 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
             {session.error && <p className="cp-colobby-err center" role="alert">{session.error}</p>}
 
             <div className="cp-colobby-actions">
-              <button type="button" className="btn btn-primary cp-colobby-enter" onClick={onEnterTheater}>
-                <IconFilm size={14} /> Enter theater
-              </button>
               <button type="button" className="cp-colobby-leave" onClick={onLeave}>
                 {isHost ? "End session" : "Leave session"}
               </button>

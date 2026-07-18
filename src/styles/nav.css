@@ -3,13 +3,13 @@
    NAV RAIL — slim vertical icon+label rail on the window's left edge.
    Sits inside .cp-body (below the titlebar, so it never collides
    with the macOS traffic lights). While co-review screening mode is
-   on it becomes a CSS-only edge-reveal overlay — see screening.css.
+   on it stays put in every mode, including the session room (room.css).
    ============================================================ */
 
 /* Rail dock — a display:contents pass-through in the normal layout, so the
    rail is a direct flex child of .cp-body exactly as before. Screening mode
    re-establishes a box on it and turns it into the reveal hot-zone
-   (screening.css). Keep it transparent to layout here. */
+   Keep it transparent to layout here. */
 .cp-nav-dock { display: contents; }
 
 .cp-nav {

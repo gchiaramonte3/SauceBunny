@@ -157,6 +157,9 @@ type Props = {
    * PanelApp.
    */
   embedded?: boolean;
+  /** Session-room dressing: tab strip and queue chrome hidden, the
+   *  Review tab forced (same mounted panel, just the room's face). */
+  roomFace?: boolean;
 };
 
 function statusLabel(s: QueuedClip["status"]): string {
@@ -215,7 +218,7 @@ export function QueueDrawer({
   onOpenReviewSource, onReviewRangeDraft, onRegisterRangeHotkeys,
   reviewSessionActive, reviewSessionDoc, onReviewSessionOp,
   onRenameClip, onRenameAll,
-  onPopOut, embedded = false,
+  onPopOut, embedded = false, roomFace = false,
 }: Props) {
   const counts = queue.reduce(
     (acc, c) => ((acc[c.status] = (acc[c.status] ?? 0) + 1), acc),
@@ -291,6 +294,9 @@ export function QueueDrawer({
   // Restore the last active tab on mount (pop-out, re-dock, and relaunch all
   // land on the tab the user was on) and write every change straight through.
   const [activeTab, setActiveTab] = useState<TabId>(() => loadActiveTab());
+  // The room forces the Review face without touching the persisted tab
+  // choice - leaving the room lands back on whatever was active before.
+  const shownTab: TabId = roomFace ? "review" : activeTab;
   useEffect(() => { saveActiveTab(activeTab); }, [activeTab]);
   // Review-tab comfort width. Below ~520px the review toolbar wraps onto two
   // rows (filters row + icons row), which reads as clutter. When the user
@@ -313,6 +319,9 @@ export function QueueDrawer({
   // AI chat, a running dictation in Review — survives tab switches. Lazy so
   // never-visited tabs cost nothing at drawer mount.
   const [visited, setVisited] = useState<ReadonlySet<TabId>>(() => new Set([activeTab]));
+  useEffect(() => {
+    setVisited((prev) => (prev.has(shownTab) ? prev : new Set(prev).add(shownTab)));
+  }, [shownTab]);
   useEffect(() => {
     setVisited((prev) => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
   }, [activeTab]);
@@ -500,7 +509,7 @@ export function QueueDrawer({
 
   return (
     <aside
-      className={"cp-queue-drawer" + (open ? " open" : "") + (embedded ? " embedded" : "") + (resizing ? " resizing" : "")}
+      className={"cp-queue-drawer" + (open ? " open" : "") + (embedded ? " embedded" : "") + (roomFace ? " room" : "") + (resizing ? " resizing" : "")}
       aria-hidden={!open}
       aria-label="Queue and tools"
       // Inline width only when docked + open. In embedded (floating) mode
@@ -531,7 +540,7 @@ export function QueueDrawer({
       <div className="cp-queue-head" role="tablist" aria-label="Right panel sections" ref={tabStripRef}>
         {orderedTabs.map((t, idx) => {
           const Icon = t.icon;
-          const isActive = activeTab === t.id && !t.disabled;
+          const isActive = shownTab === t.id && !t.disabled;
           const isDragSrc = drag?.tabId === t.id;
           return (
             <button
@@ -609,7 +618,7 @@ export function QueueDrawer({
           the ACTIVE tab so hidden bodies do no karaoke/timecode work while
           keeping all their internal state. Add a case here for a new tab. */}
       {visited.has("queue") && (
-        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-queue" aria-labelledby="cp-tab-queue" hidden={activeTab !== "queue"}>
+        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-queue" aria-labelledby="cp-tab-queue" hidden={shownTab !== "queue"}>
         {/* === existing queue body kept untouched below === */}
 
       <div className="cp-queue-list">
@@ -775,7 +784,7 @@ export function QueueDrawer({
         </div>
       )}
       {visited.has("transcript") && (
-        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-transcript" aria-labelledby="cp-tab-transcript" hidden={activeTab !== "transcript"}>
+        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-transcript" aria-labelledby="cp-tab-transcript" hidden={shownTab !== "transcript"}>
         <TranscriptViewer
           path={transcriptPath}
           /* Same-path overwrites (Regenerate / Fix-timing) re-read via the tick. */
@@ -783,7 +792,7 @@ export function QueueDrawer({
           /* Playhead only while ACTIVE — a hidden transcript's karaoke
              highlight + autoscroll stay frozen, then snap to the current
              position when the tab re-shows. */
-          playheadActive={playheadAvailable && activeTab === "transcript"}
+          playheadActive={playheadAvailable && shownTab === "transcript"}
           fps={transcriptFps}
           onSeek={onTranscriptSeek}
           origin={transcriptOrigin}
@@ -803,7 +812,7 @@ export function QueueDrawer({
         </div>
       )}
       {visited.has("ai") && (
-        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-ai" aria-labelledby="cp-tab-ai" hidden={activeTab !== "ai"}>
+        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-ai" aria-labelledby="cp-tab-ai" hidden={shownTab !== "ai"}>
         <AiSummary
           transcriptPath={transcriptPath}
           reloadToken={transcriptArrivedTick}
@@ -818,12 +827,12 @@ export function QueueDrawer({
         </div>
       )}
       {visited.has("review") && (
-        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-review" aria-labelledby="cp-tab-review" hidden={activeTab !== "review"}>
+        <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-review" aria-labelledby="cp-tab-review" hidden={shownTab !== "review"}>
         <ReviewPanel
           sourceKey={reviewSourceKey ?? null}
           sourceTitle={reviewSourceTitle}
           /* Playhead only while ACTIVE — see the transcript note above. */
-          playheadActive={playheadAvailable && activeTab === "review"}
+          playheadActive={playheadAvailable && shownTab === "review"}
           fps={fps}
           onSeek={onTranscriptSeek}
           drawActive={!!reviewDrawActive}

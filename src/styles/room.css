@@ -1,0 +1,261 @@
+/* The SESSION ROOM — Review's live-session dressing over the shared stage.
+   ============================================================
+   When a session is live and the Review view is active, App puts `cp-room`
+   on .cp-body (plus `cp-room-theater` for the widened-stage sub-mode). The
+   room REUSES the Clip view's stage subtree: CSS below makes the [hidden]
+   Clip view visible and strips every piece of editing furniture, so the
+   player never remounts (the one hard constraint). What remains is the
+   room's own design system: nav rail (always visible), People panel left,
+   stage center, review drawer right, room header above the stage.
+   Successor of the retired cp-screening mode (see git history). */
+
+/* The stage lives in the Clip view; the room shows it while the Review
+   view is the active one. The lobby (cp-view-coreview) yields entirely. */
+.cp-room .cp-view-clip[hidden] {
+  display: flex;
+}
+.cp-room .cp-view-coreview {
+  display: none;
+}
+
+/* OUT, unconditionally: Clip's editing furniture. */
+.cp-room .cp-view-clip .cp-toolbar { display: none; }
+.cp-room .cp-sidebar { display: none; }
+.cp-room .cp-view-bar { display: none; }
+.cp-room .cp-logs-header,
+.cp-room .cp-logs-body { display: none; }
+/* Minimal transport: play/pause + scrub only. Editing clusters go. */
+.cp-room .cp-transport-side.right .cp-icon-group { display: none; }
+.cp-room .cp-transport-side.right .cp-icon-divider { display: none; }
+
+/* The room reads as its own place: the canvas deepens behind the stage. */
+.cp-room .cp-main { background: var(--bg-0); }
+
+/* Room header — session identity + the few room-level controls. */
+.cp-room-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  margin: var(--s-2) 4px 0;
+  background: var(--bg-1);
+  border-radius: var(--r-lg);
+}
+.cp-room-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.cp-room-live {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  animation: cp-room-pulse 2.4s ease-in-out infinite;
+}
+.cp-room-source {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 340px;
+}
+.cp-room-head-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+@keyframes cp-room-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+/* Guest with nothing loaded: one line over the stage, waiting. */
+.cp-room .cp-main { position: relative; }
+.cp-room-waiting {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-0);
+  border-radius: var(--r-lg);
+  margin: var(--s-2) 4px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--fg-3);
+}
+
+/* The review drawer is the room's right panel: no tab strip, no queue
+   chrome — the Review face only (QueueDrawer roomFace). */
+.cp-room .cp-queue-drawer.room .cp-queue-head { display: none; }
+.cp-room .cp-queue-drawer.room .cp-queue-foot { display: none; }
+
+/* The People panel exit control is redundant with the room header. */
+.cp-room .cp-prail-exit { display: none; }
+
+/* ── Theater sub-mode: widen the stage; the rail STAYS (it is the app's
+   primary navigation — the room is not an exception). ── */
+.cp-room-theater .cp-prail { display: none; }
+.cp-room-theater .cp-queue-drawer.room { display: none; }
+.cp-room-theater .cp-room-head { margin-top: var(--s-2); }
+
+/* ── People panel (the old participant rail, folded into the room) ── */
+.cp-prail {
+  width: 224px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  /* Tone-card (Claude Terminal grammar): matches the other panels — bg-1
+     tone, one radius, uniform gutters, no border. */
+  background: var(--bg-1);
+  border-radius: var(--r-lg);
+  margin: var(--s-2) 4px;
+  overflow: hidden;
+}
+.cp-prail-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-4) 10px;
+}
+.cp-prail-title {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.cp-prail-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+}
+.cp-prail-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: 2px var(--s-2) var(--s-2);
+}
+
+/* One participant row */
+.cp-prail-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 7px var(--s-2);
+  border-radius: var(--r-lg);
+  animation: cp-prail-in 260ms var(--ease-out) both;
+}
+.cp-prail-row.self { background: rgba(255,255,255,0.04); }
+@keyframes cp-prail-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Avatar: initials in a coloured ring (the reviewer's hue), with a live dot
+   and an optional host crown. */
+.cp-prail-av {
+  position: relative;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--pr-color, var(--accent)) 22%, var(--bg-3));
+  box-shadow: inset 0 0 0 2px var(--pr-color, var(--accent));
+}
+.cp-prail-initials {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--fg-0);
+  letter-spacing: 0.01em;
+  user-select: none;
+}
+.cp-prail-live {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 2.5px var(--bg-1);
+  animation: cp-prail-pulse 2.4s ease-in-out infinite;
+}
+@keyframes cp-prail-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+.cp-prail-crown {
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--gold);
+  display: flex;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5));
+}
+
+.cp-prail-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cp-prail-name {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cp-prail-you {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: rgba(255,255,255,0.08);
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.cp-prail-exit {
+  flex-shrink: 0;
+  margin: var(--s-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-prail-row { animation: none; }
+  .cp-prail-live { animation: none; }
+  .cp-room-live { animation: none; }
+}

@@ -10,8 +10,8 @@ import logoUrl from "../assets/saucebunny.svg";
  * This is a STATE switch, not a router (CLAUDE.md forbids routers): App owns
  * a single `activeView` useState and both views stay mounted — the inactive
  * one is hidden with [hidden], QueueDrawer-tab style, so playback and
- * running jobs survive navigation. While co-review screening mode is on the
- * rail becomes a CSS-only edge-reveal overlay (see screening.css / .cp-nav-dock)
+ * running jobs survive navigation. The
+ * rail stays visible in every mode, including the session room (room.css)
  * — it never unmounts, so the player is untouched.
  */
 type Props = {
