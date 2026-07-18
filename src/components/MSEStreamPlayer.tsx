@@ -58,6 +58,9 @@ type Props = {
    *  codecs are absent/unsupported we fall back to probing (then to download). */
   videoCodec?: string;
   audioCodec?: string;
+  /** Initial pipeline start (seconds). A fresh-retry stream resumes where
+   *  the dying one was (review fix: the retry previously restarted at 0). */
+  startAtSeconds?: number;
   /** Low-volume pipeline diagnostics → the Pipeline log (channel "seek"), so
    *  seek/rebuild behaviour is inspectable without DevTools. Logged only on
    *  actual seeks/rebuilds (not per-frame), so it stays quiet. */
@@ -69,7 +72,7 @@ type Props = {
 const BUFFER_AHEAD_SECONDS = 30;
 
 export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSEStreamPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration, audioStreamUrl, videoCodec, audioCodec, onDiag },
+  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration, audioStreamUrl, videoCodec, audioCodec, onDiag, startAtSeconds },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -106,6 +109,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   useEffect(() => { audioCodecRef.current = audioCodec ?? null; }, [audioCodec]);
   const onDiagRef = useRef<Props["onDiag"]>(undefined);
   useEffect(() => { onDiagRef.current = onDiag; }, [onDiag]);
+  // Read at pipeline-build time only (a prop change must not rebuild).
+  const startAtSecondsRef = useRef(0);
+  useEffect(() => {
+    startAtSecondsRef.current = startAtSeconds && isFinite(startAtSeconds) && startAtSeconds > 0.5 ? startAtSeconds : 0;
+  }, [startAtSeconds]);
   // Latest-callback ref for onTimeUpdate: the media effect below runs on
   // [path] only, so its handlers would otherwise close over the callback from
   // MOUNT time. App's callback converts seconds to frames with the CURRENT
@@ -746,7 +754,13 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     };
     rebuildRef.current = buildPipeline;
 
-    buildPipeline(0);
+    {
+      // Fresh-retry resume: build from where the previous stream died and
+      // land exactly there once buffered (same contract as a user seek).
+      const startAt = startAtSecondsRef.current;
+      if (startAt > 0) pendingLandRef.current = startAt;
+      buildPipeline(startAt);
+    }
 
     return () => {
       disposed = true;

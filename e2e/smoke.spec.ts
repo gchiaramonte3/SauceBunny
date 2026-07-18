@@ -489,11 +489,18 @@ test("new-source reset: filename reseeds per source, user-typed name survives", 
   await page.getByRole("button", { name: /^Fetch/ }).click();
   await expect(filename).toHaveValue("Source-B-title", { timeout: 10_000 });
 
-  // Type a custom name (arms the dirty flag), refetch A → custom SURVIVES.
+  // Type a custom name (arms the PER-SOURCE dirty flag), refetch the SAME
+  // source → custom SURVIVES the refetch.
   await filename.fill("my-custom-name");
-  await url.fill("https://youtube.com/watch?v=aaaa");
+  await url.fill("https://youtube.com/watch?v=bbbb");
   await page.getByRole("button", { name: /^Fetch/ }).click();
   await expect(filename).toHaveValue("my-custom-name", { timeout: 10_000 });
+
+  // A DIFFERENT source disarms the flag: the field reseeds from A's title
+  // (review fix: the old session-sticky flag kept the custom name forever).
+  await url.fill("https://youtube.com/watch?v=aaaa");
+  await page.getByRole("button", { name: /^Fetch/ }).click();
+  await expect(filename).toHaveValue("Source-A-title", { timeout: 10_000 });
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 

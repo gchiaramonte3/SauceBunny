@@ -57,6 +57,8 @@ type Props = {
    * branch was removed in r53; see DISTRIBUTION.md for the rationale.
    */
   webStreamUrl?: string | null;
+  /** Seconds the MSE pipeline should start from (fresh-retry resume). */
+  streamStartAt?: number;
   /** Pipeline/seek diagnostics → the Pipeline log (channel "seek"). */
   onDiag?: (tag: string, message: string) => void;
   /** r75: RAW audio-track CDN URL for DASH-split sources (Reddit, YouTube
@@ -213,7 +215,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     errorDetail, extractorRot,
     resumeTitle, onResume, onboarding,
     aspect,
-    sourceKind, localFilePath, webStreamUrl, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
+    sourceKind, localFilePath, webStreamUrl, streamStartAt, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs,
     streamLoadingPhase,
     toast, onToastDismiss,
@@ -433,6 +435,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               /* Authoritative duration so far seeks don't clamp to a short
                  stream-probe value (was sending 19:40 to 15:12). */
               knownDuration={metadata?.duration ?? undefined}
+              startAtSeconds={streamStartAt}
               initialVolume={initialVolume}
               onTimeUpdate={onPlayerTimeUpdate}
               onPlayStateChange={onPlayerStateChange}

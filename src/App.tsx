@@ -83,7 +83,7 @@ import {
   tcToFrames, tcToSeconds,
 } from "./lib/timecode";
 import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, looksLikeExtractorRot, prettyHost } from "./lib/validation";
-import { sanitizeFilename, stripExt, suggestFilename } from "./lib/filename";
+import { sanitizeFilename, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
 import { buildDiagnosticsReport, diagnosticsFilename } from "./lib/diagnostics";
 import { extractFrameAsBlob, extractPosterBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
@@ -1101,6 +1101,7 @@ export default function App() {
     stop: stopWebPlayback,
     onPlayerReady: webOnPlayerReady,
     onMediaError: webOnMediaError,
+    consumeResume: webConsumeResume,
   } = webPlayback;
   // True while actively MSE-streaming a web source (not yet downloaded to
   // cache). Gates the audio pre-cache, caption auto-fetch, caption-sync offset.
@@ -1515,6 +1516,9 @@ export default function App() {
       try { playerRef.current?.seekTo?.(at); } catch { /* best effort */ }
       markUserSeek(playheadSecondsToFrames(at, fpsRef.current));
       publishPlayheadFrames(playheadSecondsToFrames(at, fpsRef.current));
+      // Review fix: one-shot. Without consuming, any later player remount
+      // (error -> loaded status cycles) re-applied the stale death position.
+      webConsumeResume();
     }
     // Apply persisted volume + mute + playback speed as soon as a player
     // becomes ready, and record whether it can honour a rate at all (drives
@@ -1544,7 +1548,7 @@ export default function App() {
         return { ...prev, duration: dur };
       });
     }
-  }, [volume, muted, playbackRate, webOnPlayerReady]);
+  }, [volume, muted, playbackRate, webOnPlayerReady, webConsumeResume]);
 
   // ====== Actions ======
   /**
@@ -1552,16 +1556,30 @@ export default function App() {
    * from a clean slate. Critically resets `sourceKind` + `localFilePath` so
    * the Monitor doesn't render the old player while the new source loads.
    */
-  // ── Filename dirty flag ──────────────────────────────────────────
-  // True ONLY after the user edits the filename input (Sidebar calls
-  // markFilenameEdited); reset on every new source load. The hydrate rule:
-  // edited → keep the user's name; not edited → ALWAYS reseed from the new
-  // source. Replaces the old `prev.filename !== "clip"` heuristic, which
-  // could not tell "user typed a name" from "seeded from the PREVIOUS
-  // source's title" and left source A's name (and the window title) on
-  // source B.
-  const filenameEditedRef = useRef(false);
-  const markFilenameEdited = useCallback(() => { filenameEditedRef.current = true; }, []);
+  // ── Filename dirty flag (PER-SOURCE, review fix) ─────────────────
+  // Arms ONLY when the user edits the filename input (Sidebar calls
+  // markFilenameEdited) and remembers WHICH source it was typed for. The
+  // hydrate rule: the custom name is kept only while the loaded source is
+  // the one it was typed for — a refetch of the same source keeps it, any
+  // other source disarms the flag and reseeds from the new title. (The
+  // previous session-sticky boolean kept one custom name for every future
+  // source until relaunch; before that, a `prev.filename !== "clip"`
+  // heuristic couldn't tell a typed name from the previous source's seed.)
+  const currentSourceKeyRef = useRef<string>("");
+  const filenameEditedForRef = useRef<string | null>(null);
+  const markFilenameEdited = useCallback(() => {
+    filenameEditedForRef.current = currentSourceKeyRef.current || null;
+  }, []);
+  /** True while the user's typed filename belongs to the CURRENT source. */
+  const keepUserFilename = useCallback(
+    () => filenameEditedForRef.current != null && filenameEditedForRef.current === currentSourceKeyRef.current,
+    [],
+  );
+  /** The one hydrate rule, shared by warm/fresh/local hydrates. */
+  const seedFilename = useCallback(
+    (prevName: string, title: string) => (keepUserFilename() && prevName ? prevName : suggestFilename(title)),
+    [keepUserFilename],
+  );
 
   /**
    * Source-scoped reset — called at the TOP of every load path (handleFetch,
@@ -1570,20 +1588,22 @@ export default function App() {
    * CLEARED: playback/prep + captions/transcript jobs (canceled + disowned),
    *   metadata, error detail, rot verdict, logs, result path, progress,
    *   captions/transcript state, marks + TC fields, fetch/export phases,
-   *   transcript resolution, ffmpeg clip job, filename dirty flag, and the
-   *   filename itself when not user-edited (so the field and the WINDOW
-   *   TITLE never show the previous source while the new one hydrates).
+   *   transcript resolution, ffmpeg clip job, and — whenever the incoming
+   *   source differs from the one a custom name was typed for — the
+   *   filename dirty flag and the filename itself (so the field and the
+   *   WINDOW TITLE never show the previous source while the new one
+   *   hydrates; a custom name survives only a same-source refetch).
    * KEPT (deliberately): the export queue + its history (job log spans
    *   sources), notifications, settings/prefs, review docs (keyed per
    *   source; they swap on their own), recents, the spent-URL rot map.
    *   The undo stack clears via its own sourceKey effect.
    */
-  const resetForNewSource = useCallback(() => {
-    // NOTE the flag deliberately does NOT reset here: the spec's own e2e
-    // requires a user-typed name to SURVIVE a refetch, which contradicts a
-    // literal reset-on-every-load. Sticky-once-edited is the behavior the
-    // acceptance test demands; the flag only ever arms on a real keystroke.
-    if (!filenameEditedRef.current) {
+  const resetForNewSource = useCallback((sourceKey: string) => {
+    currentSourceKeyRef.current = sourceKey;
+    // Per-source flag: same source (refetch) → the custom name survives;
+    // different source → disarm and reseed. This is what the e2e pins.
+    if (filenameEditedForRef.current !== sourceKey) filenameEditedForRef.current = null;
+    if (filenameEditedForRef.current == null) {
       // Clear a non-edited filename immediately: titleSuffix derives from
       // it, so the previous source's name must not linger in the titlebar
       // during the fetch window. Hydrate reseeds from the new title.
@@ -1701,7 +1721,7 @@ export default function App() {
       setFetchPhase("error");
       return;
     }
-    resetForNewSource();
+    resetForNewSource(full);
     // Committed source URL for the audio-master cache (keyed off this, not the
     // live `url` input, which can change without a re-fetch). The ref mirror is
     // set synchronously so the cookie reminder can name the host mid-fetch.
@@ -1763,16 +1783,16 @@ export default function App() {
     // resetForNewSource() above clears it, so every fetch starts with a clean
     // transcript panel — no holdover from the previous video. A past transcript
     // is still one click away via the Transcript tab's History popover.
-    // Seed a sensible filename from the URL right away; replaced once title arrives.
+    // Filename is owned by resetForNewSource (cleared unless the user's
+    // custom name belongs to THIS source) + the hydrates below (reseeded
+    // from the real title) — no competing seed here (review fix: this was
+    // the last survivor of the retired prev.filename heuristic).
     setExportOpts((prev) => ({
       ...prev,
       folder: prev.folder ?? defaults.folder,
       format: defaults.format,
       reencode: defaults.reencode,
       captions: defaults.captions,
-      filename: prev.filename && stripExt(prev.filename) && prev.filename !== "clip"
-        ? prev.filename
-        : "clip",
     }));
     if (warm?.metadata) {
       appendLog("ok", "cache", `Details for ${hostnameOf(full)} loaded from cache`);
@@ -1782,9 +1802,7 @@ export default function App() {
       setExportOpts((prev) => ({
         ...prev,
         captions: defaults.captions && wm.has_subs,
-        filename: filenameEditedRef.current && prev.filename
-          ? prev.filename
-          : suggestFilename(wm.title),
+        filename: seedFilename(prev.filename, wm.title),
       }));
     }
     setMetadataLoading(true);
@@ -1892,11 +1910,9 @@ export default function App() {
       setExportOpts((prev) => ({
         ...prev,
         captions: defaults.captions && m.has_subs,
-        // Keep the name only if the USER typed it (dirty flag) — a seed from
-        // the previous source must not survive onto this one.
-        filename: filenameEditedRef.current && prev.filename
-          ? prev.filename
-          : suggestFilename(m.title),
+        // Keep the name only if the USER typed it FOR THIS SOURCE — any
+        // other source's name (typed or seeded) must not survive onto it.
+        filename: seedFilename(prev.filename, m.title),
       }));
       // yt-dlp's authoritative duration may differ slightly from what the
       // IFrame reported (subtle rounding, or the IFrame hadn't measured yet).
@@ -2307,7 +2323,7 @@ export default function App() {
       // Loading a local source belongs in the Clip view — surface it so a
       // drop / File-menu import / recent open from the Library is visible.
       setActiveView("clip");
-      resetForNewSource();
+      resetForNewSource(picked);
       const seq = ++sourceSeqRef.current;
       setStatus("fetching");
       appendLog("info", "local", `Opening local file: ${picked}`);
@@ -2394,10 +2410,7 @@ export default function App() {
         // is overwhelmingly the more likely target. They can click MP3
         // back on if they actually want audio-only.
         format: prev.format === "audio" ? "1080" : prev.format,
-        filename:
-          filenameEditedRef.current && prev.filename
-            ? prev.filename
-            : suggestFilename(lf.filename.replace(/\.[^.]+$/, "")),
+        filename: seedFilename(prev.filename, lf.filename.replace(/\.[^.]+$/, "")),
       }));
       appendLog(
         "ok",
@@ -3435,7 +3448,7 @@ export default function App() {
   }, []);
 
   const handleClear = useCallback(() => {
-    resetForNewSource();
+    resetForNewSource("");
     setStatus("empty");
     setExportOpts((prev) => ({
       ...prev,
@@ -4709,6 +4722,7 @@ export default function App() {
                        (download fallback) wins over the live stream; both are null
                        until the machine produces one. */
                     webStreamUrl={webPlayback.cachePath ?? webPlayback.streamUrl}
+                    streamStartAt={webPlayback.streamStartAt}
                     onDiag={(tag, msg) => appendLog(asLogTag(tag), "seek", msg)}
                     /* Audio track + codecs are meaningful only while STREAMING (the
                        cached file is already muxed and sample-accurate). */

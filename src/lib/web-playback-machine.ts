@@ -49,10 +49,10 @@ export type WebPlaybackState =
   | { kind: "inactive" }
   /** `fresh: true` = the retry after a cached stream URL failed — the
    *  resolver must bypass the warm cache and ask yt-dlp for new URLs. */
-  | { kind: "resolving"; seq: number; url: string; fresh: boolean }
+  | { kind: "resolving"; seq: number; url: string; fresh: boolean; resumeAtSeconds: number }
   /** `fromCache: true` = playing cached signed URLs (warm boot). Its failure
    *  edge is a fresh resolve, not the download fallback. */
-  | { kind: "streaming"; seq: number; url: string; stream: StreamInfo; ready: boolean; fromCache: boolean }
+  | { kind: "streaming"; seq: number; url: string; stream: StreamInfo; ready: boolean; fromCache: boolean; resumeAtSeconds: number }
   /** resumeAtSeconds: the playhead at the moment the stream died — the
    *  cached player boots there instead of 0 (RC4: a swap must never lose
    *  the position). REQUIRED so every future fallback transition has to
@@ -75,6 +75,9 @@ export type WebPlaybackAction =
   | { t: "DOWNLOAD_PROGRESS"; seq: number; progress: number }
   | { t: "DOWNLOAD_DONE"; seq: number; cachePath: string }
   | { t: "DOWNLOAD_FAILED"; seq: number; message: string }
+  /** App consumed the RC4 resume seek (review fix): zero it so a later
+   *  player remount cannot re-apply a stale death position. */
+  | { t: "RESUME_CONSUMED"; seq: number }
   | { t: "RESET" };
 
 export const INITIAL_WEB_PLAYBACK: WebPlaybackState = { kind: "inactive" };
@@ -97,7 +100,7 @@ export function webPlaybackReducer(
   if (action.t === "LOAD") {
     return action.mode === "download-first"
       ? startDownload(action.seq, action.url, 0)
-      : { kind: "resolving", seq: action.seq, url: action.url, fresh: false };
+      : { kind: "resolving", seq: action.seq, url: action.url, fresh: false, resumeAtSeconds: 0 };
   }
   if (action.t === "LOAD_CACHED") {
     // Warm boot from a complete copy: position 0 is correct at load time.
@@ -119,12 +122,17 @@ export function webPlaybackReducer(
           stream: action.stream,
           ready: false,
           fromCache: action.fromCache,
+          // Review fix: a fresh retry after a cached-stream death resumes
+          // where that stream died, not at 0.
+          resumeAtSeconds: state.resumeAtSeconds,
         };
-      if (action.t === "RESOLVE_FAILED") return startDownload(state.seq, state.url, 0);
+      if (action.t === "RESOLVE_FAILED") return startDownload(state.seq, state.url, state.resumeAtSeconds);
       return state;
 
     case "streaming":
-      if (action.t === "PLAYER_READY") return state.ready ? state : { ...state, ready: true };
+      // PLAYER_READY also consumes the resume: the pipeline used it at
+      // mount, so a remount of the same state must start clean.
+      if (action.t === "PLAYER_READY") return state.ready ? state : { ...state, ready: true, resumeAtSeconds: 0 };
       if (action.t === "MEDIA_ERROR" || action.t === "WATCHDOG") {
         // A CACHED signed URL died (expired/rotated) — that says nothing
         // about the source itself, so spend one fresh resolve before the
@@ -133,8 +141,14 @@ export function webPlaybackReducer(
         // happens on the retry edge: the fresh URL lands in the SAME
         // streaming state / MSE path.
         return state.fromCache
-          ? { kind: "resolving", seq: state.seq, url: state.url, fresh: true }
+          ? { kind: "resolving", seq: state.seq, url: state.url, fresh: true, resumeAtSeconds: action.atSeconds }
           : startDownload(state.seq, state.url, action.atSeconds);
+      }
+      return state;
+
+    case "cached":
+      if (action.t === "RESUME_CONSUMED") {
+        return state.resumeAtSeconds === 0 ? state : { ...state, resumeAtSeconds: 0 };
       }
       return state;
 

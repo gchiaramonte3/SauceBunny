@@ -65,6 +65,8 @@ export type WebPlayback = {
   cachePath: string | null;
   /** Playhead the stream died at (RC4) — the cached player resumes here. */
   cachedResumeAt: number;
+  /** Where a freshly-retried stream should START (0 for a first play). */
+  streamStartAt: number;
   downloading: boolean;
   downloadProgress: number;
   downloadJobId: string | null;
@@ -77,6 +79,8 @@ export type WebPlayback = {
    *  and play the file (LocalMediaPlayer) immediately. */
   loadCached: (url: string, cachePath: string, seq: number) => void;
   onPlayerReady: () => void;
+  /** One-shot the RC4 resume after the ready-seek applied it. */
+  consumeResume: () => void;
   /** Returns true if the error was handled (→ download fallback); false if the
    *  caller should fall through to its generic error handling. */
   onMediaError: (message: string) => boolean;
@@ -356,6 +360,13 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     dispatch({ t: "RESET" });
   }, [cancelActiveJob]);
 
+  // Review fix: one-shot the RC4 resume — App calls this right after the
+  // ready-seek so a later player remount can't re-apply a stale position.
+  const consumeResume = useCallback(() => {
+    const s = stateRef.current;
+    if (s.kind === "cached") dispatch({ t: "RESUME_CONSUMED", seq: s.seq });
+  }, []);
+
   return {
     state,
     streamUrl: state.kind === "streaming" ? state.stream.url : null,
@@ -364,12 +375,15 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     audioCodec: state.kind === "streaming" ? state.stream.audioCodec : null,
     cachePath: state.kind === "cached" ? state.cachePath : null,
     cachedResumeAt: state.kind === "cached" ? state.resumeAtSeconds : 0,
+    /** Where a freshly-retried stream should START (0 for a first play). */
+    streamStartAt: state.kind === "streaming" ? state.resumeAtSeconds : 0,
     downloading: state.kind === "downloading",
     downloadProgress: state.kind === "downloading" ? state.progress : 0,
     downloadJobId: state.kind === "downloading" ? state.jobId : null,
     loadWeb,
     loadCached,
     onPlayerReady,
+    consumeResume,
     onMediaError,
     reset,
     stop,

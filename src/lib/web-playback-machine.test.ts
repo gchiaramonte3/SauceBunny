@@ -23,7 +23,7 @@ function run(actions: WebPlaybackAction[], from: WebPlaybackState = INITIAL_WEB_
 describe("web-playback machine: core lifecycle", () => {
   it("LOAD stream-first enters resolving (not a fresh retry)", () => {
     const s = run([{ t: "LOAD", seq: 1, url: URL, mode: "stream-first" }]);
-    expect(s).toEqual({ kind: "resolving", seq: 1, url: URL, fresh: false });
+    expect(s).toEqual({ kind: "resolving", seq: 1, url: URL, fresh: false, resumeAtSeconds: 0 });
   });
 
   it("LOAD download-first enters downloading directly", () => {
@@ -86,8 +86,9 @@ describe("web-playback machine: warm boot (r112)", () => {
       { t: "RESOLVED", seq: 1, stream: stream("warm"), fromCache: true },
       { t: "MEDIA_ERROR", seq: 1, atSeconds: 42 },
     ]);
-    // The retry must go back through resolving with the cache bypassed.
-    expect(s).toEqual({ kind: "resolving", seq: 1, url: URL, fresh: true });
+    // The retry must go back through resolving with the cache bypassed,
+    // CARRYING the death position (review fix).
+    expect(s).toEqual({ kind: "resolving", seq: 1, url: URL, fresh: true, resumeAtSeconds: 42 });
   });
 
   it("the watchdog on a cached stream also retries with a fresh resolve", () => {
@@ -96,7 +97,7 @@ describe("web-playback machine: warm boot (r112)", () => {
       { t: "RESOLVED", seq: 1, stream: stream("warm"), fromCache: true },
       { t: "WATCHDOG", seq: 1, atSeconds: 42 },
     ]);
-    expect(s).toEqual({ kind: "resolving", seq: 1, url: URL, fresh: true });
+    expect(s).toEqual({ kind: "resolving", seq: 1, url: URL, fresh: true, resumeAtSeconds: 42 });
   });
 
   it("full chain: cached stream fails, fresh stream fails, THEN download (retry cannot loop)", () => {
@@ -161,5 +162,57 @@ describe("RC4 position handoff (resumeAtSeconds)", () => {
     const s = webPlaybackReducer(INITIAL_WEB_PLAYBACK, { t: "LOAD_CACHED", seq: 2, url: "u", cachePath: "/tmp/y.mp4" });
     expect(s.kind).toBe("cached");
     if (s.kind === "cached") expect(s.resumeAtSeconds).toBe(0);
+  });
+});
+
+describe("web-playback machine: resume-position handoff (review fix)", () => {
+  const toCachedStream: WebPlaybackAction[] = [
+    { t: "LOAD", seq: 1, url: URL, mode: "stream-first" },
+    { t: "RESOLVED", seq: 1, stream: stream("warm"), fromCache: true },
+  ];
+
+  it("cached-stream death carries the position into the fresh retry", () => {
+    const s = run([...toCachedStream, { t: "MEDIA_ERROR", seq: 1, atSeconds: 1200 }]);
+    expect(s).toEqual({ kind: "resolving", seq: 1, url: URL, fresh: true, resumeAtSeconds: 1200 });
+  });
+
+  it("a successful fresh retry starts the new stream at the death position", () => {
+    const s = run([
+      ...toCachedStream,
+      { t: "WATCHDOG", seq: 1, atSeconds: 987 },
+      { t: "RESOLVED", seq: 1, stream: stream("fresh"), fromCache: false },
+    ]);
+    expect(s.kind).toBe("streaming");
+    if (s.kind === "streaming") expect(s.resumeAtSeconds).toBe(987);
+  });
+
+  it("a failed fresh retry hands the position to the download fallback", () => {
+    const s = run([
+      ...toCachedStream,
+      { t: "MEDIA_ERROR", seq: 1, atSeconds: 1200 },
+      { t: "RESOLVE_FAILED", seq: 1 },
+      { t: "DOWNLOAD_DONE", seq: 1, cachePath: "/cache/a.mp4" },
+    ]);
+    expect(s).toEqual({ kind: "cached", seq: 1, url: URL, cachePath: "/cache/a.mp4", resumeAtSeconds: 1200 });
+  });
+
+  it("PLAYER_READY consumes the streaming resume so a remount starts clean", () => {
+    const s = run([
+      ...toCachedStream,
+      { t: "MEDIA_ERROR", seq: 1, atSeconds: 1200 },
+      { t: "RESOLVED", seq: 1, stream: stream("fresh"), fromCache: false },
+      { t: "PLAYER_READY", seq: 1 },
+    ]);
+    if (s.kind === "streaming") expect(s.resumeAtSeconds).toBe(0);
+    expect(s.kind).toBe("streaming");
+  });
+
+  it("RESUME_CONSUMED zeroes the cached resume (remounts cannot re-teleport)", () => {
+    const s = run([
+      { t: "LOAD", seq: 1, url: URL, mode: "download-first" },
+      { t: "DOWNLOAD_DONE", seq: 1, cachePath: "/cache/a.mp4" },
+      { t: "RESUME_CONSUMED", seq: 1 },
+    ]);
+    expect(s).toEqual({ kind: "cached", seq: 1, url: URL, cachePath: "/cache/a.mp4", resumeAtSeconds: 0 });
   });
 });
