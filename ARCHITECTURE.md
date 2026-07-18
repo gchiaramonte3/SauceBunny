@@ -243,3 +243,45 @@ Remaining, roughly in priority order:
 1. **UI smoke harness** — unit tests cover the parsers/math; playback and the transcript pipeline are still verified manually. A Playwright (or tauri-driver) smoke run would close that gap.
 2. **First public release** — tagged v0.1.0 with a notarized .dmg (see DISTRIBUTION.md), plus an app-update story (tauri-plugin-updater) and a plan for yt-dlp staleness (YouTube breaks extractors faster than app releases ship).
 3. **Linux / Windows builds** — macOS-first while we hit 1.0; cross-platform after.
+
+## Media stream cache + timeline contract (r112–r114)
+
+**Warm boot / stream cache.** Web-source state persists across sessions so a
+repeat open skips yt-dlp entirely when possible:
+- `media/meta/<urlhash>.json` in the app cache — source metadata + the last
+  resolved signed stream URLs (with their expiry), read by `get_warm_start`
+  (async command) BEFORE the optimistic mount.
+- `saucebunny-media/downloads/` — completed download-fallback copies, exempt
+  from the 24h cache sweep. A complete copy short-circuits to
+  `LOAD_CACHED` → LocalMediaPlayer; still-valid signed URLs short-circuit
+  the resolve (`RESOLVED fromCache: true`) into the same proxy/MSE path.
+- Signed URLs rot: a cached stream's failure edge spends ONE fresh yt-dlp
+  resolve before the download fallback, and every fallback edge carries
+  `resumeAtSeconds` so the position survives the swap (see
+  `src/lib/web-playback-machine.ts` — the state types make the handoff
+  mandatory).
+
+**Timeline contract (proxy ↔ player).** The `/fmp4` route answers with:
+- `X-Timeline: absolute | rebased` — whether stream timestamps are true
+  source time. ffmpeg's fragmented-MP4 muxer re-zeros every track to its
+  first dts, so "absolute" is achieved by recovering the erased origin:
+- `X-Stream-Epoch: <seconds>` — the first video dts at the `-ss` landing
+  keyframe, probed by a bounded (4s wall-clock, memoized) ffprobe pass.
+  The player re-adds it via `SourceBuffer.timestampOffset`, making
+  buffered ranges genuinely absolute; the landing seek then places
+  `currentTime` exactly on the requested second.
+- The player commits its (mode, baseTime, duration) tuple atomically per
+  pipeline from that pipeline's OWN response header — never from a
+  previous pipeline's mode (a failed probe legitimately flips a rebuild
+  to `rebased`, which asserts baseTime = seek target instead).
+
+## Tone-card design grammar (shell v3)
+
+Panels (sidebar, queue drawer, library tree/detail, prail) are uniform
+tone cards: `--bg-1` surfaces on the `--bg-0` canvas, `--r-lg` radius,
+8px gutters with 4px half-gaps, and NO borders — tonal contrast does the
+separation. The flat tier (nav rail, Home, Library hero/grid) and the
+open center (monitor + timeline) stay borderless and flush. Focus never
+uses the green accent: `--focus-ring` (white) brightens the control's
+outline; composed fields brighten the wrapper and suppress the inner
+ring (guarded by `src/lib/focus-contract.test.ts`).

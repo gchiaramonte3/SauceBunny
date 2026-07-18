@@ -201,7 +201,7 @@ Do not change these paths without updating both the Rust backend and the fronten
 
 ## Build-ID handshake
 
-The frontend defines `EXPECTED_BACKEND_BUILD_ID` in `src/lib/build-id.ts`. The Rust backend exposes `BACKEND_BUILD_ID` in `src-tauri/src/commands.rs` via the `get_backend_build_id` command. On app startup, the frontend checks that they match. If they don't, the user sees a warning that the Rust binary is stale.
+The frontend defines `EXPECTED_BACKEND_BUILD_ID` in `src/lib/build-id.ts`. The Rust backend exposes `BACKEND_BUILD_ID` in `src-tauri/src/commands/system.rs` via the `get_backend_build_id` command. On app startup, the frontend checks that they match. If they don't, the user sees a warning that the Rust binary is stale.
 
 When modifying Rust commands or changing the invoke API surface, bump the build ID in both places.
 

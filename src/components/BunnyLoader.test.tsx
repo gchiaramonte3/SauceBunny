@@ -9,10 +9,12 @@ describe("BunnyLoader", () => {
     const html = renderToStaticMarkup(<BunnyLoader />);
     expect(html.match(/pathLength="1"/g)?.length).toBe(16);
     expect(html).toContain("linearGradient");
-    expect(html).toContain("bl-grad");
-    // The two brand stops mirrored from tokens.css.
-    expect(html).toContain("#8627FF");
-    expect(html).toContain("#6CFF8D");
+    expect(html).toContain("cp-bl-grad");
+    // Brand colors come from tokens via the classed stops (loader.css) —
+    // NO mirrored hex literals in the markup (conventions fix).
+    expect(html).toContain("cp-bl-stop-a");
+    expect(html).toContain("cp-bl-stop-b");
+    expect(html).not.toContain("#8627FF");
   });
 
   it("carries the a11y contract and the sublabel", () => {

@@ -690,15 +690,15 @@ export default function App() {
   // below). Programmatic opens/closes — transcript auto-open, Clear-all,
   // the panel pop-out bridge — use setQueueOpen and never write the pref,
   // so session mechanics can't overwrite the user's choice.
-  const [queueOpen, setQueueOpen] = useState<boolean>(() => {
-    try { return localStorage.getItem("saucebunny.queueOpen") !== "0"; } catch { return true; }
-  });
+  // loadJson/saveJson like every sibling pref (review fix: this was the
+  // one pref hand-rolling "1"/"0" strings, invisible to storage audits).
+  const [queueOpen, setQueueOpen] = useState<boolean>(() => loadJson("saucebunny.queueOpen", true));
   /** User-initiated drawer visibility (toolbar toggle, ⌘⇧Q, palette, menu,
    *  the drawer's close button) — applies AND persists the choice. */
   const setQueueOpenChoice = useCallback((next: boolean | ((p: boolean) => boolean)) => {
     setQueueOpen((p) => {
       const v = typeof next === "function" ? next(p) : next;
-      try { localStorage.setItem("saucebunny.queueOpen", v ? "1" : "0"); } catch { /* quota */ }
+      saveJson("saucebunny.queueOpen", v);
       return v;
     });
   }, []);
@@ -1211,7 +1211,7 @@ export default function App() {
   // starts, so the Recent entry is attributed to the source that was exported
   // even if the user switches sources before clip-done fires (the listener
   // guards only on job_id, which we must keep live to resolve the queue).
-  const clipJobMetaRef = useRef<{ title: string; thumbnail: RecentClip["thumbnail"] } | null>(null);
+  const clipJobMetaRef = useRef<{ title: string; thumbnail: RecentClip["thumbnail"]; source?: string } | null>(null);
   const diarizerPrepareJobIdRef = useRef<string | null>(null);
   diarizerPrepareJobIdRef.current = diarizerPrepareJobId;
   // Ref for transcript-history bookkeeping — captions/whisper listeners
@@ -1285,6 +1285,7 @@ export default function App() {
               dur,
               when: Date.now(),
               thumbnail: m.thumbnail,
+              source: m.source,
             };
             setRecents((prev) => pushRecentClip(prev, r));
           }
@@ -2011,7 +2012,7 @@ export default function App() {
     /** 0..100 */
     onProgress: (pct: number) => void;
   }): Promise<
-    | { kind: "ok"; bytesWritten: number }
+    | { kind: "ok"; bytesWritten: number; finalPath: string }
     | { kind: "cancelled" }
     | { kind: "unsupported"; reason: string }
     | { kind: "error"; message: string }
@@ -2029,14 +2030,16 @@ export default function App() {
       if (result.kind !== "ok") return result;
       // Persist via the small bytes-writer command we already have.
       // For >50MB clips this is a one-shot invoke; large but works.
-      // ifNotExists: destPath is derived (not saveDialog-vetted) — refuse
-      // to clobber an existing file, matching create_clip's behavior.
-      await invoke("write_bytes_to_path", {
+      // unique: destPath is derived (not saveDialog-vetted) — a collision
+      // walks -2, -3 on disk exactly like create_clip, and NEVER fails
+      // (review fix: this path used to hard-error on collision while the
+      // web path uniquified, with the UI promising uniquing for both).
+      const finalPath = await invoke<string>("write_bytes_to_path", {
         path: args.destPath,
         bytes: Array.from(result.bytes),
-        ifNotExists: true,
+        unique: true,
       });
-      return { kind: "ok", bytesWritten: result.bytes.byteLength };
+      return { kind: "ok", bytesWritten: result.bytes.byteLength, finalPath };
     } catch (err) {
       // formatError handles Error / AppError / string — `err instanceof Error`
       // alone misses the r51 discriminated-union shape.
@@ -2121,12 +2124,14 @@ export default function App() {
 
       setStatus("loaded");
       setExportPhase("success"); // local clip written → check flash
-      setResultPath(destPath);
+      // finalPath is what unique-mode actually wrote (name-2.mp4 on a
+      // collision) — every surface below must show THAT name.
+      setResultPath(result.finalPath);
       setProgress(0);
-      const filename = destPath.split("/").pop() ?? "Done.";
+      const filename = result.finalPath.split("/").pop() ?? "Done.";
       appendLog("ok", "mediabunny",
-        `Wrote ${(result.bytesWritten / 1_000_000).toFixed(1)} MB → ${destPath}`);
-      pushNotification("success", "Clip exported", filename, destPath);
+        `Wrote ${(result.bytesWritten / 1_000_000).toFixed(1)} MB → ${result.finalPath}`);
+      pushNotification("success", "Clip exported", filename, result.finalPath);
       notify("Clip exported", filename);
 
       // Add to recents.
@@ -2138,10 +2143,11 @@ export default function App() {
         const rc: RecentClip = {
           id: Math.random().toString(36).slice(2),
           title: m.title,
-          path: destPath,
+          path: result.finalPath,
           dur,
           when: Date.now(),
           thumbnail: m.thumbnail,
+          source: localFilePath ?? undefined,
         };
         setRecents((prev) => pushRecentClip(prev, rc));
       }
@@ -2168,7 +2174,11 @@ export default function App() {
       // Attribute the Recent entry to THIS source now (see clipJobMetaRef) so a
       // source switch before clip-done can't stamp the new source's title on it.
       clipJobMetaRef.current = metadataRef.current
-        ? { title: metadataRef.current.title, thumbnail: metadataRef.current.thumbnail }
+        ? {
+            title: metadataRef.current.title,
+            thumbnail: metadataRef.current.thumbnail,
+            source: metadataRef.current.webpage_url ?? undefined,
+          }
         : null;
       // Marks may be null (full-clip export) — pass null through, the
       // backend skips --download-sections so yt-dlp just grabs the whole stream.
@@ -2732,6 +2742,7 @@ export default function App() {
           dur: secondsToTc((item.outFrames - item.inFrames) / itemR, item.fps),
           when: Date.now(),
           thumbnail: item.thumbnail,
+          source: item.source.kind === "file" ? item.source.path : item.source.url,
         };
         setRecents((prev) => pushRecentClip(prev, rc));
       };
@@ -2754,9 +2765,9 @@ export default function App() {
           break;
         }
         if (result.kind === "ok") {
-          setClipQueue((prev) => prev.map((c) => c.id === item.id ? { ...c, status: "done", path: destPath, error: undefined } : c));
-          appendLog("ok", "mediabunny", `Wrote ${(result.bytesWritten / 1_000_000).toFixed(1)} MB → ${destPath}`);
-          pushQueueRecent(destPath);
+          setClipQueue((prev) => prev.map((c) => c.id === item.id ? { ...c, status: "done", path: result.finalPath, error: undefined } : c));
+          appendLog("ok", "mediabunny", `Wrote ${(result.bytesWritten / 1_000_000).toFixed(1)} MB → ${result.finalPath}`);
+          pushQueueRecent(result.finalPath);
           okCount++;
         } else {
           // "unsupported" and "error" both land here — there is no ffmpeg

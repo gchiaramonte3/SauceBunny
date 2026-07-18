@@ -588,6 +588,11 @@
 /* Recent-clip groups: newest export leads; the chevron reveals the older
    exports from the same source, nested and quiet. */
 .cp-recent-group { display: flex; flex-direction: column; }
+.cp-recent-reveal {
+  width: 22px;
+  height: 22px;
+  border: none;
+}
 .cp-recent-chev {
   width: 22px;
   height: 22px;

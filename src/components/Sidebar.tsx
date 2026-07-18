@@ -201,17 +201,41 @@ export function Sidebar(props: Props) {
 
   const inValid  = exportOpts.inTc  === "" || isValidTc(exportOpts.inTc,  fps);
   const outValid = exportOpts.outTc === "" || isValidTc(exportOpts.outTc, fps);
-  // Recent exports grouped by source title: newest of each group leads,
-  // groups ordered by their newest member (the list is already newest-first).
+  // Shared row internals for lead + nested recent rows (one place to
+  // change the meta line or the reveal action — review fix: they were
+  // copy-pasted, and the reveal button carried inline styles).
+  const recentMeta = (r: RecentClip) => (
+    <div className="meta">
+      <span className="tc">{r.dur}</span>
+      <span className="sep" />
+      <span>{formatRelative(r.when)}</span>
+    </div>
+  );
+  const recentReveal = (path: string) => (
+    <button
+      className="btn-icon cp-recent-reveal"
+      title="Reveal in Finder"
+      aria-label="Reveal in Finder"
+      onClick={(e) => { e.stopPropagation(); invoke("reveal_in_finder", { path }).catch(() => {}); }}
+    >
+      <IconReveal size={12} />
+    </button>
+  );
+
+  // Recent exports grouped by SOURCE IDENTITY (webpage URL / local path),
+  // newest of each group leading, groups ordered by their newest member.
+  // Titles are display-only: two different sources with the same title must
+  // NOT merge (review fix); legacy entries without `source` fall back to it.
+  const groupKey = (r: RecentClip) => r.source ?? r.title;
   const groupedRecents = useMemo(() => {
-    const byTitle = new Map<string, { lead: RecentClip; rest: RecentClip[] }>();
+    const bySource = new Map<string, { lead: RecentClip; rest: RecentClip[] }>();
     const groups: { lead: RecentClip; rest: RecentClip[] }[] = [];
     for (const r of recents) {
-      const g = byTitle.get(r.title);
+      const g = bySource.get(groupKey(r));
       if (g) g.rest.push(r);
       else {
         const fresh = { lead: r, rest: [] as RecentClip[] };
-        byTitle.set(r.title, fresh);
+        bySource.set(groupKey(r), fresh);
         groups.push(fresh);
       }
     }
@@ -762,51 +786,25 @@ export function Sidebar(props: Props) {
                   </div>
                   <div className="body">
                     <div className="title" title={decodeHtmlEntities(g.lead.title)}>{decodeHtmlEntities(g.lead.title)}</div>
-                    <div className="meta">
-                      <span className="tc">{g.lead.dur}</span>
-                      <span className="sep" />
-                      <span>{formatRelative(g.lead.when)}</span>
-                    </div>
+                    {recentMeta(g.lead)}
                   </div>
                   {g.rest.length > 0 && (
                     <button
-                      className={"btn-icon cp-recent-chev" + (openGroups.has(g.lead.title) ? " open" : "")}
-                      title={openGroups.has(g.lead.title) ? "Hide older exports" : `${g.rest.length} more from this source`}
-                      aria-label={openGroups.has(g.lead.title) ? "Hide older exports" : `Show ${g.rest.length} older exports`}
-                      aria-expanded={openGroups.has(g.lead.title)}
-                      onClick={(e) => { e.stopPropagation(); toggleGroup(g.lead.title); }}
+                      className={"btn-icon cp-recent-chev" + (openGroups.has(groupKey(g.lead)) ? " open" : "")}
+                      title={openGroups.has(groupKey(g.lead)) ? "Hide older exports" : `${g.rest.length} more from this source`}
+                      aria-label={openGroups.has(groupKey(g.lead)) ? "Hide older exports" : `Show ${g.rest.length} older exports`}
+                      aria-expanded={openGroups.has(groupKey(g.lead))}
+                      onClick={(e) => { e.stopPropagation(); toggleGroup(groupKey(g.lead)); }}
                     >
                       <IconChevronRight size={12} />
                     </button>
                   )}
-                  <button
-                    className="btn-icon"
-                    style={{ width: 22, height: 22, border: "none" }}
-                    title="Reveal in Finder"
-                    aria-label="Reveal in Finder"
-                    onClick={(e) => { e.stopPropagation(); invoke("reveal_in_finder", { path: g.lead.path }).catch(() => {}); }}
-                  >
-                    <IconReveal size={12} />
-                  </button>
+                  {recentReveal(g.lead.path)}
                 </div>
-                {openGroups.has(g.lead.title) && g.rest.map((r) => (
+                {openGroups.has(groupKey(g.lead)) && g.rest.map((r) => (
                   <div className="cp-recent nested" key={r.id} onClick={() => onPickRecent(r)} title={r.path}>
-                    <div className="body">
-                      <div className="meta">
-                        <span className="tc">{r.dur}</span>
-                        <span className="sep" />
-                        <span>{formatRelative(r.when)}</span>
-                      </div>
-                    </div>
-                    <button
-                      className="btn-icon"
-                      style={{ width: 22, height: 22, border: "none" }}
-                      title="Reveal in Finder"
-                      aria-label="Reveal in Finder"
-                      onClick={(e) => { e.stopPropagation(); invoke("reveal_in_finder", { path: r.path }).catch(() => {}); }}
-                    >
-                      <IconReveal size={12} />
-                    </button>
+                    <div className="body">{recentMeta(r)}</div>
+                    {recentReveal(r.path)}
                   </div>
                 ))}
               </div>

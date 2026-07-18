@@ -48,15 +48,16 @@ export function BunnyLoader({ size = 96, label = "Loading", sublabel }: Props) {
     >
       <svg viewBox="212 63 831 1046" aria-hidden="true">
         <defs>
-          {/* SVG gradients cannot read CSS variables. These two hex values
-              mirror tokens.css --novella-purple (#8627FF) and --ella-green
-              (#6CFF8D) — tokens.css carries the reverse note. */}
-          <linearGradient id="bl-grad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="#8627FF" />
-            <stop offset="1" stopColor="#6CFF8D" />
+          {/* stop-color IS a CSS presentation property, so the actual colors
+              live in loader.css as var(--novella-purple)/var(--ella-green) —
+              no mirrored hex literals (the old "SVG gradients cannot read
+              CSS variables" justification was wrong). */}
+          <linearGradient id="cp-bl-grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" className="cp-bl-stop-a" />
+            <stop offset="1" className="cp-bl-stop-b" />
           </linearGradient>
           {/* SVG blur (not CSS filter) so the glow clips with the svg box. */}
-          <filter id="bl-blur" x="-40%" y="-40%" width="180%" height="180%">
+          <filter id="cp-bl-blur" x="-40%" y="-40%" width="180%" height="180%">
             <feGaussianBlur stdDeviation="14" />
           </filter>
         </defs>
@@ -64,25 +65,25 @@ export function BunnyLoader({ size = 96, label = "Loading", sublabel }: Props) {
             times — the animated segments are a highlight sweeping over it,
             not the only thing on screen (three disconnected arcs never read
             as the bunny). */}
-        <g className="bl-base">
+        <g className="cp-bl-base">
           {PATHS.map((d, i) => (
             <path key={i} d={d} pathLength={1} />
           ))}
         </g>
         {/* Feathered glow underlayer: same dash cycle, fat blurred stroke. */}
-        <g className="bl-glow" filter="url(#bl-blur)">
+        <g className="cp-bl-glow" filter="url(#cp-bl-blur)">
           {PATHS.map((d, i) => (
             <path key={i} d={d} pathLength={1} />
           ))}
         </g>
         {/* Comet tail: a shorter, fainter segment trailing the main one. */}
-        <g className="bl-tail">
+        <g className="cp-bl-tail">
           {PATHS.map((d, i) => (
             <path key={i} d={d} pathLength={1} />
           ))}
         </g>
         {/* Main chasing segment. */}
-        <g className="bl-main">
+        <g className="cp-bl-main">
           {PATHS.map((d, i) => (
             <path key={i} d={d} pathLength={1} />
           ))}

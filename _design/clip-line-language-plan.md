@@ -1,3 +1,11 @@
+> **STATUS (2026-07-18): SUPERSEDED.** The "lines win" decision below was
+> reversed the same week: the user chose the TONE-CARD grammar instead
+> (uniform bg-1 cards, r-lg radius, 4px half-gap gutters, no borders —
+> tone does the separation; modeled on Claude Code's desktop UI). See
+> `_design/prompts-ui-polish-v3.md` and the shipped shell/sidebar/library
+> CSS. This document stays as the record of the road not taken; sections
+> 2+ (Clip panel defaults, gray-placeholder thumbs) DID ship.
+
 # Plan: one design language (lines), Clip panel defaults, YouTube gray-placeholder thumbs
 2026-07-17 · follows d8f2411
 

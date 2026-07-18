@@ -22,6 +22,19 @@ fatal() { printf "  \033[31m✗\033[0m %s\n" "$1"; fail=$((fail + 1)); }
 echo "── Sidecar discipline ──────────────────────────────────────────"
 echo "  (every binary must be self-contained — no Homebrew / user-dir dylib refs)"
 echo
+# Required set FIRST (review fix): the dylib loop below only audits binaries
+# that exist, so a missing sidecar sailed through silently. ffprobe going
+# missing would quietly degrade every seek to keyframe precision (the RC7
+# epoch probe falls back to the rebased timeline with no hard failure).
+REQUIRED_SIDECARS="yt-dlp ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate llama-server"
+for req in $REQUIRED_SIDECARS; do
+  if [ -f "${ROOT_DIR}/src-tauri/binaries/${req}-aarch64-apple-darwin" ]; then
+    pass "${req} present"
+  else
+    fatal "${req} MISSING from src-tauri/binaries/ (npm run setup / the matching build script)"
+  fi
+done
+echo
 for bin in "${ROOT_DIR}"/src-tauri/binaries/*-aarch64-apple-darwin; do
   [ -f "$bin" ] || continue
   name=$(basename "$bin" -aarch64-apple-darwin)

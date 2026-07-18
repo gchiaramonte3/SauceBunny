@@ -1645,8 +1645,11 @@ pub(crate) fn stream_expires_at(video_url: &str, audio_url: Option<&str>, resolv
 /// BEFORE any yt-dlp work: returns whatever warm state exists for this
 /// source so the UI can hydrate instantly and playback can skip extraction.
 /// Pure local-disk reads — never touches the network.
+// async (review fix): this command does disk I/O (meta JSON read +
+// downloads-dir scan) on the fetch hot path, BEFORE the optimistic mount.
+// A plain fn would run it on the MAIN thread; async runs it on the pool.
 #[tauri::command]
-pub fn get_warm_start(
+pub async fn get_warm_start(
     app: AppHandle,
     url: String,
     max_height: Option<u32>,

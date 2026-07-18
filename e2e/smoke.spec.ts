@@ -507,21 +507,26 @@ test("new-source reset: filename reseeds per source, user-typed name survives", 
 test("recent exports: grouped per source, chevron reveals older exports", async ({ page }) => {
   await page.addInitScript(() => {
     // App.tsx RECENTS_KEY — storage stays flat, newest-first; the per-source
-    // grouping under test is purely render-time (Sidebar groupedRecents).
-    const mk = (id: string, title: string, when: number) => ({
-      id, title, path: `/e2e/out/${id}.mp4`, dur: "0:42", when, thumbnail: null,
+    // grouping under test is purely render-time (Sidebar groupedRecents),
+    // keyed on SOURCE IDENTITY, never the display title (review fix).
+    const mk = (id: string, title: string, when: number, source: string) => ({
+      id, title, path: `/e2e/out/${id}.mp4`, dur: "0:42", when, thumbnail: null, source,
     });
     localStorage.setItem("cp-recents", JSON.stringify([
-      mk("r4", "Source A", 4000),
-      mk("r3", "Source A", 3000),
-      mk("r2", "Source B", 2000),
-      mk("r1", "Source A", 1000),
+      mk("r4", "Source A", 4000, "https://youtube.com/watch?v=aaaa"),
+      mk("r3", "Source A", 3000, "https://youtube.com/watch?v=aaaa"),
+      mk("r2", "Source B", 2000, "https://youtube.com/watch?v=bbbb"),
+      mk("r1", "Source A", 1000, "https://youtube.com/watch?v=aaaa"),
+      // Same TITLE as Source A but a different source: must be its own
+      // group, not swallowed as an "older export" of the first one.
+      mk("r0", "Source A", 500, "/e2e/other/interview.mp4"),
     ]));
   });
   await boot(page);
-  // Two groups: Source A leads with its newest export plus a chevron for the
-  // two older ones; Source B is a singleton, so it gets no chevron.
-  await expect(page.locator(".cp-recent-group")).toHaveCount(2);
+  // Three groups: the aaaa source leads with a chevron for its two older
+  // exports; Source B and the same-titled local file are singletons (no
+  // chevron) — title collisions must not merge groups.
+  await expect(page.locator(".cp-recent-group")).toHaveCount(3);
   const chev = page.locator(".cp-recent-chev");
   await expect(chev).toHaveCount(1);
   await expect(chev).toHaveAttribute("aria-expanded", "false");

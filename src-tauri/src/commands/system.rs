@@ -399,27 +399,39 @@ fn sweep_stale_files(cache: &std::path::Path, now: std::time::SystemTime) -> u32
 /// Write raw bytes (e.g. a frame Blob marshalled from the frontend) to
 /// `path`. Used by the mediabunny snapshot + local clip-export paths so we
 /// can produce the file entirely in JS land and just persist the buffer here.
-/// Validates the parent dir exists. Callers whose destination did NOT come
-/// from a saveDialog (the clip exporters derive names themselves) pass
-/// `if_not_exists` so a name collision errors instead of silently truncating
-/// an existing file — matching create_clip's refuse-to-overwrite behavior.
+/// Validates the parent dir exists. Returns the path actually written.
+/// Callers whose destination is DERIVED (the clip exporters build names
+/// themselves) pass `unique` — a collision walks -2, -3, … exactly like
+/// create_clip's unique_output_path, and NEVER fails (review fix: the local
+/// export path used to hard-error on collision while the web path silently
+/// uniquified). `if_not_exists` remains for callers that genuinely want a
+/// refuse-to-overwrite error.
 #[tauri::command]
 pub fn write_bytes_to_path(
     path: String,
     bytes: Vec<u8>,
     if_not_exists: Option<bool>,
-) -> Result<(), crate::AppError> {
-    let p = PathBuf::from(&path);
+    unique: Option<bool>,
+) -> Result<String, crate::AppError> {
+    let mut p = PathBuf::from(&path);
     if let Some(parent) = p.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
             return Err(format!("Folder does not exist: {}", parent.display()).into());
         }
     }
-    if if_not_exists.unwrap_or(false) && p.exists() {
+    if unique.unwrap_or(false) {
+        let dir = p.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+        let ext = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("bin")
+            .to_string();
+        p = super::media::unique_output_path(&dir, &p, &ext);
+    } else if if_not_exists.unwrap_or(false) && p.exists() {
         return Err(format!("File already exists: {}", p.display()).into());
     }
     std::fs::write(&p, &bytes).map_err(|e| format!("write failed: {e}"))?;
-    Ok(())
+    Ok(p.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -519,7 +531,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-17-r113-filenames";
+pub const BACKEND_BUILD_ID: &str = "2026-07-18-r114-review-hardening";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

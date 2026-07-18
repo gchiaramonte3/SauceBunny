@@ -1,7 +1,13 @@
+/* Gradient stops for the trace (referenced by the SVG defs' classes) —
+   the brand tokens straight from tokens.css, hex fallbacks only for the
+   pathological no-tokens case. */
+.cp-bl-stop-a { stop-color: var(--novella-purple, #8627FF); }
+.cp-bl-stop-b { stop-color: var(--ella-green, #6CFF8D); }
+
 /* BunnyLoader (BunnyLoader.tsx) — branded stroke-trace loading indicator for
-   screen-level waits. The gradient stops live in the component's SVG defs
-   (SVG gradients cannot read CSS variables); dash math is normalized by
-   pathLength=1 on every path, so one keyframe drives all four contours. */
+   screen-level waits. Colors come from the token stops above; dash math is
+   normalized by pathLength=1 on every path, so one keyframe drives all four
+   contours. */
 .cp-bunny-loader {
   display: flex;
   flex-direction: column;
@@ -15,25 +21,25 @@
 }
 .cp-bunny-loader path {
   fill: none;
-  stroke: url(#bl-grad);
+  stroke: url(#cp-bl-grad);
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 /* Persistent base outline: the full mark, always visible, quiet. Neutral
    dim stroke (rgba: the tokens carry no alpha variants) so the gradient
    segment reads as light moving over it. */
-.cp-bunny-loader .bl-base path {
+.cp-bunny-loader .cp-bl-base path {
   stroke: rgba(255, 255, 255, 0.14);
   stroke-width: 14;
 }
 /* Main chasing segment: ~30% of each outline, one lap per 1.6s. */
-.cp-bunny-loader .bl-main path {
+.cp-bunny-loader .cp-bl-main path {
   stroke-width: 16;
   stroke-dasharray: 0.3 0.7;
   animation: cp-bl-chase 1.6s linear infinite;
 }
 /* Comet tail: shorter + fainter, phase-offset so it trails the segment. */
-.cp-bunny-loader .bl-tail path {
+.cp-bunny-loader .cp-bl-tail path {
   stroke-width: 16;
   opacity: 0.35;
   stroke-dasharray: 0.1 0.9;
@@ -41,7 +47,7 @@
   animation-delay: -0.13s;
 }
 /* Feathered glow underlayer: fat blurred stroke on the same cycle. */
-.cp-bunny-loader .bl-glow path {
+.cp-bunny-loader .cp-bl-glow path {
   stroke-width: 48;
   opacity: 0.25;
   stroke-dasharray: 0.3 0.7;
@@ -67,16 +73,16 @@
 }
 @media (prefers-reduced-motion: reduce) {
   /* Static full outline at low opacity with a gentle pulse; no chase. */
-  .cp-bunny-loader .bl-main path,
-  .cp-bunny-loader .bl-tail path,
-  .cp-bunny-loader .bl-glow path {
+  .cp-bunny-loader .cp-bl-main path,
+  .cp-bunny-loader .cp-bl-tail path,
+  .cp-bunny-loader .cp-bl-glow path {
     animation: none;
     stroke-dasharray: none;
   }
-  .cp-bunny-loader .bl-tail { display: none; }
-  .cp-bunny-loader .bl-glow { display: none; }
-  .cp-bunny-loader .bl-base path { stroke: rgba(255, 255, 255, 0.1); }
-  .cp-bunny-loader .bl-main path { opacity: 0.55; }
+  .cp-bunny-loader .cp-bl-tail { display: none; }
+  .cp-bunny-loader .cp-bl-glow { display: none; }
+  .cp-bunny-loader .cp-bl-base path { stroke: rgba(255, 255, 255, 0.1); }
+  .cp-bunny-loader .cp-bl-main path { opacity: 0.55; }
   .cp-bunny-loader svg { animation: cp-bl-pulse 2s ease-in-out infinite; }
 }
 @keyframes cp-bl-pulse {

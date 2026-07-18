@@ -82,6 +82,10 @@ export type RecentClip = {
   dur: string;
   when: number; // epoch ms
   thumbnail: string | null;
+  /** Source identity (webpage URL or local file path). Grouping in the
+   *  sidebar keys on this — titles are display-only and can collide
+   *  (review fix). Optional: legacy entries fall back to the title. */
+  source?: string;
 };
 
 export type TranscriptState = "idle" | "running" | "done" | "error";

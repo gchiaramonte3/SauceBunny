@@ -268,3 +268,15 @@ member's screen.
 1. `co-review: green room — device pickers, permissions, level meter`
 2. `co-review: live webcam tiles — WebRTC mesh over iroh signaling; persistent rail in screening`
 3. `sessions: aligned local recording, ship-to-host over iroh, archive + history`
+
+## Spike results (pending hardware run)
+
+> Fill in after running MediaSpikePanel (`localStorage
+> saucebunny.devMediaSpike = "1"`) in BOTH environments — `tauri dev` and
+> a built .app (TCC prompts behave differently). Prompts 1-3 stay locked
+> until every line below has a verdict.
+
+- [ ] dev: getUserMedia camera+mic granted, device labels present
+- [ ] dev: device switch works, MediaRecorder mimeType accepted
+- [ ] dev: timeslice concat plays back, AEC ratio sane, RTC loopback OK
+- [ ] built .app: same ladder (camera + mic TCC prompts appear, once each)

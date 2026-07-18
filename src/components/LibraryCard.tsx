@@ -1,3 +1,7 @@
+/** SIZE NOTE (150-line rule): over budget since the hover-frame crossfade
+ *  and poster-fallback layers landed. The layers share refs and timing
+ *  state so a sibling split would thread 6+ props for zero reuse; keeping
+ *  one file was the deliberate call. Revisit if another media layer lands. */
 import { useRef, useState } from "react";
 import { IconFilm, IconMore, IconPlay, IconVolume } from "./Icons";
 import { LibraryCardMenu } from "./LibraryCardMenu";

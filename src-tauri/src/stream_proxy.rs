@@ -319,19 +319,19 @@ fn ffmpeg_path() -> Option<std::path::PathBuf> {
         .clone()
 }
 
-/// Resolve the bundled ffprobe sidecar (same layout rules as ffmpeg_path).
+/// Resolve the bundled ffprobe sidecar via the SHARED resolver — the same
+/// one nightly/download use, which also knows the debug-build layout
+/// (CARGO_MANIFEST_DIR/binaries) and the plain-vs-triple bundle naming.
+/// (Review fix: a local copy of ffmpeg_path's next-to-exe walk silently
+/// returned None in layouts only sidecar_path handles, degrading every
+/// seek to keyframe precision with no error.)
 fn ffprobe_path() -> Option<std::path::PathBuf> {
     static FFPROBE: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
     FFPROBE
         .get_or_init(|| {
-            let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-            for name in ["ffprobe", "ffprobe-aarch64-apple-darwin"] {
-                let p = dir.join(name);
-                if p.exists() {
-                    return Some(p);
-                }
-            }
-            None
+            crate::commands::sidecar_path("ffprobe")
+                .ok()
+                .filter(|p| p.exists())
         })
         .clone()
 }

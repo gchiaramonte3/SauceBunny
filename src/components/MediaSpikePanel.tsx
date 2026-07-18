@@ -14,6 +14,12 @@ import { useEffect, useRef, useState } from "react";
  * entitlements (entitlements.plist). wry 0.55.1 implements WKUIDelegate's
  * requestMediaCapturePermission and grants when the plist keys exist (the
  * wry #1195 lineage), so no version bump is needed.
+ *
+ * SIZE NOTE (150-line rule): deliberately one file. This is a dev-only
+ * diagnostic ladder (a-g run in strict order, each step's log feeding the
+ * next); splitting the steps into sibling components would scatter a
+ * linear protocol across files without any reuse. Revisit only if a step
+ * grows its own UI.
  */
 
 type StepResult = { id: string; label: string; verdict: "pass" | "fail" | "skip" | "manual"; detail: string };
