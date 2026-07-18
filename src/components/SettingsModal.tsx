@@ -36,6 +36,12 @@ type TabId = "general" | "captions" | "transcription" | "youtube" | "ai-summary"
 
 export type Defaults = {
   folder: string | null;
+  /** Optional TURN relay for co-review webcams (empty = Google STUN only).
+   *  All three ride to RTCPeerConnection verbatim; nothing is validated
+   *  here (a bad server just falls back to direct/STUN candidates). */
+  turnUrl: string;
+  turnUsername: string;
+  turnPassword: string;
   format: FormatId;
   reencode: boolean;
   captions: boolean;
@@ -778,6 +784,23 @@ export function SettingsModal(props: Props) {
                         className={"cp-toggle-switch" + (defaults.reencode ? " on" : "")}
                         onClick={() => setDefaults({ ...defaults, reencode: !defaults.reencode })}
                       />
+                    </div>
+                  </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection id="gen-coreview" label="Co-review calls" open={sectionOpen("gen-coreview")} onToggle={() => toggleSection("gen-coreview")}>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      TURN relay
+                      <span className="desc">Optional. Webcams connect direct or via STUN; a TURN server helps strict networks. Empty uses STUN only.</span>
+                    </div>
+                    <div className="v" style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 320 }}>
+                      <input className="cp-input" placeholder="turn:host:3478" value={defaults.turnUrl}
+                        onChange={(e) => setDefaults({ ...defaults, turnUrl: e.target.value })} spellCheck={false} />
+                      <input className="cp-input" placeholder="Username" value={defaults.turnUsername}
+                        onChange={(e) => setDefaults({ ...defaults, turnUsername: e.target.value })} spellCheck={false} />
+                      <input className="cp-input" placeholder="Password" type="password" value={defaults.turnPassword}
+                        onChange={(e) => setDefaults({ ...defaults, turnPassword: e.target.value })} />
                     </div>
                   </div>
                 </CollapsibleSection>

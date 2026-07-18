@@ -8,7 +8,7 @@ import {
 } from "../lib/review";
 import { useMediaCapture } from "../hooks/use-media-capture";
 import { GreenRoomDevices } from "./GreenRoomDevices";
-import type { Participant } from "./ParticipantRail";
+import type { Participant } from "./PeoplePanel";
 import type { SessionState } from "../bindings/SessionState";
 
 /**

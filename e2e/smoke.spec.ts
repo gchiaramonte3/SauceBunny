@@ -585,3 +585,50 @@ test("green room: returning user with granted devices lands on READY", async ({ 
   await expect(lobby.getByRole("button", { name: "Enable camera and microphone" })).toHaveCount(0);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
+
+test("session room: people tiles + control bar render; clip furniture stays out", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("saucebunny.review.author", JSON.stringify("Nika"));
+    localStorage.setItem("e2e.avGranted", "1");
+  });
+  await boot(page);
+  await page.getByRole("button", { name: "Review" }).click();
+  // Simulate a live hosted session with one connected member.
+  await page.evaluate(() => {
+    (window as unknown as {
+      __TAURI_MOCK__: { emitTauriEvent: (e: string, p: unknown) => void };
+    }).__TAURI_MOCK__.emitTauriEvent("session:state", {
+      role: "host",
+      code: "e2e-ticket",
+      peers: [{ id: "m1", name: "Ada" }],
+      selfId: "m0",
+      error: null,
+    });
+  });
+  // The room dresses the shared stage: body class on, lobby yields.
+  await expect(page.locator(".cp-body.cp-room")).toBeVisible();
+  await expect(page.locator(".cp-room-head")).toBeVisible();
+  // People panel: self tile first (avatar until devices granted in-session),
+  // plus Ada's slot; the control bar floats with share disabled.
+  const people = page.locator(".cp-people");
+  await expect(people).toBeVisible();
+  await expect(people.locator(".cp-person")).toHaveCount(2);
+  await expect(people.getByText("Nika (You)")).toBeVisible();
+  const bar = page.locator(".cp-room-bar");
+  await expect(bar).toBeVisible();
+  await expect(bar.getByRole("button", { name: "Share screen (coming soon)" })).toBeDisabled();
+  // Room purity: no Clip furniture, and the nav rail stays fully visible.
+  await expect(page.locator(".cp-view-clip .cp-toolbar")).toBeHidden();
+  await expect(page.locator(".cp-sidebar")).toBeHidden();
+  await expect(page.locator(".cp-nav")).toBeVisible();
+  // Leaving the session returns the Review view to the lobby.
+  await page.evaluate(() => {
+    (window as unknown as {
+      __TAURI_MOCK__: { emitTauriEvent: (e: string, p: unknown) => void };
+    }).__TAURI_MOCK__.emitTauriEvent("session:state", {
+      role: "off", code: null, peers: [], selfId: null, error: null,
+    });
+  });
+  await expect(page.locator(".cp-body.cp-room")).toHaveCount(0);
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});

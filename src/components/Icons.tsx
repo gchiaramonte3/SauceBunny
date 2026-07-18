@@ -414,3 +414,33 @@ export const IconList = (p: IconProps) => (
     <line x1="3.5" y1="18" x2="3.5" y2="18" strokeLinecap="round" />
   </Icon>
 );
+export const IconMic = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0" />
+    <path d="M12 18v3" />
+  </Icon>
+);
+export const IconMicOff = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0" />
+    <path d="M12 18v3" />
+    <path d="M4 4l16 16" />
+  </Icon>
+);
+export const IconCameraOff = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 7h3l2-3h6l2 3h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z" />
+    <path d="M4 4l16 16" />
+  </Icon>
+);
+export const IconScreenShare = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3" y="4" width="18" height="13" rx="1.5" />
+    <path d="M8 21h8" />
+    <path d="M12 17v4" />
+    <path d="M12 13V8" />
+    <path d="M9.5 10.5L12 8l2.5 2.5" />
+  </Icon>
+);

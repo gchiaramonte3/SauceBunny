@@ -327,3 +327,21 @@ Claude Code appends per-prompt items here overnight. Baseline list:
   across relaunch (saucebunny.mediaDevices); leaving the session or
   quitting the app turns the camera light off (pagehide + role-off
   release paths).
+
+### Appended overnight (prompt 3)
+
+- Two-instance run: your OWN camera is the top People tile the moment the
+  room opens (before any peer connects); the second instance's tile goes
+  connecting -> live; you hear each other (remote voice is per-peer hidden
+  audio, the stage video stays the only clock); speaking glow tracks the
+  active talker; mute propagates (their tile shows the mic-off glyph);
+  camera-off swaps to the avatar card in the same slot.
+- Layouts: full 240px People column; collapse chevron to the 72px spine
+  (tiles pop over on hover); narrow the window under ~1100px and the spine
+  takes over automatically.
+- Control bar: rests dimmed, wakes on hover; mic/cam toggles flip your own
+  tile AND the remote side; share is disabled with the "next build" title;
+  theater hides People + drawer but never the rail.
+- Clip cmd-3 mid-call keeps audio + the rail dot; cmd-4 restores the room;
+  leave/end closes every peer connection and the camera light dies.
+- TURN: Settings -> General -> Co-review calls (leave empty for STUN).

@@ -28,6 +28,13 @@ export function getSessionCapture(): MediaStream | null {
   return activeStream;
 }
 
+/** Subscribe to capture swaps (device switch, release). The mesh uses this
+ *  to replaceTrack on every peer without a React dependency. */
+export function subscribeSessionCapture(cb: (s: MediaStream | null) => void): () => void {
+  listeners.add(cb);
+  return () => { listeners.delete(cb); };
+}
+
 // App quit: WKWebView fires pagehide on window close; stop the hardware.
 if (typeof window !== "undefined") {
   window.addEventListener("pagehide", () => stopStream(activeStream));

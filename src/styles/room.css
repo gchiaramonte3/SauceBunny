@@ -107,36 +107,32 @@
 .cp-room .cp-queue-drawer.room .cp-queue-head { display: none; }
 .cp-room .cp-queue-drawer.room .cp-queue-foot { display: none; }
 
-/* The People panel exit control is redundant with the room header. */
-.cp-room .cp-prail-exit { display: none; }
 
 /* ── Theater sub-mode: widen the stage; the rail STAYS (it is the app's
    primary navigation — the room is not an exception). ── */
-.cp-room-theater .cp-prail { display: none; }
+.cp-room-theater .cp-people { display: none; }
 .cp-room-theater .cp-queue-drawer.room { display: none; }
 .cp-room-theater .cp-room-head { margin-top: var(--s-2); }
 
-/* ── People panel (the old participant rail, folded into the room) ── */
-.cp-prail {
-  width: 224px;
+/* ── PEOPLE panel: camera tiles are a place (Louper model) ────────── */
+.cp-people {
+  width: 240px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  /* Tone-card (Claude Terminal grammar): matches the other panels — bg-1
-     tone, one radius, uniform gutters, no border. */
   background: var(--bg-1);
   border-radius: var(--r-lg);
   margin: var(--s-2) 4px;
   overflow: hidden;
 }
-.cp-prail-head {
+.cp-people-head {
   flex-shrink: 0;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--s-2);
-  padding: var(--s-4) var(--s-4) 10px;
+  padding: var(--s-3) var(--s-3) 8px;
 }
-.cp-prail-title {
+.cp-people-title {
   font-family: var(--font-ui);
   font-size: 12px;
   font-weight: 800;
@@ -144,118 +140,179 @@
   text-transform: uppercase;
   color: var(--fg-3);
 }
-.cp-prail-count {
+.cp-people-count {
+  flex: 1;
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 700;
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
 }
-.cp-prail-list {
+.cp-people-collapse { width: 22px; height: 22px; border: none; }
+.cp-people-collapse { transform: rotate(180deg); transition: transform 160ms var(--ease-out); }
+.cp-people.spine .cp-people-collapse { transform: rotate(0deg); }
+.cp-people-list {
   flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--s-1);
+  gap: var(--s-2);
   padding: 2px var(--s-2) var(--s-2);
 }
 
-/* One participant row */
-.cp-prail-row {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 7px var(--s-2);
-  border-radius: var(--r-lg);
-  animation: cp-prail-in 260ms var(--ease-out) both;
-}
-.cp-prail-row.self { background: rgba(255,255,255,0.04); }
-@keyframes cp-prail-in {
-  from { opacity: 0; transform: translateX(-6px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-
-/* Avatar: initials in a coloured ring (the reviewer's hue), with a live dot
-   and an optional host crown. */
-.cp-prail-av {
+/* One member: a 16:9 camera tile, or the avatar card in the same slot. */
+.cp-person {
   position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--bg-0);
   flex-shrink: 0;
+}
+.cp-person video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cp-person video.mirror { transform: scaleX(-1); }
+.cp-person.speaking {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pr-color, var(--accent)) 75%, transparent);
+}
+.cp-person-avatar {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: color-mix(in srgb, var(--pr-color, var(--accent)) 10%, var(--bg-0));
+}
+.cp-person-initials {
   width: 40px;
   height: 40px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--pr-color, var(--accent)) 22%, var(--bg-3));
-  box-shadow: inset 0 0 0 2px var(--pr-color, var(--accent));
-}
-.cp-prail-initials {
   font-family: var(--font-ui);
   font-size: 14px;
   font-weight: 800;
   color: var(--fg-0);
-  letter-spacing: 0.01em;
-  user-select: none;
+  background: color-mix(in srgb, var(--pr-color, var(--accent)) 22%, var(--bg-3));
+  box-shadow: inset 0 0 0 2px var(--pr-color, var(--accent));
 }
-.cp-prail-live {
+.cp-person-conn {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--fg-4);
+}
+.cp-person-meta {
   position: absolute;
-  right: -1px;
-  bottom: -1px;
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 0 2.5px var(--bg-1);
-  animation: cp-prail-pulse 2.4s ease-in-out infinite;
-}
-@keyframes cp-prail-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.45; }
-}
-.cp-prail-crown {
-  position: absolute;
-  top: -5px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: var(--gold);
-  display: flex;
-  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5));
-}
-
-.cp-prail-meta {
-  min-width: 0;
+  left: 6px;
+  right: 6px;
+  bottom: 5px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  min-width: 0;
 }
-.cp-prail-name {
-  font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--fg-1);
-  white-space: nowrap;
+.cp-person-name {
+  min-width: 0;
   overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
-}
-.cp-prail-you {
-  flex-shrink: 0;
-  padding: 1px 6px;
-  border-radius: var(--r-pill);
-  background: rgba(255,255,255,0.08);
-  color: var(--fg-2);
   font-family: var(--font-ui);
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  color: var(--fg-0);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
 }
-.cp-prail-exit {
-  flex-shrink: 0;
-  margin: var(--s-2);
+.cp-person-crown { color: var(--gold); display: flex; flex-shrink: 0; }
+.cp-person-muted { color: var(--fg-2); display: flex; flex-shrink: 0; margin-left: auto; }
+
+/* Spine mode: 72px avatar column; tiles pop over on hover/focus. */
+.cp-people.spine { width: 72px; }
+.cp-people.spine .cp-people-title,
+.cp-people.spine .cp-people-count { display: none; }
+.cp-people.spine .cp-person {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  width: 48px;
+  align-self: center;
+}
+.cp-people.spine .cp-person video { border-radius: 50%; }
+.cp-people.spine .cp-person-meta { display: none; }
+.cp-people.spine .cp-person:hover,
+.cp-people.spine .cp-person:focus-within {
+  overflow: visible;
+}
+.cp-people.spine .cp-person:hover video,
+.cp-people.spine .cp-person:focus-within video {
+  position: absolute;
+  left: 56px;
+  top: 0;
+  width: 220px;
+  height: 124px;
+  border-radius: var(--r-lg);
+  z-index: 20;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+}
+/* Narrow windows collapse to the spine automatically. */
+@media (max-width: 1100px) {
+  .cp-room .cp-people { width: 72px; }
+  .cp-room .cp-people .cp-people-title,
+  .cp-room .cp-people .cp-people-count { display: none; }
+  .cp-room .cp-people .cp-person { aspect-ratio: 1; border-radius: 50%; width: 48px; align-self: center; }
+  .cp-room .cp-people .cp-person-meta { display: none; }
 }
 
+/* ── Room control bar: floating, bottom-center, rests dimmed ──────── */
+.cp-room-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: 6px;
+  background: var(--bg-1);
+  border-radius: var(--r-lg);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+  opacity: 0.45;
+  transition: opacity 180ms var(--ease-out);
+}
+.cp-room-bar:hover,
+.cp-room-bar:focus-within { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
-  .cp-prail-row { animation: none; }
-  .cp-prail-live { animation: none; }
-  .cp-room-live { animation: none; }
+  .cp-room-bar { opacity: 1; transition: none; }
+}
+.cp-room-bar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--r-lg);
+  background: transparent;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cp-room-bar-btn:hover { background: rgba(255,255,255,0.07); }
+.cp-room-bar-btn.off { color: var(--warn, #f5a623); }
+.cp-room-bar-btn.active { background: rgba(255,255,255,0.1); }
+.cp-room-bar-btn:disabled { opacity: 0.4; cursor: default; }
+.cp-room-bar-btn.leave { color: var(--danger, #ff6b6b); }
+.cp-room-bar-sep {
+  width: 1px;
+  height: 20px;
+  background: rgba(255,255,255,0.12);
+  margin: 0 4px;
 }

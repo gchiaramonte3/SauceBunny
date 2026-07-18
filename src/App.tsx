@@ -16,7 +16,7 @@ import { LibraryBrowser } from "./components/LibraryBrowser";
 import { useLibraryScan } from "./hooks/use-library-scan";
 import type { LibraryCrumb } from "./lib/library";
 import { Sidebar } from "./components/Sidebar";
-import { ParticipantRail } from "./components/ParticipantRail";
+import { PeoplePanel } from "./components/PeoplePanel";
 import { CoReviewLobby } from "./components/CoReviewLobby";
 import { Monitor, type AspectId } from "./components/Monitor";
 import type { Notif } from "./components/NotificationBell";
@@ -27,6 +27,8 @@ import { Timeline } from "./components/Timeline";
 import { ViewOptions } from "./components/ViewOptions";
 import { LogsPanel } from "./components/LogsPanel";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { RoomControlBar } from "./components/RoomControlBar";
+import { useMediaCapture } from "./hooks/use-media-capture";
 import { SettingsModal, type Defaults, type CaptionFontKey } from "./components/SettingsModal";
 import { YouTubeAuthModal } from "./components/YouTubeAuthModal";
 import type { PlayerHandle } from "./components/player-handle";
@@ -197,6 +199,10 @@ export default function App() {
       ytCookiesBrowser: stored.ytCookiesBrowser ?? "none",
       // r71: latches once the first-run "Connect YouTube" prompt is handled.
       ytAuthOnboarded: stored.ytAuthOnboarded ?? false,
+      // Co-review mesh TURN relay (Settings -> General); empty = STUN only.
+      turnUrl: stored.turnUrl ?? "",
+      turnUsername: stored.turnUsername ?? "",
+      turnPassword: stored.turnPassword ?? "",
       // Default off — diarization adds 10–60s per transcript and the
       // first-run model download is hundreds of MB. Opt-in via Sidebar.
       detectSpeakers: stored.detectSpeakers ?? false,
@@ -4295,6 +4301,7 @@ export default function App() {
   const {
     coSession, coSessionActive, sessionDoc, postSessionOp, coGhostMarkers,
     screening, setScreening, screeningParticipants,
+    meshStreams, meshStates,
     startCoReview, joinCoReview, leaveCoReview,
   } = useCoReview({
     isPlaying, fps,
@@ -4303,6 +4310,7 @@ export default function App() {
     onChaseSeek, setUrl, handleFetch,
     pushNotification, setQueueOpen,
     setReviewMarkers, setReviewAnnotations,
+    turn: { url: defaults.turnUrl, username: defaults.turnUsername, password: defaults.turnPassword },
   });
   // The SESSION ROOM: Review owns live sessions end to end. When a session
   // is live and the Review view is active, the room class reflows the Clip
@@ -4310,6 +4318,9 @@ export default function App() {
   // and never remounts). Switching to Clip mid-session is allowed - the
   // session stays connected and the rail's Review badge is the way back.
   const roomActive = coSessionActive && activeView === "coreview";
+  // Room bar device toggles ride the same capture singleton the green room
+  // opened; enabled-bit flips propagate to every mesh sender live.
+  const capture = useMediaCapture();
   // Undo hygiene: undoing across sources is nonsense, and entries recorded
   // solo must never replay into a co-review session (or vice versa — their
   // closures route to different docs). Drop the whole stack on either
@@ -4643,10 +4654,11 @@ export default function App() {
                   tiles land in the next build). Always mounted as a stable
                   sibling of <main> so entering the room never remounts the
                   player; renders nothing outside the room. */}
-              <ParticipantRail
+              <PeoplePanel
                 active={roomActive}
                 participants={screeningParticipants}
-                onExit={leaveCoReview}
+                remoteStreams={meshStreams}
+                peerStates={meshStates}
               />
               <Sidebar
                 onFilenameEdit={markFilenameEdited}
@@ -4712,20 +4724,20 @@ export default function App() {
                           Copy join code
                         </button>
                       )}
-                      <button
-                        type="button"
-                        className={"btn btn-ghost btn-compact" + (screening ? " active" : "")}
-                        aria-pressed={screening}
-                        title="Theater: widen the stage"
-                        onClick={() => setScreening((s) => !s)}
-                      >
-                        Theater
-                      </button>
-                      <button type="button" className="btn btn-ghost btn-compact cp-room-leave" onClick={leaveCoReview}>
-                        {coSession.role === "host" ? "End session" : "Leave"}
-                      </button>
                     </div>
                   </div>
+                )}
+                {roomActive && (
+                  <RoomControlBar
+                    micOn={!capture.choice.micMuted}
+                    camOn={!capture.choice.cameraOff}
+                    onToggleMic={() => capture.setEnabled("audio", capture.choice.micMuted)}
+                    onToggleCam={() => capture.setEnabled("video", capture.choice.cameraOff)}
+                    theater={screening}
+                    onToggleTheater={() => setScreening((v) => !v)}
+                    onLeave={leaveCoReview}
+                    isHost={coSession.role === "host"}
+                  />
                 )}
                 {roomActive && coSession.role === "guest" && status === "empty" && (
                   <div className="cp-room-waiting">Waiting for the host to load a source</div>

@@ -74,8 +74,15 @@ const ONLINE_TIMEOUT: Duration = Duration::from_secs(8);
 pub enum SessionMsg {
     /// peer → host right after connect
     Hello { name: String },
-    /// host → everyone whenever membership changes (includes host's own name first)
-    PeerList { peers: Vec<String> },
+    /// host → the just-registered peer: your session-scoped member id.
+    /// (PeerList alone can't tell you which entry is you - names collide.)
+    Welcome { you: String },
+    /// host → everyone whenever membership changes (host is always m0, first)
+    PeerList { peers: Vec<PeerInfo> },
+    /// WebRTC signaling (SDP/ICE), OPAQUE JSON relayed to the addressed
+    /// member only. `from` is rewritten by the host to the sender's real id
+    /// so a member can't spoof another's signaling.
+    Rtc { from: String, to: String, payload: String },
     /// host → everyone: load this source (web URL Phase 1)
     LoadSource { url: String },
     /// host → everyone: transport truth. at_ms = host wall clock (ms since epoch).
@@ -97,13 +104,24 @@ pub enum SessionMsg {
     Presence { name: String, position: f64 },
 }
 
+/// One session member: a session-scoped id (m0 = host, m1, m2, ... minted
+/// at Hello, never reused) + display name. Ids are the roster key - names
+/// are display-only and can collide.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct PeerInfo {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Clone, serde::Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]
 #[serde(rename_all = "camelCase")]
 pub struct SessionState {
     pub role: String,          // "off" | "host" | "peer"
     pub code: Option<String>,  // host: the join ticket to share
-    pub peers: Vec<String>,    // host: connected peer names / peer: roster via PeerList
+    pub peers: Vec<PeerInfo>,  // host: connected peers / peer: full roster via PeerList
+    pub self_id: Option<String>, // your member id: host "m0"; peer via Welcome
     pub error: Option<String>, // last error, cleared on state change
 }
 
@@ -151,7 +169,8 @@ enum Session {
     },
     Peer {
         endpoint: Endpoint,
-        roster: Arc<Mutex<Vec<String>>>,
+        roster: Arc<Mutex<Vec<PeerInfo>>>,
+        self_id: Arc<Mutex<Option<String>>>,
         read_task: JoinHandle<()>,
         // Held so the QUIC stream/connection stay open for the session's
         // lifetime (dropping the send half would RESET the stream and the
@@ -166,8 +185,11 @@ enum Session {
 /// tasks, and `session_broadcast`.
 #[derive(Default)]
 struct HostShared {
-    /// The host's own roster display name (heads every `PeerList`).
+    /// The host's own roster display name (heads every `PeerList` as m0).
     host_name: String,
+    /// Session-scoped member-id mint (m1, m2, ...; the host is m0). Never
+    /// reused within a session, so ids stay stable across disconnects.
+    next_member: AtomicU64,
     /// Send halves + names. tokio Mutex: broadcast writes are async.
     peers: AsyncMutex<Vec<PeerConn>>,
     /// Per-connection task handles, so `session_leave` can abort them.
@@ -178,6 +200,8 @@ struct HostShared {
 
 struct PeerConn {
     id: u64,
+    /// Session-scoped member id ("m1", "m2", ...) - the roster/signaling key.
+    member: String,
     name: String,
     send: SendStream,
 }
@@ -216,6 +240,7 @@ pub async fn session_start(
     let ticket = EndpointTicket::new(endpoint.addr()).to_string();
     let shared = Arc::new(HostShared {
         host_name: clean_host_name(name.as_deref().unwrap_or("")),
+        next_member: AtomicU64::new(1), // m0 is the host
         ..HostShared::default()
     });
     let accept_task = tokio::spawn(accept_loop(app.clone(), endpoint.clone(), shared.clone()));
@@ -294,11 +319,15 @@ pub async fn session_join(
     inner.generation += 1;
     inner.last_error = None;
     let generation = inner.generation;
-    let roster: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let read_task = tokio::spawn(peer_read_loop(app.clone(), recv, roster.clone(), generation));
+    let roster: Arc<Mutex<Vec<PeerInfo>>> = Arc::new(Mutex::new(Vec::new()));
+    let self_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let read_task = tokio::spawn(peer_read_loop(
+        app.clone(), recv, roster.clone(), self_id.clone(), generation,
+    ));
     inner.session = Session::Peer {
         endpoint,
         roster,
+        self_id,
         read_task,
         _conn: conn,
         send,
@@ -341,8 +370,20 @@ pub async fn session_broadcast(
         return Err(crate::AppError::invalid("Not hosting a co-review session"));
     };
 
+    // Host-originated signaling goes to the addressed member ONLY (and the
+    // host is always the true sender - stamp m0 regardless of what the
+    // frontend filled in).
+    if let SessionMsg::Rtc { to, payload, .. } = msg {
+        let stamped = SessionMsg::Rtc { from: "m0".into(), to: to.clone(), payload };
+        relay_to_member(shared, &to, &stamped).await;
+        return Ok(());
+    }
+
     let mut line = serde_json::to_string(&msg)?;
     line.push('\n');
+    if line.len() > MAX_MSG_BYTES {
+        return Err(crate::AppError::invalid("Session message too large"));
+    }
 
     let mut dropped_any = false;
     {
@@ -438,6 +479,14 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
     // 2. Register, enforcing the cap. Extras get a polite close instead of
     //    a hang — the QUIC close reason is surfaced by the peer's read loop.
     let id = NEXT_PEER_ID.fetch_add(1, Ordering::Relaxed);
+    let member = format!("m{}", shared.next_member.fetch_add(1, Ordering::Relaxed));
+    let mut send = send;
+    // Tell the newcomer who THEY are before the roster lands (PeerList can't
+    // disambiguate same-name members; the mesh keys everything on this id).
+    if write_msg_line(&mut send, &SessionMsg::Welcome { you: member.clone() }).await.is_err() {
+        conn.close(1u32.into(), b"welcome write failed");
+        return;
+    }
     {
         let mut peers = shared.peers.lock().await;
         if peers.len() >= MAX_PEERS {
@@ -445,7 +494,7 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
             conn.close(1u32.into(), b"session is full");
             return;
         }
-        peers.push(PeerConn { id, name, send });
+        peers.push(PeerConn { id, member: member.clone(), name, send });
     }
     broadcast_peer_list(&shared).await;
     emit_state_now(&app).await;
@@ -476,6 +525,16 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
                             let msg = SessionMsg::Presence { name: clean_name(&name), position };
                             let _ = app.emit("session:msg", &msg);
                             relay_to_others(&shared, id, &msg).await;
+                        }
+                        SessionMsg::Rtc { to, payload, .. } => {
+                            // Host rewrites `from` to the SENDER's real id -
+                            // a member can't sign SDP as somebody else.
+                            let msg = SessionMsg::Rtc { from: member.clone(), to: to.clone(), payload };
+                            if to == "m0" {
+                                let _ = app.emit("session:msg", &msg);
+                            } else {
+                                relay_to_member(&shared, &to, &msg).await;
+                            }
                         }
                         // A peer shouldn't originate the host-only kinds; ignore.
                         _ => {}
@@ -517,15 +576,36 @@ async fn relay_to_others(shared: &HostShared, sender_id: u64, msg: &SessionMsg) 
     }
 }
 
+/// Write one message to a single member's stream (targeted signaling).
+/// A dead target is dropped from the roster like any failed write.
+async fn relay_to_member(shared: &HostShared, member: &str, msg: &SessionMsg) {
+    let Ok(mut line) = serde_json::to_string(msg) else { return };
+    line.push('\n');
+    if line.len() > MAX_MSG_BYTES {
+        return;
+    }
+    let mut peers = shared.peers.lock().await;
+    let mut dead = false;
+    if let Some(p) = peers.iter_mut().find(|p| p.member == member) {
+        dead = p.send.write_all(line.as_bytes()).await.is_err();
+        if dead {
+            let gone = p.id;
+            peers.retain(|q| q.id != gone);
+        }
+    }
+    let _ = dead; // roster fix-up rides the next broadcast_peer_list pass
+}
+
 /// Send the current roster (host name first) to every connected peer,
 /// dropping any whose stream is dead. Loops until a pass completes with
 /// no drops so survivors always end up with an accurate list.
 async fn broadcast_peer_list(shared: &HostShared) {
     let mut peers = shared.peers.lock().await;
     loop {
-        let roster: Vec<String> = std::iter::once(shared.host_name.clone())
-            .chain(peers.iter().map(|p| p.name.clone()))
-            .collect();
+        let roster = build_roster(
+            &shared.host_name,
+            peers.iter().map(|p| (p.member.clone(), p.name.clone())),
+        );
         let Ok(mut line) = serde_json::to_string(&SessionMsg::PeerList { peers: roster }) else {
             return;
         };
@@ -551,7 +631,8 @@ async fn broadcast_peer_list(shared: &HostShared) {
 async fn peer_read_loop(
     app: AppHandle,
     recv: iroh::endpoint::RecvStream,
-    roster: Arc<Mutex<Vec<String>>>,
+    roster: Arc<Mutex<Vec<PeerInfo>>>,
+    self_id: Arc<Mutex<Option<String>>>,
     generation: u64,
 ) {
     let mut reader = BufReader::new(recv);
@@ -580,6 +661,17 @@ async fn peer_read_loop(
                             *r = peers;
                         }
                         emit_state_now(&app).await;
+                    }
+                    SessionMsg::Welcome { you } => {
+                        if let Ok(mut me) = self_id.lock() {
+                            *me = Some(you);
+                        }
+                        emit_state_now(&app).await;
+                    }
+                    msg @ SessionMsg::Rtc { .. } => {
+                        // Addressed to this member by construction (the host
+                        // relays targeted) - straight to the frontend mesh.
+                        let _ = app.emit("session:msg", &msg);
                     }
                     msg @ (SessionMsg::LoadSource { .. }
                     | SessionMsg::Transport { .. }
@@ -663,18 +755,27 @@ async fn snapshot_state(inner: &Inner) -> SessionState {
             role: "off".into(),
             code: None,
             peers: Vec::new(),
+            self_id: None,
             error: inner.last_error.clone(),
         },
         Session::Host { ticket, shared, .. } => SessionState {
             role: "host".into(),
             code: Some(ticket.clone()),
-            peers: shared.peers.lock().await.iter().map(|p| p.name.clone()).collect(),
+            peers: shared
+                .peers
+                .lock()
+                .await
+                .iter()
+                .map(|p| PeerInfo { id: p.member.clone(), name: p.name.clone() })
+                .collect(),
+            self_id: Some("m0".into()),
             error: inner.last_error.clone(),
         },
-        Session::Peer { roster, .. } => SessionState {
+        Session::Peer { roster, self_id, .. } => SessionState {
             role: "peer".into(),
             code: None,
             peers: roster.lock().map(|r| r.clone()).unwrap_or_default(),
+            self_id: self_id.lock().map(|s| s.clone()).unwrap_or(None),
             error: inner.last_error.clone(),
         },
     }
@@ -761,7 +862,7 @@ mod tests {
     fn variant_tags_are_camel_case() {
         let hello = serde_json::to_string(&SessionMsg::Hello { name: "Ada".into() }).unwrap();
         assert!(hello.contains(r#""kind":"hello""#), "json: {hello}");
-        let list = serde_json::to_string(&SessionMsg::PeerList { peers: vec!["Host".into()] }).unwrap();
+        let list = serde_json::to_string(&SessionMsg::PeerList { peers: vec![PeerInfo { id: "m0".into(), name: "Host".into() }] }).unwrap();
         assert!(list.contains(r#""kind":"peerList""#), "json: {list}");
         let load = serde_json::to_string(&SessionMsg::LoadSource { url: "https://x".into() }).unwrap();
         assert!(load.contains(r#""kind":"loadSource""#), "json: {load}");
@@ -815,5 +916,52 @@ mod tests {
         assert_eq!(clean_host_name("Host"), "Host");   // no (guest) suffix for the host
         assert_eq!(clean_host_name(" Gasper \n"), "Gasper");
         assert_eq!(clean_host_name(&"x".repeat(100)).len(), 40);
+    }
+}
+
+/// Pure roster builder: host is always m0 and first; member order follows
+/// connection order. Extracted so id stability is unit-testable without a
+/// network.
+fn build_roster(
+    host_name: &str,
+    members: impl Iterator<Item = (String, String)>,
+) -> Vec<PeerInfo> {
+    std::iter::once(PeerInfo { id: "m0".into(), name: host_name.to_string() })
+        .chain(members.map(|(id, name)| PeerInfo { id, name }))
+        .collect()
+}
+
+#[cfg(test)]
+mod member_id_tests {
+    use super::*;
+
+    fn members(v: &[(&str, &str)]) -> Vec<(String, String)> {
+        v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+    }
+
+    #[test]
+    fn host_is_always_m0_and_first() {
+        let r = build_roster("Nika", members(&[("m1", "Ada"), ("m2", "Lin")]).into_iter());
+        assert_eq!(r[0], PeerInfo { id: "m0".into(), name: "Nika".into() });
+        assert_eq!(r.len(), 3);
+    }
+
+    #[test]
+    fn ids_stay_stable_when_a_member_disconnects() {
+        // m1 drops; m2/m3 keep their minted ids - nothing renumbers.
+        let before = build_roster(
+            "Host",
+            members(&[("m1", "Ada"), ("m2", "Lin"), ("m3", "Sam")]).into_iter(),
+        );
+        let after = build_roster("Host", members(&[("m2", "Lin"), ("m3", "Sam")]).into_iter());
+        assert_eq!(after[1], before[2]);
+        assert_eq!(after[2], before[3]);
+    }
+
+    #[test]
+    fn same_display_names_stay_distinct_by_id() {
+        let r = build_roster("Ada", members(&[("m1", "Ada"), ("m4", "Ada")]).into_iter());
+        let ids: Vec<_> = r.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["m0", "m1", "m4"]);
     }
 }

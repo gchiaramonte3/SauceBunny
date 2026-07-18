@@ -1,0 +1,115 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { RtcMesh, type MeshPeerState, type MeshSignalPayload } from "../lib/rtc-mesh";
+import { getSessionCapture, subscribeSessionCapture } from "./use-media-capture";
+
+/**
+ * Browser wrapper around the pure RtcMesh core (lib/rtc-mesh.ts): real
+ * RTCPeerConnection, signaling over the iroh star (SessionMsg::Rtc via
+ * session_broadcast for the host / session_send for a peer), remote voice
+ * through one hidden <audio> element per peer (NOT attached to the DOM -
+ * the stage <video> stays the app's only media clock), and the green-room
+ * capture wired in via the use-media-capture singleton (device switch =
+ * replaceTrack on every sender).
+ *
+ * Consumed by use-co-review: it owns WHEN the mesh runs (session live +
+ * self id known) and feeds incoming Rtc lines into handleSignal.
+ */
+export type TurnConfig = { url: string; username: string; password: string };
+
+export function useRtcMesh(args: {
+  active: boolean;
+  selfId: string | null;
+  role: string; // "off" | "host" | "peer"
+  memberIds: string[];
+  turn: TurnConfig;
+  onLog: (tag: "info" | "warn" | "err", msg: string) => void;
+}) {
+  const { active, selfId, role, memberIds, turn, onLog } = args;
+  const [remoteStreams, setRemoteStreams] = useState<ReadonlyMap<string, MediaStream>>(new Map());
+  const [peerStates, setPeerStates] = useState<ReadonlyMap<string, MeshPeerState>>(new Map());
+  const meshRef = useRef<RtcMesh | null>(null);
+  const audioRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const roleRef = useRef(role);
+  useEffect(() => { roleRef.current = role; }, [role]);
+  const onLogRef = useRef(onLog);
+  useEffect(() => { onLogRef.current = onLog; }, [onLog]);
+
+  const stopAudio = (id: string) => {
+    const el = audioRef.current.get(id);
+    if (el) {
+      el.pause();
+      el.srcObject = null;
+      audioRef.current.delete(id);
+    }
+  };
+
+  // Mesh lifecycle: build when the session is live and we know who we are;
+  // full teardown (every PC closed, every voice stopped) when it ends.
+  useEffect(() => {
+    if (!active || !selfId) return;
+    const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+    if (turn.url.trim()) {
+      iceServers.push({ urls: turn.url.trim(), username: turn.username || undefined, credential: turn.password || undefined });
+    }
+    const mesh = new RtcMesh({
+      selfId,
+      iceServers,
+      createPc: (config) => new RTCPeerConnection(config),
+      sendSignal: (to, payload) => {
+        const msg = { kind: "rtc", from: selfId, to, payload: JSON.stringify(payload) };
+        const cmd = roleRef.current === "host" ? "session_broadcast" : "session_send";
+        void invoke(cmd, { msg }).catch(() => { /* session raced closed */ });
+      },
+      onRemoteStream: (id, stream) => {
+        setRemoteStreams((prev) => {
+          const next = new Map(prev);
+          if (stream) next.set(id, stream); else next.delete(id);
+          return next;
+        });
+        if (stream && stream.getAudioTracks().length > 0) {
+          let el = audioRef.current.get(id);
+          if (!el) {
+            el = document.createElement("audio");
+            el.autoplay = true;
+            audioRef.current.set(id, el);
+          }
+          el.srcObject = stream;
+          el.play().catch(() => { /* resumes on user gesture */ });
+        } else if (!stream) {
+          stopAudio(id);
+        }
+      },
+      onState: (id, state) => {
+        setPeerStates((prev) => new Map(prev).set(id, state));
+      },
+      getLocalStream: () => getSessionCapture(),
+      log: (tag, msg) => onLogRef.current(tag, msg),
+    });
+    meshRef.current = mesh;
+    const unsub = subscribeSessionCapture((s) => { void mesh.replaceLocalStream(s); });
+    return () => {
+      unsub();
+      mesh.close();
+      meshRef.current = null;
+      for (const id of [...audioRef.current.keys()]) stopAudio(id);
+      setRemoteStreams(new Map());
+      setPeerStates(new Map());
+    };
+  }, [active, selfId, turn.url, turn.username, turn.password]);
+
+  // Roster reconciliation on every membership change.
+  useEffect(() => {
+    meshRef.current?.setMembers(memberIds);
+  }, [memberIds]);
+
+  /** Incoming SessionMsg::Rtc line (already addressed to us). */
+  const handleSignal = useCallback((from: string, payloadJson: string) => {
+    try {
+      const payload = JSON.parse(payloadJson) as MeshSignalPayload;
+      void meshRef.current?.handleSignal(from, payload);
+    } catch { /* malformed signaling line */ }
+  }, []);
+
+  return { remoteStreams, peerStates, handleSignal };
+}

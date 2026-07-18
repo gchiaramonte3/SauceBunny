@@ -27,11 +27,13 @@ import {
   type AnnotationStrokes, type ReviewDoc, type ReviewOp,
 } from "../lib/review";
 import type { PlayerHandle } from "../components/player-handle";
-import type { Participant } from "../components/ParticipantRail";
+import type { Participant } from "../components/PeoplePanel";
 import type { ToastKind } from "../components/CanvasToast";
 import type { Metadata } from "../types";
 import type { SessionMsg } from "../bindings/SessionMsg";
 import type { SessionState as CoSessionState } from "../bindings/SessionState";
+import { useRtcMesh, type TurnConfig } from "./use-rtc-mesh";
+import type { MeshPeerState } from "../lib/rtc-mesh";
 
 /** Timeline/monitor read-model of one review comment marker. Shared by the
  *  solo path (App's local-review reload effect) and the session path (the
@@ -76,6 +78,8 @@ type Args = {
    *  timeline shows everyone's live comments. */
   setReviewMarkers: (markers: ReviewMarkerView[]) => void;
   setReviewAnnotations: (annotations: ReviewAnnotationView[]) => void;
+  /** Optional TURN relay for the webcam mesh (Settings; empty = STUN only). */
+  turn: TurnConfig;
 };
 
 export type CoReview = {
@@ -94,6 +98,10 @@ export type CoReview = {
   screening: boolean;
   setScreening: Dispatch<SetStateAction<boolean>>;
   screeningParticipants: Participant[];
+  /** Live remote camera/mic streams from the webcam mesh, keyed by member id. */
+  meshStreams: ReadonlyMap<string, MediaStream>;
+  /** Per-member mesh connection state (connecting / live / failed). */
+  meshStates: ReadonlyMap<string, MeshPeerState>;
   startCoReview: () => Promise<void>;
   joinCoReview: (ticket: string, name: string) => Promise<void>;
   leaveCoReview: () => void;
@@ -106,8 +114,12 @@ export function useCoReview({
   onChaseSeek, setUrl, handleFetch,
   pushNotification, setQueueOpen,
   setReviewMarkers, setReviewAnnotations,
+  turn,
 }: Args): CoReview {
-  const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], error: null });
+  const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], selfId: null, error: null });
+  // Incoming SessionMsg::Rtc -> the mesh (assigned each render below; the
+  // mesh hook must be declared after the message handler's closure).
+  const rtcSignalRef = useRef<((from: string, payload: string) => void) | null>(null);
   const coSessionActive = coSession.role !== "off";
   // The shared review doc while in a session (null = solo).
   const [sessionDoc, setSessionDoc] = useState<ReviewDoc | null>(null);
@@ -167,6 +179,9 @@ export function useCoReview({
           const op = JSON.parse(m.op) as ReviewOp;
           setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
         } catch { /* malformed op */ }
+        return;
+      case "rtc":
+        rtcSignalRef.current?.(m.from, m.payload);
         return;
       case "presence": {
         const now = Date.now();
@@ -314,7 +329,9 @@ export function useCoReview({
   useEffect(() => {
     const was = prevScreenSessionRef.current;
     prevScreenSessionRef.current = coSessionActive;
-    if (coSessionActive && !was) { setScreening(true); setQueueOpen(true); }
+    // Entering a session lands in the ROOM (theater is an opt-in sub-mode
+    // now, not the entry experience); the drawer opens for comments.
+    if (coSessionActive && !was) setQueueOpen(true);
     if (!coSessionActive && was) setScreening(false);
   }, [coSessionActive]);
   // Everyone in the session, for the rail — so people see each other. Host's
@@ -325,20 +342,19 @@ export function useCoReview({
     const myName = me.name || "You";
     if (coSession.role === "host") {
       return [
-        { name: myName, color: me.color, isHost: true, isSelf: true },
-        ...coSession.peers.map((n) => ({ name: n, color: reviewerColorFor(n, me), isHost: false, isSelf: false })),
+        { id: "m0", name: myName, color: me.color, isHost: true, isSelf: true },
+        ...coSession.peers.map((p) => ({ id: p.id, name: p.name, color: reviewerColorFor(p.name, me), isHost: false, isSelf: false })),
       ];
     }
-    // Peer view: the host is always the roster head — session.rs builds the
-    // roster as [HOST_NAME, ...peers] — so identify it by POSITION, not a name
-    // string a guest could pick ("Host"). Claim "You" for only the FIRST name
-    // that matches ours, so a same-named guest can't also show the chip.
-    let selfSeen = false;
-    return coSession.peers.map((n, i) => {
-      const isSelf = !selfSeen && n === myName;
-      if (isSelf) selfSeen = true;
-      return { name: n, color: reviewerColorFor(n, me), isHost: i === 0, isSelf };
-    });
+    // Peer view: ids are exact - the host is m0 and selfId came from the
+    // host's Welcome, so name collisions can't confuse the roster.
+    return coSession.peers.map((p) => ({
+      id: p.id,
+      name: p.name,
+      color: p.id === coSession.selfId ? me.color : reviewerColorFor(p.name, me),
+      isHost: p.id === "m0",
+      isSelf: p.id === coSession.selfId,
+    }));
   }, [coSession.role, coSession.peers]);
 
   // In a session, the shared doc drives the timeline markers + annotations
@@ -366,9 +382,31 @@ export function useCoReview({
     }));
   }, [coGhosts, fps]);
 
+  // ── Webcam mesh (use-rtc-mesh) ──────────────────────────────────
+  // Runs while the session is live and we know our member id; signaling
+  // rides the iroh star (the rtc case above feeds incoming lines in).
+  const selfId = coSession.selfId ?? (coSession.role === "host" ? "m0" : null);
+  const memberIds = useMemo(
+    () => screeningParticipants.filter((p) => !p.isSelf).map((p) => p.id),
+    [screeningParticipants],
+  );
+  const mesh = useRtcMesh({
+    active: coSessionActive,
+    selfId,
+    role: coSession.role,
+    memberIds,
+    turn,
+    onLog: (tag, msg) => {
+      if (tag === "err") console.error("[co-review rtc]", msg);
+      else if (tag === "warn") console.warn("[co-review rtc]", msg);
+    },
+  });
+  rtcSignalRef.current = mesh.handleSignal;
+
   return {
     coSession, coSessionActive, sessionDoc, postSessionOp, coGhostMarkers,
     screening, setScreening, screeningParticipants,
+    meshStreams: mesh.remoteStreams, meshStates: mesh.peerStates,
     startCoReview, joinCoReview, leaveCoReview,
   };
 }
