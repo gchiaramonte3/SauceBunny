@@ -53,8 +53,12 @@ export type WebPlaybackState =
   /** `fromCache: true` = playing cached signed URLs (warm boot). Its failure
    *  edge is a fresh resolve, not the download fallback. */
   | { kind: "streaming"; seq: number; url: string; stream: StreamInfo; ready: boolean; fromCache: boolean }
-  | { kind: "downloading"; seq: number; url: string; jobId: string | null; progress: number }
-  | { kind: "cached"; seq: number; url: string; cachePath: string }
+  /** resumeAtSeconds: the playhead at the moment the stream died — the
+   *  cached player boots there instead of 0 (RC4: a swap must never lose
+   *  the position). REQUIRED so every future fallback transition has to
+   *  decide the handoff explicitly (compile error, not a regression). */
+  | { kind: "downloading"; seq: number; url: string; jobId: string | null; progress: number; resumeAtSeconds: number }
+  | { kind: "cached"; seq: number; url: string; cachePath: string; resumeAtSeconds: number }
   | { kind: "failed"; seq: number; url: string; message: string };
 
 export type WebPlaybackAction =
@@ -65,8 +69,8 @@ export type WebPlaybackAction =
   | { t: "RESOLVED"; seq: number; stream: StreamInfo; fromCache: boolean }
   | { t: "RESOLVE_FAILED"; seq: number }
   | { t: "PLAYER_READY"; seq: number }
-  | { t: "MEDIA_ERROR"; seq: number }
-  | { t: "WATCHDOG"; seq: number }
+  | { t: "MEDIA_ERROR"; seq: number; atSeconds: number }
+  | { t: "WATCHDOG"; seq: number; atSeconds: number }
   | { t: "DOWNLOAD_STARTED"; seq: number; jobId: string }
   | { t: "DOWNLOAD_PROGRESS"; seq: number; progress: number }
   | { t: "DOWNLOAD_DONE"; seq: number; cachePath: string }
@@ -80,8 +84,8 @@ export function webPlaybackSeq(s: WebPlaybackState): number | null {
   return s.kind === "inactive" ? null : s.seq;
 }
 
-function startDownload(seq: number, url: string): WebPlaybackState {
-  return { kind: "downloading", seq, url, jobId: null, progress: 0 };
+function startDownload(seq: number, url: string, resumeAtSeconds: number): WebPlaybackState {
+  return { kind: "downloading", seq, url, jobId: null, progress: 0, resumeAtSeconds };
 }
 
 export function webPlaybackReducer(
@@ -92,11 +96,12 @@ export function webPlaybackReducer(
   if (action.t === "RESET") return INITIAL_WEB_PLAYBACK;
   if (action.t === "LOAD") {
     return action.mode === "download-first"
-      ? startDownload(action.seq, action.url)
+      ? startDownload(action.seq, action.url, 0)
       : { kind: "resolving", seq: action.seq, url: action.url, fresh: false };
   }
   if (action.t === "LOAD_CACHED") {
-    return { kind: "cached", seq: action.seq, url: action.url, cachePath: action.cachePath };
+    // Warm boot from a complete copy: position 0 is correct at load time.
+    return { kind: "cached", seq: action.seq, url: action.url, cachePath: action.cachePath, resumeAtSeconds: 0 };
   }
 
   // Every other action is seq-scoped: silently drop anything that doesn't
@@ -115,7 +120,7 @@ export function webPlaybackReducer(
           ready: false,
           fromCache: action.fromCache,
         };
-      if (action.t === "RESOLVE_FAILED") return startDownload(state.seq, state.url);
+      if (action.t === "RESOLVE_FAILED") return startDownload(state.seq, state.url, 0);
       return state;
 
     case "streaming":
@@ -129,7 +134,7 @@ export function webPlaybackReducer(
         // streaming state / MSE path.
         return state.fromCache
           ? { kind: "resolving", seq: state.seq, url: state.url, fresh: true }
-          : startDownload(state.seq, state.url);
+          : startDownload(state.seq, state.url, action.atSeconds);
       }
       return state;
 
@@ -137,7 +142,7 @@ export function webPlaybackReducer(
       if (action.t === "DOWNLOAD_STARTED") return { ...state, jobId: action.jobId };
       if (action.t === "DOWNLOAD_PROGRESS") return { ...state, progress: action.progress };
       if (action.t === "DOWNLOAD_DONE")
-        return { kind: "cached", seq: state.seq, url: state.url, cachePath: action.cachePath };
+        return { kind: "cached", seq: state.seq, url: state.url, cachePath: action.cachePath, resumeAtSeconds: state.resumeAtSeconds };
       if (action.t === "DOWNLOAD_FAILED")
         return { kind: "failed", seq: state.seq, url: state.url, message: action.message };
       return state;

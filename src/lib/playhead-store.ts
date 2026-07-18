@@ -50,6 +50,13 @@ export function markUserSeek(frames: number): void {
   lastUserSeekFrames = frames;
 }
 
+/** When the user last seeked (ms epoch; 0 = never). Consumers that would
+ *  MOVE the playhead on their own (the co-review host chase) must yield to a
+ *  fresh local gesture. */
+export function getLastUserSeekAt(): number {
+  return lastUserSeekAt;
+}
+
 /**
  * Move the playhead. No-ops (and doesn't notify) when the frame is unchanged,
  * so a paused player's timeupdate ticks don't cause re-renders.

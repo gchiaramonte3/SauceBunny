@@ -51,7 +51,7 @@ describe("web-playback machine: core lifecycle", () => {
     const s = run([
       { t: "LOAD", seq: 1, url: URL, mode: "stream-first" },
       { t: "RESOLVED", seq: 1, stream: stream("fresh"), fromCache: false },
-      { t: "MEDIA_ERROR", seq: 1 },
+      { t: "MEDIA_ERROR", seq: 1, atSeconds: 42 },
     ]);
     expect(s.kind).toBe("downloading");
   });
@@ -60,10 +60,10 @@ describe("web-playback machine: core lifecycle", () => {
     const base = run([
       { t: "LOAD", seq: 1, url: URL, mode: "stream-first" },
       { t: "RESOLVED", seq: 1, stream: stream("fresh"), fromCache: false },
-      { t: "MEDIA_ERROR", seq: 1 },
+      { t: "MEDIA_ERROR", seq: 1, atSeconds: 42 },
       { t: "DOWNLOAD_STARTED", seq: 1, jobId: "job-1" },
     ]);
-    const s = run([{ t: "WATCHDOG", seq: 1 }, { t: "MEDIA_ERROR", seq: 1 }], base);
+    const s = run([{ t: "WATCHDOG", seq: 1, atSeconds: 42 }, { t: "MEDIA_ERROR", seq: 1, atSeconds: 42 }], base);
     expect(s).toEqual(base);
   });
 });
@@ -76,6 +76,7 @@ describe("web-playback machine: warm boot (r112)", () => {
       seq: 1,
       url: URL,
       cachePath: "/cache/saucebunny-media/downloads/x.mp4",
+      resumeAtSeconds: 0,
     });
   });
 
@@ -83,7 +84,7 @@ describe("web-playback machine: warm boot (r112)", () => {
     const s = run([
       { t: "LOAD", seq: 1, url: URL, mode: "stream-first" },
       { t: "RESOLVED", seq: 1, stream: stream("warm"), fromCache: true },
-      { t: "MEDIA_ERROR", seq: 1 },
+      { t: "MEDIA_ERROR", seq: 1, atSeconds: 42 },
     ]);
     // The retry must go back through resolving with the cache bypassed.
     expect(s).toEqual({ kind: "resolving", seq: 1, url: URL, fresh: true });
@@ -93,7 +94,7 @@ describe("web-playback machine: warm boot (r112)", () => {
     const s = run([
       { t: "LOAD", seq: 1, url: URL, mode: "stream-first" },
       { t: "RESOLVED", seq: 1, stream: stream("warm"), fromCache: true },
-      { t: "WATCHDOG", seq: 1 },
+      { t: "WATCHDOG", seq: 1, atSeconds: 42 },
     ]);
     expect(s).toEqual({ kind: "resolving", seq: 1, url: URL, fresh: true });
   });
@@ -102,7 +103,7 @@ describe("web-playback machine: warm boot (r112)", () => {
     const afterRetry = run([
       { t: "LOAD", seq: 1, url: URL, mode: "stream-first" },
       { t: "RESOLVED", seq: 1, stream: stream("warm"), fromCache: true },
-      { t: "MEDIA_ERROR", seq: 1 },
+      { t: "MEDIA_ERROR", seq: 1, atSeconds: 42 },
       { t: "RESOLVED", seq: 1, stream: stream("fresh"), fromCache: false },
     ]);
     // The retry lands the fresh URL in the SAME streaming/MSE path — no
@@ -113,7 +114,7 @@ describe("web-playback machine: warm boot (r112)", () => {
       expect(afterRetry.fromCache).toBe(false);
       expect(afterRetry.stream.url).toBe(stream("fresh").url);
     }
-    const s = run([{ t: "MEDIA_ERROR", seq: 1 }], afterRetry);
+    const s = run([{ t: "MEDIA_ERROR", seq: 1, atSeconds: 42 }], afterRetry);
     expect(s.kind).toBe("downloading");
   });
 
@@ -122,7 +123,7 @@ describe("web-playback machine: warm boot (r112)", () => {
       { t: "LOAD", seq: 2, url: URL, mode: "stream-first" },
       { t: "RESOLVED", seq: 2, stream: stream("warm"), fromCache: true },
     ]);
-    const s = run([{ t: "MEDIA_ERROR", seq: 1 }], base);
+    const s = run([{ t: "MEDIA_ERROR", seq: 1, atSeconds: 42 }], base);
     expect(s).toEqual(base);
   });
 
@@ -141,5 +142,24 @@ describe("web-playback machine: warm boot (r112)", () => {
       { t: "RESET" },
     ]);
     expect(s).toEqual(INITIAL_WEB_PLAYBACK);
+  });
+});
+
+describe("RC4 position handoff (resumeAtSeconds)", () => {
+  it("MEDIA_ERROR carries the playhead into downloading and through to cached", () => {
+    let s = webPlaybackReducer(INITIAL_WEB_PLAYBACK, { t: "LOAD", seq: 1, url: "u", mode: "stream-first" });
+    s = webPlaybackReducer(s, { t: "RESOLVED", seq: 1, stream: stream("s"), fromCache: false });
+    s = webPlaybackReducer(s, { t: "MEDIA_ERROR", seq: 1, atSeconds: 137.5 });
+    expect(s.kind).toBe("downloading");
+    if (s.kind === "downloading") expect(s.resumeAtSeconds).toBe(137.5);
+    s = webPlaybackReducer(s, { t: "DOWNLOAD_DONE", seq: 1, cachePath: "/tmp/x.mp4" });
+    expect(s.kind).toBe("cached");
+    if (s.kind === "cached") expect(s.resumeAtSeconds).toBe(137.5);
+  });
+
+  it("warm-boot LOAD_CACHED starts at 0", () => {
+    const s = webPlaybackReducer(INITIAL_WEB_PLAYBACK, { t: "LOAD_CACHED", seq: 2, url: "u", cachePath: "/tmp/y.mp4" });
+    expect(s.kind).toBe("cached");
+    if (s.kind === "cached") expect(s.resumeAtSeconds).toBe(0);
   });
 });

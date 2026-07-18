@@ -1076,6 +1076,9 @@ export default function App() {
   const webPlayback = useWebPlayback({
     appendLog,
     pushNotification,
+    // Playhead at dispatch time, for the download fallback's position
+    // handoff (RC4). fps via ref-free read: round at call time.
+    getPlayheadSeconds: () => getPlayheadFrames() / Math.max(1, Math.round(fpsRef.current)),
     maybePromptYtAuth,
     cookiesBrowser: cookiesBrowserOrNone,
     previewMaxHeight: defaults.previewMaxHeight,
@@ -1207,6 +1210,8 @@ export default function App() {
   localFilePathRef.current = localFilePath;
   const metadataRef = useRef<Metadata | null>(null);
   metadataRef.current = metadata;
+  const webPlaybackRef = useRef(webPlayback);
+  webPlaybackRef.current = webPlayback;
   const fpsRef = useRef(fps);
   fpsRef.current = fps;
   const exportOptsRef = useRef(exportOpts);
@@ -1490,6 +1495,16 @@ export default function App() {
     webOnPlayerReady();
     // Player is up → drop the resolving/buffering overlay (r62).
     setPlayerReady(true);
+    // RC4 position handoff: the download fallback carried the playhead the
+    // stream died at through the machine (downloading → cached). The cached
+    // LocalMediaPlayer boots at 0 — seek it back before the user notices.
+    const wp = webPlaybackRef.current;
+    if (wp.cachePath && wp.cachedResumeAt > 0.5) {
+      const at = wp.cachedResumeAt;
+      try { playerRef.current?.seekTo?.(at); } catch { /* best effort */ }
+      markUserSeek(playheadSecondsToFrames(at, fpsRef.current));
+      publishPlayheadFrames(playheadSecondsToFrames(at, fpsRef.current));
+    }
     // Apply persisted volume + mute + playback speed as soon as a player
     // becomes ready, and record whether it can honour a rate at all (drives
     // the speed UI's disabled state — MediaBunny always plays at 1×).

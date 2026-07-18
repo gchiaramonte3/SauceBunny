@@ -49,6 +49,9 @@ type Helpers = {
   cookiesBrowser: () => string | undefined;
   /** Preview height cap (governs both the streamed res and the download). */
   previewMaxHeight: number;
+  /** Playhead at dispatch time — carried on MEDIA_ERROR/WATCHDOG so the
+   *  download fallback can resume where the stream died (RC4). */
+  getPlayheadSeconds: () => number;
 };
 
 export type WebPlayback = {
@@ -60,6 +63,8 @@ export type WebPlayback = {
   videoCodec: string | null;
   audioCodec: string | null;
   cachePath: string | null;
+  /** Playhead the stream died at (RC4) — the cached player resumes here. */
+  cachedResumeAt: number;
   downloading: boolean;
   downloadProgress: number;
   downloadJobId: string | null;
@@ -216,7 +221,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
         h.appendLog("warn", "media", "Stream didn't open in 15s. Falling back to download.");
         h.pushNotification("info", "Downloading preview…", "Fetching the file via yt-dlp so you can scrub and mark in-app.");
       }
-      dispatch({ t: "WATCHDOG", seq: mySeq });
+      dispatch({ t: "WATCHDOG", seq: mySeq, atSeconds: helpersRef.current.getPlayheadSeconds() });
     }, WATCHDOG_MS);
     return () => window.clearTimeout(t);
   }, [kind, seq, streamingReady]);
@@ -321,7 +326,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
         // The cached signed URL rotted (403/expired). One fresh resolve
         // before the download fallback — no toast, this self-heals fast.
         h.appendLog("info", "cache", `Cached stream URL failed (${message}). Getting a fresh URL.`);
-        dispatch({ t: "MEDIA_ERROR", seq: s.seq });
+        dispatch({ t: "MEDIA_ERROR", seq: s.seq, atSeconds: helpersRef.current.getPlayheadSeconds() });
         return true;
       }
       // r81: not a failure from the user's POV — some sources (HLS-only /
@@ -329,7 +334,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
       // we quietly download a playable copy. Keep it `info`, not `warn`.
       h.appendLog("info", "media", `In-app stream unavailable for this source (${message}). Downloading a playable copy instead…`);
       h.pushNotification("info", "Downloading preview…", "Couldn't stream this source in-app. Fetching the file so you can scrub and mark.");
-      dispatch({ t: "MEDIA_ERROR", seq: s.seq });
+      dispatch({ t: "MEDIA_ERROR", seq: s.seq, atSeconds: helpersRef.current.getPlayheadSeconds() });
       return true;
     }
     return false;
@@ -358,6 +363,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     videoCodec: state.kind === "streaming" ? state.stream.videoCodec : null,
     audioCodec: state.kind === "streaming" ? state.stream.audioCodec : null,
     cachePath: state.kind === "cached" ? state.cachePath : null,
+    cachedResumeAt: state.kind === "cached" ? state.resumeAtSeconds : 0,
     downloading: state.kind === "downloading",
     downloadProgress: state.kind === "downloading" ? state.progress : 0,
     downloadJobId: state.kind === "downloading" ? state.jobId : null,

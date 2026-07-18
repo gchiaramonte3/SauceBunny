@@ -19,7 +19,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { formatError } from "../lib/error-format";
-import { getPlayheadFrames } from "../lib/playhead-store";
+import { getLastUserSeekAt, getPlayheadFrames } from "../lib/playhead-store";
 import {
   loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc,
   commentMarkers as reviewMarkersOf, annotationsOf,
@@ -190,7 +190,16 @@ export function useCoReview({
         // Follow: while playing, chase drift > 0.5 s. While paused, only jump
         // when the host actually scrubbed — so a paused guest can glance at a
         // nearby frame without being yanked back on every heartbeat.
-        if (m.playing) {
+        // RC3 latch: a local seek in the last ~1.2s owns the playhead — the
+        // chase yielding here is what lets a guest click a transcript cue
+        // without being yanked back on the next heartbeat. The heartbeat
+        // re-evaluates 500ms later, so genuine drift still corrects.
+        const localSeekHot = Date.now() - getLastUserSeekAt() < 1200;
+        if (localSeekHot && !justLoaded) {
+          if (import.meta.env.DEV && Math.abs(cur - expected) > 0.5) {
+            console.info("[co-review] chase yielded to a local seek", { cur, expected });
+          }
+        } else if (m.playing) {
           if (Math.abs(cur - expected) > 0.5) onSeek(Math.floor(expected * r));
         } else if (justLoaded || (hostScrubbed && Math.abs(cur - expected) > 0.1)) {
           onSeek(Math.floor(expected * r));

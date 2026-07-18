@@ -625,6 +625,15 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             // delivery phase it exists to guard.
             // New pipeline is positioned at baseTime (video.currentTime 0) —
             // safe to report time again, and resume if we were playing.
+            // RC5b: a NEWER seek arrived while this pipeline was opening
+            // (debounce armed or a target pending). Publishing T1 here would
+            // visibly snap the just-clicked playhead backward for ~280ms and
+            // consuming wantPlay would resume the wrong stream — yield; the
+            // newer rebuild owns the resume and tears this MediaSource down.
+            if (rebuildTimerRef.current != null || pendingSeekRef.current != null) {
+              onDiagRef.current?.("info", "pipeline superseded before open; yielding to the newer seek");
+              return;
+            }
             seekingRef.current = false;
             onTimeUpdateRef.current?.(fromSeconds);
             onDiagRef.current?.("ok", `pipeline open at ${fromSeconds.toFixed(1)}s → playhead ${fromSeconds.toFixed(1)}s`);
