@@ -1,60 +1,85 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { saveJson } from "../lib/storage";
 import { IconCrown } from "./Icons";
-import { AUTHOR_KEY, REVIEW_CHANGED_EVENT, initialsOf, loadReviewer } from "../lib/review";
+import {
+  AUTHOR_COLOR_KEY, AUTHOR_KEY, AVATAR_COLORS, REVIEW_CHANGED_EVENT,
+  initialsOf, loadReviewer,
+} from "../lib/review";
+import { useMediaCapture } from "../hooks/use-media-capture";
+import { GreenRoomDevices } from "./GreenRoomDevices";
 import type { Participant } from "./ParticipantRail";
 import type { SessionState } from "../bindings/SessionState";
 
 /**
- * Co-Review lobby — the first-class destination (nav rail, ⌘4) that promotes
- * the watch-party from a toolbar afterthought to a full surface. It's a
- * parallel view over the SAME useCoReview state the toolbar CoReviewPopover
- * reads; nothing here owns session state (that lives in Rust).
+ * The Review lobby - the GREEN ROOM. Three calm steps in one tone-card
+ * column: IDENTITY (name + avatar color; returning users skip it),
+ * DEVICES (GreenRoomDevices sibling: preview, selects, meter, permission
+ * states), READY (host Start / join code). Saved identity + granted
+ * permissions land straight on READY with a compact device strip.
  *
- * Designed as a calm centered "green room": ONE column (~560px, generous top
- * space) in both faces so nothing jumps when a session starts — only the
- * column's content swaps.
- *   · idle      → quiet header + Host and Join cards, stacked.
- *   · in session → live badge, the join code as a click-to-copy keycap chip
- *                 (host only), a horizontal avatar roster, a door into the
- *                 theater and a quiet leave.
- * The display-name field writes the reviewer identity (loadReviewer / AUTHOR_KEY)
- * because startCoReview() takes no args and hosts under that name — so the typed
- * name is what the roster shows. "Enter theater" jumps to Clip AND flips
- * screening on (the theater overlays the Clip player).
+ * The capture opened here is THE session capture (use-media-capture's
+ * module singleton) - the room's self tile and the mesh reuse it; it is
+ * released when the session ends, whichever surface ended it.
  */
-export function CoReviewLobby({ session, localSource, participants, onStart, onJoin, onLeave, }: {
+type Step = "identity" | "devices" | "ready";
+
+export function CoReviewLobby({ session, localSource, participants, onStart, onJoin, onLeave }: {
   session: SessionState;
-  /** A local file is loaded — guests can't receive it yet (hosting still allowed). */
+  /** A local file is loaded - guests can't receive it yet (hosting still allowed). */
   localSource: boolean;
   participants: Participant[];
   onStart: () => void;
   onJoin: (ticket: string, name: string) => void;
   onLeave: () => void;
 }) {
+  const cap = useMediaCapture();
   const [copied, setCopied] = useState(false);
   const [name, setName] = useState(() => loadReviewer().name);
+  const [color, setColor] = useState(() => loadReviewer().color);
   const [ticket, setTicket] = useState("");
   const [joining, setJoining] = useState(false);
+  const [step, setStep] = useState<Step>(() => (loadReviewer().name ? "devices" : "identity"));
   const active = session.role !== "off";
   const isHost = session.role === "host";
   const joinReady = ticket.trim().length > 0 && name.trim().length > 0;
-  // Clear the transient "Connecting…" the moment the session resolves either way
-  // (role flips to peer/host on success; an error surfaces on failure).
+
+  // Returning-user fast path: saved identity + already-granted permissions
+  // land on READY (a one-shot upgrade before any interaction this mount).
+  const steppedRef = useRef(false);
+  useEffect(() => {
+    if (steppedRef.current) return;
+    if (loadReviewer().name && cap.permission === "granted") setStep("ready");
+  }, [cap.permission]);
+
+  // Session over -> release the hardware (the camera light must never
+  // outlive the session, whichever surface ended it).
+  const prevRoleRef = useRef(session.role);
+  useEffect(() => {
+    if (prevRoleRef.current !== "off" && session.role === "off") cap.release();
+    prevRoleRef.current = session.role;
+  }, [session.role, cap]);
+
+  // Clear the transient "Connecting…" once the session resolves either way.
   useEffect(() => { setJoining(false); }, [session.role, session.error]);
 
-  // Persist the typed name as the reviewer identity so the roster + host name
-  // reflect it (there's no backend session-name; loadReviewer() is the source).
-  const persistName = (v: string) => {
-    saveJson(AUTHOR_KEY, v);
+  const persistIdentity = (n: string, c: string) => {
+    saveJson(AUTHOR_KEY, n);
+    saveJson(AUTHOR_COLOR_KEY, c);
     try { window.dispatchEvent(new CustomEvent(REVIEW_CHANGED_EVENT)); } catch { /* non-DOM */ }
   };
-  const startSession = () => { const v = name.trim(); if (v) persistName(v); onStart(); };
+  const continueIdentity = () => {
+    const v = name.trim();
+    if (!v) return;
+    steppedRef.current = true;
+    persistIdentity(v, color);
+    setStep("devices");
+  };
+  const startSession = () => { const v = name.trim(); if (v) persistIdentity(v, color); onStart(); };
   const joinSession = () => {
     const v = name.trim(); const t = ticket.trim();
     if (!v || !t) return;
-    persistName(v);
+    persistIdentity(v, color);
     setJoining(true);
     onJoin(t, v);
   };
@@ -66,6 +91,11 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
       window.setTimeout(() => setCopied(false), 1600);
     } catch { /* clipboard unavailable */ }
   };
+
+  const deviceSummary = [
+    cap.choice.cameraOff ? "Camera off" : (cap.devices.cameras.find((d) => d.deviceId === cap.choice.cameraId)?.label || "Default camera"),
+    cap.choice.micMuted ? "Mic muted" : (cap.devices.mics.find((d) => d.deviceId === cap.choice.micId)?.label || "Default mic"),
+  ].join(" · ");
 
   return (
     <main className="cp-coreview-lobby" aria-label="Co-Review">
@@ -79,42 +109,80 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
               </p>
             </header>
 
-            <section className="cp-colobby-card">
-              <h2 className="cp-colobby-card-title">Host</h2>
-              <label className="cp-colobby-field">
-                <span className="cp-colobby-field-label">Your name</span>
-                <input className="cp-colobby-input" value={name}
-                  onChange={(e) => setName(e.target.value)} placeholder="Your name" />
-              </label>
-              <button type="button" className="btn btn-primary cp-colobby-cta" onClick={startSession}>
-                Start session
-              </button>
-            </section>
-            {localSource && (
-              <p className="cp-colobby-hint">
-                Local files can't be shared yet. Load a web URL to screen together.
-              </p>
+            {step === "identity" && (
+              <section className="cp-colobby-card" aria-label="Your identity">
+                <h2 className="cp-colobby-card-title">You</h2>
+                <label className="cp-colobby-field">
+                  <span className="cp-colobby-field-label">Your name</span>
+                  <input className="cp-colobby-input" value={name} autoFocus
+                    onChange={(e) => setName(e.target.value)} placeholder="Your name"
+                    onKeyDown={(e) => { if (e.key === "Enter") continueIdentity(); }} />
+                </label>
+                <div className="cp-gr-swatches" role="radiogroup" aria-label="Avatar color">
+                  {AVATAR_COLORS.map((c) => (
+                    <button key={c} type="button" role="radio" aria-checked={color === c}
+                      className={"cp-gr-swatch" + (color === c ? " picked" : "")}
+                      style={{ ["--sw" as string]: c }} aria-label={`Avatar color ${c}`}
+                      onClick={() => setColor(c)} />
+                  ))}
+                </div>
+                <button type="button" className="btn btn-primary cp-colobby-cta"
+                  disabled={!name.trim()} onClick={continueIdentity}>
+                  Continue
+                </button>
+              </section>
             )}
 
-            <section className="cp-colobby-card">
-              <h2 className="cp-colobby-card-title">Join</h2>
-              <label className="cp-colobby-field">
-                <span className="cp-colobby-field-label">Join code</span>
-                <input className="cp-colobby-input" value={ticket} spellCheck={false}
-                  onChange={(e) => setTicket(e.target.value)} placeholder="Paste a join code" />
-              </label>
-              <label className="cp-colobby-field">
-                <span className="cp-colobby-field-label">Your name</span>
-                <input className="cp-colobby-input" value={name}
-                  onChange={(e) => setName(e.target.value)} placeholder="Your name" />
-              </label>
-              <button type="button"
-                className={"btn " + (joinReady ? "btn-primary" : "btn-ghost") + " cp-colobby-cta"}
-                disabled={!joinReady || joining} onClick={joinSession}>
-                {joining ? "Connecting…" : "Join"}
-              </button>
-              {session.error && <p className="cp-colobby-err" role="alert">{session.error}</p>}
-            </section>
+            {step === "devices" && (
+              <GreenRoomDevices cap={cap} onContinue={() => { steppedRef.current = true; setStep("ready"); }} />
+            )}
+
+            {step === "ready" && (
+              <>
+                <section className="cp-colobby-card" aria-label="Devices">
+                  <div className="cp-gr-strip">
+                    <GreenRoomThumb stream={cap.stream} />
+                    <span className="cp-gr-strip-names" title={deviceSummary}>{deviceSummary}</span>
+                    <button type="button" className="btn btn-ghost btn-compact"
+                      onClick={() => { steppedRef.current = true; setStep("devices"); }}>
+                      Change
+                    </button>
+                  </div>
+                </section>
+
+                <section className="cp-colobby-card">
+                  <h2 className="cp-colobby-card-title">Host</h2>
+                  <button type="button" className="btn btn-primary cp-colobby-cta" onClick={startSession}>
+                    Start session
+                  </button>
+                </section>
+                {localSource && (
+                  <p className="cp-colobby-hint">
+                    Local files can't be shared yet. Load a web URL to screen together.
+                  </p>
+                )}
+
+                <section className="cp-colobby-card">
+                  <h2 className="cp-colobby-card-title">Join</h2>
+                  <label className="cp-colobby-field">
+                    <span className="cp-colobby-field-label">Join code</span>
+                    <input className="cp-colobby-input" value={ticket} spellCheck={false}
+                      onChange={(e) => setTicket(e.target.value)} placeholder="Paste a join code" />
+                  </label>
+                  <button type="button"
+                    className={"btn " + (joinReady ? "btn-primary" : "btn-ghost") + " cp-colobby-cta"}
+                    disabled={!joinReady || joining} onClick={joinSession}>
+                    {joining ? "Connecting…" : "Join"}
+                  </button>
+                  {session.error && <p className="cp-colobby-err" role="alert">{session.error}</p>}
+                </section>
+
+                <button type="button" className="cp-gr-editname"
+                  onClick={() => { steppedRef.current = true; setStep("identity"); }}>
+                  Not you? Edit name
+                </button>
+              </>
+            )}
           </>
         )}
 
@@ -168,4 +236,19 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
       </div>
     </main>
   );
+}
+
+/** Tiny live preview thumb for the READY device strip (avatar-size). */
+function GreenRoomThumb({ stream }: { stream: MediaStream | null }) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    v.srcObject = stream;
+    if (stream) v.play().catch(() => { /* autoplay */ });
+  }, [stream]);
+  if (!stream || stream.getVideoTracks().length === 0) {
+    return <span className="cp-gr-strip-thumb off" aria-hidden />;
+  }
+  return <video ref={ref} className="cp-gr-strip-thumb" muted playsInline aria-hidden />;
 }

@@ -315,3 +315,15 @@ Claude Code appends per-prompt items here overnight. Baseline list:
    ffmpeg after force-quit.
 5. Approval status set in a live session syncs to the other instance and
    shows on the Home card afterward.
+
+### Appended overnight (prompt 2)
+
+- Green room specifics to verify on hardware: the ONE getUserMedia prompt
+  fires on "Enable camera and microphone" (not on lobby mount); device
+  labels populate only after the grant; the denied path's System Settings
+  deep link opens Privacy & Security > Camera; switching camera/mic in the
+  selects re-opens the stream on the new device; the mic meter moves when
+  you speak; camera-off shows the "Camera off" card; choices persist
+  across relaunch (saucebunny.mediaDevices); leaving the session or
+  quitting the app turns the camera light off (pagehide + role-off
+  release paths).

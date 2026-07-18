@@ -1,0 +1,90 @@
+import { loadJson, saveJson } from "./storage";
+
+/**
+ * THE device seam. This module is the ONLY place in the app that touches
+ * `navigator.mediaDevices` (contract stated in the review-workspace pack:
+ * if real hardware misbehaves, the fix is contained here). Plain typed
+ * functions; ownership/lifecycle lives in hooks/use-media-capture.ts.
+ */
+
+export type DeviceChoice = {
+  cameraId: string | null;
+  micId: string | null;
+  cameraOff: boolean;
+  micMuted: boolean;
+};
+
+export const DEVICE_CHOICE_KEY = "saucebunny.mediaDevices";
+
+export function loadDeviceChoice(): DeviceChoice {
+  return loadJson<DeviceChoice>(DEVICE_CHOICE_KEY, {
+    cameraId: null,
+    micId: null,
+    cameraOff: false,
+    micMuted: false,
+  });
+}
+
+export function saveDeviceChoice(c: DeviceChoice): void {
+  saveJson(DEVICE_CHOICE_KEY, c);
+}
+
+export type AvPermission = "unknown" | "granted" | "denied";
+
+/** Best-effort permission probe. WKWebView's Permissions API coverage for
+ *  camera/microphone is inconsistent, so anything that throws or reports
+ *  "prompt" collapses to "unknown" (the UI then shows the one Enable
+ *  button and lets getUserMedia produce the real prompt). */
+export async function queryAvPermission(): Promise<AvPermission> {
+  try {
+    const perms = navigator.permissions;
+    if (!perms?.query) return "unknown";
+    const [cam, mic] = await Promise.all([
+      perms.query({ name: "camera" as PermissionName }),
+      perms.query({ name: "microphone" as PermissionName }),
+    ]);
+    if (cam.state === "denied" || mic.state === "denied") return "denied";
+    if (cam.state === "granted" && mic.state === "granted") return "granted";
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+export type AvDevices = { cameras: MediaDeviceInfo[]; mics: MediaDeviceInfo[] };
+
+/** Camera + mic lists. Pre-grant, labels are empty per spec — callers render
+ *  "Default" until a stream exists and labels populate. */
+export async function enumerateAv(): Promise<AvDevices> {
+  const all = await navigator.mediaDevices.enumerateDevices();
+  return {
+    cameras: all.filter((d) => d.kind === "videoinput"),
+    mics: all.filter((d) => d.kind === "audioinput"),
+  };
+}
+
+/** Open the session capture for a device choice. Camera-off still requests
+ *  audio (presence degrades to avatar, voice continues); both-off returns
+ *  null without prompting. Throws getUserMedia errors through — the caller
+ *  maps NotAllowedError to the denied UI. */
+export async function openCapture(c: DeviceChoice): Promise<MediaStream | null> {
+  const wantVideo = !c.cameraOff;
+  const wantAudio = true; // mic-mute is track.enabled, not a missing track
+  if (!wantVideo && !wantAudio) return null;
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: wantVideo
+      ? (c.cameraId ? { deviceId: { ideal: c.cameraId }, width: { ideal: 1280 }, height: { ideal: 720 } } : { width: { ideal: 1280 }, height: { ideal: 720 } })
+      : false,
+    audio: c.micId ? { deviceId: { ideal: c.micId } } : true,
+  });
+  const mic = stream.getAudioTracks()[0];
+  if (mic) mic.enabled = !c.micMuted;
+  return stream;
+}
+
+export function stopStream(s: MediaStream | null): void {
+  if (!s) return;
+  for (const t of s.getTracks()) {
+    try { t.stop(); } catch { /* already stopped */ }
+  }
+}

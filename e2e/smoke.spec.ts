@@ -99,7 +99,9 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   await expect(page.locator(".cp-view-clip")).toBeHidden();
   await expect(page.locator(".cp-view-clip .cp-toolbar")).toBeAttached();
   // The lobby is session-first: hosting is available with no source loaded.
-  await expect(page.getByRole("button", { name: "Start session", exact: true })).toBeEnabled();
+  // Fresh profile lands on the green room's IDENTITY step; Start lives on
+  // the READY step behind it (covered by the green-room specs).
+  await expect(page.getByPlaceholder("Your name")).toBeVisible();
   // Join stays gated (neutral) until both the code and a name are present.
   await expect(page.getByRole("button", { name: "Join", exact: true })).toBeDisabled();
   await page.keyboard.press("Control+3");
@@ -168,7 +170,8 @@ test("sessions live in Review: no toolbar popover, the lobby owns start/join", a
   await page.getByRole("button", { name: "Review" }).click();
   const lobby = page.locator(".cp-view-coreview");
   await expect(lobby).toBeVisible();
-  await expect(lobby.getByRole("button", { name: "Start session" })).toBeEnabled();
+  // Fresh profile: the green room opens on IDENTITY (Start sits on READY).
+  await expect(lobby.getByPlaceholder("Your name")).toBeVisible();
   // No live session -> the body never carries the room class.
   await expect(page.locator(".cp-body.cp-room")).toHaveCount(0);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
@@ -541,5 +544,44 @@ test("recent exports: grouped per source, chevron reveals older exports", async 
   // Close: they fold away again.
   await chev.click();
   await expect(page.locator(".cp-recent.nested")).toHaveCount(0);
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
+test("green room: identity, devices, ready; saved identity skips ahead", async ({ page }) => {
+  await boot(page);
+  await page.getByRole("button", { name: "Review" }).click();
+  const lobby = page.locator(".cp-view-coreview");
+
+  // Fresh profile: IDENTITY first. Name + a swatch, then continue.
+  await lobby.getByPlaceholder("Your name").fill("Nika");
+  await lobby.locator(".cp-gr-swatch").nth(2).click();
+  await lobby.getByRole("button", { name: "Continue" }).click();
+
+  // DEVICES: one Enable button pre-grant; the mock grants and streams.
+  await lobby.getByRole("button", { name: "Enable camera and microphone" }).click();
+  await expect(lobby.locator(".cp-gr-preview video")).toBeVisible();
+  // Post-grant labels populate the selects.
+  await expect(lobby.locator(".cp-gr-selects select").first()).toBeVisible();
+  await lobby.getByRole("button", { name: "Continue" }).click();
+
+  // READY: device strip + host/join faces.
+  await expect(lobby.locator(".cp-gr-strip")).toBeVisible();
+  await expect(lobby.getByRole("button", { name: "Start session" })).toBeEnabled();
+  await expect(lobby.getByPlaceholder("Paste a join code")).toBeVisible();
+  expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
+});
+
+test("green room: returning user with granted devices lands on READY", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("saucebunny.review.author", JSON.stringify("Nika"));
+    localStorage.setItem("e2e.avGranted", "1");
+  });
+  await boot(page);
+  await page.getByRole("button", { name: "Review" }).click();
+  const lobby = page.locator(".cp-view-coreview");
+  // Straight to READY: compact device strip instead of the full step.
+  await expect(lobby.locator(".cp-gr-strip")).toBeVisible();
+  await expect(lobby.getByRole("button", { name: "Start session" })).toBeEnabled();
+  await expect(lobby.getByRole("button", { name: "Enable camera and microphone" })).toHaveCount(0);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });

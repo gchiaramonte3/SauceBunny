@@ -163,4 +163,60 @@ export function tauriMockInit(expectedBuildId: string): void {
     },
     plugins: {},
   };
+
+  // ── navigator.mediaDevices mock (green-room onboarding smoke) ──────
+  // Chromium in CI has no camera; the lobby's device flow runs against a
+  // canvas-fed video track + an oscillator audio track. Two fake devices
+  // per kind so the selects render real options. Seed
+  // localStorage["e2e.avGranted"] = "1" to simulate a prior TCC grant
+  // (drives the returning-user READY fast path via permissions.query).
+  const fakeDevice = (kind: MediaDeviceKind, id: string, label: string) =>
+    ({ kind, deviceId: id, groupId: "g0", label, toJSON: () => ({}) }) as MediaDeviceInfo;
+  const makeStream = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 160; canvas.height = 90;
+    const draw = canvas.getContext("2d");
+    if (draw) { draw.fillStyle = "#345"; draw.fillRect(0, 0, 160, 90); }
+    const stream: MediaStream = (canvas as HTMLCanvasElement & { captureStream(fps?: number): MediaStream }).captureStream(5);
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const dest = ctx.createMediaStreamDestination();
+      osc.connect(dest);
+      osc.start();
+      const at = dest.stream.getAudioTracks()[0];
+      if (at) stream.addTrack(at);
+    } catch { /* audio optional in the smoke run */ }
+    return stream;
+  };
+  const grantedFlag = () => { try { return localStorage.getItem("e2e.avGranted") === "1"; } catch { return false; } };
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: {
+      enumerateDevices: async () => [
+        fakeDevice("videoinput", "cam-a", grantedFlag() ? "Studio Display Camera" : ""),
+        fakeDevice("videoinput", "cam-b", grantedFlag() ? "Continuity Camera" : ""),
+        fakeDevice("audioinput", "mic-a", grantedFlag() ? "MacBook Pro Microphone" : ""),
+        fakeDevice("audioinput", "mic-b", grantedFlag() ? "External Mic" : ""),
+      ],
+      getUserMedia: async () => {
+        try { localStorage.setItem("e2e.avGranted", "1"); } catch { /* ignore */ }
+        return makeStream();
+      },
+      addEventListener: () => { /* devicechange unused in the mock */ },
+      removeEventListener: () => { /* symmetric no-op */ },
+    },
+  });
+  const realQuery = navigator.permissions?.query?.bind(navigator.permissions);
+  if (navigator.permissions) {
+    Object.defineProperty(navigator.permissions, "query", {
+      configurable: true,
+      value: async (desc: { name: string }) => {
+        if (desc.name === "camera" || desc.name === "microphone") {
+          return { state: grantedFlag() ? "granted" : "prompt" } as PermissionStatus;
+        }
+        return realQuery ? realQuery(desc as PermissionDescriptor) : ({ state: "prompt" } as PermissionStatus);
+      },
+    });
+  }
 }
