@@ -1,10 +1,11 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useMemo, useEffect, useState, type CSSProperties } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { GenerateButton } from "./GenerateButton";
 import { StatefulButton } from "./StatefulButton";
 import {
+  IconChevronRight,
   IconFilm, IconCaptions, IconReveal,
   IconDownload, IconSparkles, IconPlus,
 } from "./Icons";
@@ -200,6 +201,30 @@ export function Sidebar(props: Props) {
 
   const inValid  = exportOpts.inTc  === "" || isValidTc(exportOpts.inTc,  fps);
   const outValid = exportOpts.outTc === "" || isValidTc(exportOpts.outTc, fps);
+  // Recent exports grouped by source title: newest of each group leads,
+  // groups ordered by their newest member (the list is already newest-first).
+  const groupedRecents = useMemo(() => {
+    const byTitle = new Map<string, { lead: RecentClip; rest: RecentClip[] }>();
+    const groups: { lead: RecentClip; rest: RecentClip[] }[] = [];
+    for (const r of recents) {
+      const g = byTitle.get(r.title);
+      if (g) g.rest.push(r);
+      else {
+        const fresh = { lead: r, rest: [] as RecentClip[] };
+        byTitle.set(r.title, fresh);
+        groups.push(fresh);
+      }
+    }
+    return groups;
+  }, [recents]);
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = (title: string) =>
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(title)) next.delete(title); else next.add(title);
+      return next;
+    });
+
   const filenameValid = sanitizeFilename(exportOpts.filename).length > 0;
   // Export is allowed when: source loaded, folder + filename set, marks are
   // either both unset (= full clip) or both valid with out > in.
@@ -726,28 +751,64 @@ export function Sidebar(props: Props) {
             </button>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {recents.map((r) => (
-              <div className="cp-recent" key={r.id} onClick={() => onPickRecent(r)} title={r.path}>
-                <div className="thumb">
-                  {r.thumbnail && <img src={r.thumbnail} alt="" referrerPolicy="no-referrer" />}
-                </div>
-                <div className="body">
-                  <div className="title" title={decodeHtmlEntities(r.title)}>{decodeHtmlEntities(r.title)}</div>
-                  <div className="meta">
-                    <span className="tc">{r.dur}</span>
-                    <span className="sep" />
-                    <span>{formatRelative(r.when)}</span>
+            {/* Grouped by source: the newest export leads; the chevron
+                reveals older exports from the same source. Storage stays
+                flat — grouping is purely presentational. */}
+            {groupedRecents.map((g) => (
+              <div className="cp-recent-group" key={g.lead.id}>
+                <div className="cp-recent" onClick={() => onPickRecent(g.lead)} title={g.lead.path}>
+                  <div className="thumb">
+                    {g.lead.thumbnail && <img src={g.lead.thumbnail} alt="" referrerPolicy="no-referrer" />}
                   </div>
+                  <div className="body">
+                    <div className="title" title={decodeHtmlEntities(g.lead.title)}>{decodeHtmlEntities(g.lead.title)}</div>
+                    <div className="meta">
+                      <span className="tc">{g.lead.dur}</span>
+                      <span className="sep" />
+                      <span>{formatRelative(g.lead.when)}</span>
+                    </div>
+                  </div>
+                  {g.rest.length > 0 && (
+                    <button
+                      className={"btn-icon cp-recent-chev" + (openGroups.has(g.lead.title) ? " open" : "")}
+                      title={openGroups.has(g.lead.title) ? "Hide older exports" : `${g.rest.length} more from this source`}
+                      aria-label={openGroups.has(g.lead.title) ? "Hide older exports" : `Show ${g.rest.length} older exports`}
+                      aria-expanded={openGroups.has(g.lead.title)}
+                      onClick={(e) => { e.stopPropagation(); toggleGroup(g.lead.title); }}
+                    >
+                      <IconChevronRight size={12} />
+                    </button>
+                  )}
+                  <button
+                    className="btn-icon"
+                    style={{ width: 22, height: 22, border: "none" }}
+                    title="Reveal in Finder"
+                    aria-label="Reveal in Finder"
+                    onClick={(e) => { e.stopPropagation(); invoke("reveal_in_finder", { path: g.lead.path }).catch(() => {}); }}
+                  >
+                    <IconReveal size={12} />
+                  </button>
                 </div>
-                <button
-                  className="btn-icon"
-                  style={{ width: 22, height: 22, border: "none" }}
-                  title="Reveal in Finder"
-                  aria-label="Reveal in Finder"
-                  onClick={(e) => { e.stopPropagation(); invoke("reveal_in_finder", { path: r.path }).catch(() => {}); }}
-                >
-                  <IconReveal size={12} />
-                </button>
+                {openGroups.has(g.lead.title) && g.rest.map((r) => (
+                  <div className="cp-recent nested" key={r.id} onClick={() => onPickRecent(r)} title={r.path}>
+                    <div className="body">
+                      <div className="meta">
+                        <span className="tc">{r.dur}</span>
+                        <span className="sep" />
+                        <span>{formatRelative(r.when)}</span>
+                      </div>
+                    </div>
+                    <button
+                      className="btn-icon"
+                      style={{ width: 22, height: 22, border: "none" }}
+                      title="Reveal in Finder"
+                      aria-label="Reveal in Finder"
+                      onClick={(e) => { e.stopPropagation(); invoke("reveal_in_finder", { path: r.path }).catch(() => {}); }}
+                    >
+                      <IconReveal size={12} />
+                    </button>
+                  </div>
+                ))}
               </div>
             ))}
           </div>

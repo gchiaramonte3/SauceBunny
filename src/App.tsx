@@ -825,17 +825,12 @@ export default function App() {
   const whisperModelLabel = selectedModel?.name ?? defaults.whisperModel;
 
   // ====== Recents ======
-  // One row per SOURCE in the sidebar's recent clips: re-exporting from the
-  // same title replaces the old row (newest wins) instead of stacking the
-  // same link over and over. Applied on every record AND once at load, which
-  // migrates lists that accumulated duplicates before this rule existed.
-  const [recents, setRecents] = useState<RecentClip[]>(() => {
-    const loaded = loadJson<RecentClip[]>(RECENTS_KEY, []);
-    const seen = new Set<string>();
-    return loaded.filter((r) => (seen.has(r.title) ? false : (seen.add(r.title), true)));
-  });
+  // Recent clips keep EVERY export (capped) — the sidebar GROUPS them by
+  // source at render time: the newest export leads each group, a chevron
+  // reveals the rest. Storage stays flat and dumb.
+  const [recents, setRecents] = useState<RecentClip[]>(() => loadJson<RecentClip[]>(RECENTS_KEY, []));
   const pushRecentClip = (prev: RecentClip[], r: RecentClip): RecentClip[] =>
-    [r, ...prev.filter((p) => p.title !== r.title)].slice(0, 6);
+    [r, ...prev].slice(0, 12);
   useEffect(() => saveJson(RECENTS_KEY, recents), [recents]);
 
   // ====== Recent sources (URL-bar history + "Resume last session") ======
