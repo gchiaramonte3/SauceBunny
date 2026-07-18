@@ -555,7 +555,7 @@ test("green room: identity, devices, ready; saved identity skips ahead", async (
 
   // Fresh profile: IDENTITY first. Name + a swatch, then continue.
   await lobby.getByPlaceholder("Your name").fill("Nika");
-  await lobby.locator(".cp-gr-swatch").nth(2).click();
+  await lobby.locator(".cp-swatch").nth(2).click();
   await lobby.getByRole("button", { name: "Continue" }).click();
 
   // DEVICES: one Enable button pre-grant; the mock grants and streams.

@@ -2,6 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RtcMesh, type MeshPeerState, type MeshSignalPayload } from "../lib/rtc-mesh";
 import { getSessionCapture, subscribeSessionCapture } from "./use-media-capture";
+import { SPEAKERS_CHANGED_EVENT, canPickSpeakers, loadDeviceChoice } from "../lib/media-devices";
+
+/** Route one session-voice element to the chosen output (WebKit 18.4+;
+ *  silently a no-op elsewhere or on "system default"). */
+function applySpeaker(el: HTMLAudioElement): void {
+  const id = loadDeviceChoice().speakerId;
+  if (!id || !canPickSpeakers()) return;
+  void (el as HTMLAudioElement & { setSinkId(id: string): Promise<void> })
+    .setSinkId(id).catch(() => { /* device gone - default output */ });
+}
 
 /**
  * Browser wrapper around the pure RtcMesh core (lib/rtc-mesh.ts): real
@@ -32,6 +42,13 @@ export function useRtcMesh(args: {
   const audioRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const roleRef = useRef(role);
   useEffect(() => { roleRef.current = role; }, [role]);
+
+  // Speaker choice changed in settings: re-route every live voice element.
+  useEffect(() => {
+    const onChange = () => { for (const el of audioRef.current.values()) applySpeaker(el); };
+    window.addEventListener(SPEAKERS_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(SPEAKERS_CHANGED_EVENT, onChange);
+  }, []);
   const onLogRef = useRef(onLog);
   useEffect(() => { onLogRef.current = onLog; }, [onLog]);
 
@@ -72,6 +89,7 @@ export function useRtcMesh(args: {
           if (!el) {
             el = document.createElement("audio");
             el.autoplay = true;
+            applySpeaker(el);
             audioRef.current.set(id, el);
           }
           el.srcObject = stream;

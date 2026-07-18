@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ColorSwatches } from "./ColorSwatches";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -1339,16 +1340,7 @@ function NameGateModal({
           placeholder="e.g. Gasper"
         />
         <div className="cp-review-namegate-colors">
-          {AVATAR_COLORS.map((c) => (
-            <button
-              key={c}
-              className={"cp-review-colordot" + (c === authorColor ? " active" : "")}
-              style={{ background: c }}
-              onClick={() => onPickColor(c)}
-              title="Avatar colour"
-              aria-label={`Avatar colour ${c}`}
-            />
-          ))}
+          <ColorSwatches colors={AVATAR_COLORS} value={authorColor} onPick={onPickColor} ariaLabel="Avatar colour" />
         </div>
         <button className="btn btn-primary" onClick={() => onSave(nameInput)} disabled={!nameInput.trim()}>Start reviewing</button>
       </div>

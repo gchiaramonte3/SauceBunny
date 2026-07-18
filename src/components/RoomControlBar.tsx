@@ -10,11 +10,12 @@ import type { ShareState } from "../lib/share-machine";
 /**
  * The session room's control cluster: mic, camera, share screen (native
  * ffmpeg display capture; SharePicker owns the TCC dance), device settings,
- * theater, leave/end. Terse - labels are hover titles only. It renders
+ * theater. End/Leave lives in the room header, next to Copy join code.
+ * Terse - labels are hover titles only. It renders
  * INSIDE the transport row's right side (Transport's roomControls slot),
  * with the snapshot/speed/volume controls - not floating over the timeline.
  */
-export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareState, onStartShare, onStopShare, theater, onToggleTheater, onLeave, isHost }: {
+export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareState, onStartShare, onStopShare, theater, onToggleTheater }: {
   micOn: boolean;
   camOn: boolean;
   onToggleMic: () => void;
@@ -24,8 +25,6 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
   onStopShare: () => void;
   theater: boolean;
   onToggleTheater: () => void;
-  onLeave: () => void;
-  isHost: boolean;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [devicesOpen, setDevicesOpen] = useState(false);
@@ -92,15 +91,6 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
         onClick={onToggleTheater}
       >
         {theater ? <IconFullscreenExit size={15} /> : <IconFullscreen size={15} />}
-      </button>
-      <button
-        type="button"
-        className="cp-room-bar-btn leave"
-        title={isHost ? "End session" : "Leave session"}
-        aria-label={isHost ? "End the session" : "Leave the session"}
-        onClick={onLeave}
-      >
-        {isHost ? "End" : "Leave"}
       </button>
     </div>
   );

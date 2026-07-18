@@ -9,6 +9,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { IconChevronDown, IconReveal, IconSparkles, IconInfo } from "./Icons";
 import { loadJson, saveJson } from "../lib/storage";
+import { DEVICE_CHOICE_KEY } from "../lib/media-devices";
+import { AvSettingsPane } from "./AvSettingsPane";
+import { ColorSwatches } from "./ColorSwatches";
 import { KeybindingEditor } from "./KeybindingEditor";
 import { loadKeybindings, KEYBINDINGS_STORAGE_KEY, type KeybindingOverrides } from "../lib/keybindings";
 
@@ -32,7 +35,7 @@ import { YouTubeSettings } from "./YouTubeSettings";
 import { useModalFocus } from "../hooks/use-modal-focus";
 import logoUrl from "../assets/saucebunny.svg";
 
-type TabId = "general" | "captions" | "transcription" | "youtube" | "ai-summary" | "commands" | "about";
+type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "commands" | "about";
 
 export type Defaults = {
   folder: string | null;
@@ -192,6 +195,7 @@ type Props = {
 const TABS: { id: TabId; label: string }[] = [
   { id: "general",       label: "General" },
   { id: "captions",      label: "Captions" },
+  { id: "devices",       label: "Camera & Mic" },
   { id: "youtube",       label: "Web sources" },
   { id: "transcription", label: "Transcription" },
   { id: "ai-summary",    label: "AI Summary" },
@@ -462,6 +466,7 @@ export function SettingsModal(props: Props) {
         defaults,
         keybindings: loadKeybindings(),
         sections: loadJson<Record<string, boolean>>(SECTIONS_LS_KEY, {}),
+        media: loadJson<Record<string, unknown>>(DEVICE_CHOICE_KEY, {}),
       };
       const bytes = Array.from(new TextEncoder().encode(JSON.stringify(payload, null, 2)));
       await invoke("write_bytes_to_path", { path, bytes });
@@ -477,7 +482,7 @@ export function SettingsModal(props: Props) {
       const picked = await openDialog({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] });
       if (typeof picked !== "string" || !picked) return;
       const text = await invoke<string>("read_text_file_capped", { path: picked, maxBytes: 4 * 1024 * 1024 });
-      const parsed = JSON.parse(text) as { kind?: string; version?: number; defaults?: unknown; keybindings?: unknown; sections?: unknown };
+      const parsed = JSON.parse(text) as { kind?: string; version?: number; defaults?: unknown; keybindings?: unknown; sections?: unknown; media?: unknown };
       if (parsed.kind !== "settings") {
         setBackupMsg("That file isn't a settings export from this app.");
         return;
@@ -496,6 +501,7 @@ export function SettingsModal(props: Props) {
       if (isObj(parsed.defaults)) { saveJson(DEFAULTS_LS_KEY, parsed.defaults); wrote.push("preferences"); }
       if (isObj(parsed.keybindings)) { saveJson(KEYBINDINGS_STORAGE_KEY, parsed.keybindings); wrote.push("shortcuts"); }
       if (isObj(parsed.sections)) { saveJson(SECTIONS_LS_KEY, parsed.sections); wrote.push("section layout"); }
+      if (isObj(parsed.media)) { saveJson(DEVICE_CHOICE_KEY, parsed.media); wrote.push("devices"); }
       if (wrote.length === 0) {
         setBackupMsg("That export didn't contain any settings to import.");
         return;
@@ -512,6 +518,7 @@ export function SettingsModal(props: Props) {
       localStorage.removeItem(DEFAULTS_LS_KEY);
       localStorage.removeItem(KEYBINDINGS_STORAGE_KEY);
       localStorage.removeItem(SECTIONS_LS_KEY);
+      localStorage.removeItem(DEVICE_CHOICE_KEY);
     } catch { /* ignore */ }
     window.location.reload();
   }, []);
@@ -988,22 +995,11 @@ export function SettingsModal(props: Props) {
                   <div className="cp-pane-row">
                     <div className="k">Text colour</div>
                     <div className="v cp-cap-colors">
-                      {CAP_COLORS.map((c) => (
-                        <button
-                          key={c}
-                          className={"cp-cap-swatch" + (defaults.captionColor.toLowerCase() === c.toLowerCase() ? " active" : "")}
-                          style={{ background: c }}
-                          onClick={() => setDefaults({ ...defaults, captionColor: c })}
-                          title={c}
-                          aria-label={`Caption colour ${c}`}
-                        />
-                      ))}
-                      <input
-                        type="color"
-                        className="cp-cap-color-custom"
+                      <ColorSwatches
+                        colors={CAP_COLORS}
                         value={defaults.captionColor}
-                        onChange={(e) => setDefaults({ ...defaults, captionColor: e.target.value })}
-                        title="Custom colour"
+                        onPick={(c) => setDefaults({ ...defaults, captionColor: c })}
+                        ariaLabel="Caption colour"
                       />
                     </div>
                   </div>
@@ -1013,6 +1009,9 @@ export function SettingsModal(props: Props) {
 
             {tab === "youtube" && (
               <YouTubeSettings defaults={defaults} setDefaults={setDefaults} sectionOpen={sectionOpen} toggleSection={toggleSection} />
+            )}
+            {tab === "devices" && (
+              <AvSettingsPane sectionOpen={sectionOpen} toggleSection={toggleSection} />
             )}
 
             {tab === "transcription" && (

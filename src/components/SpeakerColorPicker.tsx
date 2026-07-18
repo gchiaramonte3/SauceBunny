@@ -1,3 +1,4 @@
+import { ColorSwatches } from "./ColorSwatches";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type Hsv, hsvToHex, rgbToHsv, parseHex, clamp01, SPEAKER_PRESETS } from "../lib/color";
 
@@ -126,19 +127,8 @@ export function SpeakerColorPicker({
 
   if (compact) {
     return (
-      <div className="cp-colorpick-compact" role="listbox" aria-label="Speaker color">
-        {SPEAKER_PRESETS.map((p) => (
-          <button
-            key={p}
-            type="button"
-            role="option"
-            aria-selected={p.toLowerCase() === hex.toLowerCase()}
-            className={"cp-colorpick-swatch" + (p.toLowerCase() === hex.toLowerCase() ? " sel" : "")}
-            style={{ background: p }}
-            title={p}
-            onClick={() => onCommit(p)}
-          />
-        ))}
+      <div className="cp-colorpick-compact">
+        <ColorSwatches colors={SPEAKER_PRESETS} value={hex} onPick={onCommit} size={20} ariaLabel="Speaker color" />
       </div>
     );
   }
@@ -233,19 +223,7 @@ export function SpeakerColorPicker({
         )}
       </div>
 
-      <div className="cp-colorpick-presets" role="listbox" aria-label="Preset colours">
-        {SPEAKER_PRESETS.map((p) => (
-          <button
-            key={p}
-            role="option"
-            aria-selected={p.toLowerCase() === hex.toLowerCase()}
-            className={"cp-colorpick-swatch" + (p.toLowerCase() === hex.toLowerCase() ? " sel" : "")}
-            style={{ background: p }}
-            title={p}
-            onClick={() => pickPreset(p)}
-          />
-        ))}
-      </div>
+      <ColorSwatches colors={SPEAKER_PRESETS} value={hex} onPick={pickPreset} size={20} ariaLabel="Preset colours" />
     </div>
   );
 }

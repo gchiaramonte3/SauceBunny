@@ -4786,6 +4786,14 @@ export default function App() {
                           Copy join code
                         </button>
                       )}
+                      <button
+                        type="button"
+                        className="btn cp-room-end"
+                        title={coSession.role === "host" ? "End the session for everyone" : "Leave the session"}
+                        onClick={leaveCoReview}
+                      >
+                        {coSession.role === "host" ? "End session" : "Leave session"}
+                      </button>
                     </div>
                   </div>
                 )}
@@ -5036,8 +5044,6 @@ export default function App() {
                         onStopShare={stopShare}
                         theater={screening}
                         onToggleTheater={() => setScreening((v) => !v)}
-                        onLeave={leaveCoReview}
-                        isHost={coSession.role === "host"}
                       />
                     ) : undefined}
                   />

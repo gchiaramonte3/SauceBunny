@@ -1195,24 +1195,6 @@
   text-transform: lowercase;
 }
 .cp-colorpick-reset { height: 28px; padding: 0 10px; font-size: 11px; }
-.cp-colorpick-presets {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 6px;
-}
-.cp-colorpick-swatch {
-  height: 20px;
-  border-radius: 6px;
-  border: 1px solid var(--line-2);
-  cursor: pointer;
-  transition: transform 90ms ease, box-shadow 120ms ease;
-}
-.cp-colorpick-swatch:hover { transform: translateY(-1px); border-color: rgba(255,255,255,0.3); }
-.cp-colorpick-swatch.sel { box-shadow: 0 0 0 2px var(--color-surface-elevated), 0 0 0 3px var(--fg-1); }
-.cp-colorpick-swatch:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--color-surface-elevated), 0 0 0 3px var(--focus-ring);
-}
 
 /* Follow playback beside Manage speakers (3d): the roster-button grammar
    with a lifted grey fill so the disengaged state is findable. */

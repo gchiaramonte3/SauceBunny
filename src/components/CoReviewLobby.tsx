@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { loadJson, saveJson } from "../lib/storage";
+import { ColorSwatches } from "./ColorSwatches";
 import { IconCrown } from "./Icons";
 import {
   AUTHOR_COLOR_KEY, AUTHOR_KEY, AVATAR_COLORS, REVIEW_CHANGED_EVENT,
@@ -126,14 +127,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                     onChange={(e) => setName(e.target.value)} placeholder="Your name"
                     onKeyDown={(e) => { if (e.key === "Enter") continueIdentity(); }} />
                 </label>
-                <div className="cp-gr-swatches" role="radiogroup" aria-label="Avatar color">
-                  {AVATAR_COLORS.map((c) => (
-                    <button key={c} type="button" role="radio" aria-checked={color === c}
-                      className={"cp-gr-swatch" + (color === c ? " picked" : "")}
-                      style={{ ["--sw" as string]: c }} aria-label={`Avatar color ${c}`}
-                      onClick={() => setColor(c)} />
-                  ))}
-                </div>
+                <ColorSwatches colors={AVATAR_COLORS} value={color} onPick={setColor} ariaLabel="Avatar color" />
                 <button type="button" className="btn btn-primary cp-colobby-cta"
                   disabled={!name.trim()} onClick={continueIdentity}>
                   Continue

@@ -1,3 +1,4 @@
+import { ColorSwatches } from "./ColorSwatches";
 import { useEffect, useRef, useState } from "react";
 import { getStroke } from "perfect-freehand";
 import { annotationHasContent, type AnnotationStrokes } from "../lib/review";
@@ -232,19 +233,7 @@ export function AnnotationOverlay({
       {drawing ? (
         <div className="cp-annot-tools">
           <div className="cp-annot-swatches">
-            {PEN_COLORS.map((c) => (
-              <button
-                key={c}
-                className={"cp-annot-swatch" + (c === color ? " active" : "")}
-                style={{ background: c }}
-                onClick={() => setColor(c)}
-                title={c}
-                aria-label={`Pen color ${c}`}
-              />
-            ))}
-            <label className="cp-annot-custom" title="Custom color">
-              <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
-            </label>
+            <ColorSwatches colors={PEN_COLORS} value={color} onPick={setColor} size={17} ariaLabel="Pen color" />
           </div>
           <span className="cp-annot-divider" />
           <div className="cp-annot-sizectl" title="Brush size">

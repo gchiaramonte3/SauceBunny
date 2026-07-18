@@ -43,7 +43,7 @@ if (typeof window !== "undefined") {
 export function useMediaCapture() {
   const [stream, setStream] = useState<MediaStream | null>(activeStream);
   const [permission, setPermission] = useState<AvPermission>("unknown");
-  const [devices, setDevices] = useState<AvDevices>({ cameras: [], mics: [] });
+  const [devices, setDevices] = useState<AvDevices>({ cameras: [], mics: [], speakers: [] });
   const [choice, setChoiceState] = useState<DeviceChoice>(() => loadDeviceChoice());
   const [error, setError] = useState<string | null>(null);
 

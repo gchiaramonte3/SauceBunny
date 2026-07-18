@@ -121,3 +121,51 @@ button:focus-visible, input:focus-visible {
   white-space: nowrap;
 }
 
+/* ── ColorSwatches (ColorSwatches.tsx): THE swatch language for every
+      color choice (avatar, speaker, pen, captions). Selection ring is
+      bg + fg-1, never the accent; the custom well hides a native color
+      input (the macOS panel carries its own hex entry). ── */
+.cp-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 2px 0;
+}
+.cp-swatch {
+  width: var(--swatch-size, 22px);
+  height: var(--swatch-size, 22px);
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.cp-swatch:hover { opacity: 1; transform: scale(1.12); }
+.cp-swatch.picked {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 3px var(--fg-1);
+}
+.cp-swatch.custom {
+  position: relative;
+  background: transparent;
+  border: 1.5px dashed var(--line-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.cp-swatch.custom::before { content: "+"; color: var(--fg-3); font-size: 13px; line-height: 1; }
+.cp-swatch.custom.picked { border-style: solid; border-color: transparent; }
+.cp-swatch.custom.picked::before { content: ""; }
+.cp-swatch.custom input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-swatch { transition: none; }
+  .cp-swatch:hover { transform: none; }
+}

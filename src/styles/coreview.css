@@ -387,20 +387,9 @@
 }
 .cp-gr-denied-row { display: flex; justify-content: center; gap: var(--s-2); }
 .cp-gr-denied-line { display: flex; align-items: center; gap: 6px; margin: 0; }
-.cp-gr-swatches { display: flex; justify-content: center; gap: var(--s-2); padding: 2px 0; }
-.cp-gr-swatch {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: none;
-  background: var(--sw);
-  cursor: pointer;
-  opacity: 0.75;
-}
-.cp-gr-swatch.picked {
-  opacity: 1;
-  box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 3px var(--focus-ring);
-}
+/* Identity swatches are the shared ColorSwatches (base.css); the card
+   centers the row. */
+.cp-colobby-card .cp-swatches { justify-content: center; }
 .cp-gr-strip {
   display: flex;
   align-items: center;

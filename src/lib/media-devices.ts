@@ -12,17 +12,30 @@ export type DeviceChoice = {
   micId: string | null;
   cameraOff: boolean;
   micMuted: boolean;
+  /** Voice processing = Apple's whole voice pipeline via the ONE constraint
+   *  WebKit implements (echoCancellation). noiseSuppression/autoGainControl
+   *  are silently ignored by WebKit, so no separate toggles exist. */
+  echoCancel: boolean;
+  /** Session-voice output device (setSinkId, WebKit 18.4+ only). */
+  speakerId: string | null;
 };
 
 export const DEVICE_CHOICE_KEY = "saucebunny.mediaDevices";
+/** Fired after the speaker choice changes so live audio elements re-route. */
+export const SPEAKERS_CHANGED_EVENT = "saucebunny:speakers-changed-out";
+
+const CHOICE_DEFAULTS: DeviceChoice = {
+  cameraId: null,
+  micId: null,
+  cameraOff: false,
+  micMuted: false,
+  echoCancel: true,
+  speakerId: null,
+};
 
 export function loadDeviceChoice(): DeviceChoice {
-  return loadJson<DeviceChoice>(DEVICE_CHOICE_KEY, {
-    cameraId: null,
-    micId: null,
-    cameraOff: false,
-    micMuted: false,
-  });
+  // Spread-merge: blobs persisted before a field existed read as defaults.
+  return { ...CHOICE_DEFAULTS, ...loadJson<Partial<DeviceChoice>>(DEVICE_CHOICE_KEY, {}) };
 }
 
 export function saveDeviceChoice(c: DeviceChoice): void {
@@ -51,15 +64,22 @@ export async function queryAvPermission(): Promise<AvPermission> {
   }
 }
 
-export type AvDevices = { cameras: MediaDeviceInfo[]; mics: MediaDeviceInfo[] };
+export type AvDevices = { cameras: MediaDeviceInfo[]; mics: MediaDeviceInfo[]; speakers: MediaDeviceInfo[] };
 
-/** Camera + mic lists. Pre-grant, labels are empty per spec — callers render
- *  "Default" until a stream exists and labels populate. */
+/** True when this WebKit can route audio to a chosen output (18.4+). */
+export function canPickSpeakers(): boolean {
+  return typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype;
+}
+
+/** Camera + mic + speaker lists. Pre-grant, labels are empty per spec —
+ *  callers render "Default" until a stream exists and labels populate.
+ *  (Speakers enumerate only once mic access is granted.) */
 export async function enumerateAv(): Promise<AvDevices> {
   const all = await navigator.mediaDevices.enumerateDevices();
   return {
     cameras: all.filter((d) => d.kind === "videoinput"),
     mics: all.filter((d) => d.kind === "audioinput"),
+    speakers: canPickSpeakers() ? all.filter((d) => d.kind === "audiooutput") : [],
   };
 }
 
@@ -80,7 +100,12 @@ export async function openCapture(c: DeviceChoice): Promise<MediaStream | null> 
     video: wantVideo
       ? (c.cameraId ? { deviceId: { ideal: c.cameraId }, width: { ideal: 1280 }, height: { ideal: 720 } } : { width: { ideal: 1280 }, height: { ideal: 720 } })
       : false,
-    audio: c.micId ? { deviceId: { ideal: c.micId } } : true,
+    audio: {
+      ...(c.micId ? { deviceId: { ideal: c.micId } } : {}),
+      // Plain (non-exact) constraint: honored where implemented, ignored
+      // elsewhere - never OverconstrainedError.
+      echoCancellation: c.echoCancel,
+    },
   });
   const mic = stream.getAudioTracks()[0];
   if (mic) mic.enabled = !c.micMuted;

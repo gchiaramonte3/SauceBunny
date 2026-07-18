@@ -1074,26 +1074,6 @@
   backdrop-filter: blur(8px);
 }
 .cp-annot-swatches { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-.cp-annot-swatch {
-  width: 17px; height: 17px;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.35);
-  cursor: pointer;
-  padding: 0;
-  transition: transform var(--dur-fast) var(--ease-out);
-}
-.cp-annot-swatch:hover { transform: scale(1.15); }
-.cp-annot-swatch.active { border-color: var(--fg-1); }
-.cp-annot-custom {
-  width: 19px; height: 19px;
-  border-radius: 50%;
-  overflow: hidden;
-  border: 1px dashed rgba(255,255,255,0.35);
-  cursor: pointer;
-  display: inline-flex;
-}
-.cp-annot-custom input { width: 200%; height: 200%; margin: -50%; border: none; padding: 0; background: none; cursor: pointer; }
 .cp-annot-divider { width: 1px; height: 18px; background: var(--line-2); flex-shrink: 0; }
 .cp-annot-sizectl { display: inline-flex; align-items: center; gap: 7px; }
 .cp-annot-dot { display: block; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(0,0,0,0.35); }
