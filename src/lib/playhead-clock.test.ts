@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampSeekFrames, maxSeekSeconds } from "./playhead-clock";
+import { clampSeekFrames, endSeekFrames, maxSeekSeconds } from "./playhead-clock";
 
 // These pin the RC1 invariant: an unknown duration must never clamp a seek.
 // (The historical failure: metadata.duration null/understated → every click
@@ -40,5 +40,20 @@ describe("maxSeekSeconds", () => {
 
   it("guards a zero/garbage fps", () => {
     expect(maxSeekSeconds(301, 0)).toBe(300);
+  });
+});
+
+describe("endSeekFrames", () => {
+  it("returns the last frame for a known duration", () => {
+    expect(endSeekFrames(300)).toBe(299);
+    expect(endSeekFrames(1)).toBe(0);
+  });
+
+  it("is a no-op (null) while the duration is unknown", () => {
+    // The RC1 class: max(0, 0 - 1) = 0 used to yank the playhead to the
+    // start when metadata had not hydrated (or never would).
+    expect(endSeekFrames(0)).toBeNull();
+    expect(endSeekFrames(-5)).toBeNull();
+    expect(endSeekFrames(NaN)).toBeNull();
   });
 });

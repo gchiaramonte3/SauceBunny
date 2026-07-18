@@ -343,16 +343,29 @@ fn ffprobe_path() -> Option<std::path::PathBuf> {
 /// the same packet. `%+#48` bounds the read window while guaranteeing a
 /// video packet shows up even when a muxed source interleaves audio first.
 fn probe_stream_epoch(upstream: &str, start: f64) -> Option<f64> {
+    // Memoized per (upstream, start): scrubbing back to a spot re-serves the
+    // same remux, and the epoch is a pure function of the seek landing point.
+    static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<(String, u64), f64>>> =
+        OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let key = (upstream.to_string(), start.to_bits());
+    if let Ok(map) = cache.lock() {
+        if let Some(&e) = map.get(&key) {
+            return Some(e);
+        }
+    }
+
     let fp = ffprobe_path()?;
-    let out = std::process::Command::new(fp)
+    let mut child = std::process::Command::new(fp)
         .args([
             "-hide_banner",
             "-loglevel",
             "error",
-            // Bound each network read (µs) — a stalled CDN must not wedge
-            // the stream request behind a hung probe.
+            // Per-read network bound (µs); the WALL-CLOCK bound below is what
+            // actually protects the seek path — rw_timeout alone lets a
+            // dripping CDN stretch 48 bounded reads into minutes.
             "-rw_timeout",
-            "8000000",
+            "4000000",
             "-user_agent",
             SAFARI_UA,
             "-select_streams",
@@ -366,12 +379,47 @@ fn probe_stream_epoch(upstream: &str, start: f64) -> Option<f64> {
         .arg(format!("{start}%+#48"))
         .arg(upstream)
         .stdin(std::process::Stdio::null())
-        .output()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
         .ok()?;
-    if !out.status.success() {
+
+    // Overall deadline: past ~4s the probe costs more than the precision is
+    // worth — kill it and fall back to the rebased header (safe since the
+    // player commits its clock per-pipeline from that same header).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(4);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    eprintln!("[media-proxy] epoch probe timed out (4s) for start={start}");
+                    return None;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                return None;
+            }
+        }
+    };
+    if !status.success() {
         return None;
     }
-    parse_stream_epoch(&String::from_utf8_lossy(&out.stdout))
+    let mut buf = String::new();
+    use std::io::Read as _;
+    child.stdout.take()?.read_to_string(&mut buf).ok()?;
+    let epoch = parse_stream_epoch(&buf)?;
+    if let Ok(mut map) = cache.lock() {
+        if map.len() > 64 {
+            map.clear(); // tiny working set; wholesale clear beats an LRU here
+        }
+        map.insert(key, epoch);
+    }
+    Some(epoch)
 }
 
 /// Extract the epoch from ffprobe's JSON packet list: the first video
@@ -539,17 +587,25 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
     };
 
     // RC7: recover the timeline origin the muxer is about to erase (see the
-    // timeline-mode comment above). Runs AFTER the ffmpeg spawn so the probe
-    // overlaps ffmpeg's own connection warm-up — headers only have to exist
-    // before respond() sends them, ahead of the first body bytes. No seek
-    // (start 0) needs no probe: the muxer's re-zero is the identity there.
-    // Probe failure falls back to the rebased header, i.e. the player's
-    // asserted-baseTime math — playhead continuity is preserved and only
-    // landing precision degrades to the keyframe gap.
+    // timeline-mode comment above). NOTE the honest cost model: respond()
+    // below cannot send headers until this returns, so the probe IS on the
+    // seek critical path — it merely overlaps ffmpeg's own connection
+    // warm-up. That is why probe_stream_epoch carries a 4s wall-clock kill
+    // and a per-(upstream,start) memo. No seek (start 0) needs no probe:
+    // the muxer's re-zero is the identity there. Probe failure falls back
+    // to the rebased header (the player commits mode+clock per pipeline
+    // from this header, so a flip is safe — only landing precision drops
+    // to the keyframe gap).
     let epoch = if hls {
         None
     } else if start > 0.0 {
-        probe_stream_epoch(&upstream, start)
+        let e = probe_stream_epoch(&upstream, start);
+        if e.is_none() {
+            eprintln!(
+                "[media-proxy] epoch probe failed -> serving REBASED timeline (keyframe precision) start={start}"
+            );
+        }
+        e
     } else {
         Some(0.0)
     };

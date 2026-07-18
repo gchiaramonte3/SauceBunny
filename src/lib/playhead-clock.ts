@@ -32,3 +32,13 @@ export function maxSeekSeconds(durationFrames: number, fps: number): number {
   if (durationFrames <= 0) return Infinity;
   return (durationFrames - 1) / Math.max(1, Math.round(fps));
 }
+
+/** Target for "jump to end": the last frame, or null (= no-op) while the
+ *  duration is unknown. Deriving `durationFrames - 1` inline at call sites
+ *  is exactly how the RC1 backward snap survived the clamp chokepoint —
+ *  with duration 0 it computes max(0, -1) = 0 and yanks the playhead to
+ *  the start. Every end-derivation must route through here. */
+export function endSeekFrames(durationFrames: number): number | null {
+  if (!Number.isFinite(durationFrames) || durationFrames <= 0) return null;
+  return Math.floor(durationFrames) - 1;
+}

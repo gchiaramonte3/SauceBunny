@@ -38,7 +38,7 @@ import { asLogTag } from "./types";
 import { formatError, isAppError } from "./lib/error-format";
 import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase";
 import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek, subscribePlayhead } from "./lib/playhead-store";
-import { clampSeekFrames, maxSeekSeconds } from "./lib/playhead-clock";
+import { clampSeekFrames, maxSeekSeconds, endSeekFrames } from "./lib/playhead-clock";
 import { usePanelBus } from "./hooks/use-panel-bus";
 import { useWebPlayback } from "./hooks/use-web-playback";
 import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView } from "./hooks/use-co-review";
@@ -3957,7 +3957,11 @@ export default function App() {
         case "play.secondBack": onStep(-Math.round(fps)); break;
         case "play.secondFwd":  onStep(Math.round(fps)); break;
         case "play.toStart": onSeek(0); break;
-        case "play.toEnd":   onSeek(Math.max(0, durationFrames - 1)); break;
+        case "play.toEnd": {
+          const end = endSeekFrames(durationFrames);
+          if (end != null) onSeek(end);
+          break;
+        }
         // Persistent playback speed ([ / ] / \) — steps the 0.5–2× list.
         case "play.rateDown":  handlePlaybackRateStep(-1); break;
         case "play.rateUp":    handlePlaybackRateStep(1); break;

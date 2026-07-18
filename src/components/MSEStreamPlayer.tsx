@@ -246,6 +246,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
           if (localTarget >= sb.buffered.start(i) - 0.25 && localTarget <= sb.buffered.end(i) + 0.25) {
             if (rebuildTimerRef.current != null) { window.clearTimeout(rebuildTimerRef.current); rebuildTimerRef.current = null; }
             pendingSeekRef.current = null;
+            // Review fix: a landing target armed by an earlier out-of-buffer
+            // rebuild is superseded by this click — clearing it here stops the
+            // updateend landing from later yanking currentTime back to it.
+            pendingLandRef.current = null;
             try { v.currentTime = localTarget; } catch { /* ignore */ }
             onDiagRef.current?.("ok", `seek in-buffer → currentTime ${localTarget.toFixed(1)}`);
             return;
@@ -262,7 +266,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         pendingSeekRef.current = null;
         if (t == null) return;
         pendingLandRef.current = t;
-        baseTimeRef.current = timelineAbsRef.current ? 0 : t;
+        // Review fix (mode-flip race): baseTime is NOT committed here — the
+        // timeline mode is per-pipeline (the proxy's probe can fail on any
+        // rebuild, flipping absolute→rebased), so the clock commits only in
+        // startFetch once this pipeline's X-Timeline header is read.
         onDiagRef.current?.("info", `seek out-of-buffer → rebuilding from ${t.toFixed(1)}s`);
         teardownRef.current?.();
         rebuildRef.current?.(t);
@@ -452,6 +459,17 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       const item = queueRef.current.shift();
       if (!item) {
         if (endedRef.current && ms.readyState === "open") {
+          // Review fix: a stream that ended SHORT of the landing target
+          // (seek past the real end; stale cue with unknown duration) would
+          // otherwise leave the element parked at currentTime 0 outside the
+          // buffered range forever. Land at the closest buffered moment.
+          const land = pendingLandRef.current;
+          if (timelineAbsRef.current && land != null && v && sb.buffered.length > 0) {
+            pendingLandRef.current = null;
+            const start = sb.buffered.start(0);
+            const end = sb.buffered.end(sb.buffered.length - 1);
+            try { v.currentTime = Math.min(land, Math.max(start, end - 0.1)); } catch { /* ignore */ }
+          }
           try { ms.endOfStream(); } catch { /* already ended */ }
         }
         return;
@@ -495,6 +513,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     teardownRef.current = teardownPipeline;
 
     const buildPipeline = (fromSeconds: number) => {
+      // Review fix: seek rebuilds had NO stall rescue (the app-level 15s
+      // watchdog disarms after the first pipeline opens). If this pipeline
+      // produces no data within 20s of its fetch starting (wedged epoch
+      // probe, dead CDN URL), fail -> onMediaError -> download fallback.
+      let sawData = false;
       const gen = ++genRef.current;
       endedRef.current = false;
       queueRef.current = [];
@@ -581,11 +604,13 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             sb.mode = "segments";
             sbRef.current = sb;
             clockOriginSetRef.current = false; // re-capture for this pipeline
-            const localDur = timelineAbsRef.current ? total : (total > fromSeconds ? total - fromSeconds : 0);
-            if (localDur > 0) { try { ms.duration = localDur; } catch { /* ignore */ } }
+            // ms.duration is sized in startFetch once the response header
+            // reveals THIS pipeline's timeline mode (review fix: sizing it
+            // here used the previous pipeline's mode).
             sb.addEventListener("updateend", () => {
               // Capture the timeline origin from the first buffered range (later
               // ranges shift forward as old data is evicted, so capture ONCE).
+              if (sb.buffered.length > 0) sawData = true;
               if (!clockOriginSetRef.current && sb.buffered.length > 0) {
                 clockOriginSetRef.current = true;
                 // Absolute timeline: currentTime IS source time; origin stays 0.
@@ -642,6 +667,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
               video.play().catch(() => { /* gesture/autoplay — ignore */ });
             }
             void startFetch(fromSeconds, gen);
+            window.setTimeout(() => {
+              if (!disposed && gen === genRef.current && !sawData) {
+                fail("stream pipeline stalled: no data within 20s of the rebuild");
+              }
+            }, 20_000);
           }, { once: true });
 
           // Fetch the ffmpeg-remuxed fMP4 and feed it to the SourceBuffer.
@@ -660,6 +690,19 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
               if (disposed || g !== genRef.current) { try { await resp.body?.cancel(); } catch { /* ignore */ } return; }
               if (!resp.ok || !resp.body) { fail(`fMP4 stream HTTP ${resp.status}`); return; }
               timelineAbsRef.current = resp.headers.get("x-timeline") === "absolute";
+              // Review fix (mode-flip race): the (mode, baseTime, duration)
+              // tuple commits HERE, atomically per pipeline, from this
+              // response's own header — never from a previous pipeline's
+              // mode. Absolute → base 0 (currentTime IS source time after the
+              // epoch shift below); rebased → base asserts the seek target.
+              baseTimeRef.current = timelineAbsRef.current ? 0 : from;
+              {
+                const localDur = timelineAbsRef.current ? total : (total > from ? total - from : 0);
+                const msNow = msRef.current;
+                if (localDur > 0 && msNow && msNow.readyState === "open") {
+                  try { msNow.duration = localDur; } catch { /* ignore */ }
+                }
+              }
               // RC7: ffmpeg's fragmented-MP4 muxer re-zeros the remux to its
               // first dts, so the wire timestamps are NOT absolute on their
               // own. The proxy probes the erased origin (the first video dts

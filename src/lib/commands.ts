@@ -1,3 +1,4 @@
+import { endSeekFrames } from "./playhead-clock";
 /**
  * Single source of truth for every action the app exposes.
  *
@@ -178,7 +179,8 @@ export function buildCommands(d: CommandDeps): Command[] {
     { id: "play.toEnd",    label: "Jump to end",   group: "Playback",
       hotkey: "End",
       disabled: !d.hasSource,
-      run: () => d.onSeek(Math.max(0, d.durationFrames - 1)) },
+      // endSeekFrames: no-op while duration is unknown (RC1 snap class).
+      run: () => { const end = endSeekFrames(d.durationFrames); if (end != null) d.onSeek(end); } },
     // Persistent playback speed — distinct from the J-K-L shuttle (a transient
     // override). Applies to the <video>-backed players; while the WebCodecs
     // player is active (PlayerHandle.supportsPlaybackRate = false) the App
