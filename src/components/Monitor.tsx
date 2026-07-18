@@ -1,5 +1,6 @@
 import { forwardRef, useLayoutEffect, useRef, useState } from "react";
 import { IconAlert, IconHistory } from "./Icons";
+import { BunnyLoader } from "./BunnyLoader";
 import { CanvasToast, type ToastKind } from "./CanvasToast";
 import { CaptionOverlay, type CaptionStyle } from "./CaptionOverlay";
 import { AnnotationOverlay } from "./AnnotationOverlay";
@@ -527,7 +528,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             an inline Cancel button. */}
         {playbackPrepBusy && (
           <div className="cp-prep-banner">
-            <div className="cp-prep-spinner" />
+            <BunnyLoader size={44} label="Preparing" />
             <div className="cp-prep-text">
               <div className="cp-prep-title">
                 {sourceKind === "file" ? "Preparing playback copy…" : "Downloading preview…"}
@@ -569,7 +570,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               />
             )}
             <div className="cp-stream-loading-inner">
-              <div className="cp-stream-spinner" />
+              <BunnyLoader size={96} label={streamLoadingPhase} />
               <div className="cp-stream-loading-title">{streamLoadingPhase}</div>
               <div className="cp-stream-loading-sub">
                 This can take a few seconds.

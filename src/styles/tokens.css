@@ -8,6 +8,9 @@
 
 :root {
   --ella-green:      #6CFF8D;
+  /* NOTE: #8627FF and --ella-green #6CFF8D are mirrored as literal stops
+     in BunnyLoader.tsx's SVG gradient (SVG gradients cannot read CSS
+     variables) — update both together. */
   --novella-purple:  #8627FF;
   --novella-purple-2:#4826E8;
   --novella-violet:  #6D52ED;

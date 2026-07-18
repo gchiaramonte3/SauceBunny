@@ -330,8 +330,6 @@
      ignores clicks via pointer-events: none on the text wrapper. */
   pointer-events: auto;
 }
-.cp-prep-banner .cp-prep-spinner,
-.cp-prep-banner .cp-prep-text { pointer-events: none; }
 .cp-prep-cancel {
   pointer-events: auto;
   font-family: var(--font-ui);
@@ -354,15 +352,6 @@
   border-color: rgba(255,255,255,0.24);
 }
 .cp-prep-cancel:active { background: rgba(255,255,255,0.16); }
-.cp-prep-spinner {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 2px solid var(--line-3);
-  border-top-color: var(--accent);
-  animation: cp-spin 0.8s linear infinite;
-  flex-shrink: 0;
-}
 .cp-prep-text { display: flex; flex-direction: column; gap: 1px; }
 .cp-prep-title {
   font-size: 11px;
@@ -374,9 +363,6 @@
   font-size: 10px;
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
-}
-@keyframes cp-spin {
-  to { transform: rotate(360deg); }
 }
 
 /* ── Stream-loading overlay (r62) ──────────────────────────────────────
@@ -412,14 +398,6 @@
   padding: 22px 30px;
   text-align: center;
   font-family: var(--font-ui);
-}
-.cp-stream-spinner {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: 3px solid var(--line-2);
-  border-top-color: var(--accent);
-  animation: cp-spin 0.85s linear infinite;
 }
 .cp-stream-loading-title {
   font-size: 14px;

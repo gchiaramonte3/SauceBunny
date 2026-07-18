@@ -1,0 +1,77 @@
+/* BunnyLoader (BunnyLoader.tsx) — branded stroke-trace loading indicator for
+   screen-level waits. The gradient stops live in the component's SVG defs
+   (SVG gradients cannot read CSS variables); dash math is normalized by
+   pathLength=1 on every path, so one keyframe drives all three. */
+.cp-bunny-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+}
+.cp-bunny-loader svg {
+  width: var(--bl-size, 96px);
+  height: auto;
+  overflow: visible;
+}
+.cp-bunny-loader path {
+  fill: none;
+  stroke: url(#bl-grad);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* Main chasing segment: ~30% of each outline, one lap per 1.6s. */
+.cp-bunny-loader .bl-main path {
+  stroke-width: 16;
+  stroke-dasharray: 0.3 0.7;
+  animation: cp-bl-chase 1.6s linear infinite;
+}
+/* Comet tail: shorter + fainter, phase-offset so it trails the segment. */
+.cp-bunny-loader .bl-tail path {
+  stroke-width: 16;
+  opacity: 0.35;
+  stroke-dasharray: 0.1 0.9;
+  animation: cp-bl-chase 1.6s linear infinite;
+  animation-delay: -0.13s;
+}
+/* Feathered glow underlayer: fat blurred stroke on the same cycle. */
+.cp-bunny-loader .bl-glow path {
+  stroke-width: 48;
+  opacity: 0.25;
+  stroke-dasharray: 0.3 0.7;
+  animation: cp-bl-chase 1.6s linear infinite;
+}
+@keyframes cp-bl-chase {
+  to { stroke-dashoffset: -1; }
+}
+.cp-bunny-loader-sub {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--fg-4);
+  text-align: center;
+}
+/* Visually hidden status text (assistive tech only). */
+.cp-vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Static full outline at low opacity with a gentle pulse; no chase. */
+  .cp-bunny-loader .bl-main path,
+  .cp-bunny-loader .bl-tail path,
+  .cp-bunny-loader .bl-glow path {
+    animation: none;
+    stroke-dasharray: none;
+  }
+  .cp-bunny-loader .bl-tail { display: none; }
+  .cp-bunny-loader .bl-glow { display: none; }
+  .cp-bunny-loader .bl-main path { opacity: 0.55; }
+  .cp-bunny-loader svg { animation: cp-bl-pulse 2s ease-in-out infinite; }
+}
+@keyframes cp-bl-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
