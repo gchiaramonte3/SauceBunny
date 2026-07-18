@@ -75,7 +75,7 @@ import { nextShuttleRate } from "./lib/shuttle";
 import { sanitizePlaybackRate, stepPlaybackRate } from "./lib/playback-rate";
 import { parseSrt } from "./lib/srt";
 import { speakerLanes } from "./lib/speaker-stats";
-import { speakerColor } from "./components/transcript/helpers";
+import { speakerColor, loadSpeakerOverrides, resolveAliasChain, SPEAKERS_CHANGED_EVENT } from "./components/transcript/helpers";
 import { MediaInfoModal } from "./components/MediaInfoModal";
 import { loadReview, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
 import { loadChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
@@ -987,6 +987,7 @@ export default function App() {
   // changes (path) or is rewritten in place (arrivedTick bump). Lanes only
   // render for diarized / speaker-labelled transcripts — an all-null strip
   // would just be one solid bar of noise.
+  const [speakersChangedTick, setSpeakersChangedTick] = useState(0);
   const [speakerLaneData, setSpeakerLaneData] = useState<
     { startMs: number; endMs: number; color: string; speaker: string | null }[]
   >([]);
@@ -1003,15 +1004,35 @@ export default function App() {
         if (!alive) return;
         const cues = parseSrt(text);
         if (!cues.some((c) => c.speaker !== null)) { setSpeakerLaneData([]); return; }
+        // 3a fix: resolve each lane's color through the SAME override path
+        // the transcript uses (alias chain -> user-picked color -> palette).
+        // Reading overrides here + the speakers-changed dep below is what
+        // makes a recolor in Manage speakers repaint the lane instantly.
+        const ov = loadSpeakerOverrides(transcriptPath);
+        const laneColor = (tag: string | null) => {
+          const resolved = resolveAliasChain(tag, ov.aliases);
+          return ov.colors[resolved ?? "__NULL__"] || speakerColor(resolved);
+        };
         setSpeakerLaneData(
-          speakerLanes(cues).map((lane) => ({ ...lane, color: speakerColor(lane.speaker) })),
+          speakerLanes(cues).map((lane) => ({ ...lane, color: laneColor(lane.speaker) })),
         );
       } catch {
         if (alive) setSpeakerLaneData([]);
       }
     })();
     return () => { alive = false; };
-  }, [transcriptPath, transcriptArrivedTick]);
+  }, [transcriptPath, transcriptArrivedTick, speakersChangedTick]);
+  // Recolor signal: the transcript fires saucebunny:speakers-changed as a
+  // window CustomEvent (same window) AND a Tauri event (panel window).
+  useEffect(() => {
+    const bump = () => setSpeakersChangedTick((t) => t + 1);
+    window.addEventListener(SPEAKERS_CHANGED_EVENT, bump);
+    const un = listen(SPEAKERS_CHANGED_EVENT, bump);
+    return () => {
+      window.removeEventListener(SPEAKERS_CHANGED_EVENT, bump);
+      un.then((f) => f());
+    };
+  }, []);
 
   // ====== Backend build ID handshake ======
   // Persistent banner state when the running Rust binary doesn't match the

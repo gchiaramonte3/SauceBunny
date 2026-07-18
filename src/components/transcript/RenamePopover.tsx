@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { SpeakerColorPicker } from "../SpeakerColorPicker";
 import { createPortal } from "react-dom";
 
 /**
@@ -39,6 +40,11 @@ type Props = {
   state: RenameState;
   onCancel: () => void;
   onApply: (name: string, scope: "all" | "turn") => void;
+  /** 4a: the same color plumbing Manage speakers uses - a compact preset
+   *  row; picking commits through the shared override path (and so fires
+   *  speakers-changed, recoloring the timeline lane too). */
+  colorValue?: string;
+  onPickColor?: (hex: string) => void;
   /** Jump the transcript to where this speaker first appears, then close.
    *  Optional so any caller without a viewport stays valid. */
   onGoToSpeaker?: () => void;
@@ -53,6 +59,7 @@ type Props = {
 
 export function RenamePopover({
   state, onCancel, onApply, onGoToSpeaker, reassignChoices, onReassign,
+  colorValue, onPickColor,
 }: Props) {
   const [name, setName] = useState(state.currentName);
   const [scope, setScope] = useState<"all" | "turn">("all");
@@ -128,6 +135,9 @@ export function RenamePopover({
         autoCorrect="off"
         autoComplete="off"
       />
+      {colorValue && onPickColor && (
+        <SpeakerColorPicker compact value={colorValue} anchorRect={null} onCommit={onPickColor} onClose={() => {}} />
+      )}
       <div className="cp-tx-rename-scope">
         <label>
           <input

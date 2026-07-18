@@ -12,11 +12,15 @@ export function SpeakerColorPicker({
   value,
   anchorRect,
   onCommit,
+  compact = false,
   onReset,
   onClose,
 }: {
   value: string;
   anchorRect: DOMRect | null;
+  /** Inline preset-swatch row only (the rename popover's variant) -
+   *  no anchored panel, no SV/hue surface, same commit path. */
+  compact?: boolean;
   onCommit: (hex: string) => void;
   onReset?: () => void;
   onClose: () => void;
@@ -119,6 +123,25 @@ export function SpeakerColorPicker({
     setHsv(next);
     commit(next);
   };
+
+  if (compact) {
+    return (
+      <div className="cp-colorpick-compact" role="listbox" aria-label="Speaker color">
+        {SPEAKER_PRESETS.map((p) => (
+          <button
+            key={p}
+            type="button"
+            role="option"
+            aria-selected={p.toLowerCase() === hex.toLowerCase()}
+            className={"cp-colorpick-swatch" + (p.toLowerCase() === hex.toLowerCase() ? " sel" : "")}
+            style={{ background: p }}
+            title={p}
+            onClick={() => onCommit(p)}
+          />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div

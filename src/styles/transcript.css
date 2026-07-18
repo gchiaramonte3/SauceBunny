@@ -409,9 +409,24 @@
   border-radius: 2px;
   transition: background-color 80ms ease, color 80ms ease;
 }
-.cp-tx-cue:hover {
-  background: rgba(108, 255, 141, 0.06);
+/* Hover REVEALS the cue block (2a): no click needed. Clearly visible per
+   feedback - lifted grey fill + a slight outline (the active/karaoke cue
+   keeps green; hover is neutral). The transition delay is the ~150ms
+   intent gate so skimming the prose doesn't flicker blocks; reduced
+   motion swaps instantly. */
+.cp-tx-cue {
+  transition: background 100ms var(--ease-out), box-shadow 100ms var(--ease-out);
 }
+.cp-tx-cue:hover {
+  transition-delay: 150ms;
+  background: rgba(255, 255, 255, 0.10);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-tx-cue { transition: none; }
+}
+
 .cp-tx-cue.active {
   background: rgba(108, 255, 141, 0.18);
   color: #fff;
@@ -847,13 +862,13 @@
    live in SpeakerRosterModal (.cp-spk-*).
    ───────────────────────────────────────────────────────────────── */
 
+/* Clean space (3b): no hairline framing, no tinted band - the row is
+   just a quiet label + controls above the prose. */
 .cp-tx-roster {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--line-1);
-  background: rgba(255,255,255,0.015);
+  padding: 10px 12px 4px;
 }
 .cp-tx-roster-label {
   font-size: 10px;
@@ -1204,4 +1219,12 @@
 .cp-tx-follow-btn {
   background: var(--bg-5);
   color: var(--fg-0);
+}
+
+/* Compact preset row (rename popover's color control, 4a). */
+.cp-colorpick-compact {
+  display: flex;
+  gap: 6px;
+  padding: 2px 0 6px;
+  flex-wrap: wrap;
 }

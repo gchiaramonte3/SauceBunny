@@ -1560,6 +1560,11 @@ export function TranscriptViewer({
           state={rename}
           onCancel={() => setRename(null)}
           onApply={applyRename}
+          colorValue={speakerDisplayColor(effectiveTagFor(rename.turnIdx, rename.originalTag))}
+          onPickColor={(hex) => {
+            const resolved = resolveAliasChain(effectiveTagFor(rename.turnIdx, rename.originalTag), overrides.aliases);
+            setSpeakerColor(resolved ?? "__NULL__", hex);
+          }}
           onGoToSpeaker={goToSpeaker}
           reassignChoices={roster
             .filter((r) => r.tag !== (effectiveTagFor(rename.turnIdx, rename.originalTag) ?? "Speaker"))
