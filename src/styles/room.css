@@ -62,6 +62,17 @@
   background: var(--success);
   animation: cp-room-pulse 2.4s ease-in-out infinite;
 }
+.cp-room-title .cp-room-name {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--fg-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
 .cp-room-source {
   font-family: var(--font-ui);
   font-size: 12px;
@@ -176,7 +187,7 @@
 }
 .cp-person video.mirror { transform: scaleX(-1); }
 .cp-person.speaking {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pr-color, var(--accent)) 75%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 82%, transparent);
 }
 .cp-person-avatar {
   position: absolute;
@@ -267,41 +278,31 @@
   .cp-room .cp-people .cp-person-meta { display: none; }
 }
 
-/* ── Room control bar: floating, bottom-center, rests dimmed ──────── */
+/* ── Room control cluster: lives INSIDE the transport's right side (user
+      call: session controls belong with snapshot/speed/volume, not floating
+      over the timeline). position:relative anchors the upward popovers. ── */
 .cp-room-bar {
-  position: absolute;
-  left: 50%;
-  bottom: 18px;
-  transform: translateX(-50%);
-  z-index: 12;
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--s-1);
-  padding: 6px;
-  background: var(--bg-1);
-  border-radius: var(--r-lg);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
-  opacity: 0.45;
-  transition: opacity 180ms var(--ease-out);
-}
-.cp-room-bar:hover,
-.cp-room-bar:focus-within { opacity: 1; }
-@media (prefers-reduced-motion: reduce) {
-  .cp-room-bar { opacity: 1; transition: none; }
+  gap: 2px;
+  margin-left: var(--s-2);
+  padding-left: var(--s-2);
+  border-left: 1px solid rgba(255,255,255,0.12);
 }
 .cp-room-bar-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 34px;
-  height: 34px;
-  padding: 0 10px;
+  min-width: 30px;
+  height: 28px;
+  padding: 0 7px;
   border: none;
-  border-radius: var(--r-lg);
+  border-radius: 6px;
   background: transparent;
-  color: var(--fg-1);
+  color: var(--fg-2);
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -333,12 +334,12 @@
   text-transform: uppercase;
 }
 
-/* Display picker popover above the bar's share button. */
+/* Display picker popover above the cluster's share button. */
 .cp-share-pick {
   position: absolute;
-  bottom: 52px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 40px;
+  right: 0;
+  z-index: 13;
   min-width: 240px;
   display: flex;
   flex-direction: column;
@@ -379,3 +380,41 @@
   color: var(--fg-4);
 }
 .cp-share-pick-cancel { align-self: center; }
+
+/* ── Device settings popover (DevicePanel.tsx): the gear's Meet-style
+      mid-call switcher, anchored above the cluster. ── */
+.cp-devpanel {
+  position: absolute;
+  bottom: 40px;
+  right: 0;
+  z-index: 13;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  background: var(--bg-1);
+  border-radius: var(--r-lg);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+.cp-devpanel-preview {
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cp-devpanel-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+.cp-devpanel-off {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  color: var(--fg-4);
+}
+.cp-devpanel-done { align-self: center; }

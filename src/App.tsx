@@ -4765,8 +4765,10 @@ export default function App() {
                   <div className="cp-room-head">
                     <div className="cp-room-title">
                       <span className="cp-room-live" aria-hidden />
-                      <span>{coSession.title || "Review session"}</span>
-                      {metadata?.title && (
+                      <span className="cp-room-name" title={coSession.title || metadata?.title || undefined}>
+                        {coSession.title || metadata?.title || "Review session"}
+                      </span>
+                      {metadata?.title && coSession.title && metadata.title !== coSession.title && (
                         <span className="cp-room-source" title={metadata.title}>{metadata.title}</span>
                       )}
                       {reviewStatus && reviewStatus.state !== "pending" && (
@@ -4786,21 +4788,6 @@ export default function App() {
                       )}
                     </div>
                   </div>
-                )}
-                {roomActive && (
-                  <RoomControlBar
-                    micOn={!capture.choice.micMuted}
-                    camOn={!capture.choice.cameraOff}
-                    onToggleMic={() => capture.setEnabled("audio", capture.choice.micMuted)}
-                    onToggleCam={() => capture.setEnabled("video", capture.choice.cameraOff)}
-                    shareState={shareState}
-                    onStartShare={startShare}
-                    onStopShare={stopShare}
-                    theater={screening}
-                    onToggleTheater={() => setScreening((v) => !v)}
-                    onLeave={leaveCoReview}
-                    isHost={coSession.role === "host"}
-                  />
                 )}
                 {roomActive && coSession.role === "guest" && status === "empty" && (
                   <div className="cp-room-waiting">Waiting for the host to load a source</div>
@@ -5029,6 +5016,30 @@ export default function App() {
                     onVolumeChange={handleVolumeChange}
                     onMutedChange={handleMutedChange}
                     onPlaybackRateChange={handlePlaybackRateChange}
+                    roomControls={roomActive ? (
+                      <RoomControlBar
+                        micOn={!capture.choice.micMuted}
+                        camOn={!capture.choice.cameraOff}
+                        onToggleMic={() => capture.setEnabled("audio", capture.choice.micMuted)}
+                        onToggleCam={() => {
+                          const turningOn = capture.choice.cameraOff;
+                          if (turningOn && (capture.stream?.getVideoTracks().length ?? 0) === 0) {
+                            // Camera was off at acquire time: no video track exists to
+                            // re-enable - reopen for real (the mesh replaceTracks it out).
+                            void capture.acquire({ ...capture.choice, cameraOff: false });
+                          } else {
+                            capture.setEnabled("video", turningOn);
+                          }
+                        }}
+                        shareState={shareState}
+                        onStartShare={startShare}
+                        onStopShare={stopShare}
+                        theater={screening}
+                        onToggleTheater={() => setScreening((v) => !v)}
+                        onLeave={leaveCoReview}
+                        isHost={coSession.role === "host"}
+                      />
+                    ) : undefined}
                   />
                   <Timeline
                     status={status}
@@ -5061,7 +5072,7 @@ export default function App() {
                       selection (or a queued no-marks state) renders NOTHING -
                       the row's space collapses, no reserved empty line.
                       Partial-mark guidance stays (it completes the gesture). */}
-                  {(() => {
+                  {!roomActive && (() => {
                     const content =
                       (status === "loaded" || status === "success")
                         ? (inFrames == null && outFrames == null

@@ -24,6 +24,12 @@
          classic CFBundleIconFile .icns. -->
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
+    <!-- Dev-run TCC identity: `tauri dev` embeds this plist into the raw
+         binary, and without an identifier macOS registers permission state
+         by executable path (and the app never appears in Privacy lists).
+         Matches tauri.conf.json's identifier, so bundles are unchanged. -->
+    <key>CFBundleIdentifier</key>
+    <string>com.saucebunny.desktop</string>
     <key>NSCameraUsageDescription</key>
     <string>Sauce Bunny uses your camera only for live review sessions, so session members can see each other. Video goes directly between members' machines and never touches a server.</string>
     <key>NSMicrophoneUsageDescription</key>

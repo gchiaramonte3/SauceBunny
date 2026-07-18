@@ -105,7 +105,10 @@
   gap: var(--s-1);
 }
 .cp-colobby-field-label {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   font-family: var(--font-ui);
   font-size: 11px;
   font-weight: 600;
@@ -383,6 +386,7 @@
   color: var(--fg-2);
 }
 .cp-gr-denied-row { display: flex; justify-content: center; gap: var(--s-2); }
+.cp-gr-denied-line { display: flex; align-items: center; gap: 6px; margin: 0; }
 .cp-gr-swatches { display: flex; justify-content: center; gap: var(--s-2); padding: 2px 0; }
 .cp-gr-swatch {
   width: 22px;

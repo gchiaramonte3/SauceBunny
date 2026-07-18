@@ -2,6 +2,7 @@ import {
   IconPlay, IconPause, IconSkipBack, IconSkipForward,
   IconMarkIn, IconMarkOut, IconClearMarks, IconCaptions, IconCamera,
 } from "./Icons";
+import type { ReactNode } from "react";
 import { VolumeControl } from "./VolumeControl";
 import { SpeedControl } from "./SpeedControl";
 import { usePlayheadFrames } from "../lib/playhead-store";
@@ -39,6 +40,9 @@ type Props = {
   onVolumeChange: (v: number) => void;
   onMutedChange: (m: boolean) => void;
   onPlaybackRateChange: (r: number) => void;
+  /** Room face: the session control cluster (mic/cam/share/theater/leave)
+   *  rendered at the row's right edge, where controls belong. */
+  roomControls?: ReactNode;
 };
 
 export function Transport({
@@ -47,9 +51,11 @@ export function Transport({
   captionsOn, snapshotBusy, canSnapshot,
   volume, muted, playbackRate, playbackRateSupported,
   onPlayToggle, onStep, onMarkIn, onMarkOut, onClearMarks, onToggleCaptions, onSnapshot,
-  onVolumeChange, onMutedChange, onPlaybackRateChange,
+  onVolumeChange, onMutedChange, onPlaybackRateChange, roomControls,
 }: Props) {
-  const dim = status === "empty" || status === "fetching" || status === "error";
+  // In a room the row must stay interactive even with no source loaded
+  // (a waiting guest still needs mic/cam/leave), so the dim gate lifts.
+  const dim = (status === "empty" || status === "fetching" || status === "error") && !roomControls;
   return (
     <div
       className="cp-transport"
@@ -120,6 +126,7 @@ export function Transport({
           <IconCaptions size={15} />
         </button>
         <div className="cp-tc duration">{durationTc}</div>
+        {roomControls}
       </div>
     </div>
   );

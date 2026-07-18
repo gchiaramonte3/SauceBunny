@@ -444,3 +444,20 @@ export const IconScreenShare = (p: IconProps) => (
     <path d="M9.5 10.5L12 8l2.5 2.5" />
   </Icon>
 );
+
+/* Movie camera (live webcam), NOT the photo camera: body + side lens wedge.
+   The transport snapshot keeps IconCamera; the room's camera toggle uses
+   this pair so "save a frame" and "my webcam" stop sharing a glyph. */
+export const IconVideo = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="2.5" y="6.5" width="12.5" height="11" rx="2" />
+    <path d="M15 10.5l6-3v9l-6-3" />
+  </Icon>
+);
+export const IconVideoOff = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="2.5" y="6.5" width="12.5" height="11" rx="2" />
+    <path d="M15 10.5l6-3v9l-6-3" />
+    <path d="M4 4l16 16" />
+  </Icon>
+);

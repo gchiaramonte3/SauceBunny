@@ -49,14 +49,30 @@ folded into `SessionState`), and shown as a quiet chip in the room header.
 | file (after transfer) | YES | host broadcasts | host |
 
 In `share` mode the Review composer hides the timecode chip and the "at
-playhead" affordance; saved ops carry `t: null`. The review doc schema
-already tolerates null timestamps - verify, don't assume.
+playhead" affordance. Notes carry a TAGGED ANCHOR instead of a bare nullable
+timestamp (adopted from the 2026-07-19 schema proposal - see "Evaluated
+ideas" below):
+
+```ts
+type Anchor =
+  | { anchor: "timecode"; t: number }                    // source seconds
+  | { anchor: "session"; sessionMs: number; wallClockMs: number };
+```
+
+A share-mode note records when-in-the-meeting and time-of-day. That is what
+makes the note conformable LATER: if the shared screen was recorded, the
+recording's start time maps `sessionMs` onto real timecode and the note
+retroactively gains a frame address. `t: null` would throw that away. The
+review doc schema must tolerate the new anchor kind - verify, don't assume.
 
 ## Prompt 1: playhead channel (host drives)
 
 Rust `session.rs`: new `SessionMsg::Playhead { seconds, playing, at }` sent
 host -> all at a low fixed rate (2Hz while playing, plus one message on every
-seek/pause/play edge; nothing while idle - idle traffic stays zero). Guests
+seek/pause/play edge; nothing while idle - idle traffic stays zero). `at` is
+the SENDER's monotonic-ish clock (ms): followers estimate transit delay from
+it and, while playing, advance the target by that delay before comparing -
+without this every guest sits a network hop behind the host. Guests
 apply it: seek if |delta| > 0.75s, play/pause to match. Frontend: the room's
 player already exposes the corrected playhead; wire it into the session via
 use-co-review. Guests get a "Following host" chip with a "Watch freely"
@@ -107,6 +123,57 @@ Settings gains a "Review sessions" group:
   threshold the request still requires the HOST's approval, but the GUEST's
   save is automatic; above it the guest confirms too.
 - A "Clear received files" row with the current byte count.
+
+## Prompt 6: Avid marker export (future, from the proposal)
+
+Timecode-anchored notes map 1:1 onto Avid text-import markers: Username =
+author display name, TC = start timecode advanced by the note's frame,
+Track/Color = per-note fields (default V1/red), Comment = body. Ranged notes
+export as bracket markers or a RANGE- prefixed comment (Avid text import has
+no true spanned marker). Prerequisite: store the source frame rate as a
+RATIONAL (30000/1001, drop-frame flag), never a float, and convert
+frames -> SMPTE in ONE tested display function (29.97 drop-frame math is the
+part with teeth). Session-anchored notes stay out of this export until
+conformed (see the anchor section). This prompt ships with a vitest table of
+known drop-frame conversions.
+
+## Prompt 7: window-level share (Meet-style picker)
+
+Today's share is whole displays only, because the capture side is ffmpeg's
+avfoundation input and avfoundation enumerates SCREENS, not windows. A
+Meet-style "share this window" needs ScreenCaptureKit: extend the existing
+Swift sidecar (or a small second SPM target) to list shareable windows
+(SCShareableContent: app name, window title, thumbnail) and stream a chosen
+SCStream as raw frames into the existing /share/v1 proxy path in place of
+the ffmpeg process. The picker UI then gets two tabs - Displays / Windows -
+with live thumbnails, like Meet. Sized as its own session; the UI tab shell
+can land earlier with displays only.
+
+## Evaluated ideas (2026-07-19 pasted proposal)
+
+A SQLite schema + control-message protocol was proposed. Verdict per idea:
+
+- ADOPTED - tagged anchors (`timecode` vs `session` + wallClockMs): folded
+  into the mode contract above. The conform story is the winning argument.
+- ADOPTED - sender-clock latency compensation on transport/tick messages:
+  folded into Prompt 1.
+- ADOPTED - rational frame rates + single drop-frame display function, and
+  the Avid marker column mapping: now Prompt 6.
+- ALREADY OURS - content-addressed asset identity: review docs are keyed by
+  source fingerprint hash today, and Prompt 4's transfer verifies blake3.
+  Same idea, no change needed.
+- DEFERRED - driver handoff (`{ t: "driver"; participantId }`): the message
+  shape is right if multi-driver ever lands, but one-driver-the-host stays
+  the contract for now.
+- REJECTED - SQLite: the constitution's persistence layer is localStorage +
+  JSON review docs with debounced write-through, and at this data volume a
+  database adds a dependency, a migration, and a second source of truth
+  without buying anything. The schema's SHAPE (assets/notes columns) largely
+  restates what review docs already carry.
+- REJECTED - WebTorrent/infoHash: iroh is already the transport and blake3
+  the content id; a second P2P stack is a hard no.
+- REJECTED - persisted `sessions` table: sessions are deliberately ephemeral;
+  notes carry authorship and anchors, which is all export needs.
 
 ## Out of scope (explicitly)
 

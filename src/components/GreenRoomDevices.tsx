@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { IconMic, IconVideo, IconVideoOff } from "./Icons";
 import type { useMediaCapture } from "../hooks/use-media-capture";
 
 /**
@@ -70,7 +71,7 @@ export function GreenRoomDevices({ cap, onContinue }: {
 
       {cap.permission === "denied" ? (
         <div className="cp-gr-denied">
-          <p>Camera and microphone are blocked for Sauce Bunny.</p>
+          <p className="cp-gr-denied-line"><IconVideoOff size={14} /> Camera and microphone are blocked for Sauce Bunny.</p>
           <p className="cp-colobby-hint">After allowing them in System Settings, quit and reopen the app. macOS requires it.</p>
           <div className="cp-gr-denied-row">
             <button type="button" className="btn btn-ghost btn-compact" onClick={openPrivacySettings}>
@@ -94,7 +95,7 @@ export function GreenRoomDevices({ cap, onContinue }: {
           </div>
           <div className="cp-gr-selects">
             <label className="cp-colobby-field">
-              <span className="cp-colobby-field-label">Camera</span>
+              <span className="cp-colobby-field-label"><IconVideo size={12} /> Camera</span>
               <select
                 className="cp-colobby-input"
                 value={cap.choice.cameraId ?? ""}
@@ -107,7 +108,7 @@ export function GreenRoomDevices({ cap, onContinue }: {
               </select>
             </label>
             <label className="cp-colobby-field">
-              <span className="cp-colobby-field-label">Microphone</span>
+              <span className="cp-colobby-field-label"><IconMic size={12} /> Microphone</span>
               <select
                 className="cp-colobby-input"
                 value={cap.choice.micId ?? ""}
