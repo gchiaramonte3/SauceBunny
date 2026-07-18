@@ -3,13 +3,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { BunnyLoader } from "./BunnyLoader";
 
 // Server-render pins the structure: FOUR traced contours (two ears, body
-// silhouette, inner play triangle) x four layers, gradient defs, a11y.
+// silhouette, inner play triangle) x four layers (halo/glow/tail/main -
+// v2 has NO resting base outline), gradient defs, a11y.
 describe("BunnyLoader", () => {
   it("renders three paths per layer and the gradient defs", () => {
     const html = renderToStaticMarkup(<BunnyLoader />);
     expect(html.match(/pathLength="1"/g)?.length).toBe(16);
     expect(html).toContain("linearGradient");
     expect(html).toContain("cp-bl-grad");
+    expect(html).not.toContain("cp-bl-base");
+    expect(html).toContain("cp-bl-halo-layer");
     // Brand colors come from tokens via the classed stops (loader.css) —
     // NO mirrored hex literals in the markup (conventions fix).
     expect(html).toContain("cp-bl-stop-a");

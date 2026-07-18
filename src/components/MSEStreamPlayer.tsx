@@ -2,7 +2,7 @@ import {
   forwardRef, memo, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
 import { Input, UrlSource, CanvasSink, ALL_FORMATS } from "mediabunny";
-import { IconFilm } from "./Icons";
+import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle } from "./player-handle";
 import { base64UrlEncode } from "../lib/stream-proxy";
 
@@ -915,7 +915,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
           <video ref={(el) => { videoRef.current = el; }} style={{ display: "none" }} />
           <div className="cp-audio-card">
             <div className={"cp-audio-icon" + (isPlaying ? " playing" : "")}>
-              <IconFilm size={32} stroke="rgba(255,255,255,0.6)" />
+              <BunnyMark size={52} />
               {isPlaying && <div className="cp-eq"><span /><span /><span /><span /></div>}
             </div>
             <div className="cp-audio-name">{filename ?? "Streaming audio"}</div>

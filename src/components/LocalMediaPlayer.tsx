@@ -2,7 +2,7 @@ import {
   forwardRef, memo, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { IconFilm } from "./Icons";
+import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle } from "./player-handle";
 
 type Props = {
@@ -357,7 +357,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
           {/* Visible card so the user can tell something is loaded and playing. */}
           <div className="cp-audio-card">
             <div className={"cp-audio-icon" + (isPlaying ? " playing" : "")}>
-              <IconFilm size={32} stroke="rgba(255,255,255,0.6)" />
+              <BunnyMark size={52} />
               {isPlaying && (
                 <div className="cp-eq">
                   <span /><span /><span /><span />

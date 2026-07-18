@@ -8,7 +8,7 @@ import {
 } from "mediabunny";
 import { mediabunnySource } from "../lib/mediabunny-source";
 import { createScrubPump, type ScrubPump } from "../lib/scrub-pump";
-import { IconFilm } from "./Icons";
+import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle } from "./player-handle";
 
 /**
@@ -609,7 +609,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       ) : (
         <div className="cp-audio-card">
           <div className={"cp-audio-icon" + (isPlaying ? " playing" : "")}>
-            <IconFilm size={32} stroke="rgba(255,255,255,0.6)" />
+            <BunnyMark size={52} />
             {isPlaying && (
               <div className="cp-eq">
                 <span /><span /><span /><span />

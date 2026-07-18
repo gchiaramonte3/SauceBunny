@@ -313,6 +313,7 @@
   z-index: 4;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   padding: 8px 12px 8px 12px;
   background: rgba(15,15,18,0.86);
@@ -1197,3 +1198,13 @@
   .cp-canvas-toast { animation: none; }
 }
 
+
+/* The static bunny mark (11a): quiet crisp outline for placeholders. */
+.cp-bunny-mark path {
+  fill: none;
+  stroke: var(--fg-4);
+  stroke-width: 18;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.8;
+}

@@ -27,7 +27,10 @@ const BODY_OUTER =
 const BODY_INNER =
   "M853.8,798.31c-3.4,7.98-9.28,14.76-17.26,19.29-42.62,23.58-173.88,98.98-214.16,121.5-26.64,11.49-76.46,55.95-108.15,41.8-16.62-5.54-28.52-19.42-30.63-36.92,0,0,.04-321.22.04-321.22,0-15.97,10.58-30.05,24.25-36.84,29.23-17.55,61.44,9.19,86.1,22.44,0,0,51.62,29.27,51.62,29.27,12.56,7.18,191.06,108.51,196.21,112.4,14.78,11.03,19.17,31.41,11.99,48.29Z";
 
-const PATHS = [EAR_LEFT, EAR_RIGHT, BODY_OUTER, BODY_INNER];
+/** Exported for BunnyMark (the static placeholder) - one source of truth. */
+export const BUNNY_PATHS = [EAR_LEFT, EAR_RIGHT, BODY_OUTER, BODY_INNER];
+export const BUNNY_VIEWBOX = "212 63 831 1046";
+const PATHS = BUNNY_PATHS;
 
 type Props = {
   /** Rendered width in px; height follows the mark's aspect. */
@@ -46,7 +49,7 @@ export function BunnyLoader({ size = 96, label = "Loading", sublabel }: Props) {
       aria-live="polite"
       style={{ ["--bl-size" as string]: `${size}px` }}
     >
-      <svg viewBox="212 63 831 1046" aria-hidden="true">
+      <svg viewBox={BUNNY_VIEWBOX} aria-hidden="true">
         <defs>
           {/* stop-color IS a CSS presentation property, so the actual colors
               live in loader.css as var(--novella-purple)/var(--ella-green) —
@@ -56,16 +59,19 @@ export function BunnyLoader({ size = 96, label = "Loading", sublabel }: Props) {
             <stop offset="0" className="cp-bl-stop-a" />
             <stop offset="1" className="cp-bl-stop-b" />
           </linearGradient>
-          {/* SVG blur (not CSS filter) so the glow clips with the svg box. */}
-          <filter id="cp-bl-blur" x="-40%" y="-40%" width="180%" height="180%">
-            <feGaussianBlur stdDeviation="14" />
+          {/* SVG blur (not CSS filter) so the glow clips with the svg box.
+              Two radii: the neon glow and a very soft outer halo. */}
+          <filter id="cp-bl-blur" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="22" />
+          </filter>
+          <filter id="cp-bl-halo" x="-80%" y="-80%" width="260%" height="260%">
+            <feGaussianBlur stdDeviation="38" />
           </filter>
         </defs>
-        {/* Persistent base outline: the WHOLE mark stays visible at all
-            times — the animated segments are a highlight sweeping over it,
-            not the only thing on screen (three disconnected arcs never read
-            as the bunny). */}
-        <g className="cp-bl-base">
+        {/* v2 (1a): NO resting outline - the mark exists only where the
+            light is passing. The long trace + halo below keep most of the
+            bunny suggested at any moment. Softest pass first. */}
+        <g className="cp-bl-halo-layer" filter="url(#cp-bl-halo)">
           {PATHS.map((d, i) => (
             <path key={i} d={d} pathLength={1} />
           ))}

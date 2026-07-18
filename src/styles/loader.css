@@ -25,32 +25,35 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-/* Persistent base outline: the full mark, always visible, quiet. Neutral
-   dim stroke (rgba: the tokens carry no alpha variants) so the gradient
-   segment reads as light moving over it. */
-.cp-bunny-loader .cp-bl-base path {
-  stroke: rgba(255, 255, 255, 0.14);
-  stroke-width: 14;
-}
-/* Main chasing segment: ~30% of each outline, one lap per 1.6s. */
+/* v2 (1a): no resting outline. The trace itself carries the mark - a
+   LONG segment (~55% of each contour) so most of the bunny is suggested
+   by light at any moment, with neon feathering: a wide blurred glow and
+   a second, softer halo pass so the light fades out instead of stopping. */
 .cp-bunny-loader .cp-bl-main path {
   stroke-width: 16;
-  stroke-dasharray: 0.3 0.7;
+  stroke-dasharray: 0.55 0.45;
   animation: cp-bl-chase 1.6s linear infinite;
 }
-/* Comet tail: shorter + fainter, phase-offset so it trails the segment. */
+/* Comet tail: trails the segment, proportionally longer than v1. */
 .cp-bunny-loader .cp-bl-tail path {
   stroke-width: 16;
-  opacity: 0.35;
-  stroke-dasharray: 0.1 0.9;
+  opacity: 0.4;
+  stroke-dasharray: 0.22 0.78;
   animation: cp-bl-chase 1.6s linear infinite;
-  animation-delay: -0.13s;
+  animation-delay: -0.18s;
 }
-/* Feathered glow underlayer: fat blurred stroke on the same cycle. */
+/* Neon glow: fat blurred stroke on the same cycle. */
 .cp-bunny-loader .cp-bl-glow path {
-  stroke-width: 48;
-  opacity: 0.25;
-  stroke-dasharray: 0.3 0.7;
+  stroke-width: 64;
+  opacity: 0.32;
+  stroke-dasharray: 0.55 0.45;
+  animation: cp-bl-chase 1.6s linear infinite;
+}
+/* Outer halo: very soft, very wide - the feather's last breath. */
+.cp-bunny-loader .cp-bl-halo-layer path {
+  stroke-width: 96;
+  opacity: 0.12;
+  stroke-dasharray: 0.55 0.45;
   animation: cp-bl-chase 1.6s linear infinite;
 }
 @keyframes cp-bl-chase {
@@ -72,16 +75,18 @@
   white-space: nowrap;
 }
 @media (prefers-reduced-motion: reduce) {
-  /* Static full outline at low opacity with a gentle pulse; no chase. */
+  /* Static full outline at low opacity, gentle pulse, no chase - the ONE
+     place the whole outline may appear (there is no resting outline). */
   .cp-bunny-loader .cp-bl-main path,
   .cp-bunny-loader .cp-bl-tail path,
-  .cp-bunny-loader .cp-bl-glow path {
+  .cp-bunny-loader .cp-bl-glow path,
+  .cp-bunny-loader .cp-bl-halo-layer path {
     animation: none;
     stroke-dasharray: none;
   }
   .cp-bunny-loader .cp-bl-tail { display: none; }
   .cp-bunny-loader .cp-bl-glow { display: none; }
-  .cp-bunny-loader .cp-bl-base path { stroke: rgba(255, 255, 255, 0.1); }
+  .cp-bunny-loader .cp-bl-halo-layer { display: none; }
   .cp-bunny-loader .cp-bl-main path { opacity: 0.55; }
   .cp-bunny-loader svg { animation: cp-bl-pulse 2s ease-in-out infinite; }
 }
