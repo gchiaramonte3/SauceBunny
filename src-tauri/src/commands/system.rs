@@ -439,6 +439,55 @@ pub async fn write_bytes_to_path(
     Ok(p.to_string_lossy().into_owned())
 }
 
+/// The real camera + microphone TCC state, from AVFoundation. WKWebView's
+/// JS Permissions API is unreliable for capture (it collapses to "prompt"/
+/// throws, so the app can't otherwise tell "granted" from "denied" or from
+/// "the OS grant hasn't taken effect until relaunch"). AVCaptureDevice's
+/// authorizationStatus is the authoritative answer the UI needs.
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct AvAuthStatus {
+    /// "authorized" | "denied" | "notDetermined" | "restricted"
+    pub camera: String,
+    pub microphone: String,
+}
+
+#[cfg(target_os = "macos")]
+fn av_status(media_type: &objc2_foundation::NSString) -> String {
+    use objc2::runtime::AnyClass;
+    let Some(cls) = AnyClass::get(c"AVCaptureDevice") else {
+        return "notDetermined".into();
+    };
+    // AVAuthorizationStatus: 0 notDetermined, 1 restricted, 2 denied, 3 authorized.
+    let raw: isize = unsafe { objc2::msg_send![cls, authorizationStatusForMediaType: media_type] };
+    match raw {
+        3 => "authorized",
+        2 => "denied",
+        1 => "restricted",
+        _ => "notDetermined",
+    }
+    .into()
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub fn av_permission_status() -> AvAuthStatus {
+    use objc2_foundation::NSString;
+    // AVMediaTypeVideo == "vide", AVMediaTypeAudio == "soun" (documented raw
+    // values) - constructing them avoids an extern-static dance while the
+    // AVCaptureDevice class lookup forces AVFoundation to be present.
+    AvAuthStatus {
+        camera: av_status(&NSString::from_str("vide")),
+        microphone: av_status(&NSString::from_str("soun")),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub fn av_permission_status() -> AvAuthStatus {
+    AvAuthStatus { camera: "authorized".into(), microphone: "authorized".into() }
+}
+
 /// Open a System Settings privacy pane. The opener plugin's default scope
 /// allows only http(s), so x-apple.systempreferences: links silently no-op
 /// from the frontend - macOS `open` via std::process is the app's proven
@@ -553,7 +602,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-19-r119-share-v2";
+pub const BACKEND_BUILD_ID: &str = "2026-07-19-r120-av-perms";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

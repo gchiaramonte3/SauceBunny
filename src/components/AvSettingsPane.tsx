@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { useMediaCapture } from "../hooks/use-media-capture";
-import { SPEAKER_OUTPUT_CHANGED_EVENT, canPickSpeakers } from "../lib/media-devices";
+import { SPEAKER_OUTPUT_CHANGED_EVENT, canPickSpeakers, nativeAvStatus, type AvAuthState } from "../lib/media-devices";
 import { IconMic, IconVideo } from "./Icons";
+import { invoke } from "@tauri-apps/api/core";
 
 /**
  * Settings > Camera & Mic - the Discord-style AV panel, scoped to what
@@ -32,6 +33,32 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
   }, []);
 
   const camLive = !!cap.stream && cap.stream.getVideoTracks().length > 0 && !cap.choice.cameraOff;
+
+  // THE real macOS TCC state (WKWebView can't tell us). Drives the status
+  // row + the "granted but relaunch needed" hint.
+  const [tcc, setTcc] = useState<{ camera: AvAuthState; microphone: AvAuthState } | null>(null);
+  const refreshTcc = useCallback(() => { void nativeAvStatus().then(setTcc); }, []);
+  useEffect(() => { refreshTcc(); }, [refreshTcc, cap.permission]);
+
+  // Auto-start the preview when authorized and nothing is live - the Camera
+  // & Mic pane is where you EXPECT to see yourself (Zoom/Discord do this).
+  // Once only; never steals a session's stream.
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (autoStartedRef.current || cap.stream) return;
+    if (tcc?.camera === "authorized" || tcc?.microphone === "authorized") {
+      autoStartedRef.current = true;
+      ownedHereRef.current = true;
+      void cap.acquire(cap.choice);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tcc]);
+
+  const permLabel = (s: AvAuthState | undefined): string =>
+    s === "authorized" ? "Allowed"
+    : s === "denied" ? "Not allowed"
+    : s === "restricted" ? "Restricted"
+    : "Not asked yet";
 
   // Preview follows the owned stream. camLive is a dep because the <video>
   // REMOUNTS when the camera toggles off->on - same stream, fresh element,
@@ -133,28 +160,64 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
       </p>
 
       <CollapsibleSection id="av-devices" label="Devices" open={sectionOpen("av-devices")} onToggle={() => toggleSection("av-devices")}>
-        {!cap.stream && cap.permission !== "denied" && (
+        {/* Permission status - the real macOS TCC answer, per device. */}
+        <div className="cp-pane-row">
+          <div className="k">
+            Permissions
+            <span className="desc">Controlled in macOS System Settings - Privacy &amp; Security.</span>
+          </div>
+          <div className="v cp-av-perms">
+            <span className={"cp-av-perm " + (tcc?.camera ?? "notDetermined")}>
+              <IconVideo size={12} /> {permLabel(tcc?.camera)}
+            </span>
+            <span className={"cp-av-perm " + (tcc?.microphone ?? "notDetermined")}>
+              <IconMic size={12} /> {permLabel(tcc?.microphone)}
+            </span>
+          </div>
+        </div>
+        {(tcc?.camera === "denied" || tcc?.microphone === "denied" || tcc?.camera === "restricted" || tcc?.microphone === "restricted") && (
           <div className="cp-pane-row">
             <div className="k">
-              Preview
-              <span className="desc">Start the camera and microphone to pick devices by name and see yourself.</span>
+              Blocked
+              <span className="desc">Allow Camera and Microphone for Sauce Bunny in System Settings, then quit and reopen the app - macOS applies the change on relaunch.</span>
             </div>
             <div className="v">
-              <button type="button" className="btn btn-primary" onClick={() => acquire({})}>
-                Start preview
+              <button type="button" className="btn btn-ghost btn-compact"
+                onClick={() => { void invoke("open_privacy_pane", { anchor: "Privacy_Camera" }).catch(() => {}); }}>
+                Open System Settings
               </button>
             </div>
           </div>
         )}
-        {cap.permission === "denied" && (
+        {/* Authorized but no live stream: auto-start pending, or capture
+            failed despite the grant (the relaunch quirk). */}
+        {!cap.stream && (tcc?.camera === "authorized" || tcc?.microphone === "authorized") && (
           <div className="cp-pane-row">
             <div className="k">
-              Access
-              <span className="desc">Camera and microphone are blocked for Sauce Bunny. After allowing them in System Settings, quit and reopen the app. macOS requires it.</span>
+              Preview
+              <span className="desc">
+                {cap.error
+                  ? "Allowed, but the camera didn't start. If you just granted access, quit and reopen the app - macOS applies it on relaunch."
+                  : "Starting the camera so you can pick devices and see yourself…"}
+              </span>
             </div>
             <div className="v">
-              <button type="button" className="btn btn-ghost btn-compact" onClick={() => acquire({})}>
-                Try again
+              <button type="button" className="btn btn-ghost btn-compact" onClick={() => { refreshTcc(); acquire({}); }}>
+                {cap.error ? "Try again" : "Start now"}
+              </button>
+            </div>
+          </div>
+        )}
+        {/* Never asked: the enable button triggers the OS prompt. */}
+        {!cap.stream && tcc?.camera === "notDetermined" && tcc?.microphone === "notDetermined" && (
+          <div className="cp-pane-row">
+            <div className="k">
+              Preview
+              <span className="desc">Enable the camera and microphone to pick devices and see yourself.</span>
+            </div>
+            <div className="v">
+              <button type="button" className="btn cp-colobby-cta" onClick={() => { autoStartedRef.current = true; acquire({}); }}>
+                <IconVideo size={13} /><IconMic size={13} /> Enable camera and mic
               </button>
             </div>
           </div>

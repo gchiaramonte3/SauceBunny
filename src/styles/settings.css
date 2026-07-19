@@ -1030,3 +1030,22 @@
   color: var(--fg-4);
 }
 .cp-pane-row .k svg { vertical-align: -2px; margin-right: 3px; }
+
+/* ── Camera & Mic permission chips (native TCC status). ── */
+.cp-av-perms { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.cp-av-perm {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: var(--r-pill);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--line-2);
+  color: var(--fg-3);
+}
+.cp-av-perm.authorized { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, transparent); }
+.cp-av-perm.denied,
+.cp-av-perm.restricted { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.cp-av-perm svg { flex-shrink: 0; }

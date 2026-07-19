@@ -45,12 +45,39 @@ export function saveDeviceChoice(c: DeviceChoice): void {
 }
 
 export type AvPermission = "unknown" | "granted" | "denied";
+/** Raw macOS TCC state, per device (mirrors AVAuthorizationStatus). */
+export type AvAuthState = "authorized" | "denied" | "notDetermined" | "restricted";
 
-/** Best-effort permission probe. WKWebView's Permissions API coverage for
- *  camera/microphone is inconsistent, so anything that throws or reports
- *  "prompt" collapses to "unknown" (the UI then shows the one Enable
- *  button and lets getUserMedia produce the real prompt). */
+/** THE camera+mic permission, from macOS AVFoundation via the Rust command -
+ *  authoritative, unlike WKWebView's Permissions API (which is inconsistent
+ *  for capture). Returns the raw per-device state so the UI can tell
+ *  "granted but relaunch needed" from "denied" from "never asked". */
+export async function nativeAvStatus(): Promise<{ camera: AvAuthState; microphone: AvAuthState } | null> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const s = await invoke<{ camera: string; microphone: string }>("av_permission_status");
+    const norm = (v: string): AvAuthState =>
+      v === "authorized" || v === "denied" || v === "restricted" ? v : "notDetermined";
+    return { camera: norm(s.camera), microphone: norm(s.microphone) };
+  } catch {
+    return null; // non-Tauri (e2e/vitest) or old backend
+  }
+}
+
+/** Best-effort permission probe. Prefers the native TCC check; falls back to
+ *  WKWebView's inconsistent Permissions API (which collapses to "unknown",
+ *  so the UI shows the Enable button and lets getUserMedia produce the
+ *  real prompt). */
 export async function queryAvPermission(): Promise<AvPermission> {
+  const native = await nativeAvStatus();
+  if (native) {
+    // Either device denied -> denied face; both authorized -> granted;
+    // anything still pending -> unknown (the Enable button prompts).
+    if (native.camera === "denied" || native.camera === "restricted"
+      || native.microphone === "denied" || native.microphone === "restricted") return "denied";
+    if (native.camera === "authorized" && native.microphone === "authorized") return "granted";
+    return "unknown";
+  }
   try {
     const perms = navigator.permissions;
     if (!perms?.query) return "unknown";

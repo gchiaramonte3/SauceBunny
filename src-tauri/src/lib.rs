@@ -177,6 +177,7 @@ pub fn run() {
             commands::cancel_job,
             commands::reveal_in_finder,
             commands::open_privacy_pane,
+            commands::av_permission_status,
             commands::write_bytes_to_path,
             commands::screen_capture_access,
             commands::list_displays,

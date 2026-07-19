@@ -21,6 +21,11 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset", "macos-private-api"] }
+# Native camera/mic TCC status (WKWebView's JS Permissions query is
+# unreliable for capture, so the app can't otherwise tell "granted" from
+# "denied" - AVCaptureDevice.authorizationStatus is the real answer).
+objc2 = "0.6"
+objc2-foundation = "0.3"
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
