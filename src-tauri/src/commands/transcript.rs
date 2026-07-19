@@ -1338,6 +1338,14 @@ pub async fn generate_transcript(
             );
             return;
         }
+        // ffmpeg above ran via `.output().await` — no registered child to
+        // kill — so a Stop during conversion is only visible here as the flag.
+        if app_for.state::<JobRegistry>().is_cancelled(&job_for) {
+            let _ = std::fs::remove_file(&wav_path_for);
+            app_for.state::<JobRegistry>().finish_job(&job_for);
+            emit_transcript_done(&app_for, &job_for, false, None, None, Some("Cancelled".into()));
+            return;
+        }
 
         // ─── Phase 3 (Parakeet branch, r90) ───
         // When the user picked Parakeet, the diarize sidecar's --asr mode
@@ -1361,7 +1369,8 @@ pub async fn generate_transcript(
                 return;
             }
             let mut warn_note: Option<String> = None;
-            if detect_speakers {
+            if detect_speakers
+                && !app_for.state::<JobRegistry>().is_cancelled(&job_for) {
                 if let Err(e) = run_diarize_and_merge(
                     &app_for, &job_for, &wav_path_for, std::path::Path::new(&srt), expected_speakers,
                 ).await {
@@ -1377,6 +1386,7 @@ pub async fn generate_transcript(
                 }
             }
             let _ = std::fs::remove_file(&wav_path_for);
+            app_for.state::<JobRegistry>().finish_job(&job_for);
             emit_transcript_done(&app_for, &job_for, true, Some(0), Some(srt), warn_note);
             return;
         }
@@ -1429,6 +1439,14 @@ pub async fn generate_transcript(
         }
         let lang = normalize_whisper_lang(args.language.as_deref());
         warn_if_english_only_mismatch(&app_for, &job_for, &args.model_id, &lang);
+        // Stop pressed during the VAD fetch above? No whisper child existed to
+        // kill, so honor the cancel here rather than transcribe regardless.
+        if app_for.state::<JobRegistry>().is_cancelled(&job_for) {
+            let _ = std::fs::remove_file(&wav_path_for);
+            app_for.state::<JobRegistry>().finish_job(&job_for);
+            emit_transcript_done(&app_for, &job_for, false, None, None, Some("Cancelled".into()));
+            return;
+        }
         let spawn = wsp
             .args(whisper_cli_args(&model_str, &wav_path_str, &output_base_str, &lang, vad_model.as_deref()))
             .spawn();
@@ -1498,7 +1516,11 @@ pub async fn generate_transcript(
                         // matching block in transcribe_prepared_wav for
                         // the full rationale). WAV cleanup is deferred.
                         let mut warn_note: Option<String> = None;
-                        if detect_speakers {
+                        // Skip diarization if Stop landed after whisper finished
+                        // — the SRT is saved; don't label speakers nobody's
+                        // waiting for.
+                        if detect_speakers
+                            && !app_for.state::<JobRegistry>().is_cancelled(&job_for) {
                             emit_transcript_log(
                                 &app_for, &job_for, "info",
                                 format!(
@@ -1532,6 +1554,7 @@ pub async fn generate_transcript(
                             }
                         }
                         let _ = std::fs::remove_file(&wav_path_for);
+                        app_for.state::<JobRegistry>().finish_job(&job_for);
                         emit_transcript_done(
                             &app_for,
                             &job_for,
@@ -1542,6 +1565,7 @@ pub async fn generate_transcript(
                         );
                     } else {
                         let _ = std::fs::remove_file(&wav_path_for);
+                        app_for.state::<JobRegistry>().finish_job(&job_for);
                         let msg = if !success {
                             if payload.signal.is_some() {
                                 "Cancelled".to_string() // user Stop → SIGKILL, code is None
@@ -1900,6 +1924,14 @@ pub async fn transcribe_prepared_wav(
         }
         let lang = normalize_whisper_lang(args.language.as_deref());
         warn_if_english_only_mismatch(&app_for, &job_for, &args.model_id, &lang);
+        // Stop pressed during the VAD fetch above? No whisper child existed to
+        // kill, so honor the cancel here rather than transcribe regardless.
+        if app_for.state::<JobRegistry>().is_cancelled(&job_for) {
+            let _ = std::fs::remove_file(&wav_path_for);
+            app_for.state::<JobRegistry>().finish_job(&job_for);
+            emit_transcript_done(&app_for, &job_for, false, None, None, Some("Cancelled".into()));
+            return;
+        }
         let spawn = wsp
             // No DYLD override — whisper-cli is statically linked (see the
             // generate_transcript spawn for the full rationale).
@@ -1965,7 +1997,11 @@ pub async fn transcribe_prepared_wav(
                     // has audio to chew on. A diarization failure does
                     // NOT fail the whole job — the user still gets the
                     // non-diarized SRT and a warning in the pipeline log.
-                    if detect_speakers && path.is_some() {
+                    // Skip diarization if Stop landed after whisper finished —
+                    // the SRT is already saved; don't spend seconds labeling
+                    // speakers nobody's waiting for.
+                    if detect_speakers && path.is_some()
+                        && !app_for.state::<JobRegistry>().is_cancelled(&job_for) {
                         emit_transcript_log(
                             &app_for, &job_for, "info",
                             format!(
@@ -1990,6 +2026,7 @@ pub async fn transcribe_prepared_wav(
                     }
 
                     let _ = std::fs::remove_file(&wav_path_for);
+                    app_for.state::<JobRegistry>().finish_job(&job_for);
                     emit_transcript_done(&app_for, &job_for, success && path.is_some(),
                                          payload.code, path, error);
                     break;
@@ -2098,6 +2135,14 @@ pub async fn transcribe_local_file(
             );
             return;
         }
+        // ffmpeg above ran via `.output().await` — no registered child to
+        // kill — so a Stop during conversion is only visible here as the flag.
+        if app_for.state::<JobRegistry>().is_cancelled(&job_for) {
+            let _ = std::fs::remove_file(&wav_path_for);
+            app_for.state::<JobRegistry>().finish_job(&job_for);
+            emit_transcript_done(&app_for, &job_for, false, None, None, Some("Cancelled".into()));
+            return;
+        }
 
         // Phase 2 (Parakeet branch, r90) — see generate_transcript for rationale.
         if engine == "parakeet" {
@@ -2116,7 +2161,8 @@ pub async fn transcribe_local_file(
                 return;
             }
             let mut warn_note: Option<String> = None;
-            if detect_speakers {
+            if detect_speakers
+                && !app_for.state::<JobRegistry>().is_cancelled(&job_for) {
                 if let Err(e) = run_diarize_and_merge(
                     &app_for, &job_for, &wav_path_for, std::path::Path::new(&srt), expected_speakers,
                 ).await {
@@ -2126,6 +2172,7 @@ pub async fn transcribe_local_file(
                 }
             }
             let _ = std::fs::remove_file(&wav_path_for);
+            app_for.state::<JobRegistry>().finish_job(&job_for);
             emit_transcript_done(&app_for, &job_for, true, Some(0), Some(srt), warn_note);
             return;
         }
@@ -2158,6 +2205,14 @@ pub async fn transcribe_local_file(
                 "Voice-activity detection on (Silero VAD).".into());
         }
         warn_if_english_only_mismatch(&app_for, &job_for, &model_id, &lang);
+        // Stop pressed during the VAD fetch above? No whisper child existed to
+        // kill, so honor the cancel here rather than transcribe regardless.
+        if app_for.state::<JobRegistry>().is_cancelled(&job_for) {
+            let _ = std::fs::remove_file(&wav_path_for);
+            app_for.state::<JobRegistry>().finish_job(&job_for);
+            emit_transcript_done(&app_for, &job_for, false, None, None, Some("Cancelled".into()));
+            return;
+        }
         let spawn = wsp
             // No DYLD override — whisper-cli is statically linked (see the
             // generate_transcript spawn for the full rationale).
@@ -2207,7 +2262,11 @@ pub async fn transcribe_local_file(
                         // matching block in transcribe_prepared_wav for
                         // the rationale + failure semantics).
                         let mut warn_note: Option<String> = None;
-                        if detect_speakers {
+                        // Skip diarization if Stop landed after whisper finished
+                        // — the SRT is saved; don't label speakers nobody's
+                        // waiting for.
+                        if detect_speakers
+                            && !app_for.state::<JobRegistry>().is_cancelled(&job_for) {
                             emit_transcript_log(
                                 &app_for, &job_for, "info",
                                 format!(
@@ -2228,9 +2287,11 @@ pub async fn transcribe_local_file(
                             }
                         }
                         let _ = std::fs::remove_file(&wav_path_for);
+                        app_for.state::<JobRegistry>().finish_job(&job_for);
                         emit_transcript_done(&app_for, &job_for, true, payload.code, Some(srt), warn_note);
                     } else {
                         let _ = std::fs::remove_file(&wav_path_for);
+                        app_for.state::<JobRegistry>().finish_job(&job_for);
                         let msg = if !success {
                             if payload.signal.is_some() {
                                 "Cancelled".to_string() // user Stop → SIGKILL, code is None

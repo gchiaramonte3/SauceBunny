@@ -1261,6 +1261,11 @@ export default function App() {
   captionsJobIdRef.current = captionsJobId;
   const transcriptJobIdRef = useRef<string | null>(null);
   transcriptJobIdRef.current = transcriptJobId;
+  // Aborts the FRONTEND half of a transcription run — the mediabunny audio
+  // extraction that happens in the browser BEFORE any backend job exists.
+  // Stop can't cancel_job something that hasn't spawned yet, so handleStop
+  // flips this to bail out of extraction and skip the backend invoke.
+  const transcriptAbortRef = useRef<AbortController | null>(null);
   // Pipeline-log channel label for transcription ("whisper" | "parakeet"), in a
   // ref so the long-lived transcript-log listener tags lines with the engine
   // that's actually running rather than a hardcoded "whisper".
@@ -2691,6 +2696,27 @@ export default function App() {
       setPlaybackPrepJobId(null);
       setPlaybackPrepProgress(0);
     }
+    // Interrupt the browser-side audio extraction (runs before any backend
+    // job exists) and, for a live run, reset the transcript UI synchronously.
+    // The backend whisper Terminated handler still emits a "Cancelled" done,
+    // but its job_id no longer matches after we null it below, so it's a
+    // no-op — this is what makes Stop instant AND the only reset when the
+    // hang was in the pre-backend extraction phase.
+    transcriptAbortRef.current?.abort();
+    transcriptAbortRef.current = null;
+    if (transcriptState === "running") {
+      setTranscriptState("idle");
+      setTranscriptResolution(null);
+      setTranscriptError(null);
+      setTranscriptProgress(0);
+      setTranscriptPhase(null);
+      setTranscriptJobId(null);
+      // Null the ref NOW (not at next render) so the backend's own
+      // "Cancelled" done event, which can land before React re-renders,
+      // is ignored by the listener instead of double-logging.
+      transcriptJobIdRef.current = null;
+      appendLog("warn", txChannelRef.current, "Transcription cancelled");
+    }
     for (const id of ids) {
       try {
         await invoke<boolean>("cancel_job", { jobId: id });
@@ -2698,7 +2724,7 @@ export default function App() {
         appendLog("err", "control", `Cancel failed: ${formatError(err)}`);
       }
     }
-  }, [jobId, transcriptJobId, playbackPrepJobId, appendLog, webPlayback.downloading, stopWebPlayback]);
+  }, [jobId, transcriptJobId, transcriptState, playbackPrepJobId, appendLog, webPlayback.downloading, stopWebPlayback]);
 
   /** Add the current active selection as a new queued item, then clear marks.
    *  The item captures its SOURCE (web URL or local path), fps, and title at
@@ -3145,6 +3171,12 @@ export default function App() {
     try {
       const id = await invoke<string>("new_job_id");
       setTranscriptJobId(id);
+      // Fresh abort scope for this run. The mediabunny audio extraction below
+      // runs entirely in the browser before any cancelable backend job exists,
+      // so Stop pivots on this controller to interrupt it (and to skip the
+      // backend invoke if the user bailed mid-extraction).
+      const abort = new AbortController();
+      transcriptAbortRef.current = abort;
       if (sourceKind === "file" && localFilePath) {
         // Two paths, mediabunny preferred:
         //   • mediabunny: in-browser audio decode → OfflineAudioContext
@@ -3156,8 +3188,15 @@ export default function App() {
         // Parakeet runs only via transcribe_local_file (ffmpeg WAV); the
         // WebCodecs prepared-WAV fast-path is whisper-only.
         const wavBlob = (engine !== "parakeet" && defaults.useWebCodecsDecoder)
-          ? await extractAudioAsWav16k(localFilePath).catch(() => null)
+          ? await extractAudioAsWav16k(localFilePath, undefined, undefined, abort.signal).catch(() => null)
           : null;
+        // Extraction can be the slow "stuck at 0%" phase on big 4K files. If
+        // the user hit Stop while it ran, bail here — no backend job was ever
+        // spawned, so there's nothing for cancel_job to kill.
+        if (abort.signal.aborted) {
+          transcriptAbortRef.current = null;
+          return;
+        }
         if (wavBlob) {
           appendLog("info", txChannel,
             `Audio extracted via mediabunny (${(wavBlob.size / 1_000_000).toFixed(1)} MB WAV); skipping ffmpeg.`);
@@ -3215,7 +3254,12 @@ export default function App() {
           },
         });
       }
+      // Backend job is now spawning; cancellation passes to cancel_job (which
+      // also flags the pre-whisper VAD window). The frontend abort scope is
+      // done its job.
+      transcriptAbortRef.current = null;
     } catch (err) {
+      transcriptAbortRef.current = null;
       const msg = formatError(err);
       setTranscriptState("error");
       setTranscriptError(msg);
@@ -5138,16 +5182,7 @@ export default function App() {
                         micOn={!capture.choice.micMuted}
                         camOn={!capture.choice.cameraOff}
                         onToggleMic={() => capture.setEnabled("audio", capture.choice.micMuted)}
-                        onToggleCam={() => {
-                          const turningOn = capture.choice.cameraOff;
-                          if (turningOn && (capture.stream?.getVideoTracks().length ?? 0) === 0) {
-                            // Camera was off at acquire time: no video track exists to
-                            // re-enable - reopen for real (the mesh replaceTracks it out).
-                            void capture.acquire({ ...capture.choice, cameraOff: false });
-                          } else {
-                            capture.setEnabled("video", turningOn);
-                          }
-                        }}
+                        onToggleCam={() => capture.setEnabled("video", capture.choice.cameraOff)}
                         shareState={shareState}
                         onStartShare={startShare}
                         onStopShare={stopShare}

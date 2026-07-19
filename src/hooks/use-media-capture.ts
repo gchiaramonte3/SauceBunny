@@ -70,9 +70,20 @@ export function useMediaCapture() {
     setStream(activeStream);
     setChoiceState(currentChoice);
     void queryAvPermission().then(setPermission);
+    // Populate the device lists immediately, and track hot-plug: powering on
+    // an external camera (or a Continuity iPhone appearing) fires the
+    // browser's `devicechange` — re-enumerate so the pickers show it without
+    // the user having to reopen anything. Labels stay generic until a
+    // getUserMedia grant; the pickers already fall back to "Camera N".
+    const onDeviceChange = () => {
+      void enumerateAv().then(setDevices).catch(() => { /* seam unavailable */ });
+    };
+    onDeviceChange();
+    navigator.mediaDevices?.addEventListener?.("devicechange", onDeviceChange);
     return () => {
       listeners.delete(l);
       choiceListeners.delete(setChoiceState);
+      navigator.mediaDevices?.removeEventListener?.("devicechange", onDeviceChange);
     };
   }, []);
 
@@ -119,14 +130,21 @@ export function useMediaCapture() {
   }, []);
 
   /** Flip a track's enabled bit without re-prompting (mute / camera-off of
-   *  a LIVE stream; a camera turned off before acquire never opens video). */
+   *  a LIVE stream). One exception: a stream acquired with the camera OFF
+   *  has no video track at all (openCapture never requested one), so
+   *  camera-ON must re-acquire to actually open the camera — flipping
+   *  enabled on zero tracks would silently do nothing. */
   const setEnabled = useCallback((kind: "audio" | "video", enabled: boolean) => {
     commitChoice({ ...currentChoice, ...(kind === "audio" ? { micMuted: !enabled } : { cameraOff: !enabled }) });
     const s = activeStream;
     if (!s) return;
     const tracks = kind === "audio" ? s.getAudioTracks() : s.getVideoTracks();
+    if (kind === "video" && enabled && tracks.length === 0) {
+      void acquire(currentChoice);
+      return;
+    }
     for (const t of tracks) t.enabled = enabled;
-  }, []);
+  }, [acquire]);
 
   /** Persist a choice change that needs no reopen (e.g. the speaker output).
    *  Every mounted instance sees it immediately. */

@@ -20,6 +20,7 @@ export async function extractAudioAsWav16k(
   localPath: string,
   startSeconds?: number,
   endSeconds?: number,
+  signal?: AbortSignal,
 ): Promise<Blob | null> {
   const url = convertFileSrc(localPath);
   const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
@@ -32,9 +33,12 @@ export async function extractAudioAsWav16k(
 
     // Collect all the AudioBuffer chunks for the requested range. Each
     // chunk is a Web Audio API AudioBuffer with the track's native
-    // sample rate + channel count.
+    // sample rate + channel count. On a large file this decode loop is the
+    // long pole, so honor an abort request (Stop) between chunks instead of
+    // decoding the whole track before noticing.
     const chunks: AudioBuffer[] = [];
     for await (const wrapped of sink.buffers(startSeconds, endSeconds)) {
+      if (signal?.aborted) return null;
       chunks.push(wrapped.buffer);
     }
     if (chunks.length === 0) return null;

@@ -21,6 +21,15 @@ use super::*;
 #[derive(Default)]
 pub struct JobRegistry {
     children: Mutex<HashMap<String, CommandChild>>,
+    // Jobs the user asked to cancel. A `kill()` only reaches a process that
+    // is registered THIS instant, but a transcription pipeline spends real
+    // time BETWEEN spawns — fetching the Silero VAD model before whisper-cli,
+    // running the diarizer after it — with no child to kill. Those stages
+    // poll `is_cancelled` at their boundaries and bail. `finish_job` clears
+    // the flag on the pipelines' main exit paths; a path that misses it only
+    // strands one job-id string (ids are UUIDs, never reused, so a stale
+    // flag can't cancel a future job).
+    cancelled: Mutex<std::collections::HashSet<String>>,
 }
 
 impl JobRegistry {
@@ -59,10 +68,33 @@ impl JobRegistry {
             .map(|g| g.keys().cloned().collect())
             .unwrap_or_default()
     }
+    /// Record that a job should stop. Read by pipeline stages that run
+    /// between child spawns (VAD fetch, diarize) — see the `cancelled` field.
+    pub(crate) fn mark_cancelled(&self, id: &str) {
+        if let Ok(mut g) = self.cancelled.lock() {
+            g.insert(id.to_string());
+        }
+    }
+    /// True if `cancel_job` flagged this job. Pipeline stages poll this at
+    /// their boundaries to bail out of an otherwise-unkillable window.
+    pub(crate) fn is_cancelled(&self, id: &str) -> bool {
+        self.cancelled.lock().map(|g| g.contains(id)).unwrap_or(false)
+    }
+    /// Drop all bookkeeping for a finished job — the cancel flag plus any
+    /// lingering child handle. Pipeline tasks call this on every exit path so
+    /// the cancel set can't accumulate stale entries across a session.
+    pub(crate) fn finish_job(&self, id: &str) {
+        if let Ok(mut g) = self.cancelled.lock() { g.remove(id); }
+        if let Ok(mut g) = self.children.lock() { g.remove(id); }
+    }
 }
 
 #[tauri::command]
 pub fn cancel_job(registry: State<'_, JobRegistry>, job_id: String) -> Result<bool, crate::AppError> {
+    // Flag the intent first so a pipeline stage running BETWEEN spawns (VAD
+    // fetch, diarize) notices even though there's no child to kill this
+    // instant. `kill()` handles the case where a sidecar is actually running.
+    registry.mark_cancelled(&job_id);
     if let Some(child) = registry.take(&job_id) {
         child.kill().map_err(|e| format!("kill failed: {e}"))?;
         Ok(true)
@@ -602,7 +634,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-19-r120-av-perms";
+pub const BACKEND_BUILD_ID: &str = "2026-07-19-r121-stop-cancel";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

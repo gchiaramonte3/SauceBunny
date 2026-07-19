@@ -130,7 +130,10 @@ button:focus-visible, input:focus-visible {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--s-2);
-  padding: 2px 0;
+  /* Inset so the .picked selection ring (a 3px box-shadow that sits OUTSIDE
+     the swatch) and the hover scale have room — otherwise an edge swatch's
+     ring is clipped by the container or an overflow-hidden card around it. */
+  padding: 4px;
 }
 .cp-swatch {
   width: var(--swatch-size, 22px);
