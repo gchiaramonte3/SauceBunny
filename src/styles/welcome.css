@@ -1,0 +1,114 @@
+/* ============================================================
+   WELCOME SCREEN (first launch only - src/components/WelcomeScreen.tsx)
+   The one surface where the brand green and novella purple share a stage:
+   two soft radial washes over the darkest background, mark + four rows +
+   one grey-chip CTA. Everything animates in once; reduced motion renders
+   the finished state immediately.
+   ============================================================ */
+.cp-welcome {
+  position: fixed;
+  inset: 0;
+  z-index: 300; /* above modals - nothing outranks first-run */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(52% 44% at 18% 12%, color-mix(in srgb, var(--ella-green) 13%, transparent), transparent 70%),
+    radial-gradient(56% 48% at 84% 88%, color-mix(in srgb, var(--novella-purple) 17%, transparent), transparent 72%),
+    radial-gradient(40% 36% at 78% 18%, color-mix(in srgb, var(--novella-violet) 8%, transparent), transparent 70%),
+    var(--bg-0, #0b0b0d);
+}
+.cp-welcome-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  max-width: 520px;
+  padding: var(--s-6) var(--s-5);
+  text-align: center;
+}
+.cp-welcome-mark {
+  width: 96px;
+  height: auto;
+  filter: drop-shadow(0 0 28px color-mix(in srgb, var(--ella-green) 34%, transparent));
+  animation: cp-welcome-rise 520ms var(--ease-out) both;
+}
+.cp-welcome-title {
+  margin: var(--s-2) 0 0;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--fg-1);
+  animation: cp-welcome-rise 520ms var(--ease-out) 60ms both;
+}
+.cp-welcome-sub {
+  margin: 0;
+  font-size: 14px;
+  color: var(--fg-2);
+  animation: cp-welcome-rise 520ms var(--ease-out) 120ms both;
+}
+.cp-welcome-rows {
+  list-style: none;
+  margin: var(--s-4) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  width: 100%;
+  max-width: 400px;
+  text-align: left;
+}
+.cp-welcome-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line-1);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-1, #131316) 82%, transparent);
+  animation: cp-welcome-rise 520ms var(--ease-out) both;
+}
+.cp-welcome-row-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid var(--line-2);
+  color: var(--fg-2);
+  background: rgba(255, 255, 255, 0.03);
+}
+.cp-welcome-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.cp-welcome-row-text strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+.cp-welcome-row-text span {
+  font-size: 12px;
+  color: var(--fg-3);
+}
+.cp-welcome-cta {
+  margin-top: var(--s-4);
+  padding: 10px 26px;
+  font-size: 14px;
+  font-weight: 700;
+  animation: cp-welcome-rise 520ms var(--ease-out) 560ms both;
+}
+@keyframes cp-welcome-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-welcome-mark,
+  .cp-welcome-title,
+  .cp-welcome-sub,
+  .cp-welcome-row,
+  .cp-welcome-cta { animation: none; }
+}

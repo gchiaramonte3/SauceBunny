@@ -103,12 +103,25 @@ export function YouTubeSettings({
     invoke("open_youtube_signin", { browser: browser === "none" ? null : browser }).catch(() => {});
   const openFda = () => invoke("open_full_disk_access").catch(() => {});
 
+  // Live Full Disk Access state for the Safari note (re-checked on selection
+  // and on window focus, so granting in System Settings updates the line).
+  const [safariFda, setSafariFda] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (browser !== "safari") return;
+    const check = () => { void invoke<boolean>("safari_fda_status").then(setSafariFda).catch(() => setSafariFda(null)); };
+    check();
+    window.addEventListener("focus", check);
+    return () => window.removeEventListener("focus", check);
+  }, [browser]);
+
   // Contextual hint under the browser picker — collapses the old standalone
   // "Full Disk Access" row + the per-browser permission caveats into one line
   // that changes with the selection (progressive disclosure).
   const cookieNote: { text: string; action?: { label: string; fn: () => void } } =
     browser === "safari"
-      ? { text: "Safari needs Full Disk Access. Grant it, then sign-ins are picked up automatically.", action: { label: "Grant access ↗", fn: openFda } }
+      ? safariFda
+        ? { text: "Full Disk Access is on. Safari sign-ins are picked up automatically." }
+        : { text: "Safari needs Full Disk Access. Grant it, then sign-ins are picked up automatically.", action: { label: "Grant access ↗", fn: openFda } }
       : browser === "firefox"
         ? { text: "Firefox needs no extra permission." }
         : browser === "none"

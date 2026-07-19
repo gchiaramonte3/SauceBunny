@@ -23,6 +23,8 @@ async function boot(page: Page): Promise<void> {
   await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
+    // Latch the first-launch welcome screen too - it overlays everything.
+    localStorage.setItem("saucebunny.welcomed", "1");
   });
   await page.goto("/");
   await expect(page.locator(".cp-toolbar")).toBeVisible({ timeout: 15_000 });

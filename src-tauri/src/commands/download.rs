@@ -59,6 +59,15 @@ fn safari_cookies_readable() -> bool {
     std::fs::File::open(&p).is_ok()
 }
 
+/// Frontend-visible Full Disk Access probe (r123): can the app actually read
+/// Safari's cookie store? Drives the "one more step" guidance the moment a
+/// user picks Safari sign-in - without it, cookies_args silently degrades to
+/// no-auth and the user believes they're signed in when they aren't.
+#[tauri::command]
+pub fn safari_fda_status() -> bool {
+    safari_cookies_readable()
+}
+
 /// True when `cookies_args` would actually inject `--cookies-from-browser` for
 /// this browser (set, not "none", and — for Safari — readable). Lets callers
 /// decide whether a no-cookies *retry* would even differ from the first attempt

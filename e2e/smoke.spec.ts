@@ -21,11 +21,31 @@ async function boot(page: Page): Promise<void> {
   // (App.tsx DEFAULTS_KEY — the cp- prefix is the project-wide carryover.)
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
+    // Latch the first-launch welcome screen too - it overlays everything.
+    localStorage.setItem("saucebunny.welcomed", "1");
   });
   await page.goto("/");
   // The app shell is up once the toolbar renders.
   await expect(page.locator(".cp-toolbar")).toBeVisible({ timeout: 15_000 });
 }
+
+test("first launch: welcome screen shows once, Get started reveals the app", async ({ page }) => {
+  pageErrors.length = 0;
+  page.on("pageerror", (e) => pageErrors.push(String(e)));
+  await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
+  // Only the YouTube prompt is latched - the welcome flag stays unset.
+  await page.addInitScript(() => {
+    localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
+  });
+  await page.goto("/");
+  await expect(page.locator(".cp-welcome")).toBeVisible({ timeout: 15_000 });
+  await page.locator(".cp-welcome-cta").click();
+  await expect(page.locator(".cp-welcome")).toHaveCount(0);
+  await expect(page.locator(".cp-toolbar")).toBeVisible();
+  const flag = await page.evaluate(() => localStorage.getItem("saucebunny.welcomed"));
+  expect(flag).toBe("1");
+  expect(pageErrors).toEqual([]);
+});
 
 test("shell boots: toolbar, sidebar, monitor render without pageerrors", async ({ page }) => {
   await boot(page);

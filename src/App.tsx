@@ -53,6 +53,7 @@ import { QueueDrawer } from "./components/QueueDrawer";
 import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutSheet } from "./components/ShortcutSheet";
 import { DropTarget } from "./components/DropTarget";
+import { WelcomeScreen } from "./components/WelcomeScreen";
 import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS, TRANSCRIPT_EXTENSIONS } from "./lib/import-extensions";
 import {
   recordTranscript,
@@ -341,6 +342,12 @@ export default function App() {
   // cached in `defaults.ytCookiesBrowser` (localStorage). `ytAuthRetry`
   // re-runs handleFetch once a browser is picked (after defaults update, so
   // no stale closure).
+  // First-launch welcome screen (r123). Gated on its own flag, independent
+  // of the YouTube-auth onboarding latch below.
+  const [showWelcome, setShowWelcome] = useState<boolean>(() => {
+    try { return localStorage.getItem("saucebunny.welcomed") !== "1"; } catch { return false; }
+  });
+
   const [ytAuthOpen, setYtAuthOpen] = useState(false);
   const [ytAuthMode, setYtAuthMode] = useState<"welcome" | "blocked" | "severed" | "site-login">("blocked");
   // Which site the cookie reminder is about ("YouTube", "Reddit", …). The
@@ -1295,6 +1302,27 @@ export default function App() {
   // Stop can't cancel_job something that hasn't spawned yet, so handleStop
   // flips this to bail out of extraction and skip the backend invoke.
   const transcriptAbortRef = useRef<AbortController | null>(null);
+  // Safari sign-in guidance (r123): picking Safari for cookies without Full
+  // Disk Access silently degrades to no-auth (cookies_args skips it so the
+  // fetch doesn't die) - the user believes they're signed in when they
+  // aren't. Whenever the choice BECOMES safari (modal or Settings), probe
+  // FDA; if missing, open the exact pane and say what to do in one line.
+  const safariFdaPromptedRef = useRef(false);
+  useEffect(() => {
+    if (defaults.ytCookiesBrowser !== "safari") {
+      safariFdaPromptedRef.current = false;
+      return;
+    }
+    if (safariFdaPromptedRef.current) return;
+    safariFdaPromptedRef.current = true;
+    void invoke<boolean>("safari_fda_status").then((ok) => {
+      if (ok) return;
+      pushNotification("info", "One more step for Safari",
+        "Turn on Sauce Bunny in the settings window that just opened, then load the video again.");
+      void invoke("open_full_disk_access").catch(() => { /* best-effort */ });
+    }).catch(() => { /* stale backend - Settings still shows the banner */ });
+  }, [defaults.ytCookiesBrowser, pushNotification]);
+
   // Pipeline-log channel label for transcription ("whisper" | "parakeet"), in a
   // ref so the long-lived transcript-log listener tags lines with the engine
   // that's actually running rather than a hardcoded "whisper".
@@ -5543,6 +5571,15 @@ export default function App() {
                   : transcriptState === "done" ? "Transcript ready"
                     : ""}
       </div>
+
+      {/* First-launch welcome — covers everything (incl. the Connect YouTube
+          prompt, which is then revealed after Get started). Shows once. */}
+      {showWelcome && (
+        <WelcomeScreen onDone={() => {
+          try { localStorage.setItem("saucebunny.welcomed", "1"); } catch { /* quota */ }
+          setShowWelcome(false);
+        }} />
+      )}
     </div>
   );
 }

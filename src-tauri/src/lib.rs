@@ -202,6 +202,7 @@ pub fn run() {
             commands::reset_ytdlp,
             commands::open_youtube_signin,
             commands::open_full_disk_access,
+            commands::safari_fda_status,
             commands::open_panel_window,
             commands::close_panel_window,
             commands::session_start,
