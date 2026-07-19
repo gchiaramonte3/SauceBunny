@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { IconChevronRight, IconPanelLeft, IconPlus, IconRefresh, IconStack } from "./Icons";
-import { LibraryTreeArt } from "./LibraryTreeArt";
+import { IconChevronRight, IconPanelLeft, IconPlus, IconRefresh, IconStack, IconFolderSolid } from "./Icons";
 import type { LibraryFolder } from "../types";
 import { libraryPosterPaths, type LibraryCrumb, type LibraryKindFilter } from "../lib/library";
 
@@ -15,7 +14,6 @@ type Props = {
   /** Hides the panel (the bar's Show folders button brings it back). */
   onCollapse: () => void;
   /** The shared, cached, concurrency-capped thumbnail loader (root art). */
-  requestThumb: (path: string) => Promise<string | null>;
   addFolder: () => Promise<void>;
   rescanAll: () => void;
   scanning: boolean;
@@ -74,7 +72,7 @@ function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
  * Add folder + rescan stay pinned at the bottom.
  */
 export function LibraryTree({
-  trees, selection, onSelect, kind, onKind, onCollapse, requestThumb,
+  trees, selection, onSelect, kind, onKind, onCollapse,
   addFolder, rescanAll, scanning,
 }: Props) {
   // Roots open by default; ancestors of the current selection are auto-revealed.
@@ -193,8 +191,8 @@ export function LibraryTree({
                   {row.key === "all" ? <IconStack size={13} /> : null}
                 </span>
               )}
-              {row.artPath !== undefined && (
-                <LibraryTreeArt path={row.artPath} requestThumb={requestThumb} />
+              {row.key !== "all" && (
+                <IconFolderSolid size={15} className="cp-lib-tree-folder" />
               )}
               <span className="cp-lib-tree-name">{row.name}</span>
             </button>

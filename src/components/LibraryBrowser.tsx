@@ -190,7 +190,6 @@ export function LibraryBrowser({
           kind={prefs.kind}
           onKind={(kind) => patchPrefs({ kind })}
           onCollapse={() => setTreeOpen(false)}
-          requestThumb={requestThumb}
           addFolder={addFolder}
           rescanAll={rescanAll}
           scanning={scanning}

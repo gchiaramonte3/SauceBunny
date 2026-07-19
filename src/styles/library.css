@@ -936,22 +936,8 @@
   background: var(--bg-3);
   color: var(--fg-1);
 }
-/* Root folder art — the root's first video poster in a small tile (lazy via
-   the shared thumbnail gate); folder glyph until it lands. */
-.cp-lib-tree-art {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 26px;
-  width: 26px;
-  height: 26px;
-  border-radius: var(--r-xs);
-  overflow: hidden;
-  background: var(--bg-2);
-  border: 1px solid var(--line-1);
-  color: var(--fg-4);
-}
-.cp-lib-tree-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Row glyph: a plain solid folder, boxless by design. */
+.cp-lib-tree-folder { color: var(--fg-3); flex-shrink: 0; }
 .cp-lib-tree-tw {
   display: flex;
   align-items: center;

@@ -1209,3 +1209,11 @@
   padding: 2px 0 6px;
   flex-wrap: wrap;
 }
+
+/* History entries whose video is gone: visible but not loadable (the
+   follow-along rule - a transcript never attaches without its video). */
+.cp-tx-history-row.missing { opacity: 0.5; cursor: not-allowed; }
+.cp-tx-history-gone {
+  color: var(--warning);
+  font-weight: 600;
+}

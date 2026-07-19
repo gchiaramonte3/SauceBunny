@@ -456,3 +456,15 @@ export const IconSmile = (p: IconProps) => (
     <path d="M15 9.5h.01" strokeWidth={2.4} />
   </Icon>
 );
+
+/* Solid folder - the Library tree's row glyph (user call: simple, filled,
+   no thumbnail box). */
+export const IconFolderSolid = (p: IconProps) => (
+  <Icon {...p}>
+    <path
+      d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2c.4 0 .8.16 1.08.44L11.3 7h8.2A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-11z"
+      fill="currentColor"
+      stroke="none"
+    />
+  </Icon>
+);

@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { createPortal } from "react-dom";
 import {
   formatTimeAgo,
@@ -29,6 +30,28 @@ export function HistoryPopover({
   anchor, entries, activePath, onClose, onPick, onRemove,
 }: Props) {
   const popRef = useRef<HTMLDivElement>(null);
+  // RULE: a transcript can only load while its video is reachable. Probe
+  // local sources on open; entries with no source location at all are
+  // unfollowable by definition. (Web URLs are always a known location.)
+  const [missing, setMissing] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const gone = new Set<string>();
+      for (const e of entries) {
+        if (e.sourcePath) {
+          const ok = await invoke<number>("get_file_size", { path: e.sourcePath })
+            .then(() => true)
+            .catch(() => false);
+          if (!ok) gone.add(e.id);
+        } else if (!e.sourceUrl) {
+          gone.add(e.id);
+        }
+      }
+      if (live) setMissing(gone);
+    })();
+    return () => { live = false; };
+  }, [entries]);
   useEffect(() => {
     function onDoc(e: MouseEvent) {
       if (!popRef.current?.contains(e.target as Node)) onClose();
@@ -75,16 +98,19 @@ export function HistoryPopover({
         <div className="cp-tx-history-list">
           {entries.map((e) => {
             const isActive = e.srtPath === activePath;
+            const gone = missing.has(e.id);
             const originLabel =
               e.origin === "captions" ? "YT" :
               e.origin === "whisper"  ? "Whisper" :
-              "—";
+              "File";
             return (
               <div
                 key={e.id}
-                className={"cp-tx-history-row" + (isActive ? " active" : "")}
-                onClick={() => onPick(e)}
+                className={"cp-tx-history-row" + (isActive ? " active" : "") + (gone ? " missing" : "")}
+                onClick={() => { if (!gone) onPick(e); }}
                 role="menuitem"
+                aria-disabled={gone}
+                title={gone ? "The video for this transcript can't be found" : undefined}
               >
                 <div className="cp-tx-history-row-main">
                   <div className="cp-tx-history-row-title" title={e.srtPath}>
@@ -98,6 +124,12 @@ export function HistoryPopover({
                       <>
                         <span>·</span>
                         <span className="cp-tx-history-active-pill">open</span>
+                      </>
+                    )}
+                    {gone && (
+                      <>
+                        <span>·</span>
+                        <span className="cp-tx-history-gone">video missing</span>
                       </>
                     )}
                   </div>

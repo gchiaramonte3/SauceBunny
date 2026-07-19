@@ -2370,6 +2370,14 @@ export default function App() {
    *  a failed load (e.g. stale recent-source pruning on NotFound) can
    *  branch on the kind instead of matching prose; the error UI itself is
    *  fully handled in here. */
+  // A live session makes the Review room the working view: every source
+  // open surfaces IT, not Clip (the two spaces share plumbing, not a home).
+  // Ref, not state: loadLocalPath is defined before useCoReview runs.
+  const sessionRoomRef = useRef(false);
+  const openSourceView = useCallback(() => {
+    setActiveView(sessionRoomRef.current ? "coreview" : "clip");
+  }, [setActiveView]);
+
   const loadLocalPath = useCallback(async (
     picked: string,
     // When an explicit transcript will be attached by the caller (Library
@@ -2386,9 +2394,10 @@ export default function App() {
       if (/^https?:\/\//i.test(picked.trim())) {
         throw { kind: "Invalid", data: `Local import got a web URL (${picked}). This is a bug: web sources must go through Fetch.` } satisfies AppError;
       }
-      // Loading a local source belongs in the Clip view — surface it so a
-      // drop / File-menu import / recent open from the Library is visible.
-      setActiveView("clip");
+      // Surface the working view - Clip normally, but a live session's
+      // room owns source opens (the Review workspace is sticky: loading
+      // content must not bounce you out of the session).
+      openSourceView();
       resetForNewSource(picked);
       const seq = ++sourceSeqRef.current;
       setStatus("fetching");
@@ -3386,9 +3395,9 @@ export default function App() {
    */
   const loadTranscriptPath = useCallback(async (picked: string) => {
     try {
-      // The transcript lands in the Clip view's Transcript tab — surface that
-      // view so a drop / File-menu import from the Library is visible.
-      setActiveView("clip");
+      // Surface the working view (the room when a session is live - the
+      // Review workspace is sticky).
+      openSourceView();
       // Probe — read_text_file_capped errors clearly if the file is
       // missing / too large. We don't load the bytes here; the viewer
       // will read them itself on the path change.
@@ -3423,6 +3432,37 @@ export default function App() {
   }, [loadTranscriptPath]);
 
   const handleLoadFromHistory = useCallback(async (entry: TranscriptHistoryEntry) => {
+    // RULE (2026-07-19): a transcript only ever attaches to ITS OWN video.
+    // If the entry's source isn't what's loaded, load that source alongside;
+    // if the source is gone (moved/deleted local file, no known location),
+    // refuse - a disconnected transcript shadowing the wrong video is worse
+    // than no transcript.
+    const isCurrent =
+      (entry.sourcePath != null && entry.sourcePath === localFilePath) ||
+      (entry.sourceUrl != null && entry.sourceUrl === activeSourceUrlRef.current);
+    if (!isCurrent) {
+      if (entry.sourcePath) {
+        const exists = await invoke<number>("get_file_size", { path: entry.sourcePath })
+          .then(() => true)
+          .catch(() => false);
+        if (!exists) {
+          pushNotification("error", "This transcript's video can't be found",
+            `${entry.sourcePath} was moved or deleted, so the transcript has nothing to follow. Remove the entry to clean up.`);
+          return;
+        }
+        // skipAutoTranscript: the newest-transcript auto-loader must not
+        // race and clobber this explicit (possibly older) choice.
+        void loadLocalPath(entry.sourcePath, true);
+      } else if (entry.sourceUrl) {
+        openSourceView();
+        setUrl(entry.sourceUrl);
+        void handleFetch(entry.sourceUrl);
+      } else {
+        pushNotification("error", "This transcript's video is unknown",
+          "The history entry has no source location, so there is nothing to follow along with.");
+        return;
+      }
+    }
     try {
       await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 8 * 1024 * 1024 });
       setActiveTranscript({
@@ -3437,7 +3477,7 @@ export default function App() {
       pushNotification("error", "Transcript file missing",
         `${entry.srtPath} was moved or deleted. Remove it from the history list to clean up.`);
     }
-  }, [pushNotification]);
+  }, [pushNotification, localFilePath, loadLocalPath, handleFetch, setUrl, openSourceView]);
 
   // ====== Library (Home view) open-handlers ======
   // Every Library open switches to the Clip view first, then routes through
@@ -3455,14 +3495,13 @@ export default function App() {
     navigateView("coreview");
   }, [handleOpenRecentSource, navigateView]);
   const handleLibraryOpenLocalPath = useCallback((path: string) => {
-    setActiveView("clip");
-    void loadLocalPath(path);
-  }, [setActiveView, loadLocalPath]);
+    void loadLocalPath(path); // navigates via openSourceView
+  }, [loadLocalPath]);
 
   const handleLibraryOpenRecent = useCallback((entry: RecentSource) => {
-    setActiveView("clip");
+    openSourceView();
     handleOpenRecentSource(entry);
-  }, [setActiveView, handleOpenRecentSource]);
+  }, [openSourceView, handleOpenRecentSource]);
 
   // Transcript-shelf open: load the SOURCE through the existing handlers, then
   // attach THIS entry via the same handler the Transcript-tab history popover
@@ -3471,11 +3510,8 @@ export default function App() {
   // (possibly older) choice; handleFetch clears the transcript up front but
   // never auto-attaches for web sources, so no skip flag is needed there.
   const handleLibraryOpenTranscript = useCallback((entry: TranscriptHistoryEntry) => {
-    setActiveView("clip");
-    if (entry.sourcePath) void loadLocalPath(entry.sourcePath, true);
-    else if (entry.sourceUrl) { setUrl(entry.sourceUrl); void handleFetch(entry.sourceUrl); }
-    void handleLoadFromHistory(entry);
-  }, [setActiveView, loadLocalPath, handleFetch, handleLoadFromHistory]);
+    void handleLoadFromHistory(entry); // loads the source + navigates + gates
+  }, [handleLoadFromHistory]);
 
   // Home folder card / folder search-hit → open the Library browser with that
   // folder selected. The tick makes a repeat drill re-apply the same chain.
@@ -4397,6 +4433,7 @@ export default function App() {
     const st = statusOf(doc, doc.activeVersionId);
     return st.updatedAt > 0 || st.state !== "pending" ? st : null;
   }, [sessionDoc, reviewSourceKey, reviewTick]);
+  sessionRoomRef.current = coSessionActive;
   const roomActive = coSessionActive && activeView === "coreview";
   // Latest transient reaction per member: tile badges (pruning rides the
   // liveReactions feed itself).
