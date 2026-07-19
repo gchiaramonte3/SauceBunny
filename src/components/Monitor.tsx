@@ -57,6 +57,11 @@ type Props = {
    * branch was removed in r53; see DISTRIBUTION.md for the rationale.
    */
   webStreamUrl?: string | null;
+  /** r122: when webStreamUrl is a LOCAL cached copy (download fallback),
+   *  decode it with MediaBunnyPlayer instead of native <video>. Large cached
+   *  files hang WKWebView's media element over asset:// (black canvas, no
+   *  error) — the same failure that made local imports mediabunny-first. */
+  webCachedUseMediabunny?: boolean;
   /** Seconds the MSE pipeline should start from (fresh-retry resume). */
   streamStartAt?: number;
   /** Pipeline/seek diagnostics → the Pipeline log (channel "seek"). */
@@ -215,7 +220,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     errorDetail, extractorRot,
     resumeTitle, onResume, onboarding,
     aspect,
-    sourceKind, localFilePath, webStreamUrl, streamStartAt, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
+    sourceKind, localFilePath, webStreamUrl, webCachedUseMediabunny, streamStartAt, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs,
     streamLoadingPhase,
     toast, onToastDismiss,
@@ -436,6 +441,24 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
                  stream-probe value (was sending 19:40 to 15:12). */
               knownDuration={metadata?.duration ?? undefined}
               startAtSeconds={streamStartAt}
+              initialVolume={initialVolume}
+              onTimeUpdate={onPlayerTimeUpdate}
+              onPlayStateChange={onPlayerStateChange}
+              onReady={onPlayerReady}
+              onError={onMediaError}
+              onSurfaceClick={onSurfaceClick}
+            />
+          ) : webCachedUseMediabunny ? (
+            /* r122: the cached download-fallback copy decodes in-app via
+               WebCodecs. Native <video> over asset:// hangs on large local
+               files (black canvas, often no error event) — same reason local
+               imports are mediabunny-first since r107. App swaps back to
+               LocalMediaPlayer once per cache path if this player errors. */
+            <MediaBunnyPlayer
+              ref={ref}
+              path={webStreamUrl}
+              filename={metadata?.title}
+              hasVideo
               initialVolume={initialVolume}
               onTimeUpdate={onPlayerTimeUpdate}
               onPlayStateChange={onPlayerStateChange}

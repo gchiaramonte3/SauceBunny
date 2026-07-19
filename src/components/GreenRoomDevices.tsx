@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { IconChevronRight, IconMic, IconMicOff, IconVideo, IconVideoOff } from "./Icons";
+import { nativeAvStatus } from "../lib/media-devices";
 import type { useMediaCapture } from "../hooks/use-media-capture";
 
 /**
@@ -64,9 +65,15 @@ export function GreenRoomDevices({ cap, onContinue }: {
 
   // The opener plugin's default scope blocks x-apple.systempreferences:
   // links (the old deep link silently no-oped) - macOS `open` via Rust is
-  // the app's proven path.
+  // the app's proven path. Ask TCC which device is actually blocked so a
+  // mic-only denial deep-links to the Microphone pane, not Camera.
   const openPrivacySettings = () => {
-    void invoke("open_privacy_pane", { anchor: "Privacy_Camera" }).catch(() => { /* surfaced in logs */ });
+    void nativeAvStatus().then((s) => {
+      const anchor = s && s.camera === "authorized" && s.microphone !== "authorized"
+        ? "Privacy_Microphone"
+        : "Privacy_Camera";
+      void invoke("open_privacy_pane", { anchor }).catch(() => { /* surfaced in logs */ });
+    });
   };
   const label = (d: MediaDeviceInfo, i: number, kind: string) => d.label || `${kind} ${i + 1}`;
 

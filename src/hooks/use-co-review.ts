@@ -545,6 +545,23 @@ export function useCoReview({
         if (tag === "err") console.error("[screen-share]", msg);
         else console.warn("[screen-share]", msg);
       },
+      // A post-picker failure used to dead-end in the console while the
+      // share button silently re-enabled. Recheck TCC: if screen recording
+      // is the blocker, say so and how to fix it; otherwise surface the
+      // generic failure so the user at least knows it broke.
+      onStartError: (err) => {
+        void invoke<string>("screen_capture_access", { request: false }).then((access) => {
+          if (access !== "granted") {
+            pushNotification("error", "Screen recording is blocked",
+              "Allow Sauce Bunny under System Settings, Privacy and Security, Screen Recording, then quit and reopen the app.");
+            void invoke("open_privacy_pane", { anchor: "Privacy_ScreenCapture" }).catch(() => { /* best-effort */ });
+          } else {
+            pushNotification("error", "Screen share failed to start", formatError(err));
+          }
+        }).catch(() => {
+          pushNotification("error", "Screen share failed to start", formatError(err));
+        });
+      },
     });
   }
   const startShare = useCallback((source: ShareSourceArg) => { void shareRef.current?.start(source); }, []);

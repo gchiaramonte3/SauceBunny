@@ -190,6 +190,15 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       const el = videoRef.current;
       if (!el) return;
       el.play().catch((err) => {
+        // AbortError is a BENIGN interruption per the HTML spec: any pause()
+        // (scrub gesture) or src swap (out-of-buffer rebuild) rejects a
+        // pending play() with it. Treating it as fatal killed a healthy
+        // stream mid-seek and forced the download fallback for nothing.
+        // The rebuild owns resume via wantPlayRef; genuine pipeline deaths
+        // still surface through the SourceBuffer/<video> error listeners
+        // and the no-data stall guard.
+        if ((err as DOMException)?.name === "AbortError" || failedRef.current) return;
+        failedRef.current = true;
         onError?.(`Playback failed: ${err?.name ?? "Error"}: ${err?.message ?? String(err)}`);
       });
     },

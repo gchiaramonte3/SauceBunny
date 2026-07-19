@@ -104,6 +104,70 @@ pub fn cancel_job(registry: State<'_, JobRegistry>, job_id: String) -> Result<bo
 }
 
 // ============================================================
+// SIDECAR EXECUTE-BIT REPAIR (r122)
+// iCloud Drive eviction/restore (and some copy paths) can strip the
+// execute bit from sidecar binaries. tauri-plugin-shell's .sidecar()
+// only resolves a path — a present-but-non-executable file passes
+// resolution and dies at spawn with EACCES ("Permission denied
+// (os error 13)"), which used to leak verbatim into the pipeline log.
+// This sweep runs once at startup and restores +x on any known sidecar
+// that lost it. Restricted to the tauri.conf.json externalBin name set
+// so a stray file can never be made executable.
+// ============================================================
+const SIDECAR_NAMES: [&str; 8] = [
+    "yt-dlp", "ffmpeg", "ffprobe", "whisper-cli",
+    "saucebunny-diarize", "saucebunny-dictate", "saucebunny-capture",
+    "llama-server",
+];
+
+/// Restore the execute bit on any sidecar binary that lost it. Returns the
+/// number of files repaired. Best-effort: an iCloud dataless stub can still
+/// fail to spawn until the file materializes, so callers treat this as a
+/// reliability sweep, not a guarantee.
+pub(crate) fn ensure_sidecars_executable(app: &AppHandle) -> usize {
+    use std::os::unix::fs::PermissionsExt;
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    // Where the shell plugin actually spawns from: next to the executable
+    // (release: SauceBunny.app/Contents/MacOS; dev: target/debug).
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            dirs.push(dir.to_path_buf());
+        }
+    }
+    // Dev builds also resolve some paths straight out of the repo.
+    if cfg!(debug_assertions) {
+        dirs.push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries"));
+    }
+    // The user-updated yt-dlp copy (update_ytdlp installs to app_data/bin).
+    if let Ok(data) = app.path().app_data_dir() {
+        dirs.push(data.join("bin"));
+    }
+    let mut repaired = 0usize;
+    for dir in &dirs {
+        for name in SIDECAR_NAMES {
+            let plain = dir.join(name);
+            let suffixed = dir.join(format!("{}-{}", name, current_triple()));
+            for path in [plain, suffixed] {
+                let Ok(meta) = std::fs::metadata(&path) else { continue };
+                if !meta.is_file() {
+                    continue;
+                }
+                let mode = meta.permissions().mode();
+                if mode & 0o111 == 0 {
+                    let mut perms = meta.permissions();
+                    perms.set_mode(mode | 0o755);
+                    if std::fs::set_permissions(&path, perms).is_ok() {
+                        eprintln!("[startup] repaired execute bit: {}", path.display());
+                        repaired += 1;
+                    }
+                }
+            }
+        }
+    }
+    repaired
+}
+
+// ============================================================
 // CACHE SWEEP + MEDIA-CACHE LAYOUT (r112)
 // Every transient artifact we write to app_cache_dir() shares the
 // `saucebunny-` prefix (playback prep copies, whisper wavs, in-flight
@@ -482,6 +546,11 @@ pub struct AvAuthStatus {
     /// "authorized" | "denied" | "notDetermined" | "restricted"
     pub camera: String,
     pub microphone: String,
+    /// Screen recording (r122): "authorized" | "notDetermined" only.
+    /// CGPreflightScreenCaptureAccess can't distinguish denied from
+    /// never-asked without prompting, so the UI must style non-authorized
+    /// as neutral not-yet, never as an error.
+    pub screen: String,
 }
 
 #[cfg(target_os = "macos")]
@@ -511,13 +580,22 @@ pub fn av_permission_status() -> AvAuthStatus {
     AvAuthStatus {
         camera: av_status(&NSString::from_str("vide")),
         microphone: av_status(&NSString::from_str("soun")),
+        screen: if super::media::screen_recording_preflight() {
+            "authorized".into()
+        } else {
+            "notDetermined".into()
+        },
     }
 }
 
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
 pub fn av_permission_status() -> AvAuthStatus {
-    AvAuthStatus { camera: "authorized".into(), microphone: "authorized".into() }
+    AvAuthStatus {
+        camera: "authorized".into(),
+        microphone: "authorized".into(),
+        screen: "authorized".into(),
+    }
 }
 
 /// Open a System Settings privacy pane. The opener plugin's default scope
@@ -634,7 +712,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-19-r121-stop-cancel";
+pub const BACKEND_BUILD_ID: &str = "2026-07-19-r122-reliability";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

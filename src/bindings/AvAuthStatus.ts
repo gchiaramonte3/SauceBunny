@@ -11,4 +11,11 @@ export type AvAuthStatus = {
 /**
  * "authorized" | "denied" | "notDetermined" | "restricted"
  */
-camera: string, microphone: string, };
+camera: string, microphone: string, 
+/**
+ * Screen recording (r122): "authorized" | "notDetermined" only.
+ * CGPreflightScreenCaptureAccess can't distinguish denied from
+ * never-asked without prompting, so the UI must style non-authorized
+ * as neutral not-yet, never as an error.
+ */
+screen: string, };

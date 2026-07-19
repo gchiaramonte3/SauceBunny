@@ -28,6 +28,10 @@ export type ShareDeps = {
   announce: (on: boolean) => void;
   onChange: (state: ShareState, stream: MediaStream | null) => void;
   log: (tag: "info" | "warn" | "err", msg: string) => void;
+  /** Start failed (after the picker) - the room surfaces it to the USER.
+   *  Without this the failure dead-ends in the console and the share button
+   *  just silently re-enables. Optional so tests stay minimal. */
+  onStartError?: (err: unknown) => void;
 };
 
 export class ShareController {
@@ -64,6 +68,7 @@ export class ShareController {
     } catch (err) {
       this.deps.log("err", `screen share failed to start: ${err instanceof Error ? err.message : String(err)}`);
       await this.cleanup();
+      this.deps.onStartError?.(err);
     }
   }
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { useMediaCapture } from "../hooks/use-media-capture";
 import { SPEAKER_OUTPUT_CHANGED_EVENT, canPickSpeakers, nativeAvStatus, type AvAuthState } from "../lib/media-devices";
-import { IconMic, IconVideo } from "./Icons";
+import { IconMic, IconScreenShare, IconVideo } from "./Icons";
 import { invoke } from "@tauri-apps/api/core";
 
 /**
@@ -36,9 +36,16 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
 
   // THE real macOS TCC state (WKWebView can't tell us). Drives the status
   // row + the "granted but relaunch needed" hint.
-  const [tcc, setTcc] = useState<{ camera: AvAuthState; microphone: AvAuthState } | null>(null);
+  const [tcc, setTcc] = useState<{ camera: AvAuthState; microphone: AvAuthState; screen: AvAuthState } | null>(null);
   const refreshTcc = useCallback(() => { void nativeAvStatus().then(setTcc); }, []);
   useEffect(() => { refreshTcc(); }, [refreshTcc, cap.permission]);
+  // Live status: the edit-in-System-Settings loop ends with a cmd-tab back
+  // here - refresh on window focus so the chips update without reopening.
+  useEffect(() => {
+    const onFocus = () => refreshTcc();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refreshTcc]);
 
   // Auto-start the preview when authorized and nothing is live - the Camera
   // & Mic pane is where you EXPECT to see yourself (Zoom/Discord do this).
@@ -160,32 +167,51 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
       </p>
 
       <CollapsibleSection id="av-devices" label="Devices" open={sectionOpen("av-devices")} onToggle={() => toggleSection("av-devices")}>
-        {/* Permission status - the real macOS TCC answer, per device. */}
-        <div className="cp-pane-row">
-          <div className="k">
-            Permissions
-            <span className="desc">Controlled in macOS System Settings - Privacy &amp; Security.</span>
+        {/* Permission status - the real macOS TCC answer, one row per
+            permission. Every row deep-links to ITS OWN System Settings pane
+            (the old single button always opened the Camera pane, even for a
+            mic denial). Screen recording can only report allowed-or-not, so
+            its non-authorized face stays neutral, never red. */}
+        {([
+          {
+            key: "camera" as const, name: "Camera", icon: <IconVideo size={12} />,
+            state: tcc?.camera, anchor: "Privacy_Camera",
+            desc: "For your video tile in review sessions.",
+          },
+          {
+            key: "mic" as const, name: "Microphone", icon: <IconMic size={12} />,
+            state: tcc?.microphone, anchor: "Privacy_Microphone",
+            desc: "For talking in sessions and voice comments.",
+          },
+          {
+            key: "screen" as const, name: "Screen Recording", icon: <IconScreenShare size={12} />,
+            state: tcc?.screen, anchor: "Privacy_ScreenCapture",
+            desc: "For sharing your screen in review sessions.",
+          },
+        ]).map((p) => (
+          <div className="cp-pane-row" key={p.key}>
+            <div className="k">
+              {p.name}
+              <span className="desc">{p.desc}</span>
+            </div>
+            <div className="v cp-av-perms">
+              <span className={"cp-av-perm " + (p.state ?? "notDetermined")}>
+                {p.icon} {permLabel(p.state)}
+              </span>
+              {p.state !== "authorized" && (
+                <button type="button" className="btn btn-ghost btn-compact"
+                  onClick={() => { void invoke("open_privacy_pane", { anchor: p.anchor }).catch(() => {}); }}>
+                  Open Settings
+                </button>
+              )}
+            </div>
           </div>
-          <div className="v cp-av-perms">
-            <span className={"cp-av-perm " + (tcc?.camera ?? "notDetermined")}>
-              <IconVideo size={12} /> {permLabel(tcc?.camera)}
-            </span>
-            <span className={"cp-av-perm " + (tcc?.microphone ?? "notDetermined")}>
-              <IconMic size={12} /> {permLabel(tcc?.microphone)}
-            </span>
-          </div>
-        </div>
+        ))}
         {(tcc?.camera === "denied" || tcc?.microphone === "denied" || tcc?.camera === "restricted" || tcc?.microphone === "restricted") && (
           <div className="cp-pane-row">
             <div className="k">
               Blocked
-              <span className="desc">Allow Camera and Microphone for Sauce Bunny in System Settings, then quit and reopen the app - macOS applies the change on relaunch.</span>
-            </div>
-            <div className="v">
-              <button type="button" className="btn btn-ghost btn-compact"
-                onClick={() => { void invoke("open_privacy_pane", { anchor: "Privacy_Camera" }).catch(() => {}); }}>
-                Open System Settings
-              </button>
+              <span className="desc">After allowing access in System Settings, quit and reopen Sauce Bunny - macOS applies the change on relaunch.</span>
             </div>
           </div>
         )}

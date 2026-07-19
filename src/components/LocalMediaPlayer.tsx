@@ -71,8 +71,12 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       scrubbingRef.current = false;
       if (settleTimerRef.current) { window.clearTimeout(settleTimerRef.current); settleTimerRef.current = 0; }
       el.play().catch((err) => {
+        // AbortError → benign: a pause()/src change interrupted the pending
+        // play() per spec (scrub gestures do this constantly). Reporting it
+        // as fatal tore down working players — swallow it.
         // NotAllowedError → autoplay blocked (need user gesture)
         // NotSupportedError → codec/source issue
+        if ((err as DOMException)?.name === "AbortError") return;
         onError?.(`Playback failed: ${err?.name ?? "Error"}: ${err?.message ?? String(err)}`);
       });
     },

@@ -48,17 +48,21 @@ export type AvPermission = "unknown" | "granted" | "denied";
 /** Raw macOS TCC state, per device (mirrors AVAuthorizationStatus). */
 export type AvAuthState = "authorized" | "denied" | "notDetermined" | "restricted";
 
-/** THE camera+mic permission, from macOS AVFoundation via the Rust command -
+/** THE camera+mic+screen permission, from macOS via the Rust command -
  *  authoritative, unlike WKWebView's Permissions API (which is inconsistent
  *  for capture). Returns the raw per-device state so the UI can tell
- *  "granted but relaunch needed" from "denied" from "never asked". */
-export async function nativeAvStatus(): Promise<{ camera: AvAuthState; microphone: AvAuthState } | null> {
+ *  "granted but relaunch needed" from "denied" from "never asked".
+ *  `screen` only ever reports authorized | notDetermined: CoreGraphics can't
+ *  see "denied" without prompting, so style non-authorized as neutral. */
+export async function nativeAvStatus(): Promise<{ camera: AvAuthState; microphone: AvAuthState; screen: AvAuthState } | null> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    const s = await invoke<{ camera: string; microphone: string }>("av_permission_status");
+    const s = await invoke<{ camera: string; microphone: string; screen?: string }>("av_permission_status");
     const norm = (v: string): AvAuthState =>
       v === "authorized" || v === "denied" || v === "restricted" ? v : "notDetermined";
-    return { camera: norm(s.camera), microphone: norm(s.microphone) };
+    // `screen` tolerates a stale backend (missing field → notDetermined);
+    // the build-id banner already flags the mismatch loudly.
+    return { camera: norm(s.camera), microphone: norm(s.microphone), screen: norm(s.screen ?? "") };
   } catch {
     return null; // non-Tauri (e2e/vitest) or old backend
   }

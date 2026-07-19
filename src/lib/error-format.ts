@@ -13,6 +13,26 @@ import type { AppError } from "../types";
  * See CLAUDE.md refactor priority #4.
  */
 
+/**
+ * The one sidecar failure users actually hit in the wild: the helper binary
+ * lost its execute bit (iCloud Drive eviction/restore strips permissions),
+ * so spawn fails with EACCES and the raw io error ("Permission denied
+ * (os error 13)") leaks into logs. The backend repairs the bits at every
+ * launch (`ensure_sidecars_executable`), so the honest user advice is
+ * retry / relaunch. Applied to any error string that names a helper AND
+ * carries the EACCES signature; everything else passes through untouched.
+ */
+const SIDECAR_NAME_RE =
+  /(yt-dlp|ffmpeg|ffprobe|whisper-cli|saucebunny-diarize|saucebunny-dictate|saucebunny-capture|llama-server)/;
+
+export function humanizeSpawnError(msg: string): string {
+  if (!/os error 13|Permission denied/i.test(msg)) return msg;
+  const name = SIDECAR_NAME_RE.exec(msg)?.[1];
+  if (!name) return msg;
+  return `The ${name} helper couldn't start (macOS blocked it as non-executable). ` +
+    `Sauce Bunny repairs this at launch: try again, and if it persists, quit and reopen the app.`;
+}
+
 export function isAppError(e: unknown): e is AppError {
   return (
     typeof e === "object" &&
@@ -33,12 +53,12 @@ export function isAppError(e: unknown): e is AppError {
  *      arbitrary shapes; that's a signal to add coverage here).
  */
 export function formatError(e: unknown): string {
-  if (typeof e === "string") return e;
+  if (typeof e === "string") return humanizeSpawnError(e);
   if (isAppError(e)) {
     switch (e.kind) {
       case "Invalid":
       case "Internal":
-        return e.data;
+        return humanizeSpawnError(e.data);
       case "NotFound":
         return `Not found: ${e.data}`;
       case "Cancelled":

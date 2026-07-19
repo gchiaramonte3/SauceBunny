@@ -42,7 +42,7 @@ import type {
   SourceKind, WarmStart, WhisperModel,
 } from "./types";
 import { asLogTag } from "./types";
-import { formatError, isAppError } from "./lib/error-format";
+import { formatError, humanizeSpawnError, isAppError } from "./lib/error-format";
 import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase";
 import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek, subscribePlayhead } from "./lib/playhead-store";
 import { clampSeekFrames, maxSeekSeconds, endSeekFrames } from "./lib/playhead-clock";
@@ -541,6 +541,19 @@ export default function App() {
    * Cleared by resetForNewSource.
    */
   const [nativeFallbackTried, setNativeFallbackTried] = useState(false);
+
+  /**
+   * Player for the WEB download-fallback cached copy (r122). Mirror of the
+   * r107 mediabunny-first lesson: native <video> over asset:// silently hangs
+   * on large files (black canvas, often no error event), and the cached copy
+   * of a long source is exactly that. Default mediabunny: the download
+   * cascade always produces H.264+AAC MP4, which WebCodecs decodes on every
+   * Apple Silicon Mac. A background probe demotes to native in the rare case
+   * mediabunny can't read the file, and one runtime error swaps players once
+   * (guarded per cache path so it can't loop).
+   */
+  const [webCachedPlayer, setWebCachedPlayer] = useState<"mediabunny" | "native">("mediabunny");
+  const webCachedSwapRef = useRef<string | null>(null);
 
   // Effective fps and duration in frames.
   const fps = metadata?.fps && metadata.fps > 0 ? metadata.fps : fallbackFps;
@@ -1166,6 +1179,22 @@ export default function App() {
   // cache). Gates the audio pre-cache, caption auto-fetch, caption-sync offset.
   const webStreaming = webPlayback.state.kind === "streaming";
 
+  // Pick the player for the download-fallback cached copy (r122). Reset to
+  // the mediabunny default on every new cache path, then let a background
+  // probe demote to native only if WebCodecs genuinely can't read the file.
+  // (The cascade always yields H.264+AAC MP4, so demotion is the rare case.)
+  useEffect(() => {
+    const p = webPlayback.cachePath;
+    if (!p) return;
+    let live = true;
+    setWebCachedPlayer("mediabunny");
+    webCachedSwapRef.current = null;
+    void canMediabunnyDecode(p).then((ok) => {
+      if (live && !ok) setWebCachedPlayer("native");
+    });
+    return () => { live = false; };
+  }, [webPlayback.cachePath]);
+
   // A web source is DEAD once the playback machine reaches its terminal
   // `failed` state (the stream resolve AND the download fallback both lost —
   // nothing is playing, nothing will). When that terminal failure carries a
@@ -1362,13 +1391,14 @@ export default function App() {
         } else {
           setStatus("error");
           setExportPhase("error"); // Export button → cross flash
-          setErrorDetail(e.payload.error ?? "Export failed");
-          // A yt-dlp export can be the first place stale-extractor breakage
-          // surfaces (fetch worked off a cached/streaming path) — offer the
-          // one-click update+retry on the overlay this just raised.
+          // Humanize AFTER classifyExtractorRot sees the raw text (the
+          // humanizer only rewrites EACCES spawn failures, but keep the
+          // ordering honest anyway).
           classifyExtractorRot(e.payload.error ?? "");
-          notify("Export failed", e.payload.error ?? "Unknown error");
-          pushNotification("error", "Export failed", e.payload.error ?? "Unknown error");
+          const msg = humanizeSpawnError(e.payload.error ?? "Export failed");
+          setErrorDetail(msg);
+          notify("Export failed", msg);
+          pushNotification("error", "Export failed", msg);
         }
       });
       const d = await listen<LogEvent>("captions-log", (e) => {
@@ -1403,7 +1433,7 @@ export default function App() {
           // fetch from the CC toggle.)
         } else {
           setCaptionsState("error");
-          const msg = e.payload.error ?? "Caption download failed";
+          const msg = humanizeSpawnError(e.payload.error ?? "Caption download failed");
           setCaptionsError(msg);
           appendLog("err", "captions", msg);
         }
@@ -1467,7 +1497,7 @@ export default function App() {
           setTranscriptState("error");
           setTranscriptResolution("error"); // GenerateButton → cross flash
           setTranscriptPhase(null);
-          const msg = e.payload.error ?? "Transcription failed";
+          const msg = humanizeSpawnError(e.payload.error ?? "Transcription failed");
           setTranscriptError(msg);
           appendLog("err", txChannelRef.current, msg);
           notify("Transcript failed", msg);
@@ -3486,17 +3516,27 @@ export default function App() {
   }, [appendLog, pushNotification, setActiveView]);
 
   const handleImportTranscript = useCallback(async () => {
+    // Default the picker to the library's current-month folder, where
+    // generated transcripts land. The dialog degrades safely: a nonexistent
+    // defaultPath opens at its parent (the library root), and a missing
+    // library falls back to the panel's native last-used folder. Deliberately
+    // NOT resolveTranscriptOutDir: that helper creates the folder on disk,
+    // which merely opening an import dialog shouldn't do.
+    const lib = defaults.transcriptLibrary;
+    const d = new Date();
+    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
       m.open({
         multiple: false,
         directory: false,
+        defaultPath: lib ? `${lib}/${month}` : undefined,
         filters: [{ name: "Transcript", extensions: TRANSCRIPT_EXTENSIONS }],
         title: "Import transcript",
       })
     );
     if (typeof picked !== "string" || !picked) return;
     await loadTranscriptPath(picked);
-  }, [loadTranscriptPath]);
+  }, [loadTranscriptPath, defaults.transcriptLibrary]);
 
   const handleLoadFromHistory = useCallback(async (entry: TranscriptHistoryEntry) => {
     // RULE (2026-07-19): a transcript only ever attaches to ITS OWN video.
@@ -4999,6 +5039,9 @@ export default function App() {
                        (download fallback) wins over the live stream; both are null
                        until the machine produces one. */
                     webStreamUrl={webPlayback.cachePath ?? webPlayback.streamUrl}
+                    /* r122: cached copies play mediabunny-first (large files hang
+                       native <video> over asset:// — same lesson as r107 locals). */
+                    webCachedUseMediabunny={webCachedPlayer === "mediabunny"}
                     streamStartAt={webPlayback.streamStartAt}
                     onDiag={(tag, msg) => appendLog(asLogTag(tag), "seek", msg)}
                     /* Audio track + codecs are meaningful only while STREAMING (the
@@ -5108,12 +5151,29 @@ export default function App() {
                         return;
                       }
 
+                      // Cached web copy failed to play (r122): swap players once
+                      // per cache path instead of dead-ending in a toast. The
+                      // mediabunny default covers the large-file <video> hang;
+                      // this covers the inverse (WebCodecs chokes, native works).
+                      const cachePath = webPlayback.cachePath;
+                      if (cachePath && webCachedSwapRef.current !== cachePath) {
+                        webCachedSwapRef.current = cachePath;
+                        const next = webCachedPlayer === "mediabunny" ? "native" : "mediabunny";
+                        setWebCachedPlayer(next);
+                        appendLog("warn", "media",
+                          `Cached copy failed in the ${webCachedPlayer} player. Retrying with ${next}.`);
+                        return;
+                      }
+
                       // Web-source playback fallback (r80): delegate to the state
                       // machine. When it's mid-stream it logs, shows the toast, and
                       // transitions streaming → downloading (exactly once — the
                       // double-download race is gone) and returns true. Any other
                       // state returns false → fall through to the generic error.
-                      if (webOnMediaError(msg)) return;
+                      // Force the transport out of "playing" for the handoff: the
+                      // dying MSE element's queued pause event can be dropped
+                      // during unmount, stranding the play button.
+                      if (webOnMediaError(msg)) { setIsPlaying(false); return; }
 
                       appendLog("err", "media", msg);
                       pushNotification("error", "Playback error", msg);

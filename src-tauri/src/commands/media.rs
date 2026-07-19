@@ -2311,6 +2311,13 @@ pub struct DisplayInfo {
     pub height: u32,
 }
 
+/// Read-only screen-recording preflight for the permissions checklist
+/// (av_permission_status). NEVER prompts — prompting stays exclusively in
+/// `screen_capture_access { request: true }` behind an explicit user click.
+pub(crate) fn screen_recording_preflight() -> bool {
+    unsafe { CGPreflightScreenCaptureAccess() }
+}
+
 /// Screen-recording TCC state. CG exposes only granted-or-not, so a
 /// non-granted preflight WITHOUT `request` reports "undetermined" (the
 /// honest tri-state approximation); with `request: true` the OS prompt

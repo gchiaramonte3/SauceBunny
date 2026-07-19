@@ -226,6 +226,15 @@ pub fn run() {
                 }
             }
 
+            // Repair sidecar execute bits BEFORE anything can spawn one.
+            // iCloud eviction/restore strips +x, and a non-executable
+            // sidecar dies at spawn with EACCES. Cheap (a handful of
+            // stat calls), synchronous on purpose.
+            let repaired = commands::ensure_sidecars_executable(app.handle());
+            if repaired > 0 {
+                eprintln!("[startup] repaired {repaired} sidecar execute bit(s)");
+            }
+
             // Start the loopback media proxy (r58). WKWebView's <video>
             // can't stream googlevideo URLs directly or via custom URI
             // schemes; it CAN stream from http://127.0.0.1. See

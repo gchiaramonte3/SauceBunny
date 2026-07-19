@@ -37,3 +37,8 @@ guard rail and refuses to install a leaky binary.
 - version: 8.1
 - source: https://www.osxexperts.net/ (static arm64 build)
 - refreshed: 2026-07-19
+
+## yt-dlp
+- version: 2026.07.04
+- source: https://github.com/yt-dlp/yt-dlp (official single-file macOS static build)
+- refreshed: 2026-07-19
