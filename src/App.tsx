@@ -54,6 +54,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutSheet } from "./components/ShortcutSheet";
 import { DropTarget } from "./components/DropTarget";
 import { WelcomeScreen } from "./components/WelcomeScreen";
+import { RoomSourceBar } from "./components/RoomSourceBar";
 import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS, TRANSCRIPT_EXTENSIONS } from "./lib/import-extensions";
 import {
   recordTranscript,
@@ -2460,6 +2461,8 @@ export default function App() {
   // open surfaces IT, not Clip (the two spaces share plumbing, not a home).
   // Ref, not state: loadLocalPath is defined before useCoReview runs.
   const sessionRoomRef = useRef(false);
+  /** Latest active view for the keyboard bindings (they capture once). */
+  const activeViewRef = useRef<string>("clip");
   const openSourceView = useCallback(() => {
     setActiveView(sessionRoomRef.current ? "coreview" : "clip");
   }, [setActiveView]);
@@ -4337,9 +4340,21 @@ export default function App() {
       };
       await Promise.all([
         bind("open_url_bar",        () => {
-          // The URL bar lives in the Clip view's toolbar — surface that view
-          // first (a [hidden] subtree can't take focus), then focus once
-          // React has committed the unhide (setTimeout lands after the
+          // In a live room the URL bar IS the room's source bar - focus that
+          // and stay put. Ejecting a presenter to the Clip view mid-session
+          // (which is what an unconditional setActiveView("clip") did) breaks
+          // the sticky-workspace rule.
+          if (sessionRoomRef.current && activeViewRef.current === "coreview") {
+            setTimeout(() => {
+              const el = document.querySelector<HTMLInputElement>(".cp-room-source-field input");
+              el?.focus();
+              el?.select();
+            }, 0);
+            return;
+          }
+          // Otherwise the URL bar lives in the Clip view's toolbar - surface
+          // that view first (a [hidden] subtree can't take focus), then focus
+          // once React has committed the unhide (setTimeout lands after the
           // microtask-flushed render).
           setActiveView("clip");
           setTimeout(() => {
@@ -4581,7 +4596,7 @@ export default function App() {
     screening, setScreening, screeningParticipants,
     meshStreams, meshStates,
     shareState, shareStream, sharingMembers, startShare, stopShare,
-    isPresenter, pendingSource,
+    isPresenter, pendingSource, makePresenter,
     startCoReview, joinCoReview, leaveCoReview,
   } = useCoReview({
     isPlaying, fps, playbackRate,
@@ -4605,6 +4620,7 @@ export default function App() {
     return st.updatedAt > 0 || st.state !== "pending" ? st : null;
   }, [sessionDoc, reviewSourceKey, reviewTick]);
   sessionRoomRef.current = coSessionActive;
+  activeViewRef.current = activeView;
   const roomActive = coSessionActive && activeView === "coreview";
   // Display name of whoever is driving, for the waiting affordance.
   const presenterName = coSession.peers.find((p) => p.id === coSession.presenter)?.name
@@ -4964,6 +4980,9 @@ export default function App() {
                 shareStream={shareStream}
                 raisedHands={raisedHands}
                 reactionFlashes={reactionFlashes}
+                presenter={coSession.presenter}
+                canGrantPresenter={coSession.role === "host"}
+                onMakePresenter={makePresenter}
               />
               <Sidebar
                 reviewStatus={reviewStatus}
@@ -5024,6 +5043,18 @@ export default function App() {
                         <ReviewStatusChip state={reviewStatus.state} reviewer={reviewStatus.reviewer || undefined} />
                       )}
                     </div>
+                    {/* Change what the room is watching without leaving the
+                        session. The room hides Clip's toolbar (and with it the
+                        URL bar + Import), which used to mean the only way to
+                        switch sources was to end the session. Presenter only. */}
+                    {isPresenter && (
+                      <RoomSourceBar
+                        hasSource={hasSource}
+                        onLoadUrl={(u) => { setUrl(u); void handleFetch(u); }}
+                        onImportFile={() => { void handleImportFile(); }}
+                        onClear={handleClear}
+                      />
+                    )}
                     <div className="cp-room-head-actions">
                       {coSession.role === "host" && coSession.code && (
                         <button

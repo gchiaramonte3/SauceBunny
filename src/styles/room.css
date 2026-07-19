@@ -704,3 +704,72 @@
 }
 .cp-share-audio.off { opacity: 0.6; cursor: default; }
 .cp-share-dialog-actions { display: flex; align-items: center; gap: var(--s-2); }
+
+/* ── In-room source control (r124) ──────────────────────────────────────
+   The room strips Clip's toolbar, so the presenter gets this purpose-built
+   bar instead: paste a link, pick a file, clear. Sits in the room header
+   between the title and the session actions. */
+.cp-room-source-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-left: auto;
+  margin-right: var(--s-3);
+  min-width: 0;
+}
+.cp-room-source-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  height: 28px;
+  min-width: 200px;
+  max-width: 340px;
+  flex: 1 1 240px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--bg-0, #0c0c0e);
+  color: var(--fg-3);
+}
+/* Composed field: the WRAPPER takes the focus ring, never the accent. */
+.cp-room-source-field:focus-within { border-color: var(--focus-ring); }
+.cp-room-source-field input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+.cp-room-source-field input::placeholder { color: var(--fg-3); }
+
+/* Presenter badge + hand-over action on a people tile (r124). The floor is a
+   permission, not the network host - see SessionMsg::Presenter. */
+.cp-person-presenting {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+/* Hover-revealed, like the rest of the tile affordances. */
+.cp-person-grant {
+  position: absolute;
+  left: 50%;
+  bottom: 30px;
+  transform: translateX(-50%);
+  opacity: 0;
+  white-space: nowrap;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.cp-person-tile:hover .cp-person-grant,
+.cp-person-grant:focus-visible { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .cp-person-grant { transition: none; }
+}

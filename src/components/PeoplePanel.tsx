@@ -18,9 +18,14 @@ export type Participant = { id: string; name: string; color: string; isHost: boo
  * the old participant rail's roster duties; leave/end lives in the room
  * control bar.
  */
-export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream, raisedHands, reactionFlashes, strip = false }: {
+export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream, raisedHands, reactionFlashes, strip = false, presenter = "m0", canGrantPresenter = false, onMakePresenter }: {
   active: boolean;
   participants: Participant[];
+  /** Member id currently driving source + transport. */
+  presenter?: string;
+  /** True for the host, who is the one who can pass the floor. */
+  canGrantPresenter?: boolean;
+  onMakePresenter?: (memberId: string) => void;
   remoteStreams: ReadonlyMap<string, MediaStream>;
   peerStates: ReadonlyMap<string, MeshPeerState>;
   /** Members flagged as screen-sharing (their tile badges "Sharing screen"). */
@@ -67,6 +72,9 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
             sharing={p.isSelf ? shareStream != null : sharingMembers.has(p.id)}
             handUp={raisedHands.has(p.id)}
             flash={reactionFlashes.get(p.id) ?? null}
+            isPresenter={p.id === presenter}
+            canGrant={canGrantPresenter}
+            onMakePresenter={onMakePresenter}
           />
         ))}
       </div>
@@ -77,13 +85,18 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
 /** One member: camera tile when a video track flows, avatar card when not.
  *  Speaking glow rides an AnalyserNode threshold on the tile's own audio
  *  (reduced motion: no glow animation, static ring). */
-function PersonTile({ p, stream, state, sharing, handUp, flash }: {
+function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, canGrant, onMakePresenter }: {
   p: Participant;
   stream: MediaStream | null;
   state: MeshPeerState;
   sharing: boolean;
   handUp: boolean;
   flash: string | null;
+  /** This member currently chooses what the room watches. */
+  isPresenter: boolean;
+  /** WE may hand the floor over (host only). */
+  canGrant: boolean;
+  onMakePresenter?: (memberId: string) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [speaking, setSpeaking] = useState(false);
@@ -159,8 +172,24 @@ function PersonTile({ p, stream, state, sharing, handUp, flash }: {
       <div className="cp-person-meta">
         {p.isHost && <span className="cp-person-crown" title="Host"><IconCrown size={10} /></span>}
         <span className="cp-person-name" title={p.name}>{p.isSelf ? `${p.name} (You)` : p.name}</span>
+        {isPresenter && (
+          <span className="cp-person-presenting" title="Choosing what everyone watches">Presenting</span>
+        )}
         {micMuted && <span className="cp-person-muted" title="Mic muted" aria-label="Mic muted"><IconMicOff size={11} /></span>}
       </div>
+      {/* Hand the floor over. Host-only, and never to whoever already has it.
+          This passes the PRESENTER role, not the network host: the invite
+          ticket points at the original machine, so the star itself can't move. */}
+      {canGrant && !isPresenter && !p.isSelf && onMakePresenter && (
+        <button
+          type="button"
+          className="btn btn-ghost btn-compact cp-person-grant"
+          title={`Let ${p.name} choose what everyone watches`}
+          onClick={() => onMakePresenter(p.id)}
+        >
+          Let them present
+        </button>
+      )}
     </div>
   );
 }

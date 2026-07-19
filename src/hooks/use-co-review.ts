@@ -159,6 +159,8 @@ export type CoReview = {
   pendingSource: SessionSource | null;
   /** member id → "loading" | "ready" | "failed" | "missing" for the current source. */
   sourceStatus: ReadonlyMap<string, string>;
+  /** Host only: hand the presenter floor to another member. */
+  makePresenter: (memberId: string) => void;
   /** True when YOUR hand is up. */
   handRaised: boolean;
   /** Fire a transient reaction (throttled; echoes locally). */
@@ -714,6 +716,19 @@ export function useCoReview({
       },
     });
   }
+  /** Host only: hand the presenter floor to another member. This passes a
+   *  PERMISSION, not the network star - the invite ticket points at the
+   *  original host's endpoint, so the relay itself can never move. Rust
+   *  updates its own gate as the message goes out, so the new presenter's
+   *  very next source change is accepted. */
+  const presenterEpochRef = useRef(0);
+  const makePresenter = useCallback((memberId: string) => {
+    if (coRoleRef.current !== "host") return;
+    const epoch = ++presenterEpochRef.current;
+    setCoSession((prev) => ({ ...prev, presenter: memberId }));
+    void invoke("session_broadcast", { msg: { kind: "presenter", member: memberId, epoch } })
+      .catch(() => { /* session raced closed */ });
+  }, []);
   const startShare = useCallback((source: ShareSourceArg) => { void shareRef.current?.start(source); }, []);
   const stopShare = useCallback(() => { void shareRef.current?.stop(); }, []);
   // Session over -> the share dies with it (same converged cleanup).
@@ -737,6 +752,7 @@ export function useCoReview({
     pendingSource,
     /** member id → "loading" | "ready" | "failed" | "missing" for that source. */
     sourceStatus,
+    makePresenter,
     handRaised: coSession.selfId != null ? raisedHands.has(coSession.selfId) : raisedHands.has("m0"),
     sendReaction,
     toggleHand,
