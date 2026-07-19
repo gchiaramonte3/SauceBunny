@@ -86,6 +86,16 @@ type Args = {
   turn: TurnConfig;
 };
 
+/** One transient on-screen reaction (floater + tile badge, ~5s). */
+export type LiveReaction = {
+  id: number;
+  /** Member id of the sender (m0 = host). */
+  from: string;
+  /** applause | confetti | thumbsup | question */
+  emote: string;
+  at: number;
+};
+
 export type CoReview = {
   /** Session state pushed from Rust over `session:state`. */
   coSession: CoSessionState;
@@ -113,6 +123,16 @@ export type CoReview = {
   sharingMembers: ReadonlySet<string>;
   startShare: (displayIndex: number) => void;
   stopShare: () => void;
+  /** Transient reactions currently on screen (auto-pruned after ~5s). */
+  liveReactions: LiveReaction[];
+  /** Member ids with a raised hand (persistent until lowered). */
+  raisedHands: ReadonlySet<string>;
+  /** True when YOUR hand is up. */
+  handRaised: boolean;
+  /** Fire a transient reaction (throttled; echoes locally). */
+  sendReaction: (emote: string) => void;
+  /** Raise/lower your hand (persistent state, relayed). */
+  toggleHand: () => void;
   startCoReview: (title?: string) => Promise<void>;
   joinCoReview: (ticket: string, name: string) => Promise<void>;
   leaveCoReview: () => void;
@@ -128,6 +148,14 @@ export function useCoReview({
   turn,
 }: Args): CoReview {
   const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], selfId: null, title: null, error: null });
+  // Live reactions: fire-and-forget, never persisted, pruned after ~5s
+  // (the Zoom/Meet grammar - late joiners never see past reactions).
+  const [liveReactions, setLiveReactions] = useState<LiveReaction[]>([]);
+  const [raisedHands, setRaisedHands] = useState<ReadonlySet<string>>(new Set());
+  const reactionIdRef = useRef(0);
+  const lastReactionSendRef = useRef(0);
+  const coSessionRef = useRef(coSession);
+  coSessionRef.current = coSession;
   // Incoming SessionMsg::Rtc -> the mesh (assigned each render below; the
   // mesh hook must be declared after the message handler's closure).
   const rtcSignalRef = useRef<((from: string, payload: string) => void) | null>(null);
@@ -195,6 +223,22 @@ export function useCoReview({
           setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
         } catch { /* malformed op */ }
         return;
+      case "reaction": {
+        if (m.emote === "hand") {
+          setRaisedHands((prev) => {
+            const next = new Set(prev);
+            if (m.on) next.add(m.from); else next.delete(m.from);
+            return next;
+          });
+        } else if (m.on) {
+          const r: LiveReaction = { id: ++reactionIdRef.current, from: m.from, emote: m.emote, at: Date.now() };
+          setLiveReactions((prev) => [...prev.slice(-23), r]);
+          window.setTimeout(() => {
+            setLiveReactions((prev) => prev.filter((x) => x.id !== r.id));
+          }, 5200);
+        }
+        return;
+      }
       case "rtc":
         rtcSignalRef.current?.(m.from, m.payload);
         return;
@@ -272,6 +316,8 @@ export function useCoReview({
       if (d && d.sourceKey) saveReview(d);
       setSessionDoc(null);
       setCoGhosts([]);
+      setLiveReactions([]);
+      setRaisedHands(new Set());
       coLastHostPosRef.current = null;
       coReadyRef.current = false;
     }
@@ -328,6 +374,30 @@ export function useCoReview({
     const iv = window.setInterval(send, 350);
     return () => window.clearInterval(iv);
   }, [coSessionActive, sendSessionMsg]);
+  // Local echo + relay: the sender renders its own reaction immediately
+  // (the host relay never echoes back to the origin).
+  const sendReaction = useCallback((emote: string) => {
+    const now = Date.now();
+    if (now - lastReactionSendRef.current < 250) return; // per-sender throttle
+    lastReactionSendRef.current = now;
+    const selfId = coSessionRef.current.selfId ?? "m0";
+    const r: LiveReaction = { id: ++reactionIdRef.current, from: selfId, emote, at: now };
+    setLiveReactions((prev) => [...prev.slice(-23), r]);
+    window.setTimeout(() => setLiveReactions((prev) => prev.filter((x) => x.id !== r.id)), 5200);
+    sendSessionMsg({ kind: "reaction", from: selfId, emote, on: true });
+  }, [sendSessionMsg]);
+
+  const toggleHand = useCallback(() => {
+    const selfId = coSessionRef.current.selfId ?? "m0";
+    setRaisedHands((prev) => {
+      const up = !prev.has(selfId);
+      const next = new Set(prev);
+      if (up) next.add(selfId); else next.delete(selfId);
+      sendSessionMsg({ kind: "reaction", from: selfId, emote: "hand", on: up });
+      return next;
+    });
+  }, [sendSessionMsg]);
+
   const startCoReview = useCallback(async (title?: string) => {
     try {
       // Host under the review identity's name (falls back to "Host" in Rust)
@@ -467,6 +537,11 @@ export function useCoReview({
     screening, setScreening, screeningParticipants,
     meshStreams: mesh.remoteStreams, meshStates: mesh.peerStates,
     shareState, shareStream, sharingMembers, startShare, stopShare,
+    liveReactions,
+    raisedHands,
+    handRaised: coSession.selfId != null ? raisedHands.has(coSession.selfId) : raisedHands.has("m0"),
+    sendReaction,
+    toggleHand,
     startCoReview, joinCoReview, leaveCoReview,
   };
 }

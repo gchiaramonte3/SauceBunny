@@ -925,15 +925,6 @@
 }
 .cp-source-title .cp-status-chip { margin-right: 6px; }
 
-/* The panel's approval row (under the toolbar). */
-.cp-review-approval {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s-2);
-  padding: 6px 10px;
-}
-.cp-review-approval-actions { display: flex; gap: var(--s-1); }
 
 /* Card corner chip (Home/Library) - existing badge grammar corner. */
 .cp-lib-cell-status {
@@ -942,4 +933,37 @@
   left: 6px;
   z-index: 3;
   pointer-events: none;
+}
+
+/* ── Emoji reactions (ReactionBar): chips per emoji + the smiley opener
+      with its palette. Chips reuse the like-button skin. ── */
+.cp-react-bar { display: inline-flex; align-items: center; gap: 3px; }
+.cp-react-emoji { font-size: 11px; line-height: 1; }
+.cp-react-add-wrap { position: relative; display: inline-flex; }
+.cp-react-pop {
+  position: absolute;
+  bottom: 22px;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md, 8px);
+  box-shadow: 0 8px 22px rgba(0,0,0,0.5);
+}
+.cp-react-pop-btn {
+  width: 26px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.cp-react-pop-btn:hover { background: rgba(255,255,255,0.08); transform: scale(1.15); }
+@media (prefers-reduced-motion: reduce) {
+  .cp-react-pop-btn:hover { transform: none; }
 }

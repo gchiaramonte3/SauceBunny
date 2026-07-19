@@ -3,7 +3,7 @@ import {
   emptyDoc, ensureVersion,
   editComment, deleteComment,
   editReply, removeReply, ensureCommentIds,
-  setStatus, statusOf, rootComments, repliesOf, sortComments,
+  setStatus, statusOf, reactionsOf, rootComments, repliesOf, sortComments,
   commentMarkers, openCount, reviewToMarkdown,
   reviewFingerprint, resolveByFingerprint, linkFingerprint,
   loadReviewHistory, upsertReviewHistory, removeReviewHistory, clearReviewHistory,
@@ -20,12 +20,17 @@ const addComment = (doc: ReviewDoc, c: Parameters<typeof buildComment>[0], now =
   insertComment(doc, buildComment(c, now));
 const toggleLike = (doc: ReviewDoc, id: string, name: string) => {
   const c = doc.comments.find((x) => x.id === id);
-  const liked = !(c?.likes ?? []).includes(name.trim());
+  const liked = !(c ? (reactionsOf(c)["👍"] ?? []) : []).includes(name.trim());
   return setLike(doc, id, name, liked);
 };
 const toggleResolved = (doc: ReviewDoc, id: string, now = Date.now()) => {
   const c = doc.comments.find((x) => x.id === id);
   return setResolved(doc, id, !c?.resolved, now);
+};
+
+const thumbsOf = (doc: ReviewDoc, id: string) => {
+  const c = doc.comments.find((x) => x.id === id);
+  return c ? reactionsOf(c)["👍"] ?? [] : [];
 };
 
 function seed(): { doc: ReviewDoc; v: string } {
@@ -63,8 +68,8 @@ describe("co-review op relay (applyReviewOp)", () => {
     expect(r2.comments[0].resolved).toBe(true); // replay doesn't flip it back
     const l1 = applyReviewOp(d0, { t: "like", id: "x1", name: "Sam", liked: true });
     const l2 = applyReviewOp(l1, { t: "like", id: "x1", name: "Sam", liked: true });
-    expect(l2.comments[0].likes).toEqual(["Sam"]); // no double-add
-    expect(setLike(l2, "x1", "Sam", false).comments[0].likes).toEqual([]);
+    expect(reactionsOf(l2.comments[0])["👍"]).toEqual(["Sam"]); // no double-add
+    expect(reactionsOf(setLike(l2, "x1", "Sam", false).comments[0])["👍"] ?? []).toEqual([]);
   });
 
   it("edit is last-writer-wins by timestamp (concurrent edits converge)", () => {
@@ -92,7 +97,7 @@ describe("co-review op relay (applyReviewOp)", () => {
     const local = setLike(setResolved(base, "x1", true, 2000), "x1", "Me", true); // mine: resolved + liked
     const merged = mergeReviewDoc(local, incoming);
     expect(merged.comments[0].resolved).toBe(true);          // newer local edit kept
-    expect(merged.comments[0].likes).toEqual(["Me"]);        // like survives (unioned)
+    expect(reactionsOf(merged.comments[0])["👍"]).toEqual(["Me"]);        // like survives (unioned)
   });
 });
 
@@ -205,30 +210,30 @@ describe("likes", () => {
   it("toggles a like on, then off", () => {
     const { d, rootId } = noted();
     const on = toggleLike(d, rootId, "Sam");
-    expect(on.comments.find((c) => c.id === rootId)?.likes).toEqual(["Sam"]);
+    expect(thumbsOf(on, rootId)).toEqual(["Sam"]);
     const off = toggleLike(on, rootId, "Sam");
-    expect(off.comments.find((c) => c.id === rootId)?.likes).toEqual([]);
+    expect(thumbsOf(off, rootId)).toEqual([]);
   });
   it("collects multiple likers; toggling removes only that name", () => {
     const { d, rootId } = noted();
     let n = toggleLike(d, rootId, "Sam");
     n = toggleLike(n, rootId, "Alex");
-    expect(n.comments.find((c) => c.id === rootId)?.likes).toEqual(["Sam", "Alex"]);
+    expect(thumbsOf(n, rootId)).toEqual(["Sam", "Alex"]);
     n = toggleLike(n, rootId, "Sam");
-    expect(n.comments.find((c) => c.id === rootId)?.likes).toEqual(["Alex"]);
+    expect(thumbsOf(n, rootId)).toEqual(["Alex"]);
   });
   it("likes a reply (flat array — same op); root untouched", () => {
     const { d, rootId, replyId } = noted();
     const n = toggleLike(d, replyId, "Sam");
-    expect(repliesOf(n, rootId)[0].likes).toEqual(["Sam"]);
-    expect(n.comments.find((c) => c.id === rootId)?.likes).toBeUndefined();
+    expect(reactionsOf(repliesOf(n, rootId)[0])["👍"]).toEqual(["Sam"]);
+    expect(thumbsOf(n, rootId)).toEqual([]);
   });
   it("trims the name; empty names and unknown ids no-op", () => {
     const { d, rootId } = noted();
     const n = toggleLike(d, rootId, "  Sam  ");
-    expect(n.comments.find((c) => c.id === rootId)?.likes).toEqual(["Sam"]);
+    expect(thumbsOf(n, rootId)).toEqual(["Sam"]);
     // The trimmed store means an untrimmed re-toggle still matches (removes).
-    expect(toggleLike(n, rootId, "Sam ").comments.find((c) => c.id === rootId)?.likes).toEqual([]);
+    expect(thumbsOf(toggleLike(n, rootId, "Sam "), rootId)).toEqual([]);
     expect(toggleLike(d, rootId, "   ")).toBe(d);
     expect(toggleLike(d, "nope", "Sam")).toBe(d);
   });
@@ -371,6 +376,35 @@ describe("export", () => {
     expect(md).toContain("Changes requested — needs work");
     expect(md.indexOf("intro too long")).toBeLessThan(md.indexOf("tighten")); // time-sorted
     expect(md).toContain("[00:00:05]");
+  });
+});
+
+describe("emoji reactions", () => {
+  it("sets and clears a non-thumbs emoji; chips read via reactionsOf", () => {
+    const { doc, v } = seed();
+    const d = addComment(doc, { versionId: v, timeStart: 1, body: "n", author: "Me" }, 1);
+    const id = d.comments[0].id;
+    const on = setLike(d, id, "Sam", true, "🎉");
+    expect(reactionsOf(on.comments[0])["🎉"]).toEqual(["Sam"]);
+    const off = setLike(on, id, "Sam", false, "🎉");
+    expect(reactionsOf(off.comments[0])["🎉"]).toBeUndefined();
+  });
+  it("legacy likes fold into the 👍 chip and un-react cleanly", () => {
+    const { doc, v } = seed();
+    const d = addComment(doc, { versionId: v, timeStart: 1, body: "n", author: "Me" }, 1);
+    const legacy = { ...d, comments: d.comments.map((c) => ({ ...c, likes: ["Old"] })) };
+    expect(reactionsOf(legacy.comments[0])["👍"]).toEqual(["Old"]);
+    const off = setLike(legacy, legacy.comments[0].id, "Old", false);
+    expect(reactionsOf(off.comments[0])["👍"] ?? []).toEqual([]);
+  });
+  it("mergeReviewDoc unions reactions per emoji", () => {
+    const { doc, v } = seed();
+    const d = addComment(doc, { versionId: v, timeStart: 1, body: "n", author: "Me" }, 1);
+    const id = d.comments[0].id;
+    const a = setLike(d, id, "Sam", true, "❤️");
+    const b = setLike(d, id, "Alex", true, "❤️");
+    const merged = mergeReviewDoc(a, b);
+    expect(reactionsOf(merged.comments[0])["❤️"]?.sort()).toEqual(["Alex", "Sam"]);
   });
 });
 

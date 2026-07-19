@@ -18,7 +18,7 @@ export type Participant = { id: string; name: string; color: string; isHost: boo
  * the old participant rail's roster duties; leave/end lives in the room
  * control bar.
  */
-export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream }: {
+export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream, raisedHands, reactionFlashes, strip = false }: {
   active: boolean;
   participants: Participant[];
   remoteStreams: ReadonlyMap<string, MediaStream>;
@@ -27,6 +27,13 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
   sharingMembers: ReadonlySet<string>;
   /** Your own live share preview (v1: it replaces your camera tile). */
   shareStream: MediaStream | null;
+  /** Members with a raised hand (persistent ✋ tile badge). */
+  raisedHands: ReadonlySet<string>;
+  /** Latest transient reaction per member (short-lived tile badge). */
+  reactionFlashes: ReadonlyMap<string, string>;
+  /** Theater bottom strip: horizontal row under the stage instead of the
+   *  side column (the column hides in theater; this fills the space). */
+  strip?: boolean;
 }) {
   const [selfStream, setSelfStream] = useState<MediaStream | null>(() => getSessionCapture());
   const [collapsed, setCollapsed] = useState(false);
@@ -35,7 +42,7 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
 
   const ordered = [...participants].sort((a, b) => Number(b.isSelf) - Number(a.isSelf));
   return (
-    <aside className={"cp-people" + (collapsed ? " spine" : "")} aria-label="Session participants">
+    <aside className={"cp-people" + (strip ? " strip" : collapsed ? " spine" : "")} aria-label="Session participants">
       <div className="cp-people-head">
         <span className="cp-people-title">People</span>
         <span className="cp-people-count">{participants.length}</span>
@@ -58,6 +65,8 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
             stream={p.isSelf ? (shareStream ?? selfStream) : remoteStreams.get(p.id) ?? null}
             state={p.isSelf ? "live" : peerStates.get(p.id) ?? "connecting"}
             sharing={p.isSelf ? shareStream != null : sharingMembers.has(p.id)}
+            handUp={raisedHands.has(p.id)}
+            flash={reactionFlashes.get(p.id) ?? null}
           />
         ))}
       </div>
@@ -68,11 +77,13 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
 /** One member: camera tile when a video track flows, avatar card when not.
  *  Speaking glow rides an AnalyserNode threshold on the tile's own audio
  *  (reduced motion: no glow animation, static ring). */
-function PersonTile({ p, stream, state, sharing }: {
+function PersonTile({ p, stream, state, sharing, handUp, flash }: {
   p: Participant;
   stream: MediaStream | null;
   state: MeshPeerState;
   sharing: boolean;
+  handUp: boolean;
+  flash: string | null;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [speaking, setSpeaking] = useState(false);
@@ -143,6 +154,8 @@ function PersonTile({ p, stream, state, sharing }: {
         </div>
       )}
       {sharing && <span className="cp-person-share">Sharing screen</span>}
+      {handUp && <span className="cp-person-hand" title="Hand raised" aria-label="Hand raised">✋</span>}
+      {flash && <span className="cp-person-flash" aria-hidden>{flash}</span>}
       <div className="cp-person-meta">
         {p.isHost && <span className="cp-person-crown" title="Host"><IconCrown size={10} /></span>}
         <span className="cp-person-name" title={p.name}>{p.isSelf ? `${p.name} (You)` : p.name}</span>

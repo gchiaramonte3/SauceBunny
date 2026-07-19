@@ -376,6 +376,11 @@ fn sweep_stale_files(cache: &std::path::Path, now: std::time::SystemTime) -> u32
         if name == MEDIA_CACHE_DIRNAME {
             continue;
         }
+        // Posters are cheap to keep and expensive to regenerate daily; the
+        // Settings cache panel's thumbnails bucket is the manual purge.
+        if name.starts_with("saucebunny-thumb-") {
+            continue;
+        }
         // Whisper model files live under a separate `whisper-models/`
         // subdir so they're never matched here. Belt + braces though:
         // skip directories explicitly.
@@ -548,7 +553,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-19-r117-giant-review";
+pub const BACKEND_BUILD_ID: &str = "2026-07-19-r118-live-reactions";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

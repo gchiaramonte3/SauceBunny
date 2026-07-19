@@ -91,6 +91,19 @@ normal session; none is trivial.
 - CoReviewLobby in-session people list keyed by index (Participant.id is
   the roster key); lobby + room faces could split into sibling components.
 
+## Reusable join codes (user ask 2026-07-19, deferred - needs a spike)
+
+"Use the same code for your second time": persist a 32-byte iroh SecretKey
+under app_data_dir and feed `.secret_key(...)` into session_start's endpoint
+builder - the host's NodeId becomes stable across sessions. CAVEAT the
+mapper verified: EndpointTicket also embeds live relay + direct addresses,
+so the dressed SAUC- code can still change between sessions even with a
+stable key. A byte-identical "personal room code" requires NodeId-only
+dialing, which session.rs:1016 records as unverified on our setup (needs
+live n0 discovery). Spike: persist the key, mint a NodeId-only invite,
+verify a cross-network join, then swap parse_invite to accept both forms.
+Needs a rand/getrandom dep for key generation (none in Cargo.toml today).
+
 ## Rejected / not doing
 
 - MSE audio-only branch removal (finder called it unreachable; the

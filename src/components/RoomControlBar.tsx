@@ -1,9 +1,10 @@
 import { useState } from "react";
 import {
   IconFullscreen, IconFullscreenExit, IconMic, IconMicOff,
-  IconScreenShare, IconSettings, IconVideo, IconVideoOff,
+  IconScreenShare, IconSettings, IconSmile, IconVideo, IconVideoOff,
 } from "./Icons";
 import { DevicePanel } from "./DevicePanel";
+import { ReactionPicker } from "./ReactionPicker";
 import { SharePicker } from "./SharePicker";
 import type { ShareState } from "../lib/share-machine";
 
@@ -15,7 +16,7 @@ import type { ShareState } from "../lib/share-machine";
  * INSIDE the transport row's right side (Transport's roomControls slot),
  * with the snapshot/speed/volume controls - not floating over the timeline.
  */
-export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareState, onStartShare, onStopShare, theater, onToggleTheater }: {
+export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareState, onStartShare, onStopShare, theater, onToggleTheater, onReact, handRaised, onToggleHand }: {
   micOn: boolean;
   camOn: boolean;
   onToggleMic: () => void;
@@ -25,9 +26,13 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
   onStopShare: () => void;
   theater: boolean;
   onToggleTheater: () => void;
+  onReact: (emote: string) => void;
+  handRaised: boolean;
+  onToggleHand: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [devicesOpen, setDevicesOpen] = useState(false);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
   return (
     <div className="cp-room-bar" role="toolbar" aria-label="Room controls">
       <button
@@ -70,11 +75,28 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
       )}
       <button
         type="button"
+        className={"cp-room-bar-btn" + (reactionsOpen || handRaised ? " active" : "")}
+        title={handRaised ? "Reactions (hand raised)" : "Reactions"}
+        aria-label="Send a reaction"
+        onClick={() => { setPickerOpen(false); setDevicesOpen(false); setReactionsOpen((v) => !v); }}
+      >
+        <IconSmile size={15} />
+      </button>
+      {reactionsOpen && (
+        <ReactionPicker
+          onReact={onReact}
+          handRaised={handRaised}
+          onToggleHand={onToggleHand}
+          onClose={() => setReactionsOpen(false)}
+        />
+      )}
+      <button
+        type="button"
         className={"cp-room-bar-btn" + (devicesOpen ? " active" : "")}
         title="Camera and mic settings"
         aria-label="Camera and microphone settings"
         aria-pressed={devicesOpen}
-        onClick={() => { setPickerOpen(false); setDevicesOpen((v) => !v); }}
+        onClick={() => { setPickerOpen(false); setReactionsOpen(false); setDevicesOpen((v) => !v); }}
       >
         <IconSettings size={15} />
       </button>

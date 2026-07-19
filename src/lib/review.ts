@@ -59,9 +59,12 @@ export type ReviewComment = {
   createdAt: number;
   updatedAt: number;
   annotation: AnnotationStrokes | null;
-  /** Reviewer names who liked this note. Optional so docs persisted before
-   *  likes existed parse unchanged (absent = no likes). */
+  /** Reviewer names who liked this note. LEGACY field: thumbs-up reactions
+   *  from older docs; folded into `reactions` by reactionsOf. Optional so
+   *  docs persisted before likes existed parse unchanged. */
   likes?: string[];
+  /** Per-emoji reactions: glyph -> reviewer names. Optional for old docs. */
+  reactions?: Record<string, string[]>;
 };
 
 export type ReviewVersion = {
@@ -316,9 +319,24 @@ export function setResolved(doc: ReviewDoc, id: string, resolved: boolean, now =
   };
 }
 
-/** SET (not toggle) `name`'s membership in a comment's likes — the idempotent
- *  form for the op relay (two applies land the same place). */
-export function setLike(doc: ReviewDoc, id: string, name: string, liked: boolean): ReviewDoc {
+/** Merged reaction view: the reactions map plus legacy likes folded in as
+ *  thumbs-up (old docs keep rendering without a migration pass). */
+export function reactionsOf(c: ReviewComment): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [emoji, names] of Object.entries(c.reactions ?? {})) {
+    if (names.length) out[emoji] = [...names];
+  }
+  if (c.likes?.length) {
+    out["👍"] = [...new Set([...(out["👍"] ?? []), ...c.likes])];
+  }
+  return out;
+}
+
+/** SET (not toggle) `name`'s membership in a comment's per-emoji reactions —
+ *  the idempotent form for the op relay (two applies land the same place).
+ *  Default 👍 keeps pre-emoji ops meaningful; removing 👍 also strips the
+ *  legacy likes entry so old docs un-react cleanly. */
+export function setLike(doc: ReviewDoc, id: string, name: string, liked: boolean, emoji = "👍"): ReviewDoc {
   const who = name.trim();
   // Unknown ids are an identity no-op (callers rely on reference equality
   // to skip persistence).
@@ -327,11 +345,24 @@ export function setLike(doc: ReviewDoc, id: string, name: string, liked: boolean
     ...doc,
     comments: doc.comments.map((c) => {
       if (c.id !== id) return c;
-      const likes = c.likes ?? [];
-      const has = likes.includes(who);
-      if (liked && !has) return { ...c, likes: [...likes, who] };
-      if (!liked && has) return { ...c, likes: likes.filter((n) => n !== who) };
-      return c;
+      const cur = c.reactions?.[emoji] ?? [];
+      const inLegacy = emoji === "👍" && (c.likes ?? []).includes(who);
+      const has = cur.includes(who) || inLegacy;
+      if (liked === has && !inLegacy) return c; // identity no-op
+      const reactions = { ...(c.reactions ?? {}) };
+      if (liked) {
+        if (!cur.includes(who)) reactions[emoji] = [...cur, who];
+      } else {
+        const next = cur.filter((n) => n !== who);
+        if (next.length) reactions[emoji] = next;
+        else delete reactions[emoji];
+      }
+      const likes = inLegacy && !liked ? (c.likes ?? []).filter((n) => n !== who) : c.likes;
+      return {
+        ...c,
+        reactions: Object.keys(reactions).length ? reactions : undefined,
+        likes: likes && likes.length ? likes : undefined,
+      };
     }),
   };
 }
@@ -352,7 +383,7 @@ export type ReviewOp =
   | { t: "edit"; id: string; body: string; at: number }
   | { t: "del"; id: string }
   | { t: "resolve"; id: string; resolved: boolean; at: number }
-  | { t: "like"; id: string; name: string; liked: boolean }
+  | { t: "like"; id: string; name: string; liked: boolean; emoji?: string }
   | { t: "editReply"; versionId: string; commentId: string; replyId: string; body: string; at: number }
   | { t: "delReply"; versionId: string; commentId: string; replyId: string }
   /** Source-level verdict (per active version). LWW like edits; relayed in
@@ -400,7 +431,7 @@ export function applyReviewOp(doc: ReviewDoc, op: ReviewOp): ReviewDoc {
       return setResolved(doc, op.id, op.resolved, op.at);
     }
     case "like":
-      return setLike(doc, op.id, op.name, op.liked);
+      return setLike(doc, op.id, op.name, op.liked, op.emoji);
     case "editReply": {
       const cur = doc.comments.find((c) => c.id === op.replyId);
       if (cur && editLoses(op, cur)) return doc;
@@ -453,7 +484,7 @@ export function inverseReviewOps(before: ReviewDoc, op: ReviewOp, at = Date.now(
       return [{ t: "resolve", id: op.id, resolved: cur ? cur.resolved : !op.resolved, at }];
     }
     case "like":
-      return [{ t: "like", id: op.id, name: op.name, liked: !op.liked }];
+      return [{ t: "like", id: op.id, name: op.name, liked: !op.liked, emoji: op.emoji }];
     case "status": {
       const prev = statusOf(before, op.versionId);
       return [{ t: "status", versionId: op.versionId, state: prev.state, reviewer: prev.reviewer, at }];
@@ -492,6 +523,16 @@ export function mergeReviewDoc(local: ReviewDoc, incoming: ReviewDoc): ReviewDoc
     const base = lc.updatedAt > ic.updatedAt ? { ...lc } : { ...ic };
     const likes = Array.from(new Set([...(ic.likes ?? []), ...(lc.likes ?? [])]));
     base.likes = likes.length ? likes : undefined;
+    // Per-emoji union, same convergence rule as likes.
+    const emojiKeys = new Set([...Object.keys(ic.reactions ?? {}), ...Object.keys(lc.reactions ?? {})]);
+    if (emojiKeys.size) {
+      const reactions: Record<string, string[]> = {};
+      for (const e of emojiKeys) {
+        const u = Array.from(new Set([...(ic.reactions?.[e] ?? []), ...(lc.reactions?.[e] ?? [])]));
+        if (u.length) reactions[e] = u;
+      }
+      base.reactions = Object.keys(reactions).length ? reactions : undefined;
+    }
     byId.set(lc.id, base);
   }
   const status: Record<string, ReviewStatus> = { ...incoming.status };

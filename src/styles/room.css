@@ -121,7 +121,7 @@
 
 /* ── Theater sub-mode: widen the stage; the rail STAYS (it is the app's
    primary navigation — the room is not an exception). ── */
-.cp-room-theater .cp-people { display: none; }
+.cp-room-theater .cp-people:not(.strip) { display: none; }
 .cp-room-theater .cp-queue-drawer.room { display: none; }
 .cp-room-theater .cp-room-head { margin-top: var(--s-2); }
 
@@ -315,6 +315,14 @@
   color: var(--fg-0);
 }
 .cp-room-bar-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+/* Copy join code matches End session's height exactly - two header
+   actions, one scale. */
+.cp-room-code {
+  height: 30px;
+  padding: 0 14px;
+  font-size: 12.5px;
+}
+
 /* End/Leave (user call 2026-07-19): a LARGE red action in the room
    header, beside Copy join code - the one destructive control, styled in
    the header-button family but unmistakably danger. */
@@ -440,3 +448,144 @@
   color: var(--fg-4);
 }
 .cp-devpanel-done { align-self: center; }
+
+/* ── Theater participants strip: the column hides in theater; this row
+      fills the space under the stage (user call 2026-07-19). ── */
+.cp-people.strip {
+  width: auto;
+  margin: var(--s-2) 4px;
+  flex-shrink: 0;
+}
+.cp-people.strip .cp-people-head { display: none; }
+.cp-people.strip .cp-people-list {
+  flex-direction: row;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px;
+  gap: var(--s-2);
+}
+.cp-people.strip .cp-person {
+  width: 168px;
+  aspect-ratio: 16 / 9;
+}
+
+/* Tile badges: persistent raised hand + the ~5s reaction flash. */
+.cp-person-hand {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  font-size: 14px;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));
+}
+.cp-person-flash {
+  position: absolute;
+  bottom: 26px;
+  right: 6px;
+  font-size: 18px;
+  animation: cp-flash-pop 300ms var(--ease-out);
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));
+}
+@keyframes cp-flash-pop {
+  from { transform: scale(0.4); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+/* ── Reaction picker (cluster popover, anchors up like SharePicker). ── */
+.cp-react-pick {
+  position: absolute;
+  bottom: 40px;
+  right: 0;
+  z-index: 13;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  background: var(--bg-1);
+  border-radius: var(--r-lg);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+.cp-react-pick-row { display: flex; gap: 4px; }
+.cp-react-pick-btn {
+  width: 36px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 19px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.cp-react-pick-btn:hover { background: rgba(255,255,255,0.08); transform: scale(1.12); }
+.cp-react-pick-hand {
+  height: 30px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md, 8px);
+  background: transparent;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cp-react-pick-hand:hover { background: rgba(255,255,255,0.06); }
+.cp-react-pick-hand.up { border-color: var(--warning); color: var(--warning); }
+
+/* ── Live reaction floaters: rise along the LEFT edge of the stage (the
+      Meet pattern - shared content stays unobscured). ── */
+.cp-reactions-layer {
+  position: absolute;
+  left: 14px;
+  bottom: 90px;
+  top: 0;
+  width: 130px;
+  pointer-events: none;
+  z-index: 11;
+  overflow: hidden;
+}
+.cp-reaction-float {
+  position: absolute;
+  bottom: 0;
+  left: var(--rx, 0px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  animation: cp-react-rise 4.6s cubic-bezier(0.2, 0.6, 0.3, 1) var(--rd, 0ms) forwards;
+}
+.cp-reaction-glyph { font-size: 26px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
+.cp-reaction-name {
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: rgba(0,0,0,0.55);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+@keyframes cp-react-rise {
+  0%   { transform: translateY(0) scale(0.6); opacity: 0; }
+  8%   { transform: translateY(-8%) scale(1); opacity: 1; }
+  75%  { opacity: 1; }
+  100% { transform: translateY(-360px) scale(0.9); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-reaction-float { animation: cp-react-fade 4.6s ease var(--rd, 0ms) forwards; }
+  .cp-person-flash { animation: none; }
+  @keyframes cp-react-fade {
+    0% { opacity: 0; }
+    10% { opacity: 1; }
+    80% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+}
+
+/* Screen-reader-only live region (reaction announcements). */
+.cp-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

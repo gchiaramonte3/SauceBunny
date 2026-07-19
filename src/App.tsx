@@ -17,6 +17,7 @@ import { useLibraryScan } from "./hooks/use-library-scan";
 import type { LibraryCrumb } from "./lib/library";
 import { Sidebar } from "./components/Sidebar";
 import { PeoplePanel } from "./components/PeoplePanel";
+import { ReactionLayer } from "./components/ReactionLayer";
 import { CoReviewLobby } from "./components/CoReviewLobby";
 import { Monitor, type AspectId } from "./components/Monitor";
 import type { Notif } from "./components/NotificationBell";
@@ -28,6 +29,7 @@ import { ViewOptions } from "./components/ViewOptions";
 import { LogsPanel } from "./components/LogsPanel";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { RoomControlBar } from "./components/RoomControlBar";
+import { reactionGlyph } from "./lib/reactions";
 import { ReviewStatusChip } from "./components/ReviewStatusChip";
 import { useMediaCapture } from "./hooks/use-media-capture";
 import { SettingsModal, type Defaults, type CaptionFontKey } from "./components/SettingsModal";
@@ -4369,6 +4371,7 @@ export default function App() {
   // re-render App).
   const {
     coSession, coSessionActive, sessionDoc, postSessionOp, coGhostMarkers,
+    liveReactions, raisedHands, handRaised, sendReaction, toggleHand,
     screening, setScreening, screeningParticipants,
     meshStreams, meshStates,
     shareState, shareStream, sharingMembers, startShare, stopShare,
@@ -4395,6 +4398,16 @@ export default function App() {
     return st.updatedAt > 0 || st.state !== "pending" ? st : null;
   }, [sessionDoc, reviewSourceKey, reviewTick]);
   const roomActive = coSessionActive && activeView === "coreview";
+  // Latest transient reaction per member: tile badges (pruning rides the
+  // liveReactions feed itself).
+  const reactionFlashes = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of liveReactions) m.set(r.from, reactionGlyph(r.emote));
+    return m;
+  }, [liveReactions]);
+  const memberName = useCallback((id: string) => {
+    return screeningParticipants.find((p) => p.id === id)?.name ?? "Someone";
+  }, [screeningParticipants]);
   // Room bar device toggles ride the same capture singleton the green room
   // opened; enabled-bit flips propagate to every mesh sender live.
   const capture = useMediaCapture();
@@ -4735,12 +4748,14 @@ export default function App() {
                   sibling of <main> so entering the room never remounts the
                   player; renders nothing outside the room. */}
               <PeoplePanel
-                active={roomActive}
+                active={roomActive && !screening}
                 participants={screeningParticipants}
                 remoteStreams={meshStreams}
                 peerStates={meshStates}
                 sharingMembers={sharingMembers}
                 shareStream={shareStream}
+                raisedHands={raisedHands}
+                reactionFlashes={reactionFlashes}
               />
               <Sidebar
                 reviewStatus={reviewStatus}
@@ -5026,6 +5041,7 @@ export default function App() {
                     annotationLabelMode={annDrawing && reviewLabelMode}
                     annotationLabelColor={annLabelColor}
                   />
+                  {roomActive && <ReactionLayer reactions={liveReactions} nameFor={memberName} />}
                   <Transport
                     status={status}
                     isPlaying={isPlaying}
@@ -5070,6 +5086,9 @@ export default function App() {
                         onStopShare={stopShare}
                         theater={screening}
                         onToggleTheater={() => setScreening((v) => !v)}
+                        onReact={sendReaction}
+                        handRaised={handRaised}
+                        onToggleHand={toggleHand}
                       />
                     ) : undefined}
                   />
@@ -5104,6 +5123,19 @@ export default function App() {
                       selection (or a queued no-marks state) renders NOTHING -
                       the row's space collapses, no reserved empty line.
                       Partial-mark guidance stays (it completes the gesture). */}
+                  {roomActive && screening && (
+                    <PeoplePanel
+                      active
+                      strip
+                      participants={screeningParticipants}
+                      remoteStreams={meshStreams}
+                      peerStates={meshStates}
+                      sharingMembers={sharingMembers}
+                      shareStream={shareStream}
+                      raisedHands={raisedHands}
+                      reactionFlashes={reactionFlashes}
+                    />
+                  )}
                   {!roomActive && (() => {
                     const content =
                       (status === "loaded" || status === "success")

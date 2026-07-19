@@ -1,3 +1,4 @@
+import { COMMENT_REACTION_EMOJI } from "../lib/reactions";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ColorSwatches } from "./ColorSwatches";
 import { invoke } from "@tauri-apps/api/core";
@@ -5,7 +6,6 @@ import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type { DictateDoneEvent, DictateLevelEvent, DictatePartialEvent } from "../types";
 import { DictationWave } from "./DictationWave";
-import { ReviewStatusChip } from "./ReviewStatusChip";
 import { EmojiPicker } from "./EmojiPicker";
 import { IconDownload, IconRange } from "./Icons";
 import { usePlayheadSeconds } from "../lib/playhead-store";
@@ -16,13 +16,12 @@ import { appUndo } from "../lib/undo";
 import {
   loadReview, saveReview, ensureVersion,
   buildComment, insertComment, editComment, deleteComment, editReply, removeReply,
-  setResolved, setLike, rootComments, repliesOf, openCount,
+  setResolved, setLike, reactionsOf, rootComments, repliesOf, openCount,
   applyReviewOp, inverseReviewOps, restampReviewOp,
   reviewToMarkdown,
   avatarColor, initialsOf, loadReviewer, AVATAR_COLORS, AUTHOR_KEY, AUTHOR_COLOR_KEY, REVIEW_CHANGED_EVENT,
   loadReviewHistory, removeReviewHistory, clearReviewHistory, annotationHasContent,
   type ReviewDoc, type ReviewComment, type CommentSort, type AnnotationStrokes, type ReviewHistoryEntry, type ReviewOp,
-  statusOf,
 } from "../lib/review";
 import {
   markersToAvidTxt, markersToPremiereXml, markersToResolveEdl, markersToFcpxml, markersToCsv,
@@ -789,36 +788,6 @@ export function ReviewPanel({
         history={history} setHistory={setHistory} now={now}
         author={author} authorColor={authorColor} openRename={openRename}
       />
-      {/* Approval: the review's verdict, set from either workspace and
-          relayed in a session like any other op (undoable). */}
-      {viewDoc && versionId && (() => {
-        const st = statusOf(viewDoc, versionId);
-        const setVerdict = (state: "approved" | "changes" | "pending") => {
-          const op = { t: "status" as const, versionId, state, reviewer: author, at: Date.now() };
-          dispatchUndoable("Set review status", op, (d) => applyReviewOp(d, op));
-        };
-        return (
-          <div className="cp-review-approval">
-            <ReviewStatusChip state={st.state} reviewer={st.reviewer || undefined} />
-            <div className="cp-review-approval-actions">
-              {st.state !== "approved" ? (
-                <button type="button" className="btn btn-ghost btn-compact" onClick={() => setVerdict("approved")}>
-                  Approve
-                </button>
-              ) : (
-                <button type="button" className="btn btn-ghost btn-compact" onClick={() => setVerdict("pending")}>
-                  Reopen
-                </button>
-              )}
-              {st.state !== "changes" && (
-                <button type="button" className="btn btn-ghost btn-compact" onClick={() => setVerdict("changes")}>
-                  Request changes
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      })()}
       {searchOpen && (
         <div className="cp-review-search" ref={searchRowRef}>
           <SearchGlyph />
@@ -858,10 +827,10 @@ export function ReviewPanel({
             onResolve={() => { const at = Date.now(), v = !c.resolved; dispatchUndoable(v ? "resolve comment" : "reopen comment", { t: "resolve", id: c.id, resolved: v, at }, (d) => setResolved(d, c.id, v, at)); }}
             onDelete={() => dispatchUndoable("delete comment", { t: "del", id: c.id }, (d) => deleteComment(d, c.id))}
             onEdit={(body) => { const at = Date.now(); dispatchUndoable("edit comment", { t: "edit", id: c.id, body, at }, (d) => editComment(d, c.id, body, at)); }}
-            onLike={() => { if (!ensureNamed()) return; const liked = !(c.likes ?? []).includes(author); dispatch({ t: "like", id: c.id, name: author, liked }, (d) => setLike(d, c.id, author, liked)); }}
+            onLike={(emoji) => { if (!ensureNamed()) return; const liked = !(reactionsOf(c)[emoji] ?? []).includes(author); dispatch({ t: "like", id: c.id, name: author, liked, emoji }, (d) => setLike(d, c.id, author, liked, emoji)); }}
             onEditReply={(replyId, body) => { const at = Date.now(); dispatchUndoable("edit reply", { t: "editReply", versionId, commentId: c.id, replyId, body, at }, (d) => editReply(d, versionId, c.id, replyId, body, at)); }}
             onDeleteReply={(replyId) => dispatchUndoable("delete reply", { t: "delReply", versionId, commentId: c.id, replyId }, (d) => removeReply(d, versionId, c.id, replyId))}
-            onLikeReply={(replyId) => { if (!ensureNamed()) return; const r = viewDoc.comments.find((x) => x.id === replyId); if (!r) return; const liked = !(r.likes ?? []).includes(author); dispatch({ t: "like", id: replyId, name: author, liked }, (d) => setLike(d, replyId, author, liked)); }}
+            onLikeReply={(replyId, emoji) => { if (!ensureNamed()) return; const r = viewDoc.comments.find((x) => x.id === replyId); if (!r) return; const liked = !(reactionsOf(r)[emoji] ?? []).includes(author); dispatch({ t: "like", id: replyId, name: author, liked, emoji }, (d) => setLike(d, replyId, author, liked, emoji)); }}
             collapsed={collapsedThreads.has(c.id)}
             onToggleCollapse={() => toggleThread(c.id)}
             replyOpen={replyTo === c.id}
@@ -1364,10 +1333,10 @@ function CommentRow({
   onResolve: () => void;
   onDelete: () => void;
   onEdit: (body: string) => void;
-  onLike: () => void;
+  onLike: (emoji: string) => void;
   onEditReply: (replyId: string, body: string) => void;
   onDeleteReply: (replyId: string) => void;
-  onLikeReply: (replyId: string) => void;
+  onLikeReply: (replyId: string, emoji: string) => void;
   /** Reply thread collapsed to a one-line "N replies" row (UI state in ReviewPanel). */
   collapsed: boolean;
   onToggleCollapse: () => void;
@@ -1395,7 +1364,7 @@ function CommentRow({
         </div>
         {c.resolved && <span className="cp-review-badge">Resolved</span>}
         <div className="cp-review-actions">
-          <LikeButton likes={c.likes ?? []} myName={myName} onLike={onLike} />
+          <ReactionBar c={c} myName={myName} onReact={onLike} />
           <button onClick={onResolve} title={c.resolved ? "Reopen" : "Resolve"}>{c.resolved ? "Reopen" : "Resolve"}</button>
           <button onClick={() => { setEditing(true); setEditDraft(c.body); }} title="Edit">Edit</button>
           <button onClick={onDelete} title="Delete">✕</button>
@@ -1458,7 +1427,7 @@ function CommentRow({
                 myColor={myColor}
                 onEdit={(body) => onEditReply(r.id, body)}
                 onDelete={() => onDeleteReply(r.id)}
-                onLike={() => onLikeReply(r.id)}
+                onLike={(emoji) => onLikeReply(r.id, emoji)}
               />
             ))}
           </div>
@@ -1493,7 +1462,7 @@ function ReplyRow({
   myColor: string;
   onEdit: (body: string) => void;
   onDelete: () => void;
-  onLike: () => void;
+  onLike: (emoji: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(r.body);
@@ -1509,7 +1478,7 @@ function ReplyRow({
             <span className="cp-review-ago">{timeAgo(r.createdAt, now)}</span>
           </div>
           <div className="cp-review-actions">
-            <LikeButton likes={r.likes ?? []} myName={myName} onLike={onLike} />
+            <ReactionBar c={r} myName={myName} onReact={onLike} />
             <button onClick={() => { setDraft(r.body); setEditing(true); }} title="Edit">Edit</button>
             <button onClick={onDelete} title="Delete">✕</button>
           </div>
@@ -1529,21 +1498,53 @@ function ReplyRow({
   );
 }
 
-/** Thumbs-up toggle in a note's action cluster (comments + replies). Quiet
- *  like its Edit/× siblings; once anyone has liked, the count rides along and
- *  the button stays visible at a glance (see .has-likes in review.css). */
-function LikeButton({ likes, myName, onLike }: { likes: string[]; myName: string; onLike: () => void }) {
-  const liked = !!myName && likes.includes(myName);
+/** Emoji reactions in a note's action cluster (comments + replies): one
+ *  chip per emoji anyone has used (click toggles yours), plus a smiley
+ *  that opens the palette. The Slack pattern - macOS's native emoji panel
+ *  can't be summoned programmatically from a webview, so the curated
+ *  palette IS the picker. */
+function ReactionBar({ c, myName, onReact }: { c: ReviewComment; myName: string; onReact: (emoji: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const map = reactionsOf(c);
+  const entries = Object.entries(map);
   return (
-    <button
-      className={"cp-review-like" + (liked ? " liked" : "") + (likes.length > 0 ? " has-likes" : "")}
-      onClick={onLike}
-      aria-pressed={liked}
-      title={likes.length > 0 ? `Liked by ${likes.join(", ")}` : "Like"}
-    >
-      <ThumbGlyph />
-      {likes.length > 0 && <span className="cp-review-like-n">{likes.length}</span>}
-    </button>
+    <span className="cp-react-bar">
+      {entries.map(([emoji, names]) => (
+        <button
+          key={emoji}
+          className={"cp-review-like has-likes" + (myName && names.includes(myName) ? " liked" : "")}
+          onClick={() => onReact(emoji)}
+          aria-pressed={!!myName && names.includes(myName)}
+          title={`${emoji} ${names.join(", ")}`}
+          aria-label={`${emoji} by ${names.join(", ")}`}
+        >
+          <span className="cp-react-emoji">{emoji}</span>
+          <span className="cp-review-like-n">{names.length}</span>
+        </button>
+      ))}
+      <span className="cp-react-add-wrap">
+        <button
+          className={"cp-review-like" + (open ? " liked" : "")}
+          onClick={() => setOpen((v) => !v)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title="Add a reaction"
+          aria-label="Add a reaction"
+        >
+          <SmileGlyph />
+        </button>
+        {open && (
+          <span className="cp-react-pop" role="menu" aria-label="Pick a reaction">
+            {COMMENT_REACTION_EMOJI.map((emoji) => (
+              <button key={emoji} role="menuitem" className="cp-react-pop-btn"
+                onClick={() => { onReact(emoji); setOpen(false); }} aria-label={`React with ${emoji}`}>
+                {emoji}
+              </button>
+            ))}
+          </span>
+        )}
+      </span>
+    </span>
   );
 }
 
@@ -1604,13 +1605,15 @@ function HistoryGlyph() {
   );
 }
 
-/** Thumbs-up glyph for the like toggle. */
-function ThumbGlyph() {
+/** Smiley glyph for the add-reaction toggle. */
+function SmileGlyph() {
   return (
     <svg className="cp-review-glyph" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
       strokeLinecap="round" strokeLinejoin="round">
-      <path d="M7 11v10" />
-      <path d="M7 11l4-8a3 3 0 0 1 3 3v3h5a2 2 0 0 1 2 2.3l-1.3 7a2 2 0 0 1-2 1.7H7" />
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" />
+      <path d="M9 9.5h.01" strokeWidth={2.6} />
+      <path d="M15 9.5h.01" strokeWidth={2.6} />
     </svg>
   );
 }

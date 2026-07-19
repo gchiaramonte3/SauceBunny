@@ -15,7 +15,9 @@
   overflow-x: hidden;
   display: flex;
   justify-content: center;
-  align-items: flex-start;
+  /* Centered BOTH axes (user call 2026-07-19). safe: falls back to start
+     when the column is taller than the viewport, so nothing clips. */
+  align-items: safe center;
   padding: 0 var(--s-6);
   background: var(--bg-0);
 }
@@ -33,14 +35,15 @@
   mask-image: linear-gradient(180deg, #000 55%, transparent 100%);
 }
 
-/* ── The one centered column. Top space is generous and CONSTANT across
-      both faces — that constancy is what guarantees no idle↔active jump. ── */
+/* ── The one centered column. The PAGE centers it on both axes; the
+      symmetric padding keeps breathing room when content outgrows the
+      viewport (safe centering tops it out instead of clipping). ── */
 .cp-colobby-inner {
   position: relative;
   width: 100%;
   max-width: 560px;
-  padding-top: clamp(var(--s-12), 16vh, 160px);
-  padding-bottom: var(--s-12);
+  padding-top: var(--s-8);
+  padding-bottom: var(--s-8);
   display: flex;
   flex-direction: column;
   gap: var(--s-4);

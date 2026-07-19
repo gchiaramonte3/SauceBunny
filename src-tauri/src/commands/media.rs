@@ -1188,8 +1188,12 @@ pub async fn generate_local_thumbnail(
     time_bucket.hash(&mut hasher);
     let key = format!("{:016x}", hasher.finish());
     let out_path = cache.join(format!("saucebunny-thumb-{key}.jpg"));
-    if out_path.exists() {
-        return Ok(out_path.to_string_lossy().to_string());
+    // Size-checked hit: a 0-byte file left by a failed run is a poison pill,
+    // not a cache entry - delete and regenerate.
+    match std::fs::metadata(&out_path) {
+        Ok(m) if m.len() > 0 => return Ok(out_path.to_string_lossy().to_string()),
+        Ok(_) => { let _ = std::fs::remove_file(&out_path); }
+        Err(_) => {}
     }
 
     let ts_secs = chosen.unwrap_or_else(|| poster_head_seconds(args.duration_seconds));
@@ -1220,6 +1224,7 @@ pub async fn generate_local_thumbnail(
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr).to_string();
         let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("(no detail)");
+        let _ = std::fs::remove_file(&out_path); // never leave a poison pill
         return Err(format!("thumbnail extraction failed: {last}").into());
     }
     // Same belt-and-braces check as extract_local_frame — ffmpeg can
@@ -1227,7 +1232,10 @@ pub async fn generate_local_thumbnail(
     // nothing.
     match std::fs::metadata(&out_path) {
         Ok(m) if m.len() > 0 => {}
-        _ => return Err("ffmpeg produced no thumbnail (likely no video stream or seek past EOF)".into()),
+        _ => {
+            let _ = std::fs::remove_file(&out_path);
+            return Err("ffmpeg produced no thumbnail (likely no video stream or seek past EOF)".into());
+        }
     }
     Ok(out_path.to_string_lossy().to_string())
 }

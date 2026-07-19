@@ -180,9 +180,12 @@ export function requestThumbnail(path: string): Promise<string | null> {
       if (url) rememberThumb(path, url);
       else thumbFailed.add(path);
       return url;
-    } catch {
+    } catch (e) {
       // Don't poison a path with a failure flag if a pick superseded us.
-      if (current()) thumbFailed.add(path);
+      if (current()) {
+        thumbFailed.add(path);
+        console.warn(`[thumb] poster failed for ${path}:`, e);
+      }
       return null;
     } finally {
       // Only clear the pending slot if we still own it. If a pick superseded us,
