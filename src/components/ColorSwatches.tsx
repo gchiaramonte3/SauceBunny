@@ -36,6 +36,8 @@ export function ColorSwatches({ colors, value, onPick, size = 22, ariaLabel }: {
         />
       ))}
       <label
+        role="radio"
+        aria-checked={!isPreset}
         className={"cp-swatch custom" + (isPreset ? "" : " picked")}
         title="Custom color"
         style={isPreset ? undefined : { background: value }}

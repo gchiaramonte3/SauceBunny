@@ -214,7 +214,8 @@ export function LibraryCard({
         title="More actions"
         aria-label="More actions"
         aria-haspopup="menu"
-        onClick={(e) => { e.stopPropagation(); openMenuAtRect(); }}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); if (menuAnchor) closeMenu(); else openMenuAtRect(); }}
       >
         <IconMore size={15} />
       </button>

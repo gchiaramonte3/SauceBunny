@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  hsvToRgb, rgbToHsv, rgbToHex, hsvToHex, parseHex, luminance,
-  prefersDarkText, SPEAKER_PRESETS,
+  hsvToRgb, rgbToHsv, rgbToHex, hsvToHex, parseHex, SPEAKER_PRESETS,
 } from "./color";
 
 describe("hex parsing", () => {
@@ -56,13 +55,3 @@ describe("hsv <-> rgb", () => {
   });
 });
 
-describe("luminance / contrast", () => {
-  it("white is bright, black is dark", () => {
-    expect(luminance({ r: 255, g: 255, b: 255 })).toBeCloseTo(1, 5);
-    expect(luminance({ r: 0, g: 0, b: 0 })).toBeCloseTo(0, 5);
-  });
-  it("flips overlay to dark on light swatches (gold) but not dark ones (indigo)", () => {
-    expect(prefersDarkText("#FFD43B")).toBe(true);
-    expect(prefersDarkText("#748FFC")).toBe(false);
-  });
-});

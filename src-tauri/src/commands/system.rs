@@ -155,7 +155,7 @@ fn dir_category_stats(dir: &std::path::Path) -> CacheCategoryStats {
 }
 
 #[tauri::command]
-pub fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppError> {
+pub async fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppError> {
     // Proof-of-concept migration for r50 — first command on the typed-error
     // (AppError) surface. See CLAUDE.md refactor priority #4. The migration
     // completed in r108: every command + helper now returns
@@ -212,7 +212,7 @@ pub fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppError> {
 /// longer knows about them — so without this list, Clear cache would delete
 /// the file backing the video that's on screen right now.
 #[tauri::command]
-pub fn clear_all_cache(
+pub async fn clear_all_cache(
     app: AppHandle,
     registry: State<'_, JobRegistry>,
     exclude: Option<Vec<String>>,
@@ -298,7 +298,7 @@ fn remove_files_in_dir(
 /// Clearing is always safe: every artifact regenerates on demand. The same
 /// active-job / currently-playing guards as `clear_all_cache` apply.
 #[tauri::command]
-pub fn clear_cache_category(
+pub async fn clear_cache_category(
     app: AppHandle,
     registry: State<'_, JobRegistry>,
     category: String,
@@ -407,7 +407,7 @@ fn sweep_stale_files(cache: &std::path::Path, now: std::time::SystemTime) -> u32
 /// uniquified). `if_not_exists` remains for callers that genuinely want a
 /// refuse-to-overwrite error.
 #[tauri::command]
-pub fn write_bytes_to_path(
+pub async fn write_bytes_to_path(
     path: String,
     bytes: Vec<u8>,
     if_not_exists: Option<bool>,
@@ -548,7 +548,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-19-r116-session-titles";
+pub const BACKEND_BUILD_ID: &str = "2026-07-19-r117-giant-review";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

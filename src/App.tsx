@@ -766,9 +766,12 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
     try { return localStorage.getItem("saucebunny.sidebarOpen") !== "0"; } catch { return true; }
   });
-  useEffect(() => {
-    try { localStorage.setItem("saucebunny.sidebarOpen", sidebarOpen ? "1" : "0"); } catch { /* quota */ }
-  }, [sidebarOpen]);
+  // Persisted ONLY by setSidebarOpenChoice - setActiveView's arrival
+  // force-open uses the raw setter and must not overwrite the preference.
+  const setSidebarOpenChoice = useCallback((v: boolean) => {
+    setSidebarOpen(v);
+    try { localStorage.setItem("saucebunny.sidebarOpen", v ? "1" : "0"); } catch { /* quota */ }
+  }, []);
   const [queueRunning, setQueueRunning] = useState(false);
   /**
    * True when the side panel has been popped out into its own native
@@ -1242,7 +1245,7 @@ export default function App() {
   // starts, so the Recent entry is attributed to the source that was exported
   // even if the user switches sources before clip-done fires (the listener
   // guards only on job_id, which we must keep live to resolve the queue).
-  const clipJobMetaRef = useRef<{ title: string; thumbnail: RecentClip["thumbnail"]; source?: string } | null>(null);
+  const clipJobMetaRef = useRef<{ title: string; thumbnail: RecentClip["thumbnail"]; source?: string; inTc: string; outTc: string } | null>(null);
   const diarizerPrepareJobIdRef = useRef<string | null>(null);
   diarizerPrepareJobIdRef.current = diarizerPrepareJobId;
   // Ref for transcript-history bookkeeping — captions/whisper listeners
@@ -1304,10 +1307,9 @@ export default function App() {
           // may now point at a different source the user switched to mid-export.
           const m = clipJobMetaRef.current;
           const f = fpsRef.current;
-          const opts = exportOptsRef.current;
           if (m) {
             const span =
-              (tcToSeconds(opts.outTc, f) ?? 0) - (tcToSeconds(opts.inTc, f) ?? 0);
+              (tcToSeconds(m.outTc, f) ?? 0) - (tcToSeconds(m.inTc, f) ?? 0);
             const dur = span > 0 ? secondsToTc(span, f) : "Full";
             const r: RecentClip = {
               id: Math.random().toString(36).slice(2),
@@ -1748,9 +1750,16 @@ export default function App() {
     if (!(urlOverride ?? url).trim()) return;
     const full = normalizeUrl(urlOverride ?? url);
     if (!isLikelyVideoUrl(full)) {
-      setErrorDetail("Paste a video URL (YouTube, Vimeo, TikTok, Twitter/X, Reddit, Instagram, or any page with embedded video).");
-      setStatus("error");
-      setFetchPhase("error");
+      const msg = "Paste a video URL (YouTube, Vimeo, TikTok, Twitter/X, Reddit, Instagram, or any page with embedded video).";
+      // A loaded source survives a bad paste: same protection the empty-URL
+      // guard above gives, for the same accidental gesture.
+      if (metadataRef.current) {
+        pushNotification("error", "That doesn't look like a video URL", msg);
+      } else {
+        setErrorDetail(msg);
+        setStatus("error");
+        setFetchPhase("error");
+      }
       return;
     }
     resetForNewSource(full);
@@ -2116,6 +2125,11 @@ export default function App() {
       appendLog("info", "mediabunny",
         `Exporting local clip ${startSec != null && endSec != null ? `${startSec.toFixed(2)}s → ${endSec.toFixed(2)}s` : "full"} → ${destPath}`);
 
+      // Seq + metadata snapshot: a source switched mid-export must not have
+      // its status clobbered or its title stamped on the old clip's Recents
+      // entry (same discipline as the web path's clipJobMetaRef).
+      const exportSeq = sourceSeqRef.current;
+      const exportMeta = metadataRef.current;
       const result = await runLocalClipExport({
         inputPath: localFilePath,
         startSeconds: startSec,
@@ -2124,6 +2138,7 @@ export default function App() {
         destPath,
         onProgress: setProgress,
       });
+      if (sourceSeqRef.current !== exportSeq) return;
 
       if (result.kind === "cancelled") {
         setStatus("loaded");
@@ -2166,7 +2181,7 @@ export default function App() {
       notify("Clip exported", filename);
 
       // Add to recents.
-      const m = metadataRef.current;
+      const m = exportMeta;
       if (m) {
         const dur = (endSec != null && startSec != null)
           ? secondsToTc(endSec - startSec, fps)
@@ -2209,6 +2224,10 @@ export default function App() {
             title: metadataRef.current.title,
             thumbnail: metadataRef.current.thumbnail,
             source: metadataRef.current.webpage_url ?? undefined,
+            // Marks snapshot too: clearing/moving marks mid-export must not
+            // relabel the finished clip's duration.
+            inTc: exportOptsRef.current.inTc,
+            outTc: exportOptsRef.current.outTc,
           }
         : null;
       // Marks may be null (full-clip export) — pass null through, the
@@ -2274,7 +2293,11 @@ export default function App() {
       setPlaybackPrepJobId(jobId);
       appendLog("info", "local", `Preparing playback copy (h264_videotoolbox)…`);
       const prepared = await new Promise<string>((resolve, reject) => {
-        playbackPrepResolverRef.current = { resolve, reject };
+        // Ownership-checked release: a superseding prep installs ITS resolver;
+        // this run's late rejection must not clear it (it would strand the new
+        // source's prep promise forever).
+        const mine = { resolve, reject };
+        playbackPrepResolverRef.current = mine;
         invoke("prepare_local_for_playback", {
           args: {
             input_path: inputPath,
@@ -2283,7 +2306,7 @@ export default function App() {
             job_id: jobId,
           },
         }).catch((err) => {
-          if (playbackPrepResolverRef.current) {
+          if (playbackPrepResolverRef.current === mine) {
             playbackPrepResolverRef.current = null;
             reject(err);
           }
@@ -2904,6 +2927,8 @@ export default function App() {
         filters: [{ name: "Image", extensions: ["jpg", "jpeg", "png"] }],
       });
       if (!dest) return;
+      // The dialog offers png - honor it (default stays JPEG).
+      const snapMime = /\.png$/i.test(dest) ? "image/png" : "image/jpeg";
       setSnapshotBusy(true);
       appendLog("info", "snapshot", `Grabbing frame at ${framesToTc(playheadNow, fps)} (${seconds.toFixed(2)}s)…`);
       // Defensive cast — a stale dev server still has the old `extract_frame`
@@ -2923,10 +2948,10 @@ export default function App() {
       let raw: unknown = null;
       if (sourceKind === "file" && localFilePath) {
         // Step 1: try the active player's exposed frame grab (zero file IO).
-        const fromActive = await playerRef.current?.getFrameBlob?.(seconds).catch(() => null);
+        const fromActive = await playerRef.current?.getFrameBlob?.(seconds, { mimeType: snapMime }).catch(() => null);
         // Step 2: try a fresh mediabunny pass on the original file.
         const blob = fromActive ?? (defaults.useWebCodecsDecoder
-          ? await extractFrameAsBlob(localFilePath, seconds).catch(() => null)
+          ? await extractFrameAsBlob(localFilePath, seconds, { mimeType: snapMime }).catch(() => null)
           : null);
         if (blob) {
           // Marshal the blob to bytes and let Rust persist it. Avoids
@@ -3459,9 +3484,8 @@ export default function App() {
   }, [setActiveView]);
 
   // Hero "Paste a URL" → the same focus lever as the File-menu "Open URL…".
-  const handleSwitchToClip = useCallback((focusUrl?: boolean) => {
+  const handleSwitchToClip = useCallback(() => {
     setActiveView("clip");
-    if (!focusUrl) return;
     setTimeout(() => {
       const el = document.querySelector<HTMLInputElement>(".cp-url input");
       el?.focus();
@@ -3941,7 +3965,7 @@ export default function App() {
   const reviewRangeKeysRef = useRef<{ markIn: () => void; markOut: () => void } | null>(null);
   const registerReviewRangeKeys = useCallback(
     (h: { markIn: () => void; markOut: () => void } | null) => { reviewRangeKeysRef.current = h; }, []);
-  const reviewRangeGateRef = useRef({ panelDetached: false, queueOpen: false, reviewSourceKey: null as string | null, hasSource: false });
+  const reviewRangeGateRef = useRef({ panelDetached: false, queueOpen: false, roomActive: false, reviewSourceKey: null as string | null, hasSource: false });
 
   // Data-driven: the live event is serialized to a combo and matched against the
   // user-editable binding map (Settings → Commands). The three things that aren't
@@ -4017,7 +4041,9 @@ export default function App() {
           // hasSource matters beyond reviewSourceKey: metadata (and thus the
           // key) survives status="error", but the playhead is null there —
           // marks would silently land at 0:00.
-          if (g.panelDetached || !g.queueOpen || loadActiveTab() !== "review" || !g.reviewSourceKey || !g.hasSource) break;
+          // Room face forces the drawer open on the Review tab, so the
+          // persisted tab/open prefs don't gate there.
+          if ((g.panelDetached && !g.roomActive) || (!g.roomActive && (!g.queueOpen || loadActiveTab() !== "review")) || !g.reviewSourceKey || !g.hasSource) break;
           const h = reviewRangeKeysRef.current;
           if (id === "review.rangeIn") h?.markIn(); else h?.markOut();
           break;
@@ -4328,7 +4354,7 @@ export default function App() {
   // `live` = an end still follows the playhead (pulsing); false = locked.
   const [reviewRangeDraft, setReviewRangeDraft] = useState<{ start: number; end: number; color: string; live: boolean } | null>(null);
   // Latest-value mirror for the keyboard effect's ⇧I/⇧O review-range gate.
-  useEffect(() => { reviewRangeGateRef.current = { panelDetached, queueOpen, reviewSourceKey, hasSource }; });
+  useEffect(() => { reviewRangeGateRef.current = { panelDetached, queueOpen, roomActive, reviewSourceKey, hasSource }; });
 
   // ── Co-review session (P2P watch party — r100 transport, r101 live review) ──
   // The whole subsystem — session lifecycle, host transport heartbeat + peer
@@ -4348,7 +4374,7 @@ export default function App() {
     shareState, shareStream, sharingMembers, startShare, stopShare,
     startCoReview, joinCoReview, leaveCoReview,
   } = useCoReview({
-    isPlaying, fps,
+    isPlaying, fps, playbackRate,
     activeSourceUrl, activeSourceUrlRef, reviewSourceKey,
     playerRef, metadataRef,
     onChaseSeek, setUrl, handleFetch,
@@ -4692,7 +4718,7 @@ export default function App() {
               queueCount={clipQueue.length}
               queueOpen={queueOpen}
               sidebarOpen={sidebarOpen}
-              onToggleSidebar={() => setSidebarOpen((p) => !p)}
+              onToggleSidebar={() => setSidebarOpenChoice(!sidebarOpen)}
               hasSource={status === "loaded" || status === "exporting" || status === "success" || status === "error"}
               status={status}
               fetchPhase={fetchButtonPhase(fetchPhase, status)}
@@ -5134,7 +5160,9 @@ export default function App() {
                   asked for "true detachment", so there's no docked placeholder.
                   Re-docking happens when the floating window closes (Rust
                   fires `panel:closed` → setPanelDetached(false)). */}
-              {!panelDetached && <QueueDrawer
+              {/* The room's review rail overrides detachment - a session
+                  with no review panel is a session you can't comment in. */}
+              {(roomActive || !panelDetached) && <QueueDrawer
                 open={roomActive ? true : queueOpen}
                 roomFace={roomActive}
                 focusItem={queueFocusItem}
@@ -5166,7 +5194,7 @@ export default function App() {
                 onLoadFromHistory={handleLoadFromHistory}
                 onRegenerateTranscript={handleGenerateTranscript}
                 regenerateBusy={transcriptState === "running"}
-                canRegenerate={hasSource && !!selectedModel?.downloaded}
+                canRegenerate={hasSource && (defaults.transcriptionEngine === "parakeet" || !!selectedModel?.downloaded)}
                 onRedetectSpeakers={() => { void handleRediarize(); }}
                 canRedetect={hasSource && !!activeTranscript}
                 onImportTranscript={handleImportTranscript}
@@ -5225,7 +5253,7 @@ export default function App() {
               session={coSession}
               localSource={coLocalSourceLoaded}
               participants={screeningParticipants}
-              onStart={() => { void startCoReview(); }}
+              onStart={(title) => { void startCoReview(title); }}
               onJoin={(t, n) => { void joinCoReview(t, n); }}
               onLeave={leaveCoReview}
             />
@@ -5235,7 +5263,7 @@ export default function App() {
 
       <SettingsModal
         open={settingsOpen}
-        onClose={() => { setSettingsOpen(false); refreshWhisperModels(); }}
+        onClose={() => { setSettingsOpen(false); setSettingsInitialTab("general"); refreshWhisperModels(); }}
         /* Cache files the CURRENT session plays from — Clear cache must not
            delete the video/audio that's on screen right now. Their jobs have
            finished, so the JobRegistry guard alone doesn't protect them. */

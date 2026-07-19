@@ -185,7 +185,6 @@ pub fn run() {
             commands::new_job_id,
             commands::read_text_file_capped,
             commands::probe_diarizer,
-            commands::run_diarizer,
             commands::prepare_diarizer_models,
             commands::ensure_dir_exists,
             commands::default_transcript_library_path,

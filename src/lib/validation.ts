@@ -1,28 +1,3 @@
-const YT_HOSTS = new Set([
-  "youtube.com",
-  "www.youtube.com",
-  "m.youtube.com",
-  "music.youtube.com",
-  "youtu.be",
-]);
-
-/**
- * True if the URL is a YouTube canonical host. Drives the IFrame
- * fast-path: if this returns true we can mount the embed BEFORE yt-dlp
- * returns metadata. Non-YouTube URLs still work — they go through the
- * direct-stream-URL resolve path which adds a 1-2s round trip.
- */
-export function isYouTubeUrl(raw: string): boolean {
-  if (!raw) return false;
-  try {
-    const normalized = raw.includes("://") ? raw : `https://${raw}`;
-    const u = new URL(normalized.trim());
-    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
-    return YT_HOSTS.has(u.hostname.toLowerCase());
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Permissive validation — any http(s) URL with a real host. yt-dlp covers

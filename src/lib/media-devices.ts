@@ -21,8 +21,10 @@ export type DeviceChoice = {
 };
 
 export const DEVICE_CHOICE_KEY = "saucebunny.mediaDevices";
-/** Fired after the speaker choice changes so live audio elements re-route. */
-export const SPEAKERS_CHANGED_EVENT = "saucebunny:speakers-changed-out";
+/** Fired after the speaker OUTPUT choice changes so live audio elements
+ *  re-route. (Named apart from transcript/helpers' SPEAKERS_CHANGED_EVENT,
+ *  which is diarization speakers - same word, unrelated event.) */
+export const SPEAKER_OUTPUT_CHANGED_EVENT = "saucebunny:speaker-output-changed";
 
 const CHOICE_DEFAULTS: DeviceChoice = {
   cameraId: null,
@@ -89,8 +91,7 @@ export async function enumerateAv(): Promise<AvDevices> {
  *  maps NotAllowedError to the denied UI. */
 export async function openCapture(c: DeviceChoice): Promise<MediaStream | null> {
   const wantVideo = !c.cameraOff;
-  const wantAudio = true; // mic-mute is track.enabled, not a missing track
-  if (!wantVideo && !wantAudio) return null;
+  // Audio is ALWAYS requested - mic-mute is track.enabled, not a missing track.
   if (!navigator.mediaDevices?.getUserMedia) {
     // WKWebView without capture support (or a non-secure context): say so
     // instead of masquerading as a permissions denial.

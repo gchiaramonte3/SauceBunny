@@ -54,9 +54,6 @@ export function suggestFilename(title: string): string {
   return cleaned || "clip";
 }
 
-export function stripExt(name: string): string {
-  return name.replace(/\.(mp4|mp3|mov|m4a|webm|mkv)$/i, "");
-}
 
 export function shortenPath(path: string | null, max = 38): string {
   if (!path) return "";

@@ -38,9 +38,6 @@ type Props = {
   onMarkAllRead: () => void;
   onClearNotifications: () => void;
   onDismissNotification: (id: string) => void;
-  /** Co-review (P2P watch party) session state + controls. */
-  /** A local file is loaded — the popover warns guests can't receive it yet (hosting still allowed). */
-  /** Screening (cinematic watch-party layout) on/off + toggle. */
 };
 
 function stripScheme(s: string): string {

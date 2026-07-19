@@ -247,6 +247,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
         new Promise<string>((resolve, reject) => {
           void (async () => {
             const jobId = await invoke<string>("new_job_id");
+            if (cancelled) { reject(new Error("Cancelled")); return; }
             downloadJobIdRef.current = jobId;
             dispatch({ t: "DOWNLOAD_STARTED", seq: mySeq, jobId });
             attemptResolverRef.current = { resolve, reject };

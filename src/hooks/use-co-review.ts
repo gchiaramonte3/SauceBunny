@@ -57,6 +57,8 @@ type Args = {
    *  re-render App.) */
   isPlaying: boolean;
   fps: number;
+  /** Host's playback rate - broadcast so guests can match speed. */
+  playbackRate: number;
   /** Committed web-source URL (null = none/local). The host pushes it to peers. */
   activeSourceUrl: string | null;
   /** Synchronous mirror of the above (set mid-fetch) — the loadSource echo guard. */
@@ -117,7 +119,7 @@ export type CoReview = {
 };
 
 export function useCoReview({
-  isPlaying, fps,
+  isPlaying, fps, playbackRate,
   activeSourceUrl, activeSourceUrlRef, reviewSourceKey,
   playerRef, metadataRef,
   onChaseSeek, setUrl, handleFetch,
@@ -142,6 +144,7 @@ export function useCoReview({
   const coSeqRef = useRef(0);
   const coPlayingRef = useRef(false); coPlayingRef.current = isPlaying;
   const coFpsRef = useRef(30); coFpsRef.current = fps;
+  const coRateRef = useRef(1); coRateRef.current = playbackRate;
   const coRoleRef = useRef("off"); coRoleRef.current = coSession.role;
   const coLastHostPosRef = useRef<number | null>(null);
   const coReadyRef = useRef(false); // has OUR player loaded the host's source yet?
@@ -264,7 +267,9 @@ export function useCoReview({
     }
     if (coSession.role === "off" && prev !== "off") {
       const d = sessionDocRef.current;
-      if (d && d.comments.length > 0 && d.sourceKey) saveReview(d); // everyone keeps the review
+      // Persist whenever a doc exists - zero comments may MEAN "we deleted
+      // them all", and skipping the save would resurrect them next session.
+      if (d && d.sourceKey) saveReview(d);
       setSessionDoc(null);
       setCoGhosts([]);
       coLastHostPosRef.current = null;
@@ -299,7 +304,7 @@ export function useCoReview({
         kind: "transport",
         playing: coPlayingRef.current,
         position: getPlayheadFrames() / r,
-        rate: 1,
+        rate: coRateRef.current,
         atMs: Date.now(),
         seq: ++coSeqRef.current,
       };

@@ -501,6 +501,17 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
     let id = NEXT_PEER_ID.fetch_add(1, Ordering::Relaxed);
     let member = format!("m{}", shared.next_member.fetch_add(1, Ordering::Relaxed));
     let mut send = send;
+    // Cap check BEFORE Welcome - a rejected extra must never briefly appear
+    // fully joined. (The insert below re-checks under the same lock; this
+    // early peek just orders the refusal ahead of the greeting.)
+    {
+        let peers = shared.peers.lock().await;
+        if peers.len() >= MAX_PEERS {
+            drop(peers);
+            conn.close(1u32.into(), b"session is full");
+            return;
+        }
+    }
     // Tell the newcomer who THEY are before the roster lands (PeerList can't
     // disambiguate same-name members; the mesh keys everything on this id).
     if write_msg_line(&mut send, &SessionMsg::Welcome { you: member.clone(), title: shared.title.clone() }).await.is_err() {
@@ -1028,7 +1039,9 @@ pub(crate) fn format_invite(ticket: &str) -> String {
 /// ticket passes through untouched (base32 - it contains neither).
 pub(crate) fn parse_invite(input: &str) -> String {
     let stripped: String = input.chars().filter(|c| !c.is_whitespace() && *c != '-').collect();
-    if stripped.len() > 4 && stripped[..4].eq_ignore_ascii_case("sauc") {
+    // is_char_boundary guards the slice - a paste with multibyte chars at the
+    // seam (emoji, smart quotes) must not panic the command.
+    if stripped.len() > 4 && stripped.is_char_boundary(4) && stripped[..4].eq_ignore_ascii_case("sauc") {
         stripped[4..].to_string()
     } else {
         stripped

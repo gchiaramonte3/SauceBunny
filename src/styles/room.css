@@ -308,7 +308,7 @@
   transition: all var(--dur-fast) var(--ease-out);
 }
 .cp-room-bar-btn:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); }
-.cp-room-bar-btn.off { color: var(--warn, #f5a623); }
+.cp-room-bar-btn.off { color: var(--warning); }
 .cp-room-bar-btn.active {
   background: var(--bg-5);
   border-color: var(--line-3);

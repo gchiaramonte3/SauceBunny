@@ -66,9 +66,29 @@ static TOKEN: OnceLock<String> = OnceLock::new();
 /// OS CSPRNG directly so we add no `rand`/`getrandom` dependency.
 fn mint_token() -> String {
     let mut buf = [0u8; 24];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        use std::io::Read;
-        let _ = f.read_exact(&mut buf);
+    let urandom_ok = std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| {
+            use std::io::Read;
+            f.read_exact(&mut buf)
+        })
+        .is_ok();
+    if !urandom_ok {
+        // Never a constant token: stir time, pid, and an ASLR'd address into
+        // a splitmix-style generator. Weaker than the CSPRNG, but /dev/urandom
+        // failing on macOS is already a broken system - this keeps the proxy
+        // from being an open relay even then.
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(1);
+        let seed = nanos ^ ((std::process::id() as u128) << 64) ^ (&buf as *const _ as u128);
+        let mut x = seed as u64 ^ (seed >> 64) as u64;
+        for chunk in buf.chunks_mut(8) {
+            x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = x;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^= z >> 31;
+            for (d, s) in chunk.iter_mut().zip(z.to_le_bytes()) { *d = s; }
+        }
     }
     URL_SAFE_NO_PAD.encode(buf)
 }
@@ -408,6 +428,7 @@ fn probe_stream_epoch(upstream: &str, start: f64) -> Option<f64> {
             }
             Err(_) => {
                 let _ = child.kill();
+                let _ = child.wait(); // reap - no zombie for the app's lifetime
                 return None;
             }
         }
@@ -1087,10 +1108,15 @@ fn serve_share(request: tiny_http::Request, display_index: u32) -> std::io::Resu
     let result = request.respond(response);
     // Client gone (stop button, session end, window closed, force-quit's
     // socket teardown) -> the capture dies here, every path converging.
+    let my_pid = child.id();
     let _ = child.kill();
     let _ = child.wait();
     if let Ok(mut cell) = share_child_cell().lock() {
-        *cell = None;
+        // A replacement share may have registered ITS pid - never clobber it,
+        // or its Stop button dies.
+        if *cell == Some(my_pid) {
+            *cell = None;
+        }
     }
     result
 }

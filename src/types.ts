@@ -88,7 +88,6 @@ export type RecentClip = {
   source?: string;
 };
 
-export type TranscriptState = "idle" | "running" | "done" | "error";
 
 export type QueueStatus = "queued" | "running" | "done" | "error";
 

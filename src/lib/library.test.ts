@@ -7,7 +7,6 @@ import {
   formatBytes,
   formatModifiedDate,
   libraryPosterPaths,
-  resolveLibraryChain,
   sanitizeLibraryRoots,
   searchLibrary,
   sortLibraryItems,
@@ -103,27 +102,6 @@ describe("searchLibrary", () => {
   });
 });
 
-describe("resolveLibraryChain", () => {
-  const sub = folder("Interviews", [item("intro.mp4")], [], "/lib/Footage/Interviews");
-  const trees = [folder("Footage", [], [sub], "/lib/Footage")];
-
-  it("walks a chain of absolute paths to the node", () => {
-    const hit = resolveLibraryChain(trees, [
-      { name: "Footage", path: "/lib/Footage" },
-      { name: "Interviews", path: "/lib/Footage/Interviews" },
-    ]);
-    expect(hit).toBe(sub);
-  });
-
-  it("is null when a hop vanished (root removed / rescan changed the tree)", () => {
-    expect(resolveLibraryChain(trees, [{ name: "Gone", path: "/lib/Gone" }])).toBeNull();
-    expect(resolveLibraryChain(trees, [
-      { name: "Footage", path: "/lib/Footage" },
-      { name: "Old", path: "/lib/Footage/Old" },
-    ])).toBeNull();
-    expect(resolveLibraryChain(trees, [])).toBeNull();
-  });
-});
 
 describe("formatBytes", () => {
   it("picks sensible units", () => {

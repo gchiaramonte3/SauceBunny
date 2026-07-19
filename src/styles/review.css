@@ -936,7 +936,6 @@
 .cp-review-approval-actions { display: flex; gap: var(--s-1); }
 
 /* Card corner chip (Home/Library) - existing badge grammar corner. */
-.cp-lib-cell { position: relative; }
 .cp-lib-cell-status {
   position: absolute;
   top: 6px;

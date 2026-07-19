@@ -78,7 +78,7 @@
 
 .cp-ai-error {
   font-size: 11.5px;
-  color: var(--color-danger, #e5484d);
+  color: var(--danger);
   background: rgba(229,72,77,0.08);
   border: 1px solid rgba(229,72,77,0.25);
   border-radius: 8px;

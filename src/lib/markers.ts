@@ -2,7 +2,7 @@
 // target (Avid Media Composer, Adobe Premiere, DaVinci Resolve, Final Cut Pro,
 // universal CSV). Each is `(doc, settings, title) => string` and reads the
 // active version's ROOT comments (parentId === null) in timecode order, exactly
-// like reviewToCsv/reviewToEdl. Replies fold into the parent's note.
+// like the review markdown export. Replies fold into the parent's note.
 //
 // ALL time conversion lives in ./marker-time (the verified frame-math core) —
 // this module never re-derives seconds→frame. It only shapes text per format

@@ -80,6 +80,7 @@ export function LibraryBrowserPane({
             selected={selectedPath === it.path}
             onSelect={() => onSelectItem(it)}
             onOpen={() => onOpen(it.path)}
+            onReview={onReview ? () => onReview(it.path) : undefined}
             requestThumb={requestThumb}
             onChoosePoster={onChoosePoster}
             onResetPoster={onResetPoster}

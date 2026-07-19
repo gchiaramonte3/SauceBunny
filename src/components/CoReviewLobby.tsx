@@ -53,7 +53,9 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   const steppedRef = useRef(false);
   useEffect(() => {
     if (steppedRef.current) return;
-    if (loadReviewer().name && cap.permission === "granted") setStep("ready");
+    // !cap.stream: once the user has enabled devices this session, the
+    // grant flipping to "granted" must NOT bounce them off the DEVICES step.
+    if (loadReviewer().name && cap.permission === "granted" && !cap.stream) setStep("ready");
   }, [cap.permission]);
 
   // Session over -> release the hardware (the camera light must never
@@ -143,7 +145,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
               <>
                 <section className="cp-colobby-card" aria-label="Devices">
                   <div className="cp-gr-strip">
-                    <GreenRoomThumb stream={cap.stream} />
+                    <GreenRoomThumb stream={cap.stream} cameraOff={cap.choice.cameraOff} />
                     <span className="cp-gr-strip-names" title={deviceSummary}>{deviceSummary}</span>
                     <button type="button" className="btn btn-ghost btn-compact"
                       onClick={() => { steppedRef.current = true; setStep("devices"); }}>
@@ -252,7 +254,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
 }
 
 /** Tiny live preview thumb for the READY device strip (avatar-size). */
-function GreenRoomThumb({ stream }: { stream: MediaStream | null }) {
+function GreenRoomThumb({ stream, cameraOff }: { stream: MediaStream | null; cameraOff: boolean }) {
   const ref = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
     const v = ref.current;
@@ -260,7 +262,9 @@ function GreenRoomThumb({ stream }: { stream: MediaStream | null }) {
     v.srcObject = stream;
     if (stream) v.play().catch(() => { /* autoplay */ });
   }, [stream]);
-  if (!stream || stream.getVideoTracks().length === 0) {
+  if (!stream || stream.getVideoTracks().length === 0 || cameraOff) {
+    // cameraOff: the track exists but is disabled - a live <video> would
+    // render solid black, not the styled placeholder.
     return <span className="cp-gr-strip-thumb off" aria-hidden />;
   }
   return <video ref={ref} className="cp-gr-strip-thumb" muted playsInline aria-hidden />;

@@ -978,7 +978,7 @@ pub async fn probe_local_file(app: AppHandle, path: String) -> Result<LocalFileM
 
 /// Total byte length of a local file — mediabunny's `CustomSource.getSize`.
 #[tauri::command]
-pub fn get_file_size(path: String) -> Result<u64, crate::AppError> {
+pub async fn get_file_size(path: String) -> Result<u64, crate::AppError> {
     Ok(std::fs::metadata(&path)?.len())
 }
 
@@ -1001,7 +1001,7 @@ fn read_file_range_bytes(path: &str, offset: u64, length: u64) -> std::io::Resul
 /// Returns RAW bytes via `tauri::ipc::Response` (→ ArrayBuffer on the JS
 /// side). See the section header for why this must not return `Vec<u8>`.
 #[tauri::command]
-pub fn read_file_range(
+pub async fn read_file_range(
     path: String,
     offset: u64,
     length: u64,

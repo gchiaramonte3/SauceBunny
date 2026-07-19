@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aspectOf, classifyAspect, rememberAspect } from "./art-aspect";
+import { classifyAspect, rememberAspect } from "./art-aspect";
 
 describe("art aspect classification (12a)", () => {
   it("classifies the common shapes", () => {
@@ -20,10 +20,7 @@ describe("art aspect classification (12a)", () => {
     expect(classifyAspect(100, 0)).toBe("landscape");
   });
 
-  it("remember/lookup round-trips by url", () => {
-    rememberAspect("https://x/th.jpg", 720, 1280);
-    expect(aspectOf("https://x/th.jpg")).toBe("portrait");
-    expect(aspectOf("https://x/other.jpg")).toBeNull();
-    expect(aspectOf(null)).toBeNull();
+  it("remember returns the classification it caches", () => {
+    expect(rememberAspect("https://x/th.jpg", 720, 1280)).toBe("portrait");
   });
 });

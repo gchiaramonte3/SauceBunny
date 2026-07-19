@@ -164,23 +164,6 @@ export function searchLibrary(
   return result;
 }
 
-/**
- * Re-resolve a drill chain against freshly-scanned trees by absolute path.
- * Null when any hop is gone (root removed, folder renamed on disk) — the
- * caller falls back to the top level instead of rendering a ghost.
- */
-export function resolveLibraryChain(
-  trees: readonly LibraryFolder[],
-  chain: readonly LibraryCrumb[],
-): LibraryFolder | null {
-  if (chain.length === 0) return null;
-  let node: LibraryFolder | null =
-    trees.find((t) => t.path === chain[0].path) ?? null;
-  for (let i = 1; node && i < chain.length; i++) {
-    node = node.folders.find((f) => f.path === chain[i].path) ?? null;
-  }
-  return node;
-}
 
 /** "820 KB" / "34 MB" / "1.2 GB" — one significant decimal under 10. */
 export function formatBytes(n: number): string {

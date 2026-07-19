@@ -50,7 +50,7 @@ type Props = {
   /** Loads a past transcript's source through the existing history handler. */
   onOpenTranscriptHistory: (entry: TranscriptHistoryEntry) => void;
   /** Switches to the Clip view; true also focuses the URL field. */
-  onSwitchToClip: (focusUrl?: boolean) => void;
+  onSwitchToClip: () => void;
   /** A folder card / folder search-hit was opened → jump to the Library
    *  browser with that folder selected (one detail browser, not two). */
   onOpenFolder: (chain: LibraryCrumb[]) => void;
@@ -353,7 +353,7 @@ export function LibraryView({
             recent={recentSources[0] ?? null}
             onOpen={onOpenRecentSource}
             onAddFolder={() => void addFolder()}
-            onPasteUrl={() => onSwitchToClip(true)}
+            onPasteUrl={onSwitchToClip}
           />
           <div className="cp-lib-rows">
             {/* Ambient montage of already-cached posters — beneath the SHELVES

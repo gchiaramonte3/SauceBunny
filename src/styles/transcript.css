@@ -407,7 +407,6 @@
   display: inline;
   cursor: pointer;
   border-radius: 2px;
-  transition: background-color 80ms ease, color 80ms ease;
 }
 /* Hover REVEALS the cue block (2a): no click needed. Clearly visible per
    feedback - lifted grey fill + a slight outline (the active/karaoke cue

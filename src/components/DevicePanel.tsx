@@ -21,15 +21,18 @@ export function DevicePanel({ onClose }: { onClose: () => void }) {
     void cap.refreshDevices();
   }, [cap]);
 
+  const camLive = !!cap.stream && cap.stream.getVideoTracks().length > 0 && !cap.choice.cameraOff;
+
+  // camLive is a dep: the <video> remounts when the camera toggles off->on
+  // (same stream, fresh element) and needs its srcObject re-attached.
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     v.srcObject = cap.stream;
     if (cap.stream) v.play().catch(() => { /* autoplay */ });
-  }, [cap.stream]);
+  }, [cap.stream, camLive]);
 
   const label = (d: MediaDeviceInfo, i: number, kind: string) => d.label || `${kind} ${i + 1}`;
-  const camLive = !!cap.stream && cap.stream.getVideoTracks().length > 0 && !cap.choice.cameraOff;
 
   return (
     <div className="cp-devpanel" role="dialog" aria-label="Camera and microphone settings">

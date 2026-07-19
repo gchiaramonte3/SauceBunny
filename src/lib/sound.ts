@@ -2,7 +2,6 @@
 // No external audio file needed — works offline, zero bundle weight.
 
 let ctxRef: AudioContext | null = null;
-let muted = false;
 
 function getCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -21,13 +20,10 @@ function getCtx(): AudioContext | null {
   return ctxRef;
 }
 
-export function setSoundMuted(m: boolean) { muted = m; }
-export function isSoundMuted(): boolean { return muted; }
-
 /** Play one tone with a soft attack + exponential decay envelope. */
 function tone(freq: number, start: number, dur: number, type: OscillatorType = "sine", peak = 0.15) {
   const ctx = getCtx();
-  if (!ctx || muted) return;
+  if (!ctx) return;
   const t0 = ctx.currentTime + start;
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();

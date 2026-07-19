@@ -172,11 +172,6 @@ export function removeEntry(id: string): void {
   notifyChanged();
 }
 
-/** Wipe everything. Used by a future "Clear history" action. */
-export function clearHistory(): void {
-  safeWrite([]);
-  notifyChanged();
-}
 
 /**
  * Find the most-recent entry matching a source. Used on import/fetch

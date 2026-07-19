@@ -8,7 +8,7 @@
 //!     (yt-dlp → wav → whisper-cli → optional diarizer-merge).
 //!   - Local-source transcription: `transcribe_prepared_wav`,
 //!     `transcribe_local_file`.
-//!   - Diarizer wrapping: `probe_diarizer`, `run_diarizer`,
+//!   - Diarizer wrapping: `probe_diarizer`,
 //!     `prepare_diarizer_models`, plus the SRT merge logic
 //!     (`merge_diarization_into_srt`, `run_diarize_and_merge`).
 //!   - Whisper output parsers (`parse_whisper_segment_end`, etc.) +
@@ -805,6 +805,11 @@ pub fn list_whisper_models(app: AppHandle) -> Result<Vec<WhisperModel>, crate::A
 
 #[tauri::command]
 pub fn delete_whisper_model(app: AppHandle, model_id: String) -> Result<(), crate::AppError> {
+    // The id becomes a filename - separators or dot-dot would delete outside
+    // the models dir.
+    if model_id.contains('/') || model_id.contains('\\') || model_id.contains("..") {
+        return Err(crate::AppError::invalid("Invalid model id"));
+    }
     let p = model_path(&app, &model_id)?;
     if p.exists() {
         std::fs::remove_file(&p).map_err(|e| format!("remove: {e}"))?;
@@ -1228,6 +1233,11 @@ pub async fn generate_transcript(
             } else {
                 humanize_ytdlp_error(&yt_log)
             };
+            // Don't leave a partial raw download in the cache (the sibling
+            // audio-clip path already cleans up on failure).
+            if let Some(p) = find_audio_in_cache(&cache_for, &raw_prefix_for) {
+                let _ = std::fs::remove_file(p);
+            }
             emit_transcript_done(&app_for, &job_for, false, yt_code, None, Some(err));
             return;
         }
@@ -2436,6 +2446,16 @@ fn merge_diarization_into_srt(
         }
         let body_str = body.join(" ").trim().to_string();
         if body_str.is_empty() { continue; }
+        // Re-diarizing a previously diarized SRT must not stack tags:
+        // strip an existing "[TAG]: " prefix before writing the new one.
+        let body_str = match body_str.strip_prefix('[') {
+            Some(rest) => match rest.find("]:") {
+                Some(close) => rest[close + 2..].trim_start().to_string(),
+                None => body_str,
+            },
+            None => body_str,
+        };
+        if body_str.is_empty() { continue; }
 
         // Find the diarizer turn with the most overlap. Linear scan
         // bounded by the early-exit when a turn starts past cue end.
@@ -2681,11 +2701,6 @@ async fn run_diarize_and_merge(
 //    command palette to confirm the Swift binary was built and is
 //    callable. Tiny — no event channel.
 //
-//  - `run_diarizer`: async run on a WAV file. Spawns the sidecar,
-//    streams its newline-delimited progress JSON on `diarize-progress`,
-//    forwards stderr lines as `diarize-log`, emits `diarize-done` on
-//    exit. Mirrors the Whisper job pattern so the eventual UI plumbing
-//    in B.2 can reuse the same event-listener shape.
 //
 // We deliberately keep the protocol JSON-line based (not a tight
 // IPC binding) — easier to debug from a terminal (`./saucebunny-diarize
@@ -2693,22 +2708,6 @@ async fn run_diarize_and_merge(
 // different diarizer in the future as long as it honours the same
 // stdout/stderr/exit contract.
 // ============================================================
-
-#[derive(Deserialize)]
-pub struct DiarizeArgs {
-    /// Caller-generated UUID — used to multiplex events on the
-    /// diarize-* channels when multiple diarize jobs could run
-    /// concurrently. Today only one runs at a time, but the channel
-    /// is wired for the future.
-    pub job_id: String,
-    /// Absolute path to a WAV (or any audio readable by FluidAudio
-    /// via AVFoundation: m4a / mp3 / aac work too). Existence is
-    /// checked here; format errors surface from the sidecar.
-    pub input_wav: String,
-    /// Absolute path where the JSON envelope should land. Existing
-    /// file is overwritten atomically by the sidecar.
-    pub output_json: String,
-}
 
 #[derive(Serialize, Clone, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]
@@ -2755,120 +2754,6 @@ pub async fn probe_diarizer(app: AppHandle) -> Result<String, crate::AppError> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// Run diarization on a local audio file. Non-blocking — emits events
-/// on `diarize-progress` / `diarize-log` / `diarize-done` and returns
-/// the job_id immediately so the frontend can subscribe.
-///
-/// First call on a fresh machine downloads FluidAudio's Core ML models
-/// to ~/.cache/fluidaudio/Models/ (~few hundred MB). Subsequent calls
-/// hit the cache and complete in 10–60s for a typical podcast.
-#[tauri::command]
-pub async fn run_diarizer(app: AppHandle, args: DiarizeArgs) -> Result<String, crate::AppError> {
-    if !PathBuf::from(&args.input_wav).is_file() {
-        return Err(format!("input file not found: {}", args.input_wav).into());
-    }
-    // Verify the output dir exists (the sidecar writes atomically
-    // via NSData.write but won't create missing intermediates).
-    if let Some(parent) = PathBuf::from(&args.output_json).parent() {
-        if !parent.as_os_str().is_empty() && !parent.is_dir() {
-            return Err(format!("output directory does not exist: {}", parent.display()).into());
-        }
-    }
-
-    let cmd = app
-        .shell()
-        .sidecar("saucebunny-diarize")
-        .map_err(|e| format!(
-            "saucebunny-diarize sidecar not bundled: {e}.\n\
-             Run `npm run build:diarizer` from the project root."
-        ))?;
-
-    let (mut rx, child) = cmd
-        .args([
-            "--input", &args.input_wav,
-            "--output", &args.output_json,
-            "--emit-progress",
-        ])
-        .spawn()
-        .map_err(|e| format!("failed to spawn saucebunny-diarize: {e}"))?;
-    // Register so Stop can cancel — first run downloads hundreds of MB of Core
-    // ML models, then diarization runs 10-60s (mirrors run_diarize_and_merge).
-    app.state::<JobRegistry>().insert(args.job_id.clone(), child);
-
-    let job_id = args.job_id.clone();
-    let job_for = job_id.clone();
-    let app_for = app.clone();
-    let output_path = args.output_json.clone();
-
-    tokio::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            match event {
-                CommandEvent::Stdout(b) => {
-                    // The sidecar emits newline-delimited JSON status
-                    // lines on stdout. We forward verbatim — the frontend
-                    // parses the `phase` field.
-                    let raw = String::from_utf8_lossy(&b).to_string();
-                    for line in raw.lines() {
-                        let trimmed = line.trim();
-                        if trimmed.is_empty() { continue; }
-                        let _ = app_for.emit(
-                            "diarize-progress",
-                            DiarizeProgressEvent {
-                                job_id: job_for.clone(),
-                                line: trimmed.to_string(),
-                            },
-                        );
-                    }
-                }
-                CommandEvent::Stderr(b) => {
-                    let raw = String::from_utf8_lossy(&b).to_string();
-                    for line in raw.lines() {
-                        let trimmed = line.trim_end();
-                        if trimmed.is_empty() { continue; }
-                        let _ = app_for.emit(
-                            "diarize-log",
-                            LogEvent {
-                                job_id: job_for.clone(),
-                                stream: "stderr".into(),
-                                tag: classify_line(trimmed),
-                                line: trimmed.to_string(),
-                            },
-                        );
-                    }
-                }
-                CommandEvent::Terminated(payload) => {
-                    let _ = app_for.state::<JobRegistry>().take(&job_for);
-                    let success = payload.code == Some(0);
-                    let error = if success {
-                        None
-                    } else {
-                        Some(match payload.code {
-                            Some(1) => "diarizer: bad arguments".into(),
-                            Some(2) => "diarizer: model preparation failed (network or disk)".into(),
-                            Some(3) => "diarizer: audio processing failed".into(),
-                            Some(4) => "diarizer: failed to write output JSON".into(),
-                            other   => format!("diarizer exited with code {other:?}"),
-                        })
-                    };
-                    let _ = app_for.emit(
-                        "diarize-done",
-                        DoneEvent {
-                            job_id: job_for.clone(),
-                            success,
-                            code: payload.code,
-                            path: if success { Some(output_path.clone()) } else { None },
-                            error,
-                        },
-                    );
-                    break;
-                }
-                _ => {}
-            }
-        }
-    });
-
-    Ok(job_id)
-}
 
 /// Pre-warm the FluidAudio Core ML model cache. Runs
 /// `saucebunny-diarize --prepare-models --emit-progress` to trigger the

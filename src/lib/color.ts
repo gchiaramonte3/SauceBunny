@@ -71,21 +71,6 @@ export function parseHex(input: string): Rgb | null {
   };
 }
 
-/** Relative luminance 0..1 — pick black vs white overlay/stroke on a swatch. */
-export function luminance({ r, g, b }: Rgb): number {
-  const lin = (c: number) => {
-    c /= 255;
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-}
-
-/** True when dark text reads better than white on this background. */
-export const prefersDarkText = (hex: string): boolean => {
-  const rgb = parseHex(hex);
-  return rgb ? luminance(rgb) > 0.55 : false;
-};
-
 /**
  * Curated 12-swatch palette — even hue spacing, uniform chroma, tuned to read
  * as small pips on a near-black surface (Open Color "5" family). Doubles as the

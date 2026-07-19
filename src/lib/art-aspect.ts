@@ -25,7 +25,3 @@ export function rememberAspect(url: string, width: number, height: number): ArtA
   cache.set(url, a);
   return a;
 }
-
-export function aspectOf(url: string | null | undefined): ArtAspect | null {
-  return url ? cache.get(url) ?? null : null;
-}

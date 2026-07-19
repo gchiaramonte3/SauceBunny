@@ -178,15 +178,6 @@ export const IconCrown = (p: IconProps) => (
     <path d="M3 7l4.5 3.5L12 4l4.5 6.5L21 7l-1.6 11.5a1 1 0 0 1-1 .85H5.6a1 1 0 0 1-1-.85L3 7z" />
   </Icon>
 );
-// Two people — the co-review (watch party) session toggle.
-export const IconUsers = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-    <circle cx="9" cy="7" r="4" />
-    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-  </Icon>
-);
 // Speech bubble — the Review tab (timecoded comments).
 export const IconReview = (p: IconProps) => (
   <Icon {...p}>
@@ -426,12 +417,6 @@ export const IconMicOff = (p: IconProps) => (
     <rect x="9" y="3" width="6" height="11" rx="3" />
     <path d="M5 11a7 7 0 0 0 14 0" />
     <path d="M12 18v3" />
-    <path d="M4 4l16 16" />
-  </Icon>
-);
-export const IconCameraOff = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M4 7h3l2-3h6l2 3h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z" />
     <path d="M4 4l16 16" />
   </Icon>
 );

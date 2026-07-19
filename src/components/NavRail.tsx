@@ -92,7 +92,7 @@ export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libr
       <div className="cp-nav-spacer" />
       <button
         type="button"
-        className="cp-nav-item cp-nav-settings"
+        className="cp-nav-item"
         onClick={onOpenSettings}
         title="Settings (⌘,)"
         aria-label="Settings"

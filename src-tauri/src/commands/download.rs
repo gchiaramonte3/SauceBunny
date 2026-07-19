@@ -196,7 +196,14 @@ pub async fn update_ytdlp(app: AppHandle) -> Result<YtdlpStatus, crate::AppError
     std::fs::create_dir_all(&bin_dir)
         .map_err(|e| crate::AppError::internal(format!("create bin dir: {e}")))?;
     let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos";
-    let resp = reqwest::get(url)
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| crate::AppError::internal(format!("http client: {e}")))?;
+    let resp = client
+        .get(url)
+        .send()
         .await
         .map_err(|e| crate::AppError::internal(format!("download yt-dlp: {e}")))?
         .error_for_status()
@@ -483,6 +490,14 @@ pub async fn fetch_metadata(
                     max_h = Some(h_val);
                     max_w = w.or(max_w);
                     max_fps = fr.or(max_fps);
+                } else if h_val == cur {
+                    // Same height, higher fps (1080p60 after 1080p30): the
+                    // fps is the interesting part of the tie.
+                    match (fr, max_fps) {
+                        (Some(f_new), Some(f_cur)) if f_new > f_cur => max_fps = Some(f_new),
+                        (Some(_), None) => max_fps = fr,
+                        _ => {}
+                    }
                 }
             } else if h.is_some() && max_h.is_none() {
                 max_h = h;
@@ -595,6 +610,10 @@ fn caption_is_auto_generated(text: &str) -> bool {
 
 #[tauri::command]
 pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<String, crate::AppError> {
+    let caption_ffmpeg_str = sidecar_path("ffmpeg")?
+        .to_str()
+        .ok_or_else(|| crate::AppError::internal("ffmpeg path not utf-8"))?
+        .to_string();
     validate_source_url(&args.url)?;
     let safe = sanitize_filename(&args.filename);
     if safe.is_empty() {
@@ -645,6 +664,9 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
         // reads vtt and srt identically, so nothing downstream breaks.
         "--sub-format".into(), "vtt/srt/best".into(),
         "--convert-subs".into(), "vtt".into(),
+        // Bundled ffmpeg - conversion must not depend on a PATH/Homebrew
+        // install that user machines don't have.
+        "--ffmpeg-location".into(), caption_ffmpeg_str,
         "--skip-download".into(),
         "--no-playlist".into(),
         "--newline".into(),

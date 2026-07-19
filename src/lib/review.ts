@@ -18,7 +18,7 @@
 
 import { loadJson, saveJson } from "./storage";
 import { getReviewDoc, putReviewDoc } from "./review-store";
-import { secondsToHms, secondsToTc } from "./timecode";
+import { secondsToHms } from "./timecode";
 
 export type ReviewStatusState = "pending" | "approved" | "changes";
 
@@ -160,9 +160,6 @@ export function ensureVersion(
   return { doc: next, versionId: version.id };
 }
 
-export function setActiveVersion(doc: ReviewDoc, versionId: string): ReviewDoc {
-  return doc.versions.some((v) => v.id === versionId) ? { ...doc, activeVersionId: versionId } : doc;
-}
 
 // ── fingerprint index + review history ───────────────────────────────────────
 // Reviews are keyed by source path/URL, but the SAME clip can live at a
@@ -266,9 +263,6 @@ export function insertComment(doc: ReviewDoc, comment: ReviewComment): ReviewDoc
   return { ...doc, comments: [...doc.comments, comment] };
 }
 
-export function addComment(doc: ReviewDoc, c: NewComment, now = Date.now()): ReviewDoc {
-  return insertComment(doc, buildComment(c, now));
-}
 
 export function editComment(doc: ReviewDoc, id: string, body: string, now = Date.now()): ReviewDoc {
   return {
@@ -311,30 +305,7 @@ export function removeReply(
   return { ...doc, comments: doc.comments.filter((c) => !match(c)) };
 }
 
-/** Toggle `name` in a comment's likes. Roots and replies both live in the
- *  flat comments array, so one op covers both. The name is trimmed; an empty
- *  name or unknown id is a no-op (returns the doc unchanged). Deliberately
- *  does NOT bump updatedAt — someone else's like isn't an edit of the note. */
-export function toggleLike(doc: ReviewDoc, commentId: string, name: string): ReviewDoc {
-  const who = name.trim();
-  if (!who || !doc.comments.some((c) => c.id === commentId)) return doc;
-  return {
-    ...doc,
-    comments: doc.comments.map((c) => {
-      if (c.id !== commentId) return c;
-      const likes = c.likes ?? [];
-      return { ...c, likes: likes.includes(who) ? likes.filter((n) => n !== who) : [...likes, who] };
-    }),
-  };
-}
 
-export function toggleResolved(doc: ReviewDoc, id: string, now = Date.now()): ReviewDoc {
-  return {
-    ...doc,
-    comments: doc.comments.map((c) =>
-      c.id === id ? { ...c, resolved: !c.resolved, updatedAt: now } : c),
-  };
-}
 
 /** SET (not toggle) the resolved flag — the idempotent form the co-review op
  *  relay needs so replaying/echoing an op converges instead of flip-flopping. */
@@ -349,7 +320,9 @@ export function setResolved(doc: ReviewDoc, id: string, resolved: boolean, now =
  *  form for the op relay (two applies land the same place). */
 export function setLike(doc: ReviewDoc, id: string, name: string, liked: boolean): ReviewDoc {
   const who = name.trim();
-  if (!who) return doc;
+  // Unknown ids are an identity no-op (callers rely on reference equality
+  // to skip persistence).
+  if (!who || !doc.comments.some((c) => c.id === id)) return doc;
   return {
     ...doc,
     comments: doc.comments.map((c) => {
@@ -678,38 +651,5 @@ export function reviewToMarkdown(doc: ReviewDoc, title = "Review"): string {
   return out.filter((l) => l !== "").join("\n") + "\n";
 }
 
-function csvCell(s: string): string {
-  // Neutralize spreadsheet formula injection: Excel/Numbers/LibreOffice evaluate
-  // a cell whose text starts with = + - @ (or a tab/CR) even when it's quoted.
-  // These exports are deliberately handed to other people, so prefix such a cell
-  // with a single quote to force it to plain text.
-  const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
-  return `"${safe.replace(/"/g, '""').replace(/[\r\n]+/g, " ")}"`;
-}
 
-/** Marker spreadsheet (timecode, status, author, comment) for the active version. */
-export function reviewToCsv(doc: ReviewDoc, fps: number): string {
-  const rows = ["Timecode,Resolved,Author,Comment"];
-  for (const c of rootComments(doc, doc.activeVersionId, "time")) {
-    rows.push([secondsToTc(c.timeStart, fps), c.resolved ? "yes" : "no", csvCell(c.author), csvCell(c.body + labelSuffix(c))].join(","));
-  }
-  return rows.join("\n") + "\n";
-}
 
-/** CMX3600 EDL whose events carry the comments as timeline markers (Resolve/Premiere). */
-export function reviewToEdl(doc: ReviewDoc, fps: number, title = "Sauce Bunny Review"): string {
-  // TITLE must be a single line per CMX3600 — strip newlines from the source name.
-  const safeTitle = title.replace(/[\r\n]+/g, " ");
-  const lines = [`TITLE: ${safeTitle}`, "FCM: NON-DROP FRAME", ""];
-  let n = 1;
-  for (const c of rootComments(doc, doc.activeVersionId, "time")) {
-    const inTc = secondsToTc(c.timeStart, fps);
-    const outTc = secondsToTc(c.timeStart + 1 / Math.max(1, Math.round(fps)), fps);
-    const ev = String(n++).padStart(3, "0");
-    const color = c.resolved ? "ResolveColorGreen" : "ResolveColorRed";
-    const note = (c.body + labelSuffix(c)).replace(/[\r\n]+/g, " ");
-    lines.push(`${ev}  AX       V     C        ${inTc} ${outTc} ${inTc} ${outTc}`);
-    lines.push(` |C:${color} |M:${note} |D:1`);
-  }
-  return lines.join("\n") + "\n";
-}

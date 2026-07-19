@@ -12,6 +12,8 @@ type Props = {
   onSelect: () => void;
   /** Double click / Enter → open in Clip. */
   onOpen: () => void;
+  /** "Review this clip": open the source and land in Review. */
+  onReview?: () => void;
   requestThumb: (path: string) => Promise<string | null>;
   onChoosePoster: (path: string) => void;
   onResetPoster: (path: string) => void;
@@ -25,7 +27,7 @@ type Props = {
  * ContextMenu/Shift+F10 open the same LibraryCardMenu.
  */
 export function LibraryListRow({
-  item, selected, onSelect, onOpen, requestThumb, onChoosePoster, onResetPoster,
+  item, selected, onSelect, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [broken, setBroken] = useState(false);
@@ -75,6 +77,7 @@ export function LibraryListRow({
           onChooseThumbnail={() => onChoosePoster(item.path)}
           onResetThumbnail={() => onResetPoster(item.path)}
           onOpen={onOpen}
+          onReview={onReview}
           onClose={closeMenu}
         />
       )}

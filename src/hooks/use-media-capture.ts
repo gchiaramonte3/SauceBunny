@@ -8,14 +8,28 @@ import {
 /**
  * Ownership of THE session capture: exactly one getUserMedia stream per
  * session, held in a module-level singleton so the green room, the room's
- * self tile, and (next build) the RTC mesh all hand around the same
- * MediaStream. Tracks stop on release (leave/end), on a fresh acquire,
- * and on app quit (pagehide) - the camera light must never outlive the
- * session.
+ * self tile, and the RTC mesh all hand around the same MediaStream. The
+ * DEVICE CHOICE is a singleton too - the room control bar, the in-session
+ * device popover, and the Settings pane each mount their own hook instance,
+ * and a switch made in one must show in all of them. Tracks stop on release
+ * (leave/end), on a fresh acquire, and on app quit (pagehide) - the camera
+ * light must never outlive the session.
  */
 
 let activeStream: MediaStream | null = null;
 const listeners = new Set<(s: MediaStream | null) => void>();
+// Generation guard: release() invalidates any acquire still awaiting
+// getUserMedia, so a slow grant can't relight the camera after leave.
+let captureGen = 0;
+
+let currentChoice: DeviceChoice = loadDeviceChoice();
+const choiceListeners = new Set<(c: DeviceChoice) => void>();
+
+function commitChoice(c: DeviceChoice) {
+  currentChoice = c;
+  saveDeviceChoice(c);
+  for (const l of [...choiceListeners]) l(c);
+}
 
 function setActive(s: MediaStream | null) {
   if (activeStream && activeStream !== s) stopStream(activeStream);
@@ -44,14 +58,22 @@ export function useMediaCapture() {
   const [stream, setStream] = useState<MediaStream | null>(activeStream);
   const [permission, setPermission] = useState<AvPermission>("unknown");
   const [devices, setDevices] = useState<AvDevices>({ cameras: [], mics: [], speakers: [] });
-  const [choice, setChoiceState] = useState<DeviceChoice>(() => loadDeviceChoice());
+  const [choice, setChoiceState] = useState<DeviceChoice>(currentChoice);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const l = (s: MediaStream | null) => setStream(s);
     listeners.add(l);
+    choiceListeners.add(setChoiceState);
+    // Late-mount sync: another instance may have changed either while this
+    // component wasn't mounted.
+    setStream(activeStream);
+    setChoiceState(currentChoice);
     void queryAvPermission().then(setPermission);
-    return () => { listeners.delete(l); };
+    return () => {
+      listeners.delete(l);
+      choiceListeners.delete(setChoiceState);
+    };
   }, []);
 
   const refreshDevices = useCallback(async () => {
@@ -62,10 +84,16 @@ export function useMediaCapture() {
    *  a user decline to the denied UI instead of throwing. */
   const acquire = useCallback(async (c: DeviceChoice): Promise<boolean> => {
     setError(null);
-    saveDeviceChoice(c);
-    setChoiceState(c);
+    commitChoice(c);
+    const gen = ++captureGen;
     try {
       const s = await openCapture(c);
+      if (gen !== captureGen) {
+        // Released (or superseded) while getUserMedia was pending: this
+        // stream must never go live, or the camera light outlives the leave.
+        stopStream(s);
+        return false;
+      }
       setActive(s);
       setPermission("granted");
       await refreshDevices(); // labels populate post-grant
@@ -85,19 +113,26 @@ export function useMediaCapture() {
   }, [refreshDevices]);
 
   /** Stop the capture and release the hardware (leave/end). */
-  const release = useCallback(() => { setActive(null); }, []);
+  const release = useCallback(() => {
+    captureGen++;
+    setActive(null);
+  }, []);
 
   /** Flip a track's enabled bit without re-prompting (mute / camera-off of
    *  a LIVE stream; a camera turned off before acquire never opens video). */
   const setEnabled = useCallback((kind: "audio" | "video", enabled: boolean) => {
-    const c = { ...loadDeviceChoice(), ...(kind === "audio" ? { micMuted: !enabled } : { cameraOff: !enabled }) };
-    saveDeviceChoice(c);
-    setChoiceState(c);
+    commitChoice({ ...currentChoice, ...(kind === "audio" ? { micMuted: !enabled } : { cameraOff: !enabled }) });
     const s = activeStream;
     if (!s) return;
     const tracks = kind === "audio" ? s.getAudioTracks() : s.getVideoTracks();
     for (const t of tracks) t.enabled = enabled;
   }, []);
 
-  return { stream, permission, devices, choice, error, acquire, release, refreshDevices, setEnabled };
+  /** Persist a choice change that needs no reopen (e.g. the speaker output).
+   *  Every mounted instance sees it immediately. */
+  const updateChoice = useCallback((patch: Partial<DeviceChoice>) => {
+    commitChoice({ ...currentChoice, ...patch });
+  }, []);
+
+  return { stream, permission, devices, choice, error, acquire, release, refreshDevices, setEnabled, updateChoice };
 }

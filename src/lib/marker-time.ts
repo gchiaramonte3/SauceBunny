@@ -64,9 +64,6 @@ export const RATE_TABLE: Record<FrameRateKey, RateSpec> = {
   "60":     { fpsExact: { num: 6000, den: 100 }, timebase: 60, ntsc: false, dropAllowed: false, frameDuration: { num: 100, den: 6000 } },
 };
 
-export function rateSpec(rate: FrameRateKey): RateSpec {
-  return RATE_TABLE[rate];
-}
 
 const pad = (n: number) => n.toString().padStart(2, "0");
 

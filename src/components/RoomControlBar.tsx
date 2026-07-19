@@ -35,7 +35,6 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
         className={"cp-room-bar-btn" + (micOn ? "" : " off")}
         title={micOn ? "Mute mic" : "Unmute mic"}
         aria-label={micOn ? "Mute microphone" : "Unmute microphone"}
-        aria-pressed={!micOn}
         onClick={onToggleMic}
       >
         {micOn ? <IconMic size={15} /> : <IconMicOff size={15} />}
@@ -45,7 +44,6 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
         className={"cp-room-bar-btn" + (camOn ? "" : " off")}
         title={camOn ? "Turn camera off" : "Turn camera on"}
         aria-label={camOn ? "Turn camera off" : "Turn camera on"}
-        aria-pressed={!camOn}
         onClick={onToggleCam}
       >
         {camOn ? <IconVideo size={15} /> : <IconVideoOff size={15} />}

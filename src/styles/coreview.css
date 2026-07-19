@@ -304,10 +304,6 @@
   gap: var(--s-3);
   margin-top: var(--s-2);
 }
-.cp-colobby-enter {
-  min-width: 220px;
-  justify-content: center;
-}
 .cp-colobby-leave {
   background: none;
   border: none;

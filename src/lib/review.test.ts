@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
-  emptyDoc, ensureVersion, setActiveVersion,
-  addComment, editComment, deleteComment, toggleResolved, toggleLike,
+  emptyDoc, ensureVersion,
+  editComment, deleteComment,
   editReply, removeReply, ensureCommentIds,
   setStatus, statusOf, rootComments, repliesOf, sortComments,
-  commentMarkers, openCount, reviewToMarkdown, reviewToCsv, reviewToEdl,
+  commentMarkers, openCount, reviewToMarkdown,
   reviewFingerprint, resolveByFingerprint, linkFingerprint,
   loadReviewHistory, upsertReviewHistory, removeReviewHistory, clearReviewHistory,
   buildComment, insertComment, setResolved, setLike, applyReviewOp, mergeReviewDoc,
@@ -12,6 +12,21 @@ import {
   annotationHasContent, annotationsOf, labelSuffix,
   type ReviewDoc, type ReviewComment, type AnnotationStrokes,
 } from "./review";
+
+// Fixture shims over the live primitives - the one-shot legacy wrappers
+// (addComment / toggleLike / toggleResolved / setActiveVersion) left the
+// prod API in the giant review; the idempotent forms are what ship.
+const addComment = (doc: ReviewDoc, c: Parameters<typeof buildComment>[0], now = Date.now()) =>
+  insertComment(doc, buildComment(c, now));
+const toggleLike = (doc: ReviewDoc, id: string, name: string) => {
+  const c = doc.comments.find((x) => x.id === id);
+  const liked = !(c?.likes ?? []).includes(name.trim());
+  return setLike(doc, id, name, liked);
+};
+const toggleResolved = (doc: ReviewDoc, id: string, now = Date.now()) => {
+  const c = doc.comments.find((x) => x.id === id);
+  return setResolved(doc, id, !c?.resolved, now);
+};
 
 function seed(): { doc: ReviewDoc; v: string } {
   const r = ensureVersion(emptyDoc("/clip.mp4"), "/clip.mp4", "V1", 1000);
@@ -96,7 +111,6 @@ describe("versions", () => {
     expect(next.doc.versions).toHaveLength(2);
     expect(next.versionId).not.toBe(v);
     expect(next.doc.activeVersionId).toBe(v); // active stays on the first
-    expect(setActiveVersion(next.doc, next.versionId).activeVersionId).toBe(next.versionId);
   });
 });
 
@@ -280,10 +294,6 @@ describe("annotation labels", () => {
     const d = addComment(doc, { versionId: v, timeStart: 5, body: "intro", author: "Me", annotation: ann }, 1);
     const md = reviewToMarkdown(d, "T");
     expect(md).toContain('intro [label: "Trim \\[here\\] "now""]'); // md-escaped brackets
-    const csv = reviewToCsv(d, 25);
-    expect(csv).toContain('"intro [label: ""Trim [here] ""now""""]"'); // quotes doubled by csvCell
-    const edl = reviewToEdl(d, 25, "T");
-    expect(edl).toContain('|M:intro [label: "Trim [here] "now""] |D:1');
   });
 });
 
@@ -361,29 +371,6 @@ describe("export", () => {
     expect(md).toContain("Changes requested — needs work");
     expect(md.indexOf("intro too long")).toBeLessThan(md.indexOf("tighten")); // time-sorted
     expect(md).toContain("[00:00:05]");
-  });
-  it("csv escapes quotes/newlines + uses SMPTE", () => {
-    const csv = reviewToCsv(withComments(), 25);
-    expect(csv.split("\n")[0]).toBe("Timecode,Resolved,Author,Comment");
-    expect(csv).toContain("00:00:05:00");
-    expect(csv).toContain('"tighten, says ""cut"" here"'); // quotes doubled, newline flattened
-  });
-  it("csv neutralizes formula-injection in author/comment cells", () => {
-    const { doc, v } = seed();
-    const d = addComment(doc, { versionId: v, timeStart: 1, body: '=HYPERLINK("http://evil","x")', author: "+ME" }, 1);
-    const csv = reviewToCsv(d, 25);
-    // Leading =/+ are forced to plain text with a single-quote prefix.
-    expect(csv).toContain('"\'=HYPERLINK');
-    expect(csv).toContain('"\'+ME"');
-    expect(csv).not.toContain('"=HYPERLINK'); // never a bare formula leader
-  });
-  it("edl emits one numbered event + marker per comment", () => {
-    const edl = reviewToEdl(withComments(), 25, "T");
-    expect(edl).toContain("TITLE: T");
-    expect(edl).toContain("001  AX");
-    expect(edl).toContain("002  AX");
-    expect(edl).toContain("|M:intro too long |D:1");
-    expect(edl).toContain("|C:ResolveColorRed"); // unresolved
   });
 });
 

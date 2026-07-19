@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { useMediaCapture } from "../hooks/use-media-capture";
-import { SPEAKERS_CHANGED_EVENT, canPickSpeakers, saveDeviceChoice } from "../lib/media-devices";
+import { SPEAKER_OUTPUT_CHANGED_EVENT, canPickSpeakers } from "../lib/media-devices";
 import { IconMic, IconVideo } from "./Icons";
 
 /**
@@ -31,13 +31,17 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Preview follows the owned stream.
+  const camLive = !!cap.stream && cap.stream.getVideoTracks().length > 0 && !cap.choice.cameraOff;
+
+  // Preview follows the owned stream. camLive is a dep because the <video>
+  // REMOUNTS when the camera toggles off->on - same stream, fresh element,
+  // and a stream-only effect would leave it black.
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     v.srcObject = cap.stream;
     if (cap.stream) v.play().catch(() => { /* autoplay */ });
-  }, [cap.stream]);
+  }, [cap.stream, camLive]);
 
   // Level meter (the green room's analyser pattern).
   useEffect(() => {
@@ -73,6 +77,7 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
   // Mic check: record a short clip, hear it back (Discord's "Let's Check").
   const [micTest, setMicTest] = useState<"idle" | "recording" | "playing">("idle");
   const recRef = useRef<MediaRecorder | null>(null);
+  const testAudioRef = useRef<HTMLAudioElement | null>(null);
   const startMicTest = () => {
     const s = cap.stream;
     if (!s || s.getAudioTracks().length === 0 || micTest !== "idle") return;
@@ -83,9 +88,17 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
       rec.onstop = () => {
         const url = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType }));
         const audio = new Audio(url);
+        testAudioRef.current = audio;
+        // Play back through the chosen speakers - the point of the test is
+        // hearing what the room hears, on the output the room will use.
+        const sink = cap.choice.speakerId;
+        if (sink && canPickSpeakers()) {
+          void (audio as HTMLAudioElement & { setSinkId(id: string): Promise<void> }).setSinkId(sink).catch(() => {});
+        }
+        const done = () => { URL.revokeObjectURL(url); testAudioRef.current = null; setMicTest("idle"); };
         setMicTest("playing");
-        audio.onended = () => { URL.revokeObjectURL(url); setMicTest("idle"); };
-        audio.play().catch(() => { URL.revokeObjectURL(url); setMicTest("idle"); });
+        audio.onended = done;
+        audio.play().catch(done);
       };
       recRef.current = rec;
       rec.start();
@@ -95,7 +108,12 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
       setMicTest("idle");
     }
   };
-  useEffect(() => () => { try { recRef.current?.stop(); } catch { /* inactive */ } }, []);
+  useEffect(() => () => {
+    try { recRef.current?.stop(); } catch { /* inactive */ }
+    // No ghost audio after the pane closes.
+    testAudioRef.current?.pause();
+    testAudioRef.current = null;
+  }, []);
 
   const label = (d: MediaDeviceInfo, i: number, kind: string) => d.label || `${kind} ${i + 1}`;
   const acquire = (patch: Partial<typeof cap.choice>) => {
@@ -103,12 +121,9 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
     void cap.acquire({ ...cap.choice, ...patch });
   };
   const pickSpeaker = (id: string | null) => {
-    saveDeviceChoice({ ...cap.choice, speakerId: id });
-    void cap.refreshDevices();
-    try { window.dispatchEvent(new Event(SPEAKERS_CHANGED_EVENT)); } catch { /* non-DOM */ }
+    cap.updateChoice({ speakerId: id });
+    try { window.dispatchEvent(new Event(SPEAKER_OUTPUT_CHANGED_EVENT)); } catch { /* non-DOM */ }
   };
-  const camLive = !!cap.stream && cap.stream.getVideoTracks().length > 0 && !cap.choice.cameraOff;
-
   return (
     <section>
       <h3 className="cp-pane-title">Camera &amp; Mic</h3>
@@ -241,7 +256,7 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
               onClick={() => {
                 const next = { ...cap.choice, echoCancel: !cap.choice.echoCancel };
                 if (cap.stream) { ownedHereRef.current = true; void cap.acquire(next); }
-                else saveDeviceChoice(next);
+                else cap.updateChoice({ echoCancel: next.echoCancel });
               }}
             />
           </div>
