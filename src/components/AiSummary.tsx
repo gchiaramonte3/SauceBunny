@@ -423,7 +423,7 @@ export function AiSummary({
   // ── Render ───────────────────────────────────────────────────────
   if (!transcriptPath) {
     return (
-      <div className="cp-ai-empty">
+      <div className="cp-pane-empty cp-ai-empty">
         <IconBrain />
         <div className="cp-ai-empty-title">No transcript yet</div>
         <div className="cp-ai-empty-sub">Generate a transcript first, then chat with it here.</div>
@@ -436,7 +436,7 @@ export function AiSummary({
     const m = recommended;
     return (
       <div className="cp-ai-wrap">
-        <div className="cp-ai-setup">
+        <div className="cp-pane-empty cp-ai-setup">
           <IconBrain />
           <div className="cp-ai-empty-title">Set up local AI</div>
           <div className="cp-ai-empty-sub">

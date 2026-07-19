@@ -2424,21 +2424,31 @@ pub struct ShareSources {
 pub async fn list_share_sources(app: AppHandle) -> Result<ShareSources, crate::AppError> {
     use tauri_plugin_shell::process::CommandEvent;
     use tauri_plugin_shell::ShellExt;
-    fn fallback(e: String) -> Result<ShareSources, crate::AppError> {
+    // engine_present distinguishes "no capture binary at all" (windows/portion/
+    // audio genuinely unavailable, and the avfoundation share path uses the
+    // avfoundation ORDINAL as the display id) from "engine there but listing
+    // was slow/failed" (keep the rich affordances; the SCK share path uses the
+    // CGDirectDisplayID). Conflating them told users to rebuild a shipped binary.
+    fn fallback(engine_present: bool, e: String) -> Result<ShareSources, crate::AppError> {
         let displays = list_displays_impl()?
             .into_iter()
-            .map(|d| ShareDisplay { id: d.id, width: d.width, height: d.height, label: d.name, thumb: None })
+            .map(|d| ShareDisplay {
+                // Engine absent -> the legacy avfoundation path indexes by
+                // ordinal; engine present -> SCK needs the CGDirectDisplayID.
+                id: if engine_present { d.id } else { d.index },
+                width: d.width, height: d.height, label: d.name, thumb: None,
+            })
             .collect();
-        eprintln!("[share] capture sidecar unavailable, display-only fallback: {e}");
-        Ok(ShareSources { displays, windows: Vec::new(), capture_engine: false })
+        eprintln!("[share] display-only fallback (engine_present={engine_present}): {e}");
+        Ok(ShareSources { displays, windows: Vec::new(), capture_engine: engine_present })
     }
     let cmd = match app.shell().sidecar("saucebunny-capture") {
         Ok(c) => c,
-        Err(e) => return fallback(e.to_string()),
+        Err(e) => return fallback(false, e.to_string()),
     };
     let (mut rx, child) = match cmd.args(["list", "--thumbs"]).spawn() {
         Ok(v) => v,
-        Err(e) => return fallback(e.to_string()),
+        Err(e) => return fallback(false, e.to_string()),
     };
     let mut out = Vec::new();
     let collect = async {
@@ -2456,11 +2466,11 @@ pub async fn list_share_sources(app: AppHandle) -> Result<ShareSources, crate::A
         Ok(c) => c,
         Err(_) => {
             let _ = child.kill();
-            return fallback("list timed out".into());
+            return fallback(true, "list timed out".into());
         }
     };
     if code != 0 {
-        return fallback(format!("list exited {code}"));
+        return fallback(true, format!("list exited {code}"));
     }
     #[derive(serde::Deserialize)]
     struct RawList {
@@ -2469,7 +2479,7 @@ pub async fn list_share_sources(app: AppHandle) -> Result<ShareSources, crate::A
     }
     match serde_json::from_slice::<RawList>(&out) {
         Ok(raw) => Ok(ShareSources { displays: raw.displays, windows: raw.windows, capture_engine: true }),
-        Err(e) => fallback(format!("list parse: {e}")),
+        Err(e) => fallback(true, format!("list parse: {e}")),
     }
 }
 

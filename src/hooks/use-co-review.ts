@@ -93,6 +93,9 @@ export type LiveReaction = {
   id: number;
   /** Member id of the sender (m0 = host). */
   from: string;
+  /** Sender's display name, snapshotted at fire time so a floater keeps
+   *  the right name even if that peer leaves during its ~5s life. */
+  name: string;
   /** applause | confetti | thumbsup | question */
   emote: string;
   at: number;
@@ -158,6 +161,11 @@ export function useCoReview({
   const lastReactionSendRef = useRef(0);
   const coSessionRef = useRef(coSession);
   coSessionRef.current = coSession;
+  const nameForMember = useCallback((memberId: string): string => {
+    const s = coSessionRef.current;
+    if (memberId === s.selfId) return loadReviewer().name || "You";
+    return s.peers.find((p) => p.id === memberId)?.name ?? "Someone";
+  }, []);
   // Incoming SessionMsg::Rtc -> the mesh (assigned each render below; the
   // mesh hook must be declared after the message handler's closure).
   const rtcSignalRef = useRef<((from: string, payload: string) => void) | null>(null);
@@ -233,7 +241,7 @@ export function useCoReview({
             return next;
           });
         } else if (m.on) {
-          const r: LiveReaction = { id: ++reactionIdRef.current, from: m.from, emote: m.emote, at: Date.now() };
+          const r: LiveReaction = { id: ++reactionIdRef.current, from: m.from, name: nameForMember(m.from), emote: m.emote, at: Date.now() };
           setLiveReactions((prev) => [...prev.slice(-23), r]);
           window.setTimeout(() => {
             setLiveReactions((prev) => prev.filter((x) => x.id !== r.id));
@@ -315,7 +323,9 @@ export function useCoReview({
       const d = sessionDocRef.current;
       // Persist whenever a doc exists - zero comments may MEAN "we deleted
       // them all", and skipping the save would resurrect them next session.
-      if (d && d.sourceKey) saveReview(d);
+      // MERGE into any solo review the user already had for this source (a
+      // guest must not lose their own notes to the host-seeded doc).
+      if (d && d.sourceKey) saveReview(mergeReviewDoc(loadReview(d.sourceKey), d));
       setSessionDoc(null);
       setCoGhosts([]);
       setLiveReactions([]);
@@ -342,7 +352,16 @@ export function useCoReview({
     }
     const d = sessionDocRef.current;
     if (d) void invoke("session_broadcast", { msg: { kind: "reviewDoc", doc: JSON.stringify(d) } }).catch(() => {});
-  }, [coSession.role, coSession.peers.length]);
+    // Re-broadcast persistent presence so a newcomer converges on the live
+    // room: the host's own hand + share, and every currently-raised hand.
+    const selfId = coSessionRef.current.selfId ?? "m0";
+    if (raisedHands.has(selfId)) {
+      void invoke("session_broadcast", { msg: { kind: "reaction", from: selfId, emote: "hand", on: true } }).catch(() => {});
+    }
+    if (shareState === "sharing") {
+      void invoke("session_broadcast", { msg: { kind: "sharing", from: selfId, on: true } }).catch(() => {});
+    }
+  }, [coSession.role, coSession.peers.length, raisedHands, shareState]);
   // Host → peers: 2 Hz transport heartbeat (play/pause/seek/scrub-settle).
   useEffect(() => {
     if (coSession.role !== "host") return;
@@ -383,11 +402,11 @@ export function useCoReview({
     if (now - lastReactionSendRef.current < 250) return; // per-sender throttle
     lastReactionSendRef.current = now;
     const selfId = coSessionRef.current.selfId ?? "m0";
-    const r: LiveReaction = { id: ++reactionIdRef.current, from: selfId, emote, at: now };
+    const r: LiveReaction = { id: ++reactionIdRef.current, from: selfId, name: nameForMember(selfId), emote, at: now };
     setLiveReactions((prev) => [...prev.slice(-23), r]);
     window.setTimeout(() => setLiveReactions((prev) => prev.filter((x) => x.id !== r.id)), 5200);
     sendSessionMsg({ kind: "reaction", from: selfId, emote, on: true });
-  }, [sendSessionMsg]);
+  }, [sendSessionMsg, nameForMember]);
 
   const toggleHand = useCallback(() => {
     const selfId = coSessionRef.current.selfId ?? "m0";

@@ -8,19 +8,19 @@
 }
 
 /* ── Empty / setup states ────────────────────────────────────────── */
+/* Geometry lives in .cp-pane-empty (base.css) for the empty/setup faces;
+   the intro keeps its own flow (it sits above live content). */
 .cp-ai-empty,
-.cp-ai-setup,
+.cp-ai-setup { color: var(--fg-3); }
 .cp-ai-intro {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   gap: 8px;
-  padding: 28px 22px;
+  padding: 36px 22px 28px;
   color: var(--fg-3);
 }
-.cp-ai-setup { margin: auto 0; }
-.cp-ai-intro { padding-top: 36px; }
 .cp-ai-icon { color: var(--fg-3); opacity: 0.85; }
 .cp-ai-empty-title { font-size: 14px; font-weight: 700; color: var(--fg-1); margin-top: 4px; }
 .cp-ai-empty-sub { font-size: 12px; line-height: 1.5; color: var(--fg-4); max-width: 320px; }

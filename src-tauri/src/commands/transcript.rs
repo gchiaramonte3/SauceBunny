@@ -919,13 +919,32 @@ pub(crate) async fn download_with_progress(
     job_id: &str,
     model_id: &str,
 ) -> Result<(), crate::AppError> {
-    let mut res = reqwest::get(url)
-        .await
-        .map_err(|e| format!("fetch: {e}"))?;
+    // A per-read idle timeout: a dropped connection mid-stream must not
+    // hang the progress bar forever (multi-GB models on flaky Wi-Fi).
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .read_timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let mut res = client.get(url).send().await.map_err(|e| format!("fetch: {e}"))?;
     if !res.status().is_success() {
         return Err(format!("HTTP {}", res.status().as_u16()).into());
     }
     let total = res.content_length().unwrap_or(0);
+    // Sweep stale *.partial / *.part temps from a prior killed download in
+    // this dir (they otherwise accumulate - the 24h cache sweep skips the
+    // models dir).
+    if let Some(dir) = dest.parent() {
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for e in rd.flatten() {
+                let n = e.file_name();
+                let n = n.to_string_lossy();
+                if n.ends_with(".partial") || n.ends_with(".part") {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
+    }
     let mut file = tokio::fs::File::create(dest)
         .await
         .map_err(|e| format!("create: {e}"))?;
@@ -978,7 +997,12 @@ async fn ensure_vad_model(app: &AppHandle) -> Option<PathBuf> {
         return Some(path);
     }
     let url = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin";
-    let res = reqwest::get(url).await.ok()?;
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .ok()?;
+    let res = client.get(url).send().await.ok()?;
     if !res.status().is_success() {
         return None;
     }

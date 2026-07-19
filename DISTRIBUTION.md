@@ -99,11 +99,19 @@ via notarization without paying the product cost of sandbox compliance.
 ### Each release
 
 ```bash
-# 1. Make sure every sidecar is current + dep-clean (no /opt/homebrew refs)
+# 1. Make sure EVERY sidecar is current + dep-clean (no /opt/homebrew refs).
+#    `npm run setup` builds/fetches all 8 behind an idempotency check; or run
+#    them individually:
 npm run refresh:sidecars         # yt-dlp from official release
 npm run refresh:ffmpeg           # ffmpeg static arm64 from osxexperts
+npm run refresh:ffprobe          # ffprobe static arm64
 npm run build:whisper            # whisper.cpp from source, static
-npm run build:diarizer           # saucebunny-diarize from swift-sidecar/
+npm run build:llama              # llama.cpp server (AI Summary)
+npm run build:diarizer           # saucebunny-diarize (Swift)
+npm run build:dictate            # saucebunny-dictate (Swift)
+npm run build:capture            # saucebunny-capture (Swift, screen share)
+# Then confirm none is a 0-byte stub or leaks a non-system dylib:
+npm run check:release
 
 # 2. Confirm cargo + tsc + swift all pass
 npx tsc --noEmit

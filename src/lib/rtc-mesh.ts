@@ -181,9 +181,13 @@ export class RtcMesh {
     const local = this.deps.getLocalStream();
     if (local) {
       for (const track of local.getTracks()) {
-        // A live share owns the video slot from the first frame a new
-        // member sees (they joined mid-share).
-        const outTrack = track.kind === "video" && this.videoOverride ? this.videoOverride : track;
+        // A live share owns BOTH slots from the first frame a new member
+        // sees (they joined mid-share): the share video, and the share+mic
+        // audio mix (else a late joiner hears the raw mic, not the shared
+        // system audio).
+        const outTrack =
+          track.kind === "video" ? (this.videoOverride ?? track)
+          : (this.audioOverride ?? track);
         const sender = pc.addTrack(outTrack, local);
         if (track.kind === "video") slot.videoSenders.push(sender);
         else slot.audioSenders.push(sender);

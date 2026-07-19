@@ -10,7 +10,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { Toolbar } from "./components/Toolbar";
 import { NavRail } from "./components/NavRail";
-import { MediaSpikePanel } from "./components/MediaSpikePanel";
+
 import { LibraryView } from "./components/LibraryView";
 import { LibraryBrowser } from "./components/LibraryBrowser";
 import { useLibraryScan } from "./hooks/use-library-scan";
@@ -18,6 +18,7 @@ import type { LibraryCrumb } from "./lib/library";
 import { Sidebar } from "./components/Sidebar";
 import { PeoplePanel } from "./components/PeoplePanel";
 import { ReactionLayer } from "./components/ReactionLayer";
+import { MediaSpikePanel } from "./components/MediaSpikePanel";
 import { CoReviewLobby } from "./components/CoReviewLobby";
 import { Monitor, type AspectId } from "./components/Monitor";
 import type { Notif } from "./components/NotificationBell";
@@ -835,9 +836,30 @@ export default function App() {
     refreshWhisperModels();
   }, [refreshWhisperModels]);
 
+  // A folder chosen in Settings/onboarding must apply to the source already
+  // loaded, not only the next one (exportOpts.folder is otherwise seeded
+  // once at load time).
+  useEffect(() => {
+    if (defaults.folder) setExportOpts((p) => (p.folder ? p : { ...p, folder: defaults.folder }));
+  }, [defaults.folder]);
+
   const selectedModel = whisperModels.find((m) => m.id === defaults.whisperModel);
-  const whisperModelReady = !!selectedModel?.downloaded;
-  const whisperModelLabel = selectedModel?.name ?? defaults.whisperModel;
+  const whisperModelDownloaded = !!selectedModel?.downloaded;
+  // The transcribe UI must reflect the SELECTED engine, not just Whisper -
+  // a Parakeet-only user was told to "Set up Whisper" with no Generate.
+  const [parakeetReady, setParakeetReady] = useState(false);
+  useEffect(() => {
+    if (defaults.transcriptionEngine !== "parakeet") return;
+    let live = true;
+    void invoke<boolean>("parakeet_model_downloaded")
+      .then((r) => { if (live) setParakeetReady(r); })
+      .catch(() => { if (live) setParakeetReady(false); });
+    return () => { live = false; };
+  }, [defaults.transcriptionEngine, transcriptState]);
+  const whisperModelReady =
+    defaults.transcriptionEngine === "parakeet" ? parakeetReady : whisperModelDownloaded;
+  const whisperModelLabel =
+    defaults.transcriptionEngine === "parakeet" ? "Parakeet" : (selectedModel?.name ?? defaults.whisperModel);
 
   // ====== Recents ======
   // Recent clips keep EVERY export (capped) — the sidebar GROUPS them by
@@ -956,6 +978,7 @@ export default function App() {
   // Dev-only capture spike (live-presence Prompt 0): renders ONLY when the
   // localStorage flag is set. Ships nothing user-visible.
   const [mediaSpikeOpen, setMediaSpikeOpen] = useState<boolean>(() => {
+    if (!import.meta.env.DEV) return false;
     try { return localStorage.getItem("saucebunny.devMediaSpike") === "1"; } catch { return false; }
   });
   const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "commands" | "about">("general");
@@ -4060,7 +4083,14 @@ export default function App() {
         case "view.logs":    setLogsOpen((p) => !p); break;
         case "queue.add":    handleAddToQueue(); break;
         case "queue.toggle": setQueueOpenChoice((p) => !p); break;
-        case "export.clip":  if (status === "loaded") handleExport(); break;
+        case "export.clip":
+          if (status === "loaded" && !exportOpts.folder) {
+            pushNotification("info", "Choose an export folder first",
+              "Pick a folder in the sidebar, or set a default in Settings → General.");
+          } else if (status === "loaded") {
+            handleExport();
+          }
+          break;
         case "play.toggle":  onPlayToggle(); break;
         // J / L — NLE transport: each press walks the shuttle ladder
         // (1-2-4-8×, opposite press steps down, +1 resumes real playback);
@@ -4445,9 +4475,6 @@ export default function App() {
     for (const r of liveReactions) m.set(r.from, reactionGlyph(r.emote));
     return m;
   }, [liveReactions]);
-  const memberName = useCallback((id: string) => {
-    return screeningParticipants.find((p) => p.id === id)?.name ?? "Someone";
-  }, [screeningParticipants]);
   // Room bar device toggles ride the same capture singleton the green room
   // opened; enabled-bit flips propagate to every mesh sender live.
   const capture = useMediaCapture();
@@ -4675,7 +4702,7 @@ export default function App() {
   return (
     <div className="cp-window">
       {buildBanner}
-      {mediaSpikeOpen && (
+      {import.meta.env.DEV && mediaSpikeOpen && (
         <MediaSpikePanel appendLog={appendLog} onClose={() => setMediaSpikeOpen(false)} />
       )}
       <div className="cp-titlebar" data-tauri-drag-region>
@@ -5081,7 +5108,7 @@ export default function App() {
                     annotationLabelMode={annDrawing && reviewLabelMode}
                     annotationLabelColor={annLabelColor}
                   />
-                  {roomActive && <ReactionLayer reactions={liveReactions} nameFor={memberName} />}
+                  {roomActive && <ReactionLayer reactions={liveReactions} />}
                   <Transport
                     status={status}
                     isPlaying={isPlaying}

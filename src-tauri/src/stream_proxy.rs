@@ -132,6 +132,15 @@ pub fn start() -> std::io::Result<String> {
         .to_ip()
         .map(|a| a.port())
         .ok_or_else(|| std::io::Error::other("no loopback port"))?;
+    // Orphaned share FIFOs from a prior force-quit (SIGKILL skips the
+    // graceful unlink): best-effort sweep.
+    if let Ok(rd) = std::fs::read_dir(std::env::temp_dir()) {
+        for e in rd.flatten() {
+            if e.file_name().to_string_lossy().starts_with("saucebunny-share-") {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
     let token = mint_token();
     let _ = TOKEN.set(token.clone());
     // Token lives in the path, not the authority, so it's still a valid
@@ -1104,6 +1113,9 @@ fn capture_path() -> Option<std::path::PathBuf> {
 /// Common libx264 low-latency fMP4 encode tail. Latency levers:
 /// ultrafast+zerolatency, 30-frame GOP, 100ms fragments.
 fn share_encode_args(cmd: &mut std::process::Command, audio: bool) {
+    // Constant output cadence: with wall-clock input timestamps this fills
+    // idle gaps by repeating the last frame (SCK-dropped-frame safety).
+    cmd.arg("-fps_mode").arg("cfr").arg("-r").arg("30");
     if audio {
         cmd.arg("-map").arg("0:v").arg("-map").arg("1:a")
             .arg("-c:a").arg("aac").arg("-b:a").arg("160k");
@@ -1179,6 +1191,7 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
         let mut capture = match cc.spawn() {
             Ok(c) => c,
             Err(e) => {
+                if let Some(f) = &fifo_path { let _ = std::fs::remove_file(f); }
                 return request.respond(
                     tiny_http::Response::from_string(format!("capture spawn failed: {e}"))
                         .with_status_code(500),
@@ -1191,26 +1204,34 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
         // stderr before the first frame - it sizes ffmpeg's rawvideo input.
         let (w, h) = {
             use std::io::BufRead;
+            // Read the meta line on a helper thread with a deadline: if the
+            // engine wedges before printing meta:/error: (e.g. SCShareableContent
+            // hangs), the proxy thread must not block forever.
             let stderr = capture.stderr.take();
-            let mut dims = None;
-            if let Some(se) = stderr {
-                let mut reader = std::io::BufReader::new(se);
-                let mut line = String::new();
-                while reader.read_line(&mut line).unwrap_or(0) > 0 {
-                    if let Some(json) = line.trim().strip_prefix("meta:") {
-                        let get = |key: &str| {
-                            json.split(&format!("\"{key}\":")).nth(1)
-                                .and_then(|r| r.trim_start().split(|c: char| !c.is_ascii_digit()).next()?.parse::<u32>().ok())
-                        };
-                        dims = get("width").zip(get("height"));
-                        break;
+            let dims = if let Some(se) = stderr {
+                let (tx, rx) = std::sync::mpsc::channel::<Option<(u32, u32)>>();
+                std::thread::spawn(move || {
+                    let mut reader = std::io::BufReader::new(se);
+                    let mut line = String::new();
+                    let mut found = None;
+                    while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                        if let Some(json) = line.trim().strip_prefix("meta:") {
+                            let get = |key: &str| {
+                                json.split(&format!("\"{key}\":")).nth(1)
+                                    .and_then(|r| r.trim_start().split(|c: char| !c.is_ascii_digit()).next()?.parse::<u32>().ok())
+                            };
+                            found = get("width").zip(get("height"));
+                            break;
+                        }
+                        if line.starts_with("error:") { break; }
+                        line.clear();
                     }
-                    if line.starts_with("error:") {
-                        break;
-                    }
-                    line.clear();
-                }
-            }
+                    let _ = tx.send(found);
+                });
+                rx.recv_timeout(std::time::Duration::from_secs(8)).unwrap_or(None)
+            } else {
+                None
+            };
             match dims {
                 Some(d) => d,
                 None => {
@@ -1231,6 +1252,8 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
             Some(s) => s,
             None => {
                 let _ = capture.kill();
+                let _ = capture.wait();
+                if let Some(f) = &fifo_path { let _ = std::fs::remove_file(f); }
                 return request.respond(
                     tiny_http::Response::from_string("no capture stdout").with_status_code(500),
                 );
@@ -1242,7 +1265,11 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
             .arg("-f").arg("rawvideo")
             .arg("-pix_fmt").arg("bgra")
             .arg("-s").arg(format!("{w}x{h}"))
-            .arg("-r").arg("30")
+            // The engine forwards only CHANGED frames (SCK drops idle ones),
+            // so time frames by arrival and let the CFR output duplicate the
+            // last frame across idle gaps - otherwise a static screen plays
+            // back sped-up and drifts from the audio.
+            .arg("-use_wallclock_as_timestamps").arg("1")
             .arg("-i").arg("pipe:0");
         if let Some(f) = &fifo_path {
             cmd.arg("-f").arg("f32le").arg("-ar").arg("48000").arg("-ac").arg("2").arg("-i").arg(f);

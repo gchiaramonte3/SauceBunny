@@ -169,3 +169,20 @@ button:focus-visible, input:focus-visible {
   .cp-swatch { transition: none; }
   .cp-swatch:hover { transform: none; }
 }
+
+/* ── THE empty/setup state for every drawer tab (Queue, Review, AI
+      Summary, Transcript). One geometry so the four faces agree:
+      centered on BOTH axes, same padding, same rhythm. Components keep
+      their own typography classes; this owns the box. ── */
+.cp-pane-empty {
+  flex: 1;
+  min-height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--s-2);
+  padding: var(--s-8) var(--s-6);
+}

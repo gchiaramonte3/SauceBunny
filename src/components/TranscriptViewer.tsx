@@ -291,7 +291,7 @@ export function TranscriptViewer({
         setRaw(text);
       } catch (e) {
         if (cancelled) return;
-        setLoadErr(String(e ?? "Failed to read transcript"));
+        setLoadErr(e ? formatError(e) : "Failed to read transcript");
         setRaw(null);
       } finally {
         if (!cancelled) setLoading(false);
@@ -1122,7 +1122,7 @@ export function TranscriptViewer({
     // SOURCE (not on canRegenerate, which also wants a downloaded model —
     // the handler explains a missing model better than a dead button would).
     return (
-      <div className="cp-tx-empty">
+      <div className="cp-pane-empty cp-tx-empty">
         <div className="cp-tx-empty-title">No transcript yet</div>
         <div className="cp-tx-empty-body">
           Transcribe the loaded source, or import an
@@ -1155,12 +1155,12 @@ export function TranscriptViewer({
   }
 
   if (loading) {
-    return <div className="cp-tx-empty"><div className="cp-tx-empty-title">Loading transcript…</div></div>;
+    return <div className="cp-pane-empty cp-tx-empty"><div className="cp-tx-empty-title">Loading transcript…</div></div>;
   }
 
   if (loadErr) {
     return (
-      <div className="cp-tx-empty">
+      <div className="cp-pane-empty cp-tx-empty">
         <IconAlert size={20} stroke="var(--color-warn, #f5a)" />
         <div className="cp-tx-empty-title">Couldn't read transcript</div>
         <div className="cp-tx-empty-body">{loadErr}</div>
@@ -1170,7 +1170,7 @@ export function TranscriptViewer({
 
   if (turns.length === 0) {
     return (
-      <div className="cp-tx-empty">
+      <div className="cp-pane-empty cp-tx-empty">
         <div className="cp-tx-empty-title">Transcript is empty</div>
         <div className="cp-tx-empty-body">
           The SRT file at this path parsed to zero cues. Try regenerating, or

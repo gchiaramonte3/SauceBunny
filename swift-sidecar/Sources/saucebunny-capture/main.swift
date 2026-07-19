@@ -188,13 +188,41 @@ final class StreamOutput: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private func writeAudio(_ sample: CMSampleBuffer) {
         guard let fifo = audioFifo,
-              let block = CMSampleBufferGetDataBuffer(sample) else { return }
-        var length = 0
-        var pointer: UnsafeMutablePointer<CChar>?
-        guard CMBlockBufferGetDataPointer(block, atOffset: 0, lengthAtOffsetOut: nil,
-                                          totalLengthOut: &length, dataPointerOut: &pointer) == kCMBlockBufferNoErr,
-              let p = pointer else { return }
-        fifo.write(Data(bytes: p, count: length))
+              let fmt = CMSampleBufferGetFormatDescription(sample),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fmt)?.pointee else { return }
+        let channels = Int(asbd.mChannelsPerFrame)
+        let planar = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
+
+        // Pull the AudioBufferList. ffmpeg reads the FIFO as interleaved
+        // f32le/2ch, so planar Float32 (SCK's default) must be interleaved
+        // here - copying the raw block verbatim would swap channels/pitch.
+        var blockBuffer: CMBlockBuffer?
+        var abl = AudioBufferList()
+        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sample, bufferListSizeNeededOut: nil, bufferListOut: &abl,
+            bufferListSize: MemoryLayout<AudioBufferList>.size, blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil, flags: 0, blockBufferOut: &blockBuffer)
+        guard status == noErr else { return }
+
+        let buffers = UnsafeMutableAudioBufferListPointer(&abl)
+        if !planar || channels < 2 || buffers.count < 2 {
+            // Already interleaved (or mono): pass through as f32le. If the
+            // source is truly mono, ffmpeg's -ac 2 upmixes.
+            for b in buffers {
+                if let d = b.mData { fifo.write(Data(bytes: d, count: Int(b.mDataByteSize))) }
+            }
+            return
+        }
+        // Planar -> interleaved f32. Two channels, equal frame counts.
+        let frames = Int(buffers[0].mDataByteSize) / MemoryLayout<Float32>.size
+        let left = buffers[0].mData!.assumingMemoryBound(to: Float32.self)
+        let right = buffers[1].mData!.assumingMemoryBound(to: Float32.self)
+        var inter = [Float32](repeating: 0, count: frames * 2)
+        for i in 0..<frames {
+            inter[i * 2] = left[i]
+            inter[i * 2 + 1] = right[i]
+        }
+        inter.withUnsafeBytes { fifo.write(Data($0)) }
     }
 }
 

@@ -31,6 +31,17 @@
 
 set -euo pipefail
 
+guard_self_contained() {
+  local bin="$1"
+  local deps
+  deps="$(otool -L "${bin}" | tail -n +2)"
+  if printf '%s\n' "${deps}" | grep -qE '/opt/homebrew/|/usr/local/|/Users/'; then
+    echo "✗ ${bin} references a non-system dylib — refusing to install:" >&2
+    printf '%s\n' "${deps}" | grep -E '/opt/homebrew/|/usr/local/|/Users/' >&2
+    exit 3
+  fi
+}
+
 # Resolve repo root regardless of where the script is invoked from.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -54,6 +65,7 @@ case "${MODE}" in
     swift build -c release --arch arm64
     src="${SWIFT_DIR}/.build/arm64-apple-macosx/release/saucebunny-diarize"
     dst="${BIN_DIR}/saucebunny-diarize-aarch64-apple-darwin"
+    guard_self_contained "${src}"
     cp "${src}" "${dst}"
     chmod +x "${dst}"
     echo "✓ ${dst}"
@@ -73,6 +85,7 @@ case "${MODE}" in
 
     arm_dst="${BIN_DIR}/saucebunny-diarize-aarch64-apple-darwin"
     x86_dst="${BIN_DIR}/saucebunny-diarize-x86_64-apple-darwin"
+    guard_self_contained "${arm_src}"
     cp "${arm_src}" "${arm_dst}"; chmod +x "${arm_dst}"
     cp "${x86_src}" "${x86_dst}"; chmod +x "${x86_dst}"
 

@@ -28,10 +28,17 @@ echo
 # epoch probe falls back to the rebased timeline with no hard failure).
 REQUIRED_SIDECARS="yt-dlp ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate saucebunny-capture llama-server"
 for req in $REQUIRED_SIDECARS; do
-  if [ -f "${ROOT_DIR}/src-tauri/binaries/${req}-aarch64-apple-darwin" ]; then
-    pass "${req} present"
-  else
+  bin="${ROOT_DIR}/src-tauri/binaries/${req}-aarch64-apple-darwin"
+  if [ ! -f "$bin" ]; then
     fatal "${req} MISSING from src-tauri/binaries/ (npm run setup / the matching build script)"
+  elif [ ! -s "$bin" ]; then
+    # -f is true for a 0-byte CI/iCloud-evicted stub; that would ship a DMG
+    # with a dead sidecar. Require real content + a Mach-O header.
+    fatal "${req} is a 0-byte stub — rebuild it (npm run build:${req#saucebunny-} or refresh:sidecars)"
+  elif ! file "$bin" | grep -q 'Mach-O'; then
+    fatal "${req} is not a Mach-O executable (corrupt/evicted) — rebuild it"
+  else
+    pass "${req} present + non-empty Mach-O"
   fi
 done
 echo
@@ -101,12 +108,10 @@ fi
 echo
 echo "── Minimum macOS version ───────────────────────────────────────"
 MIN=$(node -e "console.log(require('${ROOT_DIR}/src-tauri/tauri.conf.json').bundle?.macOS?.minimumSystemVersion ?? '')")
-if [ -z "$MIN" ]; then
-  warn "no minimumSystemVersion set in tauri.conf.json (Apple defaults to 10.13)"
-elif [ "$MIN" = "13.0" ] || [ "${MIN%%.*}" -ge 13 ] 2>/dev/null; then
-  pass "minimumSystemVersion = $MIN (matches CLAUDE.md target)"
+if [ "$MIN" = "14.0" ]; then
+  pass "minimumSystemVersion = $MIN (FluidAudio + native dictation floor)"
 else
-  warn "minimumSystemVersion = $MIN — CLAUDE.md says macOS 13+"
+  fatal "minimumSystemVersion = '$MIN' — must be exactly 14.0 (the real floor everywhere: Package.swift, README, CLAUDE.md)"
 fi
 
 echo

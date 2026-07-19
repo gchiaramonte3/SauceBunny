@@ -637,7 +637,7 @@ export function QueueDrawer({
 
       <div className="cp-queue-list">
         {queue.length === 0 ? (
-          <div className="cp-queue-empty">
+          <div className="cp-pane-empty cp-queue-empty">
             <IconStack size={28} stroke="var(--fg-4)" />
             <div className="cp-queue-empty-title">No clips queued</div>
             <div className="cp-queue-empty-body">

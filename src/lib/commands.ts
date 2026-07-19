@@ -250,8 +250,8 @@ export function buildCommands(d: CommandDeps): Command[] {
         // to the Transcript tab; reuse it as our "show this tab now" lever.
         d.setTranscriptArrivedTick((n) => n + 1);
       } },
-    { id: "tx.generate", label: "Generate transcript (Whisper)", group: "Transcript",
-      disabled: !d.hasSource || !d.exportFolder,
+    { id: "tx.generate", label: "Generate transcript", group: "Transcript",
+      disabled: !d.hasSource,
       run: () => d.handleGenerateTranscript() },
     { id: "tx.download", label: "Download YouTube captions", group: "Transcript",
       description: "yt-dlp pulls the .srt file",

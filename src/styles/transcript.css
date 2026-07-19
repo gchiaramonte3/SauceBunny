@@ -483,16 +483,8 @@
   line-height: 1.35;
 }
 
-.cp-tx-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 32px 24px;
-  gap: 6px;
-}
+/* Geometry lives in .cp-pane-empty (base.css). */
+.cp-tx-empty { color: var(--fg-4); }
 .cp-tx-empty-title {
   font-size: 13px;
   font-weight: 600;

@@ -10,9 +10,8 @@ import { reactionGlyph, reactionLabel } from "../lib/reactions";
  * quiet fade-in-place. A polite live region announces each reaction for
  * screen readers ("Nika reacted with applause").
  */
-export function ReactionLayer({ reactions, nameFor }: {
+export function ReactionLayer({ reactions }: {
   reactions: LiveReaction[];
-  nameFor: (memberId: string) => string;
 }) {
   // Announce only the newest reaction; coalescing beyond that is overkill
   // at 2-6 participants.
@@ -20,8 +19,8 @@ export function ReactionLayer({ reactions, nameFor }: {
   const latest = reactions.length > 0 ? reactions[reactions.length - 1] : null;
   useEffect(() => {
     if (!latest) return;
-    setAnnounce(`${nameFor(latest.from)} reacted with ${reactionLabel(latest.emote)}`);
-  }, [latest, nameFor]);
+    setAnnounce(`${latest.name} reacted with ${reactionLabel(latest.emote)}`);
+  }, [latest]);
 
   return (
     <div className="cp-reactions-layer" aria-hidden={reactions.length === 0}>
@@ -32,7 +31,7 @@ export function ReactionLayer({ reactions, nameFor }: {
           style={{ ["--rx" as string]: `${(r.id % 5) * 14}px`, ["--rd" as string]: `${(i % 3) * 180}ms` }}
         >
           <span className="cp-reaction-glyph">{reactionGlyph(r.emote)}</span>
-          <span className="cp-reaction-name">{nameFor(r.from)}</span>
+          <span className="cp-reaction-name">{r.name}</span>
         </span>
       ))}
       <span className="cp-visually-hidden" role="status" aria-live="polite">{announce}</span>
