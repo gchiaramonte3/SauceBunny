@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { loadJson, saveJson } from "../lib/storage";
 import { ColorSwatches } from "./ColorSwatches";
-import { IconCrown } from "./Icons";
+import { IconChevronRight, IconCrown, IconLink, IconPlay } from "./Icons";
 import {
   AUTHOR_COLOR_KEY, AUTHOR_KEY, AVATAR_COLORS, REVIEW_CHANGED_EVENT,
   initialsOf, loadReviewer,
@@ -120,6 +120,16 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
               </p>
             </header>
 
+            {(["identity", "devices", "ready"] as const).includes(step) && (
+              <nav className="cp-gr-trail" aria-label="Setup steps">
+                {([["identity", "You"], ["devices", "Devices"], ["ready", "Ready"]] as const).map(([id, lbl], i) => (
+                  <span key={id} className={"cp-gr-trail-step" + (step === id ? " here" : "")}>
+                    {i > 0 && <IconChevronRight size={9} className="cp-gr-trail-sep" />}
+                    {lbl}
+                  </span>
+                ))}
+              </nav>
+            )}
             {step === "identity" && (
               <section className="cp-colobby-card" aria-label="Your identity">
                 <h2 className="cp-colobby-card-title">You</h2>
@@ -130,9 +140,9 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                     onKeyDown={(e) => { if (e.key === "Enter") continueIdentity(); }} />
                 </label>
                 <ColorSwatches colors={AVATAR_COLORS} value={color} onPick={setColor} ariaLabel="Avatar color" />
-                <button type="button" className="btn btn-primary cp-colobby-cta"
+                <button type="button" className="btn cp-colobby-cta"
                   disabled={!name.trim()} onClick={continueIdentity}>
-                  Continue
+                  Continue <IconChevronRight size={12} />
                 </button>
               </section>
             )}
@@ -162,8 +172,8 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                       onChange={(e) => setSessionTitle(e.target.value)}
                       placeholder="Rough cut review" maxLength={80} />
                   </label>
-                  <button type="button" className="btn btn-primary cp-colobby-cta" onClick={startSession}>
-                    Start session
+                  <button type="button" className="btn cp-colobby-cta" onClick={startSession}>
+                    <IconPlay size={12} /> Start session
                   </button>
                 </section>
                 {localSource && (
@@ -179,13 +189,13 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                     <input className="cp-colobby-input" value={ticket} spellCheck={false}
                       onChange={(e) => setTicket(e.target.value)} placeholder="Paste a join code" />
                   </label>
-                  {/* P7: neutral until code + name validate, then it arms to
-                      the primary green; the .join floor stops the width jump
-                      while "Connecting…" is in flight. */}
+                  {/* Grey chip like every lobby action (no green here, ever);
+                      disabled carries the gating, the .join floor stops the
+                      width jump while "Connecting…" is in flight. */}
                   <button type="button"
-                    className={"btn " + (joinReady ? "btn-primary" : "btn-ghost") + " cp-colobby-cta join"}
+                    className="btn cp-colobby-cta join"
                     disabled={!joinReady || joining} onClick={joinSession}>
-                    {joining ? "Connecting…" : "Join"}
+                    <IconLink size={12} /> {joining ? "Connecting…" : "Join"}
                   </button>
                   {session.error && <p className="cp-colobby-err" role="alert">{session.error}</p>}
                 </section>

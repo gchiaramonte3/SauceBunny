@@ -559,7 +559,7 @@ test("green room: identity, devices, ready; saved identity skips ahead", async (
   await lobby.getByRole("button", { name: "Continue" }).click();
 
   // DEVICES: one Enable button pre-grant; the mock grants and streams.
-  await lobby.getByRole("button", { name: "Enable camera and microphone" }).click();
+  await lobby.getByRole("button", { name: "Enable camera and mic" }).click();
   await expect(lobby.locator(".cp-gr-preview video")).toBeVisible();
   // Post-grant labels populate the selects.
   await expect(lobby.locator(".cp-gr-selects select").first()).toBeVisible();
@@ -583,7 +583,7 @@ test("green room: returning user with granted devices lands on READY", async ({ 
   // Straight to READY: compact device strip instead of the full step.
   await expect(lobby.locator(".cp-gr-strip")).toBeVisible();
   await expect(lobby.getByRole("button", { name: "Start session" })).toBeEnabled();
-  await expect(lobby.getByRole("button", { name: "Enable camera and microphone" })).toHaveCount(0);
+  await expect(lobby.getByRole("button", { name: "Enable camera and mic" })).toHaveCount(0);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 

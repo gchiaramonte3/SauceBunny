@@ -128,19 +128,32 @@
   font-size: 12.5px;
 }
 .cp-colobby-input::placeholder { color: var(--fg-5); }
-/* Full-width action closing each card — one button height (.btn's 30px). */
-/* P7: buttons hug their labels - no card-spanning CTAs. min-width keeps
-   short labels stable; the cap stops any label from going banner-wide. */
+/* THE lobby action: the grey chip (user call 2026-07-19 - no green
+   buttons anywhere in this flow). Faint fill + line border, hover
+   brightens both; buttons hug their labels (P7), min-width keeps short
+   labels stable. */
 .cp-colobby-cta {
   width: auto;
   min-width: 88px;
   max-width: 280px;
   align-self: center;
   justify-content: center;
+  gap: 6px;
   margin-top: var(--s-1);
   padding-left: 18px;
   padding-right: 18px;
+  height: 32px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md, 8px);
+  color: var(--fg-1);
+  font-weight: 700;
 }
+.cp-colobby-cta:hover:not(:disabled) {
+  background: rgba(255,255,255,0.10);
+  border-color: var(--line-3);
+}
+.cp-colobby-cta:disabled { opacity: 0.45; }
 /* The join CTA swaps "Join" for "Connecting…" - a fixed floor stops the
    width jump while it is in flight. */
 .cp-colobby-cta.join { min-width: 132px; }
@@ -340,17 +353,6 @@
   object-fit: cover;
   transform: scaleX(-1); /* mirrored, like every conferencing self-view */
 }
-.cp-gr-preview-off {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-ui);
-  font-size: 12px;
-  color: var(--fg-3);
-  background: var(--bg-0);
-}
 .cp-gr-meter {
   display: flex;
   align-items: flex-end;
@@ -374,18 +376,7 @@
 .cp-gr-selects { display: flex; flex-direction: column; gap: var(--s-2); }
 .cp-gr-toggles { display: flex; justify-content: center; gap: var(--s-2); }
 .cp-gr-devices-foot { display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
-.cp-gr-denied {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: var(--s-2);
-  font-family: var(--font-ui);
-  font-size: 13px;
-  color: var(--fg-2);
-}
 .cp-gr-denied-row { display: flex; justify-content: center; gap: var(--s-2); }
-.cp-gr-denied-line { display: flex; align-items: center; gap: 6px; margin: 0; }
 /* Identity swatches are the shared ColorSwatches (base.css); the card
    centers the row. */
 .cp-colobby-card .cp-swatches { justify-content: center; }
@@ -425,3 +416,49 @@
   padding: var(--s-1);
 }
 .cp-gr-editname:hover { color: var(--fg-1); }
+
+/* ── Devices step: states render INSIDE the one preview frame. ── */
+.cp-gr-preview-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  padding: var(--s-4);
+  text-align: center;
+  color: var(--fg-3);
+  background: var(--bg-0);
+}
+.cp-gr-state-line {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+.cp-gr-state-sub {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-4);
+  max-width: 40ch;
+}
+
+/* ── Step trail: You › Devices › Ready. Quiet; the current step is lit. ── */
+.cp-gr-trail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-5);
+}
+.cp-gr-trail-step { display: inline-flex; align-items: center; gap: 6px; }
+.cp-gr-trail-step.here { color: var(--fg-1); }
+.cp-gr-trail-sep { color: var(--fg-5); }
