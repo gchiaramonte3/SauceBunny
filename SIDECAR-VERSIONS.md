@@ -17,10 +17,6 @@ guard rail and refuses to install a leaky binary.
 | `whisper-cli-aarch64-apple-darwin` | `npm run build:whisper` | whisper.cpp source, CMake `-DBUILD_SHARED_LIBS=OFF` |
 | `saucebunny-diarize-aarch64-apple-darwin` | `npm run build:diarizer` | `swift-sidecar/` (SPM, owned by us) |
 
-## ffmpeg
-- version: 8.1
-- source: https://www.osxexperts.net/ (static arm64 build)
-- refreshed: 2026-05-25
 
 ## whisper-cli
 - version: e0fd1f6787a5bd4a4957dd97c5b64df882ee7b0c (commit e0fd1f6)
@@ -36,3 +32,8 @@ guard rail and refuses to install a leaky binary.
 - version: 88a39274ecf88ba11686acd357b59685b1cbf03d (commit 88a3927)
 - source: https://github.com/ggml-org/llama.cpp (built from source, static)
 - refreshed: 2026-06-12
+
+## ffmpeg
+- version: 8.1
+- source: https://www.osxexperts.net/ (static arm64 build)
+- refreshed: 2026-07-19
