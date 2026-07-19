@@ -1210,10 +1210,24 @@
   flex-wrap: wrap;
 }
 
-/* History entries whose video is gone: visible but not loadable (the
-   follow-along rule - a transcript never attaches without its video). */
-.cp-tx-history-row.missing { opacity: 0.5; cursor: not-allowed; }
+/* History entries whose video is gone still open - detached (the
+   follow-along rule: a transcript never attaches to someone else's video). */
 .cp-tx-history-gone {
   color: var(--warning);
   font-weight: 600;
 }
+.cp-tx-history-clear {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.cp-tx-history-clear:hover { background: rgba(255,255,255,0.07); color: var(--fg-1); }

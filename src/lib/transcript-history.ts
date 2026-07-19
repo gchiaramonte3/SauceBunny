@@ -167,6 +167,13 @@ export function touchEntry(id: string): void {
 }
 
 /** Remove an entry by id — for the history popover's per-row delete. */
+/** Wipe the whole list (the popover's "Clear all"). The SRT files on
+ *  disk are KEPT - this clears the shortcut list, not your transcripts. */
+export function clearHistory(): void {
+  safeWrite([]);
+  notifyChanged();
+}
+
 export function removeEntry(id: string): void {
   safeWrite(safeRead().filter((e) => e.id !== id));
   notifyChanged();

@@ -10,6 +10,7 @@ import { secondsToTc } from "../lib/timecode";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
 import {
+  clearHistory,
   getHistory,
   removeEntry,
   type TranscriptHistoryEntry,
@@ -1620,6 +1621,10 @@ export function TranscriptViewer({
           }}
           onRemove={(id) => {
             removeEntry(id);
+            setHistoryEntries(getHistory());
+          }}
+          onClearAll={() => {
+            clearHistory();
             setHistoryEntries(getHistory());
           }}
         />

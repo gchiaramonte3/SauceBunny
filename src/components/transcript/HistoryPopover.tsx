@@ -24,15 +24,17 @@ type Props = {
   onClose: () => void;
   onPick: (entry: TranscriptHistoryEntry) => void;
   onRemove: (id: string) => void;
+  /** Empty the list (SRT files on disk are kept). */
+  onClearAll: () => void;
 };
 
 export function HistoryPopover({
-  anchor, entries, activePath, onClose, onPick, onRemove,
+  anchor, entries, activePath, onClose, onPick, onRemove, onClearAll,
 }: Props) {
   const popRef = useRef<HTMLDivElement>(null);
-  // RULE: a transcript can only load while its video is reachable. Probe
-  // local sources on open; entries with no source location at all are
-  // unfollowable by definition. (Web URLs are always a known location.)
+  // Every entry opens; this probe only tells the user (and the loader)
+  // whether the VIDEO still exists, so a transcript with a missing video
+  // opens on its own instead of shadowing whatever else is loaded.
   const [missing, setMissing] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     let live = true;
@@ -88,6 +90,16 @@ export function HistoryPopover({
         {entries.length > 0 && (
           <span className="cp-tx-history-count">{entries.length}</span>
         )}
+        {entries.length > 0 && (
+          <button
+            type="button"
+            className="cp-tx-history-clear"
+            onClick={(e) => { e.stopPropagation(); onClearAll(); }}
+            title="Empty this list (the transcript files on disk are kept)"
+          >
+            Clear all
+          </button>
+        )}
       </div>
       {entries.length === 0 ? (
         <div className="cp-tx-history-empty">
@@ -106,11 +118,10 @@ export function HistoryPopover({
             return (
               <div
                 key={e.id}
-                className={"cp-tx-history-row" + (isActive ? " active" : "") + (gone ? " missing" : "")}
-                onClick={() => { if (!gone) onPick(e); }}
+                className={"cp-tx-history-row" + (isActive ? " active" : "")}
+                onClick={() => onPick(e)}
                 role="menuitem"
-                aria-disabled={gone}
-                title={gone ? "The video for this transcript can't be found" : undefined}
+                title={gone ? "Opens on its own - this transcript's video can't be found" : "Opens with its video"}
               >
                 <div className="cp-tx-history-row-main">
                   <div className="cp-tx-history-row-title" title={e.srtPath}>
@@ -129,7 +140,7 @@ export function HistoryPopover({
                     {gone && (
                       <>
                         <span>·</span>
-                        <span className="cp-tx-history-gone">video missing</span>
+                        <span className="cp-tx-history-gone">no video</span>
                       </>
                     )}
                   </div>

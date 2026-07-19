@@ -3433,34 +3433,37 @@ export default function App() {
 
   const handleLoadFromHistory = useCallback(async (entry: TranscriptHistoryEntry) => {
     // RULE (2026-07-19): a transcript only ever attaches to ITS OWN video.
-    // If the entry's source isn't what's loaded, load that source alongside;
-    // if the source is gone (moved/deleted local file, no known location),
-    // refuse - a disconnected transcript shadowing the wrong video is worse
-    // than no transcript.
+    // Picking one from history brings its video along. When that video is
+    // gone (moved/deleted, or the entry never knew a location), the
+    // transcript still OPENS - detached, with the player cleared first, so
+    // it can never shadow an unrelated video that happens to be loaded.
     const isCurrent =
       (entry.sourcePath != null && entry.sourcePath === localFilePath) ||
       (entry.sourceUrl != null && entry.sourceUrl === activeSourceUrlRef.current);
     if (!isCurrent) {
-      if (entry.sourcePath) {
-        const exists = await invoke<number>("get_file_size", { path: entry.sourcePath })
-          .then(() => true)
-          .catch(() => false);
-        if (!exists) {
-          pushNotification("error", "This transcript's video can't be found",
-            `${entry.sourcePath} was moved or deleted, so the transcript has nothing to follow. Remove the entry to clean up.`);
-          return;
-        }
+      const videoPath = entry.sourcePath && await invoke<number>("get_file_size", { path: entry.sourcePath })
+        .then(() => entry.sourcePath)
+        .catch(() => null);
+      if (videoPath) {
         // skipAutoTranscript: the newest-transcript auto-loader must not
         // race and clobber this explicit (possibly older) choice.
-        void loadLocalPath(entry.sourcePath, true);
+        void loadLocalPath(videoPath, true);
       } else if (entry.sourceUrl) {
         openSourceView();
         setUrl(entry.sourceUrl);
         void handleFetch(entry.sourceUrl);
       } else {
-        pushNotification("error", "This transcript's video is unknown",
-          "The history entry has no source location, so there is nothing to follow along with.");
-        return;
+        // Detached read: clear the source so nothing else is on screen to
+        // follow along with, then attach the transcript below. (Deliberately
+        // NOT handleClear - that also closes the drawer this lives in.)
+        openSourceView();
+        resetForNewSource("");
+        setStatus("empty");
+        setUrl("");
+        pushNotification("info", "Opened without its video",
+          entry.sourcePath
+            ? `${entry.sourcePath} was moved or deleted, so this transcript opened on its own. Follow-along needs its video.`
+            : "This transcript has no saved video location, so it opened on its own. Follow-along needs its video.");
       }
     }
     try {
@@ -3477,7 +3480,7 @@ export default function App() {
       pushNotification("error", "Transcript file missing",
         `${entry.srtPath} was moved or deleted. Remove it from the history list to clean up.`);
     }
-  }, [pushNotification, localFilePath, loadLocalPath, handleFetch, setUrl, openSourceView]);
+  }, [pushNotification, localFilePath, loadLocalPath, handleFetch, setUrl, openSourceView, resetForNewSource]);
 
   // ====== Library (Home view) open-handlers ======
   // Every Library open switches to the Clip view first, then routes through
