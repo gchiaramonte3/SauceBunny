@@ -203,12 +203,16 @@
 /* Contextual note under a setting (e.g. the per-browser cookie hint). A slim,
    neutral strip — folds conditional rows into one line that changes with the
    selection. */
+/* A row followed by a note card drops its hairline - the card's own border
+   carries the separation, and hairline-then-box read as a misaligned double
+   rule (the "line below Browser cookies" complaint). */
+.cp-pane-row:has(+ .cp-pane-note) { border-bottom: none; }
 .cp-pane-note {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: -2px 0 12px;
-  padding: 8px 12px;
+  margin: 2px 0 14px;
+  padding: 10px 12px;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--line-2);
   border-radius: 8px;

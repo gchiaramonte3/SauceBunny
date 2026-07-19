@@ -109,7 +109,11 @@ pub(crate) fn ytdlp(
             // metadata, captions, downloads) funnels through here.
             eprintln!("[yt-dlp] using {} copy: {}", resolved_ytdlp_kind(true), bin_dir.join("yt-dlp").display());
             let path = format!("{}:{}", bin_dir.display(), HOMEBREW_PATH);
-            return Ok(app.shell().command("yt-dlp").env("PATH", path));
+            // --no-update: self-updating is the app's job (update_ytdlp), and
+            // without it every spawn of an >90-day binary dumps a 4-line
+            // "run yt-dlp -U" lecture into the pipeline log that users can't
+            // act on (the bundled copy isn't theirs to -U).
+            return Ok(app.shell().command("yt-dlp").arg("--no-update").env("PATH", path));
         }
     }
     eprintln!("[yt-dlp] using {} copy (sidecar)", resolved_ytdlp_kind(false));
@@ -120,6 +124,7 @@ pub(crate) fn ytdlp(
         // this in their own "yt-dlp sidecar not found: {e}" strings and the
         // established message text must survive the r108 AppError sweep.
         .map_err(|e| crate::AppError::invalid(format!("sidecar yt-dlp not found: {e}")))?
+        .arg("--no-update")
         .env("PATH", HOMEBREW_PATH))
 }
 

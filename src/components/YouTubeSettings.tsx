@@ -39,14 +39,26 @@ export function YouTubeSettings({
   sectionOpen: (id: string) => boolean;
   toggleSection: (id: string) => void;
 }) {
-  const [status, setStatus] = useState<YtdlpStatus | null>(null);
+  // Last-known version seeds the row instantly; the live probe (spawning
+  // yt-dlp --version takes a second or two) refreshes it in the background.
+  // Without the seed the row sat on "checking…" long enough to read as hung.
+  const [status, setStatus] = useState<YtdlpStatus | null>(() => {
+    try {
+      const raw = localStorage.getItem("saucebunny.ytdlpVersion");
+      return raw ? (JSON.parse(raw) as YtdlpStatus) : null;
+    } catch { return null; }
+  });
   const [busy, setBusy] = useState<"idle" | "checking" | "updating" | "resetting">("checking");
   const [msg, setMsg] = useState<string | null>(null);
 
+  const applyStatus = (s: YtdlpStatus) => {
+    setStatus(s);
+    try { localStorage.setItem("saucebunny.ytdlpVersion", JSON.stringify(s)); } catch { /* quota */ }
+  };
   const refresh = async () => {
     setBusy("checking");
     try {
-      setStatus(await invoke<YtdlpStatus>("ytdlp_version"));
+      applyStatus(await invoke<YtdlpStatus>("ytdlp_version"));
     } catch (e) {
       setMsg(formatError(e));
     } finally {
@@ -55,6 +67,7 @@ export function YouTubeSettings({
   };
   useEffect(() => {
     refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const update = async () => {
@@ -62,7 +75,7 @@ export function YouTubeSettings({
     setMsg(null);
     try {
       const s = await invoke<YtdlpStatus>("update_ytdlp");
-      setStatus(s);
+      applyStatus(s);
       setMsg(`Updated to ${s.version}.`);
     } catch (e) {
       setMsg(`Update failed: ${formatError(e)}`);
@@ -200,7 +213,7 @@ export function YouTubeSettings({
           </div>
           <div className="v cp-ytdlp-actions">
             <code className="cp-ytdlp-version">
-              {busy === "checking" ? "checking…" : (status?.version ?? "unknown")}
+              {status?.version ?? (busy === "checking" ? "checking…" : "unknown")}
             </code>
             <button className="btn btn-primary" onClick={update} disabled={busy === "updating"}>
               {busy === "updating" ? "Updating…" : "Update yt-dlp"}
