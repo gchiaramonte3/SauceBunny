@@ -34,6 +34,14 @@ class FakePc {
     return s as unknown as RTCRtpSender;
   }
   getSenders() { return this.senders as unknown as RTCRtpSender[]; }
+  transceivers: { kind: string; direction: string }[] = [];
+  addTransceiver(kind: string, init?: { direction?: string }) {
+    this.transceivers.push({ kind, direction: init?.direction ?? "sendrecv" });
+    const s = new FakeSender({ kind });
+    s.track = null; // a placeholder sender carries no track yet
+    this.senders.push(s);
+    return { sender: s as unknown as RTCRtpSender };
+  }
   createOffer() { this.offers++; return Promise.resolve({ type: "offer", sdp: "sdp-offer" }); }
   createAnswer() { this.answers++; return Promise.resolve({ type: "answer", sdp: "sdp-answer" }); }
   setLocalDescription(d: unknown) { this.localDescs.push(d); return Promise.resolve(); }
@@ -84,12 +92,12 @@ const flush = () => new Promise<void>((r) => { setTimeout(r, 0); });
 describe("rtc mesh", () => {
   it("offerer determinism: the lower member id offers, the higher waits", async () => {
     const a = makeMesh("m0");
-    a.mesh.setMembers(["m2"]);
+    a.mesh.setMembers([{ id: "m2", epoch: 1 }]);
     await flush();
     expect(a.sent.some((s) => s.to === "m2" && s.payload.t === "offer")).toBe(true);
 
     const b = makeMesh("m2");
-    b.mesh.setMembers(["m0"]);
+    b.mesh.setMembers([{ id: "m0", epoch: 1 }]);
     await flush();
     expect(b.sent.some((s) => s.payload.t === "offer")).toBe(false);
     // ...but it answers an incoming offer.
@@ -105,7 +113,7 @@ describe("rtc mesh", () => {
 
   it("device switch replaces every outbound sender track", async () => {
     const { mesh } = makeMesh("m0");
-    mesh.setMembers(["m1", "m2"]);
+    mesh.setMembers([{ id: "m1", epoch: 1 }, { id: "m2", epoch: 1 }]);
     await flush();
     const next = fakeStream(["video", "audio"]);
     await mesh.replaceLocalStream(next);
@@ -115,7 +123,7 @@ describe("rtc mesh", () => {
   });
 
   it("outbound video is capped via scaleResolutionDownBy", async () => {
-    makeMesh("m0").mesh.setMembers(["m1"]);
+    makeMesh("m0").mesh.setMembers([{ id: "m1", epoch: 1 }]);
     await flush();
     const videoSender = FakePc.instances[0].senders.find((s) => s.track?.kind === "video");
     expect(videoSender?.params.encodings[0]?.scaleResolutionDownBy).toBe(2); // 720/360
@@ -124,7 +132,7 @@ describe("rtc mesh", () => {
   it("teardown closes every peer connection and retracts streams", async () => {
     const retracted: string[] = [];
     const { mesh } = makeMesh("m0", { onRemoteStream: (id, s) => { if (s === null) retracted.push(id); } });
-    mesh.setMembers(["m1", "m2", "m3"]);
+    mesh.setMembers([{ id: "m1", epoch: 1 }, { id: "m2", epoch: 1 }, { id: "m3", epoch: 1 }]);
     await flush();
     mesh.close();
     expect(FakePc.instances.every((pc) => pc.closed)).toBe(true);
@@ -133,7 +141,7 @@ describe("rtc mesh", () => {
 
   it("one ICE restart, then failed (avatar + loud log)", async () => {
     const { mesh, states } = makeMesh("m0");
-    mesh.setMembers(["m1"]);
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
     await flush();
     const pc = FakePc.instances[0];
     pc.fireConnectionState("failed");
@@ -149,9 +157,9 @@ describe("rtc mesh", () => {
 
   it("a departed member's connection is torn down on roster change", async () => {
     const { mesh } = makeMesh("m0");
-    mesh.setMembers(["m1", "m2"]);
+    mesh.setMembers([{ id: "m1", epoch: 1 }, { id: "m2", epoch: 1 }]);
     await flush();
-    mesh.setMembers(["m2"]);
+    mesh.setMembers([{ id: "m2", epoch: 1 }]);
     expect(FakePc.instances[0].closed).toBe(true);
     expect(FakePc.instances[1].closed).toBe(false);
   });
@@ -160,7 +168,7 @@ describe("rtc mesh", () => {
   it("share override owns video senders through a device switch, camera returns on null", async () => {
     const local = fakeStream(["video", "audio"]);
     const { mesh } = makeMesh("m0", { getLocalStream: () => local });
-    mesh.setMembers(["m1"]);
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
     await flush();
     const share = { kind: "video", getSettings: () => ({ height: 900 }) } as unknown as MediaStreamTrack;
     await mesh.setVideoOverride(share);
@@ -174,5 +182,48 @@ describe("rtc mesh", () => {
     await mesh.setVideoOverride(null);
     expect((vs?.replaced.at(-1) as { kind?: string })?.kind).toBe("video");
     expect(vs?.replaced.at(-1)).not.toBe(share);
+  });
+});
+
+describe("camera that arrives after connect (r124)", () => {
+  it("reserves a video sender even when joining with the camera off", () => {
+    // The bug: addTrack only ran for tracks that existed at connect time, so
+    // joining camera-off left NO video sender - and replaceLocalStream then
+    // looped over an empty list. Turning the camera on reached nobody, with
+    // no error to catch.
+    const { mesh } = makeMesh("m0", { getLocalStream: () => fakeStream(["audio"]) });
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+    expect(FakePc.instances[0].transceivers.some((t) => t.kind === "video")).toBe(true);
+  });
+
+  it("a camera turned on later reaches every peer", async () => {
+    const { mesh } = makeMesh("m0", { getLocalStream: () => fakeStream(["audio"]) });
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+    const withCam = fakeStream(["video"]);
+    const cam = withCam.getVideoTracks()[0];
+    await mesh.replaceLocalStream(withCam);
+    const landed = FakePc.instances[0].senders.some((s) => s.replaced.includes(cam));
+    expect(landed, "the camera track must land on a sender").toBe(true);
+  });
+});
+
+describe("a member who reconnects (r124)", () => {
+  it("rebuilds the connection when the same id comes back at a higher epoch", () => {
+    // Same id, new socket. Without the epoch check the mesh kept the old
+    // PeerConnection and the tile sat on "Connecting" forever.
+    const { mesh } = makeMesh("m0");
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+    const first = FakePc.instances[0];
+    mesh.setMembers([{ id: "m1", epoch: 2 }]);
+    expect(first.closed, "the stale connection must be torn down").toBe(true);
+    expect(FakePc.instances.length, "and a fresh one built").toBe(2);
+  });
+
+  it("leaves an unchanged member's connection alone", () => {
+    const { mesh } = makeMesh("m0");
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+    expect(FakePc.instances.length).toBe(1);
+    expect(FakePc.instances[0].closed).toBe(false);
   });
 });

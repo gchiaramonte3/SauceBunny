@@ -21,6 +21,7 @@ import { listen } from "@tauri-apps/api/event";
 import { formatError } from "../lib/error-format";
 import { loadInstallId } from "../lib/identity";
 import { getLastUserSeekAt, getPlayheadFrames } from "../lib/playhead-store";
+import { createClockEstimator, expectedPosition } from "../lib/session-clock";
 import {
   loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc,
   commentMarkers as reviewMarkersOf, annotationsOf,
@@ -211,6 +212,15 @@ export function useCoReview({
   const coRateRef = useRef(1); coRateRef.current = playbackRate;
   const coRoleRef = useRef("off"); coRoleRef.current = coSession.role;
   const coLastHostPosRef = useRef<number | null>(null);
+  /** Cross-machine clock offset estimator (see lib/session-clock.ts). */
+  const coClockRef = useRef(createClockEstimator());
+  /** Last (epoch, seq) applied, so stale/duplicate heartbeats are ignored. */
+  const coLastSeqRef = useRef({ epoch: -1, seq: -1 });
+  /** When we last issued a chase seek — feeds decideChase's cooldown. */
+  const coLastChaseAtRef = useRef(0);
+  /** True while we are APPLYING a remote transport line to our own player,
+   *  so the resulting state callback is not re-broadcast as a local change. */
+  const applyingRemoteRef = useRef(false);
   const coReadyRef = useRef(false); // has OUR player loaded the host's source yet?
   // Am I the one driving source + transport? Defaults to the host until a
   // Presenter line says otherwise. The network star never moves; only this
@@ -347,8 +357,22 @@ export function useCoReview({
         // when paused, so a late-loading guest lands on the shared frame.
         const justLoaded = !coReadyRef.current;
         coReadyRef.current = true;
+        // Drop a heartbeat from a SUPERSEDED presenter, and any that arrives
+        // out of order within the current epoch. Without this, a stale line
+        // in flight during a floor handover yanks everyone backwards.
+        const lastSeen = coLastSeqRef.current;
+        if (m.epoch < lastSeen.epoch) return;
+        if (m.epoch === lastSeen.epoch && m.seq <= lastSeen.seq && !justLoaded) return;
+        if (m.epoch > lastSeen.epoch) coClockRef.current.reset(); // new sender, new clock
+        coLastSeqRef.current = { epoch: m.epoch, seq: m.seq };
+
+        const now = Date.now();
+        coClockRef.current.sample(m.atMs, now);
         const r = Math.max(1, Math.round(coFpsRef.current));
-        const expected = m.position + (m.playing ? (Math.max(0, Date.now() - m.atMs) / 1000) * m.rate : 0);
+        // Translate the presenter's wall clock into ours before extrapolating.
+        // Differencing raw Date.now() across two Macs made an ordinary clock
+        // offset look like permanent drift and re-seeked every heartbeat.
+        const expected = expectedPosition(m, now, coClockRef.current.offsetMs());
         const cur = getPlayheadFrames() / r;
         const hostScrubbed = coLastHostPosRef.current === null || Math.abs(m.position - coLastHostPosRef.current) > 0.25;
         // RC3 latch: a local seek in the last ~1.2s owns the playhead — the
@@ -361,15 +385,36 @@ export function useCoReview({
         const decision = decideChase({
           justLoaded, localSeekHot, playing: m.playing,
           curSeconds: cur, expectedSeconds: expected, hostScrubbed,
+          sinceLastChaseMs: now - coLastChaseAtRef.current,
         });
         if (decision.commitHostPos) {
           coLastHostPosRef.current = m.position;
         } else if (import.meta.env.DEV && Math.abs(cur - expected) > 0.5) {
           console.info("[co-review] chase yielded to a local seek", { cur, expected });
         }
-        if (decision.seekSeconds != null) onChaseSeek(Math.floor(decision.seekSeconds * r));
-        if (m.playing !== coPlayingRef.current) {
-          if (m.playing) p.play(); else p.pause();
+        // Everything below APPLIES the presenter's state to our player. Flag
+        // it so the resulting play/pause callback isn't mistaken for a local
+        // action and echoed back as a fresh transport line (which, once a
+        // guest can present, would be a feedback loop between two machines).
+        applyingRemoteRef.current = true;
+        try {
+          if (decision.seekSeconds != null) {
+            coLastChaseAtRef.current = now;
+            onChaseSeek(Math.floor(decision.seekSeconds * r));
+          }
+          // Rate was broadcast but never applied - a guest sat at 1x while the
+          // presenter ran at 1.5x and got seek-corrected once a second instead.
+          // MediaBunnyPlayer decodes at 1x by design, hence the capability gate.
+          if (p.supportsPlaybackRate && Math.abs((m.rate || 1) - coRateRef.current) > 0.01) {
+            p.setPlaybackRate(m.rate || 1);
+          }
+          if (m.playing !== coPlayingRef.current) {
+            if (m.playing) p.play(); else p.pause();
+          }
+        } finally {
+          // Clear on the next MACROTASK: the player's state callback lands in a
+          // later task, so a microtask would clear the flag too early.
+          window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
         }
         return;
       }
@@ -596,9 +641,20 @@ export function useCoReview({
   // Runs while the session is live and we know our member id; signaling
   // rides the iroh star (the rtc case above feeds incoming lines in).
   const selfId = coSession.selfId ?? (coSession.role === "host" ? "m0" : null);
+  // Members carry their roster claim epoch: same id + higher epoch means that
+  // person reconnected, so the mesh must rebuild that connection rather than
+  // keep talking to a socket that's gone. Serialized into a string key so the
+  // effect doesn't re-run on every identical render.
+  const memberKey = coSession.peers.map((p) => `${p.id}:${p.epoch}`).join(",");
   const memberIds = useMemo(
-    () => screeningParticipants.filter((p) => !p.isSelf).map((p) => p.id),
-    [screeningParticipants],
+    () => {
+      const epochs = new Map(coSession.peers.map((p) => [p.id, p.epoch]));
+      return screeningParticipants
+        .filter((p) => !p.isSelf)
+        .map((p) => ({ id: p.id, epoch: epochs.get(p.id) ?? 0 }));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [screeningParticipants, memberKey],
   );
   const mesh = useRtcMesh({
     active: coSessionActive,
@@ -699,7 +755,17 @@ export type ChaseInput = {
   expectedSeconds: number;
   /** Host moved > 0.25s since the last heartbeat we ACTED on. */
   hostScrubbed: boolean;
+  /** ms since our last chase seek. Guards against a correction storm: a seek
+   *  takes time to land (a web seek rebuilds the whole ffmpeg stream), and
+   *  measuring drift mid-seek produces another seek. */
+  sinceLastChaseMs: number;
 };
+/** While playing, drift under this is left alone. Above the old 0.5s a normal
+ *  clock offset kept the guest permanently "out of sync"; 0.75s is still well
+ *  under a noticeable desync for review and stops the churn. */
+const PLAYING_TOLERANCE_SEC = 0.75;
+/** No two chase seeks closer together than this. */
+const CHASE_COOLDOWN_MS = 1000;
 export type ChaseDecision = {
   /** Seconds to seek to, or null to leave the playhead alone. */
   seekSeconds: number | null;
@@ -709,12 +775,18 @@ export type ChaseDecision = {
 };
 export function decideChase(i: ChaseInput): ChaseDecision {
   if (i.localSeekHot && !i.justLoaded) return { seekSeconds: null, commitHostPos: false };
+  // A seek we just issued may still be landing; measuring drift against a
+  // mid-flight playhead would immediately order another one. The just-loaded
+  // snap is exempt - that one must always fire.
+  const cooling = !i.justLoaded && i.sinceLastChaseMs < CHASE_COOLDOWN_MS;
   if (i.playing) {
+    const drift = Math.abs(i.curSeconds - i.expectedSeconds);
     return {
-      seekSeconds: Math.abs(i.curSeconds - i.expectedSeconds) > 0.5 ? i.expectedSeconds : null,
+      seekSeconds: !cooling && drift > PLAYING_TOLERANCE_SEC ? i.expectedSeconds : null,
       commitHostPos: true,
     };
   }
+  if (cooling) return { seekSeconds: null, commitHostPos: true };
   // Paused: only jump when the host actually scrubbed (or we just loaded) —
   // a paused guest glancing at a nearby frame must not be yanked back.
   if (i.justLoaded || (i.hostScrubbed && Math.abs(i.curSeconds - i.expectedSeconds) > 0.1)) {

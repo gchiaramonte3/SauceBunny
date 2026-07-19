@@ -40,7 +40,7 @@ export function useRtcMesh(args: {
   active: boolean;
   selfId: string | null;
   role: string; // "off" | "host" | "peer"
-  memberIds: string[];
+  memberIds: { id: string; epoch: number }[];
   turn: TurnConfig;
   onLog: (tag: "info" | "warn" | "err", msg: string) => void;
 }) {

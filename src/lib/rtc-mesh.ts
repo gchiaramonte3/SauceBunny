@@ -44,6 +44,9 @@ export function isOfferer(selfId: string, otherId: string): boolean {
 
 type PeerSlot = {
   pc: RTCPeerConnection;
+  /** Roster claim count for this member id. A HIGHER epoch on the same id
+   *  means the person behind it reconnected, so this connection is stale. */
+  epoch: number;
   state: MeshPeerState;
   restarted: boolean;
   /** Senders by kind, recorded at addTrack so replace/override never has
@@ -67,16 +70,27 @@ export class RtcMesh {
 
   /** Reconcile connections against the roster (minus self): connect to new
    *  members, tear down the departed. Call on every PeerList change. */
-  setMembers(ids: string[]): void {
+  setMembers(members: { id: string; epoch: number }[]): void {
     if (this.closed) return;
-    const want = new Set(ids.filter((id) => id !== this.deps.selfId));
+    const want = new Map(
+      members.filter((m) => m.id !== this.deps.selfId).map((m) => [m.id, m.epoch]),
+    );
     for (const [id, slot] of [...this.slots]) {
       if (!want.has(id)) {
         this.dropPeer(id, slot);
+        continue;
+      }
+      // Same id, HIGHER epoch: that member dropped and reconnected, so this
+      // PeerConnection is talking to a socket that no longer exists. Rebuild
+      // it - this is what left a rejoined friend's tile on "Connecting"
+      // forever, because nothing ever noticed the peer behind it had changed.
+      const epoch = want.get(id) ?? 0;
+      if (epoch > slot.epoch) {
+        this.dropPeer(id, slot);
       }
     }
-    for (const id of want) {
-      if (!this.slots.has(id)) this.connectTo(id);
+    for (const [id, epoch] of want) {
+      if (!this.slots.has(id)) this.connectTo(id, epoch);
     }
   }
 
@@ -170,9 +184,21 @@ export class RtcMesh {
     this.deps.onState(id, state);
   }
 
-  private connectTo(id: string): PeerSlot | null {
+  /** People tiles are ~220px wide; a full mesh must stay lean. Applied to a
+   *  placeholder sender too, so a camera that arrives later is capped from
+   *  its first frame rather than blasting full resolution at every peer. */
+  private capTileResolution(sender: RTCRtpSender, sourceHeight: number): void {
+    try {
+      const params = sender.getParameters();
+      params.encodings = params.encodings?.length ? params.encodings : [{}];
+      params.encodings[0].scaleResolutionDownBy = Math.max(1, sourceHeight / 360);
+      void sender.setParameters(params);
+    } catch { /* older engines: full-size tiles still work */ }
+  }
+
+  private connectTo(id: string, epoch = 0): PeerSlot | null {
     const pc = this.deps.createPc({ iceServers: this.deps.iceServers });
-    const slot: PeerSlot = { pc, state: "connecting", restarted: false, videoSenders: [], audioSenders: [] };
+    const slot: PeerSlot = { pc, epoch, state: "connecting", restarted: false, videoSenders: [], audioSenders: [] };
     this.slots.set(id, slot);
     this.deps.onState(id, "connecting");
 
@@ -193,15 +219,32 @@ export class RtcMesh {
         else slot.audioSenders.push(sender);
         if (track.kind === "video") {
           const h = track.getSettings?.().height ?? 720;
-          const down = Math.max(1, h / 360);
-          try {
-            const params = sender.getParameters();
-            params.encodings = params.encodings?.length ? params.encodings : [{}];
-            params.encodings[0].scaleResolutionDownBy = down;
-            void sender.setParameters(params);
-          } catch { /* older engines: full-size tiles still work */ }
+          this.capTileResolution(sender, h);
         }
       }
+    }
+    // PLACEHOLDER TRANSCEIVERS (r124) - the camera-reconnect fix.
+    //
+    // addTrack above only runs for tracks that exist RIGHT NOW. Join with the
+    // camera off (or with the mic denied) and that kind gets no sender at all,
+    // so replaceLocalStream later loops over an empty list and turning the
+    // camera on never reaches a single peer - a silent no-op with no error to
+    // catch. Reserving a sendrecv transceiver up front means there is ALWAYS a
+    // sender to replaceTrack into, for the whole life of the connection, with
+    // no renegotiation (which would need glare handling this mesh has never
+    // had). The m-line rides the very first offer, so both directions work
+    // even if the camera comes on much later.
+    if (slot.videoSenders.length === 0) {
+      try {
+        const tx = pc.addTransceiver("video", { direction: "sendrecv" });
+        slot.videoSenders.push(tx.sender);
+        this.capTileResolution(tx.sender, 720);
+      } catch { /* engine without addTransceiver: camera-on still needs a rejoin */ }
+    }
+    if (slot.audioSenders.length === 0) {
+      try {
+        slot.audioSenders.push(pc.addTransceiver("audio", { direction: "sendrecv" }).sender);
+      } catch { /* as above */ }
     }
 
     pc.onicecandidate = (e) => {

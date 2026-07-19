@@ -11,7 +11,7 @@ const base: ChaseInput = {
   playing: false,
   curSeconds: 100,
   expectedSeconds: 100,
-  hostScrubbed: false,
+  hostScrubbed: false, sinceLastChaseMs: 9999,
 };
 
 describe("co-review chase decisions", () => {
@@ -19,7 +19,7 @@ describe("co-review chase decisions", () => {
     // Host scrubs to P1; the chase's own correction armed the latch, so the
     // NEXT heartbeat (host now at P2) arrives with the latch hot.
     const yielded = decideChase({
-      ...base, localSeekHot: true, hostScrubbed: true,
+      ...base, localSeekHot: true, hostScrubbed: true, sinceLastChaseMs: 9999,
       curSeconds: 50, expectedSeconds: 80,
     });
     expect(yielded.seekSeconds).toBeNull();
@@ -29,7 +29,7 @@ describe("co-review chase decisions", () => {
     // Latch expired; because the edge was not consumed, hostScrubbed is
     // still true and the paused guest finally jumps to P2.
     const after = decideChase({
-      ...base, hostScrubbed: true, curSeconds: 50, expectedSeconds: 80,
+      ...base, hostScrubbed: true, sinceLastChaseMs: 9999, curSeconds: 50, expectedSeconds: 80,
     });
     expect(after.seekSeconds).toBe(80);
     expect(after.commitHostPos).toBe(true);
@@ -59,6 +59,33 @@ describe("co-review chase decisions", () => {
     const d = decideChase({
       ...base, justLoaded: true, localSeekHot: true,
       curSeconds: 0, expectedSeconds: 640,
+    });
+    expect(d.seekSeconds).toBe(640);
+  });
+
+  it("leaves small playing drift alone but corrects a real gap", () => {
+    // Under tolerance: a clock estimate is never perfect and a normal offset
+    // must not order a seek on every 500ms heartbeat.
+    const calm = decideChase({ ...base, playing: true, curSeconds: 100, expectedSeconds: 100.6 });
+    expect(calm.seekSeconds).toBeNull();
+    const real = decideChase({ ...base, playing: true, curSeconds: 100, expectedSeconds: 103 });
+    expect(real.seekSeconds).toBe(103);
+  });
+
+  it("will not issue a second chase seek while the first is still landing", () => {
+    const hot = decideChase({
+      ...base, playing: true, curSeconds: 100, expectedSeconds: 110, sinceLastChaseMs: 200,
+    });
+    expect(hot.seekSeconds).toBeNull();
+    const settled = decideChase({
+      ...base, playing: true, curSeconds: 100, expectedSeconds: 110, sinceLastChaseMs: 1500,
+    });
+    expect(settled.seekSeconds).toBe(110);
+  });
+
+  it("the just-loaded snap ignores the cooldown", () => {
+    const d = decideChase({
+      ...base, justLoaded: true, curSeconds: 0, expectedSeconds: 640, sinceLastChaseMs: 0,
     });
     expect(d.seekSeconds).toBe(640);
   });
