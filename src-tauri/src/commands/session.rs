@@ -36,7 +36,7 @@ use tokio::task::JoinHandle;
 
 /// Protocol identifier, exchanged in the QUIC handshake. Bump the trailing
 /// version if the wire format ever changes incompatibly.
-const ALPN: &[u8] = b"saucebunny/coreview/1";
+const ALPN: &[u8] = b"saucebunny/coreview/2";
 
 /// Star topology cap: host + 3 peers = 4 people per session (Phase 1).
 const MAX_PEERS: usize = 3;
@@ -72,8 +72,10 @@ const ONLINE_TIMEOUT: Duration = Duration::from_secs(8);
 #[ts(export, export_to = "../../src/bindings/")]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SessionMsg {
-    /// peer → host right after connect
-    Hello { name: String },
+    /// peer → host right after connect. `install` is a stable per-install
+    /// UUID (localStorage saucebunny.installId) so a member who drops and
+    /// rejoins RECLAIMS its roster slot instead of minting a duplicate.
+    Hello { name: String, install: String },
     /// host → the just-registered peer: your session-scoped member id and
     /// the session's display title. (PeerList alone can't tell you which
     /// entry is you - names collide.)
@@ -84,15 +86,45 @@ pub enum SessionMsg {
     /// member only. `from` is rewritten by the host to the sender's real id
     /// so a member can't spoof another's signaling.
     Rtc { from: String, to: String, payload: String },
-    /// host → everyone: load this source (web URL Phase 1)
-    LoadSource { url: String },
-    /// host → everyone: transport truth. at_ms = host wall clock (ms since epoch).
+    /// presenter → everyone: what the room is watching. ONE variant covers
+    /// all three cases; `kind` discriminates:
+    ///   "web"  → `url` is Some; the guest re-resolves it with its OWN yt-dlp
+    ///   "file" → `url` is None; the guest resolves `fingerprint` on its disk
+    ///   "none" → the source was cleared; guests unload
+    /// (named `source_kind`, not `kind`: serde's internal tag owns `kind`.)
+    /// `review_key` is the SHARED review-doc identity (fingerprint for files,
+    /// webpage_url for web) - never a host-local filesystem path.
+    LoadSource {
+        from: String,
+        source_kind: String,
+        url: Option<String>,
+        fingerprint: Option<String>,
+        title: Option<String>,
+        duration: Option<f64>,
+        review_key: String,
+    },
+    /// any member → everyone: could I open the presenter's source?
+    /// state = "loading" | "ready" | "failed" | "missing".
+    SourceStatus { from: String, state: String, detail: Option<String> },
+    /// host → everyone: who drives source + transport. This is NOT the
+    /// network star (which structurally cannot move - the invite ticket
+    /// points at the original host's endpoint). `epoch` increments on every
+    /// grant so late/duplicate Transport lines can be ordered.
+    Presenter { member: String, epoch: u32 },
+    /// peer → host: explicit departure, so a leave is declared, not inferred
+    /// from a QUIC idle timeout.
+    Bye,
+    /// presenter → everyone: transport truth. at_ms = sender wall clock (ms).
     Transport {
         playing: bool,
         position: f64,
         rate: f64,
         at_ms: f64,
         seq: u32,
+        /// Host-stamped sender id + the presenter epoch it was sent under, so
+        /// lines from a superseded presenter can be ordered and discarded.
+        from: String,
+        epoch: u32,
     },
     /// A shared review mutation. `op` is a frontend-serialized JSON string
     /// (a ReviewOp) — OPAQUE to Rust, which only relays it. Flows
@@ -114,13 +146,19 @@ pub enum SessionMsg {
 }
 
 /// One session member: a session-scoped id (m0 = host, m1, m2, ... minted
-/// at Hello, never reused) + display name. Ids are the roster key - names
-/// are display-only and can collide.
+/// at Hello) + display name. Ids are the roster key - names are display-only
+/// and can collide. An id is RECLAIMED when the same install rejoins (r124),
+/// so a reconnect updates a slot instead of adding a duplicate row.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]
 pub struct PeerInfo {
     pub id: String,
     pub name: String,
+    /// Bumped every time this id is claimed or reclaimed. The RTC mesh keys
+    /// its peer connections on (id, epoch): a bump means "same person, new
+    /// connection", so the stale PeerConnection is torn down and rebuilt
+    /// instead of sitting on "Connecting" forever.
+    pub epoch: u32,
 }
 
 #[derive(Clone, serde::Serialize, ts_rs::TS)]
@@ -133,6 +171,9 @@ pub struct SessionState {
     pub self_id: Option<String>, // your member id: host "m0"; peer via Welcome
     pub title: Option<String>, // session display name (host-chosen, optional)
     pub error: Option<String>, // last error, cleared on state change
+    /// Member id currently allowed to drive source + transport. "" while off.
+    /// Distinct from the network host, which never moves.
+    pub presenter: String,
 }
 
 // ============================================================
@@ -183,6 +224,9 @@ enum Session {
         roster: Arc<Mutex<Vec<PeerInfo>>>,
         self_id: Arc<Mutex<Option<String>>>,
         title: Arc<Mutex<Option<String>>>,
+        /// Latest presenter id from the host, stored exactly like `roster`
+        /// and `title` so `snapshot_state` can report it without a round trip.
+        presenter: Arc<Mutex<String>>,
         read_task: JoinHandle<()>,
         // Held so the QUIC stream/connection stay open for the session's
         // lifetime (dropping the send half would RESET the stream and the
@@ -199,9 +243,21 @@ enum Session {
 struct HostShared {
     /// The host's own roster display name (heads every `PeerList` as m0).
     host_name: String,
-    /// Session-scoped member-id mint (m1, m2, ...; the host is m0). Never
-    /// reused within a session, so ids stay stable across disconnects.
+    /// Session-scoped member-id mint (m1, m2, ...; the host is m0). Ids are
+    /// RECLAIMED by install id on rejoin (r124), so the mint only advances
+    /// for genuinely new participants.
     next_member: AtomicU64,
+    /// Member id currently allowed to drive source + transport, as a number
+    /// (0 = the host). An atomic, not a Mutex: the relay reads it and then
+    /// awaits `relay_to_others`, and this file forbids holding a std guard
+    /// across an await (see the lock-order note on SessionManager).
+    presenter: AtomicU64,
+    /// install id → member id, so a reconnecting member reclaims its slot.
+    /// std Mutex, never held across an await.
+    installs: Mutex<HashMap<String, String>>,
+    /// member id → how many times that id has been claimed. Handed to the
+    /// mesh in PeerInfo.epoch so it can tell a reconnect from a no-op.
+    epochs: Mutex<HashMap<String, u32>>,
     /// Session display title, carried to each newcomer in Welcome.
     title: Option<String>,
     /// Send halves + names. tokio Mutex: broadcast writes are async.
@@ -217,6 +273,9 @@ struct PeerConn {
     /// Session-scoped member id ("m1", "m2", ...) - the roster/signaling key.
     member: String,
     name: String,
+    /// How many times this member id has been claimed. Rides the roster so
+    /// the mesh can distinguish a reconnect from an unchanged member.
+    epoch: u32,
     send: SendStream,
 }
 
@@ -288,6 +347,7 @@ pub async fn session_join(
     state: State<'_, SessionManager>,
     ticket: String,
     name: String,
+    install: String,
 ) -> Result<(), crate::AppError> {
     let display_name = clean_name(&name);
 
@@ -313,7 +373,7 @@ pub async fn session_join(
         let (mut send, recv) = conn.open_bi().await.map_err(|e| format!("open stream: {e}"))?;
         write_msg_line(
             &mut send,
-            &SessionMsg::Hello { name: display_name.clone() },
+            &SessionMsg::Hello { name: display_name.clone(), install: install.clone() },
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -341,14 +401,19 @@ pub async fn session_join(
     let roster: Arc<Mutex<Vec<PeerInfo>>> = Arc::new(Mutex::new(Vec::new()));
     let self_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let peer_title: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    // Until a Presenter line arrives, the host presents - matching the host's
+    // own default so both ends agree during the first moments of a session.
+    let peer_presenter: Arc<Mutex<String>> = Arc::new(Mutex::new("m0".into()));
     let read_task = tokio::spawn(peer_read_loop(
-        app.clone(), recv, roster.clone(), self_id.clone(), peer_title.clone(), generation,
+        app.clone(), recv, roster.clone(), self_id.clone(), peer_title.clone(),
+        peer_presenter.clone(), generation,
     ));
     inner.session = Session::Peer {
         endpoint,
         roster,
         self_id,
         title: peer_title,
+        presenter: peer_presenter,
         read_task,
         _conn: conn,
         send,
@@ -397,6 +462,18 @@ pub async fn session_broadcast(
     let msg = match msg {
         SessionMsg::Sharing { on, .. } => SessionMsg::Sharing { from: "m0".into(), on },
         SessionMsg::Reaction { emote, on, .. } => SessionMsg::Reaction { from: "m0".into(), emote, on },
+        SessionMsg::LoadSource { source_kind, url, fingerprint, title, duration, review_key, .. } =>
+            SessionMsg::LoadSource { from: "m0".into(), source_kind, url, fingerprint, title, duration, review_key },
+        SessionMsg::SourceStatus { state, detail, .. } =>
+            SessionMsg::SourceStatus { from: "m0".into(), state, detail },
+        SessionMsg::Transport { playing, position, rate, at_ms, seq, epoch, .. } =>
+            SessionMsg::Transport { playing, position, rate, at_ms, seq, from: "m0".into(), epoch },
+        // Granting the floor updates the host's own gate before it goes out,
+        // so a peer's very next LoadSource is accepted by the relay.
+        SessionMsg::Presenter { member, epoch } => {
+            shared.presenter.store(member_num(&member), Ordering::Relaxed);
+            SessionMsg::Presenter { member, epoch }
+        }
         other => other,
     };
     if let SessionMsg::Rtc { to, payload, .. } = msg {
@@ -486,14 +563,14 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
             return Err("stream closed before hello".to_string());
         }
         match serde_json::from_str::<SessionMsg>(line.trim()) {
-            Ok(SessionMsg::Hello { name }) => Ok((send, reader, name)),
+            Ok(SessionMsg::Hello { name, install }) => Ok((send, reader, name, install)),
             Ok(_) => Err("expected hello".to_string()),
             Err(e) => Err(format!("bad hello: {e}")),
         }
     })
     .await;
 
-    let (send, mut reader, raw_name) = match handshake {
+    let (send, mut reader, raw_name, install) = match handshake {
         Ok(Ok(v)) => v,
         _ => {
             conn.close(1u32.into(), b"expected hello");
@@ -505,7 +582,31 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
     // 2. Register, enforcing the cap. Extras get a polite close instead of
     //    a hang — the QUIC close reason is surfaced by the peer's read loop.
     let id = NEXT_PEER_ID.fetch_add(1, Ordering::Relaxed);
-    let member = format!("m{}", shared.next_member.fetch_add(1, Ordering::Relaxed));
+    // RECLAIM the member id when this install has been here before (r124).
+    // Minting unconditionally is what made a rejoining friend appear as a
+    // second person: same human, fresh mN, and the roster grew. An empty
+    // install string (older build) always mints, preserving old behaviour.
+    let member = {
+        let mut installs = shared.installs.lock().unwrap_or_else(|e| e.into_inner());
+        match installs.get(&install) {
+            Some(existing) if !install.is_empty() => existing.clone(),
+            _ => {
+                let fresh = format!("m{}", shared.next_member.fetch_add(1, Ordering::Relaxed));
+                if !install.is_empty() {
+                    installs.insert(install.clone(), fresh.clone());
+                }
+                fresh
+            }
+        }
+    };
+    // Bump the claim count so the mesh tears down the stale PeerConnection
+    // for this id rather than leaving a tile stuck on "Connecting".
+    let member_epoch = {
+        let mut epochs = shared.epochs.lock().unwrap_or_else(|e| e.into_inner());
+        let e = epochs.entry(member.clone()).or_insert(0);
+        *e = e.saturating_add(1);
+        *e
+    };
     let mut send = send;
     // Cap check BEFORE Welcome - a rejected extra must never briefly appear
     // fully joined. (The insert below re-checks under the same lock; this
@@ -526,12 +627,16 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
     }
     {
         let mut peers = shared.peers.lock().await;
+        // A reclaimed id may still have its PREVIOUS connection in the list
+        // (the old socket hasn't hit EOF yet). Evict it first, or the roster
+        // carries the same person twice - the duplicate-tile bug.
+        peers.retain(|p| p.member != member);
         if peers.len() >= MAX_PEERS {
             drop(peers);
             conn.close(1u32.into(), b"session is full");
             return;
         }
-        peers.push(PeerConn { id, member: member.clone(), name, send });
+        peers.push(PeerConn { id, member: member.clone(), name, epoch: member_epoch, send });
     }
     broadcast_peer_list(&shared).await;
     emit_state_now(&app).await;
@@ -583,6 +688,49 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
                                 relay_to_member(&shared, &to, &msg).await;
                             }
                         }
+                        // Source + transport: only the PRESENTER may drive, and
+                        // the host stamps `from` so a member can't drive as
+                        // somebody else. Before r124 these fell into the
+                        // catch-all below and were silently dropped, which is
+                        // why a peer could never present.
+                        SessionMsg::LoadSource {
+                            source_kind, url, fingerprint, title, duration, review_key, ..
+                        } => {
+                            if !can_drive(shared.presenter.load(Ordering::Relaxed), &member) {
+                                continue;
+                            }
+                            let msg = SessionMsg::LoadSource {
+                                from: member.clone(),
+                                source_kind, url, fingerprint, title, duration, review_key,
+                            };
+                            let _ = app.emit("session:msg", &msg);
+                            relay_to_others(&shared, id, &msg).await;
+                        }
+                        SessionMsg::Transport { playing, position, rate, at_ms, seq, epoch, .. } => {
+                            if !can_drive(shared.presenter.load(Ordering::Relaxed), &member) {
+                                continue;
+                            }
+                            let msg = SessionMsg::Transport {
+                                playing, position, rate, at_ms, seq,
+                                from: member.clone(), epoch,
+                            };
+                            let _ = app.emit("session:msg", &msg);
+                            relay_to_others(&shared, id, &msg).await;
+                        }
+                        // Anyone may report whether THEY could open the source.
+                        SessionMsg::SourceStatus { state, detail, .. } => {
+                            let msg = SessionMsg::SourceStatus {
+                                from: member.clone(),
+                                state: clean_name(&state),
+                                detail,
+                            };
+                            let _ = app.emit("session:msg", &msg);
+                            relay_to_others(&shared, id, &msg).await;
+                        }
+                        // Declared departure: break the read loop so the
+                        // disconnect path below runs immediately instead of
+                        // waiting on a QUIC idle timeout.
+                        SessionMsg::Bye => break,
                         // A peer shouldn't originate the host-only kinds; ignore.
                         _ => {}
                     }
@@ -651,7 +799,7 @@ async fn broadcast_peer_list(shared: &HostShared) {
     loop {
         let roster = build_roster(
             &shared.host_name,
-            peers.iter().map(|p| (p.member.clone(), p.name.clone())),
+            peers.iter().map(|p| (p.member.clone(), p.name.clone(), p.epoch)),
         );
         let Ok(mut line) = serde_json::to_string(&SessionMsg::PeerList { peers: roster }) else {
             return;
@@ -681,6 +829,7 @@ async fn peer_read_loop(
     roster: Arc<Mutex<Vec<PeerInfo>>>,
     self_id: Arc<Mutex<Option<String>>>,
     peer_title: Arc<Mutex<Option<String>>>,
+    peer_presenter: Arc<Mutex<String>>,
     generation: u64,
 ) {
     let mut reader = BufReader::new(recv);
@@ -724,8 +873,18 @@ async fn peer_read_loop(
                         // relays targeted) - straight to the frontend mesh.
                         let _ = app.emit("session:msg", &msg);
                     }
+                    // Presenter changes the local permission gate AND is
+                    // forwarded, so the UI can badge the new presenter.
+                    SessionMsg::Presenter { ref member, .. } => {
+                        if let Ok(mut p) = peer_presenter.lock() {
+                            *p = member.clone();
+                        }
+                        let _ = app.emit("session:msg", &msg);
+                        emit_state_now(&app).await;
+                    }
                     msg @ (SessionMsg::LoadSource { .. }
                     | SessionMsg::Transport { .. }
+                    | SessionMsg::SourceStatus { .. }
                     | SessionMsg::ReviewOp { .. }
                     | SessionMsg::ReviewDoc { .. }
                     | SessionMsg::Presence { .. }
@@ -733,7 +892,8 @@ async fn peer_read_loop(
                     | SessionMsg::Reaction { .. }) => {
                         let _ = app.emit("session:msg", &msg);
                     }
-                    SessionMsg::Hello { .. } => {} // host never sends Hello
+                    // Host never sends these to a peer.
+                    SessionMsg::Hello { .. } | SessionMsg::Bye => {}
                 }
             }
             Err(e) => {
@@ -811,6 +971,7 @@ async fn snapshot_state(inner: &Inner) -> SessionState {
             self_id: None,
             title: None,
             error: inner.last_error.clone(),
+            presenter: String::new(),
         },
         Session::Host { ticket, title, shared, .. } => SessionState {
             role: "host".into(),
@@ -822,19 +983,21 @@ async fn snapshot_state(inner: &Inner) -> SessionState {
                 .lock()
                 .await
                 .iter()
-                .map(|p| PeerInfo { id: p.member.clone(), name: p.name.clone() })
+                .map(|p| PeerInfo { id: p.member.clone(), name: p.name.clone(), epoch: p.epoch })
                 .collect(),
             self_id: Some("m0".into()),
             title: title.clone(),
             error: inner.last_error.clone(),
+            presenter: format!("m{}", shared.presenter.load(Ordering::Relaxed)),
         },
-        Session::Peer { roster, self_id, title, .. } => SessionState {
+        Session::Peer { roster, self_id, title, presenter, .. } => SessionState {
             role: "peer".into(),
             code: None,
             peers: roster.lock().map(|r| r.clone()).unwrap_or_default(),
             self_id: self_id.lock().map(|s| s.clone()).unwrap_or(None),
             title: title.lock().map(|t| t.clone()).unwrap_or(None),
             error: inner.last_error.clone(),
+            presenter: presenter.lock().map(|p| p.clone()).unwrap_or_else(|_| "m0".into()),
         },
     }
 }
@@ -905,6 +1068,8 @@ mod tests {
             rate: 1.0,
             at_ms: 1_750_000_000_000.0,
             seq: 7,
+            from: "m0".into(),
+            epoch: 1,
         };
         let json = serde_json::to_string(&msg).unwrap();
         // Tag + camelCase fields — the frontend switches on exactly these.
@@ -914,27 +1079,93 @@ mod tests {
         assert!(json.contains(r#""position":12.5"#), "json: {json}");
         assert!(json.contains(r#""rate":1.0"#), "json: {json}");
         assert!(json.contains(r#""seq":7"#), "json: {json}");
+        assert!(json.contains(r#""epoch":1"#), "json: {json}");
     }
 
     #[test]
     fn variant_tags_are_camel_case() {
-        let hello = serde_json::to_string(&SessionMsg::Hello { name: "Ada".into() }).unwrap();
+        let hello = serde_json::to_string(&SessionMsg::Hello { name: "Ada".into(), install: "i1".into() }).unwrap();
         assert!(hello.contains(r#""kind":"hello""#), "json: {hello}");
-        let list = serde_json::to_string(&SessionMsg::PeerList { peers: vec![PeerInfo { id: "m0".into(), name: "Host".into() }] }).unwrap();
+        let list = serde_json::to_string(&SessionMsg::PeerList { peers: vec![PeerInfo { id: "m0".into(), name: "Host".into(), epoch: 0 }] }).unwrap();
         assert!(list.contains(r#""kind":"peerList""#), "json: {list}");
-        let load = serde_json::to_string(&SessionMsg::LoadSource { url: "https://x".into() }).unwrap();
+        let load = serde_json::to_string(&web_source("https://x")).unwrap();
         assert!(load.contains(r#""kind":"loadSource""#), "json: {load}");
+        // The discriminator is `sourceKind`; `kind` belongs to serde's tag.
+        assert!(load.contains(r#""sourceKind":"web""#), "json: {load}");
+        let st = serde_json::to_string(&SessionMsg::SourceStatus { from: "m1".into(), state: "ready".into(), detail: None }).unwrap();
+        assert!(st.contains(r#""kind":"sourceStatus""#), "json: {st}");
+        let pr = serde_json::to_string(&SessionMsg::Presenter { member: "m1".into(), epoch: 2 }).unwrap();
+        assert!(pr.contains(r#""kind":"presenter""#), "json: {pr}");
+        let bye = serde_json::to_string(&SessionMsg::Bye).unwrap();
+        assert!(bye.contains(r#""kind":"bye""#), "json: {bye}");
+    }
+
+    /// Terse builder so the source tests read as one line each.
+    fn web_source(url: &str) -> SessionMsg {
+        SessionMsg::LoadSource {
+            from: "m0".into(),
+            source_kind: "web".into(),
+            url: Some(url.into()),
+            fingerprint: None,
+            title: None,
+            duration: None,
+            review_key: url.into(),
+        }
     }
 
     #[test]
     fn session_msg_round_trips_line_protocol() {
-        let msg = SessionMsg::LoadSource { url: "https://example.com/v".into() };
+        let msg = web_source("https://example.com/v");
         let line = serde_json::to_string(&msg).unwrap();
         let back: SessionMsg = serde_json::from_str(line.trim()).unwrap();
         match back {
-            SessionMsg::LoadSource { url } => assert_eq!(url, "https://example.com/v"),
+            SessionMsg::LoadSource { url, source_kind, review_key, .. } => {
+                assert_eq!(url.as_deref(), Some("https://example.com/v"));
+                assert_eq!(source_kind, "web");
+                assert_eq!(review_key, "https://example.com/v");
+            }
             _ => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn local_file_source_round_trips_without_a_url() {
+        // The case that used to broadcast NOTHING: a local file has no URL,
+        // so it travels as a fingerprint the peer resolves on its own disk.
+        let msg = SessionMsg::LoadSource {
+            from: "m0".into(),
+            source_kind: "file".into(),
+            url: None,
+            fingerprint: Some("cut-v4.mov|1234|1920x1080|999".into()),
+            title: Some("cut-v4.mov".into()),
+            duration: Some(123.4),
+            review_key: "cut-v4.mov|1234|1920x1080|999".into(),
+        };
+        let line = serde_json::to_string(&msg).unwrap();
+        let back: SessionMsg = serde_json::from_str(line.trim()).unwrap();
+        match back {
+            SessionMsg::LoadSource { source_kind, url, fingerprint, .. } => {
+                assert_eq!(source_kind, "file");
+                assert!(url.is_none());
+                assert_eq!(fingerprint.as_deref(), Some("cut-v4.mov|1234|1920x1080|999"));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn only_the_presenter_may_drive() {
+        // The relay gate: presenter 0 is the host, so only m0 drives.
+        assert!(can_drive(0, "m0"));
+        assert!(!can_drive(0, "m1"));
+        // Hand the floor to m1 and the permission moves with it.
+        assert!(can_drive(1, "m1"));
+        assert!(!can_drive(1, "m0"));
+        // Malformed ids can never drive - the safe direction for a gate.
+        assert!(!can_drive(0, "bogus"));
+        assert!(!can_drive(0, ""));
+        assert_eq!(member_num("m7"), 7);
+        assert_eq!(member_num("nope"), u64::MAX);
     }
 
     #[test]
@@ -982,25 +1213,38 @@ mod tests {
 /// network.
 fn build_roster(
     host_name: &str,
-    members: impl Iterator<Item = (String, String)>,
+    members: impl Iterator<Item = (String, String, u32)>,
 ) -> Vec<PeerInfo> {
-    std::iter::once(PeerInfo { id: "m0".into(), name: host_name.to_string() })
-        .chain(members.map(|(id, name)| PeerInfo { id, name }))
+    std::iter::once(PeerInfo { id: "m0".into(), name: host_name.to_string(), epoch: 0 })
+        .chain(members.map(|(id, name, epoch)| PeerInfo { id, name, epoch }))
         .collect()
+}
+
+/// Numeric part of a member id (`m3` → 3). Malformed ids sort last and can
+/// never match a presenter, which is the safe direction for a permission gate.
+fn member_num(id: &str) -> u64 {
+    id.strip_prefix('m').and_then(|n| n.parse().ok()).unwrap_or(u64::MAX)
+}
+
+/// May this member drive source + transport? Pure so the permission rule is
+/// unit-testable without a network.
+fn can_drive(presenter: u64, member: &str) -> bool {
+    member_num(member) == presenter
 }
 
 #[cfg(test)]
 mod member_id_tests {
     use super::*;
 
-    fn members(v: &[(&str, &str)]) -> Vec<(String, String)> {
-        v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+    /// Members at epoch 1 (their first claim) - the ordinary case.
+    fn members(v: &[(&str, &str)]) -> Vec<(String, String, u32)> {
+        v.iter().map(|(a, b)| (a.to_string(), b.to_string(), 1)).collect()
     }
 
     #[test]
     fn host_is_always_m0_and_first() {
         let r = build_roster("Nika", members(&[("m1", "Ada"), ("m2", "Lin")]).into_iter());
-        assert_eq!(r[0], PeerInfo { id: "m0".into(), name: "Nika".into() });
+        assert_eq!(r[0], PeerInfo { id: "m0".into(), name: "Nika".into(), epoch: 0 });
         assert_eq!(r.len(), 3);
     }
 
@@ -1014,6 +1258,21 @@ mod member_id_tests {
         let after = build_roster("Host", members(&[("m2", "Lin"), ("m3", "Sam")]).into_iter());
         assert_eq!(after[1], before[2]);
         assert_eq!(after[2], before[3]);
+    }
+
+    #[test]
+    fn a_reclaimed_id_keeps_its_slot_and_bumps_its_epoch() {
+        // The rejoin case: same person, same id, higher epoch - ONE row, not
+        // two. The epoch bump is what tells the mesh to rebuild that peer's
+        // connection instead of leaving a tile stuck on "Connecting".
+        let before = build_roster("Host", members(&[("m1", "Ada")]).into_iter());
+        let after = build_roster(
+            "Host",
+            vec![("m1".to_string(), "Ada".to_string(), 2u32)].into_iter(),
+        );
+        assert_eq!(before.len(), after.len(), "a rejoin must not grow the roster");
+        assert_eq!(after[1].id, "m1");
+        assert!(after[1].epoch > before[1].epoch);
     }
 
     #[test]

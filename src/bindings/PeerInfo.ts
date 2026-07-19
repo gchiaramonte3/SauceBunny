@@ -2,7 +2,15 @@
 
 /**
  * One session member: a session-scoped id (m0 = host, m1, m2, ... minted
- * at Hello, never reused) + display name. Ids are the roster key - names
- * are display-only and can collide.
+ * at Hello) + display name. Ids are the roster key - names are display-only
+ * and can collide. An id is RECLAIMED when the same install rejoins (r124),
+ * so a reconnect updates a slot instead of adding a duplicate row.
  */
-export type PeerInfo = { id: string, name: string, };
+export type PeerInfo = { id: string, name: string, 
+/**
+ * Bumped every time this id is claimed or reclaimed. The RTC mesh keys
+ * its peer connections on (id, epoch): a bump means "same person, new
+ * connection", so the stale PeerConnection is torn down and rebuilt
+ * instead of sitting on "Connecting" forever.
+ */
+epoch: number, };

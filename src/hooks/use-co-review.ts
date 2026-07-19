@@ -19,6 +19,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { formatError } from "../lib/error-format";
+import { loadInstallId } from "../lib/identity";
 import { getLastUserSeekAt, getPlayheadFrames } from "../lib/playhead-store";
 import {
   loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc,
@@ -51,6 +52,21 @@ export type ReviewAnnotationView = {
   id: string; time: number; color: string; strokes: AnnotationStrokes;
 };
 
+/** The room's current source, described so a REMOTE peer can act on it.
+ *  "web"  → the peer re-resolves `url` with its own yt-dlp (no media crosses
+ *           the wire; each machine streams for itself)
+ *  "file" → the peer looks for `fingerprint` on its own disk
+ *  "none" → nothing loaded; peers unload
+ *  `reviewKey` is the SHARED review-doc identity - never a local path. */
+export type SessionSource = {
+  kind: "web" | "file" | "none";
+  url: string | null;
+  fingerprint: string | null;
+  title: string | null;
+  duration: number | null;
+  reviewKey: string;
+};
+
 type Args = {
   /** Live transport values — mirrored into refs for the interval senders.
    *  (The playhead is NOT passed: it lives in lib/playhead-store, and the
@@ -61,8 +77,11 @@ type Args = {
   fps: number;
   /** Host's playback rate - broadcast so guests can match speed. */
   playbackRate: number;
-  /** Committed web-source URL (null = none/local). The host pushes it to peers. */
-  activeSourceUrl: string | null;
+  /** What the room is watching, in a form a PEER can act on (r124).
+   *  Replaces the old web-only activeSourceUrl gate: a local file has no URL,
+   *  which is exactly why loading one used to broadcast nothing at all and
+   *  leave the guest staring at the empty state. */
+  sessionSource: SessionSource;
   /** Synchronous mirror of the above (set mid-fetch) — the loadSource echo guard. */
   activeSourceUrlRef: MutableRefObject<string | null>;
   /** Review storage key of the current source — the host seeds the shared doc from it. */
@@ -132,6 +151,13 @@ export type CoReview = {
   liveReactions: LiveReaction[];
   /** Member ids with a raised hand (persistent until lowered). */
   raisedHands: ReadonlySet<string>;
+  /** True when WE drive source + transport (the host, until the floor moves). */
+  isPresenter: boolean;
+  /** The presenter's source when we can't show it yet (null = nothing pending).
+   *  A "file" kind here means the bytes live on the presenter's machine. */
+  pendingSource: SessionSource | null;
+  /** member id → "loading" | "ready" | "failed" | "missing" for the current source. */
+  sourceStatus: ReadonlyMap<string, string>;
   /** True when YOUR hand is up. */
   handRaised: boolean;
   /** Fire a transient reaction (throttled; echoes locally). */
@@ -145,14 +171,14 @@ export type CoReview = {
 
 export function useCoReview({
   isPlaying, fps, playbackRate,
-  activeSourceUrl, activeSourceUrlRef, reviewSourceKey,
+  sessionSource, activeSourceUrlRef, reviewSourceKey,
   playerRef, metadataRef,
   onChaseSeek, setUrl, handleFetch,
   pushNotification, setQueueOpen,
   setReviewMarkers, setReviewAnnotations,
   turn,
 }: Args): CoReview {
-  const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], selfId: null, title: null, error: null });
+  const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], selfId: null, title: null, error: null, presenter: "m0" });
   // Live reactions: fire-and-forget, never persisted, pruned after ~5s
   // (the Zoom/Meet grammar - late joiners never see past reactions).
   const [liveReactions, setLiveReactions] = useState<LiveReaction[]>([]);
@@ -186,6 +212,17 @@ export function useCoReview({
   const coRoleRef = useRef("off"); coRoleRef.current = coSession.role;
   const coLastHostPosRef = useRef<number | null>(null);
   const coReadyRef = useRef(false); // has OUR player loaded the host's source yet?
+  // Am I the one driving source + transport? Defaults to the host until a
+  // Presenter line says otherwise. The network star never moves; only this
+  // permission does (see SessionMsg::Presenter).
+  const isPresenter = coSessionActive
+    && (coSession.presenter || "m0") === (coSession.selfId ?? (coSession.role === "host" ? "m0" : ""));
+  const isPresenterRef = useRef(false); isPresenterRef.current = isPresenter;
+  // The presenter's source when WE can't show it yet (a file we don't have,
+  // or a web source still resolving). Drives the room's waiting affordance.
+  const [pendingSource, setPendingSource] = useState<SessionSource | null>(null);
+  // Who has reported they can/can't open the current source.
+  const [sourceStatus, setSourceStatus] = useState<ReadonlyMap<string, string>>(new Map());
 
   // Send a session message the right way for our role: the host broadcasts to
   // all peers; a peer sends up to the host, which relays it to everyone else.
@@ -206,16 +243,50 @@ export function useCoReview({
   const coApplyRef = useRef<(m: SessionMsg) => void>(() => {});
   coApplyRef.current = (m) => {
     switch (m.kind) {
-      case "loadSource":
-        if (activeSourceUrlRef.current !== m.url) {
-          // The source is changing under us — we're not synced to it until our
-          // own player reports ready for the NEW source. Re-arm here so a
-          // stale-ready old player can't apply the host's transport to the
-          // wrong video, and the snap-to-host fires on the first ready tick.
+      case "loadSource": {
+        // The presenter changed what the room is watching. We are not synced
+        // to it until OUR player reports ready for the NEW source - re-arm so
+        // a stale-ready old player can't apply transport to the wrong video.
+        if (m.sourceKind === "none") {
           coReadyRef.current = false;
-          setUrl(m.url);
-          void handleFetch(m.url);
+          setPendingSource(null);
+          setSourceStatus(new Map());
+          return;
         }
+        const src: SessionSource = {
+          kind: m.sourceKind === "file" ? "file" : "web",
+          url: m.url, fingerprint: m.fingerprint, title: m.title,
+          duration: m.duration, reviewKey: m.reviewKey,
+        };
+        setSourceStatus(new Map());
+        if (src.kind === "web" && m.url) {
+          if (activeSourceUrlRef.current === m.url) return; // already on it
+          coReadyRef.current = false;
+          setPendingSource(src);
+          sendSessionMsg({ kind: "sourceStatus", from: "", state: "loading", detail: null });
+          setUrl(m.url);
+          void handleFetch(m.url)
+            .then(() => setPendingSource(null))
+            .catch(() => {
+              sendSessionMsg({ kind: "sourceStatus", from: "", state: "failed", detail: null });
+            });
+          return;
+        }
+        // A local file: the bytes live on the presenter's disk, so there is
+        // nothing to fetch. Show what the room is watching and say plainly
+        // that we don't have it (the resolve ladder lands next phase).
+        coReadyRef.current = false;
+        setPendingSource(src);
+        sendSessionMsg({ kind: "sourceStatus", from: "", state: "missing", detail: null });
+        return;
+      }
+      case "sourceStatus":
+        setSourceStatus((prev) => new Map(prev).set(m.from, m.state));
+        return;
+      case "presenter":
+        // Rust already updated its own gate; mirror it so the UI can badge
+        // the presenter without waiting for the next session:state.
+        setCoSession((prev) => ({ ...prev, presenter: m.member }));
         return;
       case "reviewDoc":
         // MERGE, not blind-replace: the host re-broadcasts a full snapshot on
@@ -334,12 +405,31 @@ export function useCoReview({
       coReadyRef.current = false;
     }
   }, [coSession.role, reviewSourceKey]);
-  // Host → peers: current source whenever it changes (web only — a local file
-  // has no activeSourceUrl so nothing is pushed).
+  // Presenter → everyone: the current source whenever it changes. r124: this
+  // fires for LOCAL FILES and for clearing too. It used to early-return unless
+  // a web URL existed, which is why loading a local file broadcast nothing and
+  // the guest sat on the empty state with no timeline.
+  const sessionSourceRef = useRef(sessionSource);
+  sessionSourceRef.current = sessionSource;
+  const sendLoadSource = useCallback((src: SessionSource) => {
+    sendSessionMsg({
+      kind: "loadSource",
+      from: "",                 // host stamps the true sender
+      sourceKind: src.kind,
+      url: src.url,
+      fingerprint: src.fingerprint,
+      title: src.title,
+      duration: src.duration,
+      reviewKey: src.reviewKey,
+    });
+  }, [sendSessionMsg]);
   useEffect(() => {
-    if (coSession.role !== "host" || !activeSourceUrl) return;
-    void invoke("session_broadcast", { msg: { kind: "loadSource", url: activeSourceUrl } }).catch(() => {});
-  }, [coSession.role, activeSourceUrl]);
+    if (!isPresenter) return;
+    sendLoadSource(sessionSource);
+    // Depend on the FIELDS, not the object: the memo in App produces a fresh
+    // object each render and would otherwise re-broadcast on every tick.
+  }, [isPresenter, sessionSource.kind, sessionSource.url, sessionSource.fingerprint,
+      sessionSource.reviewKey, sendLoadSource]); // eslint-disable-line react-hooks/exhaustive-deps
   // Host → new joiner: source + a fresh doc snapshot when the peer count rises.
   // Fanned to all; existing peers harmlessly re-adopt the identical doc.
   const prevPeerCountRef = useRef(0);
@@ -347,8 +437,8 @@ export function useCoReview({
     const prev = prevPeerCountRef.current;
     prevPeerCountRef.current = coSession.peers.length;
     if (coSession.role !== "host" || coSession.peers.length <= prev) return;
-    if (activeSourceUrlRef.current) {
-      void invoke("session_broadcast", { msg: { kind: "loadSource", url: activeSourceUrlRef.current } }).catch(() => {});
+    if (sessionSourceRef.current.kind !== "none") {
+      sendLoadSource(sessionSourceRef.current);
     }
     const d = sessionDocRef.current;
     if (d) void invoke("session_broadcast", { msg: { kind: "reviewDoc", doc: JSON.stringify(d) } }).catch(() => {});
@@ -364,7 +454,7 @@ export function useCoReview({
   }, [coSession.role, coSession.peers.length, raisedHands, shareState]);
   // Host → peers: 2 Hz transport heartbeat (play/pause/seek/scrub-settle).
   useEffect(() => {
-    if (coSession.role !== "host") return;
+    if (!isPresenter) return;
     const send = () => {
       const r = Math.max(1, Math.round(coFpsRef.current));
       const msg: SessionMsg = {
@@ -374,13 +464,15 @@ export function useCoReview({
         rate: coRateRef.current,
         atMs: Date.now(),
         seq: ++coSeqRef.current,
+        from: "",      // host stamps the true sender
+        epoch: 0,
       };
-      void invoke("session_broadcast", { msg }).catch(() => {});
+      sendSessionMsg(msg);
     };
     send();
     const iv = window.setInterval(send, 500);
     return () => window.clearInterval(iv);
-  }, [coSession.role]);
+  }, [isPresenter, sendSessionMsg]);
   // Everyone broadcasts their own playhead ~3 Hz for ghost cursors + prunes
   // stale ghosts (someone who stopped sending).
   useEffect(() => {
@@ -429,7 +521,9 @@ export function useCoReview({
     catch (e) { pushNotification("error", "Couldn't start co-review", formatError(e)); }
   }, [pushNotification]);
   const joinCoReview = useCallback(async (ticket: string, name: string) => {
-    try { await invoke("session_join", { ticket, name }); }
+    // install: lets the host hand back the SAME member id if we've been in
+    // this session before, instead of adding a duplicate person tile.
+    try { await invoke("session_join", { ticket, name, install: loadInstallId() }); }
     catch (e) { pushNotification("error", "Couldn't join session", formatError(e)); }
   }, [pushNotification]);
   const leaveCoReview = useCallback(() => { void invoke("session_leave").catch(() => {}); }, []);
@@ -581,6 +675,12 @@ export function useCoReview({
     shareState, shareStream, sharingMembers, startShare, stopShare,
     liveReactions,
     raisedHands,
+    /** True when WE drive source + transport (host by default). */
+    isPresenter,
+    /** The presenter's source when we can't show it yet (null = nothing pending). */
+    pendingSource,
+    /** member id → "loading" | "ready" | "failed" | "missing" for that source. */
+    sourceStatus,
     handRaised: coSession.selfId != null ? raisedHands.has(coSession.selfId) : raisedHands.has("m0"),
     sendReaction,
     toggleHand,

@@ -48,7 +48,7 @@ import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playhead
 import { clampSeekFrames, maxSeekSeconds, endSeekFrames } from "./lib/playhead-clock";
 import { usePanelBus } from "./hooks/use-panel-bus";
 import { useWebPlayback } from "./hooks/use-web-playback";
-import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView } from "./hooks/use-co-review";
+import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView, type SessionSource } from "./hooks/use-co-review";
 import { QueueDrawer } from "./components/QueueDrawer";
 import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutSheet } from "./components/ShortcutSheet";
@@ -4519,6 +4519,31 @@ export default function App() {
   // duration + dims, location-independent) maps to a prior review's key — so
   // re-opening a clip you've reviewed before (even moved/renamed folder)
   // re-loads its notes. Falls back to the path on first encounter.
+  // What the room is watching, in a form a REMOTE peer can act on (r124).
+  // The old session code keyed off activeSourceUrl, which only exists for web
+  // sources - so loading a local file broadcast NOTHING and the guest sat on
+  // the empty state. A file travels as its fingerprint (content identity), not
+  // as a host-local path the peer could never open.
+  const sessionSource = useMemo<SessionSource>(() => {
+    if (!metadata) {
+      return { kind: "none", url: null, fingerprint: null, title: null, duration: null, reviewKey: "" };
+    }
+    if (sourceKind === "file" && localFilePath) {
+      const fp = reviewFingerprint(
+        metadata.title ?? localFilePath, metadata.duration ?? 0,
+        metadata.width, metadata.height, localFileSize,
+      );
+      return {
+        kind: "file", url: null, fingerprint: fp,
+        title: metadata.title ?? null, duration: metadata.duration ?? null, reviewKey: fp,
+      };
+    }
+    return {
+      kind: "web", url: activeSourceUrl, fingerprint: null,
+      title: metadata.title ?? null, duration: metadata.duration ?? null,
+      reviewKey: metadata.webpage_url ?? "",
+    };
+  }, [sourceKind, metadata, localFilePath, localFileSize, activeSourceUrl]);
   const reviewSourceKey = (sourceKind === "file" && localFilePath && metadata)
     ? (resolveByFingerprint(reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize)) ?? localFilePath)
     : (metadata?.webpage_url ?? null);
@@ -4556,10 +4581,11 @@ export default function App() {
     screening, setScreening, screeningParticipants,
     meshStreams, meshStates,
     shareState, shareStream, sharingMembers, startShare, stopShare,
+    isPresenter, pendingSource,
     startCoReview, joinCoReview, leaveCoReview,
   } = useCoReview({
     isPlaying, fps, playbackRate,
-    activeSourceUrl, activeSourceUrlRef, reviewSourceKey,
+    sessionSource, activeSourceUrlRef, reviewSourceKey,
     playerRef, metadataRef,
     onChaseSeek, setUrl, handleFetch,
     pushNotification, setQueueOpen,
@@ -4580,6 +4606,9 @@ export default function App() {
   }, [sessionDoc, reviewSourceKey, reviewTick]);
   sessionRoomRef.current = coSessionActive;
   const roomActive = coSessionActive && activeView === "coreview";
+  // Display name of whoever is driving, for the waiting affordance.
+  const presenterName = coSession.peers.find((p) => p.id === coSession.presenter)?.name
+    ?? (coSession.presenter === "m0" ? "The host" : "The presenter");
   // Latest transient reaction per member: tile badges (pruning rides the
   // liveReactions feed itself).
   const reactionFlashes = useMemo(() => {
@@ -5017,8 +5046,16 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {roomActive && coSession.role === "guest" && status === "empty" && (
-                  <div className="cp-room-waiting">Waiting for the host to load a source</div>
+                {/* What the room is watching, when WE can't show it yet. The
+                    old version tested role === "guest", a string Rust never
+                    emits ("off" | "host" | "peer"), so it never rendered and
+                    a non-presenter just saw the solo empty state. */}
+                {roomActive && !isPresenter && pendingSource && (
+                  <div className="cp-room-waiting">
+                    {pendingSource.kind === "file"
+                      ? `${presenterName} is watching ${pendingSource.title ?? "a local file"}. That file is on their Mac, so it can't play here yet.`
+                      : `Loading ${pendingSource.title ?? "the shared source"}…`}
+                  </div>
                 )}
                 <div className="cp-monitor-wrap">
                   <div className="cp-view-bar">
