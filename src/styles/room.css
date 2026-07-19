@@ -364,52 +364,6 @@
   text-transform: uppercase;
 }
 
-/* Display picker popover above the cluster's share button. */
-.cp-share-pick {
-  position: absolute;
-  bottom: 40px;
-  right: 0;
-  z-index: 13;
-  min-width: 240px;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-1);
-  padding: var(--s-2);
-  background: var(--bg-1);
-  border-radius: var(--r-lg);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-}
-.cp-share-pick-line {
-  font-family: var(--font-ui);
-  font-size: 12px;
-  color: var(--fg-2);
-  margin: 2px 4px;
-}
-.cp-share-pick-line.dim { color: var(--fg-4); font-size: 11px; }
-.cp-share-pick-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s-3);
-  padding: 8px 10px;
-  border: none;
-  border-radius: var(--r-lg);
-  background: transparent;
-  cursor: pointer;
-}
-.cp-share-pick-row:hover { background: rgba(255,255,255,0.06); }
-.cp-share-pick-name {
-  font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--fg-1);
-}
-.cp-share-pick-res {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--fg-4);
-}
-.cp-share-pick-cancel { align-self: center; }
 
 /* ── Device settings popover (DevicePanel.tsx): the gear's Meet-style
       mid-call switcher, anchored above the cluster. ── */
@@ -589,3 +543,164 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* ── Share dialog (ShareDialog.tsx): the Meet/Zoom picker - tabs for
+      screens / windows / portion, thumbnails, share-sound footer. ── */
+.cp-share-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+.cp-share-dialog {
+  width: min(680px, calc(100vw - 48px));
+  max-height: min(560px, calc(100vh - 48px));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-5);
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-lg);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+}
+.cp-share-dialog-title {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--fg-0);
+}
+.cp-share-dialog-line {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--fg-2);
+}
+.cp-share-dialog-sub {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--fg-4);
+}
+.cp-share-dialog-denied {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-6) 0;
+  text-align: center;
+  color: var(--fg-3);
+}
+.cp-share-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line-1);
+  padding-bottom: var(--s-2);
+}
+.cp-share-tab {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cp-share-tab:hover:not(:disabled) { background: rgba(255,255,255,0.06); color: var(--fg-1); }
+.cp-share-tab.here {
+  background: rgba(255,255,255,0.08);
+  border-color: var(--line-2);
+  color: var(--fg-0);
+}
+.cp-share-tab:disabled { opacity: 0.4; cursor: default; }
+.cp-share-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--s-3);
+}
+.cp-share-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-md, 8px);
+  background: rgba(255,255,255,0.03);
+  cursor: pointer;
+  text-align: left;
+}
+.cp-share-card:hover { background: rgba(255,255,255,0.07); border-color: var(--line-3); }
+.cp-share-card.picked { border-color: var(--fg-1); background: rgba(255,255,255,0.08); }
+.cp-share-card img,
+.cp-share-card-ph {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 5px;
+  background: var(--bg-0);
+  display: block;
+}
+.cp-share-card-label {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cp-share-portion { display: flex; flex-direction: column; gap: var(--s-2); }
+.cp-share-portion-surface {
+  position: relative;
+  border-radius: var(--r-md, 8px);
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none;
+  background: var(--bg-0);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.cp-share-portion-surface img {
+  width: 100%;
+  display: block;
+  pointer-events: none;
+}
+.cp-share-portion-rect {
+  position: absolute;
+  border: 2px solid var(--fg-0);
+  background: rgba(255,255,255,0.14);
+  pointer-events: none;
+}
+.cp-share-portion-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.cp-share-dialog-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  border-top: 1px solid var(--line-1);
+  padding-top: var(--s-3);
+}
+.cp-share-audio {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--fg-2);
+  cursor: pointer;
+}
+.cp-share-audio.off { opacity: 0.6; cursor: default; }
+.cp-share-dialog-actions { display: flex; align-items: center; gap: var(--s-2); }

@@ -59,6 +59,7 @@ export class RtcMesh {
   /** Screen share: when set, every video sender carries THIS track instead
    *  of the camera; null restores the capture's video. */
   private videoOverride: MediaStreamTrack | null = null;
+  private audioOverride: MediaStreamTrack | null = null;
 
   constructor(deps: MeshDeps) {
     this.deps = deps;
@@ -110,7 +111,7 @@ export class RtcMesh {
    *  the video senders; the new camera takes over when the share ends. */
   async replaceLocalStream(stream: MediaStream | null): Promise<void> {
     const video = this.videoOverride ?? stream?.getVideoTracks()[0] ?? null;
-    const audio = stream?.getAudioTracks()[0] ?? null;
+    const audio = this.audioOverride ?? stream?.getAudioTracks()[0] ?? null;
     for (const [, slot] of this.slots) {
       for (const sender of slot.videoSenders) {
         try { await sender.replaceTrack(video); } catch { /* sender gone */ }
@@ -129,6 +130,18 @@ export class RtcMesh {
     for (const [, slot] of this.slots) {
       for (const sender of slot.videoSenders) {
         try { await sender.replaceTrack(video); } catch { /* sender gone */ }
+      }
+    }
+  }
+
+  /** Share system audio in/out: the share+mic mix replaces the mic on
+   *  every audio sender; null restores the capture's mic track. */
+  async setAudioOverride(track: MediaStreamTrack | null): Promise<void> {
+    this.audioOverride = track;
+    const audio = track ?? this.deps.getLocalStream()?.getAudioTracks()[0] ?? null;
+    for (const [, slot] of this.slots) {
+      for (const sender of slot.audioSenders) {
+        try { await sender.replaceTrack(audio); } catch { /* sender gone */ }
       }
     }
   }

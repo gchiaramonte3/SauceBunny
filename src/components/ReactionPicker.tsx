@@ -1,7 +1,7 @@
 import { HAND_GLYPH, REACTION_EMOTES } from "../lib/reactions";
 
 /**
- * The room cluster's reaction popover (sibling of SharePicker/DevicePanel,
+ * The room cluster's reaction popover (sibling of DevicePanel,
  * same upward anchor): four transient emotes that fire-and-forget, plus
  * Raise hand - the one PERSISTENT state, styled apart and showing its
  * current direction ("Lower hand" while up).

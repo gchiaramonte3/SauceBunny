@@ -37,6 +37,9 @@ if have saucebunny-diarize; then echo "already present — skipping (rebuild: np
 step "saucebunny-dictate (Swift sidecar — on-device voice dictation)"
 if have saucebunny-dictate; then echo "already present — skipping (rebuild: npm run build:dictate)"; else bash scripts/build-dictate.sh; fi
 
+step "saucebunny-capture (Swift sidecar — ScreenCaptureKit screen sharing)"
+if have saucebunny-capture; then echo "already present — skipping (rebuild: npm run build:capture)"; else bash scripts/build-capture.sh; fi
+
 step "llama-server (compiles llama.cpp — a few minutes; powers the AI Summary tab)"
 if have llama-server; then echo "already present — skipping (rebuild: npm run build:llama)"; else bash scripts/build-llama.sh; fi
 

@@ -11,7 +11,7 @@
 export async function openShareStream(
   url: string,
   onDied: () => void,
-): Promise<{ stream: MediaStream; track: MediaStreamTrack; close: () => void }> {
+): Promise<{ stream: MediaStream; track: MediaStreamTrack; audioTrack: MediaStreamTrack | null; close: () => void }> {
   const video = document.createElement("video");
   video.muted = true;
   video.playsInline = true;
@@ -28,8 +28,10 @@ export async function openShareStream(
     video.addEventListener("error", () => reject(new Error("share video failed to open")), { once: true });
   });
   URL.revokeObjectURL(objectUrl);
-  // ultrafast/high yuv420p out of the proxy's libx264 line.
-  const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.640028"');
+  // ultrafast/high yuv420p out of the proxy's libx264 line; AAC rides
+  // along when system audio is shared (declaring it for a video-only
+  // stream is harmless - it is a capability list, not a requirement).
+  const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.640028, mp4a.40.2"');
   sb.mode = "segments";
 
   const resp = await fetch(url);
@@ -73,6 +75,7 @@ export async function openShareStream(
   return {
     stream,
     track,
+    audioTrack: stream.getAudioTracks()[0] ?? null,
     close: () => {
       closed = true;
       try { void reader?.cancel(); } catch { /* already done */ }
@@ -80,5 +83,27 @@ export async function openShareStream(
       video.pause();
       video.src = "";
     },
+  };
+}
+
+/**
+ * Mix the share's system audio with the mic into ONE outgoing track, so
+ * the mesh keeps its replaceTrack-only contract (a second audio sender
+ * would force renegotiation). The mic is snapshotted at share start; a
+ * mid-share device switch keeps the old mic in the mix until re-share.
+ */
+export function mixShareAudio(
+  shareTrack: MediaStreamTrack,
+  micTrack: MediaStreamTrack | null,
+): { track: MediaStreamTrack; close: () => void } {
+  const ctx = new AudioContext();
+  const dest = ctx.createMediaStreamDestination();
+  ctx.createMediaStreamSource(new MediaStream([shareTrack])).connect(dest);
+  if (micTrack) {
+    ctx.createMediaStreamSource(new MediaStream([micTrack])).connect(dest);
+  }
+  return {
+    track: dest.stream.getAudioTracks()[0],
+    close: () => { void ctx.close(); },
   };
 }

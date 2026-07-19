@@ -180,6 +180,7 @@ pub fn run() {
             commands::write_bytes_to_path,
             commands::screen_capture_access,
             commands::list_displays,
+            commands::list_share_sources,
             commands::start_screen_share,
             commands::stop_screen_share,
             commands::new_job_id,

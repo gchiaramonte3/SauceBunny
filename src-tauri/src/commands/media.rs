@@ -2329,10 +2329,9 @@ pub fn screen_capture_access(request: Option<bool>) -> String {
     "undetermined".into()
 }
 
-/// Active displays for the share picker (whole displays only; window-level
-/// capture is a later ScreenCaptureKit sidecar).
-#[tauri::command]
-pub fn list_displays() -> Result<Vec<DisplayInfo>, crate::AppError> {
+/// Active displays via CoreGraphics - the capture-engine-free fallback
+/// (list_share_sources adds windows + thumbnails via ScreenCaptureKit).
+fn list_displays_impl() -> Result<Vec<DisplayInfo>, crate::AppError> {
     let mut ids = [0u32; 16];
     let mut count: u32 = 0;
     let rc = unsafe { CGGetActiveDisplayList(16, ids.as_mut_ptr(), &mut count) };
@@ -2353,6 +2352,11 @@ pub fn list_displays() -> Result<Vec<DisplayInfo>, crate::AppError> {
         .collect())
 }
 
+#[tauri::command]
+pub fn list_displays() -> Result<Vec<DisplayInfo>, crate::AppError> {
+    list_displays_impl()
+}
+
 /// Pure (unit-tested): picker display name from ordinal + main flag.
 pub(crate) fn display_name(index: usize, is_main: bool) -> String {
     if is_main {
@@ -2362,14 +2366,133 @@ pub(crate) fn display_name(index: usize, is_main: bool) -> String {
     }
 }
 
-/// Start sharing a display: returns the token-gated proxy URL the hidden
-/// <video> plays (the proxy route spawns/owns the ffmpeg child; it dies
-/// with the connection, so a crash or force-quit can't orphan it).
+/// What to share: a display, a window, or a portion of a display (the
+/// Zoom Advanced-tab shape). Windows and system audio need the
+/// saucebunny-capture sidecar (ScreenCaptureKit); the proxy falls back to
+/// ffmpeg's display capture when it's absent.
+#[derive(serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct ShareSourceArg {
+    /// "display" | "window"
+    pub kind: String,
+    /// CGDirectDisplayID for displays, CGWindowID for windows.
+    pub id: u32,
+    /// Portion of a display, in display points: "x,y,w,h".
+    pub crop: Option<String>,
+    /// Share system audio too (ScreenCaptureKit path only).
+    pub audio: bool,
+}
+
+/// A shareable display or window for the picker, with an optional base64
+/// JPEG thumbnail (SCScreenshotManager via the capture sidecar).
+#[derive(serde::Deserialize, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct ShareDisplay {
+    pub id: u32,
+    pub width: u32,
+    pub height: u32,
+    pub label: String,
+    pub thumb: Option<String>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct ShareWindow {
+    pub id: u32,
+    pub title: String,
+    pub app: String,
+    pub width: u32,
+    pub height: u32,
+    pub thumb: Option<String>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct ShareSources {
+    pub displays: Vec<ShareDisplay>,
+    pub windows: Vec<ShareWindow>,
+    /// False when the capture sidecar is missing - windows/portion/audio
+    /// unavailable, displays fall back to the ffmpeg path.
+    pub capture_engine: bool,
+}
+
+/// Enumerate shareable displays + windows with thumbnails for the share
+/// dialog. Runs the ScreenCaptureKit sidecar's `list` mode; without the
+/// sidecar (or before the Screen Recording grant) it degrades to the
+/// CoreGraphics display list, no thumbnails.
 #[tauri::command]
-pub fn start_screen_share(display_index: u32) -> Result<String, crate::AppError> {
+pub async fn list_share_sources(app: AppHandle) -> Result<ShareSources, crate::AppError> {
+    use tauri_plugin_shell::process::CommandEvent;
+    use tauri_plugin_shell::ShellExt;
+    fn fallback(e: String) -> Result<ShareSources, crate::AppError> {
+        let displays = list_displays_impl()?
+            .into_iter()
+            .map(|d| ShareDisplay { id: d.id, width: d.width, height: d.height, label: d.name, thumb: None })
+            .collect();
+        eprintln!("[share] capture sidecar unavailable, display-only fallback: {e}");
+        Ok(ShareSources { displays, windows: Vec::new(), capture_engine: false })
+    }
+    let cmd = match app.shell().sidecar("saucebunny-capture") {
+        Ok(c) => c,
+        Err(e) => return fallback(e.to_string()),
+    };
+    let (mut rx, child) = match cmd.args(["list", "--thumbs"]).spawn() {
+        Ok(v) => v,
+        Err(e) => return fallback(e.to_string()),
+    };
+    let mut out = Vec::new();
+    let collect = async {
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                CommandEvent::Stdout(b) => out.extend_from_slice(&b),
+                CommandEvent::Terminated(t) => return t.code.unwrap_or(-1),
+                _ => {}
+            }
+        }
+        -1
+    };
+    // Thumbnails take ~a second; a wedged sidecar must not hang the dialog.
+    let code = match tokio::time::timeout(std::time::Duration::from_secs(10), collect).await {
+        Ok(c) => c,
+        Err(_) => {
+            let _ = child.kill();
+            return fallback("list timed out".into());
+        }
+    };
+    if code != 0 {
+        return fallback(format!("list exited {code}"));
+    }
+    #[derive(serde::Deserialize)]
+    struct RawList {
+        displays: Vec<ShareDisplay>,
+        windows: Vec<ShareWindow>,
+    }
+    match serde_json::from_slice::<RawList>(&out) {
+        Ok(raw) => Ok(ShareSources { displays: raw.displays, windows: raw.windows, capture_engine: true }),
+        Err(e) => fallback(format!("list parse: {e}")),
+    }
+}
+
+/// Start a share: returns the token-gated proxy URL the hidden <video>
+/// plays (the proxy route spawns/owns the capture children; they die with
+/// the connection, so a crash or force-quit can't orphan them).
+#[tauri::command]
+pub fn start_screen_share(source: ShareSourceArg) -> Result<String, crate::AppError> {
     let base = crate::stream_proxy::base_url()
         .ok_or_else(|| crate::AppError::internal("media proxy not running"))?;
-    Ok(format!("{base}/share/v1?display={display_index}"))
+    let crop = source
+        .crop
+        .as_deref()
+        .filter(|c| c.split(',').filter_map(|p| p.parse::<f64>().ok()).count() == 4)
+        .map(|c| format!("&crop={c}"))
+        .unwrap_or_default();
+    Ok(format!(
+        "{base}/share/v1?kind={}&id={}{}&audio={}",
+        if source.kind == "window" { "window" } else { "display" },
+        source.id,
+        crop,
+        if source.audio { 1 } else { 0 },
+    ))
 }
 
 /// Stop the live share pipeline (bar button / session end). The proxy

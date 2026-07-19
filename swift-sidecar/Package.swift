@@ -59,5 +59,11 @@ let package = Package(
       name: "saucebunny-dictate",
       path: "Sources/saucebunny-dictate"
     ),
+    // Screen-share capture engine — ScreenCaptureKit windows/displays/portion
+    // + system audio. NO external dependencies (system SCK/AVFoundation only).
+    .executableTarget(
+      name: "saucebunny-capture",
+      path: "Sources/saucebunny-capture"
+    ),
   ]
 )

@@ -127,6 +127,11 @@ export function useRtcMesh(args: {
     void meshRef.current?.setVideoOverride(track);
   }, []);
 
+  /** Share audio: the share+mic mix to every peer (null = mic only). */
+  const setAudioOverride = useCallback((track: MediaStreamTrack | null) => {
+    void meshRef.current?.setAudioOverride(track);
+  }, []);
+
   /** Incoming SessionMsg::Rtc line (already addressed to us). */
   const handleSignal = useCallback((from: string, payloadJson: string) => {
     try {
@@ -135,5 +140,5 @@ export function useRtcMesh(args: {
     } catch { /* malformed signaling line */ }
   }, []);
 
-  return { remoteStreams, peerStates, handleSignal, setVideoOverride };
+  return { remoteStreams, peerStates, handleSignal, setVideoOverride, setAudioOverride };
 }

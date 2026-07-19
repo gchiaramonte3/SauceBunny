@@ -1,3 +1,4 @@
+import type { ShareSourceArg } from "../bindings/ShareSourceArg";
 import { useState } from "react";
 import {
   IconFullscreen, IconFullscreenExit, IconMic, IconMicOff,
@@ -5,12 +6,12 @@ import {
 } from "./Icons";
 import { DevicePanel } from "./DevicePanel";
 import { ReactionPicker } from "./ReactionPicker";
-import { SharePicker } from "./SharePicker";
+import { ShareDialog } from "./ShareDialog";
 import type { ShareState } from "../lib/share-machine";
 
 /**
  * The session room's control cluster: mic, camera, share screen (native
- * ffmpeg display capture; SharePicker owns the TCC dance), device settings,
+ * ScreenCaptureKit engine; ShareDialog owns the picker + TCC), devices,
  * theater. End/Leave lives in the room header, next to Copy join code.
  * Terse - labels are hover titles only. It renders
  * INSIDE the transport row's right side (Transport's roomControls slot),
@@ -22,7 +23,7 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
   onToggleMic: () => void;
   onToggleCam: () => void;
   shareState: ShareState;
-  onStartShare: (displayIndex: number) => void;
+  onStartShare: (source: ShareSourceArg) => void;
   onStopShare: () => void;
   theater: boolean;
   onToggleTheater: () => void;
@@ -68,7 +69,7 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
         <IconScreenShare size={15} />
       </button>
       {pickerOpen && shareState === "idle" && (
-        <SharePicker
+        <ShareDialog
           onPick={onStartShare}
           onClose={() => setPickerOpen(false)}
         />

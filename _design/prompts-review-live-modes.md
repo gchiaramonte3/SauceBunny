@@ -137,7 +137,19 @@ part with teeth). Session-anchored notes stay out of this export until
 conformed (see the anchor section). This prompt ships with a vitest table of
 known drop-frame conversions.
 
-## Prompt 7: window-level share (Meet-style picker)
+## Prompt 7: window-level share (Meet-style picker) - SHIPPED r119
+
+Shipped 2026-07-19: the saucebunny-capture ScreenCaptureKit sidecar (list
+with thumbnails + raw BGRA stream piped into the ffmpeg fMP4 proxy path),
+the tabbed ShareDialog (Screens / Windows / Portion of screen with a
+drag-to-select rect, Zoom's Advanced-tab shape), and SCK system audio
+muxed as AAC and mixed into the mic sender. HARDWARE-UNVERIFIED pieces to
+test first: the rawvideo pipe end to end, portion coords on Retina, and
+whether WKWebView's captureStream() emits audio from the muted hidden
+element (the mix silently degrades to mic-only if not). Original design
+notes below for reference.
+
+### Original design (pre-implementation)
 
 Today's share is whole displays only, because the capture side is ffmpeg's
 avfoundation input and avfoundation enumerates SCREENS, not windows. A

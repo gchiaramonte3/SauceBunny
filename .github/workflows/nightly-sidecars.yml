@@ -83,7 +83,7 @@ jobs:
       # externalBin existence check passes. `-s` keeps any real binary.
       - name: Stub non-exercised sidecars
         run: |
-          for name in yt-dlp ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate llama-server; do
+          for name in yt-dlp ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate saucebunny-capture llama-server; do
             f="src-tauri/binaries/${name}-aarch64-apple-darwin"
             if [ ! -s "$f" ]; then
               touch "$f" && chmod +x "$f"

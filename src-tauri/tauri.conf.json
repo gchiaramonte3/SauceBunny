@@ -55,6 +55,7 @@
       "binaries/whisper-cli",
       "binaries/saucebunny-diarize",
       "binaries/saucebunny-dictate",
+      "binaries/saucebunny-capture",
       "binaries/llama-server"
     ],
     "resources": {

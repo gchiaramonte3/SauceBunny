@@ -26,7 +26,7 @@ echo
 # that exist, so a missing sidecar sailed through silently. ffprobe going
 # missing would quietly degrade every seek to keyframe precision (the RC7
 # epoch probe falls back to the rebased timeline with no hard failure).
-REQUIRED_SIDECARS="yt-dlp ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate llama-server"
+REQUIRED_SIDECARS="yt-dlp ffmpeg ffprobe whisper-cli saucebunny-diarize saucebunny-dictate saucebunny-capture llama-server"
 for req in $REQUIRED_SIDECARS; do
   if [ -f "${ROOT_DIR}/src-tauri/binaries/${req}-aarch64-apple-darwin" ]; then
     pass "${req} present"

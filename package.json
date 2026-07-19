@@ -13,6 +13,7 @@
     "build:diarizer": "bash scripts/build-diarizer.sh",
     "build:diarizer:universal": "bash scripts/build-diarizer.sh --universal",
     "build:dictate": "bash scripts/build-dictate.sh",
+    "build:capture": "bash scripts/build-capture.sh",
     "refresh:sidecars": "bash scripts/refresh-sidecars.sh",
     "refresh:ffmpeg": "bash scripts/fetch-ffmpeg.sh",
     "refresh:ffprobe": "bash scripts/fetch-ffprobe.sh",

@@ -35,7 +35,9 @@ import type { SessionState as CoSessionState } from "../bindings/SessionState";
 import { useRtcMesh, type TurnConfig } from "./use-rtc-mesh";
 import type { MeshPeerState } from "../lib/rtc-mesh";
 import { ShareController, type ShareState } from "../lib/share-machine";
-import { openShareStream } from "../lib/share-stream";
+import { mixShareAudio, openShareStream } from "../lib/share-stream";
+import { getSessionCapture } from "./use-media-capture";
+import type { ShareSourceArg } from "../bindings/ShareSourceArg";
 
 /** Timeline/monitor read-model of one review comment marker. Shared by the
  *  solo path (App's local-review reload effect) and the session path (the
@@ -121,7 +123,7 @@ export type CoReview = {
   shareStream: MediaStream | null;
   /** Member ids currently flagged as sharing (tile badges). */
   sharingMembers: ReadonlySet<string>;
-  startShare: (displayIndex: number) => void;
+  startShare: (source: ShareSourceArg) => void;
   stopShare: () => void;
   /** Transient reactions currently on screen (auto-pruned after ~5s). */
   liveReactions: LiveReaction[];
@@ -504,12 +506,16 @@ export function useCoReview({
   const shareRef = useRef<ShareController | null>(null);
   const meshOverrideRef = useRef(mesh.setVideoOverride);
   meshOverrideRef.current = mesh.setVideoOverride;
+  const meshAudioOverrideRef = useRef(mesh.setAudioOverride);
+  meshAudioOverrideRef.current = mesh.setAudioOverride;
   if (!shareRef.current) {
     shareRef.current = new ShareController({
-      start: (i) => invoke<string>("start_screen_share", { displayIndex: i }),
+      start: (source) => invoke<string>("start_screen_share", { source }),
       stopPipeline: () => invoke("stop_screen_share").then(() => undefined),
       open: openShareStream,
       setOverride: (t) => meshOverrideRef.current(t),
+      setAudioOverride: (t) => meshAudioOverrideRef.current(t),
+      mixAudio: (share) => mixShareAudio(share, getSessionCapture()?.getAudioTracks()[0] ?? null),
       announce: (on) => {
         const msg = { kind: "sharing", from: coRoleRef.current === "host" ? "m0" : "", on };
         const cmd = coRoleRef.current === "host" ? "session_broadcast" : "session_send";
@@ -522,7 +528,7 @@ export function useCoReview({
       },
     });
   }
-  const startShare = useCallback((displayIndex: number) => { void shareRef.current?.start(displayIndex); }, []);
+  const startShare = useCallback((source: ShareSourceArg) => { void shareRef.current?.start(source); }, []);
   const stopShare = useCallback(() => { void shareRef.current?.stop(); }, []);
   // Session over -> the share dies with it (same converged cleanup).
   useEffect(() => {

@@ -13,13 +13,15 @@ function makeController(overrides: Partial<ShareDeps> = {}) {
   const track = { kind: "video" } as unknown as MediaStreamTrack;
   const stream = {} as MediaStream;
   const deps: ShareDeps = {
-    start: async (i) => `http://127.0.0.1:1/t/x/share/v1?display=${i}`,
+    start: async (src) => `http://127.0.0.1:1/t/x/share/v1?kind=${src.kind}&id=${src.id}`,
     stopPipeline: async () => { calls.stops++; },
     open: async (_url, onDied) => {
       died = onDied;
-      return { stream, track, close: () => { calls.closes++; } };
+      return { stream, track, audioTrack: null, close: () => { calls.closes++; } };
     },
     setOverride: (t) => calls.overrides.push(t),
+    setAudioOverride: () => {},
+    mixAudio: () => ({ track: { kind: "audio" } as unknown as MediaStreamTrack, close: () => {} }),
     announce: (on) => calls.announces.push(on),
     onChange: (s) => calls.states.push(s),
     log: vi.fn(),
@@ -32,7 +34,7 @@ function makeController(overrides: Partial<ShareDeps> = {}) {
 describe("share state machine", () => {
   it("start -> sharing: override out, peers flagged", async () => {
     const { ctl, calls, track } = makeController();
-    await ctl.start(1);
+    await ctl.start({ kind: "display", id: 1, crop: null, audio: false });
     expect(ctl.current()).toBe("sharing");
     expect(calls.states).toEqual(["starting", "sharing"]);
     expect(calls.overrides).toEqual([track]);
@@ -41,7 +43,7 @@ describe("share state machine", () => {
 
   it("stop restores the camera and un-flags exactly once", async () => {
     const { ctl, calls } = makeController();
-    await ctl.start(0);
+    await ctl.start({ kind: "display", id: 0, crop: null, audio: false });
     await ctl.stop();
     expect(ctl.current()).toBe("idle");
     expect(calls.overrides[1]).toBeNull();
@@ -55,7 +57,7 @@ describe("share state machine", () => {
 
   it("ffmpeg death converges on the SAME cleanup", async () => {
     const { ctl, calls, fireDeath } = makeController();
-    await ctl.start(0);
+    await ctl.start({ kind: "display", id: 0, crop: null, audio: false });
     fireDeath();
     await Promise.resolve();
     expect(ctl.current()).toBe("idle");
@@ -68,7 +70,7 @@ describe("share state machine", () => {
 
   it("a failed start lands back on idle with the pipeline stopped", async () => {
     const { ctl, calls } = makeController({ start: async () => { throw new Error("no proxy"); } });
-    await ctl.start(0);
+    await ctl.start({ kind: "display", id: 0, crop: null, audio: false });
     expect(ctl.current()).toBe("idle");
     expect(calls.announces).toEqual([false]);
     expect(calls.stops).toBe(1);
@@ -76,8 +78,8 @@ describe("share state machine", () => {
 
   it("start while sharing is a no-op (one share at a time)", async () => {
     const { ctl, calls } = makeController();
-    await ctl.start(0);
-    await ctl.start(1);
+    await ctl.start({ kind: "display", id: 0, crop: null, audio: false });
+    await ctl.start({ kind: "display", id: 1, crop: null, audio: false });
     expect(calls.announces).toEqual([true]);
   });
 });
