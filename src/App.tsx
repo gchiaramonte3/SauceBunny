@@ -4596,13 +4596,13 @@ export default function App() {
     screening, setScreening, screeningParticipants,
     meshStreams, meshStates,
     shareState, shareStream, sharingMembers, startShare, stopShare,
-    isPresenter, pendingSource, makePresenter,
+    isPresenter, pendingSource, makePresenter, adoptPendingSource,
     startCoReview, joinCoReview, leaveCoReview,
   } = useCoReview({
     isPlaying, fps, playbackRate,
     sessionSource, activeSourceUrlRef, reviewSourceKey,
     playerRef, metadataRef,
-    onChaseSeek, setUrl, handleFetch,
+    onChaseSeek, setUrl, handleFetch, loadLocalPath,
     pushNotification, setQueueOpen,
     setReviewMarkers, setReviewAnnotations,
     turn: { url: defaults.turnUrl, username: defaults.turnUsername, password: defaults.turnPassword },
@@ -5083,9 +5083,21 @@ export default function App() {
                     a non-presenter just saw the solo empty state. */}
                 {roomActive && !isPresenter && pendingSource && (
                   <div className="cp-room-waiting">
-                    {pendingSource.kind === "file"
-                      ? `${presenterName} is watching ${pendingSource.title ?? "a local file"}. That file is on their Mac, so it can't play here yet.`
-                      : `Loading ${pendingSource.title ?? "the shared source"}…`}
+                    <span>
+                      {pendingSource.kind === "file"
+                        ? `${presenterName} is watching ${pendingSource.title ?? "a local file"}. That file lives on their Mac.`
+                        : `Loading ${pendingSource.title ?? "the shared source"}…`}
+                    </span>
+                    {pendingSource.kind === "file" && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-compact"
+                        title="Point at your own copy of this file"
+                        onClick={() => { void adoptPendingSource(); }}
+                      >
+                        Open my copy…
+                      </button>
+                    )}
                   </div>
                 )}
                 <div className="cp-monitor-wrap">

@@ -24,6 +24,7 @@ import { getLastUserSeekAt, getPlayheadFrames } from "../lib/playhead-store";
 import { createClockEstimator, expectedPosition } from "../lib/session-clock";
 import {
   loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc,
+  resolveByFingerprint, linkFingerprint,
   commentMarkers as reviewMarkersOf, annotationsOf,
   loadReviewer, reviewerColorFor, initialsOf,
   type AnnotationStrokes, type ReviewDoc, type ReviewOp,
@@ -96,6 +97,9 @@ type Args = {
   onChaseSeek: (frames: number) => void;
   setUrl: (url: string) => void;
   handleFetch: (url: string) => Promise<void>;
+  /** Open a file from THIS Mac's disk. Used by the fingerprint ladder when a
+   *  guest turns out to already have the presenter's file. */
+  loadLocalPath: (path: string) => Promise<unknown>;
   pushNotification: (kind: ToastKind, title: string, body: string) => void;
   /** Screening auto-enter also opens the drawer (comments live there). */
   setQueueOpen: (open: boolean) => void;
@@ -161,6 +165,8 @@ export type CoReview = {
   sourceStatus: ReadonlyMap<string, string>;
   /** Host only: hand the presenter floor to another member. */
   makePresenter: (memberId: string) => void;
+  /** Point at YOUR copy of the presenter's local file (fingerprint ladder). */
+  adoptPendingSource: () => Promise<void>;
   /** True when YOUR hand is up. */
   handRaised: boolean;
   /** Fire a transient reaction (throttled; echoes locally). */
@@ -176,7 +182,7 @@ export function useCoReview({
   isPlaying, fps, playbackRate,
   sessionSource, activeSourceUrlRef, reviewSourceKey,
   playerRef, metadataRef,
-  onChaseSeek, setUrl, handleFetch,
+  onChaseSeek, setUrl, handleFetch, loadLocalPath,
   pushNotification, setQueueOpen,
   setReviewMarkers, setReviewAnnotations,
   turn,
@@ -284,11 +290,30 @@ export function useCoReview({
             });
           return;
         }
-        // A local file: the bytes live on the presenter's disk, so there is
-        // nothing to fetch. Show what the room is watching and say plainly
-        // that we don't have it (the resolve ladder lands next phase).
+        // A local file. The bytes live on the presenter's disk and never cross
+        // the wire, so the fingerprint is the question "do YOU have this same
+        // content?". Tier 1 of the ladder: if we've reviewed this exact
+        // content before, we know where our own copy is - open it, zero bytes
+        // transferred. That's the whole point of shipping an identity rather
+        // than a host-local path.
         coReadyRef.current = false;
         setPendingSource(src);
+        const mine = src.fingerprint ? resolveByFingerprint(src.fingerprint) : null;
+        if (mine) {
+          sendSessionMsg({ kind: "sourceStatus", from: "", state: "loading", detail: null });
+          void loadLocalPath(mine)
+            .then(() => {
+              setPendingSource(null);
+              sendSessionMsg({ kind: "sourceStatus", from: "", state: "ready", detail: null });
+            })
+            .catch(() => {
+              // Indexed but gone (moved, renamed, external drive unplugged).
+              sendSessionMsg({ kind: "sourceStatus", from: "", state: "missing", detail: null });
+            });
+          return;
+        }
+        // Tier 3: we don't have it. Say so plainly; the room affordance offers
+        // "Open my copy", which links the fingerprint so tier 1 hits next time.
         sendSessionMsg({ kind: "sourceStatus", from: "", state: "missing", detail: null });
         return;
       }
@@ -729,6 +754,28 @@ export function useCoReview({
     void invoke("session_broadcast", { msg: { kind: "presenter", member: memberId, epoch } })
       .catch(() => { /* session raced closed */ });
   }, []);
+  /** Tier 3 of the fingerprint ladder: the guest points at THEIR copy of the
+   *  presenter's file. Linking the fingerprint to that path means the next
+   *  time anyone shares this content we resolve it silently (tier 1) - the
+   *  ladder teaches itself. */
+  const pendingSourceRef = useRef<SessionSource | null>(null);
+  pendingSourceRef.current = pendingSource;
+  const adoptPendingSource = useCallback(async () => {
+    const pending = pendingSourceRef.current;
+    if (!pending || pending.kind !== "file") return;
+    const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
+      m.open({ multiple: false, directory: false, title: "Find your copy" }),
+    );
+    if (typeof picked !== "string" || !picked) return;
+    if (pending.fingerprint) linkFingerprint(pending.fingerprint, picked);
+    try {
+      await loadLocalPath(picked);
+      setPendingSource(null);
+      sendSessionMsg({ kind: "sourceStatus", from: "", state: "ready", detail: null });
+    } catch {
+      sendSessionMsg({ kind: "sourceStatus", from: "", state: "failed", detail: null });
+    }
+  }, [loadLocalPath, sendSessionMsg]);
   const startShare = useCallback((source: ShareSourceArg) => { void shareRef.current?.start(source); }, []);
   const stopShare = useCallback(() => { void shareRef.current?.stop(); }, []);
   // Session over -> the share dies with it (same converged cleanup).
@@ -753,6 +800,7 @@ export function useCoReview({
     /** member id → "loading" | "ready" | "failed" | "missing" for that source. */
     sourceStatus,
     makePresenter,
+    adoptPendingSource,
     handRaised: coSession.selfId != null ? raisedHands.has(coSession.selfId) : raisedHands.has("m0"),
     sendReaction,
     toggleHand,
