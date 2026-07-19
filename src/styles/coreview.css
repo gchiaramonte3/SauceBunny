@@ -353,23 +353,30 @@
   object-fit: cover;
   transform: scaleX(-1); /* mirrored, like every conferencing self-view */
 }
+/* Horizontal broadcast-style level strip (shared: green room + Settings).
+   Segments light left to right; zone colors are the industry convention
+   (green body, yellow hot, red peaking) - a live-signal exception to the
+   grey-chip rule. Driven by src/lib/level-meter.ts (.lit / .hold). */
 .cp-gr-meter {
   display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 18px;
-  padding: 0 2px;
+  align-items: center;
+  gap: 2px;
+  height: 10px;
+  min-width: 160px;
 }
 .cp-gr-meter-bar {
   flex: 1;
   height: 100%;
-  border-radius: 2px;
-  background: var(--fg-3);
-  opacity: 0.7;
-  transform: scaleY(0.25);
-  transform-origin: bottom;
-  transition: transform 90ms linear;
+  border-radius: 1.5px;
+  opacity: 0.16;
+  transition: opacity 70ms linear;
 }
+.cp-gr-meter-bar.zone-green  { background: var(--success); }
+.cp-gr-meter-bar.zone-yellow { background: var(--color-warning); }
+.cp-gr-meter-bar.zone-red    { background: var(--danger); }
+.cp-gr-meter-bar.lit  { opacity: 1; }
+/* Peak-hold marker: stays lit ~1s at the loudest recent segment. */
+.cp-gr-meter-bar.hold { opacity: 0.85; }
 @media (prefers-reduced-motion: reduce) {
   .cp-gr-meter-bar { transition: none; }
 }

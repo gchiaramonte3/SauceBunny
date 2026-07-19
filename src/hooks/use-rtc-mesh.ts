@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RtcMesh, type MeshPeerState, type MeshSignalPayload } from "../lib/rtc-mesh";
 import { getSessionCapture, subscribeSessionCapture } from "./use-media-capture";
-import { SPEAKER_OUTPUT_CHANGED_EVENT, canPickSpeakers, loadDeviceChoice } from "../lib/media-devices";
+import {
+  SESSION_VOLUME_CHANGED_EVENT, SPEAKER_OUTPUT_CHANGED_EVENT,
+  canPickSpeakers, loadDeviceChoice, loadSessionVolume,
+} from "../lib/media-devices";
 
 /** Route one session-voice element to the chosen output (WebKit 18.4+;
  *  silently a no-op elsewhere or on "system default"). */
@@ -12,6 +15,11 @@ function applySpeaker(el: HTMLAudioElement): void {
   const id = loadDeviceChoice().speakerId ?? "";
   void (el as HTMLAudioElement & { setSinkId(id: string): Promise<void> })
     .setSinkId(id).catch(() => { /* device gone - default output */ });
+}
+
+/** Session output volume (Settings > Camera & Mic) on one voice element. */
+function applyVolume(el: HTMLAudioElement): void {
+  el.volume = loadSessionVolume().output;
 }
 
 /**
@@ -49,6 +57,12 @@ export function useRtcMesh(args: {
     const onChange = () => { for (const el of audioRef.current.values()) applySpeaker(el); };
     window.addEventListener(SPEAKER_OUTPUT_CHANGED_EVENT, onChange);
     return () => window.removeEventListener(SPEAKER_OUTPUT_CHANGED_EVENT, onChange);
+  }, []);
+  // Session output volume changed: re-apply to every live voice element.
+  useEffect(() => {
+    const onChange = () => { for (const el of audioRef.current.values()) applyVolume(el); };
+    window.addEventListener(SESSION_VOLUME_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(SESSION_VOLUME_CHANGED_EVENT, onChange);
   }, []);
   const onLogRef = useRef(onLog);
   useEffect(() => { onLogRef.current = onLog; }, [onLog]);
@@ -91,6 +105,7 @@ export function useRtcMesh(args: {
             el = document.createElement("audio");
             el.autoplay = true;
             applySpeaker(el);
+            applyVolume(el);
             audioRef.current.set(id, el);
           }
           el.srcObject = stream;

@@ -1032,7 +1032,13 @@
 .cp-pane-row .k svg { vertical-align: -2px; margin-right: 3px; }
 
 /* ── Camera & Mic permission chips (native TCC status). ── */
-.cp-av-perms { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.cp-av-perms { display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: center; }
+/* Session volume sliders (input gain / output level). Same treatment as the
+   captions Size slider so all Settings ranges read as one family. */
+.cp-av-vol {
+  width: 150px;
+  accent-color: var(--accent);
+}
 .cp-av-perm {
   display: inline-flex;
   align-items: center;

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { IconChevronRight, IconMic, IconMicOff, IconVideo, IconVideoOff } from "./Icons";
 import { nativeAvStatus } from "../lib/media-devices";
+import { METER_SEGMENTS, meterZoneClass, startLevelMeter } from "../lib/level-meter";
 import type { useMediaCapture } from "../hooks/use-media-capture";
 
 /**
@@ -19,7 +20,6 @@ export function GreenRoomDevices({ cap, onContinue }: {
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const barsRef = useRef<(HTMLSpanElement | null)[]>([]);
-  const rafRef = useRef(0);
   const camLive = !!cap.stream && cap.stream.getVideoTracks().length > 0 && !cap.choice.cameraOff;
 
   // Preview follows the owned stream. camLive is a dep: the <video>
@@ -31,36 +31,12 @@ export function GreenRoomDevices({ cap, onContinue }: {
     if (cap.stream) v.play().catch(() => { /* autoplay policies */ });
   }, [cap.stream, camLive]);
 
-  // Live mic level: AnalyserNode driving 12 bars (DictationWave's DOM-bar
-  // pattern). Reduced motion renders the static bars, no rAF.
+  // Live mic level - shared driver (src/lib/level-meter.ts): horizontal
+  // green/yellow/red strip with peak hold, suspended-AudioContext safe.
   useEffect(() => {
     const s = cap.stream;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!s || s.getAudioTracks().length === 0 || reduced) return;
-    const ctx = new AudioContext();
-    const src = ctx.createMediaStreamSource(s);
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    src.connect(analyser);
-    const data = new Uint8Array(analyser.frequencyBinCount);
-    const tick = () => {
-      analyser.getByteTimeDomainData(data);
-      let peak = 0;
-      for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i] - 128));
-      const level = Math.min(1, peak / 96);
-      barsRef.current.forEach((b, i) => {
-        if (!b) return;
-        const t = (i + 1) / barsRef.current.length;
-        b.style.transform = `scaleY(${level >= t * 0.9 ? 1 : 0.25})`;
-      });
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(rafRef.current);
-      src.disconnect();
-      void ctx.close();
-    };
+    if (!s) return;
+    return startLevelMeter(s, () => barsRef.current);
   }, [cap.stream]);
 
   // The opener plugin's default scope blocks x-apple.systempreferences:
@@ -117,8 +93,8 @@ export function GreenRoomDevices({ cap, onContinue }: {
       {cap.stream && (
         <>
           <div className="cp-gr-meter" aria-label="Microphone level" role="img">
-            {Array.from({ length: 12 }, (_, i) => (
-              <span key={i} ref={(el) => { barsRef.current[i] = el; }} className="cp-gr-meter-bar" />
+            {Array.from({ length: METER_SEGMENTS }, (_, i) => (
+              <span key={i} ref={(el) => { barsRef.current[i] = el; }} className={meterZoneClass(i)} />
             ))}
           </div>
           <div className="cp-gr-selects">

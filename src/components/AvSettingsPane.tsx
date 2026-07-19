@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { useMediaCapture } from "../hooks/use-media-capture";
-import { SPEAKER_OUTPUT_CHANGED_EVENT, canPickSpeakers, nativeAvStatus, type AvAuthState } from "../lib/media-devices";
+import {
+  SPEAKER_OUTPUT_CHANGED_EVENT, canPickSpeakers, loadSessionVolume, nativeAvStatus,
+  setSessionInputVolume, setSessionOutputVolume, type AvAuthState,
+} from "../lib/media-devices";
 import { IconMic, IconScreenShare, IconVideo } from "./Icons";
+import { METER_SEGMENTS, meterZoneClass, startLevelMeter } from "../lib/level-meter";
 import { invoke } from "@tauri-apps/api/core";
 
 /**
@@ -22,7 +26,6 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
   const cap = useMediaCapture();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const barsRef = useRef<(HTMLSpanElement | null)[]>([]);
-  const rafRef = useRef(0);
   // Release on close ONLY if this pane turned the hardware on (never steal
   // a live session's stream).
   const ownedHereRef = useRef(false);
@@ -77,50 +80,52 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
     if (cap.stream) v.play().catch(() => { /* autoplay */ });
   }, [cap.stream, camLive]);
 
-  // Level meter (the green room's analyser pattern).
+  // Level meter - shared driver (src/lib/level-meter.ts). Handles the
+  // WKWebView suspended-AudioContext trap that kept these bars frozen when
+  // the preview auto-started without a user gesture.
   useEffect(() => {
     const s = cap.stream;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!s || s.getAudioTracks().length === 0 || reduced) return;
-    const ctx = new AudioContext();
-    const src = ctx.createMediaStreamSource(s);
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 256;
-    src.connect(analyser);
-    const data = new Uint8Array(analyser.frequencyBinCount);
-    const tick = () => {
-      analyser.getByteTimeDomainData(data);
-      let peak = 0;
-      for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i] - 128));
-      const level = Math.min(1, peak / 96);
-      barsRef.current.forEach((b, i) => {
-        if (!b) return;
-        const t = (i + 1) / barsRef.current.length;
-        b.style.transform = `scaleY(${level >= t * 0.9 ? 1 : 0.25})`;
-      });
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      cancelAnimationFrame(rafRef.current);
-      src.disconnect();
-      void ctx.close();
-    };
+    if (!s) return;
+    return startLevelMeter(s, () => barsRef.current);
   }, [cap.stream]);
 
   // Mic check: record a short clip, hear it back (Discord's "Let's Check").
   const [micTest, setMicTest] = useState<"idle" | "recording" | "playing">("idle");
+  const [micTestError, setMicTestError] = useState<string | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
   const testAudioRef = useRef<HTMLAudioElement | null>(null);
   const startMicTest = () => {
     const s = cap.stream;
     if (!s || s.getAudioTracks().length === 0 || micTest !== "idle") return;
+    setMicTestError(null);
+    // "Join muted" leaves track.enabled=false, which records SILENCE - the
+    // classic "mic check doesn't work". Force the mic live for the test and
+    // restore the user's mute state after.
+    const tracks = s.getAudioTracks();
+    const wasEnabled = tracks.map((t) => t.enabled);
+    tracks.forEach((t) => { t.enabled = true; });
+    const restoreMute = () => tracks.forEach((t, i) => { t.enabled = wasEnabled[i] ?? true; });
     try {
-      const rec = new MediaRecorder(new MediaStream(s.getAudioTracks()));
+      // WKWebView records audio/mp4 (never webm) - ask for it explicitly so
+      // the blob type is honest instead of relying on the default.
+      const mime = typeof MediaRecorder.isTypeSupported === "function"
+        && MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : undefined;
+      const rec = new MediaRecorder(new MediaStream(tracks), mime ? { mimeType: mime } : undefined);
       const chunks: Blob[] = [];
       rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      rec.onerror = () => {
+        restoreMute();
+        setMicTestError("Recording failed. Check the microphone permission and try again.");
+        setMicTest("idle");
+      };
       rec.onstop = () => {
-        const url = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType }));
+        restoreMute();
+        if (chunks.length === 0) {
+          setMicTestError("Nothing was recorded. Pick a different microphone and try again.");
+          setMicTest("idle");
+          return;
+        }
+        const url = URL.createObjectURL(new Blob(chunks, { type: rec.mimeType || "audio/mp4" }));
         const audio = new Audio(url);
         testAudioRef.current = audio;
         // Play back through the chosen speakers - the point of the test is
@@ -132,13 +137,24 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
         const done = () => { URL.revokeObjectURL(url); testAudioRef.current = null; setMicTest("idle"); };
         setMicTest("playing");
         audio.onended = done;
-        audio.play().catch(done);
+        audio.onerror = () => {
+          setMicTestError("Playback failed. Try a different speaker output.");
+          done();
+        };
+        audio.play().catch(() => {
+          setMicTestError("Playback failed. Try a different speaker output.");
+          done();
+        });
       };
       recRef.current = rec;
       rec.start();
       setMicTest("recording");
       window.setTimeout(() => { if (rec.state !== "inactive") rec.stop(); }, 4000);
-    } catch {
+    } catch (err) {
+      restoreMute();
+      setMicTestError(err instanceof Error && err.name === "NotSupportedError"
+        ? "Recording isn't supported in this webview."
+        : "Couldn't start the recording.");
       setMicTest("idle");
     }
   };
@@ -300,10 +316,38 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
               </div>
               <div className="v">
                 <div className="cp-gr-meter" aria-label="Microphone level" role="img">
-                  {Array.from({ length: 12 }, (_, i) => (
-                    <span key={i} ref={(el) => { barsRef.current[i] = el; }} className="cp-gr-meter-bar" />
+                  {Array.from({ length: METER_SEGMENTS }, (_, i) => (
+                    <span key={i} ref={(el) => { barsRef.current[i] = el; }} className={meterZoneClass(i)} />
                   ))}
                 </div>
+              </div>
+            </div>
+            <div className="cp-pane-row">
+              <div className="k">
+                Input volume
+                <span className="desc">How loud your mic is to others. The meter above follows it.</span>
+              </div>
+              <div className="v">
+                <input
+                  type="range" className="cp-av-vol" min={0} max={2} step={0.05}
+                  defaultValue={loadSessionVolume().input}
+                  aria-label="Microphone input volume"
+                  onChange={(e) => setSessionInputVolume(Number(e.target.value))}
+                />
+              </div>
+            </div>
+            <div className="cp-pane-row">
+              <div className="k">
+                Output volume
+                <span className="desc">How loud session voices play on this Mac.</span>
+              </div>
+              <div className="v">
+                <input
+                  type="range" className="cp-av-vol" min={0} max={1} step={0.05}
+                  defaultValue={loadSessionVolume().output}
+                  aria-label="Session output volume"
+                  onChange={(e) => setSessionOutputVolume(Number(e.target.value))}
+                />
               </div>
             </div>
             {canPickSpeakers() && cap.devices.speakers.length > 0 && (
@@ -366,6 +410,7 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
             </button>
           </div>
         </div>
+        {micTestError && <p className="cp-colobby-err" role="alert">{micTestError}</p>}
       </CollapsibleSection>
 
       <CollapsibleSection id="av-join" label="Joining sessions" open={sectionOpen("av-join")} onToggle={() => toggleSection("av-join")}>
