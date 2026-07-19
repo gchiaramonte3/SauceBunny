@@ -296,6 +296,21 @@ pub fn run() {
             // model in memory and would otherwise survive as an orphan.
             if let tauri::RunEvent::Exit = event {
                 app.state::<commands::LlmServer>().shutdown();
+                // Every OTHER sidecar too. Nothing drained the JobRegistry on
+                // exit, so an in-flight yt-dlp/ffmpeg/whisper outlived the app
+                // (three orphaned yt-dlp+ffmpeg pairs were found still pulling
+                // the same download half an hour after their app instance had
+                // quit, starving the next launch of bandwidth).
+                let registry = app.state::<commands::JobRegistry>();
+                let mut killed = 0usize;
+                for id in registry.active_ids() {
+                    if let Some(child) = registry.take(&id) {
+                        if child.kill().is_ok() { killed += 1; }
+                    }
+                }
+                if killed > 0 {
+                    eprintln!("[shutdown] killed {killed} in-flight sidecar job(s)");
+                }
             }
         });
 }

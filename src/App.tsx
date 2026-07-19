@@ -3176,6 +3176,11 @@ export default function App() {
   }, [defaults.transcriptLibrary, appendLog]);
 
   const handleGenerateTranscript = useCallback(async () => {
+    // One run at a time. Without this, an impatient second click spawned a
+    // SECOND full audio download racing the first on the same pipe (three
+    // concurrent 127 MB downloads were observed in the wild), which made a
+    // slow transcribe look like a hung one.
+    if (transcriptState === "running") return;
     if (!metadata) {
       setTranscriptState("error");
       setTranscriptError("Load a source URL first.");
@@ -3326,7 +3331,7 @@ export default function App() {
       setTranscriptError(msg);
       appendLog("err", txChannel, msg);
     }
-  }, [metadata, metadataLoading, exportOpts, fps, selectedModel, defaults.whisperModel,
+  }, [transcriptState, metadata, metadataLoading, exportOpts, fps, selectedModel, defaults.whisperModel,
       defaults.transcriptionEngine, defaults.useWebCodecsDecoder,
       defaults.detectSpeakers, defaults.expectedSpeakers, defaults.transcriptionLanguage,
       appendLog, resolveTranscriptOutDir, localFilePath, sourceKind,

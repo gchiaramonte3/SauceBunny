@@ -1474,12 +1474,35 @@ pub async fn download_web_preview(
 /// FNV-1a (deterministic across process runs; std `DefaultHasher` is seeded
 /// randomly per-process, so its output couldn't be reused across launches).
 pub(crate) fn source_audio_hash(url: &str) -> String {
+    let canon = canonical_cache_url(url);
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in url.as_bytes() {
+    for b in canon.as_bytes() {
         h ^= u64::from(*b);
         h = h.wrapping_mul(0x0000_0100_0000_01B3);
     }
     format!("{h:016x}")
+}
+
+/// Strip the query params that name a VIEW of a source rather than the source
+/// itself, so the same video hashes identically however it was pasted.
+///
+/// This was a real bug, not a nicety: the pre-cache is written under the URL
+/// the user pasted (`...?v=ID&t=3930s`) but read back under the canonical
+/// `webpage_url` (`...?v=ID`). Different string, different hash, permanent
+/// miss - so any link carrying a timestamp, playlist, or share id could never
+/// reuse its own cached audio and re-downloaded the whole track every time.
+/// `v` is KEPT (it identifies the video); everything else is dropped.
+pub(crate) fn canonical_cache_url(url: &str) -> String {
+    let Some((base, query)) = url.split_once('?') else { return url.to_string() };
+    let keep: Vec<&str> = query
+        .split('&')
+        .filter(|kv| kv.starts_with("v=") || kv.starts_with("video_id="))
+        .collect();
+    if keep.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}?{}", keep.join("&"))
+    }
 }
 
 /// The COMPLETE-file prefix. A file under this prefix is fully downloaded and
@@ -2079,5 +2102,46 @@ mod ytdlp_update_tests {
     fn updated_copy_always_outranks_bundled() {
         assert_eq!(resolved_ytdlp_kind(true), "updated");
         assert_eq!(resolved_ytdlp_kind(false), "bundled");
+    }
+}
+
+#[cfg(test)]
+mod cache_url_tests {
+    use super::*;
+
+    #[test]
+    fn view_params_do_not_change_a_source_identity() {
+        // The bug this fixes: the audio pre-cache is WRITTEN under the URL the
+        // user pasted and READ back under the canonical webpage_url. A "&t="
+        // timestamp made those two different strings, so a source could never
+        // reuse its own cached audio and re-downloaded the whole track.
+        let canonical = "https://www.youtube.com/watch?v=-8_w9zfPoQQ";
+        for pasted in [
+            "https://www.youtube.com/watch?v=-8_w9zfPoQQ&t=3930s",
+            "https://www.youtube.com/watch?v=-8_w9zfPoQQ&list=PL123&index=4",
+            "https://www.youtube.com/watch?v=-8_w9zfPoQQ&si=abc",
+        ] {
+            assert_eq!(
+                source_audio_hash(pasted),
+                source_audio_hash(canonical),
+                "{pasted} must share a cache entry with its canonical form",
+            );
+        }
+    }
+
+    #[test]
+    fn different_videos_still_get_different_entries() {
+        assert_ne!(
+            source_audio_hash("https://www.youtube.com/watch?v=aaaaaaaaaaa"),
+            source_audio_hash("https://www.youtube.com/watch?v=bbbbbbbbbbb"),
+        );
+    }
+
+    #[test]
+    fn urls_without_a_query_are_untouched() {
+        assert_eq!(canonical_cache_url("https://vimeo.com/12345"), "https://vimeo.com/12345");
+        // A non-YouTube URL whose params we don't understand keeps only what
+        // we recognise; the base still identifies the source.
+        assert_eq!(canonical_cache_url("https://x.com/i/status/9?s=20"), "https://x.com/i/status/9");
     }
 }

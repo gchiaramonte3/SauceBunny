@@ -1130,7 +1130,6 @@ pub async fn generate_transcript(
         return Err(format!("ffmpeg sidecar missing at {}", ffmpeg.display()).into());
     }
 
-    let section = format!("*{:.3}-{:.3}", start_s, end_s);
     // Bundled ffmpeg for the section cut below — resolved here (the fn returns
     // AppError) so the move-closure owns it; without it yt-dlp falls back to
     // PATH/Homebrew, absent on a distributed app (DISTRIBUTION.md).
@@ -1183,9 +1182,16 @@ pub async fn generate_transcript(
             }
         };
 
+        // NO --download-sections. It forces yt-dlp off its native concurrent
+        // downloader and onto a single-connection ffmpeg read of the
+        // googlevideo URL, which YouTube throttles to roughly real time:
+        // measured on this stack at 26 KB/s vs 82 MB/s native - a ~3000x
+        // slowdown that made a 2-hour source spend ~81 minutes "downloading
+        // audio" before whisper could start at all. We pull the FULL track at
+        // full speed and let phase 2 cut the section (the cached-audio branch
+        // above already works exactly that way), which also makes the download
+        // reusable instead of thrown away.
         let mut yt_args: Vec<String> = vec![
-            "--download-sections".into(),
-            section.clone(),
             "--ffmpeg-location".into(), ffmpeg_for,
             "-f".into(), "bestaudio/best".into(),
             "--no-playlist".into(),
@@ -1277,7 +1283,10 @@ pub async fn generate_transcript(
                 return;
             }
         };
-        (raw_path, false, false)
+        // Full track downloaded -> phase 2 cuts [start,end] out of it, exactly
+        // like the cached branch. (Was `false`: the file used to arrive
+        // pre-cut by --download-sections.)
+        (raw_path, true, false)
         };
 
         let raw_mb = raw_path

@@ -304,9 +304,25 @@ func runStream() async -> Never {
         fail("start capture: \(error.localizedDescription)", code: 5)
     }
 
-    // Runs until the proxy kills us or the stdout reader disappears.
-    RunLoop.main.run()
-    exit(0)
+    // Park the process until the proxy kills us or the stdout reader goes.
+    //
+    // This MUST NOT be RunLoop.main.run(): that returns IMMEDIATELY when the
+    // run loop has no attached input sources or timers, and SCStream delivers
+    // every sample on its own DispatchQueue (see addStreamOutput above), so
+    // RunLoop.main has nothing attached. It returned instantly, fell through
+    // to exit(0), and killed capture ~0.17s in - after the meta line was
+    // written but before a single frame. Every downstream stage then behaved
+    // "correctly" on an empty stream, so screen share failed with an HTTP 200,
+    // a 780-byte header-only fMP4, and no error anywhere.
+    //
+    // dispatchMain() is ALSO wrong here: this file is a main.swift with
+    // top-level `await`, so the program runs as an implicit Task and the
+    // process exits when that task COMPLETES. Suspending it forever is what
+    // keeps us alive - the process stays up, and SCK keeps delivering on its
+    // own dispatch queues. We exit when the proxy kills us or stdout closes
+    // (SIGPIPE), which is exactly the intended lifetime.
+    await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
+    exit(0) // unreachable: the continuation above is never resumed
 }
 
 switch argv[0] {
