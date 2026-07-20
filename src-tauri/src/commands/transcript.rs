@@ -1456,6 +1456,9 @@ pub async fn generate_transcript(
             emit_transcript_done(&app_for, &job_for, false, None, None, Some("Cancelled".into()));
             return;
         }
+        // Wall clock for the pipeline log: users need to be able to read
+        // (and paste back) how long a transcription actually took.
+        let whisper_started = std::time::Instant::now();
         let spawn = wsp
             .args(whisper_cli_args(&model_str, &wav_path_str, &output_base_str, &lang, vad_model.as_deref()))
             .spawn();
@@ -1517,6 +1520,10 @@ pub async fn generate_transcript(
                 }
                 CommandEvent::Terminated(payload) => {
                     let _ = app_for.state::<JobRegistry>().take(&job_for);
+                    emit_transcript_log(
+                        &app_for, &job_for, "info",
+                        format!("Whisper finished in {}.", fmt_elapsed(whisper_started.elapsed())),
+                    );
                     let success = payload.code == Some(0);
                     let srt = format!("{}.srt", output_base_str);
                     let srt_exists = std::path::Path::new(&srt).exists();
@@ -1941,6 +1948,9 @@ pub async fn transcribe_prepared_wav(
             emit_transcript_done(&app_for, &job_for, false, None, None, Some("Cancelled".into()));
             return;
         }
+        // Wall clock for the pipeline log: users need to be able to read
+        // (and paste back) how long a transcription actually took.
+        let whisper_started = std::time::Instant::now();
         let spawn = wsp
             // No DYLD override — whisper-cli is statically linked (see the
             // generate_transcript spawn for the full rationale).
@@ -1980,6 +1990,10 @@ pub async fn transcribe_prepared_wav(
                 }
                 CommandEvent::Terminated(payload) => {
                     let _ = app_for.state::<JobRegistry>().take(&job_for);
+                    emit_transcript_log(
+                        &app_for, &job_for, "info",
+                        format!("Whisper finished in {}.", fmt_elapsed(whisper_started.elapsed())),
+                    );
                     let success = payload.code == Some(0);
                     let srt_path = format!("{}.srt", output_base_str);
                     let srt_exists = std::path::Path::new(&srt_path).exists();
@@ -2222,6 +2236,9 @@ pub async fn transcribe_local_file(
             emit_transcript_done(&app_for, &job_for, false, None, None, Some("Cancelled".into()));
             return;
         }
+        // Wall clock for the pipeline log: users need to be able to read
+        // (and paste back) how long a transcription actually took.
+        let whisper_started = std::time::Instant::now();
         let spawn = wsp
             // No DYLD override — whisper-cli is statically linked (see the
             // generate_transcript spawn for the full rationale).
@@ -2263,6 +2280,10 @@ pub async fn transcribe_local_file(
                 }
                 CommandEvent::Terminated(payload) => {
                     let _ = app_for.state::<JobRegistry>().take(&job_for);
+                    emit_transcript_log(
+                        &app_for, &job_for, "info",
+                        format!("Whisper finished in {}.", fmt_elapsed(whisper_started.elapsed())),
+                    );
                     let success = payload.code == Some(0);
                     let srt = format!("{}.srt", output_base_str);
                     let srt_exists = std::path::Path::new(&srt).exists();

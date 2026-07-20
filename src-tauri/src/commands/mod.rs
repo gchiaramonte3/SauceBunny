@@ -90,6 +90,46 @@ fn short_err(stderr: &str) -> String {
 
 
 
+/// Human duration for the pipeline log, so a user can read (and paste back)
+/// how long a stage actually took: "820ms", "45.2s", "6m 08s", "1h 04m".
+/// Tuned for reporting, not precision - the unit steps down as the number
+/// grows so the string stays short and scannable.
+pub(crate) fn fmt_elapsed(d: std::time::Duration) -> String {
+    let ms = d.as_millis();
+    if ms < 1000 {
+        return format!("{ms}ms");
+    }
+    let secs = d.as_secs_f64();
+    if secs < 60.0 {
+        return format!("{secs:.1}s");
+    }
+    let total = d.as_secs();
+    let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
+    if h > 0 {
+        format!("{h}h {m:02}m")
+    } else {
+        format!("{m}m {s:02}s")
+    }
+}
+
+#[cfg(test)]
+mod elapsed_tests {
+    use super::fmt_elapsed;
+    use std::time::Duration;
+
+    #[test]
+    fn reads_naturally_at_every_scale() {
+        assert_eq!(fmt_elapsed(Duration::from_millis(820)), "820ms");
+        assert_eq!(fmt_elapsed(Duration::from_millis(45_200)), "45.2s");
+        assert_eq!(fmt_elapsed(Duration::from_secs(368)), "6m 08s");
+        assert_eq!(fmt_elapsed(Duration::from_secs(3840)), "1h 04m");
+        // Boundaries stay on the right side of each unit switch.
+        assert_eq!(fmt_elapsed(Duration::from_millis(999)), "999ms");
+        assert_eq!(fmt_elapsed(Duration::from_secs(59)), "59.0s");
+        assert_eq!(fmt_elapsed(Duration::from_secs(60)), "1m 00s");
+    }
+}
+
 fn current_triple() -> &'static str {
     if cfg!(all(target_arch = "aarch64", target_os = "macos")) {
         "aarch64-apple-darwin"

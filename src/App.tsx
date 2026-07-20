@@ -43,6 +43,7 @@ import type {
 } from "./types";
 import { asLogTag } from "./types";
 import { formatError, humanizeSpawnError, isAppError } from "./lib/error-format";
+import { fmtElapsed, stageLabel } from "./lib/elapsed";
 import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase";
 import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek, subscribePlayhead } from "./lib/playhead-store";
 import { clampSeekFrames, maxSeekSeconds, endSeekFrames } from "./lib/playhead-clock";
@@ -1327,7 +1328,28 @@ export default function App() {
   // Pipeline-log channel label for transcription ("whisper" | "parakeet"), in a
   // ref so the long-lived transcript-log listener tags lines with the engine
   // that's actually running rather than a hardcoded "whisper".
+  /** Current pipeline stage + when it started, so each stage can report its
+   *  own duration in the log as the next one begins. */
+  const stageClockRef = useRef<{ phase: string | null; at: number }>({ phase: null, at: 0 });
+  /** When the whole transcription run started, for the closing total. */
+  const jobStartedRef = useRef(0);
   const txChannelRef = useRef<"whisper" | "parakeet">("whisper");
+  /** Close out the last stage and report the run total. Called when a
+   *  transcription finishes, so the log ends with a number the user can read
+   *  off ("Whisper finished in 6m 08s." / "Total 7m 12s."). */
+  const logRunTotals = useCallback(() => {
+    const stage = stageClockRef.current;
+    if (stage.phase) {
+      appendLog("info", txChannelRef.current,
+        `${stageLabel(stage.phase)} finished in ${fmtElapsed(Date.now() - stage.at)}.`);
+    }
+    if (jobStartedRef.current) {
+      appendLog("ok", txChannelRef.current,
+        `Total ${fmtElapsed(Date.now() - jobStartedRef.current)}.`);
+    }
+    stageClockRef.current = { phase: null, at: 0 };
+    jobStartedRef.current = 0;
+  }, [appendLog]);
   txChannelRef.current = defaults.transcriptionEngine === "parakeet" ? "parakeet" : "whisper";
   // Snapshot of the source's title/thumbnail taken when a SINGLE clip export
   // starts, so the Recent entry is attributed to the source that was exported
@@ -1480,6 +1502,7 @@ export default function App() {
           setTranscriptProgress(100);
           setTranscriptPhase(null);
           const filename = e.payload.path.split("/").pop() ?? "Transcript ready.";
+          logRunTotals();
           appendLog("ok", txChannelRef.current, `Transcript saved → ${e.payload.path}`);
           // Load into the Transcript tab (same pulse-and-switch behavior
           // as the captions path above).
@@ -1521,12 +1544,14 @@ export default function App() {
           setTranscriptError(null);
           setTranscriptProgress(0);
           setTranscriptPhase(null);
+          logRunTotals();
           appendLog("warn", txChannelRef.current, "Transcription cancelled");
         } else {
           setTranscriptState("error");
           setTranscriptResolution("error"); // GenerateButton → cross flash
           setTranscriptPhase(null);
           const msg = humanizeSpawnError(e.payload.error ?? "Transcription failed");
+          logRunTotals();
           setTranscriptError(msg);
           appendLog("err", txChannelRef.current, msg);
           notify("Transcript failed", msg);
@@ -1554,6 +1579,19 @@ export default function App() {
       type TranscriptPhasePayload = { job_id: string; phase: string };
       const jPhase = await listen<TranscriptPhasePayload>("transcript-phase", (e) => {
         if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
+        // Close out the previous stage in the pipeline log. Every long
+        // pipeline reports its phases through this one event, so timing them
+        // here covers whisper, parakeet and each diarize step at once - and
+        // gives a number the user can read off and paste back when something
+        // is slower than it should be.
+        const stage = stageClockRef.current;
+        if (stage.phase && stage.phase !== e.payload.phase) {
+          appendLog("info", txChannelRef.current,
+            `${stageLabel(stage.phase)} finished in ${fmtElapsed(Date.now() - stage.at)}.`);
+        }
+        if (stage.phase !== e.payload.phase) {
+          stageClockRef.current = { phase: e.payload.phase, at: Date.now() };
+        }
         setTranscriptPhase(e.payload.phase);
       });
       // Speaker-model pre-warm channel (Settings → Transcription).
@@ -3230,6 +3268,9 @@ export default function App() {
     setTranscriptError(null);
     setTranscriptProgress(0);
     setTranscriptPhase(null); // backend emits "whisper"/"parakeet" then "diarize-*"
+    // Reset the stage/total clocks for this run.
+    stageClockRef.current = { phase: null, at: 0 };
+    jobStartedRef.current = Date.now();
     const engineLabel = engine === "parakeet" ? "Parakeet" : (selectedModel?.name ?? "Whisper");
     const txChannel = engine === "parakeet" ? "parakeet" : "whisper";
     const srcLabel = sourceKind === "file" ? metadata.title : `${exportOpts.inTc || "00:00:00:00"} → ${exportOpts.outTc || "end"}`;
