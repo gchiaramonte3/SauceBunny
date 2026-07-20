@@ -227,3 +227,32 @@ describe("a member who reconnects (r124)", () => {
     expect(FakePc.instances[0].closed).toBe(false);
   });
 });
+
+describe("screen share resolution (r128)", () => {
+  it("sends a share at full size instead of inheriting the camera tile cap", async () => {
+    // scaleResolutionDownBy is a SENDER property, so it survived
+    // replaceTrack: a share went out at roughly half resolution, which is
+    // unreadable for the text and timelines people actually share.
+    const { mesh } = makeMesh("m0");
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+    const pc = FakePc.instances[0];
+    const videoSender = pc.senders.find((s) => s.track?.kind === "video")!;
+    // The camera tile cap is in place first.
+    expect(videoSender.params.encodings[0].scaleResolutionDownBy).toBeGreaterThan(1);
+
+    await mesh.setVideoOverride(fakeTrack("video") as unknown as MediaStreamTrack);
+    expect(videoSender.params.encodings[0].scaleResolutionDownBy,
+      "a share must not be downscaled to tile size").toBe(1);
+  });
+
+  it("restores the tile cap when the share ends", async () => {
+    const { mesh } = makeMesh("m0");
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+    const pc = FakePc.instances[0];
+    const videoSender = pc.senders.find((s) => s.track?.kind === "video")!;
+    await mesh.setVideoOverride(fakeTrack("video") as unknown as MediaStreamTrack);
+    await mesh.setVideoOverride(null);
+    expect(videoSender.params.encodings[0].scaleResolutionDownBy,
+      "the camera goes back to tile size").toBeGreaterThan(1);
+  });
+});

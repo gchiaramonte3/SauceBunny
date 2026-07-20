@@ -144,8 +144,36 @@ export class RtcMesh {
     for (const [, slot] of this.slots) {
       for (const sender of slot.videoSenders) {
         try { await sender.replaceTrack(video); } catch { /* sender gone */ }
+        // scaleResolutionDownBy is a SENDER property, so it survives
+        // replaceTrack: a share was inheriting the camera tile's downscale
+        // and arriving at roughly half resolution - unreadable for the text
+        // and timelines people actually share. A share sends full size; the
+        // camera goes back to tile size when the share ends.
+        if (track) {
+          this.setSenderScale(sender, 1);
+          // Screen content is detail, not motion: hold resolution and let the
+          // frame rate absorb congestion, rather than blurring the pixels
+          // someone is trying to read.
+          try {
+            const p = sender.getParameters() as RTCRtpSendParameters & { degradationPreference?: string };
+            p.degradationPreference = "maintain-resolution";
+            void sender.setParameters(p);
+          } catch { /* older engines ignore the hint */ }
+        } else {
+          this.capTileResolution(sender, video?.getSettings?.().height ?? 720);
+        }
       }
     }
+  }
+
+  /** Set (or clear) a sender's resolution downscale. */
+  private setSenderScale(sender: RTCRtpSender, factor: number): void {
+    try {
+      const params = sender.getParameters();
+      params.encodings = params.encodings?.length ? params.encodings : [{}];
+      params.encodings[0].scaleResolutionDownBy = factor;
+      void sender.setParameters(params);
+    } catch { /* older engines: full-size is the safe direction */ }
   }
 
   /** Share system audio in/out: the share+mic mix replaces the mic on
@@ -188,12 +216,7 @@ export class RtcMesh {
    *  placeholder sender too, so a camera that arrives later is capped from
    *  its first frame rather than blasting full resolution at every peer. */
   private capTileResolution(sender: RTCRtpSender, sourceHeight: number): void {
-    try {
-      const params = sender.getParameters();
-      params.encodings = params.encodings?.length ? params.encodings : [{}];
-      params.encodings[0].scaleResolutionDownBy = Math.max(1, sourceHeight / 360);
-      void sender.setParameters(params);
-    } catch { /* older engines: full-size tiles still work */ }
+    this.setSenderScale(sender, Math.max(1, sourceHeight / 360));
   }
 
   private connectTo(id: string, epoch = 0): PeerSlot | null {

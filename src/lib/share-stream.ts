@@ -42,8 +42,24 @@ export async function openShareStream(
   const pump = () => {
     if (closed || sb.updating) return;
     const chunk = queue.shift();
-    if (chunk) {
-      try { sb.appendBuffer(chunk as BufferSource); } catch { died(); }
+    if (!chunk) return;
+    try {
+      sb.appendBuffer(chunk as BufferSource);
+    } catch (err) {
+      // A share appended forever with no eviction, so a long one eventually
+      // hit the SourceBuffer quota - and that throw was treated as the
+      // pipeline dying, killing a share that was working fine. Evict what has
+      // already played and retry the same chunk (same recovery the main
+      // player uses). Only a NON-quota failure is a real death.
+      if ((err as DOMException)?.name === "QuotaExceededError") {
+        queue.unshift(chunk);
+        const keepFrom = Math.max(0, video.currentTime - 10);
+        try {
+          if (keepFrom > 0) sb.remove(0, keepFrom);
+          return; // the remove's updateend re-enters pump
+        } catch { /* fall through to death below */ }
+      }
+      died();
     }
   };
   sb.addEventListener("updateend", pump);

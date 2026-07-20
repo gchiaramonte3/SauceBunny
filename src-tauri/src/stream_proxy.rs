@@ -1128,6 +1128,15 @@ fn share_encode_args(cmd: &mut std::process::Command, audio: bool) {
         .arg("-profile:v").arg("high")
         .arg("-pix_fmt").arg("yuv420p")
         .arg("-g").arg("30")
+        // Rate control. Without ANY cap, libx264 fell back to its default
+        // quality target and a detailed screen at 30fps could push well past
+        // 12 Mbit/s - uploaded once PER PEER, which saturates a home
+        // connection and starves the very session it belongs to. 6 Mbit/s
+        // holds text legible at typical share sizes; bufsize at 2x maxrate
+        // lets a busy moment (a scroll, a cut) spend ahead without a spike.
+        .arg("-b:v").arg("6M")
+        .arg("-maxrate").arg("6M")
+        .arg("-bufsize").arg("12M")
         .arg("-movflags").arg("frag_keyframe+empty_moov+default_base_moof")
         .arg("-frag_duration").arg("100000")
         .arg("-f").arg("mp4")
