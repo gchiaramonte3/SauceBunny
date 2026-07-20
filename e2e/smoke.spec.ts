@@ -654,19 +654,28 @@ test("session room: people tiles + control bar render; clip furniture stays out"
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
-test("timeline: helper line yields to marks; queued range renders with status class", async ({ page }) => {
+test("timeline: helper row holds its space; queued range renders with status class", async ({ page }) => {
   await boot(page);
   const url = page.locator("input[placeholder^='Paste a video URL']");
   await url.fill("https://youtube.com/watch?v=aaaa");
   await page.getByRole("button", { name: /^Fetch/ }).click();
   await expect(page.locator(".cp-timeline-hint")).toContainText("No marks set", { timeout: 10_000 });
 
-  // Marks via the transport buttons (focus-proof): in at 0, step, out.
-  // The helper row disappears ENTIRELY (9a) - no reserved empty line.
+  // The row RESERVES its space. It used to be removed outright, so setting a
+  // mark collapsed it and shoved everything below up the screen. Measure the
+  // element under it before and after: that position is the actual contract.
+  const below = page.locator(".cp-logs").first();
+  const beforeY = (await below.boundingBox())?.y ?? -1;
+  expect(beforeY, "needed a reference element below the hint").toBeGreaterThan(0);
+
   await page.getByRole("button", { name: "Mark in" }).click();
   await page.getByRole("button", { name: "Step forward one frame" }).click();
   await page.getByRole("button", { name: "Mark out" }).click();
-  await expect(page.locator(".cp-timeline-hint")).toHaveCount(0);
+  // Still present, just with nothing to say.
+  await expect(page.locator(".cp-timeline-hint")).toHaveCount(1);
+  await expect(page.locator(".cp-timeline-hint")).toHaveText("");
+  const afterY = (await below.boundingBox())?.y ?? -1;
+  expect(Math.abs(afterY - beforeY), "setting a mark must not move the UI").toBeLessThanOrEqual(1);
 
   // Queue the section: the range lands on the track with the queued status
   // class (gold). done/error flips ride the same class from queue state
@@ -674,8 +683,11 @@ test("timeline: helper line yields to marks; queued range renders with status cl
   // here).
   await page.locator(".cp-add-queue").click();
   await expect(page.locator(".cp-track-queued.queued")).toHaveCount(1);
-  // Clearing marks with something queued: the no-marks helper stays gone.
+  // Clearing marks with something queued: still no text (the queue speaks for
+  // itself), and still no movement.
   await page.getByRole("button", { name: "Clear in/out" }).click();
-  await expect(page.locator(".cp-timeline-hint")).toHaveCount(0);
+  await expect(page.locator(".cp-timeline-hint")).toHaveText("");
+  const clearedY = (await below.boundingBox())?.y ?? -1;
+  expect(Math.abs(clearedY - beforeY), "clearing marks must not move the UI").toBeLessThanOrEqual(1);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });

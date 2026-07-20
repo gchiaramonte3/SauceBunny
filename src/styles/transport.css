@@ -635,6 +635,9 @@
 /* Hint line below the timeline. Fixed min-height so the canvas above
    never shifts when marks are set/cleared. */
 .cp-fullclip-hint,
+/* The height is RESERVED, not conditional: this row empties out as soon as a
+   mark is set, and if it collapsed the transport and log below it would jump.
+   Keep min-height and the margin even when there is no text. */
 .cp-timeline-hint {
   margin-top: 8px;
   min-height: 16px;

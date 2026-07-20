@@ -5519,7 +5519,16 @@ export default function App() {
                             </>
                           )
                           : null;
-                    return content ? <div className="cp-timeline-hint">{content}</div> : null;
+                    // ALWAYS render the row. Returning null removed the
+                    // element outright, so its reserved height and margin went
+                    // with it and everything below jumped the moment a mark was
+                    // set. The row holds its line box when it has nothing to
+                    // say; aria-hidden keeps an empty one out of the a11y tree.
+                    return (
+                      <div className="cp-timeline-hint" aria-hidden={!content}>
+                        {content}
+                      </div>
+                    );
                   })()}
                 </div>
 
