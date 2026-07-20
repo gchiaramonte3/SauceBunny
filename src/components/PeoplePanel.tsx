@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { IconCrown, IconMicOff, IconChevronRight } from "./Icons";
+import { IconCrown, IconMic, IconMicOff, IconVideo, IconVideoOff, IconChevronRight } from "./Icons";
 import { initialsOf } from "../lib/review";
 import { subscribeSessionCapture, getSessionCapture } from "../hooks/use-media-capture";
 import type { MeshPeerState } from "../lib/rtc-mesh";
@@ -18,7 +18,7 @@ export type Participant = { id: string; name: string; color: string; isHost: boo
  * the old participant rail's roster duties; leave/end lives in the room
  * control bar.
  */
-export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream, raisedHands, reactionFlashes, strip = false, presenter = "m0", canGrantPresenter = false, onMakePresenter }: {
+export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream, raisedHands, reactionFlashes, strip = false, presenter = "m0", canGrantPresenter = false, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic }: {
   active: boolean;
   participants: Participant[];
   /** Member id currently driving source + transport. */
@@ -26,6 +26,11 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
   /** True for the host, who is the one who can pass the floor. */
   canGrantPresenter?: boolean;
   onMakePresenter?: (memberId: string) => void;
+  /** Your own device state + toggles, rendered on your tile. */
+  selfCamOff?: boolean;
+  selfMicMuted?: boolean;
+  onToggleCam?: () => void;
+  onToggleMic?: () => void;
   remoteStreams: ReadonlyMap<string, MediaStream>;
   peerStates: ReadonlyMap<string, MeshPeerState>;
   /** Members flagged as screen-sharing (their tile badges "Sharing screen"). */
@@ -75,6 +80,10 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
             isPresenter={p.id === presenter}
             canGrant={canGrantPresenter}
             onMakePresenter={onMakePresenter}
+            selfCamOff={selfCamOff}
+            selfMicMuted={selfMicMuted}
+            onToggleCam={onToggleCam}
+            onToggleMic={onToggleMic}
           />
         ))}
       </div>
@@ -85,7 +94,7 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
 /** One member: camera tile when a video track flows, avatar card when not.
  *  Speaking glow rides an AnalyserNode threshold on the tile's own audio
  *  (reduced motion: no glow animation, static ring). */
-function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, canGrant, onMakePresenter }: {
+function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, canGrant, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic }: {
   p: Participant;
   stream: MediaStream | null;
   state: MeshPeerState;
@@ -97,6 +106,11 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
   /** WE may hand the floor over (host only). */
   canGrant: boolean;
   onMakePresenter?: (memberId: string) => void;
+  /** YOUR device state - only meaningful on your own tile. */
+  selfCamOff?: boolean;
+  selfMicMuted?: boolean;
+  onToggleCam?: () => void;
+  onToggleMic?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [speaking, setSpeaking] = useState(false);
@@ -164,6 +178,32 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
           <span className="cp-person-initials">{initialsOf(p.name)}</span>
           {state === "connecting" && !p.isSelf && <span className="cp-person-conn">Connecting</span>}
           {state === "failed" && <span className="cp-person-conn">No connection</span>}
+        </div>
+      )}
+      {/* Your own tile doubles as the device control: the camera and mic you
+          see are the ones you click. Everyone else's tile stays read-only. */}
+      {p.isSelf && onToggleCam && onToggleMic && (
+        <div className="cp-person-controls">
+          <button
+            type="button"
+            className={"cp-person-ctl" + (selfCamOff ? " off" : "")}
+            aria-pressed={!selfCamOff}
+            title={selfCamOff ? "Turn camera on" : "Turn camera off"}
+            aria-label={selfCamOff ? "Turn camera on" : "Turn camera off"}
+            onClick={onToggleCam}
+          >
+            {selfCamOff ? <IconVideoOff size={13} /> : <IconVideo size={13} />}
+          </button>
+          <button
+            type="button"
+            className={"cp-person-ctl" + (selfMicMuted ? " off" : "")}
+            aria-pressed={!selfMicMuted}
+            title={selfMicMuted ? "Unmute" : "Mute"}
+            aria-label={selfMicMuted ? "Unmute" : "Mute"}
+            onClick={onToggleMic}
+          >
+            {selfMicMuted ? <IconMicOff size={13} /> : <IconMic size={13} />}
+          </button>
         </div>
       )}
       {sharing && <span className="cp-person-share">Sharing screen</span>}

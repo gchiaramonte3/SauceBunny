@@ -187,7 +187,7 @@ export function useCoReview({
   setReviewMarkers, setReviewAnnotations,
   turn,
 }: Args): CoReview {
-  const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], selfId: null, title: null, error: null, presenter: "m0" });
+  const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], selfId: null, title: null, error: null, presenter: "m0", presenterEpoch: 0 });
   // Live reactions: fire-and-forget, never persisted, pruned after ~5s
   // (the Zoom/Meet grammar - late joiners never see past reactions).
   const [liveReactions, setLiveReactions] = useState<LiveReaction[]>([]);
@@ -235,7 +235,12 @@ export function useCoReview({
   // permission does (see SessionMsg::Presenter).
   const isPresenter = coSessionActive
     && (coSession.presenter || "m0") === (coSession.selfId ?? (coSession.role === "host" ? "m0" : ""));
-  const isPresenterRef = useRef(false); isPresenterRef.current = isPresenter;
+  const isPresenterRef = useRef(false);
+  // Taking the floor restarts our seq at 0. Receivers order across a handover
+  // by the host-stamped epoch, which bumps at the same moment - without the
+  // reset our first messages would look stale to anyone whose seq is higher.
+  if (isPresenter && !isPresenterRef.current) coSeqRef.current = 0;
+  isPresenterRef.current = isPresenter;
   // The presenter's source when WE can't show it yet (a file we don't have,
   // or a web source still resolving). Drives the room's waiting affordance.
   const [pendingSource, setPendingSource] = useState<SessionSource | null>(null);
@@ -286,6 +291,9 @@ export function useCoReview({
           void handleFetch(m.url)
             .then(() => setPendingSource(null))
             .catch(() => {
+              // Clear the pending state too, or the guest renders "Loading…"
+              // forever with no error and no retry.
+              setPendingSource(null);
               sendSessionMsg({ kind: "sourceStatus", from: "", state: "failed", detail: null });
             });
           return;
@@ -536,7 +544,9 @@ export function useCoReview({
         rate: coRateRef.current,
         atMs: Date.now(),
         seq: ++coSeqRef.current,
-        from: "",      // host stamps the true sender
+        // `from` AND `epoch` are stamped by the host: a peer cannot know the
+        // authoritative epoch, and sending a stale one strands receivers.
+        from: "",
         epoch: 0,
       };
       sendSessionMsg(msg);

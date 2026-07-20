@@ -778,3 +778,53 @@
 @media (prefers-reduced-motion: reduce) {
   .cp-person-grant { transition: none; }
 }
+
+/* Who can't open the room's source. Amber, not red: it's a mismatch to
+   resolve, not a failure of the app. */
+.cp-room-blocked {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
+  color: var(--color-warning);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Device controls on your OWN people tile. Hover/focus reveal, like the rest
+   of the tile affordances; always visible while a device is off so "why can't
+   they see me" is answerable at a glance. */
+.cp-person-controls {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.cp-person:hover .cp-person-controls,
+.cp-person-controls:focus-within,
+.cp-person-controls:has(.off) { opacity: 1; }
+.cp-person-ctl {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  background: color-mix(in srgb, var(--bg-0) 72%, transparent);
+  color: var(--fg-1);
+  cursor: pointer;
+}
+.cp-person-ctl:hover { background: var(--bg-0); }
+.cp-person-ctl:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+/* Off is a state, not an error: muted red so it reads as "you turned this off". */
+.cp-person-ctl.off {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-person-controls { transition: none; }
+}

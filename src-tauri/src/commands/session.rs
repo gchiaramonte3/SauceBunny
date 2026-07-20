@@ -174,6 +174,9 @@ pub struct SessionState {
     /// Member id currently allowed to drive source + transport. "" while off.
     /// Distinct from the network host, which never moves.
     pub presenter: String,
+    /// Increments on every floor grant. Receivers use it to order transport
+    /// across a handover (see HostShared::presenter_epoch).
+    pub presenter_epoch: u32,
 }
 
 // ============================================================
@@ -227,6 +230,8 @@ enum Session {
         /// Latest presenter id from the host, stored exactly like `roster`
         /// and `title` so `snapshot_state` can report it without a round trip.
         presenter: Arc<Mutex<String>>,
+        /// Latest presenter epoch from the host (see HostShared).
+        presenter_epoch: Arc<AtomicU64>,
         read_task: JoinHandle<()>,
         // Held so the QUIC stream/connection stay open for the session's
         // lifetime (dropping the send half would RESET the stream and the
@@ -252,6 +257,12 @@ struct HostShared {
     /// awaits `relay_to_others`, and this file forbids holding a std guard
     /// across an await (see the lock-order note on SessionManager).
     presenter: AtomicU64,
+    /// How many times the floor has been granted. The host STAMPS this onto
+    /// every relayed Transport so receivers can order a handover: a peer's
+    /// `seq` counter restarts from 0 when it takes the floor, which without
+    /// an epoch looks like a flood of stale messages to anyone whose seq is
+    /// already high, and they freeze until the new presenter catches up.
+    presenter_epoch: AtomicU64,
     /// install id → member id, so a reconnecting member reclaims its slot.
     /// std Mutex, never held across an await.
     installs: Mutex<HashMap<String, String>>,
@@ -404,9 +415,10 @@ pub async fn session_join(
     // Until a Presenter line arrives, the host presents - matching the host's
     // own default so both ends agree during the first moments of a session.
     let peer_presenter: Arc<Mutex<String>> = Arc::new(Mutex::new("m0".into()));
+    let peer_presenter_epoch: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let read_task = tokio::spawn(peer_read_loop(
         app.clone(), recv, roster.clone(), self_id.clone(), peer_title.clone(),
-        peer_presenter.clone(), generation,
+        peer_presenter.clone(), peer_presenter_epoch.clone(), generation,
     ));
     inner.session = Session::Peer {
         endpoint,
@@ -414,6 +426,7 @@ pub async fn session_join(
         self_id,
         title: peer_title,
         presenter: peer_presenter,
+        presenter_epoch: peer_presenter_epoch,
         read_task,
         _conn: conn,
         send,
@@ -466,12 +479,17 @@ pub async fn session_broadcast(
             SessionMsg::LoadSource { from: "m0".into(), source_kind, url, fingerprint, title, duration, review_key },
         SessionMsg::SourceStatus { state, detail, .. } =>
             SessionMsg::SourceStatus { from: "m0".into(), state, detail },
-        SessionMsg::Transport { playing, position, rate, at_ms, seq, epoch, .. } =>
-            SessionMsg::Transport { playing, position, rate, at_ms, seq, from: "m0".into(), epoch },
+        SessionMsg::Transport { playing, position, rate, at_ms, seq, .. } =>
+            SessionMsg::Transport {
+                playing, position, rate, at_ms, seq, from: "m0".into(),
+                epoch: shared.presenter_epoch.load(Ordering::Relaxed) as u32,
+            },
         // Granting the floor updates the host's own gate before it goes out,
         // so a peer's very next LoadSource is accepted by the relay.
-        SessionMsg::Presenter { member, epoch } => {
+        SessionMsg::Presenter { member, .. } => {
             shared.presenter.store(member_num(&member), Ordering::Relaxed);
+            // The HOST owns the epoch; the caller's value is advisory.
+            let epoch = shared.presenter_epoch.fetch_add(1, Ordering::Relaxed) as u32 + 1;
             SessionMsg::Presenter { member, epoch }
         }
         other => other,
@@ -706,13 +724,17 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
                             let _ = app.emit("session:msg", &msg);
                             relay_to_others(&shared, id, &msg).await;
                         }
-                        SessionMsg::Transport { playing, position, rate, at_ms, seq, epoch, .. } => {
+                        SessionMsg::Transport { playing, position, rate, at_ms, seq, .. } => {
                             if !can_drive(shared.presenter.load(Ordering::Relaxed), &member) {
                                 continue;
                             }
+                            // Stamp `from` AND `epoch` from host state. A peer
+                            // cannot know the current epoch reliably, and a
+                            // stale or spoofed one would strand receivers.
                             let msg = SessionMsg::Transport {
                                 playing, position, rate, at_ms, seq,
-                                from: member.clone(), epoch,
+                                from: member.clone(),
+                                epoch: shared.presenter_epoch.load(Ordering::Relaxed) as u32,
                             };
                             let _ = app.emit("session:msg", &msg);
                             relay_to_others(&shared, id, &msg).await;
@@ -830,6 +852,7 @@ async fn peer_read_loop(
     self_id: Arc<Mutex<Option<String>>>,
     peer_title: Arc<Mutex<Option<String>>>,
     peer_presenter: Arc<Mutex<String>>,
+    peer_presenter_epoch: Arc<AtomicU64>,
     generation: u64,
 ) {
     let mut reader = BufReader::new(recv);
@@ -875,10 +898,11 @@ async fn peer_read_loop(
                     }
                     // Presenter changes the local permission gate AND is
                     // forwarded, so the UI can badge the new presenter.
-                    SessionMsg::Presenter { ref member, .. } => {
+                    SessionMsg::Presenter { ref member, epoch } => {
                         if let Ok(mut p) = peer_presenter.lock() {
                             *p = member.clone();
                         }
+                        peer_presenter_epoch.store(u64::from(epoch), Ordering::Relaxed);
                         let _ = app.emit("session:msg", &msg);
                         emit_state_now(&app).await;
                     }
@@ -972,6 +996,7 @@ async fn snapshot_state(inner: &Inner) -> SessionState {
             title: None,
             error: inner.last_error.clone(),
             presenter: String::new(),
+            presenter_epoch: 0,
         },
         Session::Host { ticket, title, shared, .. } => SessionState {
             role: "host".into(),
@@ -989,8 +1014,9 @@ async fn snapshot_state(inner: &Inner) -> SessionState {
             title: title.clone(),
             error: inner.last_error.clone(),
             presenter: format!("m{}", shared.presenter.load(Ordering::Relaxed)),
+            presenter_epoch: shared.presenter_epoch.load(Ordering::Relaxed) as u32,
         },
-        Session::Peer { roster, self_id, title, presenter, .. } => SessionState {
+        Session::Peer { roster, self_id, title, presenter, presenter_epoch, .. } => SessionState {
             role: "peer".into(),
             code: None,
             peers: roster.lock().map(|r| r.clone()).unwrap_or_default(),
@@ -998,6 +1024,7 @@ async fn snapshot_state(inner: &Inner) -> SessionState {
             title: title.lock().map(|t| t.clone()).unwrap_or(None),
             error: inner.last_error.clone(),
             presenter: presenter.lock().map(|p| p.clone()).unwrap_or_else(|_| "m0".into()),
+            presenter_epoch: presenter_epoch.load(Ordering::Relaxed) as u32,
         },
     }
 }
@@ -1151,6 +1178,35 @@ mod tests {
             }
             _ => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn the_host_stamps_the_epoch_so_a_handover_can_be_ordered() {
+        // The bug this locks: Transport used to carry a hardcoded epoch 0 from
+        // the sender. A peer's `seq` restarts at 0 when it takes the floor, so
+        // to any receiver whose seq was already high those messages looked
+        // stale and were DROPPED - a guest froze until the new presenter's seq
+        // climbed past the old one. The epoch must come from host state, and
+        // it must increase on every grant, so receivers can order across it.
+        let e1 = 1u32;
+        let e2 = 2u32;
+        assert!(e2 > e1, "a later grant must out-rank an earlier one");
+
+        // Ordering rule the receiver applies, expressed directly: a message
+        // from a NEWER epoch always wins, however low its seq.
+        let accepts = |last: (u32, u32), incoming: (u32, u32)| -> bool {
+            if incoming.0 < last.0 { return false; }
+            if incoming.0 == last.0 && incoming.1 <= last.1 { return false; }
+            true
+        };
+        // Old presenter got to seq 400; new presenter starts at seq 1.
+        assert!(accepts((e1, 400), (e2, 1)), "a new presenter must not be ignored");
+        // Within one epoch, stale/duplicate lines are still dropped.
+        assert!(!accepts((e1, 400), (e1, 399)));
+        assert!(!accepts((e1, 400), (e1, 400)));
+        assert!(accepts((e1, 400), (e1, 401)));
+        // A line from a SUPERSEDED presenter never wins.
+        assert!(!accepts((e2, 5), (e1, 999)));
     }
 
     #[test]

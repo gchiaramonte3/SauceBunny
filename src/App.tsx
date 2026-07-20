@@ -4642,7 +4642,7 @@ export default function App() {
     screening, setScreening, screeningParticipants,
     meshStreams, meshStates,
     shareState, shareStream, sharingMembers, startShare, stopShare,
-    isPresenter, pendingSource, makePresenter, adoptPendingSource,
+    isPresenter, pendingSource, sourceStatus, makePresenter, adoptPendingSource,
     startCoReview, joinCoReview, leaveCoReview,
   } = useCoReview({
     isPlaying, fps, playbackRate,
@@ -4671,6 +4671,17 @@ export default function App() {
   // Display name of whoever is driving, for the waiting affordance.
   const presenterName = coSession.peers.find((p) => p.id === coSession.presenter)?.name
     ?? (coSession.presenter === "m0" ? "The host" : "The presenter");
+  // Members who reported they can't open the current source ("missing" = they
+  // don't have the file, "failed" = it broke on their machine).
+  const blockedMembers = useMemo(() => {
+    const out: string[] = [];
+    for (const [id, state] of sourceStatus) {
+      if (state !== "missing" && state !== "failed") continue;
+      if (id === coSession.selfId) continue;
+      out.push(coSession.peers.find((p) => p.id === id)?.name ?? "Someone");
+    }
+    return out;
+  }, [sourceStatus, coSession.peers, coSession.selfId]);
   // Latest transient reaction per member: tile badges (pruning rides the
   // liveReactions feed itself).
   const reactionFlashes = useMemo(() => {
@@ -5029,6 +5040,12 @@ export default function App() {
                 presenter={coSession.presenter}
                 canGrantPresenter={coSession.role === "host"}
                 onMakePresenter={makePresenter}
+                /* Your own tile is also your device control - same capture
+                   singleton the room bar drives, so the two stay in step. */
+                selfCamOff={capture.choice.cameraOff}
+                selfMicMuted={capture.choice.micMuted}
+                onToggleCam={() => capture.setEnabled("video", capture.choice.cameraOff)}
+                onToggleMic={() => capture.setEnabled("audio", capture.choice.micMuted)}
               />
               <Sidebar
                 reviewStatus={reviewStatus}
@@ -5087,6 +5104,15 @@ export default function App() {
                       )}
                       {reviewStatus && reviewStatus.state !== "pending" && (
                         <ReviewStatusChip state={reviewStatus.state} reviewer={reviewStatus.reviewer || undefined} />
+                      )}
+                      {/* Who could NOT open what the room is watching. This is
+                          replicated already (SourceStatus) but was never shown,
+                          so a presenter had no way to know a guest was staring
+                          at an empty stage. */}
+                      {blockedMembers.length > 0 && (
+                        <span className="cp-room-blocked" title="They can't open this source">
+                          {blockedMembers.join(", ")} can&apos;t open this
+                        </span>
                       )}
                     </div>
                     {/* Change what the room is watching without leaving the

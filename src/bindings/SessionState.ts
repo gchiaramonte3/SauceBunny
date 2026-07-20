@@ -6,4 +6,9 @@ export type SessionState = { role: string, code: string | null, peers: Array<Pee
  * Member id currently allowed to drive source + transport. "" while off.
  * Distinct from the network host, which never moves.
  */
-presenter: string, };
+presenter: string, 
+/**
+ * Increments on every floor grant. Receivers use it to order transport
+ * across a handover (see HostShared::presenter_epoch).
+ */
+presenterEpoch: number, };
