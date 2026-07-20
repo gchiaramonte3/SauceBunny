@@ -139,6 +139,48 @@ else
 fi
 
 echo
+echo "── Version lockstep ────────────────────────────────────────────"
+PKG_V=$(node -p "require('${ROOT_DIR}/package.json').version")
+CONF_V=$(node -p "require('${ROOT_DIR}/src-tauri/tauri.conf.json').version")
+CARGO_V=$(awk '/^\[package\]/{p=1} /^\[/&&!/^\[package\]/{p=0} p&&/^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' "${ROOT_DIR}/src-tauri/Cargo.toml")
+
+if [ "$PKG_V" = "$CONF_V" ] && [ "$CONF_V" = "$CARGO_V" ]; then
+  pass "version is $PKG_V in all three files"
+else
+  fatal "version drift — package.json=$PKG_V tauri.conf.json=$CONF_V Cargo.toml=$CARGO_V (run: bash scripts/set-version.sh X.Y.Z)"
+fi
+
+# Bare X.Y.Z only: Tauri's updater compares with semver, and a suffixed
+# version like "1.1.0-beta" sorts BELOW "1.1.0".
+echo "$CONF_V" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' \
+  && pass "version is bare semver (updater-safe)" \
+  || fatal "version '$CONF_V' is not bare X.Y.Z"
+
+# The DMG filename is the only thing a user sees; 1.0.0 forever means
+# every download looks identical. Refuse to ship a version already tagged.
+if git -C "${ROOT_DIR}" rev-parse "v${CONF_V}" >/dev/null 2>&1; then
+  fatal "v${CONF_V} is already tagged — bump before building (bash scripts/set-version.sh X.Y.Z)"
+else
+  pass "v${CONF_V} is not yet tagged"
+fi
+
+# CFBundleVersion must be present and distinct per build.
+BUNDLE_V=$(node -p "require('${ROOT_DIR}/src-tauri/tauri.conf.json').bundle?.macOS?.bundleVersion ?? ''")
+[ -n "$BUNDLE_V" ] \
+  && pass "CFBundleVersion = $BUNDLE_V" \
+  || warn "bundle.macOS.bundleVersion unset — CFBundleVersion defaults to the semver, so same-version rebuilds are indistinguishable"
+
+echo
+echo "── Build-ID handshake ──────────────────────────────────────────"
+TS_ID=$(grep -oE 'EXPECTED_BACKEND_BUILD_ID = "[^"]+"' "${ROOT_DIR}/src/lib/build-id.ts" | sed 's/.*"\(.*\)"/\1/')
+RS_ID=$(grep -oE 'BACKEND_BUILD_ID: &str = "[^"]+"' "${ROOT_DIR}/src-tauri/src/commands/system.rs" | sed 's/.*"\(.*\)"/\1/')
+if [ -n "$TS_ID" ] && [ "$TS_ID" = "$RS_ID" ]; then
+  pass "build-id matches ($TS_ID)"
+else
+  fatal "build-id mismatch — build-id.ts='$TS_ID' system.rs='$RS_ID'"
+fi
+
+echo
 echo "── Toolchain ───────────────────────────────────────────────────"
 command -v cargo >/dev/null && pass "cargo present" || fatal "cargo missing — install Rust"
 command -v swift >/dev/null && pass "swift present" || fatal "swift missing — install Xcode CLT"

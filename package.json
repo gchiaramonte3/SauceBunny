@@ -1,7 +1,7 @@
 {
   "name": "sauce-bunny",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -20,7 +20,8 @@
     "build:whisper": "bash scripts/build-whisper.sh",
     "build:llama": "bash scripts/build-llama.sh",
     "check:release": "bash scripts/check-notarization-ready.sh",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "set-version": "bash scripts/set-version.sh"
   },
   "dependencies": {
     "@fontsource/nunito-sans": "^5.2.7",

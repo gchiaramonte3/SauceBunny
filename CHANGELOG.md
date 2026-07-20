@@ -5,6 +5,49 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-19
+
+### Reliability
+- **Screen sharing now works at all.** The capture engine exited 0.17s after
+  launch, before a single frame: it parked on a run loop with nothing attached
+  to it, while ScreenCaptureKit delivers on its own queues. Every stage
+  downstream then behaved correctly on an empty stream, so the failure looked
+  like nothing happening rather than an error.
+- **Transcribing a web source no longer takes ~80 minutes.** yt-dlp was being
+  forced onto a single-connection downloader that YouTube throttles to
+  ~26 KB/s (vs ~83 MB/s native). The audio cache that should have skipped the
+  download was also keyed inconsistently, so a link with a `&t=` timestamp
+  could never reuse its own cached track.
+- Stopping a transcription actually stops it, including during the phases with
+  no running process to kill.
+- Sidecar execute bits are repaired at launch, so a helper stripped by a sync
+  service no longer fails with a raw permission error.
+- In-flight sidecars are killed when the app quits instead of outliving it.
+
+### Co-review
+- Guests see the host's source, **including local files** (previously nothing
+  was sent at all for a local file, leaving the guest on an empty stage).
+- A member who leaves and rejoins reclaims their place instead of appearing
+  twice, and dead connections are rebuilt rather than left "Connecting".
+- Playhead sync no longer drifts from a clock difference between two Macs;
+  playback rate is applied instead of being corrected by seeking.
+- The camera can be turned on mid-session (it previously could not reach
+  anyone if you joined with it off).
+- Change or clear what the room is watching without leaving the session.
+- Hand the presenter role to someone else so they can share their own sources.
+
+### Added
+- First-launch welcome screen.
+- Per-permission rows (camera, microphone, screen recording) with a direct
+  link to each System Settings pane.
+- Session input/output volume, a working mic check, and a level meter.
+- The pipeline log reports how long each stage took, and a run total.
+
+### Changed
+- Versioning: releases are now semver with a date-based build number, so two
+  builds are never indistinguishable. (Every prior build reported `1.0.0`.)
+- Bundled yt-dlp refreshed to 2026.07.04.
+
 ### Co-review (P2P watch party) — new
 - **Watch and review together, peer-to-peer** — host a session and share a
   one-line join code; up to 3 guests connect over iroh QUIC (end-to-end

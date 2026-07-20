@@ -259,8 +259,8 @@ pub fn run() {
                 // Web/static URLs that don't need React in the loop —
                 // open them directly via the system browser.
                 let opened_in_browser: Option<&str> = match id {
-                    "report_bug" => Some("https://github.com/saucebunny/saucebunny/issues/new/choose"),
-                    "open_repo" | "check_updates" => Some("https://github.com/saucebunny/saucebunny/releases"),
+                    "report_bug" => Some("https://github.com/gchiaramonte3/SauceBunny/issues/new/choose"),
+                    "open_repo" | "check_updates" => Some("https://github.com/gchiaramonte3/SauceBunny/releases"),
                     _ => None,
                 };
                 if let Some(url) = opened_in_browser {
