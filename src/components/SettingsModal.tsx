@@ -34,6 +34,9 @@ import { CollapsibleSection } from "./CollapsibleSection";
 import { YouTubeSettings } from "./YouTubeSettings";
 import { useModalFocus } from "../hooks/use-modal-focus";
 import logoUrl from "../assets/saucebunny.svg";
+import { UpdateRow } from "./UpdateRow";
+import { getVersion } from "@tauri-apps/api/app";
+import { EXPECTED_BACKEND_BUILD_ID } from "../lib/build-id";
 
 type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "commands" | "about";
 
@@ -363,6 +366,14 @@ export function SettingsModal(props: Props) {
     diarizerReady, diarizerPrepareState, diarizerPrepareError,
     onPrepareDiarizerModels, onCancelDiarizerPrepare,
   } = props;
+  // Read from the bundle, never hardcoded: the About tab used to claim v0.1.0
+  // while the app was 0.2.0. The build number distinguishes two DMGs of the
+  // same version (see scripts/set-version.sh).
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    void getVersion().then(setAppVersion).catch(() => setAppVersion(null));
+  }, [open]);
   const [tab, setTab] = useState<TabId>(initialTab ?? "general");
 
   // When opening, jump to requested tab.
@@ -1540,7 +1551,7 @@ export function SettingsModal(props: Props) {
                   </div>
                   <div>
                     <div className="cp-about-name">
-                      Sauce Bunny <span className="ver">v0.1.0</span>
+                      Sauce Bunny <span className="ver">{appVersion ? `v${appVersion}` : ""}</span>
                     </div>
                     <div className="cp-about-tag">
                       Local-first video section clipper. Tauri 2 + bundled yt-dlp + ffmpeg + whisper.cpp.
@@ -1548,8 +1559,10 @@ export function SettingsModal(props: Props) {
                   </div>
                 </div>
 
+                <UpdateRow />
+
                 <div className="cp-about-grid">
-                  <div className="cp-about-row"><span className="k">Build</span><span className="v">dev</span></div>
+                  <div className="cp-about-row"><span className="k">Build</span><span className="v">{EXPECTED_BACKEND_BUILD_ID}</span></div>
                   <div className="cp-about-row"><span className="k">Engine</span><span className="v">Tauri 2 + Wry</span></div>
                   <div className="cp-about-row"><span className="k">UI</span><span className="v">React 18 + Vite 6</span></div>
                   <div className="cp-about-row"><span className="k">Sidecars</span><span className="v">yt-dlp · ffmpeg · whisper-cli</span></div>

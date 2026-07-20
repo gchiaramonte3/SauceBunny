@@ -44,6 +44,7 @@ import type {
 import { asLogTag } from "./types";
 import { formatError, humanizeSpawnError, isAppError } from "./lib/error-format";
 import { fmtElapsed, stageLabel } from "./lib/elapsed";
+import { checkForUpdate } from "./lib/update-check";
 import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase";
 import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek, subscribePlayhead } from "./lib/playhead-store";
 import { clampSeekFrames, maxSeekSeconds, endSeekFrames } from "./lib/playhead-clock";
@@ -4419,6 +4420,24 @@ export default function App() {
             .catch(() => { /* ignore */ });
         }),
         bind("open_settings",       () => setSettingsOpen(true)),
+        // Help > Check for Updates used to just open a browser tab. Now it
+        // asks, and either says you're current or offers the new version.
+        bind("check_updates",       () => {
+          void (async () => {
+            const current = await getVersion().catch(() => null);
+            if (!current) { setSettingsInitialTab("about"); setSettingsOpen(true); return; }
+            const status = await checkForUpdate(current);
+            if (status.kind === "available") {
+              pushNotification("info", `Sauce Bunny ${status.version} is available`,
+                "Open Settings, About to download it.");
+            } else if (status.kind === "current") {
+              pushNotification("success", "You're up to date", `Version ${current}.`);
+            } else {
+              pushNotification("info", "Couldn't check for updates",
+                "No connection, or no release published yet.");
+            }
+          })();
+        }),
         bind("toggle_pipeline",     () => setLogsOpen((p) => !p)),
         bind("toggle_queue",        () => setQueueOpenChoice((p) => !p)),
         bind("show_command_palette", () => setPaletteOpen(true)),

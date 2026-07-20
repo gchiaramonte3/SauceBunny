@@ -1059,3 +1059,16 @@
 .cp-av-perm.denied,
 .cp-av-perm.restricted { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 .cp-av-perm svg { flex-shrink: 0; }
+
+/* ── Version + update check (Settings > About) ── */
+.cp-update-row { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.cp-update-ver {
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-0, #0c0c0e);
+  color: var(--fg-1);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.cp-update-note { color: var(--fg-3); font-size: 12px; }

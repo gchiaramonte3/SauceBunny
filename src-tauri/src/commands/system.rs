@@ -628,6 +628,93 @@ pub fn reveal_in_finder(path: String) -> Result<(), crate::AppError> {
     Ok(())
 }
 
+// ============================================================
+// UPDATE CHECK (r128)
+//
+// Check-only, on purpose. It reports that a newer release exists and the
+// frontend links to it; it does NOT download or install. Self-installing
+// updates require a notarized app (see _design/versioning-and-updates.md) --
+// replacing an un-notarized bundle in place is how a working install becomes
+// a Gatekeeper problem.
+//
+// The request lives here rather than in the webview so it is not subject to
+// the page CSP and the endpoint cannot be rewritten from page context. It is
+// a plain unauthenticated GET of a public listing: no account, no identifier,
+// nothing about the user or their media.
+// ============================================================
+
+/// The newest published release, as the frontend needs it.
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+#[serde(rename_all = "camelCase")]
+pub struct LatestRelease {
+    /// Tag as published, e.g. "v0.2.0". The frontend parses the semver.
+    pub version: String,
+    /// Human page to send the user to.
+    pub url: String,
+    /// Release notes body, trimmed. May be empty.
+    pub notes: String,
+}
+
+const RELEASES_API: &str =
+    "https://api.github.com/repos/gchiaramonte3/SauceBunny/releases/latest";
+const RELEASES_PAGE: &str = "https://github.com/gchiaramonte3/SauceBunny/releases/latest";
+
+#[tauri::command]
+pub async fn latest_release() -> Result<LatestRelease, crate::AppError> {
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| crate::AppError::internal(format!("http client: {e}")))?;
+    // GitHub rejects requests without a User-Agent.
+    let res = client
+        .get(RELEASES_API)
+        .header("User-Agent", "SauceBunny")
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| crate::AppError::Network(format!("update check: {e}")))?;
+    if !res.status().is_success() {
+        // 404 = nothing published yet, 403 = rate limited. Neither is the
+        // user's problem, and neither should look like a failure they caused.
+        return Err(crate::AppError::Network(format!(
+            "update check unavailable ({})",
+            res.status().as_u16()
+        )));
+    }
+    // reqwest is built without its `json` feature (default-features = false in
+    // Cargo.toml), so parse the text ourselves rather than widening the dep.
+    let text = res
+        .text()
+        .await
+        .map_err(|e| crate::AppError::Network(format!("update check read: {e}")))?;
+    let body: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| crate::AppError::Network(format!("update check parse: {e}")))?;
+    let version = body
+        .get("tag_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if version.is_empty() {
+        return Err(crate::AppError::Network("update check: no tag".into()));
+    }
+    let url = body
+        .get("html_url")
+        .and_then(|v| v.as_str())
+        .unwrap_or(RELEASES_PAGE)
+        .to_string();
+    let notes = body
+        .get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .trim()
+        .chars()
+        .take(600)
+        .collect();
+    Ok(LatestRelease { version, url, notes })
+}
+
 #[tauri::command]
 pub fn new_job_id() -> String {
     uuid::Uuid::new_v4().to_string()
@@ -712,7 +799,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-20-r127-session-desync";
+pub const BACKEND_BUILD_ID: &str = "2026-07-20-r128-update-check";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

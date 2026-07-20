@@ -203,6 +203,7 @@ pub fn run() {
             commands::open_youtube_signin,
             commands::open_full_disk_access,
             commands::safari_fda_status,
+            commands::latest_release,
             commands::open_panel_window,
             commands::close_panel_window,
             commands::session_start,
@@ -260,7 +261,7 @@ pub fn run() {
                 // open them directly via the system browser.
                 let opened_in_browser: Option<&str> = match id {
                     "report_bug" => Some("https://github.com/gchiaramonte3/SauceBunny/issues/new/choose"),
-                    "open_repo" | "check_updates" => Some("https://github.com/gchiaramonte3/SauceBunny/releases"),
+                    "open_repo" => Some("https://github.com/gchiaramonte3/SauceBunny/releases"),
                     _ => None,
                 };
                 if let Some(url) = opened_in_browser {
