@@ -1,5 +1,5 @@
 // useCoReview — the P2P co-review session (r100 transport, r101 live review)
-// + screening mode, extracted whole from App.tsx following the use-panel-bus /
+// + theater mode, extracted whole from App.tsx following the use-panel-bus /
 // use-web-playback shape: one cohesive subsystem out of the God-component,
 // vanilla hooks, no state library. Same effects, same dependency arrays, same
 // refs as the inline original — the cross-window events and Rust session
@@ -20,6 +20,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { formatError } from "../lib/error-format";
 import { loadInstallId } from "../lib/identity";
+import {
+  newScreening, openSegment, closeSegment, noteComment, unnoteComment,
+  screeningIsWorthKeeping, type ScreeningDoc,
+} from "../lib/screening";
+import { saveScreening } from "../lib/screening-store";
 import { getLastUserSeekAt, getPlayheadFrames } from "../lib/playhead-store";
 import { createClockEstimator, expectedPosition } from "../lib/session-clock";
 import {
@@ -101,7 +106,7 @@ type Args = {
    *  guest turns out to already have the presenter's file. */
   loadLocalPath: (path: string) => Promise<unknown>;
   pushNotification: (kind: ToastKind, title: string, body: string) => void;
-  /** Screening auto-enter also opens the drawer (comments live there). */
+  /** Theater auto-enter also opens the drawer (comments live there). */
   setQueueOpen: (open: boolean) => void;
   /** Session projection sinks — while in a session the shared doc drives the
    *  same marker state App's solo reload writes, so every participant's
@@ -138,9 +143,9 @@ export type CoReview = {
   postSessionOp: (op: ReviewOp) => void;
   /** Peer playheads in frames, tinted per name — the timeline ghost cursors. */
   coGhostMarkers: { name: string; frame: number; color: string }[];
-  screening: boolean;
-  setScreening: Dispatch<SetStateAction<boolean>>;
-  screeningParticipants: Participant[];
+  theater: boolean;
+  setTheater: Dispatch<SetStateAction<boolean>>;
+  theaterParticipants: Participant[];
   /** Live remote camera/mic streams from the webcam mesh, keyed by member id. */
   meshStreams: ReadonlyMap<string, MediaStream>;
   /** Per-member mesh connection state (connecting / live / failed). */
@@ -233,6 +238,12 @@ export function useCoReview({
   /** Latest persistDoc, so the message handler (registered once) can flush an
    *  outgoing doc without capturing a stale closure. */
   const persistDocRef = useRef<(d: ReviewDoc | null) => void>(() => {});
+  /** The screening being recorded: which sources this room watched, in order,
+   *  and which comments were made against each. Holds no comment bodies -
+   *  those live in the per-source review docs (see lib/screening.ts). */
+  const screeningRef = useRef<ScreeningDoc | null>(null);
+  /** Latest recordOpInScreening, for the once-registered message handler. */
+  const recordOpRef = useRef<(op: ReviewOp) => void>(() => {});
   // Am I the one driving source + transport? Defaults to the host until a
   // Presenter line says otherwise. The network star never moves; only this
   // permission does (see SessionMsg::Presenter).
@@ -260,10 +271,27 @@ export function useCoReview({
   // Apply a review op to the shared doc + relay it (called by the Review panel
   // for every mutation while in session). Optimistic: apply locally now and
   // send; the host relays to all-but-sender so we never receive our own op back.
+  /** Attribute a comment to the segment the room was watching when it was
+   *  made, so a screening can later say "these three notes were about Cut A".
+   *  Ids only - the bodies stay in the source's own review doc. */
+  const recordOpInScreening = useCallback((op: ReviewOp) => {
+    const sc = screeningRef.current;
+    if (!sc) return;
+    // Only ROOT comments anchor to a segment; a reply belongs to its parent.
+    if (op.t === "add" && !op.comment.parentId) {
+      screeningRef.current = noteComment(sc, op.comment.id);
+    } else if (op.t === "del") {
+      screeningRef.current = unnoteComment(sc, op.id);
+    }
+  }, []);
+
+  recordOpRef.current = recordOpInScreening;
+
   const postSessionOp = useCallback((op: ReviewOp) => {
     setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
+    recordOpInScreening(op);
     sendSessionMsg({ kind: "reviewOp", op: JSON.stringify(op) });
-  }, [sendSessionMsg]);
+  }, [sendSessionMsg, recordOpInScreening]);
 
   // Latest-closure ref so the once-registered session:msg listener never stales.
   const coApplyRef = useRef<(m: SessionMsg) => void>(() => {});
@@ -359,6 +387,8 @@ export function useCoReview({
         try {
           const op = JSON.parse(m.op) as ReviewOp;
           setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
+          // Everyone's notes belong to the screening, not just ours.
+          recordOpRef.current(op);
         } catch { /* malformed op */ }
         return;
       case "reaction": {
@@ -498,6 +528,15 @@ export function useCoReview({
 
     if (coSession.role === "off" && prev !== "off") {
       persistDoc(sessionDocRef.current);
+      // Close the running segment and keep the screening - unless nothing was
+      // ever watched and nobody else showed up, which is not a memory worth
+      // cluttering the library with.
+      const sc = screeningRef.current;
+      if (sc) {
+        const finished = closeSegment(sc);
+        if (screeningIsWorthKeeping(finished)) void saveScreening(finished);
+        screeningRef.current = null;
+      }
       prevDocKeyRef.current = null;
       setSessionDoc(null);
       setCoGhosts([]);
@@ -520,6 +559,20 @@ export function useCoReview({
     );
     prevDocKeyRef.current = reviewSourceKey;
     setSessionDoc(doc);
+
+    // Record what the room is watching. The screening starts on the first
+    // source rather than at session start, so a room that never loads
+    // anything leaves nothing behind.
+    if (!screeningRef.current) {
+      screeningRef.current = newScreening(
+        coSession.code ?? `local-${Date.now()}`,
+        coSession.title || metadataRef.current?.title || "Screening",
+        "host",
+      );
+    }
+    screeningRef.current = openSegment(
+      screeningRef.current, sessionSourceRef.current, reviewSourceKey,
+    );
     // Guests are still holding the OUTGOING doc, so push the new one now.
     // Previously the snapshot only went out when a peer joined, which meant a
     // mid-session source change left every guest editing the old source.
@@ -657,7 +710,7 @@ export function useCoReview({
   // and the session/playback keep running. Auto-enters when a session starts,
   // auto-exits when it ends; the rail's "Exit" drops back to editing while the
   // session stays live (re-enter from the co-review popover).
-  const [screening, setScreening] = useState(false);
+  const [theater, setTheater] = useState(false);
   const prevScreenSessionRef = useRef(false);
   useEffect(() => {
     const was = prevScreenSessionRef.current;
@@ -665,12 +718,12 @@ export function useCoReview({
     // Entering a session lands in the ROOM (theater is an opt-in sub-mode
     // now, not the entry experience); the drawer opens for comments.
     if (coSessionActive && !was) setQueueOpen(true);
-    if (!coSessionActive && was) setScreening(false);
+    if (!coSessionActive && was) setTheater(false);
   }, [coSessionActive]);
   // Everyone in the session, for the rail — so people see each other. Host's
   // roster is peers-only (its own name is local); a peer's roster is the full
   // list the host broadcast (Host + peers, self found by name).
-  const screeningParticipants = useMemo(() => {
+  const theaterParticipants = useMemo(() => {
     const me = loadReviewer();
     const myName = me.name || "You";
     if (coSession.role === "host") {
@@ -727,12 +780,12 @@ export function useCoReview({
   const memberIds = useMemo(
     () => {
       const epochs = new Map(coSession.peers.map((p) => [p.id, p.epoch]));
-      return screeningParticipants
+      return theaterParticipants
         .filter((p) => !p.isSelf)
         .map((p) => ({ id: p.id, epoch: epochs.get(p.id) ?? 0 }));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [screeningParticipants, memberKey],
+    [theaterParticipants, memberKey],
   );
   const mesh = useRtcMesh({
     active: coSessionActive,
@@ -839,7 +892,7 @@ export function useCoReview({
 
   return {
     coSession, coSessionActive, sessionDoc, postSessionOp, coGhostMarkers,
-    screening, setScreening, screeningParticipants,
+    theater, setTheater, theaterParticipants,
     meshStreams: mesh.remoteStreams, meshStates: mesh.peerStates,
     shareState, shareStream, sharingMembers, startShare, stopShare,
     liveReactions,

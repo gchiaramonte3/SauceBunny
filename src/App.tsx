@@ -4647,7 +4647,7 @@ export default function App() {
   // ── Co-review session (P2P watch party — r100 transport, r101 live review) ──
   // The whole subsystem — session lifecycle, host transport heartbeat + peer
   // playhead-follow, shared-doc seed/broadcast/merge/relay, presence ghost
-  // cursors, screening mode — lives in src/hooks/use-co-review.ts (extracted
+  // cursors, theater mode — lives in src/hooks/use-co-review.ts (extracted
   // like use-panel-bus/use-web-playback). Rust owns the iroh endpoint
   // (commands/session.rs) as a dumb relay; the frontend is the review
   // source-of-truth. WEB-ONLY — a local file can't be pushed to peers, so
@@ -4658,7 +4658,7 @@ export default function App() {
   const {
     coSession, coSessionActive, sessionDoc, postSessionOp, coGhostMarkers,
     liveReactions, raisedHands, handRaised, sendReaction, toggleHand,
-    screening, setScreening, screeningParticipants,
+    theater, setTheater, theaterParticipants,
     meshStreams, meshStates,
     shareState, shareStream, sharingMembers, startShare, stopShare,
     isPresenter, pendingSource, sourceStatus, makePresenter, adoptPendingSource,
@@ -4944,10 +4944,10 @@ export default function App() {
         </div>
       </div>
 
-      <div className={"cp-body" + (roomActive ? " cp-room" : "") + (roomActive && screening ? " cp-room-theater" : "")}>
+      <div className={"cp-body" + (roomActive ? " cp-room" : "") + (roomActive && theater ? " cp-room-theater" : "")}>
         {/* display:contents wrapper (rail is a plain flex child). The rail is
             ALWAYS visible — the session room is not an exception (the old
-            screening edge-reveal overlay is retired; see room.css). */}
+            theater edge-reveal overlay is retired; see room.css). */}
         <div className="cp-nav-dock">
           <NavRail
             active={activeView}
@@ -5048,8 +5048,8 @@ export default function App() {
                   sibling of <main> so entering the room never remounts the
                   player; renders nothing outside the room. */}
               <PeoplePanel
-                active={roomActive && !screening}
-                participants={screeningParticipants}
+                active={roomActive && !theater}
+                participants={theaterParticipants}
                 remoteStreams={meshStreams}
                 peerStates={meshStates}
                 sharingMembers={sharingMembers}
@@ -5445,8 +5445,8 @@ export default function App() {
                         shareState={shareState}
                         onStartShare={startShare}
                         onStopShare={stopShare}
-                        theater={screening}
-                        onToggleTheater={() => setScreening((v) => !v)}
+                        theater={theater}
+                        onToggleTheater={() => setTheater((v) => !v)}
                         onReact={sendReaction}
                         handRaised={handRaised}
                         onToggleHand={toggleHand}
@@ -5484,11 +5484,11 @@ export default function App() {
                       selection (or a queued no-marks state) renders NOTHING -
                       the row's space collapses, no reserved empty line.
                       Partial-mark guidance stays (it completes the gesture). */}
-                  {roomActive && screening && (
+                  {roomActive && theater && (
                     <PeoplePanel
                       active
                       strip
-                      participants={screeningParticipants}
+                      participants={theaterParticipants}
                       remoteStreams={meshStreams}
                       peerStates={meshStates}
                       sharingMembers={sharingMembers}
@@ -5648,13 +5648,13 @@ export default function App() {
               the toolbar popover reads (both surfaces stay in sync by
               construction). Kept-alive like the others: [hidden] when inactive
               so the session/listeners beneath are never torn down. "Enter
-              theater" lands on Clip with screening on (the theater overlays the
+              theater" lands on Clip with theater on (the theater overlays the
               Clip player). */}
           <div ref={coreviewViewRef} tabIndex={-1} className="cp-view cp-view-coreview" hidden={activeView !== "coreview"}>
             <CoReviewLobby
               session={coSession}
               localSource={coLocalSourceLoaded}
-              participants={screeningParticipants}
+              participants={theaterParticipants}
               onStart={(title) => { void startCoReview(title); }}
               onJoin={(t, n) => { void joinCoReview(t, n); }}
               onLeave={leaveCoReview}

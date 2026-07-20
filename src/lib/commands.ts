@@ -285,7 +285,7 @@ export function buildCommands(d: CommandDeps): Command[] {
       run: () => d.onNavigateView("clip") },
     { id: "view.coreview", label: "Go to Review", group: "View",
       hotkey: "⌘4", description: "Watch & review together",
-      keywords: ["co-review", "watch party", "session", "peers", "screening", "nav"],
+      keywords: ["co-review", "watch party", "session", "peers", "theater", "nav"],
       disabled: d.activeView === "coreview",
       run: () => d.onNavigateView("coreview") },
     { id: "view.captions", label: d.captionsOn ? "Hide captions" : "Show captions",
