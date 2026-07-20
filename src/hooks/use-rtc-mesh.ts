@@ -51,6 +51,11 @@ export function useRtcMesh(args: {
   const audioRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const roleRef = useRef(role);
   useEffect(() => { roleRef.current = role; }, [role]);
+  // Read during mesh construction, so a rebuilt mesh starts with the roster it
+  // should already have. Kept current on every render, not in an effect: the
+  // construction effect must never see a roster one render stale.
+  const memberIdsRef = useRef(memberIds);
+  memberIdsRef.current = memberIds;
 
   // Speaker choice changed in settings: re-route every live voice element.
   useEffect(() => {
@@ -88,6 +93,7 @@ export function useRtcMesh(args: {
       selfId,
       iceServers,
       createPc: (config) => new RTCPeerConnection(config),
+      createStream: () => new MediaStream(),
       sendSignal: (to, payload) => {
         const msg = { kind: "rtc", from: selfId, to, payload: JSON.stringify(payload) };
         const cmd = roleRef.current === "host" ? "session_broadcast" : "session_send";
@@ -99,6 +105,10 @@ export function useRtcMesh(args: {
           if (stream) next.set(id, stream); else next.delete(id);
           return next;
         });
+        // The mesh now publishes ONE accumulating stream per peer, so this
+        // fires again as each track lands (and again when one ends). Attaching
+        // is idempotent; the no-audio branch covers both "peer gone" and "peer
+        // muted their mic away entirely".
         if (stream && stream.getAudioTracks().length > 0) {
           let el = audioRef.current.get(id);
           if (!el) {
@@ -108,9 +118,9 @@ export function useRtcMesh(args: {
             applyVolume(el);
             audioRef.current.set(id, el);
           }
-          el.srcObject = stream;
+          if (el.srcObject !== stream) el.srcObject = stream;
           el.play().catch(() => { /* resumes on user gesture */ });
-        } else if (!stream) {
+        } else {
           stopAudio(id);
         }
       },
@@ -121,6 +131,13 @@ export function useRtcMesh(args: {
       log: (tag, msg) => onLogRef.current(tag, msg),
     });
     meshRef.current = mesh;
+    // Seed the roster HERE, not only from the effect below. This effect also
+    // reruns when the TURN fields change (Settings, per keystroke), and the
+    // roster effect is keyed on `memberIds` - which does NOT change when a
+    // mesh is rebuilt. So editing TURN mid-session closed every connection and
+    // left the replacement with an empty roster: all tiles stuck "Connecting"
+    // with no recovery short of rejoining. setMembers is idempotent.
+    mesh.setMembers(memberIdsRef.current);
     const unsub = subscribeSessionCapture((s) => { void mesh.replaceLocalStream(s); });
     return () => {
       unsub();

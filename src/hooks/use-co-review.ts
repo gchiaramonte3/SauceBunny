@@ -514,6 +514,18 @@ export function useCoReview({
   }, []);
   persistDocRef.current = persistDoc;
 
+  // WRITE THROUGH AS THE ROOM TYPES. Session comments used to reach disk only
+  // at session end (or a source change), so every note from a live review was
+  // held in React state and nowhere else: quit the app, lose the renderer, or
+  // just close the window without pressing End, and the whole session's notes
+  // were gone on every machine at once - there is no close hook on the main
+  // window to catch it. Solo editing has always persisted per-op; this makes a
+  // session no more fragile than working alone. saveReview is debounced 500ms
+  // with a pagehide flush, so this costs one merge per op, not one file write.
+  useEffect(() => {
+    if (sessionDoc) persistDoc(sessionDoc);
+  }, [sessionDoc, persistDoc]);
+
   // The shared doc FOLLOWS the source. Seeding used to be gated on the role
   // transition (`role === "host" && prev !== "host"`), so it ran once when the
   // session started and never again - change source mid-session and the doc

@@ -34,9 +34,11 @@ class FakePc {
     return s as unknown as RTCRtpSender;
   }
   getSenders() { return this.senders as unknown as RTCRtpSender[]; }
-  transceivers: { kind: string; direction: string }[] = [];
-  addTransceiver(kind: string, init?: { direction?: string }) {
-    this.transceivers.push({ kind, direction: init?.direction ?? "sendrecv" });
+  transceivers: { kind: string; direction: string; streams: unknown[] }[] = [];
+  addTransceiver(kind: string, init?: { direction?: string; streams?: unknown[] }) {
+    this.transceivers.push({
+      kind, direction: init?.direction ?? "sendrecv", streams: init?.streams ?? [],
+    });
     const s = new FakeSender({ kind });
     s.track = null; // a placeholder sender carries no track yet
     this.senders.push(s);
@@ -67,6 +69,23 @@ function fakeStream(kinds: string[]) {
   } as unknown as MediaStream;
 }
 
+/** A mutable stand-in for the accumulating per-peer MediaStream (node has no
+ *  MediaStream, which is why the mesh takes createStream as a dep). */
+function fakeMutableStream() {
+  const tracks: Array<{ kind: string; id?: string }> = [];
+  return {
+    getTracks: () => tracks,
+    getVideoTracks: () => tracks.filter((t) => t.kind === "video"),
+    getAudioTracks: () => tracks.filter((t) => t.kind === "audio"),
+    getTrackById: (id: string) => tracks.find((t) => t.id === id) ?? null,
+    addTrack: (t: { kind: string; id?: string }) => { tracks.push(t); },
+    removeTrack: (t: { kind: string }) => {
+      const i = tracks.indexOf(t);
+      if (i >= 0) tracks.splice(i, 1);
+    },
+  } as unknown as MediaStream;
+}
+
 function makeMesh(selfId: string, overrides: Partial<MeshDeps> = {}) {
   FakePc.instances = [];
   const sent: Array<{ to: string; payload: MeshSignalPayload }> = [];
@@ -75,6 +94,7 @@ function makeMesh(selfId: string, overrides: Partial<MeshDeps> = {}) {
     selfId,
     iceServers: [],
     createPc: () => new FakePc() as unknown as RTCPeerConnection,
+    createStream: () => fakeMutableStream(),
     sendSignal: (to, payload) => sent.push({ to, payload }),
     onRemoteStream: () => {},
     onState: (id, state) => states.push({ id, state }),
@@ -254,5 +274,122 @@ describe("screen share resolution (r128)", () => {
     await mesh.setVideoOverride(null);
     expect(videoSender.params.encodings[0].scaleResolutionDownBy,
       "the camera goes back to tile size").toBeGreaterThan(1);
+  });
+});
+
+// ── r131: joining mid-share, and remote tracks arriving one at a time ────
+//
+// The 0.2.0 build shipped with screen share and camera video both broken in a
+// live two-machine session. Both traced to the SAME half-finished mechanism:
+// placeholder transceivers reserved a sender slot but never seeded it, and
+// never gave it a stream identity. Every test here fails against that build.
+
+describe("a peer who joins mid-share (r131)", () => {
+  // Camera off is the ordinary way to screen share ("I'll just show my
+  // screen"), and it is exactly the case with no camera track to addTrack -
+  // so the newcomer's video rode a placeholder that carried nothing.
+  const cameraOff = { getLocalStream: () => fakeStream(["audio"]) };
+
+  it("hands the newcomer the live share, not an empty sender", async () => {
+    const { mesh } = makeMesh("m0", cameraOff);
+    const share = fakeTrack("video") as unknown as MediaStreamTrack;
+    await mesh.setVideoOverride(share);      // sharing before anyone joins
+    mesh.setMembers([{ id: "m1", epoch: 1 }]); // ...then they join
+
+    const pc = FakePc.instances[0];
+    const placeholder = pc.senders.find((s) => s.track === null || s.track?.kind === "video")!;
+    expect(placeholder.replaced,
+      "a peer joining mid-share must receive the share track").toContain(share);
+  });
+
+  it("sends that share at full size, not capped to camera tile size", async () => {
+    const { mesh } = makeMesh("m0", cameraOff);
+    await mesh.setVideoOverride(fakeTrack("video") as unknown as MediaStreamTrack);
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+
+    const pc = FakePc.instances[0];
+    const sender = pc.senders.find((s) => s.track === null || s.track?.kind === "video")!;
+    expect(sender.params.encodings[0]?.scaleResolutionDownBy,
+      "a late joiner must get the same readable picture as everyone else").toBe(1);
+  });
+
+  it("hands the newcomer the share+mic audio mix too", async () => {
+    const { mesh } = makeMesh("m0", { getLocalStream: () => null });
+    const mix = fakeTrack("audio") as unknown as MediaStreamTrack;
+    await mesh.setAudioOverride(mix);
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+
+    const pc = FakePc.instances[0];
+    const audio = pc.senders.find((s) => s.track?.kind === "audio" || s.track === null)!;
+    expect(pc.senders.some((s) => s.replaced.includes(mix)),
+      "else a late joiner hears the raw mic instead of the shared audio").toBe(true);
+    expect(audio).toBeDefined();
+  });
+
+  it("still caps a plain camera to tile size (the share path must not leak)", async () => {
+    const { mesh } = makeMesh("m0"); // camera on, no share
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+    const sender = FakePc.instances[0].senders.find((s) => s.track?.kind === "video")!;
+    expect(sender.params.encodings[0].scaleResolutionDownBy,
+      "a full mesh of camera tiles must stay lean").toBeGreaterThan(1);
+  });
+
+  it("gives placeholder transceivers a stream identity", () => {
+    // Without `streams`, each track reaches the far side as its own anonymous
+    // MediaStream - which is what let the receiver keep only the last one.
+    const { mesh } = makeMesh("m0", { getLocalStream: () => null });
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+    const tx = FakePc.instances[0].transceivers;
+    expect(tx.length, "both kinds get reserved").toBe(2);
+    for (const t of tx) {
+      expect(t.streams.length, `${t.kind} placeholder needs an msid`).toBe(1);
+    }
+    // ...and all of them share ONE stream, so they arrive as one peer.
+    expect(tx[0].streams[0]).toBe(tx[1].streams[0]);
+  });
+});
+
+describe("remote tracks arriving separately (r131)", () => {
+  it("accumulates both halves instead of keeping whichever landed last", () => {
+    // ontrack fires once per track. Publishing a fresh stream per track gave
+    // the tile either picture with no audio (permanent "muted" badge, no
+    // speaking ring) or audio with no picture, depending on m-line order.
+    const seen: Array<MediaStream | null> = [];
+    const { mesh } = makeMesh("m0", { onRemoteStream: (_id, s) => seen.push(s) });
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+
+    const pc = FakePc.instances[0];
+    const video = { kind: "video", id: "v1" };
+    const audio = { kind: "audio", id: "a1" };
+    // WebKit delivers placeholder-transceiver tracks with NO stream at all.
+    pc.ontrack?.({ track: video, streams: [] });
+    pc.ontrack?.({ track: audio, streams: [] });
+
+    const last = seen[seen.length - 1]!;
+    expect(last.getVideoTracks().length, "video must survive the audio track").toBe(1);
+    expect(last.getAudioTracks().length, "audio must survive the video track").toBe(1);
+  });
+
+  it("keeps one stream object per peer across tracks", () => {
+    const seen: Array<MediaStream | null> = [];
+    const { mesh } = makeMesh("m0", { onRemoteStream: (_id, s) => seen.push(s) });
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+    const pc = FakePc.instances[0];
+    pc.ontrack?.({ track: { kind: "video", id: "v1" }, streams: [] });
+    pc.ontrack?.({ track: { kind: "audio", id: "a1" }, streams: [] });
+    expect(seen[0]).toBe(seen[1]);
+  });
+
+  it("drops a track that ends so the tile falls back to the avatar", () => {
+    const seen: Array<MediaStream | null> = [];
+    const { mesh } = makeMesh("m0", { onRemoteStream: (_id, s) => seen.push(s) });
+    mesh.setMembers([{ id: "m1", epoch: 1 }]);
+    const pc = FakePc.instances[0];
+    const video: { kind: string; id: string; onended?: () => void } = { kind: "video", id: "v1" };
+    pc.ontrack?.({ track: video, streams: [] });
+    expect(seen[seen.length - 1]!.getVideoTracks().length).toBe(1);
+    video.onended?.();
+    expect(seen[seen.length - 1]!.getVideoTracks().length,
+      "a frozen last frame is worse than an avatar").toBe(0);
   });
 });

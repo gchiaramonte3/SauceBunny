@@ -32,7 +32,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { RoomControlBar } from "./components/RoomControlBar";
 import { reactionGlyph } from "./lib/reactions";
 import { ReviewStatusChip } from "./components/ReviewStatusChip";
-import { useMediaCapture } from "./hooks/use-media-capture";
+import { useMediaCapture, subscribeCaptureError } from "./hooks/use-media-capture";
 import { SettingsModal, type Defaults, type CaptionFontKey } from "./components/SettingsModal";
 import { YouTubeAuthModal } from "./components/YouTubeAuthModal";
 import type { PlayerHandle } from "./components/player-handle";
@@ -1845,6 +1845,12 @@ export default function App() {
     webAudioCachedPathRef.current = null;
     setWebAudioCachedSrc(null);
     setActiveSourceUrl(null);
+    // The REF has to go too, not just the state. It is the identity four other
+    // places compare against, and leaving it pointing at the source we just
+    // left made a co-review guest who had loaded that URL treat the
+    // presenter's next LoadSource as "already on it" and ignore it - the
+    // friend who sat looking at nothing while the host loaded a video.
+    activeSourceUrlRef.current = null;
     setPlayerReady(false);
     // Speed UI capability is per-player; assume supported until the next
     // player reports otherwise on ready.
@@ -4711,6 +4717,14 @@ export default function App() {
   // Room bar device toggles ride the same capture singleton the green room
   // opened; enabled-bit flips propagate to every mesh sender live.
   const capture = useMediaCapture();
+  // A camera or mic that refuses to open must SAY so. These failures are
+  // raised wherever the user acted (room control bar, self tile, Settings),
+  // so they arrive through the capture singleton rather than this instance's
+  // state — previously they landed in a field nothing rendered and a busy or
+  // denied device failed in total silence.
+  useEffect(() => subscribeCaptureError((e) => {
+    if (e) pushNotification("error", "Camera or mic unavailable", e);
+  }), [pushNotification]);
   // Undo hygiene: undoing across sources is nonsense, and entries recorded
   // solo must never replay into a co-review session (or vice versa — their
   // closures route to different docs). Drop the whole stack on either

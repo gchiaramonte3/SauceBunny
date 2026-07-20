@@ -25,6 +25,38 @@ let captureGen = 0;
 let currentChoice: DeviceChoice = loadDeviceChoice();
 const choiceListeners = new Set<(c: DeviceChoice) => void>();
 
+// Capture FAILURES are singletons too, for the same reason the stream is: the
+// room control bar, the self tile, and the Settings pane each mount their own
+// hook instance, so a failure raised by one used to be invisible to every
+// other - a camera that was busy or denied failed in total silence, which is
+// the worst possible outcome for something the user is actively debugging.
+let currentError: string | null = null;
+let currentPermission: AvPermission = "unknown";
+const errorListeners = new Set<(e: string | null) => void>();
+const permissionListeners = new Set<(p: AvPermission) => void>();
+
+function publishError(e: string | null) {
+  currentError = e;
+  for (const l of [...errorListeners]) l(e);
+}
+
+function publishPermission(p: AvPermission) {
+  currentPermission = p;
+  for (const l of [...permissionListeners]) l(p);
+}
+
+/** The last capture failure, for non-React consumers. */
+export function getCaptureError(): string | null {
+  return currentError;
+}
+
+/** Subscribe to capture failures raised by ANY surface (room, settings, tile).
+ *  App.tsx routes these to a notification so a dead camera says why. */
+export function subscribeCaptureError(cb: (e: string | null) => void): () => void {
+  errorListeners.add(cb);
+  return () => { errorListeners.delete(cb); };
+}
+
 function commitChoice(c: DeviceChoice) {
   currentChoice = c;
   saveDeviceChoice(c);
@@ -56,20 +88,23 @@ if (typeof window !== "undefined") {
 
 export function useMediaCapture() {
   const [stream, setStream] = useState<MediaStream | null>(activeStream);
-  const [permission, setPermission] = useState<AvPermission>("unknown");
+  const [permission, setPermissionState] = useState<AvPermission>(currentPermission);
   const [devices, setDevices] = useState<AvDevices>({ cameras: [], mics: [], speakers: [] });
   const [choice, setChoiceState] = useState<DeviceChoice>(currentChoice);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(currentError);
 
   useEffect(() => {
     const l = (s: MediaStream | null) => setStream(s);
     listeners.add(l);
     choiceListeners.add(setChoiceState);
-    // Late-mount sync: another instance may have changed either while this
-    // component wasn't mounted.
+    errorListeners.add(setErrorState);
+    permissionListeners.add(setPermissionState);
+    // Late-mount sync: another instance may have changed any of these while
+    // this component wasn't mounted.
     setStream(activeStream);
     setChoiceState(currentChoice);
-    void queryAvPermission().then(setPermission);
+    setErrorState(currentError);
+    void queryAvPermission().then(publishPermission);
     // Populate the device lists immediately, and track hot-plug: powering on
     // an external camera (or a Continuity iPhone appearing) fires the
     // browser's `devicechange` — re-enumerate so the pickers show it without
@@ -83,6 +118,8 @@ export function useMediaCapture() {
     return () => {
       listeners.delete(l);
       choiceListeners.delete(setChoiceState);
+      errorListeners.delete(setErrorState);
+      permissionListeners.delete(setPermissionState);
       navigator.mediaDevices?.removeEventListener?.("devicechange", onDeviceChange);
     };
   }, []);
@@ -94,7 +131,7 @@ export function useMediaCapture() {
   /** Open (or reopen) the capture for a choice. Persists the choice; maps
    *  a user decline to the denied UI instead of throwing. */
   const acquire = useCallback(async (c: DeviceChoice): Promise<boolean> => {
-    setError(null);
+    publishError(null);
     commitChoice(c);
     const gen = ++captureGen;
     try {
@@ -106,18 +143,19 @@ export function useMediaCapture() {
         return false;
       }
       setActive(s);
-      setPermission("granted");
+      publishPermission("granted");
       await refreshDevices(); // labels populate post-grant
       return true;
     } catch (err) {
       const name = err instanceof DOMException ? err.name : "";
       if (name === "NotAllowedError" || name === "SecurityError") {
-        setPermission("denied");
+        publishPermission("denied");
+        publishError("Camera or microphone access is blocked. Open Settings > Camera & Mic to allow it.");
       } else {
         // Every other failure (no device, unsupported webview, hardware in
         // use) surfaces with its real name - a wrong "blocked" message sent
         // people to System Settings for nothing.
-        setError(`${name || "CaptureError"}: ${err instanceof Error ? err.message : String(err)}`);
+        publishError(`${name || "CaptureError"}: ${err instanceof Error ? err.message : String(err)}`);
       }
       return false;
     }
@@ -130,17 +168,22 @@ export function useMediaCapture() {
   }, []);
 
   /** Flip a track's enabled bit without re-prompting (mute / camera-off of
-   *  a LIVE stream). One exception: a stream acquired with the camera OFF
-   *  has no video track at all (openCapture never requested one), so
-   *  camera-ON must re-acquire to actually open the camera — flipping
-   *  enabled on zero tracks would silently do nothing. */
+   *  a LIVE stream). Turning a device ON always has to be able to OPEN one:
+   *  a stream acquired with the camera off has no video track at all, and
+   *  with no capture at all ("join without devices", or the hardware was
+   *  released) there is nothing to flip. Both cases re-acquire — returning
+   *  early left the button dead while the toolbar claimed the camera was on,
+   *  with no way back short of leaving the session. */
   const setEnabled = useCallback((kind: "audio" | "video", enabled: boolean) => {
-    commitChoice({ ...currentChoice, ...(kind === "audio" ? { micMuted: !enabled } : { cameraOff: !enabled }) });
+    const prev = currentChoice;
+    commitChoice({ ...prev, ...(kind === "audio" ? { micMuted: !enabled } : { cameraOff: !enabled }) });
     const s = activeStream;
-    if (!s) return;
-    const tracks = kind === "audio" ? s.getAudioTracks() : s.getVideoTracks();
-    if (kind === "video" && enabled && tracks.length === 0) {
-      void acquire(currentChoice);
+    const tracks = s ? (kind === "audio" ? s.getAudioTracks() : s.getVideoTracks()) : [];
+    if (enabled && tracks.length === 0) {
+      // Roll the choice back if the device never opened, so the control bar
+      // can't advertise a camera that isn't running. acquire() has already
+      // surfaced the reason via `permission` or `error`.
+      void acquire(currentChoice).then((ok) => { if (!ok) commitChoice(prev); });
       return;
     }
     for (const t of tracks) t.enabled = enabled;
