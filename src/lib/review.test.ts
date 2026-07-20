@@ -549,3 +549,35 @@ describe("undo inverse ops (inverseReviewOps / restampReviewOp)", () => {
     expect(res).toEqual({ t: "resolve", id: "x", resolved: true, at: 9000 });
   });
 });
+
+describe("mergeReviewDoc across different sources", () => {
+  const doc = (sourceKey: string, comments: ReviewComment[]): ReviewDoc => ({
+    sourceKey, versions: [], activeVersionId: null, comments, status: {},
+  });
+  // Build through the real constructor so this test can't drift from the shape.
+  const comment = (id: string, body: string): ReviewComment => ({
+    ...buildComment({ versionId: "v1", timeStart: 1, body, author: "A" }),
+    id,
+  });
+
+  it("refuses to fold one source's comments into another's document", () => {
+    // The data-loss path: a session that switched sources used to end with
+    // mergeReviewDoc(loadReview(A), docForB), which unioned B's comments into
+    // A's file and restamped it with B's key.
+    const a = doc("sourceA", [comment("a1", "about A")]);
+    const b = doc("sourceB", [comment("b1", "about B")]);
+    const merged = mergeReviewDoc(a, b);
+    expect(merged.sourceKey).toBe("sourceB");
+    expect(merged.comments.map((c) => c.id)).toEqual(["b1"]);
+    expect(merged.comments.some((c) => c.id === "a1"),
+      "A's comments must never appear in B's document").toBe(false);
+  });
+
+  it("still merges normally when both sides describe the same source", () => {
+    const mine = doc("same", [comment("mine", "local only")]);
+    const theirs = doc("same", [comment("theirs", "remote only")]);
+    const merged = mergeReviewDoc(mine, theirs);
+    expect(merged.sourceKey).toBe("same");
+    expect(merged.comments.map((c) => c.id).sort()).toEqual(["mine", "theirs"]);
+  });
+});

@@ -230,6 +230,9 @@ export function useCoReview({
    *  so the resulting state callback is not re-broadcast as a local change. */
   const applyingRemoteRef = useRef(false);
   const coReadyRef = useRef(false); // has OUR player loaded the host's source yet?
+  /** Latest persistDoc, so the message handler (registered once) can flush an
+   *  outgoing doc without capturing a stale closure. */
+  const persistDocRef = useRef<(d: ReviewDoc | null) => void>(() => {});
   // Am I the one driving source + transport? Defaults to the host until a
   // Presenter line says otherwise. The network star never moves; only this
   // permission does (see SessionMsg::Presenter).
@@ -338,9 +341,18 @@ export function useCoReview({
         // every join, and an existing peer may have an in-flight op not yet in
         // that snapshot — mergeReviewDoc keeps it (and unions likes) so no
         // comment/edit silently vanishes.
+        //
+        // When the snapshot describes a DIFFERENT source (the presenter
+        // switched), our current doc belongs to the outgoing source: flush it
+        // to its own file BEFORE adopting, or those notes die with the swap.
+        // mergeReviewDoc refuses to fold across sourceKeys, so adopting is
+        // then a clean replace rather than a silent contamination.
         try {
           const incoming = JSON.parse(m.doc) as ReviewDoc;
-          setSessionDoc((prev) => (prev ? mergeReviewDoc(prev, incoming) : incoming));
+          setSessionDoc((prev) => {
+            if (prev && prev.sourceKey !== incoming.sourceKey) persistDocRef.current(prev);
+            return prev ? mergeReviewDoc(prev, incoming) : incoming;
+          });
         } catch { /* malformed snapshot */ }
         return;
       case "reviewOp":
@@ -460,31 +472,60 @@ export function useCoReview({
     const unMsg = listen<SessionMsg>("session:msg", (e) => coApplyRef.current(e.payload));
     return () => { unState.then((f) => f()); unMsg.then((f) => f()); };
   }, []);
-  // Host seeds the shared doc from its local review of the current source on
-  // start; persists the collaborative doc for everyone on end.
+  /** Write a doc back to ITS OWN source's file. The sourceKey on the doc is
+   *  the authority - never the key of whatever source is on screen now. */
+  const persistDoc = useCallback((d: ReviewDoc | null) => {
+    // Persist whenever a doc exists - zero comments may MEAN "we deleted them
+    // all", and skipping the save would resurrect them next session. MERGE
+    // into any solo review the user already had (a guest must not lose their
+    // own notes to the host-seeded doc); mergeReviewDoc refuses to fold
+    // across differing sourceKeys.
+    if (d && d.sourceKey) saveReview(mergeReviewDoc(loadReview(d.sourceKey), d));
+  }, []);
+  persistDocRef.current = persistDoc;
+
+  // The shared doc FOLLOWS the source. Seeding used to be gated on the role
+  // transition (`role === "host" && prev !== "host"`), so it ran once when the
+  // session started and never again - change source mid-session and the doc
+  // kept the OLD sourceKey, so new comments filed against the previous source
+  // and were written into ITS file on session end. That is the "loading a new
+  // source wipes my comments" report: they were not lost so much as misfiled.
   const prevCoRoleRef = useRef("off");
+  const prevDocKeyRef = useRef<string | null>(null);
   useEffect(() => {
     const prev = prevCoRoleRef.current;
     prevCoRoleRef.current = coSession.role;
-    if (coSession.role === "host" && prev !== "host" && reviewSourceKey) {
-      const { doc } = ensureVersion(loadReview(reviewSourceKey), reviewSourceKey, metadataRef.current?.title ?? undefined);
-      setSessionDoc(doc);
-    }
+
     if (coSession.role === "off" && prev !== "off") {
-      const d = sessionDocRef.current;
-      // Persist whenever a doc exists - zero comments may MEAN "we deleted
-      // them all", and skipping the save would resurrect them next session.
-      // MERGE into any solo review the user already had for this source (a
-      // guest must not lose their own notes to the host-seeded doc).
-      if (d && d.sourceKey) saveReview(mergeReviewDoc(loadReview(d.sourceKey), d));
+      persistDoc(sessionDocRef.current);
+      prevDocKeyRef.current = null;
       setSessionDoc(null);
       setCoGhosts([]);
       setLiveReactions([]);
       setRaisedHands(new Set());
       coLastHostPosRef.current = null;
       coReadyRef.current = false;
+      return;
     }
-  }, [coSession.role, reviewSourceKey]);
+    if (coSession.role !== "host" || !reviewSourceKey) return;
+    if (prevDocKeyRef.current === reviewSourceKey) return; // same source, nothing to do
+
+    // CLOSE the outgoing source first: its comments belong to ITS file, and
+    // they must be on disk before we point the room at anything else.
+    const outgoing = sessionDocRef.current;
+    if (outgoing && outgoing.sourceKey !== reviewSourceKey) persistDoc(outgoing);
+
+    const { doc } = ensureVersion(
+      loadReview(reviewSourceKey), reviewSourceKey, metadataRef.current?.title ?? undefined,
+    );
+    prevDocKeyRef.current = reviewSourceKey;
+    setSessionDoc(doc);
+    // Guests are still holding the OUTGOING doc, so push the new one now.
+    // Previously the snapshot only went out when a peer joined, which meant a
+    // mid-session source change left every guest editing the old source.
+    void invoke("session_broadcast", { msg: { kind: "reviewDoc", doc: JSON.stringify(doc) } })
+      .catch(() => { /* session raced closed */ });
+  }, [coSession.role, reviewSourceKey, persistDoc, metadataRef]);
   // Presenter → everyone: the current source whenever it changes. r124: this
   // fires for LOCAL FILES and for clearing too. It used to early-return unless
   // a web URL existed, which is why loading a local file broadcast nothing and

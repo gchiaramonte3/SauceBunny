@@ -516,6 +516,13 @@ export function restampReviewOp(op: ReviewOp, at: number): ReviewOp {
  *  shared comment by updatedAt, and UNIONs likes (which don't bump updatedAt)
  *  so a not-yet-echoed like isn't dropped. */
 export function mergeReviewDoc(local: ReviewDoc, incoming: ReviewDoc): ReviewDoc {
+  // NEVER fold across sources. Without this, ending a session after the room
+  // had switched sources called mergeReviewDoc(loadReview(A), docForB), which
+  // unioned B's comments into A's file AND restamped that file with B's key -
+  // silently corrupting the notes on a source nobody was even discussing.
+  // Different key means these are two different conversations: take the
+  // incoming one whole and leave `local` alone on disk.
+  if (local.sourceKey !== incoming.sourceKey) return incoming;
   const byId = new Map<string, ReviewComment>(incoming.comments.map((c) => [c.id, { ...c }]));
   for (const lc of local.comments) {
     const ic = byId.get(lc.id);
