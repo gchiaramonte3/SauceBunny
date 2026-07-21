@@ -32,7 +32,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { RoomControlBar } from "./components/RoomControlBar";
 import { reactionGlyph } from "./lib/reactions";
 import { ReviewStatusChip } from "./components/ReviewStatusChip";
-import { useMediaCapture, subscribeCaptureError } from "./hooks/use-media-capture";
+import { useMediaCapture, subscribeCaptureError, setCaptureLogSink } from "./hooks/use-media-capture";
 import { SettingsModal, type Defaults, type CaptionFontKey } from "./components/SettingsModal";
 import { YouTubeAuthModal } from "./components/YouTubeAuthModal";
 import type { PlayerHandle } from "./components/player-handle";
@@ -3944,6 +3944,21 @@ export default function App() {
         settings: { ...defaultsRef.current },
         sidecars,
         logLines: logs,
+        // Only when a session is live - a solo report should not carry an
+        // empty room. Two of these side by side is how a roster or floor
+        // disagreement becomes visible instead of inferred.
+        session: coSession.role === "off" ? undefined : {
+          role: coSession.role,
+          selfId: coSession.selfId,
+          presenter: coSession.presenter,
+          presenterEpoch: coSession.presenterEpoch,
+          peers: coSession.peers.map((p) => ({ id: p.id, name: p.name, epoch: p.epoch ?? 0 })),
+          meshStates: [...meshStates].map(([id, state]) => ({ id, state })),
+          capture: capture.stream
+            ? capture.stream.getTracks().map((t) => `${t.kind}(${t.readyState})`).join(" ")
+            : "none",
+          shareState,
+        },
       });
       const bytes = Array.from(new TextEncoder().encode(report));
       await invoke("write_bytes_to_path", { path, bytes });
@@ -4677,6 +4692,7 @@ export default function App() {
     pushNotification, setQueueOpen,
     setReviewMarkers, setReviewAnnotations,
     turn: { url: defaults.turnUrl, username: defaults.turnUsername, password: defaults.turnPassword },
+    appendLog,
   });
   // The SESSION ROOM: Review owns live sessions end to end. When a session
   // is live and the Review view is active, the room class reflows the Clip
@@ -4725,6 +4741,12 @@ export default function App() {
   useEffect(() => subscribeCaptureError((e) => {
     if (e) pushNotification("error", "Camera or mic unavailable", e);
   }), [pushNotification]);
+  // The capture singleton lives outside React, so it gets the log by
+  // installation rather than by argument.
+  useEffect(() => {
+    setCaptureLogSink((tag, line) => appendLog(tag, "capture", line));
+    return () => setCaptureLogSink(null);
+  }, [appendLog]);
   // Undo hygiene: undoing across sources is nonsense, and entries recorded
   // solo must never replay into a co-review session (or vice versa — their
   // closures route to different docs). Drop the whole stack on either

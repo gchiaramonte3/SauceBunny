@@ -382,7 +382,9 @@ fn remove_files_in_dir(
             };
             let meta = match entry.metadata() { Ok(m) => m, Err(_) => continue };
             if meta.is_dir() { continue; }
-            removed += remove_cache_file(&entry.path(), &name, &active, &excluded);
+            // `active`/`excluded` are already references here (unlike the
+            // owned sets at the two call sites in clear_all_cache).
+            removed += remove_cache_file(&entry.path(), &name, active, excluded);
         }
     }
     removed
@@ -799,7 +801,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-20-r130-screenings";
+pub const BACKEND_BUILD_ID: &str = "2026-07-20-r131-session-observability";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

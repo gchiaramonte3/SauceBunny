@@ -35,6 +35,31 @@ let currentPermission: AvPermission = "unknown";
 const errorListeners = new Set<(e: string | null) => void>();
 const permissionListeners = new Set<(p: AvPermission) => void>();
 
+// The capture singleton is not a React thing, so it reaches the pipeline log
+// through a sink App.tsx installs at boot. Before this, the camera path
+// produced no output of ANY kind - not even a console line - so "my camera
+// stopped working" arrived with literally zero evidence attached.
+let logSink: ((tag: "info" | "ok" | "warn" | "err", line: string) => void) | null = null;
+
+/** Route capture lifecycle into the pipeline log. Installed once, at boot. */
+export function setCaptureLogSink(
+  fn: ((tag: "info" | "ok" | "warn" | "err", line: string) => void) | null,
+): void {
+  logSink = fn;
+}
+
+function clog(tag: "info" | "ok" | "warn" | "err", line: string) {
+  logSink?.(tag, line);
+}
+
+/** What a stream actually carries, for the log. */
+function describe(s: MediaStream | null): string {
+  if (!s) return "none";
+  const t = s.getTracks();
+  if (t.length === 0) return "empty";
+  return t.map((x) => `${x.kind}:${x.label || "unlabelled"}(${x.readyState})`).join(" ");
+}
+
 function publishError(e: string | null) {
   currentError = e;
   for (const l of [...errorListeners]) l(e);
@@ -66,6 +91,19 @@ function commitChoice(c: DeviceChoice) {
 function setActive(s: MediaStream | null) {
   if (activeStream && activeStream !== s) stopStream(activeStream);
   activeStream = s;
+  clog(s ? "ok" : "info", s ? `Capture live: ${describe(s)}` : "Capture released.");
+  // macOS ENDS a track when another app takes the device, on wake from sleep,
+  // or when a USB camera is unplugged. Nothing listened for it, so the UI kept
+  // showing a live camera that was already dead and peers saw a frozen frame.
+  for (const t of s?.getTracks() ?? []) {
+    t.addEventListener("ended", () => {
+      clog("warn", `${t.kind} track ended (device taken by another app, unplugged, or slept).`);
+      publishError(
+        `Your ${t.kind === "video" ? "camera" : "microphone"} stopped. `
+        + "Another app may have taken it. Turn it off and on again to reconnect.",
+      );
+    }, { once: true });
+  }
   for (const l of [...listeners]) l(s);
 }
 
@@ -134,6 +172,9 @@ export function useMediaCapture() {
     publishError(null);
     commitChoice(c);
     const gen = ++captureGen;
+    clog("info",
+      `Opening capture: camera=${c.cameraOff ? "off" : (c.cameraId ?? "default")} `
+      + `mic=${c.micMuted ? "muted" : (c.micId ?? "default")}`);
     try {
       const s = await openCapture(c);
       if (gen !== captureGen) {
@@ -150,12 +191,15 @@ export function useMediaCapture() {
       const name = err instanceof DOMException ? err.name : "";
       if (name === "NotAllowedError" || name === "SecurityError") {
         publishPermission("denied");
+        clog("err", `Capture denied by macOS (${name}).`);
         publishError("Camera or microphone access is blocked. Open Settings > Camera & Mic to allow it.");
       } else {
         // Every other failure (no device, unsupported webview, hardware in
         // use) surfaces with its real name - a wrong "blocked" message sent
         // people to System Settings for nothing.
-        publishError(`${name || "CaptureError"}: ${err instanceof Error ? err.message : String(err)}`);
+        const detail = `${name || "CaptureError"}: ${err instanceof Error ? err.message : String(err)}`;
+        clog("err", `Capture failed. ${detail}`);
+        publishError(detail);
       }
       return false;
     }
@@ -179,6 +223,9 @@ export function useMediaCapture() {
     commitChoice({ ...prev, ...(kind === "audio" ? { micMuted: !enabled } : { cameraOff: !enabled }) });
     const s = activeStream;
     const tracks = s ? (kind === "audio" ? s.getAudioTracks() : s.getVideoTracks()) : [];
+    clog("info",
+      `${kind} ${enabled ? "on" : "off"} (${tracks.length} track${tracks.length === 1 ? "" : "s"}`
+      + `${s ? "" : ", no capture"}) -> ${enabled && tracks.length === 0 ? "reopening" : "toggling"}`);
     if (enabled && tracks.length === 0) {
       // Roll the choice back if the device never opened, so the control bar
       // can't advertise a camera that isn't running. acquire() has already

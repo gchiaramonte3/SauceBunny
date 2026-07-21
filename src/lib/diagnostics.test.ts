@@ -80,3 +80,45 @@ describe("buildDiagnosticsReport", () => {
     expect(r).toContain("(no sidecar versions available)");
   });
 });
+
+describe("co-review session block (r131)", () => {
+  const session = {
+    role: "host",
+    selfId: "m0",
+    presenter: "m1",
+    presenterEpoch: 3,
+    peers: [
+      { id: "m0", name: "Gasper", epoch: 1 },
+      { id: "m1", name: "Friend", epoch: 2 },
+    ],
+    meshStates: [{ id: "m1", state: "failed" }],
+    capture: "video(live) audio(live)",
+    shareState: "sharing",
+  };
+
+  it("is omitted entirely when solo", () => {
+    expect(buildDiagnosticsReport(baseInput())).not.toContain("== Co-review session ==");
+  });
+
+  it("carries everything needed to compare two machines side by side", () => {
+    const r = buildDiagnosticsReport(baseInput({ session }));
+    // Who this machine thinks it is, and who it thinks holds the floor. A
+    // disagreement here between two reports IS the bug, and it is otherwise
+    // invisible from either Mac alone.
+    expect(r).toContain("Self id:         m0");
+    expect(r).toContain("Presenter:       m1 (epoch 3)");
+    // Epochs decide staleness, so the roster is useless without them.
+    expect(r).toContain("m1 epoch=2");
+    // The RTC state per peer separates "never negotiated" from "died later".
+    expect(r).toContain("rtc=failed");
+    // A peer with no mesh entry must not read as connected.
+    expect(r).toContain("rtc=n/a");
+    expect(r).toContain("<- this machine");
+    expect(r).toContain("video(live) audio(live)");
+  });
+
+  it("says so plainly when a session has nobody in it", () => {
+    const r = buildDiagnosticsReport(baseInput({ session: { ...session, peers: [] } }));
+    expect(r).toContain("(nobody)");
+  });
+});

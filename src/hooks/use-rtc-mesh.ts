@@ -125,6 +125,10 @@ export function useRtcMesh(args: {
         }
       },
       onState: (id, state) => {
+        // "Tile stuck on Connecting" is the single most-reported session
+        // symptom and it has several unrelated causes; the transition log is
+        // what separates "never negotiated" from "connected then failed".
+        onLogRef.current(state === "failed" ? "err" : "info", `peer ${id}: ${state}`);
         setPeerStates((prev) => new Map(prev).set(id, state));
       },
       getLocalStream: () => getSessionCapture(),
@@ -137,6 +141,10 @@ export function useRtcMesh(args: {
     // mesh is rebuilt. So editing TURN mid-session closed every connection and
     // left the replacement with an empty roster: all tiles stuck "Connecting"
     // with no recovery short of rejoining. setMembers is idempotent.
+    onLogRef.current("info",
+      `mesh up: self=${selfId} role=${roleRef.current} `
+      + `turn=${turn.url.trim() ? "configured" : "none"} `
+      + `roster=[${memberIdsRef.current.map((m) => `${m.id}@${m.epoch}`).join(",")}]`);
     mesh.setMembers(memberIdsRef.current);
     const unsub = subscribeSessionCapture((s) => { void mesh.replaceLocalStream(s); });
     return () => {

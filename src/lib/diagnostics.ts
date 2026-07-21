@@ -34,6 +34,25 @@ export type DiagnosticsInput = {
   sidecars: { name: string; version: string }[];
   /** Full session log — the report keeps only the last DIAGNOSTICS_LOG_LIMIT lines. */
   logLines: DiagnosticsLogLine[];
+  /** Live co-review state, when a session is running. Omitted when solo.
+   *  This is the block that says WHICH MACHINE's picture is wrong: compare
+   *  two reports side by side and a roster or floor disagreement is visible
+   *  immediately, which is otherwise a two-machine guessing game. */
+  session?: SessionDiagnostics;
+};
+
+export type SessionDiagnostics = {
+  role: string;
+  selfId: string | null;
+  presenter: string;
+  presenterEpoch: number;
+  /** Roster as this machine sees it, with the epoch that decides staleness. */
+  peers: { id: string; name: string; epoch: number }[];
+  /** WebRTC state per peer: connecting / live / failed. */
+  meshStates: { id: string; state: string }[];
+  /** Whether a capture is open, and what it carries. */
+  capture: string;
+  shareState: string;
 };
 
 /** How many pipeline-log lines the report keeps (most recent last). */
@@ -80,6 +99,27 @@ export function buildDiagnosticsReport(d: DiagnosticsInput): string {
     for (const s of d.sidecars) push(`${s.name}: ${s.version}`);
   }
   push();
+
+  if (d.session) {
+    const s = d.session;
+    push("== Co-review session ==");
+    push(`Role:            ${s.role}`);
+    push(`Self id:         ${s.selfId ?? "(none)"}`);
+    push(`Presenter:       ${s.presenter} (epoch ${s.presenterEpoch})`);
+    push(`Share state:     ${s.shareState}`);
+    push(`Capture:         ${s.capture}`);
+    push(`Roster (${s.peers.length}):`);
+    if (s.peers.length === 0) {
+      push("  (nobody)");
+    } else {
+      const mesh = new Map(s.meshStates.map((m) => [m.id, m.state]));
+      for (const p of s.peers) {
+        const self = p.id === s.selfId ? " <- this machine" : "";
+        push(`  ${p.id} epoch=${p.epoch} rtc=${mesh.get(p.id) ?? "n/a"} "${p.name}"${self}`);
+      }
+    }
+    push();
+  }
 
   const tail = d.logLines.slice(-DIAGNOSTICS_LOG_LIMIT);
   const header = tail.length < d.logLines.length

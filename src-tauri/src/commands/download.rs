@@ -1414,16 +1414,18 @@ pub async fn download_web_preview(
                     // next open of this URL plays from disk with no network.
                     // A failed rename falls back to the temp path: playback
                     // still works this session, reuse just isn't persisted.
-                    let written = find_audio_in_cache(&cache_for, &prefix_for).and_then(|p| {
+                    // Every branch yields a usable path (the temp one if the
+                    // move fails), so this is a `map`, not an `and_then`.
+                    let written = find_audio_in_cache(&cache_for, &prefix_for).map(|p| {
                         let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
                         let dl_dir = media_cache_dir(&cache_for, "downloads");
                         if std::fs::create_dir_all(&dl_dir).is_err() {
-                            return Some(p);
+                            return p;
                         }
                         let dest = dl_dir.join(format!("{final_prefix_for}.{ext}"));
                         match std::fs::rename(&p, &dest) {
-                            Ok(()) => Some(dest),
-                            Err(_) => Some(p),
+                            Ok(()) => dest,
+                            Err(_) => p,
                         }
                     });
                     let path_str = written

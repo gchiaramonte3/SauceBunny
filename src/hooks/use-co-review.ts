@@ -37,7 +37,7 @@ import {
 import type { PlayerHandle } from "../components/player-handle";
 import type { Participant } from "../components/PeoplePanel";
 import type { ToastKind } from "../components/CanvasToast";
-import type { Metadata } from "../types";
+import { asLogTag, type LogTag, type Metadata } from "../types";
 import type { SessionMsg } from "../bindings/SessionMsg";
 import type { SessionState as CoSessionState } from "../bindings/SessionState";
 import { useRtcMesh, type TurnConfig } from "./use-rtc-mesh";
@@ -106,6 +106,12 @@ type Args = {
    *  guest turns out to already have the presenter's file. */
   loadLocalPath: (path: string) => Promise<unknown>;
   pushNotification: (kind: ToastKind, title: string, body: string) => void;
+  /** The pipeline log, which the diagnostics export reads. Co-review is the
+   *  one subsystem that inherently needs two machines to reproduce, and it
+   *  used to write NOTHING here - a failed session left no artifact on either
+   *  Mac saying which side broke. Everything that changes what the room
+   *  believes gets a line. */
+  appendLog: (tag: LogTag, channel: string, line: string) => void;
   /** Theater auto-enter also opens the drawer (comments live there). */
   setQueueOpen: (open: boolean) => void;
   /** Session projection sinks — while in a session the shared doc drives the
@@ -190,8 +196,16 @@ export function useCoReview({
   onChaseSeek, setUrl, handleFetch, loadLocalPath,
   pushNotification, setQueueOpen,
   setReviewMarkers, setReviewAnnotations,
-  turn,
+  turn, appendLog,
 }: Args): CoReview {
+  // Every long-lived listener here is registered ONCE, so it must reach the
+  // log through a ref or it captures the first render's closure forever.
+  const appendLogRef = useRef(appendLog);
+  appendLogRef.current = appendLog;
+  /** One line in the pipeline log, on the "session" channel. */
+  const slog = useCallback((tag: LogTag, line: string) => {
+    appendLogRef.current(tag, "session", line);
+  }, []);
   const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], selfId: null, title: null, error: null, presenter: "m0", presenterEpoch: 0 });
   // Live reactions: fire-and-forget, never persisted, pruned after ~5s
   // (the Zoom/Meet grammar - late joiners never see past reactions).
@@ -302,11 +316,15 @@ export function useCoReview({
         // to it until OUR player reports ready for the NEW source - re-arm so
         // a stale-ready old player can't apply transport to the wrong video.
         if (m.sourceKind === "none") {
+          slog("info", "Presenter cleared the source.");
           coReadyRef.current = false;
           setPendingSource(null);
           setSourceStatus(new Map());
           return;
         }
+        slog("info",
+          `LoadSource in: kind=${m.sourceKind} title=${JSON.stringify(m.title ?? "")} `
+          + `reviewKey=${m.reviewKey} fingerprint=${m.fingerprint ?? "none"} url=${m.url ?? "none"}`);
         const src: SessionSource = {
           kind: m.sourceKind === "file" ? "file" : "web",
           url: m.url, fingerprint: m.fingerprint, title: m.title,
@@ -314,16 +332,20 @@ export function useCoReview({
         };
         setSourceStatus(new Map());
         if (src.kind === "web" && m.url) {
-          if (activeSourceUrlRef.current === m.url) return; // already on it
+          if (activeSourceUrlRef.current === m.url) {
+            slog("info", "Already on that URL; ignoring.");
+            return;
+          }
           coReadyRef.current = false;
           setPendingSource(src);
           sendSessionMsg({ kind: "sourceStatus", from: "", state: "loading", detail: null });
           setUrl(m.url);
           void handleFetch(m.url)
-            .then(() => setPendingSource(null))
-            .catch(() => {
+            .then(() => { slog("ok", "Opened the presenter's web source."); setPendingSource(null); })
+            .catch((err) => {
               // Clear the pending state too, or the guest renders "Loading…"
               // forever with no error and no retry.
+              slog("err", `Could not open the presenter's source: ${formatError(err)}`);
               setPendingSource(null);
               sendSessionMsg({ kind: "sourceStatus", from: "", state: "failed", detail: null });
             });
@@ -498,10 +520,39 @@ export function useCoReview({
     }
   };
   useEffect(() => {
-    const unState = listen<CoSessionState>("session:state", (e) => setCoSession(e.payload));
+    const unState = listen<CoSessionState>("session:state", (e) => {
+      // Diff against what we believed BEFORE adopting it: the roster and the
+      // floor are the two things whose disagreement across machines produces
+      // "it looks connected and does nothing", and a diff is what tells you
+      // which Mac's picture is wrong.
+      const prev = coSessionRef.current;
+      const next = e.payload;
+      if (prev.role !== next.role) slog("info", `Role: ${prev.role} -> ${next.role}`);
+      if (prev.selfId !== next.selfId) slog("info", `Self id: ${next.selfId ?? "none"}`);
+      const before = new Map(prev.peers.map((p) => [p.id, p]));
+      const after = new Map(next.peers.map((p) => [p.id, p]));
+      for (const [id, p] of after) {
+        const was = before.get(id);
+        if (!was) slog("ok", `Peer joined: ${id} "${p.name}" epoch=${p.epoch ?? 0}`);
+        else if ((was.epoch ?? 0) !== (p.epoch ?? 0)) {
+          slog("info", `Peer reconnected: ${id} "${p.name}" epoch ${was.epoch ?? 0} -> ${p.epoch ?? 0}`);
+        }
+      }
+      for (const [id, p] of before) {
+        if (!after.has(id)) slog("info", `Peer left: ${id} "${p.name}"`);
+      }
+      if (prev.presenter !== next.presenter || prev.presenterEpoch !== next.presenterEpoch) {
+        slog("info", `Floor: ${next.presenter} (epoch ${next.presenterEpoch})`);
+      }
+      if (next.error && next.error !== prev.error) slog("err", `Session error: ${next.error}`);
+      setCoSession(next);
+    });
     const unMsg = listen<SessionMsg>("session:msg", (e) => coApplyRef.current(e.payload));
-    return () => { unState.then((f) => f()); unMsg.then((f) => f()); };
-  }, []);
+    const unLog = listen<{ tag: string; line: string }>("session:log", (e) => {
+      appendLogRef.current(asLogTag(e.payload.tag), "session", e.payload.line);
+    });
+    return () => { unState.then((f) => f()); unMsg.then((f) => f()); unLog.then((f) => f()); };
+  }, [slog]);
   /** Write a doc back to ITS OWN source's file. The sourceKey on the doc is
    *  the authority - never the key of whatever source is on screen now. */
   const persistDoc = useCallback((d: ReviewDoc | null) => {
@@ -805,10 +856,10 @@ export function useCoReview({
     role: coSession.role,
     memberIds,
     turn,
-    onLog: (tag, msg) => {
-      if (tag === "err") console.error("[co-review rtc]", msg);
-      else if (tag === "warn") console.warn("[co-review rtc]", msg);
-    },
+    // Into the pipeline log, not the console: in a built .app the WKWebView
+    // console needs Safari's inspector attached, so anything logged there
+    // during a real session is unreachable by the person hitting the bug.
+    onLog: (tag, msg) => { appendLogRef.current(tag, "rtc", msg); },
   });
   rtcSignalRef.current = mesh.handleSignal;
 

@@ -46,6 +46,20 @@ const MAX_PEERS: usize = 3;
 /// before it can be fanned out to every other peer (×N memory amplification).
 const MAX_MSG_BYTES: usize = 2 * 1024 * 1024;
 
+/// One line into the frontend's pipeline log, on the `session` channel.
+///
+/// The session protocol used to fail in complete silence: a line the peer
+/// couldn't parse, or one over the size cap, was dropped with a bare
+/// `continue`, so a version-skewed pair connected happily and then quietly
+/// lost a whole message class. The connection looks healthy the entire time.
+/// A dropped message is now the most valuable line in the log, not the least.
+fn session_log(app: &AppHandle, tag: &str, line: impl Into<String>) {
+    let _ = app.emit(
+        "session:log",
+        serde_json::json!({ "tag": tag, "line": line.into() }),
+    );
+}
+
 /// Fallback roster display name for a host who hasn't set one.
 /// `session_start` takes a display name like `session_join` does (r104);
 /// this is also the reserved word guests can't claim (see `clean_name`).
@@ -417,8 +431,15 @@ pub async fn session_join(
     let peer_presenter: Arc<Mutex<String>> = Arc::new(Mutex::new("m0".into()));
     let peer_presenter_epoch: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let read_task = tokio::spawn(peer_read_loop(
-        app.clone(), recv, roster.clone(), self_id.clone(), peer_title.clone(),
-        peer_presenter.clone(), peer_presenter_epoch.clone(), generation,
+        app.clone(), recv,
+        PeerShared {
+            roster: roster.clone(),
+            self_id: self_id.clone(),
+            peer_title: peer_title.clone(),
+            peer_presenter: peer_presenter.clone(),
+            peer_presenter_epoch: peer_presenter_epoch.clone(),
+        },
+        generation,
     ));
     inner.session = Session::Peer {
         endpoint,
@@ -670,9 +691,20 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
                 // Drop an abusively large control line before it can be fanned
                 // out to every other peer (×N memory amplification).
                 if line.len() > MAX_MSG_BYTES {
+                    session_log(&app, "warn", format!(
+                        "Dropped an oversize line from {member} ({} bytes, cap {MAX_MSG_BYTES}).",
+                        line.len(),
+                    ));
                     continue;
                 }
-                if let Ok(msg) = serde_json::from_str::<SessionMsg>(line.trim()) {
+                let parsed = serde_json::from_str::<SessionMsg>(line.trim());
+                if let Err(e) = &parsed {
+                    session_log(&app, "err", format!(
+                        "Unreadable message from {member}: {e}. This is what a version \
+                         mismatch between the two Macs looks like.",
+                    ));
+                }
+                if let Ok(msg) = parsed {
                     match msg {
                         SessionMsg::ReviewOp { .. } => {
                             let _ = app.emit("session:msg", &msg);
@@ -845,16 +877,26 @@ async fn broadcast_peer_list(shared: &HostShared) {
 // PEER SIDE — read loop
 // ============================================================
 
-async fn peer_read_loop(
-    app: AppHandle,
-    recv: iroh::endpoint::RecvStream,
+/// Everything a guest's read loop shares with the `Session::Peer` that owns it.
+/// Grouped because they are one thing - "what this guest believes about the
+/// room" - and passing them individually pushed the loop past the argument cap.
+struct PeerShared {
     roster: Arc<Mutex<Vec<PeerInfo>>>,
     self_id: Arc<Mutex<Option<String>>>,
     peer_title: Arc<Mutex<Option<String>>>,
     peer_presenter: Arc<Mutex<String>>,
     peer_presenter_epoch: Arc<AtomicU64>,
+}
+
+async fn peer_read_loop(
+    app: AppHandle,
+    recv: iroh::endpoint::RecvStream,
+    shared: PeerShared,
     generation: u64,
 ) {
+    let PeerShared {
+        roster, self_id, peer_title, peer_presenter, peer_presenter_epoch,
+    } = shared;
     let mut reader = BufReader::new(recv);
     loop {
         let mut line = String::new();
@@ -870,10 +912,23 @@ async fn peer_read_loop(
             }
             Ok(_) => {
                 if line.len() > MAX_MSG_BYTES {
-                    continue; // drop an abusively large line from the host
+                    session_log(&app, "warn", format!(
+                        "Dropped an oversize line from the host ({} bytes).", line.len(),
+                    ));
+                    continue;
                 }
-                let Ok(msg) = serde_json::from_str::<SessionMsg>(line.trim()) else {
-                    continue; // future-proof: skip lines we don't understand
+                let msg = match serde_json::from_str::<SessionMsg>(line.trim()) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        // Still non-fatal - forward compatibility means a newer
+                        // host may legitimately send us something we don't know
+                        // - but it is no longer INVISIBLE.
+                        session_log(&app, "err", format!(
+                            "Unreadable message from the host: {e}. If the two Macs are on \
+                             different builds, that is the cause.",
+                        ));
+                        continue;
+                    }
                 };
                 match msg {
                     SessionMsg::PeerList { peers } => {
