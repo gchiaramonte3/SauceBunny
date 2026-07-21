@@ -259,7 +259,7 @@ export function AiSummary({
     // `lines` is the UNCLIPPED per-turn list — the chapters run windows it
     // itself (sampled evenly across the duration, not head-truncated).
     return { text: clipped, truncated, hasSpeakers, lines };
-  }, [raw, server?.ctx, transcriptPath, speakersTick]);
+  }, [raw, server?.ctx, transcriptPath, speakersTick]); // eslint-disable-line react-hooks/exhaustive-deps -- speakersTick is a mutation counter; renaming reads localStorage, which the linter can't see
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: scrollBehavior() });

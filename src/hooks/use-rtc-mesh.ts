@@ -135,6 +135,7 @@ export function useRtcMesh(args: {
       log: (tag, msg) => onLogRef.current(tag, msg),
     });
     meshRef.current = mesh;
+    const els = audioRef.current;
     // Seed the roster HERE, not only from the effect below. This effect also
     // reruns when the TURN fields change (Settings, per keystroke), and the
     // roster effect is keyed on `memberIds` - which does NOT change when a
@@ -151,7 +152,9 @@ export function useRtcMesh(args: {
       unsub();
       mesh.close();
       meshRef.current = null;
-      for (const id of [...audioRef.current.keys()]) stopAudio(id);
+      // Snapshot the map identity for the cleanup rather than reading
+      // audioRef.current at teardown time, which may already point elsewhere.
+      for (const id of [...els.keys()]) stopAudio(id);
       setRemoteStreams(new Map());
       setPeerStates(new Map());
     };

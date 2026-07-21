@@ -158,7 +158,9 @@ function stripCaptionMarkup(s: string): string {
  */
 export function parseSrt(blob: string): Cue[] {
   // Strip BOM and normalise newlines so the splitter below is simple.
-  const text = blob.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  // A BOM written as an escape, not as the literal character: an invisible
+  // byte in source reads as a typo to everyone who opens the file.
+  const text = blob.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   const lines = text.split("\n");
 
   // YouTube auto-captions are "rolling": each line is repeated across several

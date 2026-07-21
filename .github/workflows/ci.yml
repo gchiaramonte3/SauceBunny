@@ -17,6 +17,12 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: npx tsc --noEmit
+      # Two hook rules only (see eslint.config.js). rules-of-hooks is an error;
+      # exhaustive-deps warns against a RATCHET: the count may fall, never rise.
+      # Rust has had clippy -D warnings for ages; 43.5k lines of TypeScript had
+      # nothing, which is how 33 unreviewed dependency arrays accumulated in the
+      # camera and co-review paths.
+      - run: npm run lint
       - run: npx vitest run
 
   cargo-check:

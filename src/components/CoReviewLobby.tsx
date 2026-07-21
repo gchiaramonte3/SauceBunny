@@ -56,7 +56,10 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
     // !cap.stream: once the user has enabled devices this session, the
     // grant flipping to "granted" must NOT bounce them off the DEVICES step.
     if (loadReviewer().name && cap.permission === "granted" && !cap.stream) setStep("ready");
-  }, [cap.permission]);
+    // cap.stream belongs here: when it arrives the `!cap.stream` guard turns
+    // this into a no-op, which is the intended behaviour - it was simply
+    // reading a stale value to decide that.
+  }, [cap.permission, cap.stream]);
 
   // Session over -> release the hardware (the camera light must never
   // outlive the session, whichever surface ended it).

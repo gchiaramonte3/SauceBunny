@@ -159,7 +159,7 @@ describe("foldPeaks", () => {
       }
     }
     const ms = performance.now() - t0;
-    // eslint-disable-next-line no-console
+     
     console.info(`waveform fold: 1h 48kHz stereo in ${ms.toFixed(0)}ms`);
     expect(ms).toBeLessThan(10_000); // generous bound for slow CI runners
     expect(p.maxs[0]).toBeGreaterThan(0.5); // sanity: signal actually landed

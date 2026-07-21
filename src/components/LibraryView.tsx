@@ -137,7 +137,10 @@ export function LibraryView({
   );
   const results = useMemo(() => searchLibrary(trees, needle), [trees, needle]);
   const searching = needle.trim() !== "";
-  const transcripts = useMemo(() => getTranscriptHistory(), [historyTick]);
+  const transcripts = useMemo(() => {
+    void historyTick; // re-read history on mutation (the tick IS the input)
+    return getTranscriptHistory();
+  }, [historyTick]);
   // Continue shelf — the 8 most recent (the featured row stays a row, not an
   // archive; recents themselves are capped at 12 upstream).
   const continueRow = recentSources.slice(0, 8);

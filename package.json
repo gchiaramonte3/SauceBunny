@@ -21,7 +21,8 @@
     "build:llama": "bash scripts/build-llama.sh",
     "check:release": "bash scripts/check-notarization-ready.sh",
     "test:e2e": "playwright test",
-    "set-version": "bash scripts/set-version.sh"
+    "set-version": "bash scripts/set-version.sh",
+    "lint": "eslint src e2e --max-warnings 22"
   },
   "dependencies": {
     "@fontsource/nunito-sans": "^5.2.7",
@@ -40,13 +41,17 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.61.1",
     "@tauri-apps/cli": "^2.1.0",
     "@types/node": "^25.9.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^10.7.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.65.0",
     "vite": "^6.0.7",
     "vitest": "^4.1.8"
   }

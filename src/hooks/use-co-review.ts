@@ -627,9 +627,14 @@ export function useCoReview({
     // source rather than at session start, so a room that never loads
     // anything leaves nothing behind.
     if (!screeningRef.current) {
+      // Read the code and title off the ref, not the render closure: they are
+      // used ONCE, to name a screening at creation, and depending on them
+      // would re-run this whole source-follow effect the moment a title
+      // arrived - closing and reopening a segment for no reason.
+      const s = coSessionRef.current;
       screeningRef.current = newScreening(
-        coSession.code ?? `local-${Date.now()}`,
-        coSession.title || metadataRef.current?.title || "Screening",
+        s.code ?? `local-${Date.now()}`,
+        s.title || metadataRef.current?.title || "Screening",
         "host",
       );
     }
@@ -662,11 +667,17 @@ export function useCoReview({
   }, [sendSessionMsg]);
   useEffect(() => {
     if (!isPresenter) return;
-    sendLoadSource(sessionSource);
-    // Depend on the FIELDS, not the object: the memo in App produces a fresh
-    // object each render and would otherwise re-broadcast on every tick.
+    // Read through the ref, which render keeps current. Depending on the
+    // OBJECT would re-broadcast every tick (App's memo makes a fresh one each
+    // render); depending on its FIELDS is what we actually want, and reading
+    // the ref here makes that honest instead of suppressed.
+    //
+    // The suppression this replaces sat on the array's second line while the
+    // warning is reported on its first, so it had never suppressed anything -
+    // it just looked like a decision had been made.
+    sendLoadSource(sessionSourceRef.current);
   }, [isPresenter, sessionSource.kind, sessionSource.url, sessionSource.fingerprint,
-      sessionSource.reviewKey, sendLoadSource]); // eslint-disable-line react-hooks/exhaustive-deps
+      sessionSource.reviewKey, sendLoadSource]);
   // Host → new joiner: source + a fresh doc snapshot when the peer count rises.
   // Fanned to all; existing peers harmlessly re-adopt the identical doc.
   const prevPeerCountRef = useRef(0);
@@ -688,7 +699,7 @@ export function useCoReview({
     if (shareState === "sharing") {
       void invoke("session_broadcast", { msg: { kind: "sharing", from: selfId, on: true } }).catch(() => {});
     }
-  }, [coSession.role, coSession.peers.length, raisedHands, shareState]);
+  }, [coSession.role, coSession.peers.length, raisedHands, shareState, sendLoadSource]);
   // Host → peers: 2 Hz transport heartbeat (play/pause/seek/scrub-settle).
   useEffect(() => {
     if (!isPresenter) return;
@@ -782,7 +793,7 @@ export function useCoReview({
     // now, not the entry experience); the drawer opens for comments.
     if (coSessionActive && !was) setQueueOpen(true);
     if (!coSessionActive && was) setTheater(false);
-  }, [coSessionActive]);
+  }, [coSessionActive, setQueueOpen]);
   // Everyone in the session, for the rail — so people see each other. Host's
   // roster is peers-only (its own name is local); a peer's roster is the full
   // list the host broadcast (Host + peers, self found by name).
@@ -804,7 +815,13 @@ export function useCoReview({
       isHost: p.id === "m0",
       isSelf: p.id === coSession.selfId,
     }));
-  }, [coSession.role, coSession.peers]);
+    // selfId MUST be a dependency. It arrives in `Welcome` while the roster
+    // arrives in `PeerList` - two separate messages - so whenever selfId lands
+    // second this memo held a roster where NOBODY was marked isSelf. The guest
+    // then saw their own tile rendered as a remote peer: no self-view controls,
+    // no "you" styling. That is a real divergence between what the host's
+    // screen shows and what the guest's does, not a lint nit.
+  }, [coSession.role, coSession.peers, coSession.selfId]);
 
   // In a session, the shared doc drives the timeline markers + annotations
   // (so everyone's live comments show on every timeline).
@@ -818,7 +835,9 @@ export function useCoReview({
     })));
     setReviewAnnotations(annotationsOf(sessionDoc, sessionDoc.activeVersionId)
       .map((a) => ({ id: a.id, time: a.time, strokes: a.strokes, color: reviewerColorFor(a.author, me) })));
-  }, [sessionDoc]);
+    // Both are useState setters from App, so React guarantees their identity;
+    // listing them costs nothing and stops the array drifting out of date.
+  }, [sessionDoc, setReviewMarkers, setReviewAnnotations]);
 
   // Ghost cursors for the timeline — peer playheads in frames, tinted per name.
   const coGhostMarkers = useMemo(() => {
