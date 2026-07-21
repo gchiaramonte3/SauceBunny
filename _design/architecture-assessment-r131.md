@@ -127,6 +127,21 @@ previous binary.
   transport, a WebRTC mesh, and a Swift capture sidecar, invisible to the
   document every session reads first.
 
+## Progress
+
+- **Item 1 (observability) — DONE**, commit `1c9d1df`. Co-review, the mesh, and
+  capture all log to `appendLog` now; `session:log` carries Rust-side drops;
+  the diagnostics export gained a Co-review session block (role, self id,
+  presenter + epoch, roster with per-peer epoch and RTC state, capture, share).
+  Also fixed 4 pre-existing clippy failures — CI's Rust gate had been red.
+- **Item 2 (ESLint) — DONE**, commit `7ce9898`. Two hook rules, ratchet at 22
+  warnings in CI. Found one real bug: `theaterParticipants` missing
+  `coSession.selfId`, so a guest could see their own tile as a remote peer.
+- **Item 3 (small-fix batch)** — partially done in r131 below; remaining:
+  index.json corruption guard, contentless-doc write guard, presenter-disconnect
+  deadlock.
+- Items 4 and 5 not started.
+
 ## Done in r131 (commit 42b9c51)
 
 Placeholder transceivers seeded from live overrides + given a stream identity;
