@@ -5,6 +5,45 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Live media
+- **Screen sharing and camera video both work for someone who joins mid-share.**
+  One half-finished mechanism broke both: the sender slot reserved for a track
+  that doesn't exist yet was never handed the live screen share, and never
+  given a stream identity — so a peer received each track separately and kept
+  only whichever arrived last. A newcomer saw a blank tile while the sharer's
+  screen said "sharing", or a camera with a permanent "muted" badge.
+- A late joiner now gets the share at full resolution instead of the camera's
+  tile-sized downscale, so shared text stays readable for everyone, not just
+  the people who were already connected.
+- **Turning the camera or mic on actually opens one.** With no capture running,
+  the room's buttons flipped their icon and did nothing while the toolbar
+  claimed the camera was on, with no way back short of leaving the session.
+- A camera or mic that refuses to open now says why. These failures used to be
+  written to a field nothing displayed, so a device held by another app failed
+  in complete silence. macOS ending a track (another app takes the camera,
+  sleep, unplug) is now noticed too, instead of showing a live camera that
+  isn't.
+- Editing the relay settings mid-session no longer kills every connection
+  permanently.
+
+### Reliability
+- **Comments made in a session are saved as you make them.** They previously
+  reached disk only when someone ended the session, so quitting the app — or
+  crashing — lost every note from that review, on every machine at once.
+- Loading a new source clears the identity of the old one, so a guest can no
+  longer ignore the presenter's next source as "already on it".
+- A guest is correctly recognised as themselves in the room roster; when their
+  own id arrived after the roster did, they saw their own tile as a stranger's.
+
+### Diagnostics
+- Co-review, the peer connections, and the camera now write to the pipeline
+  log, and **Export diagnostics includes a session block** — role, who holds
+  the floor, the roster with per-peer connection state, and what the camera is
+  doing. Comparing two exports shows which machine's picture is wrong; these
+  subsystems previously recorded nothing at all.
+- A message the other machine can't read is reported as a version mismatch
+  instead of being dropped silently.
+
 ## [0.2.0] — 2026-07-19
 
 ### Reliability
