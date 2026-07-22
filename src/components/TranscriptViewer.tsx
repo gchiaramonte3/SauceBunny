@@ -349,7 +349,13 @@ export function TranscriptViewer({
     const pad = 8;
     const visible = r.top >= sRect.top + pad && r.bottom <= sRect.bottom - pad;
     if (visible) return;
-    el.scrollIntoView({ block: "nearest", behavior: scrollBehavior() });
+    // When the highlight leaves the viewport (playback walks it off the bottom,
+    // or a seek jumps it above), don't nudge it to the nearest EDGE — that
+    // pinned the active line to the very bottom with no upcoming words visible.
+    // Place it ~28% down instead, teleprompter-style, so the lines coming next
+    // fill the space below and the panel doesn't re-scroll on every cue.
+    const target = scroller.scrollTop + (r.top - sRect.top) - scroller.clientHeight * 0.28;
+    scroller.scrollTo({ top: Math.max(0, target), behavior: scrollBehavior() });
   }, [activeCueIdx, autoScroll]);
 
   function onScroll(e: React.UIEvent<HTMLDivElement>) {

@@ -321,10 +321,32 @@
 
 .cp-tx-body {
   flex: 1;
-  overflow-y: auto;
+  /* `scroll`, not `auto`: always reserve the track so the scrollbar is a
+     PERMANENT fixture of the transcript panel, not an overlay that fades out
+     (macOS "show scrollbars when scrolling" left it effectively invisible). */
+  overflow-y: scroll;
   padding: 14px 12px 0;
   scroll-behavior: smooth;
+  scrollbar-gutter: stable;
 }
+/* An always-visible, easy-to-grab transcript scrollbar. Styling
+   ::-webkit-scrollbar switches WKWebView off the transient overlay and onto a
+   persistent classic scrollbar, so it shows even when the pointer is idle. A
+   touch stronger than the app's other panels because this one is a primary
+   reading surface the user asked to always see. */
+.cp-tx-body { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.22) transparent; }
+.cp-tx-body::-webkit-scrollbar { width: 11px; }
+.cp-tx-body::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+.cp-tx-body::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.22);
+  border-radius: 6px;
+  /* Transparent border + padding-box inset the thumb off the track edges for a
+     polished, pill look instead of a slab flush to the wall. */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.cp-tx-body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.34); }
+.cp-tx-body::-webkit-scrollbar-thumb:active { background: rgba(255,255,255,0.44); }
 
 /* One turn = one chat bubble. Speaker chip + name on top, prose below. */
 .cp-tx-turn {
