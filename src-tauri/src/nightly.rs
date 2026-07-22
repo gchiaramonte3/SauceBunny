@@ -203,22 +203,51 @@ pub(crate) fn fixture_audio_m4a() -> PathBuf {
 }
 
 /// Real spoken audio via macOS `say` — whisper needs speech, not a sine wave.
+///
+/// `say` is not deterministic on a headless CI runner: the speech-synthesis
+/// daemon intermittently renders SILENCE (a valid AIFF, just empty), which then
+/// surfaces two runs downstream as "cut got 0s" and "whisper emitted no cues" —
+/// failures that look exactly like a real upstream sidecar break and cry wolf
+/// on the one alert that is supposed to mean "an arg surface broke". So we
+/// VALIDATE the fixture at the source, retry the flake a few times, and if it
+/// still won't render, fail with a message that names the infrastructure — not
+/// the pipeline. Empirically the AIFF is ~7 s; anything under 3 s is a bad
+/// render (the script is 3 sentences).
 pub(crate) fn fixture_speech_aiff() -> PathBuf {
-    let out = scratch_dir().join("speech.aiff");
-    if fresh(&out) {
+    // In the CACHED model dir, not the ephemeral scratch dir: the workflow
+    // persists `~/.cache/sauce-bunny/nightly` across runs, so a good render is
+    // reused every subsequent night and `say` is invoked at most once — the
+    // flake window shrinks from "every night" to "the first run after a cache
+    // wipe", which the retry below covers.
+    let out = models_dir().join("speech.aiff");
+    if fresh(&out) && probe_duration(&probe_json(&out)) >= 3.0 {
         return out;
     }
-    run_ok(
-        Path::new("/usr/bin/say"),
-        [
-            "-o",
-            utf8(&out),
-            "Sauce Bunny nightly smoke check. The quick brown fox jumps over the lazy dog. \
-             One two three four five.",
-        ],
-        "generate speech fixture with `say`",
+    let mut last = 0.0;
+    for attempt in 1..=3 {
+        let _ = std::fs::remove_file(&out);
+        run_ok(
+            Path::new("/usr/bin/say"),
+            [
+                "-o",
+                utf8(&out),
+                "Sauce Bunny nightly smoke check. The quick brown fox jumps over the lazy dog. \
+                 One two three four five.",
+            ],
+            "generate speech fixture with `say`",
+        );
+        last = probe_duration(&probe_json(&out));
+        if last >= 3.0 {
+            return out;
+        }
+        eprintln!("[nightly] `say` rendered {last:.2}s of audio on attempt {attempt}/3 (expected ~7s); retrying");
+    }
+    panic!(
+        "macOS `say` produced only {last:.2}s of audio after 3 tries — the speech \
+         synthesis service is not rendering on this runner. This is an INFRASTRUCTURE \
+         flake in the test fixture, NOT a Sauce Bunny or sidecar regression: the \
+         downstream cut and whisper tests depend on this being real speech."
     );
-    out
 }
 
 /// The speech fixture normalised through the PRODUCTION phase-2 conversion

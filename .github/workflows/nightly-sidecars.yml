@@ -100,11 +100,17 @@ jobs:
       # whisper tiny.en (~78 MB) + Silero VAD — immutable artifacts the tests
       # auto-download on a cache miss (src/nightly.rs), so this cache is just
       # a network saver with a static key.
-      - name: Cache whisper/VAD models
+      # Also holds the `say`-rendered speech fixture (r131): caching it means
+      # `say` runs once per cache lifetime, not nightly, so its intermittent
+      # silent-render flake on headless runners can't fail the smoke. The
+      # in-test validate+retry covers the first render after a key roll.
+      # Bumped v1→v2 so the existing hit re-saves with the fixture included
+      # (actions/cache skips the save on an exact-key hit).
+      - name: Cache whisper/VAD models + speech fixture
         uses: actions/cache@v4
         with:
           path: ~/.cache/sauce-bunny/nightly
-          key: nightly-models-v1
+          key: nightly-models-v2
 
       - name: Cache cargo
         uses: actions/cache@v4
