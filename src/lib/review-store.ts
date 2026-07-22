@@ -224,20 +224,45 @@ async function flushDirtyDocs(): Promise<void> {
     const file = prev?.file ?? reviewFileName(key);
     const path = `${reviewsDir}/${file}`;
     const bytes = new TextEncoder().encode(JSON.stringify(doc));
-    // Shrink guard: a rich doc collapsing below half its persisted size looks
-    // like a logical clobber (bug or unhydrated doc overwriting real notes) —
-    // keep the old content as .bak for manual recovery before overwriting.
-    if (prev && prev.bytes > 2048 && bytes.length < prev.bytes / 2) {
+    // Destructive-write guard. Two shapes of a logical clobber: a rich doc
+    // collapsing below half its persisted size, OR replacing a doc the index
+    // says HAS content with a contentless shell. Both are what a failed
+    // hydration looks like — opening a source whose file is unreadable yields
+    // an emptyDoc that then saves over the real notes. (The shrink half-rule
+    // alone missed this: most real reviews are under the 2 KB floor, so an
+    // emptyDoc overwriting a small review never tripped it.)
+    const shrinking = prev && prev.bytes > 2048 && bytes.length < prev.bytes / 2;
+    const emptyOverContent = prev && prev.bytes > 2 && !reviewDocHasContent(doc);
+    if (shrinking || emptyOverContent) {
+      let existing: string | null = null;
+      let readThrew = false;
       try {
         const old = await invoke<string>("read_text_file_capped", { path, maxBytes: DOC_READ_CAP });
-        if (typeof old === "string" && old) {
+        existing = typeof old === "string" ? old : "";
+      } catch {
+        readThrew = true;
+      }
+      if (readThrew) {
+        // We believe there is real content on disk but CANNOT read it — almost
+        // always iCloud evicted the file (present as a placeholder, not
+        // downloaded), not that it's gone. Overwriting now destroys real notes
+        // with a near-empty doc. Never overwrite a file you couldn't first read
+        // back: defer, keep the key dirty, retry once it's downloadable again.
+        console.warn(`review-store: ${file} is unreadable (likely iCloud-evicted); deferring a destructive write rather than clobbering it.`);
+        dirty.add(key);
+        continue;
+      }
+      // Read succeeded → the file is present. Back up any real content before
+      // overwriting so a genuine shrink is still recoverable.
+      if (existing && existing.length > 2) {
+        try {
           await invoke("write_bytes_to_path", {
             path: `${path}.bak`,
-            bytes: Array.from(new TextEncoder().encode(old)),
+            bytes: Array.from(new TextEncoder().encode(existing)),
           });
+        } catch {
+          /* .bak is best-effort; the successful read already proved the file exists */
         }
-      } catch {
-        /* nothing on disk to back up */
       }
     }
     try {

@@ -3350,6 +3350,14 @@ export default function App() {
         const dur = durationFrames > 0 ? durationFrames - 1 : 0;
         const startStr = inFrames  != null ? framesToTc(inFrames,  fps) : framesToTc(0, fps);
         const endStr   = outFrames != null ? framesToTc(outFrames, fps) : framesToTc(dur, fps);
+        // A mark-in/out sub-range must not overwrite the full-source transcript
+        // at the same filename. Tag the file with its coverage so a partial and
+        // the full transcript coexist; re-transcribing the SAME coverage still
+        // overwrites its own file (colons → dots so it's a clean basename).
+        const baseName = sanitizeFilename(exportOpts.filename || "transcript");
+        const isSubRange = inFrames != null || outFrames != null;
+        const rangeTag = `${startStr}-${endStr}`.replace(/:/g, ".");
+        const webFilename = isSubRange ? `${baseName} (${rangeTag})` : baseName;
         await invoke<string>("generate_transcript", {
           args: {
             url: metadata.webpage_url,
@@ -3357,7 +3365,7 @@ export default function App() {
             end: endStr,
             fps,
             output_dir: outDir,
-            filename: sanitizeFilename(exportOpts.filename || "transcript"),
+            filename: webFilename,
             model_id: defaults.whisperModel,
             job_id: id,
             cookies_browser: cookiesBrowserOrNone(),

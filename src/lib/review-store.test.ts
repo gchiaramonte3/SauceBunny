@@ -270,4 +270,50 @@ describe("write-through (debounced save)", () => {
     await vi.runAllTimersAsync();
     expect(fs.has(`${DIR}/${reviewFileName("/a.mp4")}.bak`)).toBe(false);
   });
+
+  it("does NOT overwrite a review whose file is unreadable (iCloud-evicted)", async () => {
+    // The critical data-loss path: hydrate an index that references a doc, then
+    // make its file unreadable (iCloud offloaded it → the read throws). Opening
+    // the source yields an emptyDoc that tries to save over the real notes.
+    const real = mkDoc("/evicted.mp4", { comments: [mkComment("v1", "c1", "important note")] });
+    seedLibrary(real);
+    await hydrateReviewStore();
+    const file = reviewFileName("/evicted.mp4");
+    const realText = fs.get(`${DIR}/${file}`)!;
+    // Simulate eviction: the file's bytes are gone from disk but the index
+    // entry (with the real byte size) remains — exactly what hydration leaves.
+    fs.delete(`${DIR}/${file}`);
+
+    saveReview(mkDoc("/evicted.mp4")); // failed-hydration emptyDoc
+    await vi.runAllTimersAsync();
+
+    // The store must NOT have written an empty doc over the (evicted) file.
+    expect(fs.has(`${DIR}/${file}`)).toBe(false); // no clobber — stays evicted, recoverable
+    // And it must not have fabricated a .bak from a file it couldn't read.
+    expect(fs.has(`${DIR}/${file}.bak`)).toBe(false);
+    // When the file comes back (iCloud re-downloads it), a later flush must
+    // succeed — the key stayed dirty, so re-seeding the file and flushing again
+    // writes the intended (empty) doc with a real .bak of the recovered notes.
+    fs.set(`${DIR}/${file}`, realText);
+    saveReview(mkDoc("/evicted.mp4"));
+    await vi.runAllTimersAsync();
+    expect(fs.get(`${DIR}/${file}.bak`)).toBe(realText); // now recoverable
+  });
+
+  it("does NOT overwrite a SMALL real review with an empty doc (below the shrink floor)", async () => {
+    // Many real reviews are under the 2 KB shrink threshold, so the half-size
+    // rule alone never fired — an emptyDoc could silently erase them. The
+    // empty-over-content guard covers this even without eviction.
+    const small = mkDoc("/small.mp4", { comments: [mkComment("v1", "c1", "short")] });
+    seedLibrary(small);
+    await hydrateReviewStore();
+    const file = reviewFileName("/small.mp4");
+    const smallText = fs.get(`${DIR}/${file}`)!;
+
+    saveReview(mkDoc("/small.mp4")); // emptyDoc over a small-but-real review
+    await vi.runAllTimersAsync();
+
+    // The real content is backed up before the empty write lands.
+    expect(fs.get(`${DIR}/${file}.bak`)).toBe(smallText);
+  });
 });
