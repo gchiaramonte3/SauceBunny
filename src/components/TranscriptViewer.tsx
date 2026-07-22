@@ -223,6 +223,36 @@ export function TranscriptViewer({
     }
   }, [storageKey]);
 
+  // Re-read when an EXTERNAL writer changes this path's overrides: the
+  // App-level fingerprint bridge seeding names from a prior transcript of the
+  // same source (r134), or a sibling window's rename. Read-only + compare-
+  // guarded, so it never loops on the panel's own writes (which fire this same
+  // event) and never trips the persist stale-write guard below.
+  useEffect(() => {
+    if (!storageKey) return;
+    const onExternal = (e: Event) => {
+      const p = (e as CustomEvent<{ path?: string }>).detail?.path;
+      if (p && p !== path) return;
+      let next: Overrides = EMPTY;
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw) as Overrides;
+          next = {
+            global:  typeof parsed.global  === "object" && parsed.global  ? parsed.global  : {},
+            turn:    typeof parsed.turn    === "object" && parsed.turn    ? parsed.turn    : {},
+            aliases: typeof parsed.aliases === "object" && parsed.aliases ? parsed.aliases : {},
+            colors:  typeof parsed.colors  === "object" && parsed.colors  ? parsed.colors  : {},
+            turnTag: typeof parsed.turnTag === "object" && parsed.turnTag ? parsed.turnTag : {},
+          };
+        }
+      } catch { return; }
+      setOverrides((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+    };
+    window.addEventListener(SPEAKERS_CHANGED_EVENT, onExternal);
+    return () => window.removeEventListener(SPEAKERS_CHANGED_EVENT, onExternal);
+  }, [storageKey, path]);
+
   // The storageKey the persist effect last ran against. CRITICAL: on the render
   // where the key CHANGES (source swap, or the popped-out window mounting and
   // receiving its path), `overrides` still holds the OLD value while the load

@@ -83,6 +83,7 @@ import { sanitizePlaybackRate, stepPlaybackRate } from "./lib/playback-rate";
 import { parseSrt } from "./lib/srt";
 import { speakerLanes } from "./lib/speaker-stats";
 import { speakerColor, loadSpeakerOverrides, resolveAliasChain, SPEAKERS_CHANGED_EVENT } from "./components/transcript/helpers";
+import { speakerFingerprint, seedSpeakerOverridesFromFingerprint, linkSpeakerOverridesToFingerprint } from "./lib/speaker-identity";
 import { MediaInfoModal } from "./components/MediaInfoModal";
 import { loadReview, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
 import { loadChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
@@ -4656,6 +4657,45 @@ export default function App() {
   const reviewSourceKey = (sourceKind === "file" && localFilePath && metadata)
     ? (resolveByFingerprint(reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize)) ?? localFilePath)
     : (metadata?.webpage_url ?? null);
+
+  // ── Speaker-rename fingerprint bridge (r134) ──────────────────────────
+  // Speaker renames live in localStorage keyed by SRT path, which orphaned
+  // them whenever the path changed (re-transcribe in a new month, rename, or
+  // move). The bridge keys them behind the same content fingerprint reviews
+  // use, so those cases restore the names. The path key stays the working
+  // store every consumer reads — this only seeds and mirrors it.
+  const speakerFp = useMemo(
+    () => (metadata
+      ? speakerFingerprint(metadata.title ?? localFilePath, metadata.duration, metadata.width, metadata.height, localFileSize)
+      : null),
+    [metadata, localFilePath, localFileSize],
+  );
+  useEffect(() => {
+    if (!transcriptPath || !speakerFp) return;
+    // Restore names from a prior transcript of the same source (if this new
+    // path has none yet), and keep the fingerprint index current either way
+    // (this also migrates renames made before the bridge existed).
+    const seeded = seedSpeakerOverridesFromFingerprint(transcriptPath, speakerFp);
+    linkSpeakerOverridesToFingerprint(transcriptPath, speakerFp);
+    if (seeded) {
+      window.dispatchEvent(new CustomEvent(SPEAKERS_CHANGED_EVENT, { detail: { path: transcriptPath } }));
+    }
+  }, [transcriptPath, speakerFp]);
+  // Mirror every subsequent rename back to the fingerprint index so it survives
+  // the NEXT path change. Registered once; reads current path/fp through a ref.
+  const speakerBridgeRef = useRef<{ path: string | null; fp: string | null }>({ path: null, fp: null });
+  speakerBridgeRef.current = { path: transcriptPath, fp: speakerFp };
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      const { path, fp } = speakerBridgeRef.current;
+      if (!path || !fp) return;
+      const evPath = (e as CustomEvent<{ path?: string }>).detail?.path;
+      if (evPath && evPath !== path) return;
+      linkSpeakerOverridesToFingerprint(path, fp);
+    };
+    window.addEventListener(SPEAKERS_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(SPEAKERS_CHANGED_EVENT, onChange);
+  }, []);
   // Current source's approval verdict for the header chips (Clip sidebar +
   // room stage title). Live session -> the shared doc; solo -> the stored
   // doc, re-read on every review mutation via REVIEW_CHANGED_EVENT.
