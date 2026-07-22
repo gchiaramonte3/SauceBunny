@@ -237,6 +237,104 @@ pub async fn scan_library_folder(
         .map_err(|e| crate::AppError::internal(format!("Library scan task failed: {e}")))?
 }
 
+// ── Transcript library scan (the "all transcripts" auto-folder) ──────────────
+//
+// Separate from scan_library_folder because transcripts are the OPPOSITE
+// filter: this walks ~/Documents/Sauce Bunny/Transcripts/ (organized in
+// YYYY-MM subfolders) for the .srt/.vtt files the media scan deliberately
+// skips, so every transcript on disk is discoverable — not just the 50 most
+// recent the localStorage history caps at. Fast metadata walk, same as the
+// media scan: no parsing, just existence of the r132 `.diarization.json`
+// sidecar as a "has speakers" flag.
+
+/// One transcript file found under the Transcripts library.
+#[derive(Serialize, Debug, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct TranscriptFile {
+    /// Filename stem, no extension — the display title.
+    pub name: String,
+    /// Absolute path to the .srt / .vtt on disk.
+    pub path: String,
+    /// Immediate parent folder name (e.g. "2026-07"); "" when directly in root.
+    pub folder: String,
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+    #[ts(type = "number")]
+    pub modified_ms: u64,
+    /// A co-located `<stem>.diarization.json` sidecar exists (r132) → the
+    /// transcript carries speaker turns.
+    pub has_diarization: bool,
+    /// "srt" | "vtt".
+    pub format: String,
+}
+
+fn transcript_ext(path: &Path) -> Option<String> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    (ext == "srt" || ext == "vtt").then_some(ext)
+}
+
+/// Recursive collector: appends every transcript under `dir` (to
+/// `depth_remaining` folder levels) into `out`. Mirrors scan_dir's skip rules
+/// (hidden, symlinks, non-UTF-8, unreadable dirs) but flattens instead of
+/// building a tree — the frontend groups by `folder`.
+fn collect_transcripts(dir: &Path, folder_label: &str, depth_remaining: u32, out: &mut Vec<TranscriptFile>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let name_os = entry.file_name();
+        let Some(entry_name) = name_os.to_str() else { continue };
+        if entry_name.starts_with('.') { continue; }
+        let Ok(ft) = entry.file_type() else { continue };
+        if ft.is_symlink() { continue; }
+        let path = entry.path();
+        if ft.is_dir() {
+            if depth_remaining == 0 || entry_name.to_ascii_lowercase().ends_with(".app") { continue; }
+            collect_transcripts(&path, entry_name, depth_remaining - 1, out);
+        } else if ft.is_file() {
+            let Some(format) = transcript_ext(&path) else { continue };
+            let Some(path_str) = path.to_str() else { continue };
+            let Ok(meta) = entry.metadata() else { continue };
+            let modified_ms = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let sidecar = path.with_extension("diarization.json");
+            out.push(TranscriptFile {
+                name: path.file_stem().and_then(|s| s.to_str()).unwrap_or(entry_name).to_string(),
+                path: path_str.to_string(),
+                folder: folder_label.to_string(),
+                size_bytes: meta.len(),
+                modified_ms,
+                has_diarization: sidecar.is_file(),
+                format,
+            });
+        }
+    }
+}
+
+fn scan_transcript_root(path: &str) -> Vec<TranscriptFile> {
+    let root = PathBuf::from(path);
+    // A missing library (nothing transcribed yet) is the normal first-run case,
+    // not an error — return an empty list rather than surfacing a scary error.
+    if !root.is_dir() { return Vec::new(); }
+    let mut out = Vec::new();
+    collect_transcripts(&root, "", 3, &mut out);
+    // Newest first — the library's default and what "recent" wants.
+    out.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms).then_with(|| a.name.cmp(&b.name)));
+    out
+}
+
+/// Scan the Transcripts library (default `~/Documents/Sauce Bunny/Transcripts/`,
+/// or the caller's custom path) for every transcript on disk. Offloaded to the
+/// blocking pool like scan_library_folder — the walk can touch a cold volume.
+#[tauri::command]
+pub async fn scan_transcript_library(path: String) -> Result<Vec<TranscriptFile>, crate::AppError> {
+    tokio::task::spawn_blocking(move || scan_transcript_root(&path))
+        .await
+        .map_err(|e| crate::AppError::internal(format!("Transcript scan task failed: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,6 +549,47 @@ mod tests {
     // Fix 4: a root we can't STAT (parent dir has no execute bit) surfaces
     // as Invalid, NOT the misleading NotFound that Path::exists() gave for
     // every failure. A genuinely-missing root stays NotFound.
+    #[test]
+    fn transcript_scan_finds_srts_across_month_folders_and_flags_diarization() {
+        let tree = TempTree::new("tx");
+        // Root-level transcript + two month folders, mixed srt/vtt, plus a
+        // sidecar for one and noise (media + the sidecar itself) that must not
+        // appear as entries.
+        touch(&tree.path().join("Loose.srt"));
+        let m1 = tree.path().join("2026-06");
+        let m2 = tree.path().join("2026-07");
+        std::fs::create_dir_all(&m1).unwrap();
+        std::fs::create_dir_all(&m2).unwrap();
+        touch(&m1.join("June Clip.srt"));
+        touch(&m2.join("July Clip.vtt")); // no sidecar → not diarized
+        let diarized = m2.join("Diarized.srt");
+        touch(&diarized);
+        touch(&m2.join("Diarized.diarization.json")); // matches Diarized.srt stem
+        touch(&m2.join("clip.mp4")); // media — must be ignored
+
+        let mut list = scan_transcript_root(tree.path().to_str().unwrap());
+        list.sort_by(|a, b| a.name.cmp(&b.name));
+        let names: Vec<&str> = list.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["Diarized", "July Clip", "June Clip", "Loose"]);
+        // Folder labels come from the parent dir; root-level is "".
+        let by_name = |n: &str| list.iter().find(|t| t.name == n).unwrap();
+        assert_eq!(by_name("Loose").folder, "");
+        assert_eq!(by_name("June Clip").folder, "2026-06");
+        assert_eq!(by_name("July Clip").folder, "2026-07");
+        // Only the .srt with a same-stem sidecar reads as diarized.
+        assert!(by_name("Diarized").has_diarization);
+        assert!(!by_name("July Clip").has_diarization);
+        assert_eq!(by_name("June Clip").format, "srt");
+        assert_eq!(by_name("July Clip").format, "vtt");
+    }
+
+    #[test]
+    fn transcript_scan_missing_dir_is_empty_not_error() {
+        let tree = TempTree::new("tx-missing");
+        let gone = tree.path().join("never-transcribed");
+        assert!(scan_transcript_root(gone.to_str().unwrap()).is_empty());
+    }
+
     #[cfg(unix)]
     #[test]
     fn scan_distinguishes_missing_from_permission_denied() {
