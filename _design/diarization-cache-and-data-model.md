@@ -36,6 +36,22 @@ envelope (`schema_version`, `model`, `model_package_version`, `audio_seconds`,
 - **migration**: existing merged SRTs get a `source: "reconstructed-from-srt"`
   doc synthesized from cue labels on first open — no re-diarize.
 
+## Done since (2026-07-22)
+
+- **Both criticals fixed** (`eaaa984`): the evicted-review clobber guard
+  (never overwrite a file you couldn't first read back; also covers empty-over-
+  small-review below the shrink floor) + range-transcript filename
+  disambiguation. Tested.
+- **Transcript library scan** (`66255c8`, r133): `scan_transcript_library`
+  makes every transcript on disk discoverable (finding #8).
+- **Home shelf shows all transcripts** (`40c6848`): scan ∪ history, newest
+  first, with a "speakers" chip from the r132 sidecar.
+
+Still open: the dedicated grouped Library browser (Phase A remainder —
+`groupTranscriptsByFolder`/`monthLabel` already built), the fingerprint
+re-keying of speaker identities (prerequisite for Phase B on-disk moves and
+the fix for renames orphaning), and findings #3/#7/#9/#11/#12.
+
 ## Done in r132
 
 `diarizer: cache the raw speaker turns beside the transcript` — persist the
