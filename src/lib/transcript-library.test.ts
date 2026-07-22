@@ -7,7 +7,7 @@ import type { TranscriptHistoryEntry } from "./transcript-history";
 
 const file = (over: Partial<TranscriptFile> = {}): TranscriptFile => ({
   name: "Clip", path: "/tx/2026-07/Clip.srt", folder: "2026-07",
-  size_bytes: 100, modified_ms: 2000, has_diarization: false, format: "srt", ...over,
+  size_bytes: 100, modified_ms: 2000, has_diarization: false, has_analysis: false, format: "srt", ...over,
 });
 
 const hist = (over: Partial<TranscriptHistoryEntry> = {}): TranscriptHistoryEntry => ({

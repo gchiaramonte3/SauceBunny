@@ -22,6 +22,11 @@ folder: string, size_bytes: number, modified_ms: number,
  */
 has_diarization: boolean, 
 /**
+ * A co-located `<stem>.analysis.json` sidecar exists → the transcript has
+ * a saved AI analysis to reuse.
+ */
+has_analysis: boolean, 
+/**
  * "srt" | "vtt".
  */
 format: string, };

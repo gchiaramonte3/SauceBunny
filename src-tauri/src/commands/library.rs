@@ -264,6 +264,9 @@ pub struct TranscriptFile {
     /// A co-located `<stem>.diarization.json` sidecar exists (r132) → the
     /// transcript carries speaker turns.
     pub has_diarization: bool,
+    /// A co-located `<stem>.analysis.json` sidecar exists → the transcript has
+    /// a saved AI analysis to reuse.
+    pub has_analysis: bool,
     /// "srt" | "vtt".
     pub format: String,
 }
@@ -299,14 +302,14 @@ fn collect_transcripts(dir: &Path, folder_label: &str, depth_remaining: u32, out
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
-            let sidecar = path.with_extension("diarization.json");
             out.push(TranscriptFile {
                 name: path.file_stem().and_then(|s| s.to_str()).unwrap_or(entry_name).to_string(),
                 path: path_str.to_string(),
                 folder: folder_label.to_string(),
                 size_bytes: meta.len(),
                 modified_ms,
-                has_diarization: sidecar.is_file(),
+                has_diarization: path.with_extension("diarization.json").is_file(),
+                has_analysis: path.with_extension("analysis.json").is_file(),
                 format,
             });
         }
@@ -565,6 +568,7 @@ mod tests {
         let diarized = m2.join("Diarized.srt");
         touch(&diarized);
         touch(&m2.join("Diarized.diarization.json")); // matches Diarized.srt stem
+        touch(&m2.join("Diarized.analysis.json"));    // AI analysis for the same stem
         touch(&m2.join("clip.mp4")); // media — must be ignored
 
         let mut list = scan_transcript_root(tree.path().to_str().unwrap());
@@ -576,9 +580,11 @@ mod tests {
         assert_eq!(by_name("Loose").folder, "");
         assert_eq!(by_name("June Clip").folder, "2026-06");
         assert_eq!(by_name("July Clip").folder, "2026-07");
-        // Only the .srt with a same-stem sidecar reads as diarized.
+        // Only the .srt with a same-stem sidecar reads as diarized / analyzed.
         assert!(by_name("Diarized").has_diarization);
+        assert!(by_name("Diarized").has_analysis);
         assert!(!by_name("July Clip").has_diarization);
+        assert!(!by_name("July Clip").has_analysis);
         assert_eq!(by_name("June Clip").format, "srt");
         assert_eq!(by_name("July Clip").format, "vtt");
     }

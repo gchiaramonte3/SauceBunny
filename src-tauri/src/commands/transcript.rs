@@ -2673,6 +2673,25 @@ fn diarization_sidecar_path(srt_path: &std::path::Path) -> std::path::PathBuf {
     srt_path.with_extension("diarization.json")
 }
 
+/// The AI-analysis sidecar path: `Foo.srt` → `Foo.analysis.json`, co-located
+/// so the saved analysis moves with its transcript (the twin of the diarization
+/// sidecar). One analysis per transcript regardless of .srt/.vtt.
+pub(crate) fn analysis_sidecar_path(srt_path: &std::path::Path) -> std::path::PathBuf {
+    srt_path.with_extension("analysis.json")
+}
+
+/// Persist a transcript's AI analysis beside its SRT, atomically. The body is
+/// authored entirely in the frontend (the local LLM's markdown + metadata);
+/// Rust just writes it durably, because a torn file would be a corrupt reuse.
+/// Keyed by the SRT path via co-location — analysis is a property of THIS
+/// transcript, so it should not follow the source (unlike speaker names).
+#[tauri::command]
+pub fn save_transcript_analysis(srt_path: String, json: String) -> Result<(), crate::AppError> {
+    let sidecar = analysis_sidecar_path(std::path::Path::new(&srt_path));
+    atomic_write(&sidecar, json.as_bytes())
+        .map_err(|e| crate::AppError::from(format!("write analysis sidecar: {e}")))
+}
+
 async fn run_diarize_and_merge(
     app: &AppHandle,
     job_id: &str,

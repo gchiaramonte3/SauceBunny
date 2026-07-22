@@ -168,6 +168,7 @@ pub fn run() {
             commands::generate_local_thumbnail,
             commands::scan_library_folder,
             commands::scan_transcript_library,
+            commands::save_transcript_analysis,
             commands::transcribe_local_file,
             commands::transcribe_prepared_wav,
             commands::re_diarize_transcript,

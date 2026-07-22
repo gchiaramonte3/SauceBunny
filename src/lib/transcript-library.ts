@@ -35,6 +35,8 @@ export type LibraryTranscript = {
   format: string;
   /** A co-located `.diarization.json` sidecar exists (r132) → has speakers. */
   hasDiarization: boolean;
+  /** A co-located `.analysis.json` sidecar exists → has a saved AI analysis. */
+  hasAnalysis: boolean;
   /** True when a history entry matched — so we know its source and can follow
    *  along with the video; false = transcript-only (opens standalone). */
   inHistory: boolean;
@@ -91,6 +93,7 @@ export function mergeTranscriptLibrary(
       sizeBytes: t.size_bytes,
       format: t.format,
       hasDiarization: t.has_diarization,
+      hasAnalysis: t.has_analysis,
       inHistory: !!h,
       entry: h ?? synthesizeEntry(t),
     });
@@ -105,7 +108,8 @@ export function mergeTranscriptLibrary(
       modifiedMs: h.lastOpenedAt || h.createdAt || 0,
       sizeBytes: 0,
       format: h.srtPath.toLowerCase().endsWith(".vtt") ? "vtt" : "srt",
-      hasDiarization: false, // the scan is what flags the sidecar
+      hasDiarization: false, // the scan is what flags the sidecars
+      hasAnalysis: false,
       inHistory: true,
       entry: h,
     });
