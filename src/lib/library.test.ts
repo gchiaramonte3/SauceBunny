@@ -179,3 +179,46 @@ describe("sortLibraryItems", () => {
     expect(items).toEqual(copy);
   });
 });
+
+describe("source timecodes (per-file store)", () => {
+  function installLocalStorage(): void {
+    const store = new Map<string, string>();
+    (globalThis as unknown as { localStorage: Storage }).localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => { store.set(k, String(v)); },
+      removeItem: (k: string) => { store.delete(k); },
+      clear: () => store.clear(),
+      key: (i: number) => [...store.keys()][i] ?? null,
+      get length() { return store.size; },
+    } as Storage;
+  }
+
+  it("round-trips a well-formed TC and defaults to null", async () => {
+    installLocalStorage();
+    const { sourceTimecodeFor, setSourceTimecode, clearSourceTimecode } = await import("./library");
+    expect(sourceTimecodeFor("/a.mp4")).toBeNull(); // starts at zero
+    setSourceTimecode("/a.mp4", "01:00:00:00");
+    expect(sourceTimecodeFor("/a.mp4")).toBe("01:00:00:00");
+    clearSourceTimecode("/a.mp4");
+    expect(sourceTimecodeFor("/a.mp4")).toBeNull();
+  });
+
+  it("accepts drop-frame (;) and rejects malformed TCs", async () => {
+    installLocalStorage();
+    const { sourceTimecodeFor, setSourceTimecode } = await import("./library");
+    setSourceTimecode("/df.mp4", "00:59:59;29"); // drop-frame separator
+    expect(sourceTimecodeFor("/df.mp4")).toBe("00:59:59;29");
+    setSourceTimecode("/bad.mp4", "1:2:3");        // not HH:MM:SS:FF
+    setSourceTimecode("/bad2.mp4", "garbage");
+    expect(sourceTimecodeFor("/bad.mp4")).toBeNull();
+    expect(sourceTimecodeFor("/bad2.mp4")).toBeNull();
+  });
+
+  it("survives a corrupt blob (junk-tolerant load)", async () => {
+    installLocalStorage();
+    localStorage.setItem("saucebunny.sourceTimecodes", '{"/x.mp4": 12345, "/y.mp4": "02:00:00:00"}');
+    const { sourceTimecodeFor } = await import("./library");
+    expect(sourceTimecodeFor("/x.mp4")).toBeNull();  // non-string dropped
+    expect(sourceTimecodeFor("/y.mp4")).toBe("02:00:00:00");
+  });
+});

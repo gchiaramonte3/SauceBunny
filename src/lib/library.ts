@@ -13,6 +13,13 @@ import { loadJson, saveJson } from "./storage";
 
 const ROOTS_KEY = "saucebunny.libraryRoots";
 const THUMB_TIMES_KEY = "saucebunny.libraryThumbTimes";
+const SOURCE_TC_KEY = "saucebunny.sourceTimecodes";
+
+/** `HH:MM:SS:FF` (non-drop) or `HH:MM:SS;FF` (drop-frame). The store keeps the
+ *  string as authored; the drop-frame-aware, frame-rate-checked validation
+ *  happens at the setter dialog (marker-time.tcToFrames). This is the shape
+ *  gate so a junk value can never enter the map. */
+const SOURCE_TC_RE = /^\d{2}:\d{2}:\d{2}[:;]\d{2}$/;
 
 /** Folder levels `scan_library_folder` descends (see library.rs module docs). */
 export const LIBRARY_SCAN_DEPTH = 3;
@@ -241,4 +248,49 @@ export function clearChosenPoster(path: string): void {
   if (!Object.prototype.hasOwnProperty.call(map, path)) return;
   delete map[path];
   saveJson(THUMB_TIMES_KEY, map);
+}
+
+// ── Source start timecodes (localStorage `saucebunny.sourceTimecodes`):
+//    path → "HH:MM:SS:FF" the file's own timeline starts at (its burn-in
+//    timecode). Absence means it starts at 00:00:00:00. Used to align notes
+//    and, above all, to offset Avid marker export so markers land on the
+//    burn-in TC. Keyed by absolute path — source TC is intrinsic to the file,
+//    so no content fingerprint is needed. Local files only. ──
+
+/** Load the source-timecode map, tolerating junk: only string→well-formed-TC
+ *  entries survive (a corrupt blob yields {} rather than crashing). */
+export function loadSourceTimecodes(): Record<string, string> {
+  const raw = loadJson<unknown>(SOURCE_TC_KEY, {});
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof k === "string" && k !== "" && typeof v === "string" && SOURCE_TC_RE.test(v)) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+/** The source start timecode for one path, or null when it starts at zero. */
+export function sourceTimecodeFor(path: string): string | null {
+  const map = loadSourceTimecodes();
+  return Object.prototype.hasOwnProperty.call(map, path) ? map[path] : null;
+}
+
+/** Persist a file's source start timecode. Ignores a malformed TC (the dialog
+ *  validates against the frame rate before calling this; this is the last
+ *  gate). */
+export function setSourceTimecode(path: string, tc: string): void {
+  if (!SOURCE_TC_RE.test(tc)) return;
+  const map = loadSourceTimecodes();
+  map[path] = tc;
+  saveJson(SOURCE_TC_KEY, map);
+}
+
+/** Forget a file's source timecode so it reverts to starting at zero. */
+export function clearSourceTimecode(path: string): void {
+  const map = loadSourceTimecodes();
+  if (!Object.prototype.hasOwnProperty.call(map, path)) return;
+  delete map[path];
+  saveJson(SOURCE_TC_KEY, map);
 }
