@@ -41,4 +41,4 @@ guard rail and refuses to install a leaky binary.
 ## yt-dlp
 - version: 2026.07.04
 - source: https://github.com/yt-dlp/yt-dlp (official single-file macOS static build)
-- refreshed: 2026-07-19
+- refreshed: 2026-07-22

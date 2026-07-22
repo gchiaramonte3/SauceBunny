@@ -2463,6 +2463,37 @@ fn shift_srt_file(path: &std::path::Path, offset_s: f64) -> std::io::Result<()> 
 }
 
 #[cfg(test)]
+mod diarization_cache_tests {
+    use super::{atomic_write, diarization_sidecar_path};
+    use std::path::Path;
+
+    #[test]
+    fn sidecar_path_sits_beside_the_srt() {
+        let p = diarization_sidecar_path(Path::new("/x/Sauce Bunny/Transcripts/2026-07/My Clip.srt"));
+        assert_eq!(p, Path::new("/x/Sauce Bunny/Transcripts/2026-07/My Clip.diarization.json"));
+        // A dotted basename must not lose everything before the last dot.
+        let d = diarization_sidecar_path(Path::new("/x/a.b.c.srt"));
+        assert_eq!(d, Path::new("/x/a.b.c.diarization.json"));
+    }
+
+    #[test]
+    fn atomic_write_lands_the_bytes_and_leaves_no_temp() {
+        let dir = std::env::temp_dir().join(format!("sb-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("out.diarization.json");
+        atomic_write(&dest, b"{\"turns\":[]}").unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "{\"turns\":[]}");
+        // Overwrite must replace atomically and not leave the .part sibling.
+        atomic_write(&dest, b"{\"turns\":[1]}").unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "{\"turns\":[1]}");
+        let mut part = dest.clone().into_os_string();
+        part.push(".part");
+        assert!(!Path::new(&part).exists(), "temp file must be renamed away, never left behind");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
 mod srt_shift_tests {
     use super::{seconds_to_srt_tc, shift_srt_text, srt_tc_to_seconds};
 
@@ -2624,6 +2655,24 @@ fn merge_diarization_into_srt(
 // as --num-speakers, which sets OfflineDiarizerConfig.clustering
 // .numSpeakers and skips estimation entirely. Dramatically improves
 // accuracy when the user actually knows the count.
+/// Write bytes to `dest` via a sibling temp + rename, so a crash or an iCloud
+/// sync race can't leave a truncated file. Same-volume rename is atomic on
+/// macOS. Used for the single durable copies — the transcript SRT and its
+/// diarization sidecar — where a half-written file is data loss, not a retry.
+fn atomic_write(dest: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+    let mut tmp = dest.as_os_str().to_owned();
+    tmp.push(".part");
+    let tmp = std::path::PathBuf::from(tmp);
+    std::fs::write(&tmp, contents)?;
+    std::fs::rename(&tmp, dest)
+}
+
+/// The diarization sidecar path for a transcript: `Foo.srt` → `Foo.diarization.json`,
+/// co-located so it shares the SRT's fate (move, backup, iCloud eviction).
+fn diarization_sidecar_path(srt_path: &std::path::Path) -> std::path::PathBuf {
+    srt_path.with_extension("diarization.json")
+}
+
 async fn run_diarize_and_merge(
     app: &AppHandle,
     job_id: &str,
@@ -2794,8 +2843,28 @@ async fn run_diarize_and_merge(
     let whisper_srt = std::fs::read_to_string(srt_path)
         .map_err(|e| { let _ = std::fs::remove_file(&diar_json); format!("read whisper srt: {e}") })?;
     let merged = merge_diarization_into_srt(&whisper_srt, &turns)?;
-    std::fs::write(srt_path, merged)
+    atomic_write(srt_path, merged.as_bytes())
         .map_err(|e| { let _ = std::fs::remove_file(&diar_json); format!("write merged srt: {e}") })?;
+
+    // CACHE the diarization beside the transcript instead of deleting it.
+    // The sidecar already emits a versioned envelope (schema_version, model,
+    // audio_seconds, turns[]); the merge only projects turns onto whisper's cue
+    // grid, which is LOSSY (overlapping speakers and sub-cue boundaries
+    // collapse and can't be recovered from the SRT). Persisting the raw
+    // envelope means the speaker segmentation is saved with the transcript and
+    // never has to be re-run. Co-located, so it moves and is evicted as one
+    // unit with the SRT. NOTE: for a mark-range transcription the turns are in
+    // the cut audio's 0-based timeline (the SRT cues get re-based by +start_s
+    // afterwards via shift_srt_file); a future consumer must account for that.
+    let diar_sidecar = diarization_sidecar_path(srt_path);
+    if let Err(e) = atomic_write(&diar_sidecar, json_raw.as_bytes()) {
+        emit_transcript_log(app, job_id, "warn",
+            format!("Merged speakers into the SRT, but could not cache the diarization: {e}"));
+    } else {
+        emit_transcript_log(app, job_id, "ok",
+            format!("Cached diarization beside the transcript ({} segments, {} speakers).",
+                turns.len(), unique_count));
+    }
     let _ = std::fs::remove_file(&diar_json);
 
     emit_transcript_log(
