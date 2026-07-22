@@ -188,11 +188,19 @@ scan is the index, exactly as diarization has none).
 Prereq already agreed: the **fingerprint re-keying** (speaker renames) lands first.
 Analysis keying is deliberately decoupled from it (SRT-path co-location).
 
-## Open decisions (need the user's call)
-1. **Analysis write path:** Rust `save_transcript_analysis` w/ `atomic_write` (durable,
-   +build-id, +ts-rs — the only backend churn in the plan) vs FE `write_bytes_to_path`
-   (zero backend, non-atomic). Recommend Rust atomic.
-2. **"Avid notes":** the importable markers `.txt` (covered by §2) alone, or ALSO a
-   human-readable notes doc modeled on `reviewToMarkdown`?
-3. **Per-file source TC vs global marker `sequenceStartTc`:** per-file overrides when
-   present, global fallback (recommend) vs per-file replaces the global default.
+## Resolved decisions (user, 2026-07-22)
+1. **Analysis write path → Rust, atomic.** A `save_transcript_analysis` command using
+   `atomic_write` (temp+rename, the diarization-sidecar's durable write) + a ts-rs
+   `AnalysisDoc`. This is the plan's only backend change → bump the build-id handshake.
+   Pair with a `read`/exists via the scan's `has_analysis` flag (§5).
+2. **"Avid notes" = the marker `.txt` only.** ONE export path: the importable
+   tab-delimited markers file (§2). No separate readable-notes doc. (SRT export still
+   ships alongside as its own item.)
+3. **Source TC → per-file OVERRIDES the global.** At Avid export, if
+   `sourceTimecodeFor(path)` is set it wins for that file; the global
+   `saucebunny.markerExport` `sequenceStartTc` (01:00:00:00 default) is the fallback.
+   `absTc`/`totalFrames` already consume `sequenceStartTc` — just swap the value at
+   export time when a per-file TC exists.
+
+**Scope flag (not a decision):** the Reader's first cut is local-file player only;
+web-source transcripts open text-only (static highlight) or bounce to Clip.
