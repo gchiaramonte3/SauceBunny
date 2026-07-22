@@ -5017,6 +5017,7 @@ export default function App() {
               onReviewRecentSource={handleReviewRecentSource}
               onOpenRecentSource={handleLibraryOpenRecent}
               onOpenTranscriptHistory={handleLibraryOpenTranscript}
+              transcriptLibraryPath={defaults.transcriptLibrary}
               onSwitchToClip={handleSwitchToClip}
               onOpenFolder={handleOpenLibraryFolder}
               homeResetSignal={homeResetTick}

@@ -20,11 +20,10 @@ import {
 } from "../lib/library";
 import { AUDIO_EXTENSIONS, fileExtension } from "../lib/import-extensions";
 import {
-  getHistory as getTranscriptHistory,
   formatTimeAgo,
   TRANSCRIPTS_CHANGED_EVENT,
-  type TranscriptHistoryEntry,
 } from "../lib/transcript-history";
+import { loadTranscriptLibrary, type LibraryTranscript } from "../lib/transcript-library";
 import {
   hostnameOf,
   youTubeHeroThumbnailUrl,
@@ -47,8 +46,13 @@ type Props = {
   onReviewRecentSource: (r: RecentSource) => void;
   /** Same handler as the URL-bar history popover — no parallel load path. */
   onOpenRecentSource: (entry: RecentSource) => void;
-  /** Loads a past transcript's source through the existing history handler. */
-  onOpenTranscriptHistory: (entry: TranscriptHistoryEntry) => void;
+  /** Opens a transcript (real or synthesized history entry) through the
+   *  existing handler — follows along with the source when it's known. */
+  onOpenTranscriptHistory: (entry: LibraryTranscript["entry"]) => void;
+  /** The effective transcript library dir (defaults.transcriptLibrary) — the
+   *  Transcribed shelf scans it so EVERY transcript on disk shows, not just the
+   *  50 most recent the history caps at. */
+  transcriptLibraryPath: string;
   /** Switches to the Clip view; true also focuses the URL field. */
   onSwitchToClip: () => void;
   /** A folder card / folder search-hit was opened → jump to the Library
@@ -83,7 +87,7 @@ type Props = {
  */
 export function LibraryView({
   recentSources, onOpenLocalPath, onOpenRecentSource, onOpenTranscriptHistory,
-  onReviewLocalPath, onReviewRecentSource,
+  onReviewLocalPath, onReviewRecentSource, transcriptLibraryPath,
   onSwitchToClip, onOpenFolder, homeResetSignal, homeVisible,
   roots, scans, addFolder, removeRoot, scanRoot,
   requestThumb, invalidateThumb, posterVersions, bumpPoster, resetPoster,
@@ -137,10 +141,18 @@ export function LibraryView({
   );
   const results = useMemo(() => searchLibrary(trees, needle), [trees, needle]);
   const searching = needle.trim() !== "";
-  const transcripts = useMemo(() => {
-    void historyTick; // re-read history on mutation (the tick IS the input)
-    return getTranscriptHistory();
-  }, [historyTick]);
+  // Every transcript ON DISK, reconciled with history — not just the 50 the
+  // localStorage history caps at. Re-scans when Home becomes active or a new
+  // transcript lands (historyTick covers both, plus the initial mount).
+  const [transcripts, setTranscripts] = useState<LibraryTranscript[]>([]);
+  useEffect(() => {
+    void historyTick; // the tick IS the trigger
+    let alive = true;
+    void loadTranscriptLibrary(transcriptLibraryPath).then((list) => {
+      if (alive) setTranscripts(list);
+    });
+    return () => { alive = false; };
+  }, [historyTick, transcriptLibraryPath]);
   // Continue shelf — the 8 most recent (the featured row stays a row, not an
   // archive; recents themselves are capped at 12 upstream).
   const continueRow = recentSources.slice(0, 8);
@@ -202,18 +214,23 @@ export function LibraryView({
     />
   );
 
-  const transcriptCard = (t: TranscriptHistoryEntry) => {
-    const art: LibraryCardArt = t.sourcePath
-      ? { kind: "local", path: t.sourcePath, media: mediaKindOf(t.sourcePath) }
-      : { kind: "remote", url: t.sourceUrl ? youTubeThumbnailUrl(t.sourceUrl) : null };
+  const transcriptCard = (t: LibraryTranscript) => {
+    const e = t.entry;
+    const art: LibraryCardArt = e.sourcePath
+      ? { kind: "local", path: e.sourcePath, media: mediaKindOf(e.sourcePath) }
+      : { kind: "remote", url: e.sourceUrl ? youTubeThumbnailUrl(e.sourceUrl) : null };
+    const detail = [
+      t.hasDiarization ? "speakers" : null,
+      formatTimeAgo(t.modifiedMs),
+    ].filter(Boolean).join(" · ");
     return (
       <LibraryCard
-        key={t.id}
+        key={t.path}
         title={t.title}
-        detail={`${t.origin === "unknown" ? "imported" : t.origin} · ${formatTimeAgo(t.lastOpenedAt)}`}
+        detail={detail}
         art={art}
-        badge="srt"
-        onOpen={() => onOpenTranscriptHistory(t)}
+        badge={t.format}
+        onOpen={() => onOpenTranscriptHistory(t.entry)}
         requestThumb={requestThumb}
       />
     );
