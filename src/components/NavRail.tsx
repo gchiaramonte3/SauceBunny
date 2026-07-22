@@ -1,4 +1,4 @@
-import { IconHome, IconStack, IconScissors, IconSettings, IconCoReview } from "./Icons";
+import { IconHome, IconStack, IconScissors, IconSettings, IconCoReview, IconTranscript } from "./Icons";
 import type { AppView } from "../App";
 import logoUrl from "../assets/saucebunny.svg";
 
@@ -24,13 +24,14 @@ type Props = {
   libraryShortcut?: string;
   clipShortcut?: string;
   coreviewShortcut?: string;
+  readerShortcut?: string;
   /** A co-review session is live — lights the badge dot on the Review item. */
   sessionActive: boolean;
   /** People connected to the live session — surfaced in the item's title. */
   sessionPeers?: number;
 };
 
-export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libraryShortcut, clipShortcut, coreviewShortcut, sessionActive, sessionPeers }: Props) {
+export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libraryShortcut, clipShortcut, coreviewShortcut, readerShortcut, sessionActive, sessionPeers }: Props) {
   return (
     <nav className="cp-nav" aria-label="Primary">
       {/* Brand mark — a non-interactive logo, NOT a second Home button. The
@@ -88,6 +89,19 @@ export function NavRail({ active, onNavigate, onOpenSettings, homeShortcut, libr
             rides the button title above, so a screen reader isn't handed a
             stray dot. */}
         {sessionActive && <span className="cp-nav-badge" aria-hidden="true" />}
+      </button>
+      {/* Transcripts reader — sits directly under Review: a reading-first
+          workspace over every transcript on disk, outside the Clip editor. */}
+      <button
+        type="button"
+        className={"cp-nav-item" + (active === "reader" ? " active" : "")}
+        onClick={() => onNavigate("reader")}
+        title={readerShortcut ? `Transcripts (${readerShortcut})` : "Transcripts"}
+        aria-label="Transcripts"
+        aria-current={active === "reader" ? "page" : undefined}
+      >
+        <IconTranscript size={18} />
+        <span className="cp-nav-label">Transcripts</span>
       </button>
       <div className="cp-nav-spacer" />
       <button

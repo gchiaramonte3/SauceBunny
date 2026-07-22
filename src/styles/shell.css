@@ -112,6 +112,136 @@
    The [hidden] attribute also drops the subtree from the a11y tree and
    makes TranscriptViewer's ⌘F/⌘G closest("[hidden]") gate inert on Home. */
 .cp-view[hidden] { display: none; }
+/* ── Transcripts reader (cp-view-reader) ──────────────────────────────────
+   A reading-first workspace: a transcript picker rail on the left, and the
+   selected transcript rendered large on the right (the embedded
+   TranscriptViewer). Text is the focal point. */
+.cp-reader {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  min-height: 0;
+}
+.cp-reader-picker {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+.cp-reader-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 10px;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--fg-1);
+}
+.cp-reader-count {
+  margin-left: auto;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--fg-3);
+  background: var(--bg-3);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.cp-reader-list {
+  flex: 1;
+  overflow-y: scroll;             /* permanent scrollbar, like the transcript body */
+  scrollbar-gutter: stable;
+  padding: 4px 8px 12px;
+}
+.cp-reader-list::-webkit-scrollbar { width: 11px; }
+.cp-reader-list::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+.cp-reader-list::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.22);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.cp-reader-list::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.34); }
+.cp-reader-group { margin-bottom: 10px; }
+.cp-reader-group-label {
+  margin: 8px 8px 4px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+.cp-reader-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  color: var(--fg-2);
+}
+.cp-reader-row:hover { background: var(--bg-2); }
+.cp-reader-row.active {
+  background: var(--bg-3);
+  border-color: var(--line-2);
+  color: var(--fg-1);
+}
+.cp-reader-row-title {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-reader-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--fg-4);
+}
+.cp-reader-chip {
+  font-weight: 600;
+  color: var(--fg-3);
+  background: var(--bg-4);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 15px;
+}
+.cp-reader-fmt { margin-left: auto; text-transform: uppercase; letter-spacing: 0.04em; }
+.cp-reader-empty {
+  padding: 24px 16px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--fg-4);
+  text-align: center;
+}
+/* The reading pane — the embedded TranscriptViewer fills it (its own
+   .cp-tx-body scrolls). A flex column so the viewer's flex:1 body sizes. */
+.cp-reader-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.cp-reader-hint {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--fg-4);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
 /* The Clip view's own row — sidebar | monitor | drawer (what .cp-body was
    before the rail landed). Toolbar sits above it inside .cp-view-clip. */
 .cp-clip-body {

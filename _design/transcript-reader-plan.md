@@ -171,6 +171,21 @@ scan is the index, exactly as diarization has none).
 
 ---
 
+## Progress
+- **Prereq — fingerprint re-keying of speaker names: DONE** (`56da0a1`).
+- **Phase 0a — source-timecode store: DONE** (`7c89868`).
+- **Phase 0b — analysis `.analysis.json` sidecar + `has_analysis` scan flag: DONE**
+  (`0cba193`, build-id r134).
+- **Phase 1 — Reader route + shell: DONE (first cut).** AppView `reader`, ⌘5,
+  NavRail item under Review, `cp-view-reader` + `TranscriptReader.tsx` (picker
+  over `loadTranscriptLibrary`, grouped by month, Speakers/Analyzed chips) with
+  the real `TranscriptViewer` embedded as children in a reading-first config
+  (`hasSource=false` self-hides the source chrome). **Deferred to Phase 1b:** the
+  compact `LocalMediaPlayer` + click-to-seek (text-only for now, static
+  highlight); the visual layout wants the user's eye.
+- Next: Phase 1b (compact player), Phase 2 (Avid+SRT export), Phase 3 (setters +
+  AI analysis tabs).
+
 ## Build order (by dependency)
 
 - **Phase 0 (foundations, no UI):** 0a source-TC store in `library.ts`; 0b analysis

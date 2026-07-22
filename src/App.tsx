@@ -52,6 +52,8 @@ import { usePanelBus } from "./hooks/use-panel-bus";
 import { useWebPlayback } from "./hooks/use-web-playback";
 import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView, type SessionSource } from "./hooks/use-co-review";
 import { QueueDrawer } from "./components/QueueDrawer";
+import { TranscriptReader } from "./components/TranscriptReader";
+import { TranscriptViewer } from "./components/TranscriptViewer";
 import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutSheet } from "./components/ShortcutSheet";
 import { DropTarget } from "./components/DropTarget";
@@ -153,7 +155,7 @@ function migrateCaptionFont(raw: unknown): CaptionFontKey {
  * A state switch, NOT a router (CLAUDE.md) — and the Clip view is never
  * unmounted, only [hidden], so playback/jobs/listeners survive navigation.
  */
-export type AppView = "home" | "library" | "clip" | "coreview";
+export type AppView = "home" | "library" | "clip" | "coreview" | "reader";
 
 // v2 bump: re-encode default flipped from ON to OFF. Older v1 settings are
 // intentionally abandoned so users get the new, much faster default.
@@ -747,7 +749,7 @@ export default function App() {
   // The panel window (?window=panel) never mounts App, so it's untouched.
   const [activeView, setActiveViewState] = useState<AppView>(() => {
     const stored = loadJson<string>(ACTIVE_VIEW_KEY, "clip");
-    return stored === "home" || stored === "library" ? stored : "clip";
+    return stored === "home" || stored === "library" || stored === "reader" ? stored : "clip";
   });
   const setActiveView = useCallback((v: AppView) => {
     setActiveViewState(v);
@@ -780,6 +782,7 @@ export default function App() {
   const libraryViewRef = useRef<HTMLDivElement>(null);
   const clipViewRef = useRef<HTMLDivElement>(null);
   const coreviewViewRef = useRef<HTMLDivElement>(null);
+  const readerViewRef = useRef<HTMLDivElement>(null);
   // Shared library scan state — owned here so Home's shelves and the Library
   // browser read the SAME scan results (switching views never rescans) and
   // the same thumbnail cache. Both views are keep-alive-mounted below.
@@ -3716,6 +3719,25 @@ export default function App() {
     void handleLoadFromHistory(entry); // loads the source + navigates + gates
   }, [handleLoadFromHistory]);
 
+  // Reader open: attach the transcript for reading WITHOUT disturbing the Clip
+  // source (no resetForNewSource) and stay in the reader. Text-first — no player
+  // in this first cut, so follow-along is deferred (Phase 1b). A missing file
+  // surfaces cleanly instead of a blank pane.
+  const handleReaderOpenTranscript = useCallback(async (entry: TranscriptHistoryEntry) => {
+    try {
+      await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 8 * 1024 * 1024 });
+      setActiveTranscript({
+        path: entry.srtPath,
+        origin: entry.origin === "captions" ? "captions" : entry.origin === "whisper" ? "whisper" : "unknown",
+      });
+      setTranscriptArrivedTick((n) => n + 1);
+      navigateView("reader");
+    } catch {
+      pushNotification("error", "Transcript file missing",
+        `${entry.srtPath} was moved or deleted. Remove it from history to clean up.`);
+    }
+  }, [navigateView, pushNotification]);
+
   // Home folder card / folder search-hit → open the Library browser with that
   // folder selected. The tick makes a repeat drill re-apply the same chain.
   const handleOpenLibraryFolder = useCallback((chain: LibraryCrumb[]) => {
@@ -4251,14 +4273,16 @@ export default function App() {
         case "view.home":
         case "view.library":
         case "view.clip":
-        case "view.coreview": {
+        case "view.coreview":
+        case "view.reader": {
           // View switching stays live during a session: the room is a
           // dressing of the shared stage, not a trap (leaving to Clip keeps
           // the session connected; the rail's Review badge is the way back).
           const v: AppView =
             id === "view.home" ? "home" :
             id === "view.library" ? "library" :
-            id === "view.coreview" ? "coreview" : "clip";
+            id === "view.coreview" ? "coreview" :
+            id === "view.reader" ? "reader" : "clip";
           // Route through navigateView (not raw setActiveView) so Home also
           // bumps homeResetTick like every other nav surface does.
           navigateView(v);
@@ -4268,7 +4292,8 @@ export default function App() {
           const viewRef =
             v === "home" ? homeViewRef :
             v === "library" ? libraryViewRef :
-            v === "coreview" ? coreviewViewRef : clipViewRef;
+            v === "coreview" ? coreviewViewRef :
+            v === "reader" ? readerViewRef : clipViewRef;
           requestAnimationFrame(() => viewRef.current?.focus());
           break;
         }
@@ -4991,6 +5016,7 @@ export default function App() {
   const libraryCombo = bindingsFor("view.library", keybindings)[0];
   const clipCombo = bindingsFor("view.clip", keybindings)[0];
   const coreviewCombo = bindingsFor("view.coreview", keybindings)[0];
+  const readerCombo = bindingsFor("view.reader", keybindings)[0];
 
   // ── Stale-binary banner ──────────────────────────────────────────────
   // Only shows when the Rust backend doesn't match the frontend's expected
@@ -5041,6 +5067,7 @@ export default function App() {
             libraryShortcut={libraryCombo ? formatCombo(libraryCombo) : undefined}
             clipShortcut={clipCombo ? formatCombo(clipCombo) : undefined}
             coreviewShortcut={coreviewCombo ? formatCombo(coreviewCombo) : undefined}
+            readerShortcut={readerCombo ? formatCombo(readerCombo) : undefined}
             sessionActive={coSessionActive}
             sessionPeers={coSession.peers.length}
           />
@@ -5094,6 +5121,37 @@ export default function App() {
               onOpenLocalPath={handleLibraryOpenLocalPath}
               onOpenTranscriptHistory={handleLibraryOpenTranscript}
             />
+          </div>
+          {/* Transcripts reader — a reading-first workspace over every
+              transcript on disk, outside the Clip editor. The picker lives in
+              TranscriptReader; the reading pane is the real TranscriptViewer,
+              passed as children so its handler bundle stays in App scope. Text
+              first: no player in this first cut (Phase 1b), so it mounts with
+              reading-first prop values and its source-dependent chrome
+              (Regenerate/Fix-timing) self-hides via hasSource=false. */}
+          <div ref={readerViewRef} tabIndex={-1} className="cp-view cp-view-reader" hidden={activeView !== "reader"}>
+            <TranscriptReader
+              transcriptLibraryPath={defaults.transcriptLibrary}
+              activePath={transcriptPath}
+              onOpenTranscript={handleReaderOpenTranscript}
+              visible={activeView === "reader"}
+            >
+              <TranscriptViewer
+                path={transcriptPath}
+                reloadToken={transcriptArrivedTick}
+                playheadActive={false}
+                fps={fps}
+                onSeek={() => { /* Phase 1b: seek the compact player */ }}
+                origin={activeTranscript?.origin ?? "unknown"}
+                onClearTranscript={() => setActiveTranscript(null)}
+                onLoadFromHistory={handleReaderOpenTranscript}
+                onRegenerate={() => { /* reading-first: no source to regenerate from */ }}
+                regenerateBusy={false}
+                canRegenerate={false}
+                onImportTranscript={() => { /* reading-first: pick from the list */ }}
+                hasSource={false}
+              />
+            </TranscriptReader>
           </div>
           {/* Clip — the ENTIRE pre-rail app, toolbar included. NEVER
               unmounted: while Home is active it's [hidden] (the QueueDrawer

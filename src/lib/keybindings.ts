@@ -20,7 +20,7 @@ export type KeyActionId =
   | "mark.in" | "mark.out" | "mark.clear" | "mark.gotoIn" | "mark.gotoOut"
   | "review.rangeIn" | "review.rangeOut"
   | "src.fetch" | "export.clip" | "queue.add" | "queue.toggle"
-  | "view.home" | "view.library" | "view.clip" | "view.coreview"
+  | "view.home" | "view.library" | "view.clip" | "view.coreview" | "view.reader"
   | "view.logs" | "app.settings" | "app.palette" | "app.shortcuts"
   | "edit.undo" | "edit.redo";
 
@@ -81,6 +81,7 @@ export const KEY_ACTIONS: KeyAction[] = [
   { id: "view.library",    label: "Go to Library",         group: "View",      defaults: ["mod+2"],                 global: true },
   { id: "view.clip",       label: "Go to Clip view",       group: "View",      defaults: ["mod+3"],                 global: true },
   { id: "view.coreview",   label: "Go to Review",          group: "View",      defaults: ["mod+4"],                 global: true },
+  { id: "view.reader",     label: "Go to Transcripts",     group: "View",      defaults: ["mod+5"],                 global: true },
   { id: "view.logs",       label: "Toggle pipeline log",   group: "View",      defaults: ["mod+\\"],                global: true },
   { id: "app.settings",    label: "Open / close settings", group: "App",       defaults: ["mod+,"],                 global: true },
   { id: "app.palette",     label: "Command palette",       group: "App",       defaults: ["mod+k"],                 global: true },
