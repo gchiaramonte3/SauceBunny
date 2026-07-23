@@ -9,6 +9,7 @@ import { usePlayheadSeconds } from "../lib/playhead-store";
 import { secondsToTc } from "../lib/timecode";
 import { transcriptToAvidTxt } from "../lib/markers";
 import { fpsToRateKey, DEFAULT_MARKER_SETTINGS } from "../lib/marker-time";
+import { SOURCE_TC_RE } from "../lib/library";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
 import {
@@ -104,6 +105,9 @@ type Props = {
    *  burn-in origin every marker is offset from. Undefined → a 0-based origin
    *  ("00:00:00:00"), i.e. markers at raw time-from-start-of-source. */
   startTimecode?: string;
+  /** Persist the source's start timecode (or clear it with null). When omitted,
+   *  the "Set source start timecode…" tool is hidden (no source to key it to). */
+  onSetSourceTimecode?: (tc: string | null) => void;
   /** r84: source kind — the "fix caption timing" banner only applies to web
    *  sources (YouTube auto-caption ASR timing is the loose case). */
   sourceKind?: "youtube" | "file";
@@ -184,7 +188,7 @@ const VTT_DROPPED_RE = /^\s*(?:NOTE\b|STYLE\b|REGION\b)|-->\s*[\d:.,]+[ \t]+\S/m
 export function TranscriptViewer({
   path, reloadToken, playheadActive, onSeek, origin,
   onClearTranscript, onLoadFromHistory,
-  onRegenerate, regenerateBusy, canRegenerate, fps = 30, startTimecode,
+  onRegenerate, regenerateBusy, canRegenerate, fps = 30, startTimecode, onSetSourceTimecode,
   onRedetectSpeakers, canRedetect,
   onImportTranscript, sourceKind, onFixCaptionTiming,
   hasSource = false, onTranscriptEdited,
@@ -930,6 +934,10 @@ export function TranscriptViewer({
   // Write-failure message for downloadAs (the menu is already closed when the
   // write fails, so the error renders next to the Download button). Auto-clears.
   const [dlError, setDlError] = useState<string | null>(null);
+  // Source start-timecode setter popover (feeds the Avid export's burn-in offset).
+  const [tcOpen, setTcOpen] = useState(false);
+  const [tcInput, setTcInput] = useState("");
+  const [tcErr, setTcErr] = useState<string | null>(null);
   useEffect(() => {
     if (!dlError) return;
     const t = window.setTimeout(() => setDlError(null), 8000);
@@ -958,6 +966,15 @@ export function TranscriptViewer({
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [toolsOpen]);
+  // The TC popover lives inside .cp-tx-tools (toolsRef); close it on an outside click.
+  useEffect(() => {
+    if (!tcOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (!toolsRef.current?.contains(e.target as Node)) setTcOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [tcOpen]);
 
   // ── Speaker insights popover state ───────────────────────────────
   // Anchored to the Insights header button (the DOMRect doubles as the
@@ -1081,6 +1098,15 @@ export function TranscriptViewer({
       // menu closed and the user believed the file saved.
       setDlError(formatError(e));
     }
+  }
+
+  // Validate + persist the source start timecode (the last gate; setSourceTimecode
+  // re-checks too). HH:MM:SS:FF, or ; before the frames for drop-frame.
+  function saveTc() {
+    const v = tcInput.trim();
+    if (!SOURCE_TC_RE.test(v)) { setTcErr("Use HH:MM:SS:FF (e.g. 01:00:00:00)."); return; }
+    onSetSourceTimecode?.(v);
+    setTcOpen(false);
   }
 
   // ── Avid Media Composer markers (.txt) ───────────────────────────
@@ -1328,6 +1354,45 @@ export function TranscriptViewer({
                 <button role="menuitem" onClick={() => { setToolsOpen(false); setHistoryOpen(true); }}>
                   Transcript history…
                 </button>
+                {onSetSourceTimecode && (
+                  <button
+                    role="menuitem"
+                    onClick={() => { setToolsOpen(false); setTcInput(startTimecode ?? ""); setTcErr(null); setTcOpen(true); }}
+                  >
+                    Set source start timecode…
+                  </button>
+                )}
+              </div>
+            )}
+            {tcOpen && onSetSourceTimecode && (
+              <div className="cp-tx-tc-pop" role="dialog" aria-label="Source start timecode">
+                <div className="cp-tx-tc-title">Source start timecode</div>
+                <input
+                  className="cp-tx-tc-input"
+                  value={tcInput}
+                  onChange={(e) => { setTcInput(e.target.value); setTcErr(null); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveTc();
+                    else if (e.key === "Escape") setTcOpen(false);
+                  }}
+                  placeholder="00:00:00:00"
+                  spellCheck={false}
+                  autoFocus
+                />
+                <p className="cp-tx-tc-hint">
+                  Offsets every Avid marker so they land on your burn-in. HH:MM:SS:FF (use ; for drop-frame).
+                </p>
+                {tcErr && <p className="cp-tx-tc-err" role="alert">{tcErr}</p>}
+                <div className="cp-tx-tc-row">
+                  <button className="btn btn-ghost cp-tx-iconbtn" onClick={() => setTcOpen(false)}>Cancel</button>
+                  <button
+                    className="btn btn-ghost cp-tx-iconbtn"
+                    onClick={() => { onSetSourceTimecode(null); setTcOpen(false); }}
+                  >
+                    Clear
+                  </button>
+                  <button className="btn cp-tx-iconbtn" onClick={saveTc}>Save</button>
+                </div>
               </div>
             )}
           </div>

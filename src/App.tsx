@@ -103,7 +103,7 @@ import { sanitizeFilename, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
 import { buildDiagnosticsReport, diagnosticsFilename } from "./lib/diagnostics";
 import { extractFrameAsBlob, extractPosterBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
-import { chosenPosterFor, sourceTimecodeFor } from "./lib/library";
+import { chosenPosterFor, sourceTimecodeFor, setSourceTimecode, clearSourceTimecode } from "./lib/library";
 import { exportLocalClipViaMediabunny } from "./lib/mediabunny-export";
 import { extractAudioAsWav16k } from "./lib/mediabunny-audio";
 
@@ -3749,6 +3749,13 @@ export default function App() {
   // read-only source object, so opening a transcript to READ never disturbs a
   // Clip session. Local files only; web/source-less transcripts read text-only.
   const [readerSource, setReaderSource] = useState<ReaderSource | null>(null);
+  // The open transcript's SOURCE identity (local path or web url) — the key for
+  // its start timecode. Independent of readerSource (which is local-playback
+  // only), so the source-TC setter + Avid export work for web transcripts too.
+  const [readerSourceKey, setReaderSourceKey] = useState<string | null>(null);
+  // The open transcript's source start TC (feeds the Avid export offset). Derived
+  // state: set when a transcript opens and when the setter writes/clears.
+  const [readerStartTc, setReaderStartTc] = useState<string | undefined>(undefined);
   // Why there's no follow-along player, when there isn't one (web / missing file).
   const [readerNote, setReaderNote] = useState<string | null>(null);
   // True while an ffmpeg playback copy is being prepared for an exotic-codec
@@ -3804,6 +3811,9 @@ export default function App() {
     const seq = ++readerOpenSeqRef.current;
     // Open the reader with the text right away; reset the player to a clean slate.
     setReaderSource(null);
+    const srcKey = entry.sourcePath ?? entry.sourceUrl ?? null;
+    setReaderSourceKey(srcKey);
+    setReaderStartTc(srcKey ? sourceTimecodeFor(srcKey) ?? undefined : undefined);
     setReaderNote(null);
     setReaderPreparing(!!entry.sourcePath);
     // Publish 0 so the highlight can't read a frame left in the Clip's fps.
@@ -5319,10 +5329,14 @@ export default function App() {
                 reloadToken={transcriptArrivedTick}
                 playheadActive={activeView === "reader"}
                 fps={readerSource?.fps ?? fps}
-                startTimecode={readerSource ? sourceTimecodeFor(readerSource.origPath) ?? undefined : undefined}
+                startTimecode={readerStartTc}
+                onSetSourceTimecode={readerSourceKey ? (tc) => {
+                  if (tc) setSourceTimecode(readerSourceKey, tc); else clearSourceTimecode(readerSourceKey);
+                  setReaderStartTc(tc ?? undefined);
+                } : undefined}
                 onSeek={(seconds) => readerPlayerRef.current?.seekTo(seconds)}
                 origin={activeTranscript?.origin ?? "unknown"}
-                onClearTranscript={() => { readerOpenSeqRef.current++; setActiveTranscript(null); setReaderSource(null); setReaderNote(null); setReaderPreparing(false); }}
+                onClearTranscript={() => { readerOpenSeqRef.current++; setActiveTranscript(null); setReaderSource(null); setReaderSourceKey(null); setReaderStartTc(undefined); setReaderNote(null); setReaderPreparing(false); }}
                 onLoadFromHistory={handleReaderOpenTranscript}
                 onRegenerate={() => { /* reading-first: no source to regenerate from */ }}
                 regenerateBusy={false}

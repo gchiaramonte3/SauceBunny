@@ -19,7 +19,7 @@ const SOURCE_TC_KEY = "saucebunny.sourceTimecodes";
  *  string as authored; the drop-frame-aware, frame-rate-checked validation
  *  happens at the setter dialog (marker-time.tcToFrames). This is the shape
  *  gate so a junk value can never enter the map. */
-const SOURCE_TC_RE = /^\d{2}:\d{2}:\d{2}[:;]\d{2}$/;
+export const SOURCE_TC_RE = /^\d{2}:\d{2}:\d{2}[:;]\d{2}$/;
 
 /** Folder levels `scan_library_folder` descends (see library.rs module docs). */
 export const LIBRARY_SCAN_DEPTH = 3;
