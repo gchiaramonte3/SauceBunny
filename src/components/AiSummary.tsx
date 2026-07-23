@@ -5,6 +5,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { parseSrt, groupIntoTurns, fmtTime } from "../lib/srt";
 import { loadSpeakerOverrides, resolveSpeakerName, SPEAKERS_CHANGED_EVENT } from "./transcript/helpers";
 import { streamChat, type ChatMessage } from "../lib/ai-chat";
+import { loadAiProvider, cloudChat } from "../lib/ai-provider";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
 import { Markdown } from "./Markdown";
@@ -271,28 +272,45 @@ export function AiSummary({
   const send = useCallback(async (text: string) => {
     const content = text.trim();
     if (!content || streaming || chaptersBusy) return;
+    if (!transcriptForModel) return;
     setInput("");
-    const info = await ensureServer();
-    if (!info || !transcriptForModel) return;
+    const provider = loadAiProvider();
+    // Local Qwen needs its server up first (may start/download); cloud goes
+    // straight to the provider. Bail cleanly if the local server won't start.
+    let info: LlmServerInfo | null = null;
+    if (provider === "local") {
+      info = await ensureServer();
+      if (!info) return;
+    }
 
     const history: ChatMessage[] = [...messages, { role: "user", content }];
     setMessages([...history, { role: "assistant", content: "" }]);
     setStreaming(true);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    const payload: ChatMessage[] = [
-      { role: "system", content: buildSystemPrompt(transcriptForModel.text, transcriptForModel.truncated, style ?? DEFAULT_STYLE, transcriptForModel.hasSpeakers) },
-      ...history,
-    ];
+    const system = buildSystemPrompt(transcriptForModel.text, transcriptForModel.truncated, style ?? DEFAULT_STYLE, transcriptForModel.hasSpeakers);
     try {
-      await streamChat(info, payload, (delta) => {
-        setMessages((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last?.role === "assistant") next[next.length - 1] = { ...last, content: last.content + delta };
-          return next;
-        });
-      }, ctrl.signal);
+      if (provider === "local" && info) {
+        await streamChat(info, [{ role: "system", content: system }, ...history], (delta) => {
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last?.role === "assistant") next[next.length - 1] = { ...last, content: last.content + delta };
+            return next;
+          });
+        }, ctrl.signal);
+      } else {
+        // Cloud (Claude / ChatGPT) — one-shot via Rust; the reply lands at once.
+        const reply = await cloudChat(provider as Exclude<typeof provider, "local">, system, history);
+        if (!ctrl.signal.aborted) {
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last?.role === "assistant") next[next.length - 1] = { ...last, content: reply };
+            return next;
+          });
+        }
+      }
     } catch (e) {
       if (!ctrl.signal.aborted) {
         setMessages((prev) => {
@@ -306,7 +324,7 @@ export function AiSummary({
       setStreaming(false);
       abortRef.current = null;
     }
-  }, [streaming, chaptersBusy, ensureServer, transcriptForModel, messages]);
+  }, [streaming, chaptersBusy, ensureServer, transcriptForModel, messages, style]);
 
   function stop() { abortRef.current?.abort(); setStreaming(false); }
 

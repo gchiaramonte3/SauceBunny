@@ -1072,3 +1072,96 @@
   font-variant-numeric: tabular-nums;
 }
 .cp-update-note { color: var(--fg-3); font-size: 12px; }
+
+/* ============================================================
+   AI APIs pane (AiApiSettings.tsx) — provider choice + cloud keys
+   ============================================================ */
+.cp-aiapi-label {
+  display: block;
+  margin: 14px 0 6px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+.cp-aiapi-providers { display: flex; gap: 6px; flex-wrap: wrap; }
+.cp-aiapi-choice {
+  padding: 7px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--bg-3);
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cp-aiapi-choice:hover { color: var(--fg-1); background: var(--bg-4); }
+.cp-aiapi-choice.active { color: var(--fg-1); border-color: var(--fg-1); background: var(--bg-4); }
+.cp-aiapi-warn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: rgba(232,38,38,0.08);
+  border: 1px solid rgba(232,38,38,0.24);
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.cp-aiapi-card {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-1);
+  border-radius: 10px;
+  background: var(--bg-1);
+}
+.cp-aiapi-cardhead { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.cp-aiapi-name { font-family: var(--font-ui); font-size: 13px; font-weight: 700; color: var(--fg-1); }
+.cp-aiapi-set {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 600; color: var(--color-accent-green, #6cff8d);
+}
+.cp-aiapi-row { display: flex; gap: 6px; align-items: center; }
+.cp-aiapi-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  color: var(--fg-1);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12.5px;
+}
+.cp-aiapi-hints {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 6px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--fg-4);
+}
+.cp-aiapi-link {
+  border: 0;
+  background: none;
+  color: var(--fg-3);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.cp-aiapi-link:hover { color: var(--fg-1); }
+.cp-aiapi-msg {
+  display: flex; align-items: center; gap: 6px;
+  margin: 8px 0 0;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+}
+.cp-aiapi-msg.ok { color: var(--color-accent-green, #6cff8d); }
+.cp-aiapi-msg.err { color: var(--danger, #E82626); }

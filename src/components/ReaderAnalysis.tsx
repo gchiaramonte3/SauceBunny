@@ -7,6 +7,7 @@ import { formatError } from "../lib/error-format";
 import { Markdown } from "./Markdown";
 import { IconSparkles, IconSpinnerArc, IconRefresh, IconAlert } from "./Icons";
 import { buildSystemPrompt, type SummaryStyle } from "./AiSummary";
+import { loadAiProvider, cloudChat, loadCloudModel } from "../lib/ai-provider";
 import { loadAnalysis, saveAnalysis, analysisIsStale, type TranscriptAnalysis } from "../lib/transcript-analysis";
 import { TRANSCRIPTS_CHANGED_EVENT } from "../lib/transcript-history";
 import type { LlmServerInfo } from "../bindings/LlmServerInfo";
@@ -94,28 +95,44 @@ export function ReaderAnalysis({ transcriptPath, visible, selectedModelId, style
     setError(null); setStream("");
     const ctrl = new AbortController();
     abortRef.current = ctrl;
+    const provider = loadAiProvider();
+    const userTurn = "Write a complete analysis of this transcript: a short overview, the key topics with their [timestamps], and any notable quotes or takeaways.";
     try {
       setPhase("starting");
-      let info = await invoke<LlmServerInfo | null>("llm_server_status");
-      if (!info) {
-        if (!selectedModelId) {
-          setError("No local AI model is set up yet. Open AI settings to download one.");
-          setPhase("error"); return;
-        }
-        info = await invoke<LlmServerInfo>("start_llm_server", { modelId: selectedModelId });
-      }
-      const built = buildTranscriptForModel(raw, info.ctx, transcriptPath);
-      if (!built) { setError("This transcript has no readable content to analyze."); setPhase("error"); return; }
-      setPhase("generating");
-      const messages: ChatMessage[] = [
-        { role: "system", content: buildSystemPrompt(built.text, built.truncated, style ?? DEFAULT_STYLE, built.hasSpeakers) },
-        { role: "user", content: "Write a complete analysis of this transcript: a short overview, the key topics with their [timestamps], and any notable quotes or takeaways." },
-      ];
       let full = "";
-      await streamChat(info, messages, (delta) => { full += delta; setStream((s) => s + delta); }, ctrl.signal);
+      let modelUsed: string;
+      if (provider === "local") {
+        let info = await invoke<LlmServerInfo | null>("llm_server_status");
+        if (!info) {
+          if (!selectedModelId) {
+            setError("No local AI model is set up yet. Open AI settings to download one.");
+            setPhase("error"); return;
+          }
+          info = await invoke<LlmServerInfo>("start_llm_server", { modelId: selectedModelId });
+        }
+        const built = buildTranscriptForModel(raw, info.ctx, transcriptPath);
+        if (!built) { setError("This transcript has no readable content to analyze."); setPhase("error"); return; }
+        setPhase("generating");
+        const messages: ChatMessage[] = [
+          { role: "system", content: buildSystemPrompt(built.text, built.truncated, style ?? DEFAULT_STYLE, built.hasSpeakers) },
+          { role: "user", content: userTurn },
+        ];
+        await streamChat(info, messages, (delta) => { full += delta; setStream((s) => s + delta); }, ctrl.signal);
+        modelUsed = info.model_id;
+      } else {
+        // Cloud provider (Claude / ChatGPT) — one-shot via Rust (non-streaming).
+        // A generous budget: cloud contexts are large; this bounds cost, not the model.
+        const built = buildTranscriptForModel(raw, 32000, transcriptPath);
+        if (!built) { setError("This transcript has no readable content to analyze."); setPhase("error"); return; }
+        setPhase("generating");
+        const system = buildSystemPrompt(built.text, built.truncated, style ?? DEFAULT_STYLE, built.hasSpeakers);
+        full = await cloudChat(provider, system, [{ role: "user", content: userTurn }]);
+        if (ctrl.signal.aborted) { setPhase("idle"); return; }
+        modelUsed = loadCloudModel(provider);
+      }
       const doc: TranscriptAnalysis = {
         schemaVersion: 1,
-        model: info.model_id,
+        model: modelUsed,
         generatedAt: Date.now(),
         style: style ?? DEFAULT_STYLE,
         markdown: full.trim(),

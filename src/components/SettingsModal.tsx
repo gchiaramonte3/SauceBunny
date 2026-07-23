@@ -32,13 +32,14 @@ import type { LlmModel } from "../bindings/LlmModel";
 import { formatError } from "../lib/error-format";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { YouTubeSettings } from "./YouTubeSettings";
+import { AiApiSettings } from "./AiApiSettings";
 import { useModalFocus } from "../hooks/use-modal-focus";
 import logoUrl from "../assets/saucebunny.svg";
 import { UpdateRow } from "./UpdateRow";
 import { getVersion } from "@tauri-apps/api/app";
 import { EXPECTED_BACKEND_BUILD_ID } from "../lib/build-id";
 
-type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "commands" | "about";
+type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "ai-apis" | "commands" | "about";
 
 export type Defaults = {
   folder: string | null;
@@ -202,6 +203,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "youtube",       label: "Web sources" },
   { id: "transcription", label: "Transcription" },
   { id: "ai-summary",    label: "AI Summary" },
+  { id: "ai-apis",       label: "AI APIs" },
   { id: "commands",      label: "Shortcuts" },
   { id: "about",         label: "About" },
 ];
@@ -1474,6 +1476,8 @@ export function SettingsModal(props: Props) {
                 </CollapsibleSection>
               </section>
             )}
+
+            {tab === "ai-apis" && <AiApiSettings />}
 
             {tab === "commands" && (
               <section>
