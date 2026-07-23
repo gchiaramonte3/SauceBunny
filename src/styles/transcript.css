@@ -331,22 +331,27 @@
 }
 /* An always-visible, easy-to-grab transcript scrollbar. Styling
    ::-webkit-scrollbar switches WKWebView off the transient overlay and onto a
-   persistent classic scrollbar, so it shows even when the pointer is idle. A
-   touch stronger than the app's other panels because this one is a primary
-   reading surface the user asked to always see. */
-.cp-tx-body { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.22) transparent; }
-.cp-tx-body::-webkit-scrollbar { width: 11px; }
-.cp-tx-body::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+   persistent classic scrollbar, so it shows even when the pointer is idle.
+   CRITICAL: do NOT set the standard `scrollbar-width` / `scrollbar-color` here.
+   On modern WebKit (Safari 26 / the macOS 15+ WKWebView the app actually runs
+   in) specifying either one makes the engine ignore `::-webkit-scrollbar`
+   entirely and fall back to the macOS OVERLAY scrollbar — which fades out when
+   idle, i.e. the "permanent scrollbar disappeared" regression. The pseudo-
+   element path below is the only one that stays always-on, so it must own the
+   styling alone. This is a primary reading surface the user asked to always
+   see, so the thumb is a touch stronger than the app's other panels. */
+.cp-tx-body::-webkit-scrollbar { width: 12px; }
+.cp-tx-body::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
 .cp-tx-body::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.22);
+  background: rgba(255,255,255,0.32);
   border-radius: 6px;
   /* Transparent border + padding-box inset the thumb off the track edges for a
      polished, pill look instead of a slab flush to the wall. */
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-.cp-tx-body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.34); }
-.cp-tx-body::-webkit-scrollbar-thumb:active { background: rgba(255,255,255,0.44); }
+.cp-tx-body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.44); }
+.cp-tx-body::-webkit-scrollbar-thumb:active { background: rgba(255,255,255,0.56); }
 
 /* One turn = one chat bubble. Speaker chip + name on top, prose below. */
 .cp-tx-turn {

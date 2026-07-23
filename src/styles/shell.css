@@ -123,7 +123,9 @@
   min-height: 0;
   transition: grid-template-columns var(--panel-slide, 200ms ease);
 }
-.cp-reader.stage-open { --reader-stage-w: 360px; }
+.cp-reader.stage-open  { --reader-stage-w: 360px; }
+.cp-reader.stage-rail  { --reader-stage-w: 46px; }
+.cp-reader.stage-float { --reader-stage-w: 0px; }
 @media (prefers-reduced-motion: reduce) { .cp-reader { transition: none; } }
 .cp-reader-picker {
   display: flex;
@@ -261,30 +263,57 @@
   font-family: var(--font-ui);
   font-size: 13px;
 }
-/* ── The follow-along player stage (far-right dock, or a floating card) ── */
+/* ── The follow-along player stage (far-right dock · thin rail · floating card) ── */
+/* The grid's third column. Docked panel lives inside; the rail toggle sits here
+   when collapsed; a floating panel is position:fixed and lifts out of this box
+   (no ancestor transform clips it), so the column can be 0-width when floating. */
 .cp-reader-stage {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  overflow: hidden;
   border-left: 1px solid var(--line-1);
   background: var(--bg-1);
 }
-.cp-reader-stage.floating {
+.cp-reader.stage-float .cp-reader-stage { border-left: 0; }
+/* Collapsed rail — a single toggle to bring the player back. */
+.cp-reader-stage-expand {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin: 10px auto 0;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  background: var(--bg-3);
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.cp-reader-stage-expand:hover { color: var(--fg-1); background: var(--bg-4); }
+/* The panel itself — fills the docked column, or floats as a fixed card. */
+.cp-reader-stage-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.cp-reader-stage-panel.floating {
   position: fixed;
   right: 18px;
   bottom: 18px;
   width: 380px;
+  height: auto;
   border: 1px solid var(--line-2);
   border-radius: 10px;
+  background: var(--bg-1);
   box-shadow: 0 18px 48px rgba(0,0,0,0.55);
   z-index: 60;
 }
 .cp-reader-stage-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 6px;
+  padding: 8px 8px 8px 12px;
   border-bottom: 1px solid var(--line-1);
   font-family: var(--font-ui);
 }
@@ -298,7 +327,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The video fills the stage; a black letterbox around it, playhead-driven. */
+.cp-reader-stage-btn {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.cp-reader-stage-btn:hover { color: var(--fg-1); background: var(--bg-3); }
+/* The video — a black 16:9 letterbox, playhead-driven. */
 .cp-reader-stage-video {
   position: relative;
   width: 100%;
@@ -307,6 +349,70 @@
   overflow: hidden;
 }
 .cp-reader-stage-video > * { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* Text-only placeholder — an honest "nothing to play here" instead of a gap. */
+.cp-reader-stage-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 30px 22px;
+  text-align: center;
+  color: var(--fg-4);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.cp-reader-stage-empty p { margin: 0; max-width: 30ch; }
+/* ── Transport: rewind 10 · play/pause · forward 10 · position + clock ── */
+.cp-reader-transport {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px 12px 13px;
+}
+/* A slim clickable position bar — "a time, not a timeline". */
+.cp-reader-scrub {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg-4);
+  cursor: pointer;
+  overflow: hidden;
+}
+.cp-reader-scrub-fill {
+  height: 100%;
+  background: var(--fg-3);
+  border-radius: 3px;
+}
+.cp-reader-transport-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cp-reader-tbtn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--bg-3);
+  color: var(--fg-2);
+  cursor: pointer;
+}
+.cp-reader-tbtn:hover { color: var(--fg-1); background: var(--bg-4); }
+.cp-reader-tbtn.primary {
+  width: 38px;
+  height: 38px;
+  color: var(--fg-1);
+}
+.cp-reader-clock {
+  margin-left: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-3);
+}
+.cp-reader-clock-sep { color: var(--fg-4); }
 /* The Clip view's own row — sidebar | monitor | drawer (what .cp-body was
    before the rail landed). Toolbar sits above it inside .cp-view-clip. */
 .cp-clip-body {

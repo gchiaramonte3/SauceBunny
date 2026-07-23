@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { IconTranscript } from "./Icons";
+import { IconTranscript, IconPanelLeft } from "./Icons";
 import { ReaderRowThumb } from "./ReaderRowThumb";
 import type { LibraryCardArt } from "./LibraryCard";
 import {
@@ -43,17 +43,23 @@ type Props = {
    *  Library cards use, so a decode is shared across both surfaces. */
   requestThumb: (path: string) => Promise<string | null>;
   posterVersions: Record<string, number>;
-  /** The follow-along player panel (App-rendered), or null for a text-only
-   *  transcript. Docks as a far-right column, or floats when popped out. */
+  /** The follow-along player panel (App-rendered — a <ReaderPlayerStage>). Docks
+   *  as a far-right column, collapses to a thin rail, or floats when popped out. */
   stage?: ReactNode;
-  stageOpen: boolean;
+  /** A transcript is open, so the player system exists (rail is discoverable). */
+  stageAvailable: boolean;
+  /** The panel is expanded (docked full-width) vs collapsed to a rail. */
+  stageExpanded: boolean;
+  /** The panel is popped out to a floating card (the docked slot yields width). */
   stageFloating: boolean;
+  /** Bring the player back — expand + re-dock (the rail toggle). */
+  onExpandStage: () => void;
   /** The embedded <TranscriptViewer>, fed by App. Rendered only once a
    *  transcript is selected. */
   children: ReactNode;
 };
 
-export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, stage, stageOpen, stageFloating, children }: Props) {
+export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, stage, stageAvailable, stageExpanded, stageFloating, onExpandStage, children }: Props) {
   const [list, setList] = useState<LibraryTranscript[]>([]);
   const [tick, setTick] = useState(0);
 
@@ -74,10 +80,15 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
 
   const groups = useMemo(() => groupTranscriptsByFolder(list), [list]);
 
-  // Docked stage → a third grid column; floating → position:fixed over the view.
-  const dockStage = stageOpen && !stageFloating;
+  // The third grid track sizes to the stage: full when docked-open, a thin rail
+  // when collapsed, zero when floating (the panel lifts to a fixed card) or when
+  // no transcript is open.
+  const stageClass = !stageAvailable ? ""
+    : stageFloating ? " stage-float"
+    : stageExpanded ? " stage-open"
+    : " stage-rail";
   return (
-    <div className={"cp-reader" + (dockStage ? " stage-open" : "")}>
+    <div className={"cp-reader" + stageClass}>
       <aside className="cp-reader-picker" aria-label="Transcripts">
         <div className="cp-reader-picker-head">
           <IconTranscript size={16} />
@@ -125,10 +136,24 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
             </div>
           )}
       </main>
-      {stageOpen && (
-        <div className={"cp-reader-stage" + (stageFloating ? " floating" : "")} aria-label="Video">
-          {stage}
-        </div>
+      {stageAvailable && (
+        <aside className="cp-reader-stage" aria-label="Player">
+          {/* Collapsed & docked → a rail toggle so the player is never just gone. */}
+          {!stageExpanded && !stageFloating && (
+            <button
+              type="button"
+              className="cp-reader-stage-expand"
+              onClick={onExpandStage}
+              title="Show player"
+              aria-label="Show player"
+            >
+              <IconPanelLeft size={16} />
+            </button>
+          )}
+          {/* The panel — one instance, docked or floating (it adds .floating
+              itself), so popping out never remounts / reloads the player. */}
+          {(stageExpanded || stageFloating) && stage}
+        </aside>
       )}
     </div>
   );
