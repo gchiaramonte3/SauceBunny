@@ -190,9 +190,25 @@ scan is the index, exactly as diarization has none).
   player + gated writer), click-a-line-to-seek, and a far-right dock that
   pop-outs to a floating card (in-window, same clock — true OS-window deferred).
   Web/source-less transcripts stay text-only.
-- Next: Phase 2 (Avid+SRT export), Phase 3 (source-TC setter + AI analysis tabs).
-  Possible follow-ups from feedback: web-source follow-along player; true
-  detach-to-OS-window.
+- **Reader v2 feedback pass: DONE (`d658c42`).** The player is now a persistent
+  fixture (was invisible + un-toggleable when no source resolved): docked column
+  ▸ collapse to a thin rail (IconPanelLeft, state in `saucebunny.readerStageOpen`)
+  ▸ pop out to a floating card. No-source transcripts show an honest placeholder,
+  not a gap. Real transport in `ReaderPlayerStage.tsx` (rewind 10 / play-pause /
+  fwd 10 / clock / slim click-to-seek bar), reading the same global playhead as
+  the highlight. Permanent-scrollbar regression fixed: `scrollbar-width`/
+  `scrollbar-color` on `.cp-tx-body` was disabling the always-on
+  `::-webkit-scrollbar` on Safari-26 WebKit → overlay bar that fades; dropped
+  both standard props, strengthened the thumb.
+- Next: **Phase 2 (Avid export)** — READY. The infra is already there:
+  `marker-time.ts` `MarkerExportSettings.sequenceStartTc` IS the source-start-TC
+  offset, `absTc()`/`framesToTc()` do the drop-frame math. Build a pure
+  `transcriptCuesToAvidTxt(cues, roster, settings)` (speaker→Username, cue
+  text→Comment, cue start→`absTc`) beside `markersToAvidTxt`, unit-test it, then
+  a "Download Avid markers (.txt)" row in the TranscriptViewer download menu +
+  the source-start-TC setter (writes `saucebunny.sourceTimecodes` via
+  `library.ts` `setSourceTimecode`, feeding `sequenceStartTc`). Phase 3 (AI
+  analysis tabs) after. Follow-ups: web-source follow-along; true OS-window pop-out.
 
 ## Build order (by dependency)
 
