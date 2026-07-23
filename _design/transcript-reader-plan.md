@@ -200,7 +200,21 @@ scan is the index, exactly as diarization has none).
   `scrollbar-color` on `.cp-tx-body` was disabling the always-on
   `::-webkit-scrollbar` on Safari-26 WebKit → overlay bar that fades; dropped
   both standard props, strengthened the thumb.
-- Next: **Phase 2 (Avid export)** — READY. The infra is already there:
+- **Blank-reader-player bug: FIXED (`136a02a`).** Root cause (agent-traced): the
+  reader handed the RAW original to LocalMediaPlayer (native `<video>`/`asset://`),
+  which WKWebView hangs on — the r93 approach the codebase retired. It now resolves
+  the source like Clip/Library: `canMediabunnyDecode` → MediaBunnyPlayer (byte-range
+  IPC), else ffmpeg-transcode → native; onError (incl. 10-bit paint-guard) →
+  transcode fallback; seq-guarded; "Preparing…" state. Same commit pixel-aligns the
+  `.cp-tx-head` / `.cp-reader-stage-head` hairlines via a shared `--tx-head-h` token.
+- **Phase 2 (Avid export): DONE (`a2c1f20`).** `transcriptToAvidTxt` in markers.ts
+  (speaker→Username, cue text→Comment, cue start→absTc with Start-TC offset),
+  5 tests, wired into the transcript Download menu ("Avid markers (.txt)…").
+  `fpsToRateKey`/`FRAME_RATE_KEYS` lifted to marker-time.ts (shared with co-review).
+- Next: **Phase 2b — the source-start-TC SETTER UI** (right-click / a small dialog →
+  `library.ts setSourceTimecode`) so the Avid export offset is user-settable for
+  burn-in alignment (App already passes `sourceTimecodeFor` as `startTimecode`, so
+  only the setter is missing). Then Phase 3 (AI analysis tabs). Original scoping:
   `marker-time.ts` `MarkerExportSettings.sequenceStartTc` IS the source-start-TC
   offset, `absTc()`/`framesToTc()` do the drop-frame math. Build a pure
   `transcriptCuesToAvidTxt(cues, roster, settings)` (speaker→Username, cue
