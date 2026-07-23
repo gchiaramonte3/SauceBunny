@@ -7,6 +7,8 @@ import { parseSrt, groupIntoTurns, serializeCues, fmtTime, type Turn } from "../
 import { speakerStats } from "../lib/speaker-stats";
 import { usePlayheadSeconds } from "../lib/playhead-store";
 import { secondsToTc } from "../lib/timecode";
+import { transcriptToAvidTxt } from "../lib/markers";
+import { fpsToRateKey, DEFAULT_MARKER_SETTINGS } from "../lib/marker-time";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
 import {
@@ -98,6 +100,10 @@ type Props = {
    * when no source is loaded (an imported transcript with no video).
    */
   fps?: number;
+  /** Source start timecode (HH:MM:SS:FF) for the Avid marker export — the
+   *  burn-in origin every marker is offset from. Undefined → a 0-based origin
+   *  ("00:00:00:00"), i.e. markers at raw time-from-start-of-source. */
+  startTimecode?: string;
   /** r84: source kind — the "fix caption timing" banner only applies to web
    *  sources (YouTube auto-caption ASR timing is the loose case). */
   sourceKind?: "youtube" | "file";
@@ -178,7 +184,7 @@ const VTT_DROPPED_RE = /^\s*(?:NOTE\b|STYLE\b|REGION\b)|-->\s*[\d:.,]+[ \t]+\S/m
 export function TranscriptViewer({
   path, reloadToken, playheadActive, onSeek, origin,
   onClearTranscript, onLoadFromHistory,
-  onRegenerate, regenerateBusy, canRegenerate, fps = 30,
+  onRegenerate, regenerateBusy, canRegenerate, fps = 30, startTimecode,
   onRedetectSpeakers, canRedetect,
   onImportTranscript, sourceKind, onFixCaptionTiming,
   hasSource = false, onTranscriptEdited,
@@ -1077,6 +1083,38 @@ export function TranscriptViewer({
     }
   }
 
+  // ── Avid Media Composer markers (.txt) ───────────────────────────
+  // One point marker per cue: the turn's resolved (renamed) speaker → the Avid
+  // Username column, cue text → Comment, cue start → absolute sequence TC
+  // (offset by the source's Start-TC so markers land on the burn-in origin).
+  // Frame rate is taken from the source fps. Tools ▸ Marker ▸ Import Markers.
+  async function downloadAvidMarkers() {
+    setDlOpen(false);
+    try {
+      const cues = turns.flatMap((turn, ti) => {
+        const speaker = displayNameFor(ti, turn.speaker);
+        return turn.cues.map((c) => ({ start: c.start, speaker, text: c.text }));
+      });
+      if (cues.length === 0) { setDlError("No transcript cues to export."); return; }
+      const dest = await saveDialog({
+        defaultPath: `${baseFilename}.avid-markers.txt`,
+        filters: [{ name: "TXT", extensions: ["txt"] }],
+      });
+      if (!dest) return;
+      const content = transcriptToAvidTxt(cues, {
+        frameRate: fpsToRateKey(fps) ?? DEFAULT_MARKER_SETTINGS.frameRate,
+        sequenceStartTc: startTimecode || "00:00:00:00",
+        dropFrame: false,
+      });
+      const bytes = Array.from(new TextEncoder().encode(content));
+      await invoke("write_bytes_to_path", { path: dest, bytes });
+      setDlError(null);
+    } catch (e) {
+      console.error("avid marker export failed:", e);
+      setDlError(formatError(e));
+    }
+  }
+
   // ── PDF via the browser print dialog ─────────────────────────────
   // We build a self-contained printable HTML document, write it into a
   // hidden iframe, and trigger print on the iframe's window. That gives
@@ -1325,6 +1363,8 @@ export function TranscriptViewer({
               <button role="menuitem" onClick={() => downloadAs("md")}>Download .md</button>
               <button role="menuitem" onClick={() => downloadAs("srt-copy")}>Download .srt</button>
               <button role="menuitem" onClick={downloadAsPdf}>Print / Save as PDF…</button>
+              <div className="cp-tx-dl-sep" />
+              <button role="menuitem" onClick={downloadAvidMarkers}>Avid markers (.txt)…</button>
               <div className="cp-tx-dl-sep" />
               <button role="menuitem" onClick={onReveal}>Reveal original in Finder</button>
             </div>

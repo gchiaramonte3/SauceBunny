@@ -7,6 +7,8 @@ import {
   markersToResolveEdl,
   nearestCanonicalColor,
   nearestResolveColor,
+  transcriptToAvidTxt,
+  type TranscriptMarkerCue,
 } from "./markers";
 import type { MarkerExportSettings } from "./marker-time";
 import type { ReviewComment, ReviewDoc } from "./review";
@@ -274,5 +276,55 @@ describe("colour snapping", () => {
     expect(nearestResolveColor("#ff0000")).toBe("Red");
     expect(nearestResolveColor("#00ffff")).toBe("Cyan");
     expect(nearestResolveColor("#00ff00")).toBe("Green");
+  });
+});
+
+describe("transcriptToAvidTxt", () => {
+  // Cue starts reuse the spec sample's frame-exact anchors (38s → 01:00:37:23 at
+  // 23.976 NDF, Start TC 01:00:00:00), so the golden TCs match the Avid .txt suite.
+  const cues: TranscriptMarkerCue[] = [
+    { start: 38, speaker: "Alice", text: "So here's the thing about the pipeline." },
+    { start: 253, speaker: "Bob", text: "Right, and that's where it breaks." },
+  ];
+
+  it("emits one 5-column V1 line per cue: speaker → Name, cue text → Comment, no header", () => {
+    const lines = transcriptToAvidTxt(cues, S976).trimEnd().split("\n");
+    expect(lines).toHaveLength(2);
+    const cols = lines[0].split("\t");
+    expect(cols).toHaveLength(5);
+    expect(cols[0]).toBe("Alice");                                  // Username
+    expect(cols[1]).toBe("01:00:37:23");                            // absolute TC (38s)
+    expect(cols[2]).toBe("V1");
+    expect(cols[3]).toBe("red");                                    // default color
+    expect(cols[4]).toBe("So here's the thing about the pipeline."); // Comment
+    expect(lines[1].startsWith("Bob\t01:04:12:18\t")).toBe(true);  // 253s
+  });
+
+  it("honors a chosen marker color for the whole batch", () => {
+    const out = transcriptToAvidTxt(cues, S976, "cyan");
+    expect(out).toContain("\tV1\tcyan\t");
+    expect(out).not.toContain("\tred\t");
+  });
+
+  it("carries the Start-TC offset so markers land on the burn-in origin", () => {
+    const zeroBased = transcriptToAvidTxt(cues, { ...S976, sequenceStartTc: "00:00:00:00" });
+    expect(zeroBased).toContain("\t00:00:37:23\t"); // 38s from a 0-based origin
+  });
+
+  it("skips empty / annotation-only cues and never leaks tabs or newlines", () => {
+    const messy: TranscriptMarkerCue[] = [
+      { start: 5, speaker: "Alice", text: "   " },              // whitespace only → skipped
+      { start: 6, speaker: "Alice", text: "" },                 // empty → skipped
+      { start: 7, speaker: "Bob", text: "line one\tline two\nline three" },
+    ];
+    const lines = transcriptToAvidTxt(messy, S976).trimEnd().split("\n");
+    expect(lines).toHaveLength(1);
+    expect(lines[0].split("\t")).toHaveLength(5);                 // inner tab/newline collapsed
+    expect(lines[0].endsWith("line one line two line three")).toBe(true);
+  });
+
+  it("falls back to a generic Name when a cue has no speaker", () => {
+    const out = transcriptToAvidTxt([{ start: 1, speaker: "", text: "unattributed" }], S976);
+    expect(out.startsWith("Speaker\t")).toBe(true);
   });
 });

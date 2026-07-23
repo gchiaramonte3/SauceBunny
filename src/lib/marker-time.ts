@@ -65,6 +65,24 @@ export const RATE_TABLE: Record<FrameRateKey, RateSpec> = {
 };
 
 
+/** Every rate the export UI offers, in display order. */
+export const FRAME_RATE_KEYS: FrameRateKey[] = ["23.976", "24", "25", "29.97", "30", "50", "59.94", "60"];
+
+/** Map a source fps to the closest FrameRateKey (within 0.2), so an export can
+ *  pre-seed to the clip's real rate; null when nothing is close enough. */
+export function fpsToRateKey(fps: number): FrameRateKey | null {
+  const targets: Record<FrameRateKey, number> = {
+    "23.976": 23.976, "24": 24, "25": 25, "29.97": 29.97, "30": 30, "50": 50, "59.94": 59.94, "60": 60,
+  };
+  let best: FrameRateKey | null = null;
+  let bestD = 0.2;
+  for (const k of FRAME_RATE_KEYS) {
+    const d = Math.abs(fps - targets[k]);
+    if (d < bestD) { bestD = d; best = k; }
+  }
+  return best;
+}
+
 const pad = (n: number) => n.toString().padStart(2, "0");
 
 /** 0-based frame index from media start: round(seconds × fpsExact). */

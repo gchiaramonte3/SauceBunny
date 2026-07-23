@@ -102,7 +102,7 @@ import { sanitizeFilename, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
 import { buildDiagnosticsReport, diagnosticsFilename } from "./lib/diagnostics";
 import { extractFrameAsBlob, extractPosterBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
-import { chosenPosterFor } from "./lib/library";
+import { chosenPosterFor, sourceTimecodeFor } from "./lib/library";
 import { exportLocalClipViaMediabunny } from "./lib/mediabunny-export";
 import { extractAudioAsWav16k } from "./lib/mediabunny-audio";
 
@@ -5295,6 +5295,7 @@ export default function App() {
                 reloadToken={transcriptArrivedTick}
                 playheadActive={activeView === "reader"}
                 fps={readerSource?.fps ?? fps}
+                startTimecode={readerSource ? sourceTimecodeFor(readerSource.origPath) ?? undefined : undefined}
                 onSeek={(seconds) => readerPlayerRef.current?.seekTo(seconds)}
                 origin={activeTranscript?.origin ?? "unknown"}
                 onClearTranscript={() => { readerOpenSeqRef.current++; setActiveTranscript(null); setReaderSource(null); setReaderNote(null); setReaderPreparing(false); }}

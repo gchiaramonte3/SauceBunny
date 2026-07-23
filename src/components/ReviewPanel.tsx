@@ -27,7 +27,7 @@ import {
   markersToAvidTxt, markersToPremiereXml, markersToResolveEdl, markersToFcpxml, markersToCsv,
 } from "../lib/markers";
 import {
-  RATE_TABLE, DEFAULT_MARKER_SETTINGS, tcToFrames,
+  RATE_TABLE, DEFAULT_MARKER_SETTINGS, tcToFrames, FRAME_RATE_KEYS, fpsToRateKey,
   type FrameRateKey, type MarkerExportSettings,
 } from "../lib/marker-time";
 
@@ -35,23 +35,7 @@ import {
  *  targets. Persisted marker settings drive every marker format. */
 type ExportKind = "md" | "avid" | "premiere" | "resolve" | "fcpx" | "csv";
 
-const FRAME_RATE_KEYS: FrameRateKey[] = ["23.976", "24", "25", "29.97", "30", "50", "59.94", "60"];
 const MARKER_SETTINGS_KEY = "saucebunny.markerExport";
-
-/** Map a source fps to a FrameRateKey when it's close to a known rate (so the
- *  export dialog opens pre-seeded to the clip's rate), else null. */
-function fpsToRateKey(fps: number): FrameRateKey | null {
-  const targets: Record<FrameRateKey, number> = {
-    "23.976": 23.976, "24": 24, "25": 25, "29.97": 29.97, "30": 30, "50": 50, "59.94": 59.94, "60": 60,
-  };
-  let best: FrameRateKey | null = null;
-  let bestD = 0.2;
-  for (const k of FRAME_RATE_KEYS) {
-    const d = Math.abs(fps - targets[k]);
-    if (d < bestD) { bestD = d; best = k; }
-  }
-  return best;
-}
 
 /** Load persisted marker settings; seed the frame rate from the clip's fps when
  *  nothing is stored yet. Anything stored wins (the user's explicit choice). */

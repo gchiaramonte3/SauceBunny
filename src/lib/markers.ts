@@ -213,6 +213,27 @@ export function markersToAvidTxt(
   return lines.join("\n") + "\n";
 }
 
+/** One transcript cue → one Avid marker: speaker → Username, cue start →
+ *  absolute sequence timecode (the Start-TC offset carries the source's burn-in
+ *  origin for alignment), cue text → Comment. Same 5-column tab-delimited
+ *  contract as {@link markersToAvidTxt}: `Name⇥TC⇥V1⇥color⇥Comment`, no header,
+ *  LF, UTF-8 (no BOM). Empty / annotation-only cues are skipped. Sequential
+ *  cues never share a frame in practice, so no overlap-import risk. */
+export type TranscriptMarkerCue = { start: number; speaker: string; text: string };
+
+export function transcriptToAvidTxt(
+  cues: TranscriptMarkerCue[], settings: MarkerExportSettings, color: CanonicalColor = "red",
+): string {
+  const lines: string[] = [];
+  for (const c of cues) {
+    const comment = inlineClean(c.text);
+    if (!comment) continue;
+    const name = inlineClean(c.speaker) || "Speaker";
+    lines.push(`${name}\t${absTc(c.start, settings)}\tV1\t${color}\t${comment}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
 // ── 2. Adobe Premiere Pro — FCP7 / XMEML .xml ────────────────────────────────
 // <in>/<out> are 0-based frame counts from sequence frame 0 (the <timecode>
 // block carries the display start separately). Point = <out>-1</out>. Colour is
