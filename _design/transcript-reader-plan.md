@@ -183,8 +183,16 @@ scan is the index, exactly as diarization has none).
   (`hasSource=false` self-hides the source chrome). **Deferred to Phase 1b:** the
   compact `LocalMediaPlayer` + click-to-seek (text-only for now, static
   highlight); the visual layout wants the user's eye.
-- Next: Phase 1b (compact player), Phase 2 (Avid+SRT export), Phase 3 (setters +
-  AI analysis tabs).
+- **Reader v1 feedback pass: DONE.** Row thumbnails (`9911464`, reuses the
+  Library poster cache + lazy IntersectionObserver) and the follow-along player
+  (`ec8e552`): an ISOLATED reader source + own player (Clip untouched), the r88
+  single-clock gate (pause-gate on activeView + Space routed to the reader
+  player + gated writer), click-a-line-to-seek, and a far-right dock that
+  pop-outs to a floating card (in-window, same clock — true OS-window deferred).
+  Web/source-less transcripts stay text-only.
+- Next: Phase 2 (Avid+SRT export), Phase 3 (source-TC setter + AI analysis tabs).
+  Possible follow-ups from feedback: web-source follow-along player; true
+  detach-to-OS-window.
 
 ## Build order (by dependency)
 
