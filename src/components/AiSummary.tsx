@@ -53,7 +53,7 @@ const SUGGESTIONS = [
 
 const DEFAULT_STYLE: SummaryStyle = { format: "bullets", length: "standard" };
 
-function buildSystemPrompt(transcript: string, truncated: boolean, style: SummaryStyle, hasSpeakers: boolean): string {
+export function buildSystemPrompt(transcript: string, truncated: boolean, style: SummaryStyle, hasSpeakers: boolean): string {
   const fmt =
     style.format === "numbered"
       ? '- Structure lists as a numbered list using "1. ", "2. " — one item per line.'

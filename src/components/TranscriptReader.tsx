@@ -57,12 +57,17 @@ type Props = {
   stageFloating: boolean;
   /** Bring the player back — expand + re-dock (the rail toggle). */
   onExpandStage: () => void;
+  /** The reading pane's active tab — the transcript document vs its AI analysis. */
+  docTab: "document" | "analysis";
+  onDocTab: (tab: "document" | "analysis") => void;
+  /** The AI analysis pane (App-rendered <ReaderAnalysis>), shown on the Analysis tab. */
+  analysis?: ReactNode;
   /** The embedded <TranscriptViewer>, fed by App. Rendered only once a
    *  transcript is selected. */
   children: ReactNode;
 };
 
-export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, stage, stageAvailable, stageExpanded, stageFloating, onExpandStage, children }: Props) {
+export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, stage, stageAvailable, stageExpanded, stageFloating, onExpandStage, docTab, onDocTab, analysis, children }: Props) {
   const [list, setList] = useState<LibraryTranscript[]>([]);
   const [tick, setTick] = useState(0);
 
@@ -135,14 +140,31 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
         </div>
       </aside>
       <main className="cp-reader-main">
-        {activePath
-          ? children
-          : (
-            <div className="cp-reader-hint">
-              <IconTranscript size={28} />
-              <p>Pick a transcript to read.</p>
+        {activePath ? (
+          <>
+            <div className="cp-reader-tabs" role="tablist" aria-label="Transcript view">
+              <button
+                type="button" role="tab" aria-selected={docTab === "document"}
+                className={"cp-reader-tab" + (docTab === "document" ? " active" : "")}
+                onClick={() => onDocTab("document")}
+              >Document</button>
+              <button
+                type="button" role="tab" aria-selected={docTab === "analysis"}
+                className={"cp-reader-tab" + (docTab === "analysis" ? " active" : "")}
+                onClick={() => onDocTab("analysis")}
+              >Analysis</button>
             </div>
-          )}
+            {/* Both panes stay mounted (hidden) so switching tabs keeps the
+                reader's scroll + the viewer's karaoke highlight alive. */}
+            <div className="cp-reader-pane" hidden={docTab !== "document"}>{children}</div>
+            <div className="cp-reader-pane" hidden={docTab !== "analysis"}>{analysis}</div>
+          </>
+        ) : (
+          <div className="cp-reader-hint">
+            <IconTranscript size={28} />
+            <p>Pick a transcript to read.</p>
+          </div>
+        )}
       </main>
       {stageAvailable && (
         <aside className="cp-reader-stage" aria-label="Player">

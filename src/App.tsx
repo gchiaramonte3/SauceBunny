@@ -55,6 +55,7 @@ import { QueueDrawer } from "./components/QueueDrawer";
 import { TranscriptReader } from "./components/TranscriptReader";
 import { TranscriptViewer } from "./components/TranscriptViewer";
 import { ReaderPlayerStage, type ReaderSource } from "./components/ReaderPlayerStage";
+import { ReaderAnalysis } from "./components/ReaderAnalysis";
 import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutSheet } from "./components/ShortcutSheet";
 import { DropTarget } from "./components/DropTarget";
@@ -3757,6 +3758,8 @@ export default function App() {
   // The open transcript's source start TC (feeds the Avid export offset). Derived
   // state: set when a transcript opens and when the setter writes/clears.
   const [readerStartTc, setReaderStartTc] = useState<string | undefined>(undefined);
+  // Reading pane tab: the transcript document vs its saved AI analysis.
+  const [readerDocTab, setReaderDocTab] = useState<"document" | "analysis">("document");
   // Why there's no follow-along player, when there isn't one (web / missing file).
   const [readerNote, setReaderNote] = useState<string | null>(null);
   // True while an ffmpeg playback copy is being prepared for an exotic-codec
@@ -3815,6 +3818,7 @@ export default function App() {
     const srcKey = entry.sourcePath ?? entry.sourceUrl ?? null;
     setReaderSourceKey(srcKey);
     setReaderStartTc(srcKey ? sourceTimecodeFor(srcKey) ?? undefined : undefined);
+    setReaderDocTab("document"); // a fresh transcript opens on its text
     setReaderNote(null);
     setReaderPreparing(!!entry.sourcePath);
     // Publish 0 so the highlight can't read a frame left in the Clip's fps.
@@ -5330,6 +5334,18 @@ export default function App() {
               stageExpanded={readerStageOpen}
               stageFloating={readerFloating}
               onExpandStage={() => { setReaderStageOpen(true); setReaderFloating(false); }}
+              docTab={readerDocTab}
+              onDocTab={setReaderDocTab}
+              analysis={
+                <ReaderAnalysis
+                  transcriptPath={transcriptPath}
+                  visible={activeView === "reader" && readerDocTab === "analysis"}
+                  selectedModelId={defaults.llmSummarizationModel}
+                  style={{ format: defaults.summaryFormat, length: defaults.summaryLength }}
+                  onSeek={(seconds) => readerPlayerRef.current?.seekTo(seconds)}
+                  onOpenSettings={() => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); }}
+                />
+              }
               stage={
                 <ReaderPlayerStage
                   source={readerSource}
