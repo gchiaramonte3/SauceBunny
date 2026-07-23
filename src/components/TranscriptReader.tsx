@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { IconTranscript, IconPanelLeft } from "./Icons";
 import { ReaderRowThumb } from "./ReaderRowThumb";
+import { ReaderRowMenu, type RowMenuTarget } from "./ReaderRowMenu";
 import type { LibraryCardArt } from "./LibraryCard";
 import {
   loadTranscriptLibrary, groupTranscriptsByFolder, type LibraryTranscript,
@@ -62,14 +63,19 @@ type Props = {
   onDocTab: (tab: "document" | "analysis") => void;
   /** The AI analysis pane (App-rendered <ReaderAnalysis>), shown on the Analysis tab. */
   analysis?: ReactNode;
+  /** Rename a transcript's file on disk (+ carry app references). Throws on failure. */
+  onRenameTranscript: (entry: TranscriptHistoryEntry, newStem: string) => Promise<void>;
+  /** Move a transcript (+ sidecars) into a folder. Throws on failure. */
+  onMoveTranscript: (entry: TranscriptHistoryEntry, destDir: string) => Promise<void>;
   /** The embedded <TranscriptViewer>, fed by App. Rendered only once a
    *  transcript is selected. */
   children: ReactNode;
 };
 
-export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, stage, stageAvailable, stageExpanded, stageFloating, onExpandStage, docTab, onDocTab, analysis, children }: Props) {
+export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, stage, stageAvailable, stageExpanded, stageFloating, onExpandStage, docTab, onDocTab, analysis, onRenameTranscript, onMoveTranscript, children }: Props) {
   const [list, setList] = useState<LibraryTranscript[]>([]);
   const [tick, setTick] = useState(0);
+  const [rowMenu, setRowMenu] = useState<RowMenuTarget | null>(null);
 
   // Re-scan when the reader shows, a new transcript lands, or the library path
   // resolves. Mirrors the Home shelf's refresh discipline.
@@ -92,6 +98,16 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   }, [tick, transcriptLibraryPath]);
 
   const groups = useMemo(() => groupTranscriptsByFolder(list), [list]);
+
+  // Move-dialog destinations: the library root + each existing one-level folder.
+  const folderOptions = useMemo(() => {
+    const root = transcriptLibraryPath.replace(/\/+$/, "");
+    const opts = [{ label: "Library root", dir: root }];
+    for (const g of groups) {
+      if (g.folder) opts.push({ label: g.label, dir: `${root}/${g.folder}` });
+    }
+    return opts;
+  }, [groups, transcriptLibraryPath]);
 
   // The third grid track sizes to the stage: full when docked-open, a thin rail
   // when collapsed, zero when floating (the panel lifts to a fixed card) or when
@@ -118,6 +134,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
                   type="button"
                   className={"cp-reader-row" + (t.path === activePath ? " active" : "")}
                   onClick={() => onOpenTranscript(t.entry)}
+                  onContextMenu={(e) => { e.preventDefault(); setRowMenu({ entry: t.entry, title: t.title, x: e.clientX, y: e.clientY }); }}
                   aria-current={t.path === activePath ? "true" : undefined}
                   title={t.title}
                 >
@@ -184,6 +201,16 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
               itself), so popping out never remounts / reloads the player. */}
           {(stageExpanded || stageFloating) && stage}
         </aside>
+      )}
+      {rowMenu && (
+        <ReaderRowMenu
+          target={rowMenu}
+          onClose={() => setRowMenu(null)}
+          folderOptions={folderOptions}
+          libraryPath={transcriptLibraryPath}
+          onRename={onRenameTranscript}
+          onMove={onMoveTranscript}
+        />
       )}
     </div>
   );

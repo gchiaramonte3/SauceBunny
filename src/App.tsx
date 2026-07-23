@@ -67,9 +67,11 @@ import {
   findForSource,
   touchEntry,
   removeEntry as removeTranscriptEntry,
+  renameEntryPath as renameTranscriptEntryPath,
   getHistory as getTranscriptHistory,
   type TranscriptHistoryEntry,
 } from "./lib/transcript-history";
+import { renameSpeakerOverridesPath } from "./components/transcript/helpers";
 import {
   deriveOnboardingSteps, onboardingComplete,
   loadOnboardingDismissed, saveOnboardingDismissed,
@@ -3914,6 +3916,34 @@ export default function App() {
     return () => window.clearInterval(id);
   }, [metadata, localFilePath, activeSourceUrl]);
 
+  // Rename a transcript's file on disk (+ its sidecars, via Rust), then carry
+  // the app's references: path-keyed speaker names, the history entry (path +
+  // title), and the active transcript if it's the one being renamed. Throws on
+  // a backend failure (collision / bad name) so the dialog can surface it.
+  const handleRenameTranscript = useCallback(async (entry: TranscriptHistoryEntry, newStem: string) => {
+    const oldPath = entry.srtPath;
+    const newPath = await invoke<string>("rename_transcript", { srtPath: oldPath, newStem });
+    if (newPath === oldPath) return;
+    renameSpeakerOverridesPath(oldPath, newPath);
+    renameTranscriptEntryPath(oldPath, newPath, newStem); // fires TRANSCRIPTS_CHANGED
+    if (activeTranscriptRef.current?.path === oldPath) {
+      setActiveTranscript((prev) => (prev ? { ...prev, path: newPath } : prev));
+    }
+  }, []);
+
+  // Move a transcript (+ sidecars) into a folder, carrying the same references
+  // (title unchanged). Throws on failure so the dialog can surface it.
+  const handleMoveTranscript = useCallback(async (entry: TranscriptHistoryEntry, destDir: string) => {
+    const oldPath = entry.srtPath;
+    const newPath = await invoke<string>("move_transcript_to_folder", { srtPath: oldPath, destDir });
+    if (newPath === oldPath) return;
+    renameSpeakerOverridesPath(oldPath, newPath);
+    renameTranscriptEntryPath(oldPath, newPath);
+    if (activeTranscriptRef.current?.path === oldPath) {
+      setActiveTranscript((prev) => (prev ? { ...prev, path: newPath } : prev));
+    }
+  }, []);
+
   // THE single-clock gate (r88): exactly one media element is ever unpaused.
   // The Clip player keeps playing across views ([hidden] is display:none, audio
   // deliberately continues), so entering the reader must pause it, and leaving
@@ -5336,6 +5366,8 @@ export default function App() {
               onExpandStage={() => { setReaderStageOpen(true); setReaderFloating(false); }}
               docTab={readerDocTab}
               onDocTab={setReaderDocTab}
+              onRenameTranscript={handleRenameTranscript}
+              onMoveTranscript={handleMoveTranscript}
               analysis={
                 <ReaderAnalysis
                   transcriptPath={transcriptPath}

@@ -206,6 +206,17 @@ export function speakerOverridesKey(path: string): string {
   return `saucebunny.speakerNames.${path}`;
 }
 
+/** Carry a transcript's path-keyed speaker names to a new path (rename/move).
+ *  The fingerprint mirror (keyed on the SOURCE, unchanged) is untouched. */
+export function renameSpeakerOverridesPath(oldPath: string, newPath: string): void {
+  try {
+    const val = localStorage.getItem(speakerOverridesKey(oldPath));
+    if (val == null) return;
+    localStorage.setItem(speakerOverridesKey(newPath), val);
+    localStorage.removeItem(speakerOverridesKey(oldPath));
+  } catch { /* ignore */ }
+}
+
 /** Fired by the panel whenever overrides change, so live consumers (the
  *  caption overlay) can re-read without polling. Dispatched on TWO buses
  *  under this one name: a window CustomEvent (synchronous, same-window —

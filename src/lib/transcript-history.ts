@@ -179,6 +179,21 @@ export function removeEntry(id: string): void {
   notifyChanged();
 }
 
+/** Re-point a history entry to a moved/renamed transcript file (new srtPath,
+ *  optional new title). Source keys are left intact. No-op if none match. */
+export function renameEntryPath(oldPath: string, newPath: string, newTitle?: string): void {
+  const entries = safeRead();
+  let changed = false;
+  for (const e of entries) {
+    if (e.srtPath === oldPath) {
+      e.srtPath = newPath;
+      if (newTitle) e.title = newTitle;
+      changed = true;
+    }
+  }
+  if (changed) { safeWrite(entries); notifyChanged(); }
+}
+
 
 /**
  * Find the most-recent entry matching a source. Used on import/fetch
