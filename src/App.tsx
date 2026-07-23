@@ -179,6 +179,11 @@ const ACTIVE_VIEW_KEY = "saucebunny.activeView";
 const WEBCODECS_EXTRACT_MAX_SEC = 20 * 60;
 const WEBCODECS_EXTRACT_TIMEOUT_MS = 120_000;
 
+/** Hard cap on retained pipeline-log rows (oldest dropped). Generous on
+ *  purpose: this is the no-telemetry bug-report path, so losing the head of a
+ *  sidecar run would cost more than the memory it saves. */
+const LOG_MAX = 5000;
+
 // One-shot rebrand migration (clippull.* → saucebunny.*). Runs at module load,
 // before App renders so the default-loading useState initializers see the
 // migrated keys. Body lives in lib/migrate-storage.ts.
@@ -1180,7 +1185,14 @@ export default function App() {
         return [...prev.slice(0, -1), updated];
       }
       logIdRef.current += 1;
-      return [...prev, { id: logIdRef.current, ts: nowHms(), tag, source, message }];
+      const next = [...prev, { id: logIdRef.current, ts: nowHms(), tag, source, message }];
+      // The only session list with no bound. ffmpeg's `frame=/time=` progress
+      // carries no percent, so the collapse above misses it and a long run
+      // appends a row per tick, each an O(n) copy that LogsPanel then renders.
+      // The cap is deliberately generous: diagnostics reports "last 300 of N"
+      // (diagnostics.ts), and a tight cap would quietly make N stop meaning
+      // what it says on the one path users have for reporting a bug.
+      return next.length > LOG_MAX ? next.slice(next.length - LOG_MAX) : next;
     });
   }, []);
 
@@ -3354,15 +3366,25 @@ export default function App() {
           durationSec <= WEBCODECS_EXTRACT_MAX_SEC;
         let wavBlob: Blob | null = null;
         if (canFastPath) {
+          // The extraction gets its OWN signal, chained to the user's Stop, so
+          // the timeout can actively cancel it. Without that, losing the race
+          // just abandons it: it runs to completion in the background holding
+          // the whole decoded track plus its staging copy, while ffmpeg decodes
+          // the same file alongside it. The user-Stop guard below deliberately
+          // still reads `abort.signal`, so cancel semantics are unchanged.
+          const fastAbort = new AbortController();
+          const chainAbort = () => fastAbort.abort();
+          abort.signal.addEventListener("abort", chainAbort);
           let timer: ReturnType<typeof setTimeout> | undefined;
           const timeout = new Promise<null>((resolve) => {
-            timer = setTimeout(resolve, WEBCODECS_EXTRACT_TIMEOUT_MS, null);
+            timer = setTimeout(() => { fastAbort.abort(); resolve(null); }, WEBCODECS_EXTRACT_TIMEOUT_MS);
           });
           wavBlob = await Promise.race([
-            extractAudioAsWav16k(localFilePath, undefined, undefined, abort.signal).catch(() => null),
+            extractAudioAsWav16k(localFilePath, undefined, undefined, fastAbort.signal).catch(() => null),
             timeout,
           ]);
           if (timer) clearTimeout(timer);
+          abort.signal.removeEventListener("abort", chainAbort);
         }
         // Extraction can be the slow "stuck at 0%" phase on big 4K files. If
         // the user hit Stop while it ran, bail here — no backend job was ever
@@ -5466,7 +5488,7 @@ export default function App() {
               <TranscriptViewer
                 path={transcriptPath}
                 reloadToken={transcriptArrivedTick}
-                playheadActive={activeView === "reader"}
+                playheadActive={activeView === "reader" && readerDocTab === "document"}
                 fps={readerSource?.fps ?? fps}
                 startTimecode={readerStartTc}
                 onSetSourceTimecode={readerSourceKey ? (tc) => {
@@ -6041,6 +6063,11 @@ export default function App() {
                   with no review panel is a session you can't comment in. */}
               {(roomActive || !panelDetached) && <QueueDrawer
                 open={roomActive ? true : queueOpen}
+                /* Clip is keep-alive, so this subtree stays mounted on Home /
+                   Library. `|| roomActive` is load-bearing: room.css un-hides
+                   the Clip view during a session while activeView is
+                   "coreview", and the review rail there is genuinely visible. */
+                viewActive={activeView === "clip" || roomActive}
                 roomFace={roomActive}
                 focusItem={queueFocusItem}
                 onClose={() => setQueueOpenChoice(false)}

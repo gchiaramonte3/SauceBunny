@@ -148,6 +148,11 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
     let timer = 0;
     try {
       ctx = new AudioContext();
+      // Streams arrive from getUserMedia/pc.ontrack, never from a gesture, so
+      // WKWebView starts this context SUSPENDED: getByteTimeDomainData would
+      // read the 128 silence midpoint forever and the speaking ring would never
+      // light for anyone. No-op when it's already running (see level-meter.ts).
+      if (ctx.state === "suspended") void ctx.resume();
       const src = ctx.createMediaStreamSource(new MediaStream([at]));
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;

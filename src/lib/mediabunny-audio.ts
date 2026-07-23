@@ -42,6 +42,10 @@ export async function extractAudioAsWav16k(
       chunks.push(wrapped.buffer);
     }
     if (chunks.length === 0) return null;
+    // Bail before the expensive part if this run was abandoned (caller timeout
+    // or user Stop): everything below allocates a full copy of the track at the
+    // SOURCE rate, and an abandoned run would hold it for nothing.
+    if (signal?.aborted) return null;
 
     // Concat into one AudioBuffer at the source rate, then resample +
     // downmix to 16k mono via OfflineAudioContext. This is the same
@@ -75,6 +79,7 @@ export async function extractAudioAsWav16k(
     src.connect(renderCtx.destination);
     src.start();
     const rendered = await renderCtx.startRendering();
+    if (signal?.aborted) return null;
 
     // Third pass: pack rendered float32 mono into 16-bit PCM + WAV header.
     return encodeWavMono16(rendered.getChannelData(0), targetRate);

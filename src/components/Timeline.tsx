@@ -12,9 +12,11 @@ import { usePlayheadFrames } from "../lib/playhead-store";
 const FILMSTRIP_H = 44;
 
 /** Max cached filmstrips (source+count keys). Strips are the heavy cache —
- *  up to 24 JPEG data URLs at 2× DPR each — so the cap is deliberately small;
- *  reads refresh recency, so the displayed source is never the one evicted. */
-const FILMSTRIP_CACHE_MAX = 4;
+ *  up to 24 JPEG data URLs at 2× DPR each — so the cap stays small; reads
+ *  refresh recency, so the displayed source is never the one evicted. Sized so
+ *  one source's open AND closed drawer widths both survive a toggle: at 4 the
+ *  LRU thrashed and re-decoded the strip on every open/close. */
+const FILMSTRIP_CACHE_MAX = 8;
 
 /**
  * Single queued clip's range — rendered as a muted band on the track so
@@ -175,12 +177,23 @@ export function Timeline({
   useEffect(() => {
     const el = trackRef.current;
     if (!el) return;
+    let timer = 0;
+    let primed = false;
+    const commit = (w: number) =>
+      setTrackW((prev) => (Math.abs(prev - w) >= 24 ? Math.round(w) : prev));
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width ?? 0;
-      setTrackW((prev) => (Math.abs(prev - w) >= 24 ? Math.round(w) : prev));
+      // First measurement paints immediately; after that, commit only on the
+      // trailing edge. The drawer's 280ms width transition fires this
+      // continuously, and each distinct 24px bucket used to start a whole new
+      // filmstrip decode — a second mediabunny Input + VideoDecoder on the same
+      // file, competing for the same read_file_range IPC the audio pump needs.
+      if (!primed) { primed = true; commit(w); return; }
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => commit(w), 350);
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => { window.clearTimeout(timer); ro.disconnect(); };
   }, []);
 
   // Build the thumbnail filmstrip from the local file (mediabunny, one pass).

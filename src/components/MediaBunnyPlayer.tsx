@@ -85,6 +85,18 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
    * the "previous decode loop schedules audio for a stale timeline" race.
    */
   const genRef = useRef(0);
+  /**
+   * Has the A/V clock been anchored for the CURRENT generation?
+   *
+   * The anchor used to be set at the moment play/seek was *requested*, which
+   * charged the whole demux-seek + first-decode latency to the audio: by the
+   * time the first buffer arrived it was already "late" and got discarded, so
+   * every transcript-cue click opened a silent hole while the picture and the
+   * playhead (both reading the still-advancing context clock) looked perfect.
+   * Now the anchor is established from the first sample actually DELIVERED, so
+   * that latency becomes "starts a few ms later" instead of "loses a few ms".
+   */
+  const anchoredRef = useRef(false);
   /** Audio source nodes currently scheduled — cancelled on stop/seek. */
   const scheduledRef = useRef<AudioBufferSourceNode[]>([]);
   /** Most recent drawn frame — kept so React renders stay idempotent. */
@@ -106,7 +118,23 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     if (!playingRef.current) return startMediaTimeRef.current;
     const ctx = audioCtxRef.current;
     if (!ctx) return startMediaTimeRef.current;
+    // Pre-roll: play/seek has been requested but no sample has landed yet, so
+    // the anchor is stale. Hold at the requested time rather than measuring
+    // against a previous generation's anchor (which would jump the playhead).
+    if (!anchoredRef.current) return startMediaTimeRef.current;
     return startMediaTimeRef.current + (ctx.currentTime - startContextTimeRef.current);
+  };
+
+  /**
+   * Pin the media clock to the wall clock using the first sample actually
+   * delivered for this generation. Audio owns the anchor when there's an audio
+   * track (it's the sample-accurate clock); the video loop only anchors when
+   * there's no audio, or audio didn't produce anything in time.
+   */
+  const anchorClock = (mediaTime: number, ctx: AudioContext) => {
+    startMediaTimeRef.current = mediaTime;
+    startContextTimeRef.current = ctx.currentTime;
+    anchoredRef.current = true;
   };
 
   const drawCanvas = (src: HTMLCanvasElement | OffscreenCanvas) => {
@@ -147,6 +175,10 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
   /** Cancel all in-flight work without changing playing state. */
   const cancelInFlight = () => {
     genRef.current++;
+    // A new generation must re-anchor from its own first delivered sample.
+    // (stopPlayback reads currentMediaTime() before calling this, so the
+    // resume point is already captured against the outgoing anchor.)
+    anchoredRef.current = false;
     // Drop any pending scrub target too; the in-flight decode (if any) is
     // gated by the gen bump above and won't paint.
     scrubPumpRef.current?.cancel();
@@ -217,8 +249,22 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     const ctx = audioCtxRef.current;
     if (!sink || !ctx) return;
     try {
+      // Audio owns the clock anchor when there IS an audio track, so hold the
+      // first frame until it lands (bounded — a silent or undecodable track
+      // must never stall the picture). With no audio sink, video anchors.
+      const audioLeads = !!audioSinkRef.current;
       for await (const wrapped of sink.canvases(fromTime, durationRef.current)) {
         if (gen !== genRef.current) return;
+        if (!anchoredRef.current) {
+          if (audioLeads) {
+            const deadline = performance.now() + 500;
+            while (!anchoredRef.current && performance.now() < deadline) {
+              await new Promise<void>((r) => setTimeout(r, 10));
+              if (gen !== genRef.current) return;
+            }
+          }
+          if (!anchoredRef.current) anchorClock(wrapped.timestamp, ctx);
+        }
         const targetCtxTime = startContextTimeRef.current + (wrapped.timestamp - startMediaTimeRef.current);
         const waitMs = (targetCtxTime - ctx.currentTime) * 1000;
         if (waitMs > 0) {
@@ -251,18 +297,36 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     try {
       for await (const wrapped of sink.buffers(fromTime, durationRef.current)) {
         if (gen !== genRef.current) return;
+        // First buffer of this generation owns the clock — see anchoredRef.
+        if (!anchoredRef.current) anchorClock(wrapped.timestamp, ctx);
         const source = ctx.createBufferSource();
         source.buffer = wrapped.buffer;
         source.connect(gain);
-        const targetCtxTime = startContextTimeRef.current + (wrapped.timestamp - startMediaTimeRef.current);
+        let targetCtxTime = startContextTimeRef.current + (wrapped.timestamp - startMediaTimeRef.current);
         if (targetCtxTime <= ctx.currentTime) {
-          // We're behind — start immediately and offset into the chunk so
-          // we don't double-play already-past samples.
           const offset = Math.max(0, ctx.currentTime - targetCtxTime);
-          if (offset < wrapped.buffer.duration) source.start(0, offset);
+          if (offset < wrapped.buffer.duration) {
+            // Slightly behind — start now, offset into the chunk so we don't
+            // replay already-past samples.
+            source.start(0, offset);
+          } else {
+            // More than a whole chunk late (~21ms for AAC). This case used to
+            // fall through and never start the node at all, so the audio was
+            // simply lost — and since the loop never re-anchored it kept
+            // discarding, producing an open-ended silent stretch while the
+            // picture and playhead ran on regardless. Re-anchor to NOW: one
+            // ~20ms discontinuity, then audio tracks again. The video loop
+            // reads the same anchor, so A/V stay locked.
+            anchorClock(wrapped.timestamp, ctx);
+            targetCtxTime = startContextTimeRef.current;
+            source.start(0);
+          }
         } else {
           source.start(targetCtxTime);
         }
+        // Every path above starts the node, so onended is guaranteed to fire
+        // and drain this array. (Never-started nodes used to be pushed here
+        // too, where they sat forever holding their decoded PCM.)
         scheduledRef.current.push(source);
         source.onended = () => {
           const idx = scheduledRef.current.indexOf(source);
@@ -282,6 +346,34 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
         onError?.(`Audio decode failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+  };
+
+  /**
+   * Resume the context, then run both decode loops for `gen`.
+   *
+   * The resume must be AWAITED. This context is built inside an effect, never
+   * inside a user gesture, so WKWebView can start it suspended — and a
+   * gestureless caller (a remote transport op arriving from the co-review
+   * network callback) would otherwise leave it suspended: ctx.currentTime
+   * frozen, no audio, yet the UI reporting "playing". Awaiting costs nothing
+   * now that the clock is anchored from the first delivered buffer rather than
+   * from this moment.
+   */
+  const startLoops = async (ctx: AudioContext, fromTime: number, gen: number) => {
+    if (ctx.state === "suspended") {
+      try { await ctx.resume(); } catch { /* fall through to the state check */ }
+      if (gen !== genRef.current) return;
+      if (ctx.state === "suspended") {
+        playingRef.current = false;
+        setIsPlaying(false);
+        onPlayStateChange?.(false);
+        onError?.("Audio could not start. The audio context stayed suspended.");
+        return;
+      }
+    }
+    if (gen !== genRef.current) return;
+    runAudioLoop(fromTime, gen);
+    runVideoLoop(fromTime, gen);
   };
 
   // Periodic time-update tick for the parent's playhead — independent of
@@ -309,19 +401,16 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       if (!readyRef.current) return;
       const ctx = audioCtxRef.current;
       if (!ctx) return;
-      // Resume the AudioContext if a previous user-gesture-less load left
-      // it suspended (Safari is strict about this).
-      if (ctx.state === "suspended") ctx.resume().catch(() => { /* ignore */ });
       cancelInFlight();
       const gen = ++genRef.current;
-      // Re-anchor the master clock to "now starts playing from this time"
-      startContextTimeRef.current = ctx.currentTime;
+      // No anchor here: the clock is pinned by the first sample the loops
+      // actually deliver (see anchoredRef), so decode latency delays the start
+      // instead of being charged to the audio and dropped.
       // startMediaTime stays whatever it was — the resume point.
       playingRef.current = true;
       setIsPlaying(true);
       onPlayStateChange?.(true);
-      runAudioLoop(startMediaTimeRef.current, gen);
-      runVideoLoop(startMediaTimeRef.current, gen);
+      void startLoops(ctx, startMediaTimeRef.current, gen);
     },
     pause: () => stopPlayback(),
     seekTo: (s: number) => {
@@ -329,15 +418,19 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       const wasPlaying = playingRef.current;
       cancelInFlight();
       startMediaTimeRef.current = clamped;
-      onTimeUpdate?.(clamped);
+      // Via the ref, like the 100ms tick and the shuttle loop: this handle is
+      // built with [] deps, so calling the prop directly would publish through
+      // the callback captured at MOUNT (a stale fps), desyncing the transcript
+      // from the player on every cue click.
+      onTimeUpdateRef.current?.(clamped);
       if (wasPlaying) {
         const ctx = audioCtxRef.current;
         if (!ctx) return;
-        if (ctx.state === "suspended") ctx.resume().catch(() => { /* ignore */ });
         const gen = ++genRef.current;
-        startContextTimeRef.current = ctx.currentTime;
-        runAudioLoop(clamped, gen);
-        runVideoLoop(clamped, gen);
+        // Anchored from the first delivered sample, not from here — this is
+        // the path a transcript-cue click takes, and anchoring at the request
+        // charged the whole seek latency to the audio and lost it.
+        void startLoops(ctx, clamped, gen);
       } else {
         // Paused seek / scrub. Coalesce into the single-flight pump: record
         // the latest target and let it chase the cursor, dropping intermediate

@@ -562,6 +562,12 @@ export function TranscriptViewer({
       // inputs — handled by their own onKeyDown handlers, and we
       // don't want to interfere with normal typing.
       if (!e.metaKey || e.key.toLowerCase() !== "g") return;
+      // Same visibility gate as ⌘F above. This component is mounted twice (the
+      // reader and the drawer), so without it a ⌘G advanced the HIDDEN
+      // instance's cursor and turned its auto-scroll off, which nothing turns
+      // back on — the karaoke follow silently stopped working.
+      const root = wrapRef.current;
+      if (!root || root.closest("[hidden]") || root.closest('[aria-hidden="true"]')) return;
       // Same modal gate as ⌘F above — cycling matches (and its scroll) while a
       // modal dialog is open would act behind the scrim.
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;

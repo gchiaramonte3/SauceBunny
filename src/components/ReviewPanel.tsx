@@ -286,14 +286,21 @@ export function ReviewPanel({
   // Preview the in-progress range on the App timeline; clear on unmount. The
   // playhead-following end is clamped against the armed mark so the band
   // never inverts while scrubbing behind it.
+  // Once BOTH marks are set the band is fixed, so the playhead contributes
+  // nothing to the payload — but keeping currentSec in the deps republished a
+  // value-identical object on every tick, and because that lands in App state
+  // it re-rendered the whole App tree at source-fps. Follow the playhead only
+  // while an edge is still armed.
+  const rangeArmed = rangeIn == null || rangeOut == null;
+  const liveSec = rangeArmed ? currentSec : null;
   useEffect(() => {
     if (rangeIn == null && rangeOut == null) { onRangeDraft?.(null); return; }
-    const t = currentSec ?? rangeIn ?? rangeOut ?? 0;
+    const t = liveSec ?? rangeIn ?? rangeOut ?? 0;
     const start = rangeIn ?? Math.min(t, rangeOut!);
     const end = rangeOut ?? Math.max(t, rangeIn!);
-    onRangeDraft?.({ start, end, color: authorColor, live: rangeIn == null || rangeOut == null });
+    onRangeDraft?.({ start, end, color: authorColor, live: rangeArmed });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rangeIn, rangeOut, currentSec, authorColor]);
+  }, [rangeIn, rangeOut, liveSec, rangeArmed, authorColor]);
   useEffect(() => () => onRangeDraft?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps
   // Hotkey registration — App dispatches ⇧I/⇧O here, gated on the Review tab
   // being active in the docked drawer. No deps: re-registers every render so

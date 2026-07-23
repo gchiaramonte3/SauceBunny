@@ -34,6 +34,15 @@ type TabDef = {
 
 type Props = {
   open: boolean;
+  /**
+   * Is the view hosting this drawer actually on screen? Keep-alive views stay
+   * MOUNTED when inactive, so without this the transcript's unvirtualized
+   * per-turn render and the review list both keep rebuilding at source-fps
+   * against a `display:none` subtree, competing with the audio decode loop for
+   * the main thread. Defaults true for the popped-out panel window, which has
+   * no view concept and is always visible when it exists.
+   */
+  viewActive?: boolean;
   onClose: () => void;
   queue: QueuedClip[];
   fps: number;
@@ -208,7 +217,7 @@ function loadDrawerWidth(): number {
 }
 
 export function QueueDrawer({
-  open, onClose, queue, fps, running, hasFolder,
+  open, viewActive = true, onClose, queue, fps, running, hasFolder,
   onRemove, onClearAll, onExportAll, onStop,
   transcriptPath, transcriptOrigin, playheadAvailable, transcriptFps,
   sourceStartTimecode, onSetSourceTimecode,
@@ -811,7 +820,7 @@ export function QueueDrawer({
           /* Playhead only while ACTIVE — a hidden transcript's karaoke
              highlight + autoscroll stay frozen, then snap to the current
              position when the tab re-shows. */
-          playheadActive={playheadAvailable && shownTab === "transcript"}
+          playheadActive={playheadAvailable && viewActive && shownTab === "transcript"}
           fps={transcriptFps}
           startTimecode={sourceStartTimecode}
           onSetSourceTimecode={onSetSourceTimecode}
@@ -853,7 +862,7 @@ export function QueueDrawer({
           sourceKey={reviewSourceKey ?? null}
           sourceTitle={reviewSourceTitle}
           /* Playhead only while ACTIVE — see the transcript note above. */
-          playheadActive={playheadAvailable && shownTab === "review"}
+          playheadActive={playheadAvailable && viewActive && shownTab === "review"}
           fps={fps}
           onSeek={onTranscriptSeek}
           drawActive={!!reviewDrawActive}
