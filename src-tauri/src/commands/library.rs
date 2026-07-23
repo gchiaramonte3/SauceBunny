@@ -280,6 +280,21 @@ fn transcript_ext(path: &Path) -> Option<String> {
 /// `depth_remaining` folder levels) into `out`. Mirrors scan_dir's skip rules
 /// (hidden, symlinks, non-UTF-8, unreadable dirs) but flattens instead of
 /// building a tree — the frontend groups by `folder`.
+/// Cheap content probe: does this transcript carry speaker labels? True for the
+/// in-app diarizer's `[SPEAKER_NN]` machine tags AND VTT `<v Name>` voice cues.
+/// This lets an IMPORTED transcript that already names speakers light the
+/// "Speakers" badge even when it has no sibling `.diarization.json` (the badge
+/// used to key on that sidecar alone, so labeled imports read as un-diarized).
+/// Bounded read — speaker labels appear from the first cue — keeps the scan cheap.
+fn transcript_has_speaker_labels(path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(mut f) = std::fs::File::open(path) else { return false };
+    let mut buf = vec![0u8; 128 * 1024];
+    let Ok(n) = f.read(&mut buf) else { return false };
+    let head = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
+    head.contains("[speaker_") || head.contains("<v ")
+}
+
 fn collect_transcripts(dir: &Path, folder_label: &str, depth_remaining: u32, out: &mut Vec<TranscriptFile>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
@@ -308,7 +323,8 @@ fn collect_transcripts(dir: &Path, folder_label: &str, depth_remaining: u32, out
                 folder: folder_label.to_string(),
                 size_bytes: meta.len(),
                 modified_ms,
-                has_diarization: path.with_extension("diarization.json").is_file(),
+                has_diarization: path.with_extension("diarization.json").is_file()
+                    || transcript_has_speaker_labels(&path),
                 has_analysis: path.with_extension("analysis.json").is_file(),
                 format,
             });
@@ -377,6 +393,21 @@ mod tests {
 
     fn touch(path: &Path) {
         std::fs::write(path, b"x").unwrap();
+    }
+
+    #[test]
+    fn speaker_label_probe_detects_machine_and_vtt_tags() {
+        let t = TempTree::new("speakerprobe");
+        let with_machine = t.path().join("a.srt");
+        std::fs::write(&with_machine, "1\n00:00:01,000 --> 00:00:03,000\n[SPEAKER_00] hello there\n").unwrap();
+        let with_vtt = t.path().join("b.vtt");
+        std::fs::write(&with_vtt, "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n<v Alice>hello there\n").unwrap();
+        let plain = t.path().join("c.srt");
+        std::fs::write(&plain, "1\n00:00:01,000 --> 00:00:03,000\nno speakers here, just text\n").unwrap();
+        assert!(transcript_has_speaker_labels(&with_machine), "machine [SPEAKER_NN] labels → true");
+        assert!(transcript_has_speaker_labels(&with_vtt), "VTT <v Name> voice tags → true");
+        assert!(!transcript_has_speaker_labels(&plain), "un-labeled transcript → false");
+        assert!(!transcript_has_speaker_labels(&t.path().join("missing.srt")), "missing file → false");
     }
 
     fn item_names(folder: &LibraryFolder) -> Vec<&str> {
