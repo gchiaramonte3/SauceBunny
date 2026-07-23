@@ -104,6 +104,7 @@ import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
 import { buildDiagnosticsReport, diagnosticsFilename } from "./lib/diagnostics";
 import { extractFrameAsBlob, extractPosterBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
 import { chosenPosterFor, sourceTimecodeFor, setSourceTimecode, clearSourceTimecode } from "./lib/library";
+import { webPosterFor, setWebPoster } from "./lib/web-poster-store";
 import { exportLocalClipViaMediabunny } from "./lib/mediabunny-export";
 import { extractAudioAsWav16k } from "./lib/mediabunny-audio";
 
@@ -3886,6 +3887,28 @@ export default function App() {
       if (readerOpenSeqRef.current === seq) setReaderPreparing(false);
     }
   }, [appendLog, prepareReaderPlayback]);
+
+  // Web-source row poster: a non-YouTube web source has no URL-derived thumbnail,
+  // so its transcript/library rows fall to a glyph. While such a source is loaded,
+  // poll the web player for a captured frame (getPosterDataUrl is luma-guarded, so
+  // it returns null until a non-black frame is on screen) and cache it per-url.
+  // YouTube already yields hqdefault.jpg, and local files decode on demand — both
+  // skipped. Bounded attempts; stops on the first good frame or a source change.
+  useEffect(() => {
+    const url = metadata?.webpage_url ?? activeSourceUrl;
+    if (!url || localFilePath) return;          // local file → on-demand decode
+    if (youTubeThumbnailUrl(url)) return;        // YouTube → URL-derived poster
+    if (webPosterFor(url)) return;               // already captured
+    let attempts = 0;
+    const id = window.setInterval(async () => {
+      if (++attempts > 12) { window.clearInterval(id); return; }
+      try {
+        const dataUrl = await playerRef.current?.getPosterDataUrl?.();
+        if (dataUrl) { setWebPoster(url, dataUrl); window.clearInterval(id); }
+      } catch { /* ignore a transient capture failure */ }
+    }, 2500);
+    return () => window.clearInterval(id);
+  }, [metadata, localFilePath, activeSourceUrl]);
 
   // THE single-clock gate (r88): exactly one media element is ever unpaused.
   // The Clip player keeps playing across views ([hidden] is display:none, audio

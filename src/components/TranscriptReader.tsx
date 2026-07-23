@@ -8,6 +8,7 @@ import {
 import { TRANSCRIPTS_CHANGED_EVENT, type TranscriptHistoryEntry } from "../lib/transcript-history";
 import { mediaKindOf } from "../lib/import-extensions";
 import { youTubeThumbnailUrl } from "../lib/validation";
+import { webPosterFor, WEB_POSTERS_CHANGED_EVENT } from "../lib/web-poster-store";
 
 /** Poster source for a transcript row — its source video, exactly like the
  *  Library cards. Source-less scanned transcripts get a placeholder glyph. */
@@ -15,7 +16,9 @@ function rowArt(t: LibraryTranscript): LibraryCardArt {
   const e = t.entry;
   return e.sourcePath
     ? { kind: "local", path: e.sourcePath, media: mediaKindOf(e.sourcePath) }
-    : { kind: "remote", url: e.sourceUrl ? youTubeThumbnailUrl(e.sourceUrl) : null };
+    // YouTube's URL-derived poster first; a frame captured while the (non-YouTube)
+    // web source played fills the gap that used to be a glyph.
+    : { kind: "remote", url: e.sourceUrl ? youTubeThumbnailUrl(e.sourceUrl) ?? webPosterFor(e.sourceUrl) : null };
 }
 
 /**
@@ -69,7 +72,12 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   useEffect(() => {
     const onChange = () => setTick((t) => t + 1);
     window.addEventListener(TRANSCRIPTS_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(TRANSCRIPTS_CHANGED_EVENT, onChange);
+    // A web source's poster can land after the list rendered — re-render rowArt.
+    window.addEventListener(WEB_POSTERS_CHANGED_EVENT, onChange);
+    return () => {
+      window.removeEventListener(TRANSCRIPTS_CHANGED_EVENT, onChange);
+      window.removeEventListener(WEB_POSTERS_CHANGED_EVENT, onChange);
+    };
   }, []);
   useEffect(() => {
     void tick;

@@ -82,4 +82,14 @@ export type PlayerHandle = {
    * the file is already loaded by mediabunny.
    */
   getFrameBlob?: (seconds: number, opts?: { mimeType?: string; quality?: number }) => Promise<Blob | null>;
+  /**
+   * Optional — capture the CURRENTLY displayed frame as a small JPEG data URL,
+   * for a source-row poster (distinct from getFrameBlob, which is a full-res
+   * snapshot). Downscaled + luma-guarded: returns null when there's no decoded
+   * frame yet or the frame is near-black (a title/intro fade), so a web source
+   * that lacks a URL-derived thumbnail (non-YouTube) can still get a real poster
+   * without landing on black. Implemented by MSEStreamPlayer (the web player);
+   * local players rely on the on-demand decode pipeline instead.
+   */
+  getPosterDataUrl?: () => Promise<string | null>;
 };

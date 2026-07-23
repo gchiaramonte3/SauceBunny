@@ -312,6 +312,30 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       if (videoRef.current) videoRef.current.muted = m;
     },
     isMuted: () => videoRef.current?.muted ?? false,
+    // Poster capture for a source row — the current frame, downscaled, skipped
+    // when near-black. Same-origin blob-fed <video>, so the canvas isn't tainted.
+    getPosterDataUrl: async () => {
+      const v = videoRef.current;
+      if (!v || v.readyState < 2 || !v.videoWidth || !v.videoHeight) return null;
+      const scale = Math.min(1, 480 / v.videoWidth);
+      const w = Math.max(1, Math.round(v.videoWidth * scale));
+      const h = Math.max(1, Math.round(v.videoHeight * scale));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return null;
+      try {
+        ctx.drawImage(v, 0, 0, w, h);
+        const { data } = ctx.getImageData(0, 0, w, h);
+        let sum = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          sum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+        }
+        // LUMA_OK = 16, matching extractPosterBlob's black-frame floor.
+        if (sum / (data.length / 4) < 16) return null;
+        return c.toDataURL("image/jpeg", 0.7);
+      } catch { return null; }
+    },
     supportsPlaybackRate: true,
     setPlaybackRate: (rate) => {
       // Clamp to what the streaming pipeline sustains (shuttle caps here too);
