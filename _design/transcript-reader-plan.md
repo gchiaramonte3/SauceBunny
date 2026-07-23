@@ -211,10 +211,20 @@ scan is the index, exactly as diarization has none).
   (speaker→Username, cue text→Comment, cue start→absTc with Start-TC offset),
   5 tests, wired into the transcript Download menu ("Avid markers (.txt)…").
   `fpsToRateKey`/`FRAME_RATE_KEYS` lifted to marker-time.ts (shared with co-review).
-- Next: **Phase 2b — the source-start-TC SETTER UI** (right-click / a small dialog →
-  `library.ts setSourceTimecode`) so the Avid export offset is user-settable for
-  burn-in alignment (App already passes `sourceTimecodeFor` as `startTimecode`, so
-  only the setter is missing). Then Phase 3 (AI analysis tabs). Original scoping:
+- **Phase 2b (source-start-TC setter): DONE (`8b2c9a4`).** Transcript ▸ Tools ▸
+  "Set source start timecode…" popover → `setSourceTimecode`/`clearSourceTimecode`,
+  keyed on the transcript's own source (path OR url, so web works). Feeds
+  `transcriptToAvidTxt`'s sequenceStartTc. Reader-only for now (the Clip drawer's
+  TranscriptViewer is inside QueueDrawer and isn't threaded yet).
+- **Imported transcripts now stick to their source (`ba1e7e6`)** — import records
+  the loaded source's keys (was null,null) + web re-fetch auto-loads by webpage_url
+  + Clear forgets the row. This also fixed the missing row thumbnail (the row
+  derives its poster from the entry's source keys).
+- **"Speakers" badge follows the SRT labels (`c7f02dd`)** — the Rust scan probes the
+  transcript head for `[SPEAKER_`/`<v ` so labeled imports (no sidecar) light up.
+- Still deferred: web/non-YouTube row thumbnail via a live captured frame
+  (URL-keyed cache + MSEStreamPlayer getFrameBlob — Agent-traced as net-new
+  plumbing); Phase 3 (AI analysis tabs). Original scoping:
   `marker-time.ts` `MarkerExportSettings.sequenceStartTc` IS the source-start-TC
   offset, `absTc()`/`framesToTc()` do the drop-frame math. Build a pure
   `transcriptCuesToAvidTxt(cues, roster, settings)` (speaker→Username, cue
