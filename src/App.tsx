@@ -3762,6 +3762,12 @@ export default function App() {
   const [readerStartTc, setReaderStartTc] = useState<string | undefined>(undefined);
   // Reading pane tab: the transcript document vs its saved AI analysis.
   const [readerDocTab, setReaderDocTab] = useState<"document" | "analysis">("document");
+  // The CLIP drawer's transcript uses the same source-start-TC + Avid export as
+  // the reader. Its source key is whatever's loaded in Clip (local path or web
+  // url); a tick bump re-reads the stored TC after the setter writes it.
+  const [, setClipSourceTcTick] = useState(0);
+  const clipSourceKey = localFilePath ?? metadata?.webpage_url ?? activeSourceUrl ?? null;
+  const clipStartTc = clipSourceKey ? sourceTimecodeFor(clipSourceKey) ?? undefined : undefined;
   // Why there's no follow-along player, when there isn't one (web / missing file).
   const [readerNote, setReaderNote] = useState<string | null>(null);
   // True while an ffmpeg playback copy is being prepared for an exotic-codec
@@ -5992,6 +5998,11 @@ export default function App() {
                 transcriptOrigin={activeTranscript?.origin ?? "unknown"}
                 playheadAvailable={hasSource}
                 transcriptFps={fps}
+                sourceStartTimecode={clipStartTc}
+                onSetSourceTimecode={clipSourceKey ? (tc) => {
+                  if (tc) setSourceTimecode(clipSourceKey, tc); else clearSourceTimecode(clipSourceKey);
+                  setClipSourceTcTick((n) => n + 1);
+                } : undefined}
                 onTranscriptSeek={(seconds) => {
                   // onSeek owns the duration clamp (playhead-clock) — no
                   // inline math here, or an unknown duration snaps the cue

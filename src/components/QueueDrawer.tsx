@@ -53,6 +53,10 @@ type Props = {
   playheadAvailable: boolean;
   /** Source frame rate, so transcript timestamps render as SMPTE. */
   transcriptFps?: number;
+  /** Source start timecode for the Avid export offset (Tools ▸ Set source start TC). */
+  sourceStartTimecode?: string;
+  /** Persist/clear the loaded source's start timecode. */
+  onSetSourceTimecode?: (tc: string | null) => void;
   /** Click-to-seek callback — receives seconds. */
   onTranscriptSeek: (seconds: number) => void;
   /**
@@ -207,6 +211,7 @@ export function QueueDrawer({
   open, onClose, queue, fps, running, hasFolder,
   onRemove, onClearAll, onExportAll, onStop,
   transcriptPath, transcriptOrigin, playheadAvailable, transcriptFps,
+  sourceStartTimecode, onSetSourceTimecode,
   onTranscriptSeek, transcriptArrivedTick,
   onClearTranscript, onLoadFromHistory,
   onRegenerateTranscript, regenerateBusy, canRegenerate,
@@ -808,6 +813,8 @@ export function QueueDrawer({
              position when the tab re-shows. */
           playheadActive={playheadAvailable && shownTab === "transcript"}
           fps={transcriptFps}
+          startTimecode={sourceStartTimecode}
+          onSetSourceTimecode={onSetSourceTimecode}
           onSeek={onTranscriptSeek}
           origin={transcriptOrigin}
           onClearTranscript={onClearTranscript}
