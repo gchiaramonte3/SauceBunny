@@ -43,12 +43,17 @@ type Props = {
    *  Library cards use, so a decode is shared across both surfaces. */
   requestThumb: (path: string) => Promise<string | null>;
   posterVersions: Record<string, number>;
+  /** The follow-along player panel (App-rendered), or null for a text-only
+   *  transcript. Docks as a far-right column, or floats when popped out. */
+  stage?: ReactNode;
+  stageOpen: boolean;
+  stageFloating: boolean;
   /** The embedded <TranscriptViewer>, fed by App. Rendered only once a
    *  transcript is selected. */
   children: ReactNode;
 };
 
-export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, children }: Props) {
+export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, stage, stageOpen, stageFloating, children }: Props) {
   const [list, setList] = useState<LibraryTranscript[]>([]);
   const [tick, setTick] = useState(0);
 
@@ -69,8 +74,10 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
 
   const groups = useMemo(() => groupTranscriptsByFolder(list), [list]);
 
+  // Docked stage → a third grid column; floating → position:fixed over the view.
+  const dockStage = stageOpen && !stageFloating;
   return (
-    <div className="cp-reader">
+    <div className={"cp-reader" + (dockStage ? " stage-open" : "")}>
       <aside className="cp-reader-picker" aria-label="Transcripts">
         <div className="cp-reader-picker-head">
           <IconTranscript size={16} />
@@ -118,6 +125,11 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
             </div>
           )}
       </main>
+      {stageOpen && (
+        <div className={"cp-reader-stage" + (stageFloating ? " floating" : "")} aria-label="Video">
+          {stage}
+        </div>
+      )}
     </div>
   );
 }

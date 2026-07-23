@@ -54,6 +54,7 @@ import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView, type Ses
 import { QueueDrawer } from "./components/QueueDrawer";
 import { TranscriptReader } from "./components/TranscriptReader";
 import { TranscriptViewer } from "./components/TranscriptViewer";
+import { LocalMediaPlayer } from "./components/LocalMediaPlayer";
 import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutSheet } from "./components/ShortcutSheet";
 import { DropTarget } from "./components/DropTarget";
@@ -3719,24 +3720,67 @@ export default function App() {
     void handleLoadFromHistory(entry); // loads the source + navigates + gates
   }, [handleLoadFromHistory]);
 
-  // Reader open: attach the transcript for reading WITHOUT disturbing the Clip
-  // source (no resetForNewSource) and stay in the reader. Text-first — no player
-  // in this first cut, so follow-along is deferred (Phase 1b). A missing file
-  // surfaces cleanly instead of a blank pane.
+  // ── Reader follow-along player (isolated from the Clip source) ─────────
+  // The reader plays its transcript's source through its OWN player + its OWN
+  // read-only source object, so opening a transcript to READ never disturbs a
+  // Clip session. Local files only; web/source-less transcripts read text-only.
+  type ReaderSource = { path: string; hasVideo: boolean; fps: number; title: string };
+  const [readerSource, setReaderSource] = useState<ReaderSource | null>(null);
+  const [readerFloating, setReaderFloating] = useState(false);
+  const readerPlayerRef = useRef<PlayerHandle>(null);
+  // The one clock, written by the reader player ONLY while the reader is active
+  // (the gate that stops it and the still-playing Clip player from thrashing).
+  const readerSourceRef = useRef<ReaderSource | null>(null);
+  readerSourceRef.current = readerSource;
+  const onReaderTimeUpdate = useCallback((seconds: number) => {
+    const rfps = readerSourceRef.current?.fps ?? fpsRef.current;
+    publishPlayheadFrames(playheadSecondsToFrames(seconds, rfps));
+  }, []);
+
+  // Reader open: attach the transcript for reading. For a LOCAL source, probe it
+  // and mount an isolated follow-along player; web/source-less → text only. The
+  // Clip source is never touched (no resetForNewSource). A missing file surfaces
+  // cleanly instead of a blank pane.
   const handleReaderOpenTranscript = useCallback(async (entry: TranscriptHistoryEntry) => {
     try {
       await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 8 * 1024 * 1024 });
-      setActiveTranscript({
-        path: entry.srtPath,
-        origin: entry.origin === "captions" ? "captions" : entry.origin === "whisper" ? "whisper" : "unknown",
-      });
-      setTranscriptArrivedTick((n) => n + 1);
-      navigateView("reader");
     } catch {
       pushNotification("error", "Transcript file missing",
         `${entry.srtPath} was moved or deleted. Remove it from history to clean up.`);
+      return;
     }
+    // Isolated follow-along source (local only). Probe failure → text-only.
+    let src: ReaderSource | null = null;
+    if (entry.sourcePath) {
+      try {
+        const lf = await invoke<LocalFileMeta>("probe_local_file", { path: entry.sourcePath });
+        src = {
+          path: lf.path,
+          hasVideo: lf.has_video,
+          fps: lf.fps && lf.fps > 0 ? lf.fps : 24,
+          title: lf.filename ?? entry.title,
+        };
+      } catch { src = null; }
+    }
+    setReaderSource(src);
+    // Publish 0 so the highlight can't read a frame left in the Clip's fps.
+    publishPlayheadFrames(0);
+    setActiveTranscript({
+      path: entry.srtPath,
+      origin: entry.origin === "captions" ? "captions" : entry.origin === "whisper" ? "whisper" : "unknown",
+    });
+    setTranscriptArrivedTick((n) => n + 1);
+    navigateView("reader");
   }, [navigateView, pushNotification]);
+
+  // THE single-clock gate (r88): exactly one media element is ever unpaused.
+  // The Clip player keeps playing across views ([hidden] is display:none, audio
+  // deliberately continues), so entering the reader must pause it, and leaving
+  // must pause the reader player.
+  useEffect(() => {
+    if (activeView === "reader") { try { playerRef.current?.pause(); } catch { /* no clip player */ } }
+    else { try { readerPlayerRef.current?.pause(); } catch { /* no reader player */ } }
+  }, [activeView]);
 
   // Home folder card / folder search-hit → open the Library browser with that
   // folder selected. The tick makes a repeat drill re-apply the same chain.
@@ -4308,7 +4352,15 @@ export default function App() {
             handleExport();
           }
           break;
-        case "play.toggle":  onPlayToggle(); break;
+        case "play.toggle":
+          // In the reader, Space drives the reader's own player (the Clip
+          // player is paused by the single-clock gate; onPlayToggle would wake
+          // it). Elsewhere it's the Clip/room player as usual.
+          if (activeViewRef.current === "reader") {
+            const p = readerPlayerRef.current;
+            if (p?.isReady()) { p.isPlaying() ? p.pause() : p.play(); }
+          } else onPlayToggle();
+          break;
         // J / L — NLE transport: each press walks the shuttle ladder
         // (1-2-4-8×, opposite press steps down, +1 resumes real playback);
         // with K held it's a single-frame nudge instead. Repeats (key held)
@@ -5137,15 +5189,49 @@ export default function App() {
               visible={activeView === "reader"}
               requestThumb={lib.requestThumb}
               posterVersions={lib.posterVersions}
+              stageOpen={readerSource != null}
+              stageFloating={readerFloating}
+              stage={readerSource && (
+                <>
+                  <div className="cp-reader-stage-head">
+                    <span className="cp-reader-stage-title" title={readerSource.title}>{readerSource.title}</span>
+                    <button
+                      type="button"
+                      className="cp-tab-close cp-tab-popout"
+                      onClick={() => setReaderFloating((f) => !f)}
+                      title={readerFloating ? "Dock the player" : "Pop out the player"}
+                      aria-label={readerFloating ? "Dock the player" : "Pop out the player"}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                        <polyline points="15 3 21 3 21 9" />
+                        <line x1="10" y1="14" x2="21" y2="3" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="cp-reader-stage-video">
+                    <LocalMediaPlayer
+                      ref={readerPlayerRef}
+                      path={readerSource.path}
+                      filename={readerSource.title}
+                      hasVideo={readerSource.hasVideo}
+                      initialVolume={muted ? 0 : volume}
+                      onTimeUpdate={activeView === "reader" ? onReaderTimeUpdate : undefined}
+                      onPlayStateChange={setIsPlaying}
+                      onReady={() => { readerPlayerRef.current?.setVolume(muted ? 0 : volume); }}
+                    />
+                  </div>
+                </>
+              )}
             >
               <TranscriptViewer
                 path={transcriptPath}
                 reloadToken={transcriptArrivedTick}
-                playheadActive={false}
-                fps={fps}
-                onSeek={() => { /* Phase 1b: seek the compact player */ }}
+                playheadActive={activeView === "reader"}
+                fps={readerSource?.fps ?? fps}
+                onSeek={(seconds) => readerPlayerRef.current?.seekTo(seconds)}
                 origin={activeTranscript?.origin ?? "unknown"}
-                onClearTranscript={() => setActiveTranscript(null)}
+                onClearTranscript={() => { setActiveTranscript(null); setReaderSource(null); }}
                 onLoadFromHistory={handleReaderOpenTranscript}
                 onRegenerate={() => { /* reading-first: no source to regenerate from */ }}
                 regenerateBusy={false}
