@@ -24,6 +24,7 @@ import {
   TRANSCRIPTS_CHANGED_EVENT,
 } from "../lib/transcript-history";
 import { loadTranscriptLibrary, type LibraryTranscript } from "../lib/transcript-library";
+import { buildRecentIndex, transcriptArt } from "../lib/transcript-source-resolve";
 import {
   hostnameOf,
   youTubeHeroThumbnailUrl,
@@ -151,6 +152,9 @@ export function LibraryView({
   // Continue shelf — the 8 most recent (the featured row stays a row, not an
   // archive; recents themselves are capped at 12 upstream).
   const continueRow = recentSources.slice(0, 8);
+  // Slug index of recent sources, so a source-less transcript card can borrow a
+  // poster from the source it was named after (KT-#776 transcript → KT-#776 web).
+  const recentIndex = useMemo(() => buildRecentIndex(recentSources), [recentSources]);
 
   // ── Card builders (shared by shelves and the search grid) ─────────────
   const itemCard = (it: LibraryItem) => (
@@ -210,10 +214,10 @@ export function LibraryView({
   );
 
   const transcriptCard = (t: LibraryTranscript) => {
-    const e = t.entry;
-    const art: LibraryCardArt = e.sourcePath
-      ? { kind: "local", path: e.sourcePath, media: mediaKindOf(e.sourcePath) }
-      : { kind: "remote", url: e.sourceUrl ? youTubeThumbnailUrl(e.sourceUrl) : null };
+    // Re-associates a source-less transcript to a recent source by slug, so its
+    // card shows a real poster instead of a glyph (also adds the webPosterFor
+    // fallback the reader has, for non-YouTube web sources).
+    const art: LibraryCardArt = transcriptArt(t, recentIndex);
     const detail = [
       t.hasDiarization ? "speakers" : null,
       formatTimeAgo(t.modifiedMs),

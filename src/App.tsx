@@ -5360,6 +5360,7 @@ export default function App() {
               visible={activeView === "reader"}
               requestThumb={lib.requestThumb}
               posterVersions={lib.posterVersions}
+              recents={recentSources}
               stageAvailable={transcriptPath != null}
               stageExpanded={readerStageOpen}
               stageFloating={readerFloating}

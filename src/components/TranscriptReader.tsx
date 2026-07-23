@@ -2,25 +2,13 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { IconTranscript, IconPanelLeft } from "./Icons";
 import { ReaderRowThumb } from "./ReaderRowThumb";
 import { ReaderRowMenu, type RowMenuTarget } from "./ReaderRowMenu";
-import type { LibraryCardArt } from "./LibraryCard";
 import {
   loadTranscriptLibrary, groupTranscriptsByFolder, type LibraryTranscript,
 } from "../lib/transcript-library";
 import { TRANSCRIPTS_CHANGED_EVENT, type TranscriptHistoryEntry } from "../lib/transcript-history";
-import { mediaKindOf } from "../lib/import-extensions";
-import { youTubeThumbnailUrl } from "../lib/validation";
-import { webPosterFor, WEB_POSTERS_CHANGED_EVENT } from "../lib/web-poster-store";
-
-/** Poster source for a transcript row — its source video, exactly like the
- *  Library cards. Source-less scanned transcripts get a placeholder glyph. */
-function rowArt(t: LibraryTranscript): LibraryCardArt {
-  const e = t.entry;
-  return e.sourcePath
-    ? { kind: "local", path: e.sourcePath, media: mediaKindOf(e.sourcePath) }
-    // YouTube's URL-derived poster first; a frame captured while the (non-YouTube)
-    // web source played fills the gap that used to be a glyph.
-    : { kind: "remote", url: e.sourceUrl ? youTubeThumbnailUrl(e.sourceUrl) ?? webPosterFor(e.sourceUrl) : null };
-}
+import { buildRecentIndex, transcriptArt } from "../lib/transcript-source-resolve";
+import type { RecentSource } from "../lib/recent-sources";
+import { WEB_POSTERS_CHANGED_EVENT } from "../lib/web-poster-store";
 
 /**
  * The Transcripts reader — a reading-first workspace OUTSIDE the Clip editor
@@ -47,6 +35,9 @@ type Props = {
    *  Library cards use, so a decode is shared across both surfaces. */
   requestThumb: (path: string) => Promise<string | null>;
   posterVersions: Record<string, number>;
+  /** Recent sources — lets a source-less transcript row borrow the poster of
+   *  the source it was named after (re-association by filename slug). */
+  recents: RecentSource[];
   /** The follow-along player panel (App-rendered — a <ReaderPlayerStage>). Docks
    *  as a far-right column, collapses to a thin rail, or floats when popped out. */
   stage?: ReactNode;
@@ -72,10 +63,11 @@ type Props = {
   children: ReactNode;
 };
 
-export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, stage, stageAvailable, stageExpanded, stageFloating, onExpandStage, docTab, onDocTab, analysis, onRenameTranscript, onMoveTranscript, children }: Props) {
+export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, recents, stage, stageAvailable, stageExpanded, stageFloating, onExpandStage, docTab, onDocTab, analysis, onRenameTranscript, onMoveTranscript, children }: Props) {
   const [list, setList] = useState<LibraryTranscript[]>([]);
   const [tick, setTick] = useState(0);
   const [rowMenu, setRowMenu] = useState<RowMenuTarget | null>(null);
+  const recentIndex = useMemo(() => buildRecentIndex(recents), [recents]);
 
   // Re-scan when the reader shows, a new transcript lands, or the library path
   // resolves. Mirrors the Home shelf's refresh discipline.
@@ -138,7 +130,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
                   aria-current={t.path === activePath ? "true" : undefined}
                   title={t.title}
                 >
-                  <ReaderRowThumb art={rowArt(t)} requestThumb={requestThumb} posterVersions={posterVersions} />
+                  <ReaderRowThumb art={transcriptArt(t, recentIndex)} requestThumb={requestThumb} posterVersions={posterVersions} />
                   <span className="cp-reader-row-body">
                     <span className="cp-reader-row-title">{t.title}</span>
                     <span className="cp-reader-row-meta">
