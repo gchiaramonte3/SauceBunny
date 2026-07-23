@@ -65,6 +65,7 @@ import {
   recordTranscript,
   findForSource,
   touchEntry,
+  removeEntry as removeTranscriptEntry,
   getHistory as getTranscriptHistory,
   type TranscriptHistoryEntry,
 } from "./lib/transcript-history";
@@ -1025,6 +1026,10 @@ export default function App() {
     path: string;
     origin: "captions" | "whisper" | "unknown";
   } | null>(null);
+  // Fresh mirror so the (deps-[]) Clear handler can forget the exact transcript
+  // it's showing without going stale.
+  const activeTranscriptRef = useRef(activeTranscript);
+  activeTranscriptRef.current = activeTranscript;
   const [transcriptArrivedTick, setTranscriptArrivedTick] = useState(0);
   // Open the right drawer the first time a transcript arrives in this
   // session, so the user actually sees the new tab populate. Subsequent
@@ -1959,10 +1964,10 @@ export default function App() {
     publishPlayheadFrames(0);
     setInFrames(null);
     setOutFrames(null);
-    // NOTE: we deliberately do NOT auto-load a prior transcript on fetch.
-    // resetForNewSource() above clears it, so every fetch starts with a clean
-    // transcript panel — no holdover from the previous video. A past transcript
-    // is still one click away via the Transcript tab's History popover.
+    // resetForNewSource() above clears the panel so the stub window shows no
+    // holdover from the previous video. Once real metadata lands below we
+    // re-attach any transcript associated with THIS url (matched by webpage_url)
+    // — imported or generated — so an associated transcript sticks to its source.
     // Filename is owned by resetForNewSource (cleared unless the user's
     // custom name belongs to THIS source) + the hydrates below (reseeded
     // from the real title) — no competing seed here (review fix: this was
@@ -2070,6 +2075,12 @@ export default function App() {
       if (sourceSeqRef.current !== seq) return; // user already moved on
       setMetadata(m);
       setFetchPhase("success"); // metadata hydrated → success flash
+      // Re-attach a transcript previously associated with THIS url (imported or
+      // caption/whisper-generated), keyed by the canonical webpage_url — the same
+      // key those paths record. Matched to this source only (never a holdover
+      // from a different video); resetForNewSource cleared the panel above, so
+      // this restores the remembered one. No-op when nothing is associated.
+      void tryAutoLoadTranscript({ sourceUrl: m.webpage_url ?? full }, seq);
       // Successful load confirmed → record in recent sources. Title comes
       // from the metadata this fetch already returned (no second request).
       recordRecentSource({
@@ -3572,7 +3583,15 @@ export default function App() {
   }, [appendLog]);
 
   const handleClearTranscript = useCallback(() => {
+    // Clear is the "forget" action (the user's rule: an associated transcript
+    // sticks to its source until Clear). Drop its history row so re-opening the
+    // source won't re-attach it. The SRT file on disk is untouched — it still
+    // appears in the Transcripts library if it lives under the scanned folder.
+    const path = activeTranscriptRef.current?.path;
     setActiveTranscript(null);
+    if (!path) return;
+    const entry = getTranscriptHistory().find((e) => e.srtPath === path);
+    if (entry) removeTranscriptEntry(entry.id);
   }, []);
 
   /**
@@ -3597,10 +3616,15 @@ export default function App() {
       // will read them itself on the path change.
       await invoke<string>("read_text_file_capped", { path: picked, maxBytes: 8 * 1024 * 1024 });
       const title = picked.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "Imported transcript";
+      // Bind the import to whatever source is loaded NOW (exactly one of these is
+      // set — resetForNewSource clears the other), keyed the same way generated
+      // transcripts are (canonical webpage_url for web). This is what makes an
+      // imported transcript STICK to its source and auto-reload on re-open; a
+      // truly source-less import records nulls and stays an unattached library row.
       recordTranscript({
         srtPath: picked,
-        sourcePath: null,
-        sourceUrl: null,
+        sourcePath: localFilePathRef.current,
+        sourceUrl: metadataRef.current?.webpage_url ?? activeSourceUrlRef.current ?? null,
         title,
         origin: "unknown",
       });
