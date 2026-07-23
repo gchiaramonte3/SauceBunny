@@ -23,6 +23,7 @@ export function fmtElapsed(ms: number): string {
 /** Pipeline phase ids -> what a human calls that stage. */
 export function stageLabel(phase: string): string {
   switch (phase) {
+    case "extract": return "Audio prep";
     case "whisper": return "Whisper";
     case "parakeet": return "Parakeet";
     case "diarize-prepare": return "Speaker models";

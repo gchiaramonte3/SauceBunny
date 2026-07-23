@@ -120,6 +120,7 @@ const FORMATS: { id: FormatId; label: string }[] = [
 function phaseLabel(phase: string | null, percent: number): string {
   switch (phase) {
     case "download":        return `Downloading audio… ${Math.round(percent)}%`;
+    case "extract":         return percent > 0 ? `Preparing audio… ${Math.round(percent)}%` : "Preparing audio…";
     case "diarize-prepare": return "Loading speaker models…";
     case "diarize-process": return "Detecting speakers…";
     case "diarize-merge":   return "Merging speaker labels…";

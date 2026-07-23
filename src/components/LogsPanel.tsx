@@ -52,6 +52,7 @@ function transcriptPillLabel(
 ): string {
   switch (phase) {
     case "download":          return `DOWNLOADING · ${pct}%`;
+    case "extract":           return pct > 0 ? `PREPARING AUDIO · ${pct}%` : "PREPARING AUDIO";
     case "diarize-prepare":   return "LOADING SPEAKERS";
     case "diarize-process":   return "DETECTING SPEAKERS";
     case "diarize-merge":     return "MERGING SPEAKERS";

@@ -1663,6 +1663,109 @@ pub(crate) fn wav_16k_mono_args(input: &str, cut: Option<(f64, f64)>, out_wav: &
     args
 }
 
+/// Idle-timeout for the ffmpeg WAV extraction. If ffmpeg emits no progress for
+/// this long the source read has stalled — a sleeping or disconnected external
+/// volume is the usual cause — so we kill it and surface an error instead of
+/// letting the whole transcription hang at 0% forever.
+const EXTRACT_IDLE_SECS: u64 = 90;
+
+/// Extract a 16 kHz mono WAV from `input` with ffmpeg — the reliable,
+/// constant-memory path for any source, however large and wherever it lives
+/// (an in-browser WebCodecs decode of a multi-GB file off a slow volume is the
+/// path that actually hangs; ffmpeg streams instead of buffering the hour).
+///
+/// Unlike a bare `.output().await` this:
+///   • registers the ffmpeg child in the JobRegistry, so Stop actually kills it
+///     (an `.output()` child is unreachable — cancel could only flag intent);
+///   • emits a distinct `extract` phase + real progress parsed from ffmpeg's
+///     `-progress pipe:1` output against `total_secs`, so the pill reads
+///     "Preparing audio… NN%" instead of a frozen, mislabeled "Whisper 0%";
+///   • runs an idle watchdog (`EXTRACT_IDLE_SECS`) that kills a stalled read
+///     and returns an error rather than hanging forever.
+///
+/// On success the WAV is at `out_wav`. Errors carry a user-facing message; the
+/// caller distinguishes a user Stop via `JobRegistry::is_cancelled`.
+async fn extract_wav_16k_tracked(
+    app: &AppHandle,
+    job_id: &str,
+    input: &str,
+    out_wav: &str,
+    total_secs: Option<f64>,
+) -> Result<(), String> {
+    let _ = app.emit(
+        "transcript-phase",
+        TranscriptPhaseEvent { job_id: job_id.to_string(), phase: "extract".into() },
+    );
+    let ff = app
+        .shell()
+        .sidecar("ffmpeg")
+        .map_err(|e| format!("ffmpeg sidecar not found: {e}"))?;
+    // `-progress pipe:1` streams machine-readable `out_time_us=…` / `progress=…`
+    // to stdout ~2×/sec; `-nostats` drops the noisy human stderr counterpart;
+    // `-nostdin` keeps ffmpeg from ever blocking on a tty read.
+    let args: Vec<String> = vec![
+        "-y".into(), "-nostdin".into(),
+        "-i".into(), input.into(),
+        "-vn".into(), "-ar".into(), "16000".into(), "-ac".into(), "1".into(),
+        "-progress".into(), "pipe:1".into(), "-nostats".into(),
+        out_wav.into(),
+    ];
+    let (mut rx, child) = ff
+        .args(args)
+        .spawn()
+        .map_err(|e| format!("ffmpeg failed to spawn: {e}"))?;
+    app.state::<JobRegistry>().insert(job_id.to_string(), child);
+
+    let idle = std::time::Duration::from_secs(EXTRACT_IDLE_SECS);
+    let mut last_pct = 0.0_f64;
+    let mut exit_code: Option<i32> = None;
+    let mut terminated = false;
+    loop {
+        match tokio::time::timeout(idle, rx.recv()).await {
+            Err(_) => {
+                // Silent for EXTRACT_IDLE_SECS — a stalled source read.
+                if let Some(c) = app.state::<JobRegistry>().take(job_id) {
+                    let _ = c.kill();
+                }
+                return Err(format!(
+                    "Audio extraction stalled (no progress for {EXTRACT_IDLE_SECS}s). The source may be on a sleeping or disconnected drive."
+                ));
+            }
+            Ok(None) => break, // channel closed
+            Ok(Some(CommandEvent::Stdout(b))) => {
+                if let Some(total) = total_secs.filter(|t| *t > 0.0) {
+                    let raw = String::from_utf8_lossy(&b);
+                    for line in raw.lines() {
+                        if let Some(v) = line.trim().strip_prefix("out_time_us=") {
+                            if let Ok(us) = v.trim().parse::<f64>() {
+                                let pct = ((us / 1_000_000.0) / total * 100.0).clamp(0.0, 99.0);
+                                if pct - last_pct >= 1.0 {
+                                    last_pct = pct;
+                                    let _ = app.emit(
+                                        "transcript-progress",
+                                        ProgressEvent { job_id: job_id.to_string(), percent: pct },
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(Some(CommandEvent::Terminated(payload))) => {
+                exit_code = payload.code;
+                terminated = true;
+                break;
+            }
+            Ok(Some(_)) => {} // stderr banner / other — drained, ignored
+        }
+    }
+    let _ = app.state::<JobRegistry>().take(job_id);
+    if terminated && exit_code != Some(0) {
+        return Err(format!("ffmpeg audio conversion failed (exit {exit_code:?})"));
+    }
+    Ok(())
+}
+
 // Parses whisper-cli segment lines like "[00:00:04.000 --> 00:00:08.500]" → 8.5
 fn parse_whisper_segment_end(line: &str) -> Option<f64> {
     let after = line.split("--> ").nth(1)?;
@@ -1770,33 +1873,25 @@ pub async fn re_diarize_transcript(
             &app_for, &job_for, "info",
             "Re-detecting speakers (reusing the existing transcript — no re-transcription)…".into(),
         );
-        // Extract a 16 kHz mono WAV (the diarizer's input) from the source audio.
-        let ff = match app_for.shell().sidecar("ffmpeg") {
-            Ok(c) => c,
-            Err(e) => {
-                emit_transcript_done(&app_for, &job_for, false, None, None,
-                    Some(format!("ffmpeg sidecar not found: {e}")));
-                return;
-            }
-        };
-        let ff_out = ff
-            .args(wav_16k_mono_args(&audio_str, None, &wav_str))
-            .output()
-            .await;
-        match ff_out {
-            Ok(o) if o.status.success() && wav_path_for.exists() => {}
-            Ok(o) => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                let _ = std::fs::remove_file(&wav_path_for);
-                emit_transcript_done(&app_for, &job_for, false, o.status.code(), None,
-                    Some(format!("Audio conversion failed — {}", short_err(&stderr))));
-                return;
-            }
-            Err(e) => {
-                emit_transcript_done(&app_for, &job_for, false, None, None,
-                    Some(format!("ffmpeg failed to run: {e}")));
-                return;
-            }
+        // Extract a 16 kHz mono WAV (the diarizer's input) from the source
+        // audio — streamed + tracked (cancelable, watchdog-guarded) exactly like
+        // the full transcription's phase 1. Duration is unknown here, so the
+        // extract phase shows an indeterminate bar rather than a percentage.
+        if let Err(e) = extract_wav_16k_tracked(&app_for, &job_for, &audio_str, &wav_str, None).await {
+            let _ = std::fs::remove_file(&wav_path_for);
+            let cancelled = app_for.state::<JobRegistry>().is_cancelled(&job_for);
+            app_for.state::<JobRegistry>().finish_job(&job_for);
+            emit_transcript_done(
+                &app_for, &job_for, false, None, None,
+                Some(if cancelled { "Cancelled".into() } else { e }),
+            );
+            return;
+        }
+        if !wav_path_for.exists() {
+            app_for.state::<JobRegistry>().finish_job(&job_for);
+            emit_transcript_done(&app_for, &job_for, false, None, None,
+                Some("WAV conversion produced no file".into()));
+            return;
         }
         // Diarize + merge fresh speaker labels into the existing SRT in place.
         let result = run_diarize_and_merge(&app_for, &job_for, &wav_path_for, &srt_for, expected).await;
@@ -1838,6 +1933,11 @@ pub struct TranscribeLocalArgs {
     /// "auto" (whisper.cpp auto-detect). See normalize_whisper_lang.
     #[serde(default)]
     pub language: Option<String>,
+    /// Total source duration in seconds, when the frontend knows it (from the
+    /// media probe). Drives the ffmpeg extraction's real progress percentage;
+    /// None → the extract phase shows an indeterminate bar (still watchdogged).
+    #[serde(default)]
+    pub duration_seconds: Option<f64>,
 }
 
 /// Frontend-provided pre-normalised audio (16 kHz mono WAV bytes). Lets
@@ -2109,57 +2209,40 @@ pub async fn transcribe_local_file(
     let engine = args.engine.clone().unwrap_or_default();
     let model_id = args.model_id.clone();
     let lang = normalize_whisper_lang(args.language.as_deref());
+    let duration_seconds = args.duration_seconds;
 
     tokio::spawn(async move {
         // Phase 1: ffmpeg → 16 kHz mono WAV (works for any video or audio in).
+        // Streamed + tracked: registered for Stop, emits an `extract` phase +
+        // real progress, and watchdog-guarded so a stalled read (e.g. a sleeping
+        // external volume) fails loudly instead of hanging at 0% forever.
         emit_transcript_log(
             &app_for,
             &job_for,
             "info",
-            format!("Normalising audio for {}…", in_path_str),
+            format!("Extracting 16 kHz audio from {}…", in_path_str),
         );
-        let ff = match app_for.shell().sidecar("ffmpeg") {
-            Ok(c) => c,
-            Err(e) => {
-                emit_transcript_done(
-                    &app_for, &job_for, false, None, None,
-                    Some(format!("ffmpeg sidecar not found: {e}")),
-                );
-                return;
-            }
-        };
-        let ff_out = ff
-            .args(wav_16k_mono_args(&in_path_str, None, &wav_path_str))
-            .output()
-            .await;
-        let ff_out = match ff_out {
-            Ok(o) => o,
-            Err(e) => {
-                emit_transcript_done(
-                    &app_for, &job_for, false, None, None,
-                    Some(format!("ffmpeg failed to run: {e}")),
-                );
-                return;
-            }
-        };
-        if !ff_out.status.success() {
-            let stderr = String::from_utf8_lossy(&ff_out.stderr);
+        if let Err(e) = extract_wav_16k_tracked(
+            &app_for, &job_for, &in_path_str, &wav_path_str, duration_seconds,
+        ).await {
             let _ = std::fs::remove_file(&wav_path_for);
+            let cancelled = app_for.state::<JobRegistry>().is_cancelled(&job_for);
+            app_for.state::<JobRegistry>().finish_job(&job_for);
             emit_transcript_done(
-                &app_for, &job_for, false, ff_out.status.code(), None,
-                Some(format!("Audio conversion failed — {}", short_err(&stderr))),
+                &app_for, &job_for, false, None, None,
+                Some(if cancelled { "Cancelled".into() } else { e }),
             );
             return;
         }
         if !wav_path_for.exists() {
+            app_for.state::<JobRegistry>().finish_job(&job_for);
             emit_transcript_done(
                 &app_for, &job_for, false, None, None,
                 Some("WAV conversion produced no file".into()),
             );
             return;
         }
-        // ffmpeg above ran via `.output().await` — no registered child to
-        // kill — so a Stop during conversion is only visible here as the flag.
+        // A Stop that landed after ffmpeg finished but before whisper spawns.
         if app_for.state::<JobRegistry>().is_cancelled(&job_for) {
             let _ = std::fs::remove_file(&wav_path_for);
             app_for.state::<JobRegistry>().finish_job(&job_for);

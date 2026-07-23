@@ -170,6 +170,15 @@ const RECENTS_KEY   = "cp-recents";
 const ASPECT_KEY    = "cp-aspect";
 const ACTIVE_VIEW_KEY = "saucebunny.activeView";
 
+// In-browser audio extraction (mediabunny/WebCodecs → OfflineAudioContext)
+// decodes the WHOLE track into memory at the source sample rate, so it's only
+// safe for short clips — beyond this duration we always use the streaming,
+// constant-memory ffmpeg path instead. And even under the cap we race the
+// extraction against this timeout so a stalled WebView decode degrades to
+// ffmpeg rather than hanging the run at 0% forever.
+const WEBCODECS_EXTRACT_MAX_SEC = 20 * 60;
+const WEBCODECS_EXTRACT_TIMEOUT_MS = 120_000;
+
 // One-shot rebrand migration (clippull.* → saucebunny.*). Runs at module load,
 // before App renders so the default-loading useState initializers see the
 // migrated keys. Body lives in lib/migrate-storage.ts.
@@ -1606,6 +1615,10 @@ export default function App() {
         }
         if (stage.phase !== e.payload.phase) {
           stageClockRef.current = { phase: e.payload.phase, at: Date.now() };
+          // Each stage owns its own 0-100 meter (extract %, then whisper %), so
+          // reset on the transition — otherwise the pill would flash the prior
+          // stage's trailing value (e.g. "Whisper 99%") until the next tick.
+          setTranscriptProgress(0);
         }
         setTranscriptPhase(e.payload.phase);
       });
@@ -3324,9 +3337,33 @@ export default function App() {
         //     handles the ffmpeg subprocess + whisper-cli inline.
         // Parakeet runs only via transcribe_local_file (ffmpeg WAV); the
         // WebCodecs prepared-WAV fast-path is whisper-only.
-        const wavBlob = (engine !== "parakeet" && defaults.useWebCodecsDecoder)
-          ? await extractAudioAsWav16k(localFilePath, undefined, undefined, abort.signal).catch(() => null)
-          : null;
+        // The in-browser WebCodecs extractor (extractAudioAsWav16k) decodes the
+        // WHOLE track into memory and stages it at the SOURCE sample rate —
+        // ~1.4 GB of Float32 for a 1h 48kHz-stereo file — so on a long source,
+        // especially off a slow external volume, it can stall the WKWebView
+        // renderer with NO error and hang the run at 0% (the await never
+        // settles, so .catch can't save us). ffmpeg streams the identical
+        // 16kHz mono WAV at near-constant memory, so only take the fast-path
+        // for short, known-duration clips, and cap even that with a timeout so
+        // a stall always degrades to ffmpeg instead of hanging forever.
+        const durationSec = fps > 0 && durationFrames > 0 ? durationFrames / fps : 0;
+        const canFastPath =
+          engine !== "parakeet" &&
+          defaults.useWebCodecsDecoder &&
+          durationSec > 0 &&
+          durationSec <= WEBCODECS_EXTRACT_MAX_SEC;
+        let wavBlob: Blob | null = null;
+        if (canFastPath) {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const timeout = new Promise<null>((resolve) => {
+            timer = setTimeout(resolve, WEBCODECS_EXTRACT_TIMEOUT_MS, null);
+          });
+          wavBlob = await Promise.race([
+            extractAudioAsWav16k(localFilePath, undefined, undefined, abort.signal).catch(() => null),
+            timeout,
+          ]);
+          if (timer) clearTimeout(timer);
+        }
         // Extraction can be the slow "stuck at 0%" phase on big 4K files. If
         // the user hit Stop while it ran, bail here — no backend job was ever
         // spawned, so there's nothing for cancel_job to kill.
@@ -3352,7 +3389,10 @@ export default function App() {
           });
         } else {
           if (engine !== "parakeet") {
-            appendLog("info", txChannel, "Mediabunny can't decode this audio codec. Falling back to ffmpeg.");
+            appendLog("info", txChannel,
+              durationSec > WEBCODECS_EXTRACT_MAX_SEC
+                ? `Long source (${Math.round(durationSec / 60)} min). Extracting audio with ffmpeg for reliability.`
+                : "Extracting audio with ffmpeg.");
           }
           await invoke<string>("transcribe_local_file", {
             args: {
@@ -3365,6 +3405,7 @@ export default function App() {
               expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
               engine,
               language: defaults.transcriptionLanguage,
+              duration_seconds: metadata.duration ?? null,
             },
           });
         }
