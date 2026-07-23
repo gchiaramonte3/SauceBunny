@@ -222,9 +222,20 @@ scan is the index, exactly as diarization has none).
   derives its poster from the entry's source keys).
 - **"Speakers" badge follows the SRT labels (`c7f02dd`)** — the Rust scan probes the
   transcript head for `[SPEAKER_`/`<v ` so labeled imports (no sidecar) light up.
-- Still deferred: web/non-YouTube row thumbnail via a live captured frame
-  (URL-keyed cache + MSEStreamPlayer getFrameBlob — Agent-traced as net-new
-  plumbing); Phase 3 (AI analysis tabs). Original scoping:
+- **Web-source row thumbnail: DONE (`185e7d2`).** PlayerHandle `getPosterDataUrl`
+  (MSEStreamPlayer draws its same-origin `<video>` to a luma-guarded downscaled
+  canvas); App polls it while a non-YouTube web source is loaded; `web-poster-
+  store.ts` caches url→dataUrl (localStorage, LRU 80); rowArt uses
+  `youTubeThumbnailUrl ?? webPosterFor`. 4 tests.
+- **Phase 3 (saved AI Analysis tab): DONE (`5c6503d`).** Reader reading-pane
+  Document↔Analysis tabs; `ReaderAnalysis.tsx` loads/renders the r134
+  `<base>.analysis.json` sidecar, or generates one-shot via the local
+  llama-server (reused streamChat + exported buildSystemPrompt), saves it, and
+  lights the row's "Analyzed" chip. Staleness flagged vs SRT byte-size.
+- Still deferred / possible follow-ups: threading the source-TC setter + Avid
+  export into the CLIP drawer's TranscriptViewer (currently reader-only);
+  analysis "styles" picker in the reader; true detach-to-OS-window pop-out.
+  Original scoping:
   `marker-time.ts` `MarkerExportSettings.sequenceStartTc` IS the source-start-TC
   offset, `absTc()`/`framesToTc()` do the drop-frame math. Build a pure
   `transcriptCuesToAvidTxt(cues, roster, settings)` (speaker→Username, cue
