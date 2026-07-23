@@ -42,7 +42,11 @@ uuid = { version = "1", features = ["v4"] }
 # handler (r58) — reqwest's blocking client must run OUTSIDE a tokio
 # runtime, which the tiny_http worker threads satisfy. The async client
 # (default) is still used by download.rs / transcript.rs.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
+# Cloud AI (opt-in Claude/ChatGPT): the user's API key lives in the macOS
+# Keychain, never plaintext localStorage and never in the webview. keyring 2.x
+# ships the Apple keystore in its default features.
+keyring = "2"
 # r58: localhost HTTP media proxy. WKWebView's media engine refuses to
 # issue requests for <video src="custom-scheme://"> (verified empirically
 # in r57 — the custom URI scheme handler was never invoked). It WILL
