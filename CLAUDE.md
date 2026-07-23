@@ -8,7 +8,7 @@
 
 ## What this app is
 
-Sauce Bunny is a **local-first macOS desktop app** for transcribing, diarizing, and editing video/audio content. It runs entirely on the user's machine — no cloud, no accounts, no telemetry.
+Sauce Bunny is a **local-first macOS desktop app** for transcribing, diarizing, and editing video/audio content. It runs entirely on the user's machine — **no cloud _by default_**, no accounts, no telemetry. (r135: an OPT-IN cloud-AI path exists — the AI Summary + reader Analysis features can use the user's own Claude/OpenAI key instead of local Qwen. Off unless the user configures it in Settings ▸ AI APIs; see the cloud-AI entry under "What this app is NOT".)
 
 - **Shell:** Tauri 2 (Rust backend → WKWebView frontend)
 - **Target:** macOS 14+, Apple Silicon only. No Windows/Linux builds. (Floor raised from 13: the diarizer's FluidAudio dependency and native dictation need 14 — a 13 install whose headline features silently fail was worse than requiring 14.)
@@ -27,6 +27,7 @@ Do **not** add any of the following. If you think the app needs one, stop and ex
 - No authentication or user accounts
 - No additional bundler config beyond Vite defaults
 - No AI/ML inference in the frontend (Whisper and diarization run as native sidecars)
+- No cloud calls **by default**. **One deliberate, opt-in exception (r135):** the AI Summary + reader Analysis features can call the user's chosen cloud model (Claude / ChatGPT) with the user's OWN API key. Non-negotiable invariants — do NOT weaken them: local Qwen (llama-server) stays the DEFAULT and the app must work fully with zero cloud config; the key lives in the **macOS Keychain** (`src-tauri/src/commands/cloud_ai.rs` `set/has/delete_api_key`), NEVER in localStorage and never readable back by the frontend; the API call is made in **Rust** (`cloud_chat`, reqwest) so the key stays server-side and it dodges the browser CORS block. Frontend seam: `src/lib/ai-provider.ts` + `src/components/AiApiSettings.tsx`; both AI surfaces branch on `loadAiProvider()`. This is the ONLY sanctioned cloud dependency — don't add others (no cloud transcription, storage, sync, or accounts) without the same "stop and explain" bar.
 
 ---
 
@@ -363,7 +364,7 @@ npm run tauri build      # produces signed + notarized .dmg
 
 ## When in doubt
 
-1. Keep it local — no cloud dependencies, no network calls except for explicit user-initiated downloads.
+1. Keep it local — no cloud dependencies (the ONE opt-in exception is the r135 cloud-AI path above; local Qwen stays the default), no network calls except for explicit user-initiated downloads.
 2. Keep it simple — if the existing pattern (hooks, Tauri events, CSS tokens) can solve it, don't introduce a new pattern.
 3. Keep it readable — a human should be able to open any file and understand it without reading 5 other files first.
 4. Keep it buildable — all three build steps (tsc, cargo, swift) must pass at all times.
