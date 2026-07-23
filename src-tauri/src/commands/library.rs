@@ -354,6 +354,100 @@ pub async fn scan_transcript_library(path: String) -> Result<Vec<TranscriptFile>
         .map_err(|e| crate::AppError::internal(format!("Transcript scan task failed: {e}")))
 }
 
+/// Validate a user-entered file/folder name: non-empty, a SINGLE path segment
+/// (no separators / traversal), not hidden. Trailing dots/spaces trimmed
+/// (Windows-hostile, confusing on macOS).
+fn valid_stem(s: &str) -> Result<String, crate::AppError> {
+    let t = s.trim();
+    if t.is_empty() {
+        return Err(crate::AppError::invalid("Enter a name."));
+    }
+    if t.contains('/') || t.contains('\\') || t.contains('\0') || t == "." || t == ".." || t.starts_with('.') {
+        return Err(crate::AppError::invalid("Names can't contain slashes or start with a dot."));
+    }
+    let cleaned = t.trim_end_matches([' ', '.']).to_string();
+    if cleaned.is_empty() {
+        return Err(crate::AppError::invalid("Enter a name."));
+    }
+    Ok(cleaned)
+}
+
+/// Move a transcript's co-located sidecars (`.diarization.json` / `.analysis.json`)
+/// to sit beside `dest`. Best-effort: an orphaned sidecar only costs a row badge,
+/// never the transcript itself.
+fn move_sidecars(src: &Path, dest: &Path) {
+    for side in ["diarization.json", "analysis.json"] {
+        let old = src.with_extension(side);
+        if old.is_file() {
+            let _ = std::fs::rename(&old, dest.with_extension(side));
+        }
+    }
+}
+
+/// Rename a transcript file (.srt/.vtt) to `<new_stem>.<ext>` in place, carrying
+/// its sidecars along. Returns the new path. The SOURCE media file is untouched.
+#[tauri::command]
+pub fn rename_transcript(srt_path: String, new_stem: String) -> Result<String, crate::AppError> {
+    let src = PathBuf::from(&srt_path);
+    if !src.is_file() {
+        return Err(crate::AppError::not_found(srt_path.as_str()));
+    }
+    let stem = valid_stem(&new_stem)?;
+    let dir = src.parent().ok_or_else(|| crate::AppError::invalid("The transcript has no parent folder."))?;
+    let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("srt");
+    let dest = dir.join(format!("{stem}.{ext}"));
+    if dest == src {
+        return Ok(srt_path);
+    }
+    if dest.exists() {
+        return Err(crate::AppError::invalid(format!("\"{stem}.{ext}\" already exists in this folder.")));
+    }
+    // Rename the transcript FIRST (the critical file); a failure leaves everything
+    // untouched. Then move the sidecars best-effort.
+    std::fs::rename(&src, &dest)
+        .map_err(|e| crate::AppError::internal(format!("Couldn't rename the transcript: {e}")))?;
+    move_sidecars(&src, &dest);
+    dest.to_str().map(str::to_string).ok_or_else(|| crate::AppError::internal("Renamed path isn't valid UTF-8."))
+}
+
+/// Create a one-level subfolder in the transcript library. Returns its path.
+#[tauri::command]
+pub fn create_transcript_folder(library_path: String, name: String) -> Result<String, crate::AppError> {
+    let stem = valid_stem(&name)?;
+    let dir = PathBuf::from(&library_path).join(&stem);
+    if dir.exists() {
+        return Err(crate::AppError::invalid(format!("A folder named \"{stem}\" already exists.")));
+    }
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| crate::AppError::internal(format!("Couldn't create the folder: {e}")))?;
+    dir.to_str().map(str::to_string).ok_or_else(|| crate::AppError::internal("Folder path isn't valid UTF-8."))
+}
+
+/// Move a transcript (+ its sidecars) into `dest_dir`. Returns the new path.
+#[tauri::command]
+pub fn move_transcript_to_folder(srt_path: String, dest_dir: String) -> Result<String, crate::AppError> {
+    let src = PathBuf::from(&srt_path);
+    if !src.is_file() {
+        return Err(crate::AppError::not_found(srt_path.as_str()));
+    }
+    let dir = PathBuf::from(&dest_dir);
+    if !dir.is_dir() {
+        return Err(crate::AppError::not_found(dest_dir.as_str()));
+    }
+    let name = src.file_name().ok_or_else(|| crate::AppError::invalid("Bad transcript path."))?;
+    let dest = dir.join(name);
+    if dest == src {
+        return Ok(srt_path);
+    }
+    if dest.exists() {
+        return Err(crate::AppError::invalid("A transcript with that name is already in that folder."));
+    }
+    std::fs::rename(&src, &dest)
+        .map_err(|e| crate::AppError::internal(format!("Couldn't move the transcript: {e}")))?;
+    move_sidecars(&src, &dest);
+    dest.to_str().map(str::to_string).ok_or_else(|| crate::AppError::internal("Moved path isn't valid UTF-8."))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -393,6 +487,45 @@ mod tests {
 
     fn touch(path: &Path) {
         std::fs::write(path, b"x").unwrap();
+    }
+
+    #[test]
+    fn rename_transcript_moves_srt_and_sidecars() {
+        let t = TempTree::new("rename");
+        let srt = t.path().join("Old Name.srt");
+        std::fs::write(&srt, "1\n00:00:01,000 --> 00:00:02,000\n[SPEAKER_00] hi\n").unwrap();
+        std::fs::write(t.path().join("Old Name.diarization.json"), "{}").unwrap();
+        std::fs::write(t.path().join("Old Name.analysis.json"), "{}").unwrap();
+
+        let out = rename_transcript(srt.to_str().unwrap().to_string(), "New Name".into()).unwrap();
+        assert!(out.ends_with("New Name.srt"));
+        assert!(t.path().join("New Name.srt").is_file());
+        assert!(t.path().join("New Name.diarization.json").is_file(), "diarization sidecar follows");
+        assert!(t.path().join("New Name.analysis.json").is_file(), "analysis sidecar follows");
+        assert!(!srt.is_file(), "old transcript is gone");
+
+        // Collision + bad-name are rejected without touching disk.
+        std::fs::write(t.path().join("Taken.srt"), "x").unwrap();
+        assert!(rename_transcript(t.path().join("New Name.srt").to_str().unwrap().to_string(), "Taken".into()).is_err());
+        assert!(rename_transcript(t.path().join("New Name.srt").to_str().unwrap().to_string(), "a/b".into()).is_err());
+    }
+
+    #[test]
+    fn move_transcript_into_created_folder() {
+        let t = TempTree::new("movefolder");
+        let srt = t.path().join("clip.srt");
+        std::fs::write(&srt, "x").unwrap();
+        std::fs::write(t.path().join("clip.analysis.json"), "{}").unwrap();
+
+        let folder = create_transcript_folder(t.path().to_str().unwrap().to_string(), "Project A".into()).unwrap();
+        assert!(PathBuf::from(&folder).is_dir());
+        let out = move_transcript_to_folder(srt.to_str().unwrap().to_string(), folder.clone()).unwrap();
+        assert!(out.ends_with("Project A/clip.srt"));
+        assert!(PathBuf::from(&folder).join("clip.srt").is_file());
+        assert!(PathBuf::from(&folder).join("clip.analysis.json").is_file(), "sidecar moves too");
+        assert!(!srt.is_file());
+        // A duplicate folder is rejected.
+        assert!(create_transcript_folder(t.path().to_str().unwrap().to_string(), "Project A".into()).is_err());
     }
 
     #[test]
