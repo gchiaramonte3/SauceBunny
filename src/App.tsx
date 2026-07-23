@@ -5135,6 +5135,8 @@ export default function App() {
               activePath={transcriptPath}
               onOpenTranscript={handleReaderOpenTranscript}
               visible={activeView === "reader"}
+              requestThumb={lib.requestThumb}
+              posterVersions={lib.posterVersions}
             >
               <TranscriptViewer
                 path={transcriptPath}

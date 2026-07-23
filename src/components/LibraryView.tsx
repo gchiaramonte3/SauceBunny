@@ -18,7 +18,7 @@ import {
   setChosenPoster,
   type LibraryCrumb,
 } from "../lib/library";
-import { AUDIO_EXTENSIONS, fileExtension } from "../lib/import-extensions";
+import { mediaKindOf } from "../lib/import-extensions";
 import {
   formatTimeAgo,
   TRANSCRIPTS_CHANGED_EVENT,
@@ -31,11 +31,6 @@ import {
 } from "../lib/validation";
 import type { RecentSource } from "../lib/recent-sources";
 import type { LibraryFolder, LibraryItem } from "../types";
-
-/** Recents/transcripts don't carry a media kind — infer from the extension. */
-function mediaKindOf(path: string): "video" | "audio" {
-  return AUDIO_EXTENSIONS.includes(fileExtension(path)) ? "audio" : "video";
-}
 
 type Props = {
   recentSources: RecentSource[];

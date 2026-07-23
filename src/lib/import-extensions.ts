@@ -26,3 +26,10 @@ export function isMediaFile(path: string): boolean {
 export function isTranscriptFile(path: string): boolean {
   return TRANSCRIPT_EXTENSIONS.includes(fileExtension(path));
 }
+
+/** Media kind of a path, by extension — audio vs (default) video. Shared so
+ *  the "audio has no frame to thumbnail" skip isn't forked across the Library
+ *  cards and the reader rows. */
+export function mediaKindOf(path: string): "video" | "audio" {
+  return AUDIO_EXTENSIONS.includes(fileExtension(path)) ? "audio" : "video";
+}

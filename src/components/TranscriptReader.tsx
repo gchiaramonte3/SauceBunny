@@ -1,9 +1,22 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { IconTranscript } from "./Icons";
+import { ReaderRowThumb } from "./ReaderRowThumb";
+import type { LibraryCardArt } from "./LibraryCard";
 import {
   loadTranscriptLibrary, groupTranscriptsByFolder, type LibraryTranscript,
 } from "../lib/transcript-library";
 import { TRANSCRIPTS_CHANGED_EVENT, type TranscriptHistoryEntry } from "../lib/transcript-history";
+import { mediaKindOf } from "../lib/import-extensions";
+import { youTubeThumbnailUrl } from "../lib/validation";
+
+/** Poster source for a transcript row — its source video, exactly like the
+ *  Library cards. Source-less scanned transcripts get a placeholder glyph. */
+function rowArt(t: LibraryTranscript): LibraryCardArt {
+  const e = t.entry;
+  return e.sourcePath
+    ? { kind: "local", path: e.sourcePath, media: mediaKindOf(e.sourcePath) }
+    : { kind: "remote", url: e.sourceUrl ? youTubeThumbnailUrl(e.sourceUrl) : null };
+}
 
 /**
  * The Transcripts reader — a reading-first workspace OUTSIDE the Clip editor
@@ -26,12 +39,16 @@ type Props = {
   onOpenTranscript: (entry: TranscriptHistoryEntry) => void;
   /** True while the reader is the active view — gates the (lazy) scan. */
   visible: boolean;
+  /** Library's shared thumbnail cache (from useLibraryScan) — same posters the
+   *  Library cards use, so a decode is shared across both surfaces. */
+  requestThumb: (path: string) => Promise<string | null>;
+  posterVersions: Record<string, number>;
   /** The embedded <TranscriptViewer>, fed by App. Rendered only once a
    *  transcript is selected. */
   children: ReactNode;
 };
 
-export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, children }: Props) {
+export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, children }: Props) {
   const [list, setList] = useState<LibraryTranscript[]>([]);
   const [tick, setTick] = useState(0);
 
@@ -73,11 +90,14 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
                   aria-current={t.path === activePath ? "true" : undefined}
                   title={t.title}
                 >
-                  <span className="cp-reader-row-title">{t.title}</span>
-                  <span className="cp-reader-row-meta">
-                    {t.hasDiarization && <span className="cp-reader-chip">Speakers</span>}
-                    {t.hasAnalysis && <span className="cp-reader-chip">Analyzed</span>}
-                    <span className="cp-reader-fmt">{t.format}</span>
+                  <ReaderRowThumb art={rowArt(t)} requestThumb={requestThumb} posterVersions={posterVersions} />
+                  <span className="cp-reader-row-body">
+                    <span className="cp-reader-row-title">{t.title}</span>
+                    <span className="cp-reader-row-meta">
+                      {t.hasDiarization && <span className="cp-reader-chip">Speakers</span>}
+                      {t.hasAnalysis && <span className="cp-reader-chip">Analyzed</span>}
+                      <span className="cp-reader-fmt">{t.format}</span>
+                    </span>
                   </span>
                 </button>
               ))}
