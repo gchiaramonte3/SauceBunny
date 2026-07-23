@@ -288,11 +288,13 @@ fn transcript_ext(path: &Path) -> Option<String> {
 /// Bounded read — speaker labels appear from the first cue — keeps the scan cheap.
 fn transcript_has_speaker_labels(path: &Path) -> bool {
     use std::io::Read;
-    let Ok(mut f) = std::fs::File::open(path) else { return false };
-    let mut buf = vec![0u8; 128 * 1024];
-    let Ok(n) = f.read(&mut buf) else { return false };
-    let head = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
-    head.contains("[speaker_") || head.contains("<v ")
+    let Ok(f) = std::fs::File::open(path) else { return false };
+    // read_to_end on a Take handles short reads (a single read() can return < 128 KB);
+    // covers `[SPEAKER_NN]` machine tags and VTT `<v Name>` / `<v.class Name>` voices.
+    let mut buf = Vec::new();
+    if f.take(128 * 1024).read_to_end(&mut buf).is_err() { return false; }
+    let head = String::from_utf8_lossy(&buf).to_ascii_lowercase();
+    head.contains("[speaker_") || head.contains("<v ") || head.contains("<v.")
 }
 
 fn collect_transcripts(dir: &Path, folder_label: &str, depth_remaining: u32, out: &mut Vec<TranscriptFile>) {
@@ -373,15 +375,38 @@ fn valid_stem(s: &str) -> Result<String, crate::AppError> {
 }
 
 /// Move a transcript's co-located sidecars (`.diarization.json` / `.analysis.json`)
-/// to sit beside `dest`. Best-effort: an orphaned sidecar only costs a row badge,
-/// never the transcript itself.
+/// to sit beside `dest`. Best-effort AND non-clobbering: it never overwrites a
+/// sidecar already at the destination (that would be another transcript's data —
+/// `ensure_dest_clear` rejects such moves up front, but this is the belt-and-
+/// braces). An orphaned sidecar only costs a row badge, never the transcript.
 fn move_sidecars(src: &Path, dest: &Path) {
     for side in ["diarization.json", "analysis.json"] {
         let old = src.with_extension(side);
-        if old.is_file() {
-            let _ = std::fs::rename(&old, dest.with_extension(side));
+        let new = dest.with_extension(side);
+        if old.is_file() && !new.exists() {
+            let _ = std::fs::rename(&old, &new);
         }
     }
+}
+
+/// A destination is only clear when neither the transcript file NOR either of its
+/// sidecars already exists there — because `.srt` and `.vtt` of the same stem
+/// share sidecar names, a name that clears the transcript-file check could still
+/// clobber a sibling's `.diarization.json` / `.analysis.json` (silent, expensive
+/// data loss). Reject the whole operation before anything is moved.
+fn ensure_dest_clear(dest: &Path) -> Result<(), crate::AppError> {
+    if dest.exists() {
+        let name = dest.file_name().and_then(|n| n.to_str()).unwrap_or("that name");
+        return Err(crate::AppError::invalid(format!("\"{name}\" already exists in that folder.")));
+    }
+    for side in ["diarization.json", "analysis.json"] {
+        if dest.with_extension(side).exists() {
+            return Err(crate::AppError::invalid(
+                "That name would overwrite another transcript's speaker or analysis data in the destination.",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Rename a transcript file (.srt/.vtt) to `<new_stem>.<ext>` in place, carrying
@@ -399,8 +424,13 @@ pub fn rename_transcript(srt_path: String, new_stem: String) -> Result<String, c
     if dest == src {
         return Ok(srt_path);
     }
-    if dest.exists() {
-        return Err(crate::AppError::invalid(format!("\"{stem}.{ext}\" already exists in this folder.")));
+    // A case-only rename ("Talk.srt" → "talk.srt") on a case-insensitive volume:
+    // dest != src as paths but they resolve to the SAME file, so the clear-check
+    // would wrongly reject it. Allow it through to the rename (which changes case).
+    let same_file = dest.exists()
+        && std::fs::canonicalize(&dest).ok() == std::fs::canonicalize(&src).ok();
+    if !same_file {
+        ensure_dest_clear(&dest)?;
     }
     // Rename the transcript FIRST (the critical file); a failure leaves everything
     // untouched. Then move the sidecars best-effort.
@@ -439,9 +469,7 @@ pub fn move_transcript_to_folder(srt_path: String, dest_dir: String) -> Result<S
     if dest == src {
         return Ok(srt_path);
     }
-    if dest.exists() {
-        return Err(crate::AppError::invalid("A transcript with that name is already in that folder."));
-    }
+    ensure_dest_clear(&dest)?;
     std::fs::rename(&src, &dest)
         .map_err(|e| crate::AppError::internal(format!("Couldn't move the transcript: {e}")))?;
     move_sidecars(&src, &dest);
@@ -526,6 +554,29 @@ mod tests {
         assert!(!srt.is_file());
         // A duplicate folder is rejected.
         assert!(create_transcript_folder(t.path().to_str().unwrap().to_string(), "Project A".into()).is_err());
+    }
+
+    #[test]
+    fn move_refuses_to_clobber_a_sibling_sidecar() {
+        // .srt and .vtt of the same stem share sidecar names — a move whose
+        // transcript-file name is free must still not overwrite an existing
+        // sidecar that belongs to a sibling in the destination.
+        let t = TempTree::new("clobber");
+        let proj = create_transcript_folder(t.path().to_str().unwrap().to_string(), "Project".into()).unwrap();
+        // Destination already holds Interview.srt + its speaker sidecar.
+        std::fs::write(PathBuf::from(&proj).join("Interview.srt"), "x").unwrap();
+        std::fs::write(PathBuf::from(&proj).join("Interview.diarization.json"), r#"{"srt":true}"#).unwrap();
+        // Source: a DIFFERENT Interview.vtt at the root, with its own sidecar.
+        let vtt = t.path().join("Interview.vtt");
+        std::fs::write(&vtt, "y").unwrap();
+        std::fs::write(t.path().join("Interview.diarization.json"), r#"{"vtt":true}"#).unwrap();
+
+        let res = move_transcript_to_folder(vtt.to_str().unwrap().to_string(), proj.clone());
+        assert!(res.is_err(), "move must be rejected — it would clobber Interview.srt's sidecar");
+        // The .srt's sidecar is intact; nothing was moved.
+        let kept = std::fs::read_to_string(PathBuf::from(&proj).join("Interview.diarization.json")).unwrap();
+        assert!(kept.contains("srt"), "the destination sidecar is untouched");
+        assert!(vtt.is_file(), "the source transcript stays put");
     }
 
     #[test]

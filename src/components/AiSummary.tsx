@@ -246,7 +246,9 @@ export function AiSummary({
     });
     const text = lines.join("\n");
     // Budget: ~3.5 chars/token, keep ~65% of ctx for the transcript, rest for chat.
-    const ctx = server?.ctx ?? 16384;
+    // Cloud models have large contexts; don't shrink the transcript to the local
+    // server's ctx when a cloud provider is active (mirrors ReaderAnalysis' 32k).
+    const ctx = loadAiProvider() === "local" ? (server?.ctx ?? 16384) : 32000;
     const budget = Math.floor(ctx * 3.5 * 0.65);
     const truncated = text.length > budget;
     let clipped = text;
@@ -326,7 +328,16 @@ export function AiSummary({
     }
   }, [streaming, chaptersBusy, ensureServer, transcriptForModel, messages, style]);
 
-  function stop() { abortRef.current?.abort(); setStreaming(false); }
+  function stop() {
+    abortRef.current?.abort();
+    setStreaming(false);
+    // Drop the trailing empty assistant placeholder so it isn't resent next turn
+    // (a cloud abort leaves it empty, and Anthropic rejects an empty assistant).
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      return last?.role === "assistant" && !last.content ? prev.slice(0, -1) : prev;
+    });
+  }
 
   // If the chosen model changes (in Settings) mid-stream, abort the in-flight
   // run so the next turn starts cleanly on the newly-loaded model.
@@ -449,8 +460,10 @@ export function AiSummary({
     );
   }
 
-  // No model on disk → download card.
-  if (models && downloaded.length === 0) {
+  // No LOCAL model on disk → download card — but only when the LOCAL provider is
+  // selected. A cloud provider (Claude/ChatGPT) needs no local model, so fall
+  // through to the composer (send() routes to cloudChat).
+  if (loadAiProvider() === "local" && models && downloaded.length === 0) {
     const m = recommended;
     return (
       <div className="cp-ai-wrap">

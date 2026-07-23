@@ -9,7 +9,7 @@
 // `requestThumb` lazy decoder; a resolved URL through youTubeThumbnailUrl ??
 // webPosterFor, exactly like the reader's rowArt.
 
-import { suggestFilename } from "./filename";
+import { sanitizeFilename } from "./filename";
 import { youTubeThumbnailUrl } from "./validation";
 import { webPosterFor } from "./web-poster-store";
 import { mediaKindOf } from "./import-extensions";
@@ -19,11 +19,22 @@ import type { LibraryCardArt } from "../components/LibraryCard";
 
 export type RecentIndexEntry = { slug: string; source: RecentSource };
 
+/** The filename-slug of a title for MATCHING — like suggestFilename's cleaning
+ *  but WITHOUT its "clip" fallback, so a degenerate/all-non-Latin title yields ""
+ *  (no match) instead of every such title colliding on the slug "clip". */
+function matchSlug(title: string): string {
+  return sanitizeFilename(title || "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[^A-Za-z0-9]+/, "")
+    .replace(/[^A-Za-z0-9]+$/, "");
+}
+
 /** Precompute recent sources' title slugs once (longest/most-specific first),
  *  so the per-card match is a cheap scan. Memoize on the recents array. */
 export function buildRecentIndex(recents: RecentSource[]): RecentIndexEntry[] {
   return recents
-    .map((source) => ({ slug: suggestFilename(source.title), source }))
+    .map((source) => ({ slug: matchSlug(source.title), source }))
     .filter((e) => e.slug.length > 0)
     .sort((a, b) => b.slug.length - a.slug.length);
 }
@@ -40,7 +51,7 @@ export function transcriptArt(t: LibraryTranscript, index: RecentIndexEntry[]): 
   if (e.sourcePath) return { kind: "local", path: e.sourcePath, media: mediaKindOf(e.sourcePath) };
   if (e.sourceUrl) return remoteArt(e.sourceUrl);
 
-  const slug = suggestFilename(t.title);
+  const slug = matchSlug(t.title);
   if (slug) {
     // Exact slug, or the longest recent-slug that's a prefix at a separator
     // boundary — so caption/range/uniquing suffixes (".en", "-orig", "-in-out",

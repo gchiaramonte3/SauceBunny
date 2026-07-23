@@ -152,7 +152,9 @@ export function ReaderAnalysis({ transcriptPath, visible, selectedModelId, style
   }, [transcriptPath, phase, selectedModelId, style]);
 
   const busy = phase === "starting" || phase === "generating";
-  function stop() { abortRef.current?.abort(); }
+  // Abort + return to idle immediately (a cloud invoke can't be interrupted, but
+  // its result is dropped by the aborted check in analyze()).
+  function stop() { abortRef.current?.abort(); setStream(""); setPhase("idle"); }
 
   if (!transcriptPath) {
     return <div className="cp-analysis-empty"><p>Pick a transcript to analyze.</p></div>;

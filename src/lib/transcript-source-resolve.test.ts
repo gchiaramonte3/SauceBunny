@@ -64,6 +64,13 @@ describe("transcriptArt re-association", () => {
     expect(transcriptArt(tx("Unmatched-Transcript"), idx)).toEqual({ kind: "remote", url: null });
   });
 
+  it("does not cross-match degenerate titles that both slug to nothing", () => {
+    // Two unrelated all-non-Latin sources/transcripts must NOT match (they used
+    // to both collapse to the "clip" fallback slug and borrow each other's poster).
+    const idx = buildRecentIndex([recent("file", "/lib/a.mp4", "日本語")]);
+    expect(transcriptArt(tx("한국어"), idx)).toEqual({ kind: "remote", url: null });
+  });
+
   it("prefers the longest (most specific) recent slug on a prefix tie", () => {
     const idx = buildRecentIndex([
       recent("file", "/lib/short.mp4", "Interview"),

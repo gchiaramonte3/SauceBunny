@@ -2065,6 +2065,9 @@ export default function App() {
         durationSeconds: wm.duration ?? undefined,
       });
       appendLog("ok", "probe", `${wm.width ?? "?"}×${wm.height ?? "?"} · ${wm.fps ?? "?"} fps · ${wm.duration?.toFixed(1) ?? "?"}s · from cache`);
+      // Warm opens skip the cold fetch_metadata branch, so re-attach the source's
+      // transcript here too (else a re-pasted cached URL loses its transcript).
+      void tryAutoLoadTranscript({ sourceUrl: wm.webpage_url ?? full }, seq);
       return;
     }
     // If this fails we leave the player visible (the user is probably already
@@ -3794,6 +3797,14 @@ export default function App() {
     const rfps = readerSourceRef.current?.fps ?? fpsRef.current;
     publishPlayheadFrames(playheadSecondsToFrames(seconds, rfps));
   }, []);
+  // Transport shortcuts in the reader must drive the READER player, never the
+  // hidden-but-mounted Clip player (that caused double audio + playhead thrash).
+  const readerFps = () => readerSourceRef.current?.fps ?? fpsRef.current ?? 24;
+  const readerSeekRel = useCallback((deltaSeconds: number) => {
+    const p = readerPlayerRef.current; if (!p) return;
+    const dur = p.getDuration() || Number.POSITIVE_INFINITY;
+    p.seekTo(Math.max(0, Math.min(dur, p.getCurrentTime() + deltaSeconds)));
+  }, []);
 
   // Transcode an exotic-codec original into a WKWebView-friendly playback copy,
   // reader-scoped (no Clip state). Mirrors runPlaybackPrep but standalone.
@@ -3930,8 +3941,11 @@ export default function App() {
     const oldPath = entry.srtPath;
     const newPath = await invoke<string>("rename_transcript", { srtPath: oldPath, newStem });
     if (newPath === oldPath) return;
+    // Title from the ACTUAL on-disk name (the backend trims trailing dots/spaces),
+    // so history matches the file.
+    const cleanStem = (newPath.split("/").pop() ?? newStem).replace(/\.[^.]+$/, "");
     renameSpeakerOverridesPath(oldPath, newPath);
-    renameTranscriptEntryPath(oldPath, newPath, newStem); // fires TRANSCRIPTS_CHANGED
+    renameTranscriptEntryPath(oldPath, newPath, cleanStem); // fires TRANSCRIPTS_CHANGED
     if (activeTranscriptRef.current?.path === oldPath) {
       setActiveTranscript((prev) => (prev ? { ...prev, path: newPath } : prev));
     }
@@ -4542,8 +4556,8 @@ export default function App() {
         // (1-2-4-8×, opposite press steps down, +1 resumes real playback);
         // with K held it's a single-frame nudge instead. Repeats (key held)
         // sustain the current rate rather than laddering to the cap.
-        case "play.back5": shuttleStep(-1, e.repeat); break;
-        case "play.fwd5":  shuttleStep(1, e.repeat); break;
+        case "play.back5": if (activeViewRef.current === "reader") readerSeekRel(-5); else shuttleStep(-1, e.repeat); break;
+        case "play.fwd5":  if (activeViewRef.current === "reader") readerSeekRel(5); else shuttleStep(1, e.repeat); break;
         case "mark.in":      onMarkIn(); break;
         case "mark.out":     onMarkOut(); break;
         // ⇧I/⇧O — review comment-range marks, only when the review UI is
@@ -4568,20 +4582,26 @@ export default function App() {
         case "mark.clear":   onClearMarks(); break;
         case "mark.gotoIn":  onGotoIn(); break;
         case "mark.gotoOut": onGotoOut(); break;
-        case "play.frameBack":  onStep(-1); break;
-        case "play.frameFwd":   onStep(1); break;
-        case "play.secondBack": onStep(-Math.round(fps)); break;
-        case "play.secondFwd":  onStep(Math.round(fps)); break;
-        case "play.toStart": onSeek(0); break;
+        case "play.frameBack":  if (activeViewRef.current === "reader") readerSeekRel(-1 / readerFps()); else onStep(-1); break;
+        case "play.frameFwd":   if (activeViewRef.current === "reader") readerSeekRel(1 / readerFps()); else onStep(1); break;
+        case "play.secondBack": if (activeViewRef.current === "reader") readerSeekRel(-1); else onStep(-Math.round(fps)); break;
+        case "play.secondFwd":  if (activeViewRef.current === "reader") readerSeekRel(1); else onStep(Math.round(fps)); break;
+        case "play.toStart": if (activeViewRef.current === "reader") readerPlayerRef.current?.seekTo(0); else onSeek(0); break;
         case "play.toEnd": {
+          if (activeViewRef.current === "reader") {
+            const p = readerPlayerRef.current;
+            if (p) p.seekTo(Math.max(0, p.getDuration() - 0.1));
+            break;
+          }
           const end = endSeekFrames(durationFrames);
           if (end != null) onSeek(end);
           break;
         }
-        // Persistent playback speed ([ / ] / \) — steps the 0.5–2× list.
-        case "play.rateDown":  handlePlaybackRateStep(-1); break;
-        case "play.rateUp":    handlePlaybackRateStep(1); break;
-        case "play.rateReset": handlePlaybackRateChange(1); break;
+        // Persistent playback speed ([ / ] / \) — steps the 0.5–2× list. No-op in
+        // the reader (its transport is Space + skip + click-a-line, no rate UI).
+        case "play.rateDown":  if (activeViewRef.current !== "reader") handlePlaybackRateStep(-1); break;
+        case "play.rateUp":    if (activeViewRef.current !== "reader") handlePlaybackRateStep(1); break;
+        case "play.rateReset": if (activeViewRef.current !== "reader") handlePlaybackRateChange(1); break;
       }
     }
 

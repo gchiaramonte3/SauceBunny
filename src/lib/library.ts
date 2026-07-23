@@ -280,10 +280,20 @@ export function sourceTimecodeFor(path: string): string | null {
 /** Persist a file's source start timecode. Ignores a malformed TC (the dialog
  *  validates against the frame rate before calling this; this is the last
  *  gate). */
+/** Shape AND field-range check for a source start timecode: `HH:MM:SS:FF`
+ *  (`;` for drop-frame) with MM<60, SS<60, FF<60. Shape alone let junk like
+ *  99:99:99:99 be stored, then silently dropped to a zero offset at export. */
+export function isValidSourceTc(tc: string): boolean {
+  const t = tc.trim();
+  if (!SOURCE_TC_RE.test(t)) return false;
+  const [, mm, ss, ff] = t.split(/[:;]/).map(Number);
+  return mm < 60 && ss < 60 && ff < 60;
+}
+
 export function setSourceTimecode(path: string, tc: string): void {
-  if (!SOURCE_TC_RE.test(tc)) return;
+  if (!isValidSourceTc(tc)) return;
   const map = loadSourceTimecodes();
-  map[path] = tc;
+  map[path] = tc.trim();
   saveJson(SOURCE_TC_KEY, map);
 }
 

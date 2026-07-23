@@ -9,7 +9,7 @@ import { usePlayheadSeconds } from "../lib/playhead-store";
 import { secondsToTc } from "../lib/timecode";
 import { transcriptToAvidTxt } from "../lib/markers";
 import { fpsToRateKey, DEFAULT_MARKER_SETTINGS } from "../lib/marker-time";
-import { SOURCE_TC_RE } from "../lib/library";
+import { isValidSourceTc } from "../lib/library";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
 import {
@@ -1104,7 +1104,7 @@ export function TranscriptViewer({
   // re-checks too). HH:MM:SS:FF, or ; before the frames for drop-frame.
   function saveTc() {
     const v = tcInput.trim();
-    if (!SOURCE_TC_RE.test(v)) { setTcErr("Use HH:MM:SS:FF (e.g. 01:00:00:00)."); return; }
+    if (!isValidSourceTc(v)) { setTcErr("Use HH:MM:SS:FF (e.g. 01:00:00:00); minutes/seconds/frames under 60."); return; }
     onSetSourceTimecode?.(v);
     setTcOpen(false);
   }
