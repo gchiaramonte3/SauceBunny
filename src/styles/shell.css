@@ -313,7 +313,11 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 8px 8px 12px;
+  /* Same fixed height as the transcript header (.cp-tx-head) so the two bottom
+     hairlines are coplanar across the reader's column boundary. See --tx-head-h. */
+  height: var(--tx-head-h);
+  box-sizing: border-box;
+  padding: 0 8px 0 12px;
   border-bottom: 1px solid var(--line-1);
   font-family: var(--font-ui);
 }

@@ -3727,7 +3727,13 @@ export default function App() {
   const [readerSource, setReaderSource] = useState<ReaderSource | null>(null);
   // Why there's no follow-along player, when there isn't one (web / missing file).
   const [readerNote, setReaderNote] = useState<string | null>(null);
+  // True while an ffmpeg playback copy is being prepared for an exotic-codec
+  // source (the panel shows a "Preparing…" state meanwhile).
+  const [readerPreparing, setReaderPreparing] = useState(false);
   const [readerFloating, setReaderFloating] = useState(false);
+  // Supersede guard: each open/fallback bumps this; async steps bail if a newer
+  // one started, so a slow transcode can't clobber a since-changed reader.
+  const readerOpenSeqRef = useRef(0);
   // Whether the player panel is expanded (vs collapsed to a thin rail). The rail
   // keeps a persistent, discoverable toggle so the player is never just "gone".
   const [readerStageOpen, setReaderStageOpen] = useState<boolean>(() => {
@@ -3746,10 +3752,23 @@ export default function App() {
     publishPlayheadFrames(playheadSecondsToFrames(seconds, rfps));
   }, []);
 
-  // Reader open: attach the transcript for reading. For a LOCAL source, probe it
-  // and mount an isolated follow-along player; web/source-less → text only. The
-  // Clip source is never touched (no resetForNewSource). A missing file surfaces
-  // cleanly instead of a blank pane.
+  // Transcode an exotic-codec original into a WKWebView-friendly playback copy,
+  // reader-scoped (no Clip state). Mirrors runPlaybackPrep but standalone.
+  const prepareReaderPlayback = useCallback(async (
+    origPath: string, hasVideo: boolean, durationSeconds: number | null,
+  ): Promise<string> => {
+    const jobId = await invoke<string>("new_job_id");
+    return await invoke<string>("prepare_local_for_playback", {
+      args: { input_path: origPath, has_video: hasVideo, duration_seconds: durationSeconds, job_id: jobId },
+    });
+  }, []);
+
+  // Reader open: attach the transcript for reading, then resolve an ISOLATED
+  // follow-along player the SAME way Clip/Library does (this is why a file that
+  // plays in the Library plays here): probe → canMediabunnyDecode → MediaBunny
+  // on the original, or ffmpeg-transcode to a native-playable copy. The Clip
+  // source is never touched (no resetForNewSource). Text shows immediately; the
+  // player fills in async. Web/source-less → text only.
   const handleReaderOpenTranscript = useCallback(async (entry: TranscriptHistoryEntry) => {
     try {
       await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 8 * 1024 * 1024 });
@@ -3758,29 +3777,11 @@ export default function App() {
         `${entry.srtPath} was moved or deleted. Remove it from history to clean up.`);
       return;
     }
-    // Isolated follow-along source (local only). Probe failure → text-only.
-    let src: ReaderSource | null = null;
-    let note: string | null = null;
-    if (entry.sourcePath) {
-      try {
-        const lf = await invoke<LocalFileMeta>("probe_local_file", { path: entry.sourcePath });
-        src = {
-          path: lf.path,
-          hasVideo: lf.has_video,
-          fps: lf.fps && lf.fps > 0 ? lf.fps : 24,
-          title: lf.filename ?? entry.title,
-        };
-      } catch {
-        src = null;
-        note = "The source file couldn't be opened. It may have been moved or renamed, so this transcript is reading only.";
-      }
-    } else {
-      note = entry.sourceUrl
-        ? "This is a web source. Follow-along playback in the reader is local-file only for now."
-        : "No source file is linked to this transcript, so there's nothing to play.";
-    }
-    setReaderSource(src);
-    setReaderNote(note);
+    const seq = ++readerOpenSeqRef.current;
+    // Open the reader with the text right away; reset the player to a clean slate.
+    setReaderSource(null);
+    setReaderNote(null);
+    setReaderPreparing(!!entry.sourcePath);
     // Publish 0 so the highlight can't read a frame left in the Clip's fps.
     publishPlayheadFrames(0);
     setActiveTranscript({
@@ -3789,7 +3790,68 @@ export default function App() {
     });
     setTranscriptArrivedTick((n) => n + 1);
     navigateView("reader");
-  }, [navigateView, pushNotification]);
+
+    if (!entry.sourcePath) {
+      setReaderPreparing(false);
+      setReaderNote(entry.sourceUrl
+        ? "This is a web source. Follow-along playback in the reader is local-file only for now."
+        : "No source file is linked to this transcript, so there's nothing to play.");
+      return;
+    }
+    // Resolve the follow-along player (isolated, seq-guarded).
+    try {
+      const lf = await invoke<LocalFileMeta>("probe_local_file", { path: entry.sourcePath });
+      if (readerOpenSeqRef.current !== seq) return;
+      const fps = lf.fps && lf.fps > 0 ? lf.fps : 24;
+      const title = lf.filename ?? entry.title;
+      const canMb = await canMediabunnyDecode(lf.path);
+      if (readerOpenSeqRef.current !== seq) return;
+      if (canMb) {
+        // Reliable primary path: MediaBunny reads the original via byte-range IPC.
+        setReaderSource({ origPath: lf.path, path: lf.path, hasVideo: lf.has_video, fps, title, useWebCodecs: true, prepared: false });
+        setReaderPreparing(false);
+      } else {
+        // Exotic codec WebCodecs can't decode → transcode a playable copy up front
+        // (a raw native <video> would hang without even firing an error).
+        const prepared = await prepareReaderPlayback(lf.path, lf.has_video, lf.duration);
+        if (readerOpenSeqRef.current !== seq) return;
+        setReaderSource({ origPath: lf.path, path: prepared, hasVideo: lf.has_video, fps, title, useWebCodecs: false, prepared: true });
+        setReaderPreparing(false);
+      }
+    } catch {
+      if (readerOpenSeqRef.current !== seq) return;
+      setReaderPreparing(false);
+      setReaderNote("The source file couldn't be opened. It may have been moved or renamed, so this transcript is reading only.");
+    }
+  }, [navigateView, pushNotification, prepareReaderPlayback]);
+
+  // Reader player load failure → fall back like Clip's onMediaError chain. A
+  // MediaBunny paint failure (e.g. a 10-bit source that decodes but paints black)
+  // or a native load error transcodes the original and retries via native <video>.
+  // Already on a transcoded copy and still failing → surface it, don't loop.
+  const handleReaderMediaError = useCallback(async (msg: string) => {
+    const cur = readerSourceRef.current;
+    if (!cur) return;
+    if (cur.prepared && !cur.useWebCodecs) {
+      setReaderSource(null);
+      setReaderNote("This source couldn't be played in the reader, but it still opens in the Library and Clip.");
+      appendLog("warn", "local", `Reader playback failed after transcode: ${msg}`);
+      return;
+    }
+    const seq = ++readerOpenSeqRef.current;
+    setReaderPreparing(true);
+    try {
+      const prepared = await prepareReaderPlayback(cur.origPath, cur.hasVideo, null);
+      if (readerOpenSeqRef.current !== seq) return;
+      setReaderSource({ ...cur, path: prepared, useWebCodecs: false, prepared: true });
+    } catch {
+      if (readerOpenSeqRef.current !== seq) return;
+      setReaderSource(null);
+      setReaderNote("This source couldn't be prepared for playback in the reader.");
+    } finally {
+      if (readerOpenSeqRef.current === seq) setReaderPreparing(false);
+    }
+  }, [appendLog, prepareReaderPlayback]);
 
   // THE single-clock gate (r88): exactly one media element is ever unpaused.
   // The Clip player keeps playing across views ([hidden] is display:none, audio
@@ -5195,10 +5257,10 @@ export default function App() {
           {/* Transcripts reader — a reading-first workspace over every
               transcript on disk, outside the Clip editor. The picker lives in
               TranscriptReader; the reading pane is the real TranscriptViewer,
-              passed as children so its handler bundle stays in App scope. Text
-              first: no player in this first cut (Phase 1b), so it mounts with
-              reading-first prop values and its source-dependent chrome
-              (Regenerate/Fix-timing) self-hides via hasSource=false. */}
+              passed as children so its handler bundle stays in App scope. The
+              follow-along player (ReaderPlayerStage) resolves its source the same
+              way Clip does; source-dependent chrome (Regenerate/Fix-timing)
+              self-hides via hasSource=false since the reader can't regenerate. */}
           <div ref={readerViewRef} tabIndex={-1} className="cp-view cp-view-reader" hidden={activeView !== "reader"}>
             <TranscriptReader
               transcriptLibraryPath={defaults.transcriptLibrary}
@@ -5214,6 +5276,7 @@ export default function App() {
               stage={
                 <ReaderPlayerStage
                   source={readerSource}
+                  preparing={readerPreparing}
                   note={readerNote}
                   playerRef={readerPlayerRef}
                   floating={readerFloating}
@@ -5222,6 +5285,7 @@ export default function App() {
                   onCollapse={() => { setReaderStageOpen(false); setReaderFloating(false); }}
                   onTimeUpdate={activeView === "reader" ? onReaderTimeUpdate : undefined}
                   onPlayStateChange={setIsPlaying}
+                  onError={handleReaderMediaError}
                   initialVolume={muted ? 0 : volume}
                 />
               }
@@ -5233,7 +5297,7 @@ export default function App() {
                 fps={readerSource?.fps ?? fps}
                 onSeek={(seconds) => readerPlayerRef.current?.seekTo(seconds)}
                 origin={activeTranscript?.origin ?? "unknown"}
-                onClearTranscript={() => { setActiveTranscript(null); setReaderSource(null); setReaderNote(null); }}
+                onClearTranscript={() => { readerOpenSeqRef.current++; setActiveTranscript(null); setReaderSource(null); setReaderNote(null); setReaderPreparing(false); }}
                 onLoadFromHistory={handleReaderOpenTranscript}
                 onRegenerate={() => { /* reading-first: no source to regenerate from */ }}
                 regenerateBusy={false}

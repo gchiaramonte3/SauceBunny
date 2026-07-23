@@ -1,14 +1,35 @@
 import { useState, type RefObject } from "react";
 import { LocalMediaPlayer } from "./LocalMediaPlayer";
+import { MediaBunnyPlayer } from "./MediaBunnyPlayer";
 import type { PlayerHandle } from "./player-handle";
 import {
-  IconPlay, IconPause, IconSkipBack, IconSkipForward, IconPanelRight, IconFilm,
+  IconPlay, IconPause, IconSkipBack, IconSkipForward, IconPanelRight, IconFilm, IconSpinnerArc,
 } from "./Icons";
 import { usePlayheadSeconds } from "../lib/playhead-store";
 
-/** The reader's follow-along source — a local file probed for playback. Web /
- *  source-less transcripts read text-only (source === null → a placeholder). */
-export type ReaderSource = { path: string; hasVideo: boolean; fps: number; title: string };
+/**
+ * The reader's follow-along source — a local file resolved for playback the
+ * SAME way the Clip/Library flow resolves it (this is why a file that plays in
+ * the Library also plays here):
+ *   - `useWebCodecs` true  → MediaBunnyPlayer, which reads the ORIGINAL via
+ *     native byte-range IPC and decodes with WebCodecs. This is the reliable
+ *     primary path; a raw file handed to a native <video src="asset://…">
+ *     hangs in WKWebView (black canvas, duration 0:00, no error event).
+ *   - `useWebCodecs` false → the file was ffmpeg-transcoded to a small
+ *     WKWebView-friendly copy (`path`), played via LocalMediaPlayer.
+ * `origPath` is kept so an on-error fallback can transcode the original;
+ * `prepared` marks that `path` is already a transcoded copy (stops a re-prep
+ * loop). Web / source-less transcripts read text-only (source === null).
+ */
+export type ReaderSource = {
+  origPath: string;
+  path: string;
+  hasVideo: boolean;
+  fps: number;
+  title: string;
+  useWebCodecs: boolean;
+  prepared: boolean;
+};
 
 /** HH:MM:SS (or M:SS under an hour) for the transport clock. */
 function fmtClock(s: number): string {
@@ -19,8 +40,10 @@ function fmtClock(s: number): string {
 }
 
 type Props = {
-  /** The local source to play, or null for a text-only transcript. */
+  /** The resolved local source to play, or null for text-only / while preparing. */
   source: ReaderSource | null;
+  /** True while an ffmpeg playback copy is being prepared (exotic codec fallback). */
+  preparing: boolean;
   /** Why there's no player (shown in the placeholder) when source is null. */
   note: string | null;
   /** App's reader player ref — shared with the keyboard + single-clock gate. */
@@ -32,6 +55,8 @@ type Props = {
   onCollapse: () => void;
   onTimeUpdate?: (seconds: number) => void;
   onPlayStateChange: (playing: boolean) => void;
+  /** A native/WebCodecs load failure → App transcodes the original and retries. */
+  onError: (message: string) => void;
   initialVolume: number;
 };
 
@@ -44,8 +69,8 @@ type Props = {
  * instead of vanishing, so the panel is always a discoverable fixture.
  */
 export function ReaderPlayerStage({
-  source, note, playerRef, floating, active,
-  onToggleFloat, onCollapse, onTimeUpdate, onPlayStateChange, initialVolume,
+  source, preparing, note, playerRef, floating, active,
+  onToggleFloat, onCollapse, onTimeUpdate, onPlayStateChange, onError, initialVolume,
 }: Props) {
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -53,6 +78,7 @@ export function ReaderPlayerStage({
   const cur = usePlayheadSeconds(source?.fps ?? 24, active) ?? 0;
 
   const handlePlayState = (p: boolean) => { setPlaying(p); onPlayStateChange(p); };
+  const handleReady = (d: number) => { setDuration(d || 0); playerRef.current?.setVolume(initialVolume); };
   const toggle = () => {
     const p = playerRef.current; if (!p) return;
     if (p.isPlaying()) p.pause(); else p.play();
@@ -70,12 +96,24 @@ export function ReaderPlayerStage({
   };
 
   const pct = duration ? Math.min(100, (cur / duration) * 100) : 0;
+  const headTitle = source?.title ?? (preparing ? "Preparing…" : "No video");
+  // Same props feed either engine — they share the PlayerHandle interface. The
+  // key remounts cleanly on a path/engine swap (mediabunny original → native copy).
+  const playerProps = source && {
+    path: source.path,
+    filename: source.title,
+    hasVideo: source.hasVideo,
+    initialVolume,
+    onTimeUpdate,
+    onPlayStateChange: handlePlayState,
+    onReady: handleReady,
+    onError,
+  };
+
   return (
     <div className={"cp-reader-stage-panel" + (floating ? " floating" : "")} aria-label="Follow-along video">
       <div className="cp-reader-stage-head">
-        <span className="cp-reader-stage-title" title={source?.title ?? "No video"}>
-          {source?.title ?? "No video"}
-        </span>
+        <span className="cp-reader-stage-title" title={headTitle}>{headTitle}</span>
         {source && (
           <button
             type="button"
@@ -102,19 +140,12 @@ export function ReaderPlayerStage({
         </button>
       </div>
 
-      {source ? (
+      {source && playerProps ? (
         <>
           <div className="cp-reader-stage-video">
-            <LocalMediaPlayer
-              ref={playerRef}
-              path={source.path}
-              filename={source.title}
-              hasVideo={source.hasVideo}
-              initialVolume={initialVolume}
-              onTimeUpdate={onTimeUpdate}
-              onPlayStateChange={handlePlayState}
-              onReady={(d) => { setDuration(d || 0); playerRef.current?.setVolume(initialVolume); }}
-            />
+            {source.useWebCodecs
+              ? <MediaBunnyPlayer key={"mb:" + source.path} ref={playerRef} {...playerProps} />
+              : <LocalMediaPlayer key={"lm:" + source.path} ref={playerRef} {...playerProps} />}
           </div>
           <div className="cp-reader-transport">
             <div className="cp-reader-scrub" onClick={seekToFraction} role="presentation" title="Click to jump">
@@ -136,6 +167,11 @@ export function ReaderPlayerStage({
             </div>
           </div>
         </>
+      ) : preparing ? (
+        <div className="cp-reader-stage-empty">
+          <IconSpinnerArc size={22} />
+          <p>Preparing a playback copy of this source…</p>
+        </div>
       ) : (
         <div className="cp-reader-stage-empty">
           <IconFilm size={22} />
