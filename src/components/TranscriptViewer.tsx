@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { IconReveal, IconAlert, IconChevronDown, IconInfo } from "./Icons";
 import { parseSrt, groupIntoTurns, serializeCues, fmtTime, type Turn } from "../lib/srt";
 import { speakerStats } from "../lib/speaker-stats";
-import { usePlayheadSeconds } from "../lib/playhead-store";
+import { subscribePlayhead, getPlayheadFrames, playheadFramesToSeconds } from "../lib/playhead-store";
 import { secondsToTc } from "../lib/timecode";
 import { transcriptToAvidTxt } from "../lib/markers";
 import { fpsToRateKey, DEFAULT_MARKER_SETTINGS } from "../lib/marker-time";
@@ -193,10 +193,6 @@ export function TranscriptViewer({
   onImportTranscript, sourceKind, onFixCaptionTiming,
   hasSource = false, onTranscriptEdited,
 }: Props) {
-  // Live playhead (seconds) from the store — this viewer is one of the few
-  // per-tick subscribers (the karaoke highlight). Pinned to null while
-  // inactive so a hidden tab doesn't re-render on playback ticks.
-  const playheadSeconds = usePlayheadSeconds(fps, playheadActive);
   const [raw, setRaw] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -362,19 +358,31 @@ export function TranscriptViewer({
   // at a turn boundary that's the prior speaker's last line ("click 'Know',
   // highlights 'Let's roll it.'"). Snap a playhead within one frame of a cue's
   // start up to that cue so the clicked chunk is the one selected.
-  const activeCueIdx = useMemo(() => {
-    if (playheadSeconds == null || flatCues.length === 0) return -1;
-    const eps = 1 / Math.max(1, Math.round(fps)); // one frame, in seconds
-    let lo = 0, hi = flatCues.length - 1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      const c = flatCues[mid].cue;
-      if (playheadSeconds < c.start - eps) hi = mid - 1;
-      else if (playheadSeconds > c.end) lo = mid + 1;
-      else return mid;
-    }
-    return Math.max(-1, hi);
-  }, [playheadSeconds, flatCues, fps]);
+  //
+  // Subscribe to the DERIVED INDEX, not to raw seconds. Seconds change on every
+  // store notification (rAF-driven for local files, so 30-60/sec), but the only
+  // thing this component takes from the playhead is this integer, which changes
+  // about once per cue. Subscribing at seconds granularity re-rendered the whole
+  // unvirtualized turn/cue tree tens of times a second to produce a value that
+  // was identical almost every time. useSyncExternalStore compares the snapshot,
+  // so an unchanged index now re-renders nothing at all.
+  const activeCueIdx = useSyncExternalStore(
+    subscribePlayhead,
+    useCallback(() => {
+      if (!playheadActive || flatCues.length === 0) return -1;
+      const seconds = playheadFramesToSeconds(getPlayheadFrames(), fps);
+      const eps = 1 / Math.max(1, Math.round(fps)); // one frame, in seconds
+      let lo = 0, hi = flatCues.length - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const c = flatCues[mid].cue;
+        if (seconds < c.start - eps) hi = mid - 1;
+        else if (seconds > c.end) lo = mid + 1;
+        else return mid;
+      }
+      return Math.max(-1, hi);
+    }, [playheadActive, flatCues, fps]),
+  );
 
   useEffect(() => {
     if (!autoScroll || activeCueIdx < 0 || !scrollRef.current) return;
@@ -507,7 +515,10 @@ export function TranscriptViewer({
   useEffect(() => { setMatchCursor(0); }, [query, searchMode]);
 
   // ── Karaoke-body precomputes (perf) ──────────────────────────────
-  // The turns.map render runs on EVERY playhead tick (activeCueIdx changes).
+  // The turns.map render runs once per ACTIVE-CUE CHANGE (roughly once a cue),
+  // not per playhead tick — activeCueIdx is a useSyncExternalStore snapshot, so
+  // a tick that lands inside the same cue re-renders nothing. These precomputes
+  // exist to keep that boundary render cheap.
   // Hoist the O(turns²) cue-offset scan, the per-turn name/alias resolution,
   // and the search-match lookup out of that hot loop so a tick only re-marks
   // the active cue instead of recomputing all bookkeeping. Keyed so a rename
