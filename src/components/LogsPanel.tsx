@@ -98,7 +98,11 @@ export function LogsPanel({
   // Parakeet is one-shot (no per-segment %), so don't show a pinned 0% bar for
   // it — except the model download, which does report bytes. Whisper + export
   // keep their real progress bars.
-  const parakeetNoPct = transcriptEngine === "parakeet" && transcriptPhase !== "parakeet-download";
+  // "extract" is the ffmpeg audio prep, which reports real percent for either
+  // engine — without this the Parakeet pill printed a climbing percentage next
+  // to an empty bar.
+  const parakeetNoPct = transcriptEngine === "parakeet"
+    && transcriptPhase !== "parakeet-download" && transcriptPhase !== "extract";
   const showProgress = (whisperRunning && !parakeetNoPct) || status === "exporting";
   const shownProgress = whisperRunning ? (transcriptProgress ?? 0) : progress;
 

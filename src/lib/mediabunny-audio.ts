@@ -24,6 +24,12 @@ export async function extractAudioAsWav16k(
 ): Promise<Blob | null> {
   const url = convertFileSrc(localPath);
   const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
+  // Abort has to reach the demuxer, not just the loop guard below: the decode
+  // sits inside the iterator's byte reads, so a caller that gives up (its
+  // timeout won, or the user hit Stop) would otherwise leave this running to
+  // completion, holding the whole track while the fallback path decodes the
+  // same file alongside it.
+  signal?.addEventListener("abort", () => { void input.dispose(); });
   try {
     const at = await input.getPrimaryAudioTrack();
     if (!at) return null;

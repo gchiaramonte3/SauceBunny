@@ -1720,6 +1720,8 @@ async fn extract_wav_16k_tracked(
     let mut last_pct = 0.0_f64;
     let mut exit_code: Option<i32> = None;
     let mut terminated = false;
+    let mut stderr_tail = String::new();
+    let mut spawn_error: Option<String> = None;
     loop {
         match tokio::time::timeout(idle, rx.recv()).await {
             Err(_) => {
@@ -1751,19 +1753,51 @@ async fn extract_wav_16k_tracked(
                     }
                 }
             }
+            Ok(Some(CommandEvent::Stderr(b))) => {
+                // Keep a bounded tail so a real failure reports WHY. This is
+                // the whole bug-report channel (no telemetry), and the sibling
+                // extraction path already reports through short_err.
+                stderr_tail.push_str(&String::from_utf8_lossy(&b));
+                if stderr_tail.len() > 4096 {
+                    let mut cut = stderr_tail.len() - 2048;
+                    while cut < stderr_tail.len() && !stderr_tail.is_char_boundary(cut) { cut += 1; }
+                    stderr_tail = stderr_tail[cut..].to_string();
+                }
+            }
             Ok(Some(CommandEvent::Terminated(payload))) => {
                 exit_code = payload.code;
                 terminated = true;
                 break;
             }
-            Ok(Some(_)) => {} // stderr banner / other — drained, ignored
+            Ok(Some(CommandEvent::Error(e))) => { spawn_error = Some(e); }
+            Ok(Some(_)) => {} // other — drained, ignored
         }
     }
     let _ = app.state::<JobRegistry>().take(job_id);
-    if terminated && exit_code != Some(0) {
-        return Err(format!("ffmpeg audio conversion failed (exit {exit_code:?})"));
+    // A channel that closed WITHOUT a Terminated event is a failure, not a
+    // success: the plugin drops its senders after emitting Error, so treating
+    // "not terminated" as OK let a dead ffmpeg through, and the caller's only
+    // other gate is that the file exists — which it does, because `-y` writes
+    // the RIFF header at open time. A 44-byte WAV would have reached whisper.
+    match (terminated, exit_code) {
+        (true, Some(0)) => Ok(()),
+        (true, code) => Err(fail_msg(&stderr_tail, format!("exit {code:?}"))),
+        (false, _) => Err(fail_msg(
+            &stderr_tail,
+            spawn_error.unwrap_or_else(|| "ffmpeg exited without reporting a status".into()),
+        )),
     }
-    Ok(())
+}
+
+/// Format an extraction failure, preferring ffmpeg's own stderr tail over the
+/// bare status when we captured anything useful.
+fn fail_msg(stderr_tail: &str, fallback: String) -> String {
+    let tail = short_err(stderr_tail);
+    if tail.trim().is_empty() {
+        format!("Audio conversion failed — {fallback}")
+    } else {
+        format!("Audio conversion failed — {tail}")
+    }
 }
 
 // Parses whisper-cli segment lines like "[00:00:04.000 --> 00:00:08.500]" → 8.5
@@ -1896,6 +1930,10 @@ pub async fn re_diarize_transcript(
         // Diarize + merge fresh speaker labels into the existing SRT in place.
         let result = run_diarize_and_merge(&app_for, &job_for, &wav_path_for, &srt_for, expected).await;
         let _ = std::fs::remove_file(&wav_path_for);
+        // Covers both arms — every other pipeline task clears its registry
+        // bookkeeping on exit, and the success path here never did, so a
+        // re-diarize left its cancel flag behind for the rest of the session.
+        app_for.state::<JobRegistry>().finish_job(&job_for);
         match result {
             Ok(()) => emit_transcript_done(
                 &app_for, &job_for, true, Some(0), Some(transcript_path_out), None),
@@ -2234,11 +2272,15 @@ pub async fn transcribe_local_file(
             );
             return;
         }
-        if !wav_path_for.exists() {
+        // Size, not just existence: ffmpeg's `-y` writes the RIFF header when it
+        // OPENS the output, so a run that died immediately still leaves a valid
+        // ~44-byte header-only WAV behind for whisper to chew on silently.
+        if wav_path_for.metadata().map(|m| m.len()).unwrap_or(0) <= 44 {
+            let _ = std::fs::remove_file(&wav_path_for);
             app_for.state::<JobRegistry>().finish_job(&job_for);
             emit_transcript_done(
                 &app_for, &job_for, false, None, None,
-                Some("WAV conversion produced no file".into()),
+                Some("Audio conversion produced an empty file".into()),
             );
             return;
         }

@@ -3375,6 +3375,11 @@ export default function App() {
           const fastAbort = new AbortController();
           const chainAbort = () => fastAbort.abort();
           abort.signal.addEventListener("abort", chainAbort);
+          // The backend owns the phase once it starts, but this decode runs
+          // entirely in the browser BEFORE any backend job exists, so without
+          // this the pill sits on the default "Whisper 0%" for the whole
+          // extraction — the exact frozen-0% symptom this work is about.
+          setTranscriptPhase("extract");
           let timer: ReturnType<typeof setTimeout> | undefined;
           const timeout = new Promise<null>((resolve) => {
             timer = setTimeout(() => { fastAbort.abort(); resolve(null); }, WEBCODECS_EXTRACT_TIMEOUT_MS);
@@ -4541,7 +4546,7 @@ export default function App() {
   const reviewRangeKeysRef = useRef<{ markIn: () => void; markOut: () => void } | null>(null);
   const registerReviewRangeKeys = useCallback(
     (h: { markIn: () => void; markOut: () => void } | null) => { reviewRangeKeysRef.current = h; }, []);
-  const reviewRangeGateRef = useRef({ panelDetached: false, queueOpen: false, roomActive: false, reviewSourceKey: null as string | null, hasSource: false });
+  const reviewRangeGateRef = useRef({ panelDetached: false, queueOpen: false, roomActive: false, reviewSourceKey: null as string | null, hasSource: false, clipVisible: false });
 
   // Data-driven: the live event is serialized to a combo and matched against the
   // user-editable binding map (Settings → Commands). The three things that aren't
@@ -4637,6 +4642,12 @@ export default function App() {
           // marks would silently land at 0:00.
           // Room face forces the drawer open on the Review tab, so the
           // persisted tab/open prefs don't gate there.
+          // The panel only tracks the playhead while its view is on screen, so
+          // firing from Home/Library/Reader would reach a ReviewPanel whose
+          // currentSec is null: the mark silently no-ops, or worse files at
+          // 0:00. Gate on the same visibility the panel uses so the shortcut is
+          // inert BY DESIGN here, not by accident.
+          if (!g.clipVisible) break;
           if ((g.panelDetached && !g.roomActive) || (!g.roomActive && (!g.queueOpen || loadActiveTab() !== "review")) || !g.reviewSourceKey || !g.hasSource) break;
           const h = reviewRangeKeysRef.current;
           if (id === "review.rangeIn") h?.markIn(); else h?.markOut();
@@ -5048,7 +5059,7 @@ export default function App() {
   // `live` = an end still follows the playhead (pulsing); false = locked.
   const [reviewRangeDraft, setReviewRangeDraft] = useState<{ start: number; end: number; color: string; live: boolean } | null>(null);
   // Latest-value mirror for the keyboard effect's ⇧I/⇧O review-range gate.
-  useEffect(() => { reviewRangeGateRef.current = { panelDetached, queueOpen, roomActive, reviewSourceKey, hasSource }; });
+  useEffect(() => { reviewRangeGateRef.current = { panelDetached, queueOpen, roomActive, reviewSourceKey, hasSource, clipVisible: activeView === "clip" || roomActive }; });
 
   // ── Co-review session (P2P watch party — r100 transport, r101 live review) ──
   // The whole subsystem — session lifecycle, host transport heartbeat + peer

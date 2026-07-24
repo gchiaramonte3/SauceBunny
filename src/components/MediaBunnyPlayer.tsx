@@ -11,6 +11,12 @@ import { createScrubPump, type ScrubPump } from "../lib/scrub-pump";
 import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle } from "./player-handle";
 
+/** How long to wait for a decode loop to pin the clock before pinning it to
+ *  the requested time anyway. Only reachable on sources with no video track,
+ *  where the audio loop is the sole anchor and a dead track would otherwise
+ *  leave the transport wedged. */
+const ANCHOR_FALLBACK_MS = 1000;
+
 /**
  * Alternative to LocalMediaPlayer that decodes the original file via
  * WebCodecs (through mediabunny) instead of relying on WKWebView's
@@ -93,8 +99,13 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
    * time the first buffer arrived it was already "late" and got discarded, so
    * every transcript-cue click opened a silent hole while the picture and the
    * playhead (both reading the still-advancing context clock) looked perfect.
-   * Now the anchor is established from the first sample actually DELIVERED, so
-   * that latency becomes "starts a few ms later" instead of "loses a few ms".
+   * Now the anchor is established from the first sample actually DELIVERED
+   * (clamped so it can never land before the requested time), so that latency
+   * becomes "starts a few ms later" instead of "loses a few ms".
+   *
+   * The anchor is set ONCE per generation and never moved mid-playback: moving
+   * it would rewind the master clock, and every consumer of the playhead reads
+   * that clock.
    */
   const anchoredRef = useRef(false);
   /** Audio source nodes currently scheduled — cancelled on stop/seek. */
@@ -263,7 +274,9 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
               if (gen !== genRef.current) return;
             }
           }
-          if (!anchoredRef.current) anchorClock(wrapped.timestamp, ctx);
+          // Clamped to fromTime for the same reason as the audio anchor: the
+          // sink yields the frame at or before the requested time first.
+          if (!anchoredRef.current) anchorClock(Math.max(fromTime, wrapped.timestamp), ctx);
         }
         const targetCtxTime = startContextTimeRef.current + (wrapped.timestamp - startMediaTimeRef.current);
         const waitMs = (targetCtxTime - ctx.currentTime) * 1000;
@@ -298,40 +311,47 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       for await (const wrapped of sink.buffers(fromTime, durationRef.current)) {
         if (gen !== genRef.current) return;
         // First buffer of this generation owns the clock — see anchoredRef.
-        if (!anchoredRef.current) anchorClock(wrapped.timestamp, ctx);
+        // Clamped to fromTime because the sink deliberately yields the last
+        // sample at or BEFORE the requested time first: anchoring on that raw
+        // timestamp would report a position up to one packet earlier than the
+        // caller asked for, which lands a cue click on the previous cue and
+        // creeps backwards across repeated play/pause cycles.
+        if (!anchoredRef.current) anchorClock(Math.max(fromTime, wrapped.timestamp), ctx);
         const source = ctx.createBufferSource();
         source.buffer = wrapped.buffer;
         source.connect(gain);
-        let targetCtxTime = startContextTimeRef.current + (wrapped.timestamp - startMediaTimeRef.current);
+        const targetCtxTime = startContextTimeRef.current + (wrapped.timestamp - startMediaTimeRef.current);
+        let started = false;
         if (targetCtxTime <= ctx.currentTime) {
-          const offset = Math.max(0, ctx.currentTime - targetCtxTime);
+          // Behind the clock: play only the part of the chunk still ahead of
+          // it. (This is also how the first chunk after a seek trims itself
+          // down to exactly the requested time.)
+          const offset = ctx.currentTime - targetCtxTime;
           if (offset < wrapped.buffer.duration) {
-            // Slightly behind — start now, offset into the chunk so we don't
-            // replay already-past samples.
             source.start(0, offset);
-          } else {
-            // More than a whole chunk late (~21ms for AAC). This case used to
-            // fall through and never start the node at all, so the audio was
-            // simply lost — and since the loop never re-anchored it kept
-            // discarding, producing an open-ended silent stretch while the
-            // picture and playhead ran on regardless. Re-anchor to NOW: one
-            // ~20ms discontinuity, then audio tracks again. The video loop
-            // reads the same anchor, so A/V stay locked.
-            anchorClock(wrapped.timestamp, ctx);
-            targetCtxTime = startContextTimeRef.current;
-            source.start(0);
+            started = true;
           }
+          // Otherwise the chunk is entirely in the past, so it is dropped:
+          // skipping late audio is how playback stays in sync after a stall.
+          // Do NOT "rescue" it by re-anchoring the clock to its timestamp —
+          // that rewinds the master clock by the whole lateness, jumping the
+          // playhead (and every consumer of it) backwards and stalling the
+          // picture for the same span while video waits for the new anchor.
         } else {
           source.start(targetCtxTime);
+          started = true;
         }
-        // Every path above starts the node, so onended is guaranteed to fire
-        // and drain this array. (Never-started nodes used to be pushed here
-        // too, where they sat forever holding their decoded PCM.)
-        scheduledRef.current.push(source);
-        source.onended = () => {
-          const idx = scheduledRef.current.indexOf(source);
-          if (idx >= 0) scheduledRef.current.splice(idx, 1);
-        };
+        if (started) {
+          scheduledRef.current.push(source);
+          source.onended = () => {
+            const idx = scheduledRef.current.indexOf(source);
+            if (idx >= 0) scheduledRef.current.splice(idx, 1);
+          };
+        } else {
+          // Never-started nodes can never fire onended, so they must not go in
+          // scheduledRef — they would sit there holding their decoded PCM.
+          try { source.disconnect(); } catch { /* ignore */ }
+        }
         // Backpressure: if we've scheduled more than ~3 seconds ahead of
         // the current clock, wait before pulling the next chunk so we
         // don't decode the whole file into memory upfront.
@@ -343,6 +363,10 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       }
     } catch (err) {
       if (gen === genRef.current) {
+        // With no video track this loop is the only one running, so nothing
+        // else would ever settle the transport — the UI would sit reporting
+        // "playing" against a frozen clock.
+        if (!videoSinkRef.current) stopPlayback();
         onError?.(`Audio decode failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
@@ -364,16 +388,28 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       try { await ctx.resume(); } catch { /* fall through to the state check */ }
       if (gen !== genRef.current) return;
       if (ctx.state === "suspended") {
+        // Settle paused and let the next gesture-backed play() retry. This is a
+        // recoverable transport condition, NOT a decode failure — reporting it
+        // through onError would make App tear this player down and swap engines
+        // over something the very next click fixes.
         playingRef.current = false;
         setIsPlaying(false);
         onPlayStateChange?.(false);
-        onError?.("Audio could not start. The audio context stayed suspended.");
         return;
       }
     }
     if (gen !== genRef.current) return;
     runAudioLoop(fromTime, gen);
     runVideoLoop(fromTime, gen);
+    // Anchor fallback. runVideoLoop is the unconditional anchor, but it returns
+    // immediately when there is no video sink, which leaves runAudioLoop as the
+    // ONLY anchor on audio-only sources (podcasts, interviews). If it never
+    // delivers a buffer the clock would stay frozen while the UI reports
+    // playing, so pin it here rather than leave the transport wedged.
+    window.setTimeout(() => {
+      if (gen !== genRef.current || !playingRef.current || anchoredRef.current) return;
+      anchorClock(fromTime, ctx);
+    }, ANCHOR_FALLBACK_MS);
   };
 
   // Periodic time-update tick for the parent's playhead — independent of

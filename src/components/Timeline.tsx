@@ -183,6 +183,10 @@ export function Timeline({
       setTrackW((prev) => (Math.abs(prev - w) >= 24 ? Math.round(w) : prev));
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width ?? 0;
+      // A hidden view reports 0. Committing that would drop the filmstrip and
+      // change the cache key, so every trip to Home and back re-decoded the
+      // whole strip. Width is never meaningfully 0 while on screen.
+      if (w <= 0) return;
       // First measurement paints immediately; after that, commit only on the
       // trailing edge. The drawer's 280ms width transition fires this
       // continuously, and each distinct 24px bucket used to start a whole new

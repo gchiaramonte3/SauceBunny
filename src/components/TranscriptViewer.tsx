@@ -204,6 +204,10 @@ export function TranscriptViewer({
   const [autoScroll, setAutoScroll] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastScrollTop = useRef(0);
+  /** Non-zero while a follow-scroll we issued is still settling, so onScroll
+   *  doesn't mistake it for the user scrolling away and turn follow off. */
+  const programmaticScrollRef = useRef(0);
+  const programmaticScrollTimer = useRef(0);
 
   // ── Speaker overrides ───────────────────────────────────────────
   // (Type + layer semantics documented at module scope, above the component.)
@@ -395,6 +399,17 @@ export function TranscriptViewer({
     // Place it ~28% down instead, teleprompter-style, so the lines coming next
     // fill the space below and the panel doesn't re-scroll on every cue.
     const target = scroller.scrollTop + (r.top - sRect.top) - scroller.clientHeight * 0.28;
+    // Mark this as OUR scroll. It lands in the same element's onScroll, and a
+    // big catch-up jump (the panel was hidden, or playback ran on while the
+    // highlight was off-screen) looks exactly like a user flick — which would
+    // switch follow off, and nothing switches it back on for the rest of the
+    // session. Smooth scrolling emits many intermediate events, so the flag is
+    // held until the scroll settles rather than cleared after one.
+    programmaticScrollRef.current += 1;
+    window.clearTimeout(programmaticScrollTimer.current);
+    programmaticScrollTimer.current = window.setTimeout(() => {
+      programmaticScrollRef.current = 0;
+    }, 700);
     scroller.scrollTo({ top: Math.max(0, target), behavior: scrollBehavior() });
   }, [activeCueIdx, autoScroll]);
 
@@ -402,6 +417,7 @@ export function TranscriptViewer({
     const top = e.currentTarget.scrollTop;
     const delta = Math.abs(top - lastScrollTop.current);
     lastScrollTop.current = top;
+    if (programmaticScrollRef.current > 0) return; // our own catch-up scroll
     if (delta > 80) setAutoScroll(false);
   }
 
