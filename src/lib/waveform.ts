@@ -21,8 +21,8 @@
  * which is a couple of range reads. Sharing would mean refactoring
  * `extractFilmstrip`'s lifecycle for no measurable win.
  */
-import { Input, UrlSource, ALL_FORMATS, AudioBufferSink } from "mediabunny";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { Input, ALL_FORMATS, AudioBufferSink } from "mediabunny";
+import { mediabunnySource } from "./mediabunny-source";
 
 /** Min/max sample value per time bucket, index-aligned across the duration. */
 export type WaveformPeaks = {
@@ -123,8 +123,13 @@ export async function extractWaveformPeaks(
     return cached;
   }
 
-  const url = convertFileSrc(localPath);
-  const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
+  // Read through the shared range-reader, not asset://. Tauri's asset handler
+  // is a synchronous closure on the WKWebView main thread that caps each
+  // response at 1 MiB, and mediabunny re-issues a whole new request whenever a
+  // range is capped — so draining a long audio track this way meant one
+  // main-thread scheme task per megabyte, contending with the player's own
+  // reads. Every other local read already goes through mediabunnySource.
+  const input = new Input({ source: mediabunnySource(localPath), formats: ALL_FORMATS });
   try {
     const at = await input.getPrimaryAudioTrack();
     if (!at || !(await at.canDecode())) {

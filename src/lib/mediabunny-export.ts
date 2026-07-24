@@ -1,10 +1,10 @@
 import {
-  Input, UrlSource, ALL_FORMATS,
+  Input, ALL_FORMATS,
   Output, Mp4OutputFormat, Mp3OutputFormat, BufferTarget,
   Conversion,
   type ConversionOptions,
 } from "mediabunny";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { mediabunnySource } from "./mediabunny-source";
 
 export type LocalExportFormat = "video-mp4" | "audio-mp3";
 
@@ -59,8 +59,10 @@ export async function exportLocalClipViaMediabunny(
   opts: LocalExportOptions,
   cancelToken: { cancelled: boolean } = { cancelled: false },
 ): Promise<LocalExportResult> {
-  const inputUrl = convertFileSrc(opts.inputPath);
-  const input = new Input({ source: new UrlSource(inputUrl), formats: ALL_FORMATS });
+  // Shared range-reader, not asset:// — see the note in waveform.ts: the asset
+  // handler is synchronous on the main thread and caps responses at 1 MiB, so
+  // reading a whole source through it fragments into a scheme task per MiB.
+  const input = new Input({ source: mediabunnySource(opts.inputPath), formats: ALL_FORMATS });
   const target = new BufferTarget();
   // Output container picks based on requested format. MP3 needs the
   // mp3-encoder extension registered at app startup (see main.tsx).

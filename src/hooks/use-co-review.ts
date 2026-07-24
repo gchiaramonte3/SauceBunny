@@ -605,6 +605,14 @@ export function useCoReview({
       setCoGhosts([]);
       setLiveReactions([]);
       setRaisedHands(new Set());
+      // Source state is per-session too. Left behind, the "waiting for the
+      // host" overlay is an opaque full-bleed panel that reappears the moment
+      // anyone joins the NEXT session, and member ids restart at 1 each
+      // session, so a stale entry also reports the wrong person as unable to
+      // open the file. Neither self-heals: the host never receives its own
+      // broadcast, and the rebroadcast is gated on a source being set.
+      setPendingSource(null);
+      setSourceStatus(new Map());
       coLastHostPosRef.current = null;
       coReadyRef.current = false;
       return;

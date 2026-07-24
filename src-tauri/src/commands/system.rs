@@ -734,8 +734,13 @@ pub fn new_job_id() -> String {
 ///
 /// The `max_bytes` cap is a guard against accidentally pointing this at a
 /// 4 GB video file from JS; 8 MB is roughly 100 hours of SRT cues.
+// `async` is load-bearing: tauri only dispatches a command off the main thread
+// when it is declared async, and the macOS IPC handler runs on the WKWebView
+// main thread. The transcript library root is user-relocatable, so a sync read
+// here beachballs the whole app on a hung SMB/NFS mount or an evicted iCloud
+// file, with no watchdog to recover.
 #[tauri::command]
-pub fn read_text_file_capped(path: String, max_bytes: Option<u64>) -> Result<String, crate::AppError> {
+pub async fn read_text_file_capped(path: String, max_bytes: Option<u64>) -> Result<String, crate::AppError> {
     let p = PathBuf::from(&path);
     if !p.is_file() {
         return Err(format!("Not a file: {path}").into());
@@ -801,7 +806,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-23-r137-transcription-hardening";
+pub const BACKEND_BUILD_ID: &str = "2026-07-23-r138-scrub-and-perf";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

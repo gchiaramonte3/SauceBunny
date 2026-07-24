@@ -121,12 +121,15 @@
   display: grid;
   grid-template-columns: 300px 1fr var(--reader-stage-w, 0px);
   min-height: 0;
-  transition: grid-template-columns var(--panel-slide, 200ms ease);
+  /* No transition here: --panel-slide is a full transition LIST, so
+     `transition: grid-template-columns var(--panel-slide)` was invalid at
+     computed-value time and resolved to `all 0s` — the slide never actually
+     ran. Removed rather than re-implemented; the instant change is the
+     behaviour that has always shipped. */
 }
 .cp-reader.stage-open  { --reader-stage-w: 360px; }
 .cp-reader.stage-rail  { --reader-stage-w: 46px; }
 .cp-reader.stage-float { --reader-stage-w: 0px; }
-@media (prefers-reduced-motion: reduce) { .cp-reader { transition: none; } }
 .cp-reader-picker {
   display: flex;
   flex-direction: column;

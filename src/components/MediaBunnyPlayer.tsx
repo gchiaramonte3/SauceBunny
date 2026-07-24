@@ -17,6 +17,11 @@ import type { PlayerHandle } from "./player-handle";
  *  leave the transport wedged. */
 const ANCHOR_FALLBACK_MS = 1000;
 
+/** How long seeks must stop arriving before a scrub-while-playing gesture is
+ *  considered over and the decode pipelines are rebuilt. Matches
+ *  LocalMediaPlayer's settle so the two local engines feel the same. */
+const SCRUB_SETTLE_MS = 200;
+
 /**
  * Alternative to LocalMediaPlayer that decodes the original file via
  * WebCodecs (through mediabunny) instead of relying on WKWebView's
@@ -83,6 +88,9 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
   const shuttleTimeRef = useRef(0);
   const shuttleWasPlayingRef = useRef(false);
   const shuttleBusyRef = useRef(false);
+  /** Decode time accrued since the last committed shuttle step, credited back
+   *  to dt so the achieved scan rate matches the rate on the badge. */
+  const shuttleBusyMsRef = useRef(0);
   const lastShuttleWallRef = useRef(0);
 
   /**
@@ -120,6 +128,18 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
    * a decode was in flight. Created lazily below.
    */
   const scrubPumpRef = useRef<ScrubPump | null>(null);
+  /**
+   * Scrub-gesture latch for seeking WHILE PLAYING. Without it every seek of a
+   * drag restarted both decode pipelines — a fresh video decoder, a fresh audio
+   * decoder and a demuxer keyframe seek, up to 60 times a second, none of them
+   * living long enough to produce anything. The other two engines already
+   * pause-and-settle (LocalMediaPlayer 200ms, MSEStreamPlayer 300ms); this
+   * brings the default local player in line so scrub feel stops depending on
+   * which engine happened to mount.
+   */
+  const scrubLatchRef = useRef(false);
+  const scrubResumeRef = useRef(false);
+  const scrubSettleRef = useRef(0);
 
   // Driving a setState for the visible play/pause UI on audio-only mode.
   const [isPlaying, setIsPlaying] = useState(false);
@@ -200,10 +220,20 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     scheduledRef.current = [];
   };
 
+  /** Abandon any in-progress scrub gesture WITHOUT resuming playback. Called
+   *  from every path that decides the transport state itself (pause, play,
+   *  shuttle, teardown), so a pending settle can't resurrect playback after. */
+  const clearScrubLatch = () => {
+    scrubLatchRef.current = false;
+    scrubResumeRef.current = false;
+    if (scrubSettleRef.current) { window.clearTimeout(scrubSettleRef.current); scrubSettleRef.current = 0; }
+  };
+
   const stopPlayback = () => {
     if (playingRef.current) {
       startMediaTimeRef.current = currentMediaTime();
     }
+    clearScrubLatch();
     playingRef.current = false;
     setIsPlaying(false);
     onPlayStateChange?.(false);
@@ -222,7 +252,17 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       if (rate === 0) return;
       if (shuttleBusyRef.current) { shuttleRafRef.current = requestAnimationFrame(step); return; }
       const now = performance.now();
-      const dt = Math.min(0.1, Math.max(0, (now - lastShuttleWallRef.current) / 1000));
+      // Clamp only the time NOT spent inside a decode. The busy guard above
+      // skips frames without moving lastShuttleWall, so a decode longer than
+      // 100ms (routine on long-GOP 1080p/4K, where each getCanvas decodes from
+      // the preceding keyframe) had everything past the clamp thrown away: an
+      // 8x shuttle actually scanned at ~3x while the badge read 8x. Decode time
+      // is expected work and must still advance the scan; a genuine stall
+      // (backgrounded tab, long GC) is still capped.
+      const busySec = shuttleBusyMsRef.current / 1000;
+      shuttleBusyMsRef.current = 0;
+      const elapsed = Math.max(0, (now - lastShuttleWallRef.current) / 1000);
+      const dt = Math.min(0.1, Math.max(0, elapsed - busySec)) + busySec;
       lastShuttleWallRef.current = now;
       let t = shuttleTimeRef.current + rate * dt;
       let atBound = false;
@@ -233,10 +273,15 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       shuttleBusyRef.current = true;
       const sink = videoSinkRef.current;
       if (sink) {
+        const decodeStart = performance.now();
         sink.getCanvas(t)
           .then((wrapped) => { if (wrapped && shuttleRateRef.current !== 0) drawCanvas(wrapped.canvas); })
           .catch(() => { /* ignore */ })
-          .finally(() => { shuttleBusyRef.current = false; });
+          .finally(() => {
+            // Credited back to dt above, so a slow decode doesn't slow the scan.
+            shuttleBusyMsRef.current += performance.now() - decodeStart;
+            shuttleBusyRef.current = false;
+          });
       } else {
         shuttleBusyRef.current = false;
       }
@@ -437,6 +482,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       if (!readyRef.current) return;
       const ctx = audioCtxRef.current;
       if (!ctx) return;
+      clearScrubLatch(); // an explicit play supersedes any pending scrub settle
       cancelInFlight();
       const gen = ++genRef.current;
       // No anchor here: the clock is pinned by the first sample the loops
@@ -458,15 +504,33 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       // the callback captured at MOUNT (a stale fps), desyncing the transcript
       // from the player on every cue click.
       onTimeUpdateRef.current?.(clamped);
-      if (wasPlaying) {
-        cancelInFlight();
-        const ctx = audioCtxRef.current;
-        if (!ctx) return;
-        const gen = ++genRef.current;
-        // Anchored from the first delivered sample, not from here — this is
-        // the path a transcript-cue click takes, and anchoring at the request
-        // charged the whole seek latency to the audio and lost it.
-        void startLoops(ctx, clamped, gen);
+      if (wasPlaying || scrubLatchRef.current) {
+        // Seeking while playing. Treat a burst of seeks as ONE gesture: stop
+        // the pipelines on the first, preview through the scrub pump for the
+        // duration, and rebuild them ONCE when the seeks stop. Restarting per
+        // seek meant building and abandoning a video decoder, an audio decoder
+        // and a demuxer seek every vsync, so a drag produced silence and a
+        // stalled picture rather than a preview.
+        if (!scrubLatchRef.current) {
+          scrubLatchRef.current = true;
+          scrubResumeRef.current = wasPlaying;
+          cancelInFlight(); // playback really is being interrupted here
+        }
+        scrubPumpRef.current?.request(clamped);
+        if (scrubSettleRef.current) window.clearTimeout(scrubSettleRef.current);
+        scrubSettleRef.current = window.setTimeout(() => {
+          scrubSettleRef.current = 0;
+          scrubLatchRef.current = false;
+          if (!scrubResumeRef.current) return;
+          scrubResumeRef.current = false;
+          const ctx = audioCtxRef.current;
+          if (!ctx || !playingRef.current) return;
+          const gen = ++genRef.current;
+          // Anchored from the first delivered sample, not from here — this is
+          // the path a transcript-cue click takes, and anchoring at the request
+          // charged the whole seek latency to the audio and lost it.
+          void startLoops(ctx, startMediaTimeRef.current, gen);
+        }, SCRUB_SETTLE_MS);
       } else {
         // Paused seek / scrub. Coalesce into the single-flight pump: it keeps
         // only the newest target, so a fast drag chases the cursor instead of
@@ -538,6 +602,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       if (shuttleRateRef.current === 0) {
         shuttleWasPlayingRef.current = playingRef.current;
         if (playingRef.current) startMediaTimeRef.current = currentMediaTime();
+        clearScrubLatch();          // J-K-L supersedes any pending scrub settle
         cancelInFlight();           // stop the normal audio + video loops
         playingRef.current = false; // the shuttle loop drives the canvas now
         shuttleTimeRef.current = startMediaTimeRef.current;
@@ -693,6 +758,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
 
     return () => {
       cancelled = true;
+      clearScrubLatch(); // no settle may fire against the outgoing source
       cancelInFlight();
       // Tear down decoders / context. Order matters: cancel iterators
       // first (handled by genRef bump above), THEN dispose the Input so
