@@ -106,14 +106,21 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       // we resume (only if we were playing) once seeks stop arriving. The
       // paused <video> still repaints the frame at each currentTime, so the
       // drag previews frame-by-frame instead of fighting the decoder.
-      if (!scrubbingRef.current) {
+      const gestureStart = !scrubbingRef.current;
+      if (gestureStart) {
         scrubbingRef.current = true;
         wasPlayingRef.current = !el.paused;
         if (!el.paused) { try { el.pause(); } catch { /* ignore */ } }
       }
       el.currentTime = target;
-      onDiagRef.current?.("info",
-        `seek → ${target.toFixed(1)}s (file duration ${(el.duration || 0).toFixed(1)}s, landed ${el.currentTime.toFixed(1)}s)`);
+      // One line per GESTURE, not per seek. A drag fires this once per vsync and
+      // every log line is App state, so this was a full App re-render per drag
+      // frame — the one thing on the scrub path that still re-rendered the tree.
+      // A click-to-seek is a gesture of one, so it still logs exactly as before.
+      if (gestureStart) {
+        onDiagRef.current?.("info",
+          `seek → ${target.toFixed(1)}s (file duration ${(el.duration || 0).toFixed(1)}s, landed ${el.currentTime.toFixed(1)}s)`);
+      }
       if (settleTimerRef.current) window.clearTimeout(settleTimerRef.current);
       settleTimerRef.current = window.setTimeout(() => {
         settleTimerRef.current = 0;

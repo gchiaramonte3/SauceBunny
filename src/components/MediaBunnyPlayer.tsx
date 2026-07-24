@@ -452,7 +452,6 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     seekTo: (s: number) => {
       const clamped = Math.max(0, Math.min(durationRef.current, s));
       const wasPlaying = playingRef.current;
-      cancelInFlight();
       startMediaTimeRef.current = clamped;
       // Via the ref, like the 100ms tick and the shuttle loop: this handle is
       // built with [] deps, so calling the prop directly would publish through
@@ -460,6 +459,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       // from the player on every cue click.
       onTimeUpdateRef.current?.(clamped);
       if (wasPlaying) {
+        cancelInFlight();
         const ctx = audioCtxRef.current;
         if (!ctx) return;
         const gen = ++genRef.current;
@@ -468,13 +468,18 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
         // charged the whole seek latency to the audio and lost it.
         void startLoops(ctx, clamped, gen);
       } else {
-        // Paused seek / scrub. Coalesce into the single-flight pump: record
-        // the latest target and let it chase the cursor, dropping intermediate
-        // targets a fast drag produced while a decode was in flight, instead
-        // of spawning (and later discarding) one decode per seekTo. getCanvas
-        // is already frame-accurate — it returns the frame whose PTS ≤ target
-        // — so the painted frame matches the playhead readout above. cancelInFlight
-        // (called just above) already dropped any older pending target.
+        // Paused seek / scrub. Coalesce into the single-flight pump: it keeps
+        // only the newest target, so a fast drag chases the cursor instead of
+        // queueing a decode per seek.
+        //
+        // Deliberately NOT cancelInFlight() here. That bumped the playback
+        // generation on every seek, which invalidated the scrub decode it had
+        // just started: the timeline fires one seek per vsync, so while the
+        // cursor kept moving nothing ever survived to paint. The picture sat
+        // frozen until the drag stopped, having burned a full keyframe-to-target
+        // decode per display frame producing images nobody saw. The drain's own
+        // generation check still prevents a scrub frame landing after playback
+        // resumes, which is the case that gate exists for.
         scrubPumpRef.current?.request(clamped);
       }
     },
