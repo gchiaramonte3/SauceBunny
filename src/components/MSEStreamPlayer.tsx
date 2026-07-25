@@ -216,12 +216,6 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       const target = Math.max(0, total > 0 ? Math.min(total, s) : s);
       const co = clockOriginRef.current;
       const rel = target - baseTimeRef.current;
-      // Diagnostic (Pipeline log, channel "seek"): if a forward seek lands
-      // earlier than requested, this shows WHERE — a `total` smaller than `s`
-      // clamps `target` backward; otherwise the branch/rel/clockOrigin reveal it.
-      onDiagRef.current?.("info",
-        `seek req ${s.toFixed(1)} → target ${target.toFixed(1)} (base ${baseTimeRef.current.toFixed(1)}, total ${total.toFixed(1)}, rel ${rel.toFixed(1)}, clockOrigin ${co.toFixed(2)})`);
-
       // ── Gesture bookkeeping ──────────────────────────────────────────
       // A scrub fires seekTo() many times. On the FIRST of a gesture,
       // remember whether we were playing, then PAUSE — playback advancing
@@ -231,6 +225,16 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       // playhead). A settle timer (no seek for 300ms) ends the gesture and
       // resumes playback if we were playing.
       const newGesture = seekSettleRef.current == null && !seekingRef.current;
+      // Diagnostic (Pipeline log, channel "seek"): if a forward seek lands
+      // earlier than requested, this shows WHERE — a `total` smaller than `s`
+      // clamps `target` backward; otherwise the branch/rel/clockOrigin reveal it.
+      // Logged once per GESTURE, not per seek: log lines are App state, so a
+      // drag was forcing a full App re-render per vsync. A single click is a
+      // gesture of one and still logs exactly as before.
+      if (newGesture) {
+        onDiagRef.current?.("info",
+          `seek req ${s.toFixed(1)} → target ${target.toFixed(1)} (base ${baseTimeRef.current.toFixed(1)}, total ${total.toFixed(1)}, rel ${rel.toFixed(1)}, clockOrigin ${co.toFixed(2)})`);
+      }
       if (newGesture) wantPlayRef.current = !!v && !v.paused;
       seekingRef.current = true;
       try { v?.pause(); } catch { /* ignore */ }
@@ -268,7 +272,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             // updateend landing from later yanking currentTime back to it.
             pendingLandRef.current = null;
             try { v.currentTime = localTarget; } catch { /* ignore */ }
-            onDiagRef.current?.("ok", `seek in-buffer → currentTime ${localTarget.toFixed(1)}`);
+            if (newGesture) {
+              onDiagRef.current?.("ok", `seek in-buffer → currentTime ${localTarget.toFixed(1)}`);
+            }
             return;
           }
         }

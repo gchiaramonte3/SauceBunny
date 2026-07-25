@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { extractFrameAsBlob } from "../lib/mediabunny-helpers";
+import { openFrameGrabber, type FrameGrabber } from "../lib/mediabunny-helpers";
 import { createScrubPump, type ScrubPump } from "../lib/scrub-pump";
 import { secondsToClock } from "../lib/timecode";
 
@@ -32,12 +32,24 @@ export function ThumbnailPickerSlider({ path, dur, value, onChange }: Props) {
   const pumpRef = useRef<ScrubPump | null>(null);
   const aliveRef = useRef(true);
 
-  // One pump per source. `drain` decodes the target frame and paints it,
-  // revoking the frame it replaces. Rebuilt only when the path changes.
+  // One pump AND one frame grabber per source, both rebuilt only when the
+  // path changes. The grabber holds a single Input + CanvasSink open for the
+  // picker's lifetime — the old per-frame extractFrameAsBlob re-opened the
+  // file for every preview: a fresh moov parse (cost scales with file
+  // length), a fresh canDecode round-trip, and a fresh byte cache that never
+  // survived to warm the next grab. On an hour-long file that made every
+  // slider tick pay the whole open again.
   useEffect(() => {
     aliveRef.current = true;
+    // The open is async and the seed request below fires immediately, so the
+    // drain awaits this promise. Each effect run owns ITS grabber via this
+    // closure (not a ref), so a StrictMode double-mount can't dispose the
+    // survivor's handle.
+    const grabberPromise = openFrameGrabber(path);
     const pump = createScrubPump(async (target) => {
-      const blob = await extractFrameAsBlob(path, target, { maxWidth: 640 });
+      const grabber: FrameGrabber | null = await grabberPromise;
+      if (!grabber || !aliveRef.current) return;
+      const blob = await grabber.grab(target, { maxWidth: 640 });
       if (!blob) return;
       // pump.cancel() only drops PENDING targets — a decode already in flight
       // when this component unmounts (e.g. Escape mid-drag) still completes, so
@@ -55,6 +67,7 @@ export function ThumbnailPickerSlider({ path, dur, value, onChange }: Props) {
       aliveRef.current = false;
       pump.cancel();
       pumpRef.current = null;
+      void grabberPromise.then((g) => g?.dispose());
       if (previewRef.current) { URL.revokeObjectURL(previewRef.current); previewRef.current = null; }
       setPreview(null);
     };

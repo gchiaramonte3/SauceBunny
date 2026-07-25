@@ -488,10 +488,20 @@ export function useLibraryScan(): LibraryScan {
 
   const scanAll = useCallback(async (list: readonly string[]) => {
     const sweep = ++scanSweepRef.current;
-    for (const root of list) {
-      if (scanSweepRef.current !== sweep) return; // superseded by a newer sweep
-      await scanOne(root);
-    }
+    // Small pool instead of strictly one root at a time. Each scan already
+    // runs on spawn_blocking Rust-side precisely because a cold or hung
+    // network volume can stall it — the serial for-await here re-imposed that
+    // head-of-line block at the UI layer, so one sleeping NAS root kept every
+    // root behind it in "scanning" indefinitely.
+    let next = 0;
+    const worker = async () => {
+      while (next < list.length) {
+        const root = list[next++];
+        if (scanSweepRef.current !== sweep) return; // superseded by a newer sweep
+        await scanOne(root);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, list.length) }, worker));
   }, [scanOne]);
 
   // App-boot scan (both views are keep-alive-mounted even while hidden).

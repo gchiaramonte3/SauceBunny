@@ -113,11 +113,29 @@ export async function nativeAvStatus(): Promise<{ camera: AvAuthState; microphon
   }
 }
 
+/** Coalesce concurrent calls to an async fn into one shared promise. Only
+ *  IN-FLIGHT calls share; once settled, the next call runs fresh — so a
+ *  re-probe after a grant still sees the new state. useMediaCapture mounts
+ *  twice at boot (App + the keep-alive lobby), and without this each mount
+ *  paid its own probe: the TCC check is a synchronous ~30-40ms Rust command,
+ *  and StrictMode doubles it again in dev. */
+function coalesceInFlight<T>(fn: () => Promise<T>): () => Promise<T> {
+  let inFlight: Promise<T> | null = null;
+  return () => {
+    if (inFlight) return inFlight;
+    inFlight = fn().finally(() => { inFlight = null; });
+    return inFlight;
+  };
+}
+
 /** Best-effort permission probe. Prefers the native TCC check; falls back to
  *  WKWebView's inconsistent Permissions API (which collapses to "unknown",
  *  so the UI shows the Enable button and lets getUserMedia produce the
- *  real prompt). */
-export async function queryAvPermission(): Promise<AvPermission> {
+ *  real prompt). Concurrent callers share one probe. */
+export const queryAvPermission: () => Promise<AvPermission> =
+  coalesceInFlight(queryAvPermissionUncoalesced);
+
+async function queryAvPermissionUncoalesced(): Promise<AvPermission> {
   const native = await nativeAvStatus();
   if (native) {
     // Either device denied -> denied face; both authorized -> granted;
@@ -151,8 +169,12 @@ export function canPickSpeakers(): boolean {
 
 /** Camera + mic + speaker lists. Pre-grant, labels are empty per spec —
  *  callers render "Default" until a stream exists and labels populate.
- *  (Speakers enumerate only once mic access is granted.) */
-export async function enumerateAv(): Promise<AvDevices> {
+ *  (Speakers enumerate only once mic access is granted.) Concurrent callers
+ *  share one enumeration; a later `devicechange` still enumerates fresh. */
+export const enumerateAv: () => Promise<AvDevices> =
+  coalesceInFlight(enumerateAvUncoalesced);
+
+async function enumerateAvUncoalesced(): Promise<AvDevices> {
   const all = await navigator.mediaDevices.enumerateDevices();
   return {
     cameras: all.filter((d) => d.kind === "videoinput"),

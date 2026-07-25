@@ -47,6 +47,59 @@ export async function extractFrameAsBlob(
 }
 
 /**
+ * A frame grabber that HOLDS its Input + CanvasSink open across many grabs —
+ * for callers that decode a burst of frames from one file (the thumbnail
+ * picker's scrub preview). `extractFrameAsBlob` opens and disposes per call,
+ * which is right for one-shots but brutal in a loop: every open re-requests
+ * and re-parses the whole moov (cost scales with FILE length, this app's
+ * content profile), re-runs canDecode's isConfigSupported round-trip, and
+ * mints a fresh 64 MiB read cache that never gets to help the next call.
+ *
+ * `open` resolves null when the file has no decodable video track — same
+ * contract as extractFrameAsBlob, caller keeps its fallback. Always call
+ * `dispose()` when done; grabs after dispose resolve null.
+ */
+export type FrameGrabber = {
+  grab: (atSeconds: number, opts?: { mimeType?: string; quality?: number; maxWidth?: number }) => Promise<Blob | null>;
+  dispose: () => void;
+};
+
+export async function openFrameGrabber(localPath: string): Promise<FrameGrabber | null> {
+  const input = new Input({ source: mediabunnySource(localPath), formats: ALL_FORMATS });
+  try {
+    const vt = await input.getPrimaryVideoTrack();
+    if (!vt || !(await vt.canDecode())) {
+      void input.dispose();
+      return null;
+    }
+    const sink = new CanvasSink(vt, { poolSize: 1 });
+    let disposed = false;
+    return {
+      async grab(atSeconds, opts) {
+        if (disposed) return null;
+        try {
+          const wrapped = await sink.getCanvas(Math.max(0, atSeconds));
+          if (!wrapped) return null;
+          return await canvasToBlob(
+            wrapped.canvas, opts?.maxWidth, opts?.mimeType ?? "image/jpeg", opts?.quality ?? 0.95,
+          );
+        } catch {
+          return null;
+        }
+      },
+      dispose() {
+        if (disposed) return;
+        disposed = true;
+        void input.dispose();
+      },
+    };
+  } catch {
+    void input.dispose();
+    return null;
+  }
+}
+
+/**
  * Normalise a (possibly Offscreen) decode canvas → an HTMLCanvasElement JPEG
  * Blob, optionally downscaled to `maxWidth` (aspect kept). Shared by
  * extractFrameAsBlob and extractPosterBlob so the toBlob surface is consistent

@@ -327,27 +327,43 @@ export async function hydrateReviewStore(opts?: { migrate?: boolean }): Promise<
   } catch {
     /* no index yet — fresh store */
   }
+  const entries = [...parseReviewIndex(indexText)];
+  // Keep every index entry — filename + shrink guard survive even unloaded.
+  for (const [key, entry] of entries) index.set(key, entry);
+  // Per-doc reads run through a small worker pool instead of strictly one at
+  // a time: main.tsx gates first render on this, the files are tiny, and the
+  // real cost was one full IPC round-trip PER DOC in sequence. Each doc
+  // writes its own Map key, so order doesn't matter. The doc/byte caps stay
+  // as a bounded-boot backstop; in-flight workers can overshoot them by at
+  // most the pool width, which is noise against 1000 docs / 64 MB.
   let loadedDocs = 0;
   let loadedBytes = 0;
-  for (const [key, entry] of parseReviewIndex(indexText)) {
-    index.set(key, entry); // keep every entry — filename + shrink guard survive even unloaded
-    if (loadedDocs >= MAX_HYDRATE_DOCS || loadedBytes >= MAX_HYDRATE_BYTES) continue;
-    try {
-      const text = await invoke<string>("read_text_file_capped", {
-        path: `${reviewsDir}/${entry.file}`,
-        maxBytes: DOC_READ_CAP,
-      });
-      if (typeof text !== "string" || !text) continue;
-      const parsed: unknown = JSON.parse(text);
-      if (looksLikeReviewDoc(parsed) && parsed.sourceKey === key) {
-        docs.set(key, parsed);
-        loadedDocs++;
-        loadedBytes += text.length;
+  let nextEntry = 0;
+  const HYDRATE_POOL = 8;
+  const worker = async () => {
+    while (nextEntry < entries.length) {
+      const [key, entry] = entries[nextEntry++];
+      if (loadedDocs >= MAX_HYDRATE_DOCS || loadedBytes >= MAX_HYDRATE_BYTES) return;
+      try {
+        const text = await invoke<string>("read_text_file_capped", {
+          path: `${reviewsDir}/${entry.file}`,
+          maxBytes: DOC_READ_CAP,
+        });
+        if (typeof text !== "string" || !text) continue;
+        const parsed: unknown = JSON.parse(text);
+        if (looksLikeReviewDoc(parsed) && parsed.sourceKey === key) {
+          docs.set(key, parsed);
+          loadedDocs++;
+          loadedBytes += text.length;
+        }
+      } catch (err) {
+        console.warn(`review-store: skipping unreadable review file ${entry.file}:`, err);
       }
-    } catch (err) {
-      console.warn(`review-store: skipping unreadable review file ${entry.file}:`, err);
     }
-  }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(HYDRATE_POOL, entries.length) }, worker),
+  );
 
   if (opts?.migrate !== false) migrateLegacyLocalStorageDocs();
 
