@@ -1,8 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for Sauce Bunny",
-  "windows": ["main"],
+  "description": "Default capabilities for Sauce Bunny. Deliberately NO shell permissions: capabilities gate the WEBVIEW's IPC surface only, every sidecar is spawned from Rust via app.shell() (which the ACL does not gate), and the frontend imports no part of the shell plugin - so the old execute/spawn grants were pure unused attack surface for a compromised renderer (arbitrary args to ffmpeg/yt-dlp/whisper). Do not re-add them for a Rust-side need; Rust never needs them.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
@@ -17,29 +19,6 @@
     "notification:default",
     "notification:allow-notify",
     "notification:allow-is-permission-granted",
-    "notification:allow-request-permission",
-    "shell:default",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        { "name": "binaries/yt-dlp", "sidecar": true, "args": true },
-        { "name": "binaries/ffmpeg", "sidecar": true, "args": true },
-        { "name": "binaries/whisper-cli", "sidecar": true, "args": true },
-        { "name": "binaries/saucebunny-diarize", "sidecar": true, "args": true },
-        { "name": "binaries/llama-server", "sidecar": true, "args": true },
-        { "name": "yt-dlp", "cmd": "yt-dlp", "args": true }
-      ]
-    },
-    {
-      "identifier": "shell:allow-spawn",
-      "allow": [
-        { "name": "binaries/yt-dlp", "sidecar": true, "args": true },
-        { "name": "binaries/ffmpeg", "sidecar": true, "args": true },
-        { "name": "binaries/whisper-cli", "sidecar": true, "args": true },
-        { "name": "binaries/saucebunny-diarize", "sidecar": true, "args": true },
-        { "name": "binaries/llama-server", "sidecar": true, "args": true },
-        { "name": "yt-dlp", "cmd": "yt-dlp", "args": true }
-      ]
-    }
+    "notification:allow-request-permission"
   ]
 }

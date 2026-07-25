@@ -790,7 +790,7 @@ pub fn list_whisper_models(app: AppHandle) -> Result<Vec<WhisperModel>, crate::A
             name: (*name).to_string(),
             size_bytes: *size,
             url: format!(
-                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{id}.bin"
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-{id}.bin"
             ),
             downloaded,
             path: if downloaded {
@@ -845,8 +845,12 @@ pub async fn download_whisper_model(
         .iter()
         .find(|(id, _, _)| *id == args.model_id)
         .ok_or_else(|| format!("Unknown model: {}", args.model_id))?;
+    let expected_bytes = model.2;
     let url = format!(
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{}.bin",
+        // Pinned to an immutable revision (not `main`): the file the size
+        // table describes is the file every install gets, and upstream can't
+        // silently swap it. Bump the sha WITH the table when updating models.
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-{}.bin",
         model.0
     );
     let dest = model_path(&app, &args.model_id)?;
@@ -861,7 +865,7 @@ pub async fn download_whisper_model(
     let app_for = app.clone();
 
     tokio::spawn(async move {
-        let result = download_with_progress(&app_for, &url, &tmp, &job_id, &model_id).await;
+        let result = download_with_progress(&app_for, &url, &tmp, &job_id, &model_id, Some(expected_bytes)).await;
         match result {
             Ok(()) => {
                 if let Err(e) = std::fs::rename(&tmp, &dest) {
@@ -918,6 +922,7 @@ pub(crate) async fn download_with_progress(
     dest: &PathBuf,
     job_id: &str,
     model_id: &str,
+    expected_bytes: Option<u64>,
 ) -> Result<(), crate::AppError> {
     // A per-read idle timeout: a dropped connection mid-stream must not
     // hang the progress bar forever (multi-GB models on flaky Wi-Fi).
@@ -931,6 +936,20 @@ pub(crate) async fn download_with_progress(
         return Err(format!("HTTP {}", res.status().as_u16()).into());
     }
     let total = res.content_length().unwrap_or(0);
+    // Integrity band: the model tables carry expected sizes (exact for GGUF,
+    // rounded for the whisper set), so anything outside +/-2% is the wrong
+    // file or a truncation - refuse before writing gigabytes. When no size is
+    // known, a generous hard cap still stops a runaway stream.
+    let (min_ok, max_ok) = match expected_bytes {
+        Some(exp) => (exp / 100 * 98, exp / 100 * 102),
+        None => (0, 20 * 1024 * 1024 * 1024),
+    };
+    if total > 0 && (total < min_ok || total > max_ok) {
+        return Err(format!(
+            "Download size {total} bytes is outside the expected range for this model ({} bytes)",
+            expected_bytes.unwrap_or(0),
+        ).into());
+    }
     // Sweep stale *.partial / *.part temps from a prior killed download in
     // this dir (they otherwise accumulate - the 24h cache sweep skips the
     // models dir).
@@ -953,6 +972,11 @@ pub(crate) async fn download_with_progress(
     while let Some(chunk) = res.chunk().await.map_err(|e| format!("read: {e}"))? {
         file.write_all(&chunk).await.map_err(|e| format!("write: {e}"))?;
         done += chunk.len() as u64;
+        if done > max_ok {
+            drop(file);
+            let _ = tokio::fs::remove_file(dest).await;
+            return Err("Download exceeded the expected size for this model".to_string().into());
+        }
         if last_emit.elapsed().as_millis() > 120 {
             let pct = if total > 0 {
                 (done as f64 / total as f64) * 100.0
@@ -996,7 +1020,7 @@ async fn ensure_vad_model(app: &AppHandle) -> Option<PathBuf> {
     if path.exists() && path.metadata().map(|m| m.len() > 1000).unwrap_or(false) {
         return Some(path);
     }
-    let url = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin";
+    let url = "https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin";
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(30))
         .timeout(std::time::Duration::from_secs(120))

@@ -31,9 +31,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.saucebunny.desktop</string>
     <key>NSCameraUsageDescription</key>
-    <string>Sauce Bunny uses your camera only for live review sessions, so session members can see each other. Video goes directly between members' machines and never touches a server.</string>
+    <string>Sauce Bunny uses your camera only for live review sessions, so session members can see each other. Video is encrypted end to end and is never stored or processed by Sauce Bunny servers (there are none); on restrictive networks the encrypted stream may pass through a STUN or TURN relay to reach the other members.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Sauce Bunny records your microphone only while you hold the dictation button in a review comment, to transcribe your voice into text. Audio is processed entirely on this Mac and never leaves your computer.</string>
+    <string>Sauce Bunny uses your microphone for live review sessions (so members can talk) and for voice dictation in review comments. Dictation is transcribed entirely on this Mac. Session audio is encrypted end to end and is never stored or processed by Sauce Bunny servers; on restrictive networks it may pass through a STUN or TURN relay.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Sauce Bunny transcribes your voice into review comments using on-device speech recognition. Speech is recognized entirely on this Mac and never leaves your computer.</string>
 </dict>

@@ -43,6 +43,9 @@ uuid = { version = "1", features = ["v4"] }
 # runtime, which the tiny_http worker threads satisfy. The async client
 # (default) is still used by download.rs / transcript.rs.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
+# yt-dlp updater integrity: verify the release's SHA2-256SUMS entry before the
+# downloaded binary is made executable. (MIT OR Apache-2.0, RustCrypto.)
+sha2 = "0.10"
 # Cloud AI (opt-in Claude/ChatGPT): the user's API key lives in the macOS
 # Keychain, never plaintext localStorage and never in the webview. keyring 2.x
 # ships the Apple keystore in its default features.

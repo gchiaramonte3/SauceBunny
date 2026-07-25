@@ -38,7 +38,7 @@ const LLM_MODELS: &[LlmSpec] = &[
         id: "qwen3-4b-instruct",
         name: "Qwen3 4B Instruct",
         file: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-        url: "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+        url: "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/a06e946bb6b655725eafa393f4a9745d460374c9/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
         size: 2_497_281_120,
         ctx: 32_768,
         recommended: true,
@@ -48,7 +48,7 @@ const LLM_MODELS: &[LlmSpec] = &[
         id: "llama-3.2-3b-instruct",
         name: "Llama 3.2 3B Instruct",
         file: "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        url: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+        url: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/5ab33fa94d1d04e903623ae72c95d1696f09f9e8/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
         size: 2_019_377_696,
         ctx: 16_384,
         recommended: false,
@@ -62,7 +62,7 @@ const LLM_MODELS: &[LlmSpec] = &[
         id: "qwen3.5-9b",
         name: "Qwen3.5 9B",
         file: "Qwen3.5-9B-Q4_K_M.gguf",
-        url: "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf",
+        url: "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/3885219b6810b007914f3a7950a8d1b469d598a5/Qwen3.5-9B-Q4_K_M.gguf",
         size: 5_680_522_464,
         ctx: 40_960,
         recommended: false,
@@ -72,7 +72,7 @@ const LLM_MODELS: &[LlmSpec] = &[
         id: "gemma-4-12b",
         name: "Gemma 4 12B",
         file: "gemma-4-12b-it-Q4_K_M.gguf",
-        url: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/gemma-4-12b-it-Q4_K_M.gguf",
+        url: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/fc034cfff751157913579611efad8462ac1be606/gemma-4-12b-it-Q4_K_M.gguf",
         size: 7_121_860_000,
         ctx: 40_960,
         recommended: false,
@@ -147,9 +147,10 @@ pub async fn download_llm_model(
 
     let job_id = args.job_id.clone();
     let model_id = args.model_id.clone();
+    let expected_bytes = s.size;
     let app_for = app.clone();
     tokio::spawn(async move {
-        let result = download_with_progress(&app_for, &url, &tmp, &job_id, &model_id).await;
+        let result = download_with_progress(&app_for, &url, &tmp, &job_id, &model_id, Some(expected_bytes)).await;
         let done = match &result {
             Ok(()) => match std::fs::rename(&tmp, &dest) {
                 Ok(()) => DoneEvent { job_id: job_id.clone(), success: true, code: Some(0), path: dest.to_str().map(String::from), error: None },
@@ -211,15 +212,18 @@ impl LlmServer {
 }
 
 /// 32 bytes of /dev/urandom → base64url. Same approach as the media proxy's
-/// token (no extra RNG dependency).
-fn mint_api_key() -> String {
+/// token (no extra RNG dependency). FAILS CLOSED: the old version swallowed
+/// a failed open/read and encoded the untouched buffer — an ALL-ZERO, publicly
+/// known bearer token guarding the LLM server. No key, no server.
+fn mint_api_key() -> Result<String, crate::AppError> {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     let mut buf = [0u8; 32];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        use std::io::Read;
-        let _ = f.read_exact(&mut buf);
-    }
-    URL_SAFE_NO_PAD.encode(buf)
+    let mut f = std::fs::File::open("/dev/urandom")
+        .map_err(|e| crate::AppError::internal(format!("CSPRNG unavailable: {e}")))?;
+    use std::io::Read;
+    f.read_exact(&mut buf)
+        .map_err(|e| crate::AppError::internal(format!("CSPRNG read failed: {e}")))?;
+    Ok(URL_SAFE_NO_PAD.encode(buf))
 }
 
 fn free_loopback_port() -> Result<u16, crate::AppError> {
@@ -266,7 +270,7 @@ pub async fn start_llm_server(
     }
 
     let port = free_loopback_port()?;
-    let api_key = mint_api_key();
+    let api_key = mint_api_key()?;
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
 
     let cmd = app

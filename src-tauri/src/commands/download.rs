@@ -195,11 +195,20 @@ pub async fn ytdlp_version(app: AppHandle) -> Result<YtdlpStatus, crate::AppErro
     Ok(YtdlpStatus { version, updated })
 }
 
+/// Hard cap on the updater download — the real binary is ~35 MB.
+const MAX_YTDLP_BYTES: u64 = 200 * 1024 * 1024;
+
 /// Download the latest official self-contained macOS yt-dlp into app-data and
 /// make it the active binary. yt-dlp ships fixes for YouTube extractor changes
-/// often, so this lets users refresh without reinstalling the app. Writes to a
-/// temp path + atomically renames so a partial download never leaves a broken
-/// binary. Returns the new version.
+/// often, so this lets users refresh without reinstalling the app.
+///
+/// Integrity (r140): the old flow fetched the MUTABLE `latest` asset URL and
+/// ran `--version` on whatever arrived — proof it executes, not that it's
+/// authentic. Now the release TAG is resolved once via the GitHub API, and
+/// both the binary and its `SHA2-256SUMS` manifest come from that same
+/// immutable tagged release; the checksum must match BEFORE the file is made
+/// executable, the download is size-capped, and only then does the
+/// `--version` probe run. Writes to a temp path + atomically renames.
 #[tauri::command]
 pub async fn update_ytdlp(app: AppHandle) -> Result<YtdlpStatus, crate::AppError> {
     let data = app
@@ -209,23 +218,96 @@ pub async fn update_ytdlp(app: AppHandle) -> Result<YtdlpStatus, crate::AppError
     let bin_dir = data.join("bin");
     std::fs::create_dir_all(&bin_dir)
         .map_err(|e| crate::AppError::internal(format!("create bin dir: {e}")))?;
-    let url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos";
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(30))
         .timeout(std::time::Duration::from_secs(300))
         .build()
         .map_err(|e| crate::AppError::internal(format!("http client: {e}")))?;
-    let resp = client
-        .get(url)
+
+    // 1. Resolve the release tag (the one read of a mutable pointer).
+    #[derive(serde::Deserialize)]
+    struct Release {
+        tag_name: String,
+    }
+    let rel: Release = client
+        .get("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
+        .header("user-agent", "sauce-bunny-updater")
+        .header("accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| crate::AppError::internal(format!("resolve release: {e}")))?
+        .error_for_status()
+        .map_err(|e| crate::AppError::internal(format!("resolve release: {e}")))?
+        .json()
+        .await
+        .map_err(|e| crate::AppError::internal(format!("resolve release: {e}")))?;
+    let tag = rel.tag_name;
+    if tag.is_empty()
+        || tag.len() > 40
+        || !tag.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err(crate::AppError::internal(format!("suspicious release tag: {tag:?}")));
+    }
+
+    // 2. The checksum manifest from the SAME immutable release.
+    let sums = client
+        .get(format!("https://github.com/yt-dlp/yt-dlp/releases/download/{tag}/SHA2-256SUMS"))
+        .header("user-agent", "sauce-bunny-updater")
+        .send()
+        .await
+        .map_err(|e| crate::AppError::internal(format!("fetch checksums: {e}")))?
+        .error_for_status()
+        .map_err(|e| crate::AppError::internal(format!("fetch checksums: {e}")))?
+        .text()
+        .await
+        .map_err(|e| crate::AppError::internal(format!("read checksums: {e}")))?;
+    let expected = sums
+        .lines()
+        .find_map(|line| {
+            let mut parts = line.split_whitespace();
+            let hash = parts.next()?;
+            let name = parts.next()?;
+            (name == "yt-dlp_macos" && hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()))
+                .then(|| hash.to_ascii_lowercase())
+        })
+        .ok_or_else(|| crate::AppError::internal(format!("release {tag} has no yt-dlp_macos checksum")))?;
+
+    // 3. The binary, size-capped while streaming.
+    let mut resp = client
+        .get(format!("https://github.com/yt-dlp/yt-dlp/releases/download/{tag}/yt-dlp_macos"))
+        .header("user-agent", "sauce-bunny-updater")
         .send()
         .await
         .map_err(|e| crate::AppError::internal(format!("download yt-dlp: {e}")))?
         .error_for_status()
         .map_err(|e| crate::AppError::internal(format!("download yt-dlp: {e}")))?;
-    let bytes = resp
-        .bytes()
+    if resp.content_length().is_some_and(|l| l > MAX_YTDLP_BYTES) {
+        return Err(crate::AppError::internal("yt-dlp download is implausibly large"));
+    }
+    let mut bytes: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp
+        .chunk()
         .await
-        .map_err(|e| crate::AppError::internal(format!("read yt-dlp: {e}")))?;
+        .map_err(|e| crate::AppError::internal(format!("read yt-dlp: {e}")))?
+    {
+        if bytes.len() as u64 + chunk.len() as u64 > MAX_YTDLP_BYTES {
+            return Err(crate::AppError::internal("yt-dlp download is implausibly large"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+
+    // 4. Verify BEFORE anything is made executable.
+    use sha2::{Digest, Sha256};
+    let got = Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    if got != expected {
+        return Err(crate::AppError::internal(format!(
+            "yt-dlp {tag} failed checksum verification (got {got}, expected {expected}); keeping the previous copy"
+        )));
+    }
+
     let tmp = bin_dir.join("yt-dlp.download");
     std::fs::write(&tmp, &bytes)
         .map_err(|e| crate::AppError::internal(format!("write yt-dlp: {e}")))?;

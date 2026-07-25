@@ -42,11 +42,21 @@ yt-dlp, ffmpeg, ffprobe, whisper-cli, saucebunny-diarize, and llama-server
 subprocesses with argument arrays (never shell strings). They are
 self-contained static builds; the fetch/build scripts enforce with `otool -L`
 that no binary references non-system dylib paths. Sidecars are spawned only
-through Tauri's shell allow-list (`src-tauri/capabilities/`).
+from the Rust backend (`app.shell()`); the webview capability file
+(`src-tauri/capabilities/`) deliberately grants NO shell permissions, so a
+compromised renderer cannot execute or spawn anything.
 
 ### 4. What the app deliberately does NOT do
 
-- No network calls except user-initiated downloads (media, captions, models).
+- No network calls except (a) user-initiated downloads (media, captions,
+  models, the yt-dlp updater) and (b) user-initiated co-review sessions.
+  Co-review is peer-to-peer and end-to-end encrypted, but reaching the other
+  Macs uses third-party plumbing: iroh's public discovery/relay
+  infrastructure for the session channel, a public STUN server for the
+  webcam mesh, and an optional TURN relay if you configure one. Media and
+  review data are never stored or processed by any Sauce Bunny server (there
+  are none); encrypted traffic may transit that discovery/relay
+  infrastructure, and session peers can learn your network address.
 - No JavaScript execution from fetched pages — yt-dlp parses them out of
   process.
 - No analytics or crash reporting of any kind.

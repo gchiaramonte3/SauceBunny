@@ -64,33 +64,18 @@ static TOKEN: OnceLock<String> = OnceLock::new();
 /// 24 crypto-random bytes from `/dev/urandom` (always present on macOS — the
 /// only target), base64url-encoded → an unguessable 32-char token. Reads the
 /// OS CSPRNG directly so we add no `rand`/`getrandom` dependency.
-fn mint_token() -> String {
+///
+/// FAILS CLOSED: if the CSPRNG can't be read, the proxy refuses to start
+/// (web-source playback degrades to the download fallback) instead of
+/// guarding the loopback relay with a weaker, guessable token. A macOS where
+/// /dev/urandom is unreadable is already broken; running an open-ish relay
+/// on it does not make it less broken.
+fn mint_token() -> std::io::Result<String> {
     let mut buf = [0u8; 24];
-    let urandom_ok = std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| {
-            use std::io::Read;
-            f.read_exact(&mut buf)
-        })
-        .is_ok();
-    if !urandom_ok {
-        // Never a constant token: stir time, pid, and an ASLR'd address into
-        // a splitmix-style generator. Weaker than the CSPRNG, but /dev/urandom
-        // failing on macOS is already a broken system - this keeps the proxy
-        // from being an open relay even then.
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(1);
-        let seed = nanos ^ ((std::process::id() as u128) << 64) ^ (&buf as *const _ as u128);
-        let mut x = seed as u64 ^ (seed >> 64) as u64;
-        for chunk in buf.chunks_mut(8) {
-            x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
-            let mut z = x;
-            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-            z ^= z >> 31;
-            for (d, s) in chunk.iter_mut().zip(z.to_le_bytes()) { *d = s; }
-        }
-    }
-    URL_SAFE_NO_PAD.encode(buf)
+    let mut f = std::fs::File::open("/dev/urandom")?;
+    use std::io::Read;
+    f.read_exact(&mut buf)?;
+    Ok(URL_SAFE_NO_PAD.encode(buf))
 }
 
 /// Safari UA — yt-dlp resolves `web_safari`-compatible URLs, and the CDN
@@ -141,7 +126,7 @@ pub fn start() -> std::io::Result<String> {
             }
         }
     }
-    let token = mint_token();
+    let token = mint_token()?;
     let _ = TOKEN.set(token.clone());
     // Token lives in the path, not the authority, so it's still a valid
     // `http://127.0.0.1:<port>/…` URL WebKit will stream.
