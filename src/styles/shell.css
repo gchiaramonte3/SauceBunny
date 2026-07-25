@@ -507,6 +507,44 @@
   flex: 1;
   display: flex;
   min-height: 0;
+  position: relative; /* the narrow-window drawer sheet anchors to this row */
+}
+
+/* ── Adaptive workbench (r141) ───────────────────────────────────────
+   The fixed rails ate the monitor on small windows: at the declared
+   1100px minimum, nav (72) + sidebar (320) + drawer (440) left the
+   editor column ~236px, with the transport clipping offscreen.
+   Two tiers, both purely presentational (open/closed state, the
+   persisted drawer width, and every keyboard path are untouched):
+
+   1200-1349px  everything stays DOCKED - nothing covers the monitor -
+                but the sidebar and drawer give up width so the editor
+                column keeps ~440px+.
+   below 1200px docked can't work (there isn't 800px to split three
+                ways), so the OPEN drawer floats OVER the monitor as a
+                right-anchored sheet and the picture keeps its width.
+
+   The co-review room face keeps its docked grid at every size (its
+   drawer IS the room's right rail), hence the :not(.cp-room) guards. */
+@media (max-width: 1349px) {
+  .cp-body:not(.cp-room) .cp-clip-body .cp-sidebar:not(.closed) {
+    width: clamp(280px, 26vw, 320px);
+  }
+  .cp-body:not(.cp-room) .cp-clip-body .cp-queue-drawer.open {
+    max-width: min(400px, 34vw);
+  }
+}
+@media (max-width: 1199px) {
+  .cp-body:not(.cp-room) .cp-clip-body .cp-queue-drawer.open {
+    position: absolute;
+    top: var(--s-2);
+    right: 4px;
+    bottom: var(--s-2);
+    /* Above the monitor card + timeline, below scrims (400) and modals. */
+    z-index: 60;
+    max-width: min(440px, 42vw);
+    box-shadow: -14px 0 36px rgba(0, 0, 0, 0.5);
+  }
 }
 .cp-main {
   flex: 1;
