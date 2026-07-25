@@ -9,8 +9,10 @@
 // the review source-of-truth. Host: broadcasts source + a 2 Hz transport
 // heartbeat + a review-doc snapshot on each join + its own comment ops.
 // Peer: follows the host playhead, adopts the shared doc, and sends its own
-// comment ops up (the host relays them to everyone). WEB-ONLY — a local file
-// can't be pushed to peers, so hosting is gated to web sources.
+// comment ops up (the host relays them to everyone). Sources: web URLs open
+// directly on every machine; a LOCAL file ships its fingerprint (never its
+// bytes or path), and each peer resolves its own copy via the fingerprint
+// index or falls back to the "Open my copy" affordance.
 
 import {
   useCallback, useEffect, useMemo, useRef, useState,
@@ -26,7 +28,7 @@ import {
 } from "../lib/screening";
 import { saveScreening } from "../lib/screening-store";
 import { getLastUserSeekAt, getPlayheadFrames } from "../lib/playhead-store";
-import { createClockEstimator, expectedPosition } from "../lib/session-clock";
+import { acceptTransport, createClockEstimator, expectedPosition } from "../lib/session-clock";
 import {
   loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc,
   resolveByFingerprint, linkFingerprint, sanitizeDocForWire,
@@ -245,9 +247,6 @@ export function useCoReview({
   const coLastSeqRef = useRef({ epoch: -1, seq: -1 });
   /** When we last issued a chase seek — feeds decideChase's cooldown. */
   const coLastChaseAtRef = useRef(0);
-  /** True while we are APPLYING a remote transport line to our own player,
-   *  so the resulting state callback is not re-broadcast as a local change. */
-  const applyingRemoteRef = useRef(false);
   const coReadyRef = useRef(false); // has OUR player loaded the host's source yet?
   /** Latest persistDoc, so the message handler (registered once) can flush an
    *  outgoing doc without capturing a stale closure. */
@@ -301,8 +300,17 @@ export function useCoReview({
 
   recordOpRef.current = recordOpInScreening;
 
+  /** Ops posted before the host's first reviewDoc snapshot lands. They are
+   *  still SENT (the room applies them); without this buffer they simply
+   *  vanished from the author's own screen until the next full snapshot.
+   *  Replayed once on adoption — applyReviewOp is id-idempotent (insertComment
+   *  dedups, edits/resolves are LWW), so an op the snapshot already contains
+   *  is a no-op. */
+  const pendingOpsRef = useRef<ReviewOp[]>([]);
+
   const postSessionOp = useCallback((op: ReviewOp) => {
-    setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
+    if (!sessionDocRef.current) pendingOpsRef.current.push(op);
+    else setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
     recordOpInScreening(op);
     sendSessionMsg({ kind: "reviewOp", op: JSON.stringify(op) });
   }, [sendSessionMsg, recordOpInScreening]);
@@ -401,7 +409,14 @@ export function useCoReview({
           const incoming = JSON.parse(m.doc) as ReviewDoc;
           setSessionDoc((prev) => {
             if (prev && prev.sourceKey !== incoming.sourceKey) persistDocRef.current(prev);
-            return prev ? mergeReviewDoc(prev, incoming) : incoming;
+            let next = prev ? mergeReviewDoc(prev, incoming) : incoming;
+            // First adoption: replay anything the author posted while the doc
+            // was still null, so their own pre-snapshot comments reappear.
+            if (!prev && pendingOpsRef.current.length) {
+              for (const op of pendingOpsRef.current) next = applyReviewOp(next, op);
+              pendingOpsRef.current = [];
+            }
+            return next;
           });
         } catch { /* malformed snapshot */ }
         return;
@@ -458,11 +473,12 @@ export function useCoReview({
         coReadyRef.current = true;
         // Drop a heartbeat from a SUPERSEDED presenter, and any that arrives
         // out of order within the current epoch. Without this, a stale line
-        // in flight during a floor handover yanks everyone backwards.
-        const lastSeen = coLastSeqRef.current;
-        if (m.epoch < lastSeen.epoch) return;
-        if (m.epoch === lastSeen.epoch && m.seq <= lastSeen.seq && !justLoaded) return;
-        if (m.epoch > lastSeen.epoch) coClockRef.current.reset(); // new sender, new clock
+        // in flight during a floor handover yanks everyone backwards. The
+        // rule lives in session-clock.ts (acceptTransport) so the handover
+        // ordering is unit-tested against the frozen-guest scenario.
+        const verdict = acceptTransport(coLastSeqRef.current, m, justLoaded);
+        if (!verdict.accept) return;
+        if (verdict.newEpoch) coClockRef.current.reset(); // new sender, new clock
         coLastSeqRef.current = { epoch: m.epoch, seq: m.seq };
 
         const now = Date.now();
@@ -491,29 +507,24 @@ export function useCoReview({
         } else if (import.meta.env.DEV && Math.abs(cur - expected) > 0.5) {
           console.info("[co-review] chase yielded to a local seek", { cur, expected });
         }
-        // Everything below APPLIES the presenter's state to our player. Flag
-        // it so the resulting play/pause callback isn't mistaken for a local
-        // action and echoed back as a fresh transport line (which, once a
-        // guest can present, would be a feedback loop between two machines).
-        applyingRemoteRef.current = true;
-        try {
-          if (decision.seekSeconds != null) {
-            coLastChaseAtRef.current = now;
-            onChaseSeek(Math.floor(decision.seekSeconds * r));
-          }
-          // Rate was broadcast but never applied - a guest sat at 1x while the
-          // presenter ran at 1.5x and got seek-corrected once a second instead.
-          // MediaBunnyPlayer decodes at 1x by design, hence the capability gate.
-          if (p.supportsPlaybackRate && Math.abs((m.rate || 1) - coRateRef.current) > 0.01) {
-            p.setPlaybackRate(m.rate || 1);
-          }
-          if (m.playing !== coPlayingRef.current) {
-            if (m.playing) p.play(); else p.pause();
-          }
-        } finally {
-          // Clear on the next MACROTASK: the player's state callback lands in a
-          // later task, so a microtask would clear the flag too early.
-          window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
+        // Everything below APPLIES the presenter's state to our player. No
+        // echo guard is needed: nothing broadcasts on a play-state CHANGE.
+        // The only transport sender is the presenter's 2 Hz interval, gated
+        // on isPresenter, and applying remote state never makes us the
+        // presenter. (A write-only "applyingRemote" flag used to claim this
+        // job; it was never read anywhere and is gone.)
+        if (decision.seekSeconds != null) {
+          coLastChaseAtRef.current = now;
+          onChaseSeek(Math.floor(decision.seekSeconds * r));
+        }
+        // Rate was broadcast but never applied - a guest sat at 1x while the
+        // presenter ran at 1.5x and got seek-corrected once a second instead.
+        // MediaBunnyPlayer decodes at 1x by design, hence the capability gate.
+        if (p.supportsPlaybackRate && Math.abs((m.rate || 1) - coRateRef.current) > 0.01) {
+          p.setPlaybackRate(m.rate || 1);
+        }
+        if (m.playing !== coPlayingRef.current) {
+          if (m.playing) p.play(); else p.pause();
         }
         return;
       }
@@ -613,6 +624,7 @@ export function useCoReview({
       // broadcast, and the rebroadcast is gated on a source being set.
       setPendingSource(null);
       setSourceStatus(new Map());
+      pendingOpsRef.current = [];
       coLastHostPosRef.current = null;
       coReadyRef.current = false;
       return;

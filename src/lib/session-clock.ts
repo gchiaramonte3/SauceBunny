@@ -70,3 +70,36 @@ export function expectedPosition(
   const elapsedMs = Math.max(0, nowMs - (msg.atMs + offsetMs));
   return msg.position + (elapsedMs / 1000) * (msg.rate || 1);
 }
+
+/** Last (epoch, seq) a receiver applied, and an incoming heartbeat's stamp. */
+export type TransportStamp = { epoch: number; seq: number };
+
+/**
+ * Accept/drop rule for transport heartbeats across a presenter handover.
+ *
+ * The host stamps every relayed Transport with the presenter epoch it was
+ * sent under (session.rs bumps the atomic on each grant). A NEWER epoch
+ * always wins, however low its seq — a new presenter restarts at seq 1, and
+ * without the epoch tie-break those lines would look stale to any receiver
+ * whose seq watermark was already high (the frozen-guest handover bug).
+ * Within one epoch, stale and duplicate lines are dropped, EXCEPT the first
+ * heartbeat after our own player finished loading (`justLoaded`), which is
+ * accepted so a late-loading guest snaps to the shared frame even when
+ * paused. A strictly older epoch is dropped even then: that sender was
+ * superseded, and obeying it would yank the room backwards.
+ *
+ * `newEpoch` tells the caller to reset its clock-offset estimator: a new
+ * sender means new wall-clock samples, and keeping the old presenter's
+ * offset would skew every extrapolation until the window flushed.
+ */
+export function acceptTransport(
+  lastSeen: TransportStamp,
+  incoming: TransportStamp,
+  justLoaded: boolean,
+): { accept: boolean; newEpoch: boolean } {
+  if (incoming.epoch < lastSeen.epoch) return { accept: false, newEpoch: false };
+  if (incoming.epoch === lastSeen.epoch && incoming.seq <= lastSeen.seq && !justLoaded) {
+    return { accept: false, newEpoch: false };
+  }
+  return { accept: true, newEpoch: incoming.epoch > lastSeen.epoch };
+}

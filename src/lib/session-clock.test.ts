@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createClockEstimator, expectedPosition } from "./session-clock";
+import { acceptTransport, createClockEstimator, expectedPosition } from "./session-clock";
 
 describe("session clock offset", () => {
   it("reports nothing until it has enough samples", () => {
@@ -58,5 +58,44 @@ describe("expectedPosition", () => {
 
   it("never extrapolates while paused", () => {
     expect(expectedPosition({ ...msg, playing: false }, 999_999, 2000)).toBe(100);
+  });
+});
+
+describe("acceptTransport (presenter handover ordering, R1)", () => {
+  const fresh = { epoch: -1, seq: -1 };
+
+  it("synthetic handover: old presenter at seq 400, new presenter's seq 1 must be accepted", () => {
+    // Host presented for a while; every receiver's watermark is high.
+    const afterHost = { epoch: 1, seq: 400 };
+    // Floor passes; the host stamps the bumped epoch on the new presenter's
+    // first line, whose per-machine seq restarted at 1.
+    const v = acceptTransport(afterHost, { epoch: 2, seq: 1 }, false);
+    expect(v.accept).toBe(true);
+    expect(v.newEpoch).toBe(true); // clock estimator must reset for the new sender
+  });
+
+  it("drops stale and duplicate lines within one epoch", () => {
+    const last = { epoch: 2, seq: 10 };
+    expect(acceptTransport(last, { epoch: 2, seq: 9 }, false).accept).toBe(false);
+    expect(acceptTransport(last, { epoch: 2, seq: 10 }, false).accept).toBe(false);
+    expect(acceptTransport(last, { epoch: 2, seq: 11 }, false).accept).toBe(true);
+    expect(acceptTransport(last, { epoch: 2, seq: 11 }, false).newEpoch).toBe(false);
+  });
+
+  it("drops a superseded presenter's in-flight line even mid-load", () => {
+    // justLoaded relaxes the same-epoch duplicate rule, never the epoch rule.
+    const last = { epoch: 3, seq: 2 };
+    expect(acceptTransport(last, { epoch: 2, seq: 999 }, true).accept).toBe(false);
+  });
+
+  it("justLoaded accepts a same-epoch duplicate so a late loader snaps to the shared frame", () => {
+    const last = { epoch: 2, seq: 10 };
+    expect(acceptTransport(last, { epoch: 2, seq: 10 }, true).accept).toBe(true);
+  });
+
+  it("first heartbeat ever is accepted from the fresh watermark", () => {
+    const v = acceptTransport(fresh, { epoch: 0, seq: 0 }, false);
+    expect(v.accept).toBe(true);
+    expect(v.newEpoch).toBe(true);
   });
 });
