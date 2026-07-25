@@ -303,8 +303,11 @@ export function Sidebar(props: Props) {
           <div className="cp-section-label">Source</div>
           <div className="cp-thumb cp-thumb-empty">
             <div className="cp-thumb-empty-stack">
-              <IconFilm size={24} stroke="rgba(255,255,255,0.32)" />
-              <span style={{ fontFamily: "var(--font-ui)", fontSize: 10, color: "var(--fg-5)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              {/* 32, not 24: IconFilm's geometry sits on a 1.5-unit grid, and
+                  32 is the size where every stroke lands on whole device
+                  pixels (1.5 x 32/24 = 2px) - at 24 the glyph read soft. */}
+              <IconFilm size={32} stroke="rgba(255,255,255,0.32)" />
+              <span className="cp-thumb-empty-label">
                 {status === "fetching" ? "Resolving…" : status === "error" ? "Resolve failed" : "No source loaded"}
               </span>
             </div>

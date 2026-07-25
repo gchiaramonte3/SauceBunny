@@ -516,6 +516,8 @@
 
 /* Geometry lives in .cp-pane-empty (base.css). */
 .cp-tx-empty { color: var(--fg-4); }
+/* Icon-over-title, mirroring the AI pane's empty face (.cp-ai-icon tone). */
+.cp-tx-empty-icon { color: var(--fg-3); opacity: 0.85; }
 .cp-tx-empty-title {
   font-size: 13px;
   font-weight: 600;

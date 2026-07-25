@@ -8,6 +8,7 @@ import { streamChat, type ChatMessage } from "../lib/ai-chat";
 import { loadAiProvider, cloudChat } from "../lib/ai-provider";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
+import { IconAiSummary } from "./Icons";
 import { Markdown } from "./Markdown";
 import { AiChapters } from "./AiChapters";
 import type { LlmModel } from "../bindings/LlmModel";
@@ -456,7 +457,7 @@ export function AiSummary({
   if (!transcriptPath) {
     return (
       <div className="cp-pane-empty cp-ai-empty">
-        <IconBrain />
+        <IconAiSummary size={28} className="cp-ai-icon" />
         <div className="cp-ai-empty-title">No transcript yet</div>
         <div className="cp-ai-empty-sub">Generate a transcript first, then chat with it here.</div>
       </div>
@@ -471,7 +472,7 @@ export function AiSummary({
     return (
       <div className="cp-ai-wrap">
         <div className="cp-pane-empty cp-ai-setup">
-          <IconBrain />
+          <IconAiSummary size={28} className="cp-ai-icon" />
           <div className="cp-ai-empty-title">Set up local AI</div>
           <div className="cp-ai-empty-sub">
             Download a small AI model to summarize and pull quotes from your
@@ -563,7 +564,7 @@ export function AiSummary({
       <div className="cp-ai-thread" ref={scrollRef}>
         {messages.length === 0 && (
           <div className="cp-ai-intro">
-            <IconBrain />
+            <IconAiSummary size={28} className="cp-ai-icon" />
             <div className="cp-ai-empty-title">Chat with this transcript</div>
             <div className="cp-ai-empty-sub">Answers come only from the words in the video, with timestamps.</div>
             <div className="cp-ai-suggest">
@@ -620,11 +621,3 @@ export function AiSummary({
   );
 }
 
-function IconBrain() {
-  return (
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="cp-ai-icon" aria-hidden>
-      <path d="M12 5a3 3 0 0 0-3 3 3 3 0 0 0-1 5.8V16a2 2 0 0 0 4 0" />
-      <path d="M12 5a3 3 0 0 1 3 3 3 3 0 0 1 1 5.8V16a2 2 0 0 1-4 0" />
-    </svg>
-  );
-}

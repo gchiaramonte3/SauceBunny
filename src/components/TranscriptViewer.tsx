@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { IconReveal, IconAlert, IconChevronDown, IconInfo } from "./Icons";
+import { IconReveal, IconAlert, IconChevronDown, IconInfo, IconTranscript } from "./Icons";
 import { parseSrt, groupIntoTurns, serializeCues, fmtTime, type Turn } from "../lib/srt";
 import { speakerStats } from "../lib/speaker-stats";
 import { subscribePlayhead, getPlayheadFrames, playheadFramesToSeconds } from "../lib/playhead-store";
@@ -1256,6 +1256,7 @@ export function TranscriptViewer({
     // the handler explains a missing model better than a dead button would).
     return (
       <div className="cp-pane-empty cp-tx-empty">
+        <IconTranscript size={28} className="cp-tx-empty-icon" />
         <div className="cp-tx-empty-title">No transcript yet</div>
         <div className="cp-tx-empty-body">
           Transcribe the loaded source, or import an

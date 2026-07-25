@@ -116,27 +116,40 @@
   width: 70%;
   height: 100%;
   object-fit: cover;
-  object-position: right center;
+  /* Top-anchored (was centered): the art reads from the top of the band, so
+     the frame's upper third - where faces live - is what shows. Shared by the
+     static backdrop and the montage layers so the first flip doesn't jump. */
+  object-position: right top;
 }
 /* Ambient hero montage layers (HeroMontage.tsx): same geometry as the static
-   backdrop, stacked over it, under the shade. The dissolve is DELIBERATELY
-   glacial - a 20s opacity blend so frames melt into each other - and each
-   frame carries a barely-there scale drift that alternates direction (in:
-   100% -> 103%; out: arrives at 103% and settles to 100%), so the art is
-   never fully still. Anchored right-center to match object-position, so the
-   pinned right edge never reveals a gap. The drift runs slightly longer than
-   the 30s flip cadence so motion never visibly halts before the next frame. */
+   backdrop, stacked over it, under the shade. A 10s opacity blend melts
+   frames into each other, and each frame carries a slow Ken Burns move that
+   alternates direction: zoom (105% -> 110% in, back out on the next) plus a
+   gentle side-to-side drift. Frames anchor to the TOP of the band (the art
+   should read from the top of the app, not float centered) and the transform
+   origin is center-top: the top edge stays pinned while the extra scale
+   leaves >= 2.5% slack on both sides, which is what lets the +/-1.2% lateral
+   pan breathe without ever revealing a gap at the hero's right edge (the
+   left overrun hides under the opaque shade; the bottom clips). The move
+   runs slightly longer than the 30s flip cadence so motion never visibly
+   halts before the next frame. */
 .cp-lib-hero-bg.cp-hero-cycle {
   opacity: 0;
-  transition: opacity 20s linear;
-  transform-origin: right center;
+  transition: opacity 10s linear;
+  transform-origin: center top;
   will-change: opacity, transform;
 }
 .cp-lib-hero-bg.cp-hero-cycle.show { opacity: 1; }
 .cp-lib-hero-bg.cp-hero-cycle.kb-in  { animation: cp-hero-kb-in 34s linear forwards; }
 .cp-lib-hero-bg.cp-hero-cycle.kb-out { animation: cp-hero-kb-out 34s linear forwards; }
-@keyframes cp-hero-kb-in  { from { transform: scale(1); }     to { transform: scale(1.03); } }
-@keyframes cp-hero-kb-out { from { transform: scale(1.03); }  to { transform: scale(1); } }
+@keyframes cp-hero-kb-in {
+  from { transform: scale(1.05) translateX(-1.2%); }
+  to   { transform: scale(1.1)  translateX(1.2%); }
+}
+@keyframes cp-hero-kb-out {
+  from { transform: scale(1.1)  translateX(1.2%); }
+  to   { transform: scale(1.05) translateX(-1.2%); }
+}
 /* Belt + braces: the component already renders nothing under reduced motion. */
 @media (prefers-reduced-motion: reduce) {
   .cp-lib-hero-bg.cp-hero-cycle { transition: none; animation: none; }

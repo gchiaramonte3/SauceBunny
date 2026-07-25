@@ -149,12 +149,14 @@ export const IconAiSummary = (p: IconProps) => (
     <path d="M20 3v4M22 5h-4M4 17v2M5 18H3" />
   </Icon>
 );
-// Document with text lines — the Transcript tab.
+// Caption card — the Transcript tab. A subtitle block with two text lines:
+// reads "spoken words" rather than "file", and pairs with IconAiSummary's
+// sparkle as a sibling (same weight, same simplicity) in the tab strip and
+// the two panes' empty states.
 export const IconTranscript = (p: IconProps) => (
   <Icon {...p}>
-    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
-    <path d="M14 2v4a2 2 0 0 0 2 2h4" />
-    <path d="M10 9H8M16 13H8M16 17H8" />
+    <rect x="3" y="5" width="18" height="14" rx="2.5" />
+    <path d="M7 12h7M7 15.5h10" />
   </Icon>
 );
 // Docked right panel — the toolbar's side-panel toggle (replaces the Queue
