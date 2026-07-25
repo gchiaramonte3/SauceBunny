@@ -30,7 +30,7 @@ use iroh_tickets::endpoint::EndpointTicket;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::BufReader;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::JoinHandle;
 
@@ -45,6 +45,22 @@ const MAX_PEERS: usize = 3;
 /// review op or a presence tick), so anything past this is abuse — drop it
 /// before it can be fanned out to every other peer (×N memory amplification).
 const MAX_MSG_BYTES: usize = 2 * 1024 * 1024;
+
+/// Hard cap on the Hello line specifically — a name plus an install id is a
+/// few hundred bytes, so anything bigger is not a client. (Hello used to be
+/// read with NO size check at all.)
+const MAX_HELLO_BYTES: usize = 4 * 1024;
+
+/// How many connections may sit in the Hello handshake simultaneously. Each
+/// pending handshake holds a task + buffers for up to HELLO_TIMEOUT, and the
+/// accept loop used to spawn one per connection unconditionally — an invite
+/// holder could open hundreds and hold them all at the 10s window.
+const MAX_PENDING_HANDSHAKES: usize = 8;
+
+/// Longest install id accepted verbatim. Ids are UUIDs (36 chars); anything
+/// longer or non-token-shaped is treated as ABSENT so a hostile client can't
+/// grow the install→member map with unbounded garbage keys.
+const MAX_INSTALL_LEN: usize = 64;
 
 /// One line into the frontend's pipeline log, on the `session` channel.
 ///
@@ -566,6 +582,47 @@ pub async fn session_send(
     write_msg_line(send, &msg).await
 }
 
+/// Read one newline-terminated line WITHOUT ever buffering more than `cap`
+/// bytes. `read_line` grows its String until a newline arrives, so the old
+/// "check the length afterwards" pattern let a peer stream an arbitrarily
+/// long line into memory before the cap ran. Ok(None) = clean EOF. A line
+/// over the cap (or EOF mid-line, or non-UTF-8) is an ERROR — the caller
+/// drops the connection; skipping would mean reading and discarding an
+/// unbounded stream we specifically chose not to buffer.
+async fn read_line_bounded<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+    cap: usize,
+) -> std::io::Result<Option<String>> {
+    use tokio::io::AsyncBufReadExt;
+    let mut buf: Vec<u8> = Vec::new();
+    loop {
+        let chunk = reader.fill_buf().await?;
+        if chunk.is_empty() {
+            return if buf.is_empty() {
+                Ok(None)
+            } else {
+                Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "stream ended mid-line"))
+            };
+        }
+        if let Some(pos) = chunk.iter().position(|&b| b == b'\n') {
+            if buf.len() + pos > cap {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "line exceeds the size cap"));
+            }
+            buf.extend_from_slice(&chunk[..pos]);
+            reader.consume(pos + 1);
+            let text = String::from_utf8(buf)
+                .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "line is not UTF-8"))?;
+            return Ok(Some(text));
+        }
+        if buf.len() + chunk.len() > cap {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "line exceeds the size cap"));
+        }
+        buf.extend_from_slice(chunk);
+        let consumed = chunk.len();
+        reader.consume(consumed);
+    }
+}
+
 // ============================================================
 // HOST SIDE — accept loop + per-peer connection tasks
 // ============================================================
@@ -578,9 +635,23 @@ async fn accept_loop(app: AppHandle, endpoint: Endpoint, shared: Arc<HostShared>
             Ok(c) => c,
             Err(_) => continue, // handshake failure — never became a peer
         };
+        // Bound the handshake fan-out BEFORE spawning: each pending task holds
+        // buffers for up to HELLO_TIMEOUT, and an invite holder could open
+        // hundreds of connections and park them all in that window.
+        let pending = shared
+            .tasks
+            .lock()
+            .map(|mut tasks| {
+                tasks.retain(|t| !t.is_finished());
+                tasks.len()
+            })
+            .unwrap_or(usize::MAX);
+        if pending >= MAX_PENDING_HANDSHAKES {
+            conn.close(1u32.into(), b"session is busy");
+            continue;
+        }
         let handle = tokio::spawn(handle_peer_conn(app.clone(), conn, shared.clone()));
         if let Ok(mut tasks) = shared.tasks.lock() {
-            tasks.retain(|t| !t.is_finished());
             tasks.push(handle);
         }
     }
@@ -593,14 +664,14 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
     let handshake = tokio::time::timeout(HELLO_TIMEOUT, async {
         let (send, recv) = conn.accept_bi().await.map_err(|e| e.to_string())?;
         let mut reader = BufReader::new(recv);
-        let mut line = String::new();
-        let n = reader
-            .read_line(&mut line)
-            .await
-            .map_err(|e| e.to_string())?;
-        if n == 0 {
-            return Err("stream closed before hello".to_string());
-        }
+        // Bounded: Hello had NO size check, and read_line buffers until a
+        // newline arrives — the one unauthenticated read in the protocol was
+        // also the unbounded one.
+        let line = match read_line_bounded(&mut reader, MAX_HELLO_BYTES).await {
+            Ok(Some(l)) => l,
+            Ok(None) => return Err("stream closed before hello".to_string()),
+            Err(e) => return Err(format!("bad hello: {e}")),
+        };
         match serde_json::from_str::<SessionMsg>(line.trim()) {
             Ok(SessionMsg::Hello { name, install }) => Ok((send, reader, name, install)),
             Ok(_) => Err("expected hello".to_string()),
@@ -617,9 +688,32 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
         }
     };
     let name = clean_name(&raw_name);
+    // Untrusted install ids only enter the persistent install→member map when
+    // they are token-shaped and bounded; anything else is treated as absent
+    // (mint-only, no insert), so rejected or hostile connects can't grow the
+    // map with arbitrary keys.
+    let install = if install.len() <= MAX_INSTALL_LEN
+        && install.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        install
+    } else {
+        String::new()
+    };
 
-    // 2. Register, enforcing the cap. Extras get a polite close instead of
-    //    a hang — the QUIC close reason is surfaced by the peer's read loop.
+    // 2. Cap check FIRST — before minting a member id, inserting into the
+    //    install map, or bumping epochs. A rejected extra used to leave those
+    //    behind, so unique rejected connects grew host state indefinitely.
+    //    (The insert below re-checks under the same lock; this early peek
+    //    just orders the refusal ahead of any bookkeeping.)
+    {
+        let peers = shared.peers.lock().await;
+        if peers.len() >= MAX_PEERS {
+            drop(peers);
+            conn.close(1u32.into(), b"session is full");
+            return;
+        }
+    }
+
     let id = NEXT_PEER_ID.fetch_add(1, Ordering::Relaxed);
     // RECLAIM the member id when this install has been here before (r124).
     // Minting unconditionally is what made a rejoining friend appear as a
@@ -647,17 +741,6 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
         *e
     };
     let mut send = send;
-    // Cap check BEFORE Welcome - a rejected extra must never briefly appear
-    // fully joined. (The insert below re-checks under the same lock; this
-    // early peek just orders the refusal ahead of the greeting.)
-    {
-        let peers = shared.peers.lock().await;
-        if peers.len() >= MAX_PEERS {
-            drop(peers);
-            conn.close(1u32.into(), b"session is full");
-            return;
-        }
-    }
     // Tell the newcomer who THEY are before the roster lands (PeerList can't
     // disambiguate same-name members; the mesh keys everything on this id).
     if write_msg_line(&mut send, &SessionMsg::Welcome { you: member.clone(), title: shared.title.clone() }).await.is_err() {
@@ -684,19 +767,17 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
     //    (Phase 2): apply them on the HOST frontend (session:msg) AND relay to
     //    every OTHER peer so the whole star converges. EOF/error = disconnect.
     loop {
-        let mut line = String::new();
-        match reader.read_line(&mut line).await {
-            Ok(0) => break, // clean EOF — peer left
-            Ok(_) => {
-                // Drop an abusively large control line before it can be fanned
-                // out to every other peer (×N memory amplification).
-                if line.len() > MAX_MSG_BYTES {
-                    session_log(&app, "warn", format!(
-                        "Dropped an oversize line from {member} ({} bytes, cap {MAX_MSG_BYTES}).",
-                        line.len(),
-                    ));
-                    continue;
-                }
+        match read_line_bounded(&mut reader, MAX_MSG_BYTES).await {
+            Ok(None) => break, // clean EOF — peer left
+            Err(e) => {
+                // Oversize / mid-line EOF / non-UTF-8: the peer is outside the
+                // protocol, and a bounded reader can't skip past an unbounded
+                // line — disconnecting IS the containment (it used to buffer
+                // the whole line first, which was the memory hole).
+                session_log(&app, "warn", format!("Dropping {member}: {e}."));
+                break;
+            }
+            Ok(Some(line)) => {
                 let parsed = serde_json::from_str::<SessionMsg>(line.trim());
                 if let Err(e) = &parsed {
                     session_log(&app, "err", format!(
@@ -790,7 +871,6 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
                     }
                 }
             }
-            Err(_) => break, // reset / connection lost
         }
     }
 
@@ -899,9 +979,8 @@ async fn peer_read_loop(
     } = shared;
     let mut reader = BufReader::new(recv);
     loop {
-        let mut line = String::new();
-        match reader.read_line(&mut line).await {
-            Ok(0) => {
+        match read_line_bounded(&mut reader, MAX_MSG_BYTES).await {
+            Ok(None) => {
                 // Host closed the stream / ended the session.
                 tokio::spawn(fail_peer_to_off(
                     app,
@@ -910,13 +989,20 @@ async fn peer_read_loop(
                 ));
                 return;
             }
-            Ok(_) => {
-                if line.len() > MAX_MSG_BYTES {
-                    session_log(&app, "warn", format!(
-                        "Dropped an oversize line from the host ({} bytes).", line.len(),
-                    ));
-                    continue;
-                }
+            Err(e) => {
+                // Oversize / mid-line EOF / non-UTF-8 from the host: a bounded
+                // reader can't skip past an unbounded line, so the session
+                // ends the same way a closed stream does (it used to buffer
+                // the whole line before checking).
+                session_log(&app, "warn", format!("Session stream violated the protocol: {e}."));
+                tokio::spawn(fail_peer_to_off(
+                    app,
+                    generation,
+                    "The session stream broke".to_string(),
+                ));
+                return;
+            }
+            Ok(Some(line)) => {
                 let msg = match serde_json::from_str::<SessionMsg>(line.trim()) {
                     Ok(m) => m,
                     Err(e) => {
@@ -974,14 +1060,6 @@ async fn peer_read_loop(
                     // Host never sends these to a peer.
                     SessionMsg::Hello { .. } | SessionMsg::Bye => {}
                 }
-            }
-            Err(e) => {
-                tokio::spawn(fail_peer_to_off(
-                    app,
-                    generation,
-                    format!("Connection to host lost: {e}"),
-                ));
-                return;
             }
         }
     }
@@ -1141,6 +1219,46 @@ fn sanitize_name(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn bounded_reader_reads_lines_and_signals_clean_eof() {
+        let data: &[u8] = b"hello\nworld\n";
+        let mut r = BufReader::new(data);
+        assert_eq!(read_line_bounded(&mut r, 64).await.unwrap().as_deref(), Some("hello"));
+        assert_eq!(read_line_bounded(&mut r, 64).await.unwrap().as_deref(), Some("world"));
+        assert!(read_line_bounded(&mut r, 64).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn bounded_reader_rejects_an_oversize_line_instead_of_buffering_it() {
+        // 1 MiB of no-newline garbage against a 1 KiB cap: the old read_line
+        // path buffered ALL of it before any length check ran.
+        let big = vec![b'x'; 1024 * 1024];
+        let mut r = BufReader::new(&big[..]);
+        let err = read_line_bounded(&mut r, 1024).await.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[tokio::test]
+    async fn bounded_reader_edge_cases() {
+        // A line exactly AT the cap passes.
+        let mut exact = Vec::from(&b"x"[..]).repeat(8);
+        exact.push(b'\n');
+        let mut r = BufReader::new(&exact[..]);
+        assert_eq!(read_line_bounded(&mut r, 8).await.unwrap().as_deref(), Some("xxxxxxxx"));
+        // EOF mid-line is a violation, not a line.
+        let mut r = BufReader::new(&b"unterminated"[..]);
+        assert_eq!(
+            read_line_bounded(&mut r, 64).await.unwrap_err().kind(),
+            std::io::ErrorKind::UnexpectedEof,
+        );
+        // Non-UTF-8 is a violation.
+        let mut r = BufReader::new(&[0xff, 0xfe, b'\n'][..]);
+        assert_eq!(
+            read_line_bounded(&mut r, 64).await.unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData,
+        );
+    }
 
     #[test]
     fn transport_wire_shape_matches_contract() {
