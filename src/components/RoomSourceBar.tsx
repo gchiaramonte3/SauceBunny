@@ -34,6 +34,7 @@ export function RoomSourceBar({ hasSource, onLoadUrl, onImportFile, onClear }: {
           type="text"
           value={draft}
           placeholder="Paste a link to watch together"
+          title="Everyone plays the same file, in sync. Scrub, pause, and comment on exact timecode."
           aria-label="Load a source for the room"
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -43,7 +44,7 @@ export function RoomSourceBar({ hasSource, onLoadUrl, onImportFile, onClear }: {
           }}
         />
       </div>
-      <button type="button" className="btn btn-ghost btn-compact" onClick={onImportFile} title="Open a file from this Mac">
+      <button type="button" className="btn btn-ghost btn-compact" onClick={onImportFile} title="Open a file from this Mac. Peers with the same file open their own copy, frame accurate.">
         <IconImport size={12} /> File
       </button>
       {hasSource && (

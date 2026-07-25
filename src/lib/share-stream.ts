@@ -106,6 +106,10 @@ export async function openShareStream(
     const stream = (video as HTMLVideoElement & { captureStream(): MediaStream }).captureStream();
     const track = stream.getVideoTracks()[0];
     if (!track) throw new Error("share captureStream produced no video track");
+    // Screen content is text and UI, not motion: tell the encoder to spend
+    // its bits on spatial detail. Pairs with the senders' maintain-resolution
+    // degradation preference (rtc-mesh tuneVideoSender).
+    try { track.contentHint = "detail"; } catch { /* older engines ignore it */ }
 
     return {
       stream,

@@ -47,6 +47,14 @@ export function useRtcMesh(args: {
   const { active, selfId, role, memberIds, turn, onLog } = args;
   const [remoteStreams, setRemoteStreams] = useState<ReadonlyMap<string, MediaStream>>(new Map());
   const [peerStates, setPeerStates] = useState<ReadonlyMap<string, MeshPeerState>>(new Map());
+  // Per-peer LOCAL mute (People tile "Mute for me"): flips the hidden voice
+  // element's muted flag on THIS machine only. A social-safe control - the
+  // remote person is never actually muted and never notified. The ref copy is
+  // read by onRemoteStream so a re-published stream (track added/removed
+  // mid-call) re-applies the choice to the recreated element.
+  const [peerMutedForMe, setPeerMutedForMe] = useState<ReadonlySet<string>>(new Set());
+  const peerMutedForMeRef = useRef(peerMutedForMe);
+  peerMutedForMeRef.current = peerMutedForMe;
   const meshRef = useRef<RtcMesh | null>(null);
   const audioRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const roleRef = useRef(role);
@@ -116,6 +124,7 @@ export function useRtcMesh(args: {
             el.autoplay = true;
             applySpeaker(el);
             applyVolume(el);
+            el.muted = peerMutedForMeRef.current.has(id);
             audioRef.current.set(id, el);
           }
           if (el.srcObject !== stream) el.srcObject = stream;
@@ -183,5 +192,15 @@ export function useRtcMesh(args: {
     } catch { /* malformed signaling line */ }
   }, []);
 
-  return { remoteStreams, peerStates, handleSignal, setVideoOverride, setAudioOverride };
+  const toggleMuteForMe = useCallback((id: string, muted: boolean) => {
+    setPeerMutedForMe((prev) => {
+      const next = new Set(prev);
+      if (muted) next.add(id); else next.delete(id);
+      return next;
+    });
+    const el = audioRef.current.get(id);
+    if (el) el.muted = muted;
+  }, []);
+
+  return { remoteStreams, peerStates, peerMutedForMe, toggleMuteForMe, handleSignal, setVideoOverride, setAudioOverride };
 }

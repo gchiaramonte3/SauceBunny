@@ -158,6 +158,9 @@ export type CoReview = {
   meshStreams: ReadonlyMap<string, MediaStream>;
   /** Per-member mesh connection state (connecting / live / failed). */
   meshStates: ReadonlyMap<string, MeshPeerState>;
+  /** Peers YOU muted locally (tile "Mute for me"); never signalled to them. */
+  meshMutedForMe: ReadonlySet<string>;
+  toggleMuteForMe: (memberId: string, muted: boolean) => void;
   /** Screen share (native ffmpeg pipeline; v1 replaces your camera tile). */
   shareState: ShareState;
   shareStream: MediaStream | null;
@@ -1004,6 +1007,7 @@ export function useCoReview({
     coSession, coSessionActive, sessionDoc, postSessionOp, coGhostMarkers,
     theater, setTheater, theaterParticipants,
     meshStreams: mesh.remoteStreams, meshStates: mesh.peerStates,
+    meshMutedForMe: mesh.peerMutedForMe, toggleMuteForMe: mesh.toggleMuteForMe,
     shareState, shareStream, sharingMembers, startShare, stopShare,
     liveReactions,
     raisedHands,

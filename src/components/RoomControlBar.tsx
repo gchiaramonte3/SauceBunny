@@ -57,8 +57,10 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
       <button
         type="button"
         className={"cp-room-bar-btn" + (shareState === "sharing" ? " active" : "")}
-        title={shareState === "sharing" ? "Stop sharing" : "Share screen"}
-        aria-label={shareState === "sharing" ? "Stop sharing your screen" : "Share your screen"}
+        /* The promise, stated: a share is live pixels, not the review
+           subject. Watch-together (the source bar) keeps timecode. */
+        title={shareState === "sharing" ? "Stop sharing" : "Share my screen. Shows your app live; no scrubbing, no timecode."}
+        aria-label={shareState === "sharing" ? "Stop sharing your screen" : "Share your screen. Shows your app live with no scrubbing and no timecode."}
         aria-pressed={shareState === "sharing"}
         disabled={shareState === "starting"}
         onClick={() => {

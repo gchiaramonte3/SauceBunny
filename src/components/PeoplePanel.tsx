@@ -18,7 +18,7 @@ export type Participant = { id: string; name: string; color: string; isHost: boo
  * the old participant rail's roster duties; leave/end lives in the room
  * control bar.
  */
-export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream, raisedHands, reactionFlashes, strip = false, presenter = "m0", canGrantPresenter = false, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic }: {
+export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream, raisedHands, reactionFlashes, strip = false, presenter = "m0", canGrantPresenter = false, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic, mutedForMe, onToggleMuteForMe }: {
   active: boolean;
   participants: Participant[];
   /** Member id currently driving source + transport. */
@@ -31,6 +31,9 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
   selfMicMuted?: boolean;
   onToggleCam?: () => void;
   onToggleMic?: () => void;
+  /** Peers YOU muted locally ("Mute for me") - never signalled to them. */
+  mutedForMe?: ReadonlySet<string>;
+  onToggleMuteForMe?: (memberId: string, muted: boolean) => void;
   remoteStreams: ReadonlyMap<string, MediaStream>;
   peerStates: ReadonlyMap<string, MeshPeerState>;
   /** Members flagged as screen-sharing (their tile badges "Sharing screen"). */
@@ -84,6 +87,8 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
             selfMicMuted={selfMicMuted}
             onToggleCam={onToggleCam}
             onToggleMic={onToggleMic}
+            mutedForMe={mutedForMe?.has(p.id) ?? false}
+            onToggleMuteForMe={onToggleMuteForMe}
           />
         ))}
       </div>
@@ -94,7 +99,7 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
 /** One member: camera tile when a video track flows, avatar card when not.
  *  Speaking glow rides an AnalyserNode threshold on the tile's own audio
  *  (reduced motion: no glow animation, static ring). */
-function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, canGrant, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic }: {
+function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, canGrant, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic, mutedForMe, onToggleMuteForMe }: {
   p: Participant;
   stream: MediaStream | null;
   state: MeshPeerState;
@@ -111,11 +116,18 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
   selfMicMuted?: boolean;
   onToggleCam?: () => void;
   onToggleMic?: () => void;
+  /** YOU muted this peer locally (remote tiles only). */
+  mutedForMe?: boolean;
+  onToggleMuteForMe?: (memberId: string, muted: boolean) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // "Hide video" is pure presentation on THIS machine - the track keeps
+  // flowing (stopping it would need renegotiation and would tell the peer).
+  const [videoHidden, setVideoHidden] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
-  const hasVideo = !!stream && stream.getVideoTracks().some((t) => t.enabled && !t.muted);
+  const hasVideo = !!stream && stream.getVideoTracks().some((t) => t.enabled && !t.muted)
+    && !(videoHidden && !p.isSelf);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -208,6 +220,33 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
             onClick={onToggleMic}
           >
             {selfMicMuted ? <IconMicOff size={13} /> : <IconMic size={13} />}
+          </button>
+        </div>
+      )}
+      {/* Remote tiles: LOCAL-ONLY controls. Hiding a video or muting a voice
+          here affects this screen only - a remote mute is a social act the
+          app must not perform silently, so there is no remote capability. */}
+      {!p.isSelf && onToggleMuteForMe && (
+        <div className="cp-person-controls">
+          <button
+            type="button"
+            className={"cp-person-ctl remote" + (videoHidden ? " off" : "")}
+            aria-pressed={videoHidden}
+            title="Only affects your screen."
+            aria-label={videoHidden ? `Show ${p.name}'s video again` : `Hide ${p.name}'s video for me`}
+            onClick={() => setVideoHidden((h) => !h)}
+          >
+            {videoHidden ? <IconVideoOff size={13} /> : <IconVideo size={13} />}
+          </button>
+          <button
+            type="button"
+            className={"cp-person-ctl remote" + (mutedForMe ? " off" : "")}
+            aria-pressed={!!mutedForMe}
+            title="Only affects your screen."
+            aria-label={mutedForMe ? `Unmute ${p.name} for me` : `Mute ${p.name} for me`}
+            onClick={() => onToggleMuteForMe(p.id, !mutedForMe)}
+          >
+            {mutedForMe ? <IconMicOff size={13} /> : <IconMic size={13} />}
           </button>
         </div>
       )}

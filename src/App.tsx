@@ -5182,7 +5182,7 @@ export default function App() {
     coSession, coSessionActive, sessionDoc, postSessionOp, coGhostMarkers,
     liveReactions, raisedHands, handRaised, sendReaction, toggleHand,
     theater, setTheater, theaterParticipants,
-    meshStreams, meshStates,
+    meshStreams, meshStates, meshMutedForMe, toggleMuteForMe,
     shareState, shareStream, sharingMembers, startShare, stopShare,
     isPresenter, pendingSource, sourceStatus, makePresenter, adoptPendingSource,
     startCoReview, joinCoReview, leaveCoReview,
@@ -5666,6 +5666,8 @@ export default function App() {
                 participants={theaterParticipants}
                 remoteStreams={meshStreams}
                 peerStates={meshStates}
+                mutedForMe={meshMutedForMe}
+                onToggleMuteForMe={toggleMuteForMe}
                 sharingMembers={sharingMembers}
                 shareStream={shareStream}
                 raisedHands={raisedHands}
@@ -6106,6 +6108,8 @@ export default function App() {
                       participants={theaterParticipants}
                       remoteStreams={meshStreams}
                       peerStates={meshStates}
+                      mutedForMe={meshMutedForMe}
+                      onToggleMuteForMe={toggleMuteForMe}
                       sharingMembers={sharingMembers}
                       shareStream={shareStream}
                       raisedHands={raisedHands}
