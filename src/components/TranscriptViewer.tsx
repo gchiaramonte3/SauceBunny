@@ -1631,24 +1631,29 @@ export function TranscriptViewer({
             <div className="cp-tx-turn" key={ti}>
               <div className={"cp-tx-turn-head" + (hasRealSpeakers ? "" : " no-speaker")}>
                 {hasRealSpeakers && (<>
+                {/* The chip is decorative alongside the NAME button (one tab
+                    stop per speaker, not two) - the button is the keyboard
+                    path to rename (a11y r141). */}
                 <span
                   className={"cp-tx-speaker" + (hasOverride ? " renamed" : "")}
                   style={{ background: speakerDisplayColor(resolvedTag) }}
+                  aria-hidden
                   onClick={(e) => openRename(e, ti, turn.speaker)}
                   onContextMenu={(e) => openRename(e, ti, turn.speaker)}
                   title="Click or right-click to rename · use Manage speakers to recolour or merge"
                 >
                   {speakerInitials(displayName)}
                 </span>
-                <span
+                <button
+                  type="button"
                   className="cp-tx-speaker-name"
+                  aria-label={`Rename speaker ${displayName}`}
                   onClick={(e) => openRename(e, ti, turn.speaker)}
                   onContextMenu={(e) => openRename(e, ti, turn.speaker)}
                   title="Click or right-click to rename"
-                  style={{ cursor: "pointer" }}
                 >
                   {displayName}
-                </span>
+                </button>
                 </>)}
                 <button
                   className="cp-tx-jump"

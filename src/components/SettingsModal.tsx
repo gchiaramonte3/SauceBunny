@@ -161,6 +161,15 @@ export type Defaults = {
    * clip points; bump to 720/1080 if you want a sharper preview.
    */
   previewMaxHeight: 480 | 720 | 1080;
+  /**
+   * Media-cache size cap in GB (0 = keep everything, the long-standing
+   * default). When set, `enforce_media_cache_cap` prunes the oldest files
+   * at launch and whenever the cap changes; files backing the on-screen
+   * source and in-flight jobs are never touched.
+   */
+  mediaCacheCapGb: number;
+  /** Empty the media cache automatically when the app quits (r141). */
+  clearCacheOnQuit: boolean;
 };
 
 type Props = {
@@ -806,6 +815,9 @@ export function SettingsModal(props: Props) {
                     <div className="v">
                       <button
                         className={"cp-toggle-switch" + (defaults.reencode ? " on" : "")}
+                role="switch"
+                aria-checked={defaults.reencode}
+                aria-label="Re-encode by default"
                         onClick={() => setDefaults({ ...defaults, reencode: !defaults.reencode })}
                       />
                     </div>
@@ -838,11 +850,19 @@ export function SettingsModal(props: Props) {
                     <div className="v">
                       <button
                         className={"cp-toggle-switch" + (defaults.useWebCodecsDecoder ? " on" : "")}
+                role="switch"
+                aria-checked={defaults.useWebCodecsDecoder}
+                aria-label="WebCodecs decoder"
                         onClick={() => setDefaults({ ...defaults, useWebCodecsDecoder: !defaults.useWebCodecsDecoder })}
                       />
                     </div>
                   </div>
-                  <CacheControls excludePaths={props.cacheExcludePaths} />
+                  <CacheControls
+                    excludePaths={props.cacheExcludePaths}
+                    capGb={defaults.mediaCacheCapGb}
+                    clearOnQuit={defaults.clearCacheOnQuit}
+                    onRetentionChange={(patch) => setDefaults({ ...defaults, ...patch })}
+                  />
                 </CollapsibleSection>
 
                 <CollapsibleSection id="gen-web-playback" label="Web playback" open={sectionOpen("gen-web-playback")} onToggle={() => toggleSection("gen-web-playback")}>
@@ -854,6 +874,9 @@ export function SettingsModal(props: Props) {
                     <div className="v">
                       <button
                         className={"cp-toggle-switch" + (defaults.streamPreview ? " on" : "")}
+                role="switch"
+                aria-checked={defaults.streamPreview}
+                aria-label="Stream while you watch"
                         onClick={() => setDefaults({ ...defaults, streamPreview: !defaults.streamPreview })}
                       />
                     </div>
@@ -1626,7 +1649,15 @@ const CACHE_CATEGORIES = [
  * touched. Per-category sizes + Clear buttons — no automatic size caps,
  * just visibility and control (everything regenerates on demand).
  */
-function CacheControls({ excludePaths }: { excludePaths?: string[] }) {
+function CacheControls({ excludePaths, capGb, clearOnQuit, onRetentionChange }: {
+  excludePaths?: string[];
+  /** Current media-cache size cap in GB; 0 = no cap. */
+  capGb: number;
+  /** Whether the media cache is emptied on quit. */
+  clearOnQuit: boolean;
+  /** Persist retention prefs into Defaults (localStorage). */
+  onRetentionChange: (patch: { mediaCacheCapGb?: number; clearCacheOnQuit?: boolean }) => void;
+}) {
   // CacheStats now comes from the canonical Rust definition (r49 +
   // r50). The inline-anonymous-type pattern was a workaround from
   // before the bindings existed.
@@ -1676,6 +1707,34 @@ function CacheControls({ excludePaths }: { excludePaths?: string[] }) {
     }
   };
 
+  const onCapChange = async (gb: number) => {
+    onRetentionChange({ mediaCacheCapGb: gb });
+    if (gb <= 0) return;
+    // Apply immediately so picking a cap visibly shrinks the numbers above
+    // instead of silently waiting for the next launch.
+    setBusy(true);
+    try {
+      await invoke<number>("enforce_media_cache_cap", {
+        maxBytes: gb * 1024 * 1024 * 1024,
+        exclude: excludePaths ?? [],
+      });
+    } catch (err) {
+      console.warn("enforce_media_cache_cap failed", err);
+    } finally {
+      setBusy(false);
+      refresh();
+    }
+  };
+
+  const onQuitToggle = (next: boolean) => {
+    onRetentionChange({ clearCacheOnQuit: next });
+    // The marker file must exist before quit; localStorage alone is
+    // invisible to the Rust exit handler (the webview is gone by then).
+    invoke("set_clear_cache_on_quit", { enabled: next }).catch((err) => {
+      console.warn("set_clear_cache_on_quit failed", err);
+    });
+  };
+
   const sizeLabel = stats ? formatBytes(stats.bytes_total) : "—";
   const countLabel = stats ? `${stats.file_count} file${stats.file_count === 1 ? "" : "s"}` : "checking…";
 
@@ -1710,6 +1769,39 @@ function CacheControls({ excludePaths }: { excludePaths?: string[] }) {
             );
           })}
         </div>
+        <div className="cp-cache-retention">
+          <label className="cp-cache-ret-item">
+            <span className="cp-cache-ret-label">Size limit</span>
+            <select
+              className="cp-select"
+              value={String(capGb)}
+              onChange={(e) => { void onCapChange(Number(e.target.value)); }}
+              disabled={busy}
+            >
+              <option value="0">Off, keep everything</option>
+              <option value="2">2 GB</option>
+              <option value="5">5 GB</option>
+              <option value="10">10 GB</option>
+              <option value="25">25 GB</option>
+            </select>
+          </label>
+          <div className="cp-cache-ret-item">
+            <span className="cp-cache-ret-label">Clear on quit</span>
+            <button
+              type="button"
+              className={"cp-toggle-switch" + (clearOnQuit ? " on" : "")}
+              role="switch"
+              aria-checked={clearOnQuit}
+              aria-label="Clear cache on quit"
+              onClick={() => onQuitToggle(!clearOnQuit)}
+            />
+          </div>
+        </div>
+        <span className="cp-cache-ret-note">
+          With a size limit, the oldest files are removed first; whatever is on screen stays.
+          Cached downloads include videos fetched with your browser sign-in, so set a limit or
+          clear on quit if you'd rather not keep those on disk.
+        </span>
         {cachePath && (
           // Cache path visibility (r39 — user asked for "set a cache
           // folder in settings"). Setting a custom path is r40 work

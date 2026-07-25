@@ -297,6 +297,91 @@ pub async fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppErr
     })
 }
 
+/// Marker-file name for "clear the media cache on quit". A FILE under
+/// app_data, not a webview pref: the exit handler runs after the webview
+/// (and its localStorage) is already gone.
+pub(crate) const CLEAR_ON_QUIT_FLAG: &str = "clear-media-cache-on-quit";
+
+#[tauri::command]
+pub fn set_clear_cache_on_quit(app: AppHandle, enabled: bool) -> Result<(), crate::AppError> {
+    let data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?;
+    let flag = data.join(CLEAR_ON_QUIT_FLAG);
+    if enabled {
+        std::fs::create_dir_all(&data).map_err(|e| format!("create app data dir: {e}"))?;
+        std::fs::write(&flag, b"1").map_err(|e| format!("write flag: {e}"))?;
+    } else if flag.exists() {
+        std::fs::remove_file(&flag).map_err(|e| format!("remove flag: {e}"))?;
+    }
+    Ok(())
+}
+
+/// LRU-prune the persistent media cache (full downloads, cached audio, saved
+/// metadata) down to `max_bytes`: oldest files by mtime go first, and files
+/// belonging to an active job or on the caller's exclude list (the source
+/// currently playing) are never touched. Returns how many files were removed.
+/// The cache is deliberately keep-forever by default; this cap is the opt-in
+/// retention policy from Settings.
+#[tauri::command]
+pub async fn enforce_media_cache_cap(
+    app: AppHandle,
+    registry: State<'_, JobRegistry>,
+    max_bytes: u64,
+    exclude: Option<Vec<String>>,
+) -> Result<u32, crate::AppError> {
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("app_cache_dir: {e}"))?;
+    let media = cache.join(MEDIA_CACHE_DIRNAME);
+    if !media.is_dir() {
+        return Ok(0);
+    }
+    let active: std::collections::HashSet<String> = registry.active_ids().into_iter().collect();
+    let excluded: std::collections::HashSet<String> = exclude.unwrap_or_default().into_iter().collect();
+
+    fn walk(dir: &std::path::Path, out: &mut Vec<(PathBuf, u64, std::time::SystemTime)>) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if let Ok(m) = e.metadata() {
+                out.push((p, m.len(), m.modified().unwrap_or(std::time::UNIX_EPOCH)));
+            }
+        }
+    }
+    let mut files: Vec<(PathBuf, u64, std::time::SystemTime)> = Vec::new();
+    walk(&media, &mut files);
+    let total: u64 = files.iter().map(|(_, s, _)| *s).sum();
+    if total <= max_bytes {
+        return Ok(0);
+    }
+    files.sort_by_key(|(_, _, m)| *m); // oldest first
+    let mut removed: u32 = 0;
+    let mut freed: u64 = 0;
+    for (p, size, _) in files {
+        if total.saturating_sub(freed) <= max_bytes {
+            break;
+        }
+        let path_str = p.to_string_lossy().to_string();
+        if excluded.contains(&path_str) {
+            continue;
+        }
+        let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if active.iter().any(|id| name.contains(id.as_str())) {
+            continue;
+        }
+        if std::fs::remove_file(&p).is_ok() {
+            freed += size;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 /// Purge `saucebunny-*` cache files. Files whose names contain a currently-
 /// active job ID are SKIPPED so we don't yank the rug out from under an
 /// in-flight ffmpeg playback prep / audio download / etc — those would
@@ -917,7 +1002,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-24-r140-turn-keychain";
+pub const BACKEND_BUILD_ID: &str = "2026-07-25-r141-cache-retention";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

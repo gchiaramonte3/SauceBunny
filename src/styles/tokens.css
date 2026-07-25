@@ -27,8 +27,14 @@
   --fg-1:   #F5F5F5;
   --fg-2:   #E4E4E6;
   --fg-3:   #A2A0AA;
-  --fg-4:   #71717A;
-  --fg-5:   #666666;
+  /* r141 legibility lift (audit): fg-4 carried real UI copy at 3.99:1 and
+     fg-5 at 3.36:1 on bg-1 - below the 4.5:1 normal-text floor. fg-4 now
+     clears it (4.66:1) and fg-5 takes fg-4's old value (3.99:1) - the whole
+     ladder shifts one notch brighter, hierarchy intact (fg-3 stays 7.48:1).
+     Keep fg-5 for decorative/duplicated text only; meaningful secondary copy
+     belongs on fg-4 or up. */
+  --fg-4:   #7C7C85;
+  --fg-5:   #71717A;
 
   --stroke-1: #141419;
   --stroke-2: #28272A;

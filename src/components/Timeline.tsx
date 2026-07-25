@@ -330,14 +330,27 @@ export function Timeline({
                 : r.status === "running" ? "Exporting" : "Queued";
               const span = `${secondsToHms(r.inFrames / fps)} to ${secondsToHms(r.outFrames / fps)}`;
               return (
+                // role/tabIndex/keydown, not a <button>: the band is an
+                // absolutely-positioned percent-sized overlay inside the
+                // track, and a UA button here would need its whole box model
+                // reset. Enter/Space mirror the click (a11y r141).
                 <div
                   key={r.id}
+                  role="button"
+                  tabIndex={onRangeClick ? 0 : -1}
+                  aria-label={`${r.label ?? "Clip"}, ${word}, ${span}. Open in the queue.`}
                   className={"cp-track-queued " + (r.status ?? "queued")}
                   style={{ left: `${left}%`, width: `${width}%` }}
                   title={`${r.label ?? "Clip"} · ${word} · ${span}`}
                   onClick={(e) => {
                     if (!onRangeClick) return;
                     e.stopPropagation(); // the track itself seeks on click
+                    onRangeClick(r.id);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!onRangeClick || (e.key !== "Enter" && e.key !== " ")) return;
+                    e.preventDefault();
+                    e.stopPropagation();
                     onRangeClick(r.id);
                   }}
                 />

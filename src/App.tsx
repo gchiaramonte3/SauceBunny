@@ -259,6 +259,11 @@ export default function App() {
       // 480 by default: the preview is throwaway (scrub/mark only), so we
       // optimise for fast download over sharpness. Export uses real quality.
       previewMaxHeight: stored.previewMaxHeight ?? 480,
+      // r141 cache retention: 0 = keep everything (the long-standing
+      // default). A positive cap LRU-prunes the media cache at boot and
+      // whenever the cap is changed in Settings.
+      mediaCacheCapGb: stored.mediaCacheCapGb ?? 0,
+      clearCacheOnQuit: stored.clearCacheOnQuit ?? false,
     };
   });
   const setDefaults = useCallback((d: Defaults | ((prev: Defaults) => Defaults)) => {
@@ -308,6 +313,32 @@ export default function App() {
     }, 600);
     return () => window.clearTimeout(t);
   }, [defaults.turnPassword]);
+
+  // Cache retention (r141), one shot at boot: re-sync the clear-on-quit
+  // marker file with the stored pref (settings imports and app-data resets
+  // can leave them disagreeing), then enforce the size cap so the cache
+  // converges even if Settings is never opened. Nothing is playing yet, so
+  // no exclude list; anything a restored session starts playing has a fresh
+  // mtime and sits at the back of the LRU line anyway.
+  const cacheRetentionBootRef = useRef({
+    cap: defaults.mediaCacheCapGb,
+    clearOnQuit: defaults.clearCacheOnQuit,
+    done: false,
+  });
+  useEffect(() => {
+    const boot = cacheRetentionBootRef.current;
+    if (boot.done) return;
+    boot.done = true;
+    invoke("set_clear_cache_on_quit", { enabled: boot.clearOnQuit }).catch(() => {
+      /* stale binary; the Settings toggle re-writes it */
+    });
+    if (boot.cap > 0) {
+      invoke<number>("enforce_media_cache_cap", {
+        maxBytes: boot.cap * 1024 * 1024 * 1024,
+        exclude: [],
+      }).catch(() => { /* cache dir may not exist yet */ });
+    }
+  }, []); // mount-only by design
 
   // ── Editable keyboard shortcuts (Settings → Commands) ──
   // Overrides only; an action with no override uses its defaults. The keydown

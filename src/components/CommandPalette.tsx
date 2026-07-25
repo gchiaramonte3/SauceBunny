@@ -137,6 +137,11 @@ export function CommandPalette({ open, onClose, commands }: Props) {
           <input
             ref={inputRef}
             className="cp-palette-input"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="cp-palette-listbox"
+            aria-activedescendant={selectable[activeIdx] ? `cp-palette-opt-${selectable[activeIdx].id}` : undefined}
+            aria-autocomplete="list"
             value={query}
             onChange={(e) => { setQuery(e.target.value); setActiveIdx(0); }}
             placeholder="Type a command…"
@@ -147,7 +152,7 @@ export function CommandPalette({ open, onClose, commands }: Props) {
             {selectable.length} {selectable.length === 1 ? "command" : "commands"}
           </span>
         </div>
-        <div className="cp-palette-list" ref={listRef}>
+        <div className="cp-palette-list" ref={listRef} role="listbox" id="cp-palette-listbox" aria-label="Commands">
           {grouped.length === 0 ? (
             <div className="cp-palette-empty">
               No commands match &quot;{query}&quot;
@@ -161,6 +166,10 @@ export function CommandPalette({ open, onClose, commands }: Props) {
                 return (
                   <div
                     key={cmd.id}
+                    id={`cp-palette-opt-${cmd.id}`}
+                    role="option"
+                    aria-selected={active}
+                    aria-disabled={cmd.disabled || undefined}
                     data-cmd-idx={idx >= 0 ? idx : undefined}
                     className={
                       "cp-palette-row" +

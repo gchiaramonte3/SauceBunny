@@ -384,8 +384,9 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
           <div className="v">
             <button
               className={"cp-toggle-switch" + (cap.choice.echoCancel ? " on" : "")}
+              role="switch"
+              aria-checked={cap.choice.echoCancel}
               aria-label="Voice processing"
-              aria-pressed={cap.choice.echoCancel}
               onClick={() => {
                 const next = { ...cap.choice, echoCancel: !cap.choice.echoCancel };
                 if (cap.stream) { ownedHereRef.current = true; void cap.acquire(next); }
@@ -422,8 +423,9 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
           <div className="v">
             <button
               className={"cp-toggle-switch" + (cap.choice.cameraOff ? " on" : "")}
+              role="switch"
+              aria-checked={cap.choice.cameraOff}
               aria-label="Join with camera off"
-              aria-pressed={cap.choice.cameraOff}
               onClick={() => cap.setEnabled("video", cap.choice.cameraOff)}
             />
           </div>
@@ -436,8 +438,9 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
           <div className="v">
             <button
               className={"cp-toggle-switch" + (cap.choice.micMuted ? " on" : "")}
+              role="switch"
+              aria-checked={cap.choice.micMuted}
               aria-label="Join muted"
-              aria-pressed={cap.choice.micMuted}
               onClick={() => cap.setEnabled("audio", cap.choice.micMuted)}
             />
           </div>

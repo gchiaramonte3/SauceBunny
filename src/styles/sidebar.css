@@ -32,6 +32,14 @@
   align-items: center;
   gap: 8px;
   transition: background var(--dur-fast) var(--ease-out);
+  /* The head is a real <button> now (a11y r141): strip the UA chrome so it
+     renders exactly as the old clickable div did. */
+  width: 100%;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
 }
 .cp-section.collapsible > .cp-section-head:hover {
   background: rgba(255,255,255,0.015);

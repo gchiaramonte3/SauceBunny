@@ -679,6 +679,9 @@ export function Sidebar(props: Props) {
                 <button
                   type="button"
                   className={"cp-toggle-switch" + (exportOpts.reencode ? " on" : "")}
+                role="switch"
+                aria-checked={exportOpts.reencode}
+                aria-label="Re-encode exports"
                   onClick={() => setExportOpts({ ...exportOpts, reencode: !exportOpts.reencode })}
                 />
               </div>

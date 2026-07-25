@@ -972,6 +972,32 @@
   font-size: 10.5px;
   color: var(--fg-4);
 }
+/* Retention controls (r141): size cap select + clear-on-quit switch. */
+.cp-cache-retention {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  margin-top: 4px;
+}
+.cp-cache-ret-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cp-cache-ret-label {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  color: var(--fg-2);
+}
+.cp-cache-ret-note {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--fg-4);
+  max-width: 360px;
+  text-align: right;
+}
 .cp-cache-path {
   font-family: var(--font-mono);
   font-size: 10px;

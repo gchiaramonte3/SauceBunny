@@ -191,6 +191,8 @@ pub fn run() {
             commands::open_privacy_pane,
             commands::av_permission_status,
             commands::write_bytes_to_path,
+            commands::set_clear_cache_on_quit,
+            commands::enforce_media_cache_cap,
             commands::write_text_to_path,
             commands::write_raw_to_path,
             commands::screen_capture_access,
@@ -325,6 +327,18 @@ pub fn run() {
                 }
                 if killed > 0 {
                     eprintln!("[shutdown] killed {killed} in-flight sidecar job(s)");
+                }
+                // Clear-on-quit (Settings -> Cache). The marker FILE is the
+                // pref: this runs after the webview and its storage are gone.
+                if let Ok(data) = app.path().app_data_dir() {
+                    if data.join(commands::CLEAR_ON_QUIT_FLAG).is_file() {
+                        if let Ok(cache) = app.path().app_cache_dir() {
+                            let media = cache.join("saucebunny-media");
+                            if media.is_dir() && std::fs::remove_dir_all(&media).is_ok() {
+                                eprintln!("[shutdown] cleared the media cache (clear-on-quit)");
+                            }
+                        }
+                    }
                 }
             }
         });
