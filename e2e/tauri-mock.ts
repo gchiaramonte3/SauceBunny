@@ -28,8 +28,9 @@ export function tauriMockInit(expectedBuildId: string): void {
   // Reviews dir from default_transcript_library_path, then reads index.json
   // via read_text_file_capped. Returning a real-looking path here exercises
   // that whole path; the null fallthrough for read_text_file_capped reads as
-  // "no index yet" (fresh store), and ensure_dir_exists/write_bytes_to_path
-  // null-resolve as success — boot never blocks on hydration.
+  // "no index yet" (fresh store), and ensure_dir_exists/write_text_to_path
+  // (like every other unlisted write command) null-resolve as success — boot
+  // never blocks on hydration.
   const emptyCacheCategory = { file_count: 0, bytes_total: 0 };
   const table: Record<string, unknown> = {
     get_backend_build_id: expectedBuildId,

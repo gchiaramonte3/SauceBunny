@@ -2250,16 +2250,21 @@ export default function App() {
         onProgress: (p) => args.onProgress(p * 100),
       }, cancelToken);
       if (result.kind !== "ok") return result;
-      // Persist via the small bytes-writer command we already have.
-      // For >50MB clips this is a one-shot invoke; large but works.
+      // Persist via the RAW-BODY writer: the clip travels as the IPC body
+      // itself. The old write_bytes_to_path route serialized the buffer as a
+      // JSON number array — every byte decimal-printed into a string built
+      // synchronously on the main thread. Measured at 100 MB: ~2s of frozen
+      // UI and ~2.2 GB peak memory, repeated per queue item. The path rides
+      // percent-encoded in a header (headers are Latin-1; titles aren't).
       // unique: destPath is derived (not saveDialog-vetted) — a collision
       // walks -2, -3 on disk exactly like create_clip, and NEVER fails
       // (review fix: this path used to hard-error on collision while the
       // web path uniquified, with the UI promising uniquing for both).
-      const finalPath = await invoke<string>("write_bytes_to_path", {
-        path: args.destPath,
-        bytes: Array.from(result.bytes),
-        unique: true,
+      const finalPath = await invoke<string>("write_raw_to_path", result.bytes, {
+        headers: {
+          "x-dest-path": encodeURIComponent(args.destPath),
+          "x-unique": "1",
+        },
       });
       return { kind: "ok", bytesWritten: result.bytes.byteLength, finalPath };
     } catch (err) {
@@ -4294,8 +4299,7 @@ export default function App() {
           shareState,
         },
       });
-      const bytes = Array.from(new TextEncoder().encode(report));
-      await invoke("write_bytes_to_path", { path, bytes });
+      await invoke("write_text_to_path", { path, text: report });
       pushNotification("success", "Diagnostics saved", "Attach this file to a bug report.");
     } catch (err) {
       pushNotification("error", "Diagnostics export failed", formatError(err));

@@ -384,8 +384,7 @@ export function AiSummary({
       });
       if (!dest) return;
       const content = format === "md" ? buildExportMd() : buildExportTxt();
-      const bytes = Array.from(new TextEncoder().encode(content));
-      await invoke("write_bytes_to_path", { path: dest, bytes });
+      await invoke("write_text_to_path", { path: dest, text: content });
       setDlError(null);
     } catch (e) { setDlError(formatError(e)); }
   }

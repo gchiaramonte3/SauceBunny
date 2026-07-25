@@ -481,8 +481,7 @@ export function SettingsModal(props: Props) {
         sections: loadJson<Record<string, boolean>>(SECTIONS_LS_KEY, {}),
         media: loadJson<Record<string, unknown>>(DEVICE_CHOICE_KEY, {}),
       };
-      const bytes = Array.from(new TextEncoder().encode(JSON.stringify(payload, null, 2)));
-      await invoke("write_bytes_to_path", { path, bytes });
+      await invoke("write_text_to_path", { path, text: JSON.stringify(payload, null, 2) });
       setBackupMsg(`Saved to ${path.split("/").pop()}`);
     } catch (e) {
       setBackupMsg(formatError(e));

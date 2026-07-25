@@ -188,6 +188,8 @@ pub fn run() {
             commands::open_privacy_pane,
             commands::av_permission_status,
             commands::write_bytes_to_path,
+            commands::write_text_to_path,
+            commands::write_raw_to_path,
             commands::screen_capture_access,
             commands::list_displays,
             commands::list_share_sources,

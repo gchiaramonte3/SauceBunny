@@ -43,9 +43,10 @@ export type LocalExportResult =
  *  • Calls `onProgress` for the pipeline UI.
  *
  * Output is buffered in memory via `BufferTarget` then handed back as
- * raw bytes; caller writes to disk via `write_bytes_to_path`. For very
- * long clips (>1GB) this would benefit from a streaming target later,
- * but typical clips are <500MB which marshals fine through invoke().
+ * raw bytes; caller writes to disk via `write_raw_to_path` (the bytes ARE
+ * the IPC body — never the JSON number-array route, which decimal-prints
+ * every byte and froze the UI ~2s per 100 MB). For very long clips (>1GB)
+ * this would still benefit from a streaming target later.
  *
  * Returns a tagged result so the caller can branch:
  *  • "ok"          → write the bytes, done.

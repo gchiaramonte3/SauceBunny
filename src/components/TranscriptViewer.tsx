@@ -931,9 +931,9 @@ export function TranscriptViewer({
       if (!appOwned && raw != null && !backupHandledRef.current.has(path)) {
         const backupPath = backupPathFor(path);
         try {
-          await invoke("write_bytes_to_path", {
+          await invoke("write_text_to_path", {
             path: backupPath,
-            bytes: Array.from(new TextEncoder().encode(raw)),
+            text: raw,
             ifNotExists: true,
           });
           notices.push(`Original saved as ${backupPath.split("/").pop()}`);
@@ -950,8 +950,10 @@ export function TranscriptViewer({
         flattenWarnedRef.current.add(path);
         notices.push("Saving rewrites this file in a normalized form. VTT NOTE/STYLE blocks and cue settings are not kept.");
       }
-      const bytes = Array.from(new TextEncoder().encode(serialized));
-      await invoke("write_bytes_to_path", { path, bytes });
+      // String arg, not a byte array: the encode → Array.from route decimal-
+      // prints every byte and rebuilds the WHOLE transcript per committed cue
+      // edit at ~3x the size, synchronously on the main thread.
+      await invoke("write_text_to_path", { path, text: serialized });
       // Local fast path — reparse immediately instead of waiting for the
       // reload-token round trip (which follows anyway and reads the same bytes).
       setRaw(serialized);
@@ -1122,8 +1124,7 @@ export function TranscriptViewer({
         // the SRT spec anyway — there's nowhere to put them.
         content = raw ?? "";
       }
-      const bytes = Array.from(new TextEncoder().encode(content));
-      await invoke("write_bytes_to_path", { path: dest, bytes });
+      await invoke("write_text_to_path", { path: dest, text: content });
       setDlError(null);
     } catch (e) {
       console.error("transcript download failed:", e);
@@ -1165,8 +1166,7 @@ export function TranscriptViewer({
         sequenceStartTc: startTimecode || "00:00:00:00",
         dropFrame: false,
       });
-      const bytes = Array.from(new TextEncoder().encode(content));
-      await invoke("write_bytes_to_path", { path: dest, bytes });
+      await invoke("write_text_to_path", { path: dest, text: content });
       setDlError(null);
     } catch (e) {
       console.error("avid marker export failed:", e);

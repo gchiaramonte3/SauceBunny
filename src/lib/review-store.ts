@@ -9,7 +9,7 @@
  * `index.json` mapping sourceKey → filename so hydration can find the docs
  * without a list-dir command. Everything goes through the EXISTING invoke
  * surface (`default_transcript_library_path`, `ensure_dir_exists`,
- * `read_text_file_capped`, `write_bytes_to_path`) — no new Rust commands.
+ * `read_text_file_capped`, `write_text_to_path`).
  *
  * Shape on disk:
  *   Reviews/<slug>-<hash>.json   one ReviewDoc (slug = sanitized tail of the
@@ -23,7 +23,7 @@
  * `hydrateReviewStore()` fills the Map from disk once at boot — main.tsx
  * awaits it (race-capped) before the first render, in both windows.
  *
- * Durability model — direct overwrite, with a shrink guard: `write_bytes_to_path`
+ * Durability model — direct overwrite, with a shrink guard: `write_text_to_path`
  * is a plain fs::write (not atomic), and without a rename command a tmp-file
  * dance buys nothing. That's accepted deliberately: docs are small JSON blobs,
  * the debounce leaves at most ~500 ms in flight, and the medium this replaces
@@ -223,7 +223,10 @@ async function flushDirtyDocs(): Promise<void> {
     const prev = index.get(key);
     const file = prev?.file ?? reviewFileName(key);
     const path = `${reviewsDir}/${file}`;
-    const bytes = new TextEncoder().encode(JSON.stringify(doc));
+    const json = JSON.stringify(doc);
+    // Encoded ONLY for byte-length accounting (the shrink guard + index sizes
+    // are byte-based); the write itself passes the string, never the array.
+    const bytes = new TextEncoder().encode(json);
     // Destructive-write guard. Two shapes of a logical clobber: a rich doc
     // collapsing below half its persisted size, OR replacing a doc the index
     // says HAS content with a contentless shell. Both are what a failed
@@ -256,17 +259,14 @@ async function flushDirtyDocs(): Promise<void> {
       // overwriting so a genuine shrink is still recoverable.
       if (existing && existing.length > 2) {
         try {
-          await invoke("write_bytes_to_path", {
-            path: `${path}.bak`,
-            bytes: Array.from(new TextEncoder().encode(existing)),
-          });
+          await invoke("write_text_to_path", { path: `${path}.bak`, text: existing });
         } catch {
           /* .bak is best-effort; the successful read already proved the file exists */
         }
       }
     }
     try {
-      await invoke("write_bytes_to_path", { path, bytes: Array.from(bytes) });
+      await invoke("write_text_to_path", { path, text: json });
       const count = doc.comments.filter(
         (c) => c.parentId === null && c.versionId === doc.activeVersionId,
       ).length;
@@ -279,10 +279,9 @@ async function flushDirtyDocs(): Promise<void> {
   }
   if (!indexDirty) return;
   try {
-    const idxBytes = new TextEncoder().encode(serializeReviewIndex(index));
-    await invoke("write_bytes_to_path", {
+    await invoke("write_text_to_path", {
       path: `${reviewsDir}/${INDEX_FILE}`,
-      bytes: Array.from(idxBytes),
+      text: serializeReviewIndex(index),
     });
   } catch (err) {
     console.warn("review-store: index write failed:", err);

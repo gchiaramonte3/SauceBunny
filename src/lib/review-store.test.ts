@@ -22,7 +22,7 @@ let ensuredDirs: string[];
 
 function installInvokeFs(overrides?: { libPath?: unknown }): void {
   vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
-    const a = args as { path?: string; bytes?: number[] } | undefined;
+    const a = args as { path?: string; text?: string } | undefined;
     if (cmd === "default_transcript_library_path") {
       return overrides && "libPath" in overrides ? overrides.libPath : LIB;
     }
@@ -31,8 +31,8 @@ function installInvokeFs(overrides?: { libPath?: unknown }): void {
       if (text === undefined) throw new Error(`Not a file: ${a?.path}`);
       return text;
     }
-    if (cmd === "write_bytes_to_path") {
-      fs.set(a?.path ?? "", new TextDecoder().decode(new Uint8Array(a?.bytes ?? [])));
+    if (cmd === "write_text_to_path") {
+      fs.set(a?.path ?? "", a?.text ?? "");
       return null;
     }
     if (cmd === "ensure_dir_exists") {

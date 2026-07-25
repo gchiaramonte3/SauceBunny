@@ -516,13 +516,23 @@ pub async fn write_bytes_to_path(
     if_not_exists: Option<bool>,
     unique: Option<bool>,
 ) -> Result<String, crate::AppError> {
-    let mut p = PathBuf::from(&path);
+    write_bytes_impl(&path, &bytes, if_not_exists.unwrap_or(false), unique.unwrap_or(false))
+}
+
+/// Shared body of the two byte-writer commands (JSON-args and raw-body).
+fn write_bytes_impl(
+    path: &str,
+    bytes: &[u8],
+    if_not_exists: bool,
+    unique: bool,
+) -> Result<String, crate::AppError> {
+    let mut p = PathBuf::from(path);
     if let Some(parent) = p.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
             return Err(format!("Folder does not exist: {}", parent.display()).into());
         }
     }
-    if unique.unwrap_or(false) {
+    if unique {
         let dir = p.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
         let ext = p
             .extension()
@@ -530,11 +540,80 @@ pub async fn write_bytes_to_path(
             .unwrap_or("bin")
             .to_string();
         p = super::media::unique_output_path(&dir, &p, &ext);
-    } else if if_not_exists.unwrap_or(false) && p.exists() {
+    } else if if_not_exists && p.exists() {
         return Err(format!("File already exists: {}", p.display()).into());
     }
-    std::fs::write(&p, &bytes).map_err(|e| format!("write failed: {e}"))?;
+    std::fs::write(&p, bytes).map_err(|e| format!("write failed: {e}"))?;
     Ok(p.to_string_lossy().into_owned())
+}
+
+/// `write_bytes_to_path` for TEXT. A JSON string arg crosses the IPC boundary
+/// as-is, so callers must never do `Array.from(new TextEncoder().encode(s))` —
+/// that decimal-prints every byte (~3x inflation, built synchronously on the
+/// main thread; a multi-MB review doc paid tens of ms per debounced save).
+#[tauri::command]
+pub async fn write_text_to_path(
+    path: String,
+    text: String,
+    if_not_exists: Option<bool>,
+    unique: Option<bool>,
+) -> Result<String, crate::AppError> {
+    write_bytes_impl(&path, text.as_bytes(), if_not_exists.unwrap_or(false), unique.unwrap_or(false))
+}
+
+/// `write_bytes_to_path` for LARGE payloads (the local clip exporter): the
+/// bytes travel as the raw IPC body instead of a JSON number array. The JSON
+/// route decimal-prints every byte — a 100 MB clip became a ~345M-char string
+/// built synchronously on the WKWebView main thread (~2s frozen UI, ~2.2 GB
+/// peak), repeated per queue item. The raw body is a straight buffer copy.
+///
+/// The destination path rides in the `x-dest-path` header, percent-encoded
+/// (`encodeURIComponent`): headers are Latin-1 and export names carry user
+/// media titles. `x-unique: 1` opts into the same collision-walking behaviour
+/// as `write_bytes_to_path { unique: true }`.
+#[tauri::command]
+pub async fn write_raw_to_path(request: tauri::ipc::Request<'_>) -> Result<String, crate::AppError> {
+    let enc = request
+        .headers()
+        .get("x-dest-path")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| crate::AppError::internal("write_raw_to_path: missing x-dest-path header"))?;
+    let path = percent_decode_utf8(enc)?;
+    let unique = request
+        .headers()
+        .get("x-unique")
+        .and_then(|v| v.to_str().ok())
+        == Some("1");
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(crate::AppError::internal(
+            "write_raw_to_path: expected a raw body (pass the Uint8Array as the invoke payload)",
+        ));
+    };
+    write_bytes_impl(&path, bytes, false, unique)
+}
+
+/// Decode a percent-encoded UTF-8 string (the output of JS
+/// `encodeURIComponent`). Malformed escapes pass through as literal bytes;
+/// only invalid UTF-8 in the decoded result is an error.
+fn percent_decode_utf8(s: &str) -> Result<String, crate::AppError> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' {
+            if let Some(hex) = s.get(i + 1..i + 3) {
+                if let Ok(v) = u8::from_str_radix(hex, 16) {
+                    out.push(v);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8(out)
+        .map_err(|_| crate::AppError::internal("x-dest-path is not valid percent-encoded UTF-8"))
 }
 
 /// The real camera + microphone TCC state, from AVFoundation. WKWebView's
@@ -806,7 +885,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-23-r138-scrub-and-perf";
+pub const BACKEND_BUILD_ID: &str = "2026-07-24-r139-ipc-raw-writes";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {
@@ -902,6 +981,32 @@ pub async fn close_panel_window(app: AppHandle) -> Result<(), crate::AppError> {
         w.close().map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod raw_write_tests {
+    use super::percent_decode_utf8;
+
+    #[test]
+    fn decodes_encode_uri_component_output() {
+        // Plain ASCII, spaces, and non-Latin — the shapes real export names take.
+        assert_eq!(percent_decode_utf8("plain.mp4").unwrap(), "plain.mp4");
+        assert_eq!(
+            percent_decode_utf8("%2FUsers%2Fg%2FMovies%2FMy%20Clip%20-%202.mp4").unwrap(),
+            "/Users/g/Movies/My Clip - 2.mp4",
+        );
+        assert_eq!(percent_decode_utf8("caf%C3%A9%20%E6%97%A5%E6%9C%AC.mov").unwrap(), "café 日本.mov");
+    }
+
+    #[test]
+    fn malformed_escapes_pass_through_and_bad_utf8_errors() {
+        // A stray % that isn't a valid escape stays literal (encodeURIComponent
+        // never emits this, but a hand-built header must not panic).
+        assert_eq!(percent_decode_utf8("100%25 done%").unwrap(), "100% done%");
+        assert_eq!(percent_decode_utf8("%GG").unwrap(), "%GG");
+        // Decoded bytes that aren't UTF-8 are an error, not a lossy path.
+        assert!(percent_decode_utf8("%FF%FE").is_err());
+    }
 }
 
 #[cfg(test)]

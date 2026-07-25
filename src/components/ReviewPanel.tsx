@@ -756,7 +756,7 @@ export function ReviewPanel({
     try {
       const path = await saveDialog({ defaultPath: `${base}-review.${f.ext}`, filters: [{ name: f.name, extensions: [f.ext] }] });
       if (typeof path !== "string" || !path) return;
-      await invoke("write_bytes_to_path", { path, bytes: Array.from(new TextEncoder().encode(f.text)) });
+      await invoke("write_text_to_path", { path, text: f.text });
       setExportMsg(`Exported ${f.name} → ${path.split("/").pop()}`);
     } catch {
       setExportMsg("Export failed.");
