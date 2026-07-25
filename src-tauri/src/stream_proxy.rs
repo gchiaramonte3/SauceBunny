@@ -122,7 +122,11 @@ pub fn start() -> std::io::Result<String> {
     if let Ok(rd) = std::fs::read_dir(std::env::temp_dir()) {
         for e in rd.flatten() {
             if e.file_name().to_string_lossy().starts_with("saucebunny-share-") {
-                let _ = std::fs::remove_file(e.path());
+                // Pre-r141 leftovers were bare FIFOs; current ones are 0700
+                // dirs holding the FIFO. Sweep both shapes.
+                let p = e.path();
+                if p.is_dir() { let _ = std::fs::remove_dir_all(&p); }
+                else { let _ = std::fs::remove_file(&p); }
             }
         }
     }
@@ -156,10 +160,20 @@ pub fn start() -> std::io::Result<String> {
                 }
             };
             for request in server.incoming_requests() {
+                // Bound the fan-out before spawning: each request holds a
+                // thread + an upstream socket for its whole life.
+                if ACTIVE_REQUESTS.load(std::sync::atomic::Ordering::Relaxed) >= MAX_ACTIVE_REQUESTS {
+                    let _ = request.respond(
+                        tiny_http::Response::from_string("busy").with_status_code(503),
+                    );
+                    continue;
+                }
+                ACTIVE_REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let client = client.clone();
                 // Thread-per-request: a slow/stalled stream can't block
                 // the accept loop or sibling requests.
                 std::thread::spawn(move || {
+                    let _guard = CounterGuard(&ACTIVE_REQUESTS);
                     if let Err(e) = serve(&client, request) {
                         eprintln!("[media-proxy] serve error: {e}");
                     }
@@ -168,6 +182,81 @@ pub fn start() -> std::io::Result<String> {
         })?;
 
     Ok(base)
+}
+
+/// Upstream targets the proxy will fetch (directly or via ffmpeg). The token
+/// already gates WHO can talk to the proxy; this gates WHERE it will reach:
+/// never loopback/private/link-local hosts (the proxy must not become a
+/// bounce into the LLM server, the session endpoint, or anything else on the
+/// machine/LAN), and never credential-bearing URLs. Hostnames that RESOLVE to
+/// private addresses are not caught (that needs DNS resolution here); the
+/// threat this closes is the renderer bouncing through ffmpeg to local ports.
+fn is_safe_upstream(url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else { return false };
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return false;
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return false;
+    }
+    match parsed.host() {
+        Some(url::Host::Domain(d)) => {
+            let d = d.to_ascii_lowercase();
+            d != "localhost" && !d.ends_with(".localhost") && !d.ends_with(".local")
+        }
+        Some(url::Host::Ipv4(ip)) => {
+            !(ip.is_loopback() || ip.is_private() || ip.is_link_local()
+                || ip.is_unspecified() || ip.is_broadcast())
+        }
+        Some(url::Host::Ipv6(ip)) => {
+            // fc00::/7 unique-local + fe80::/10 link-local via segment math
+            // (avoids not-yet-stable std helpers).
+            let seg0 = ip.segments()[0];
+            !(ip.is_loopback() || ip.is_unspecified()
+                || (seg0 & 0xfe00) == 0xfc00 || (seg0 & 0xffc0) == 0xfe80)
+        }
+        None => false,
+    }
+}
+
+/// The Access-Control-Allow-Origin value for a request: echo the caller's
+/// Origin when it is one of OUR origins (prod webview, dev server), else pin
+/// to the prod origin — never `*`. A page that somehow learned the session
+/// token still can't READ responses cross-origin.
+fn cors_origin_for(request: &tiny_http::Request) -> String {
+    let origin = request
+        .headers()
+        .iter()
+        .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("origin"))
+        .map(|h| h.value.as_str().to_string());
+    match origin {
+        Some(o)
+            if o == "tauri://localhost"
+                || o == "http://tauri.localhost"
+                || o == "https://tauri.localhost"
+                || o.starts_with("http://localhost:")
+                || o.starts_with("http://127.0.0.1:") =>
+        {
+            o
+        }
+        _ => "tauri://localhost".to_string(),
+    }
+}
+
+/// Concurrency brakes. Thread-per-request is what keeps a stalled stream from
+/// blocking siblings, but nothing bounded the fan-out: each fMP4 remux is a
+/// whole ffmpeg process, and each raw-proxy request holds an upstream socket.
+static ACTIVE_REQUESTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static ACTIVE_REMUXES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+const MAX_ACTIVE_REQUESTS: usize = 16;
+const MAX_ACTIVE_REMUXES: usize = 4;
+
+/// RAII decrement for the counters above (early returns abound in serve_*).
+struct CounterGuard(&'static std::sync::atomic::AtomicUsize);
+impl Drop for CounterGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std::io::Result<()> {
@@ -286,10 +375,11 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
     // CORS: the page origin (tauri://localhost in prod, http://localhost:1420
     // in dev) is cross-origin to http://127.0.0.1:<port>. `<video src>`
     // doesn't enforce CORS, but `fetch()` and any future crossorigin use do —
-    // and it costs nothing to be correct. `*` is safe: this server only ever
-    // serves loopback and proxies URLs our own frontend already resolved.
+    // and it costs nothing to be correct. Echo OUR origin only, never `*`:
+    // a page that somehow learned the session token still can't read.
+    let cors = cors_origin_for(&request);
     for (name, value) in [
-        ("Access-Control-Allow-Origin", "*"),
+        ("Access-Control-Allow-Origin", cors.as_str()),
         ("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS"),
         ("Access-Control-Allow-Headers", "Range"),
         ("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges"),
@@ -482,11 +572,7 @@ fn parse_audio_query(url_path: &str) -> Option<String> {
         .find_map(|kv| kv.strip_prefix("audio="))?;
     let bytes = URL_SAFE_NO_PAD.decode(b64.as_bytes()).ok()?;
     let url = String::from_utf8(bytes).ok()?;
-    if url.starts_with("http://") || url.starts_with("https://") {
-        Some(url)
-    } else {
-        None
-    }
+    is_safe_upstream(&url).then_some(url)
 }
 
 /// Decode `<prefix><base64url>[?query]` → upstream http(s) URL. Generalizes
@@ -500,11 +586,7 @@ fn decode_after(prefix: &str, url_path: &str) -> Option<String> {
     }
     let bytes = URL_SAFE_NO_PAD.decode(b64.as_bytes()).ok()?;
     let url = String::from_utf8(bytes).ok()?;
-    if url.starts_with("http://") || url.starts_with("https://") {
-        Some(url)
-    } else {
-        None
-    }
+    is_safe_upstream(&url).then_some(url)
 }
 
 /// Spawn ffmpeg to transmux `upstream` → fragmented MP4 and stream its
@@ -512,6 +594,16 @@ fn decode_after(prefix: &str, url_path: &str) -> Option<String> {
 /// (MSE torn down on seek/source-change) or when it finishes — `respond`
 /// returns once the socket closes either way.
 fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: Option<String>) -> std::io::Result<()> {
+    // Each remux is a whole ffmpeg process; MSE teardown/seek churn can pile
+    // them up faster than they die. Beyond the cap the player's onMediaError
+    // path takes over (download fallback), same as any other stream failure.
+    if ACTIVE_REMUXES.load(std::sync::atomic::Ordering::Relaxed) >= MAX_ACTIVE_REMUXES {
+        return request.respond(
+            tiny_http::Response::from_string("too many concurrent streams").with_status_code(503),
+        );
+    }
+    ACTIVE_REMUXES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let _remux_guard = CounterGuard(&ACTIVE_REMUXES);
     let ff = match ffmpeg_path() {
         Some(p) => p,
         None => {
@@ -633,10 +725,11 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
     let timeline_mode = if epoch.is_some() { "absolute" } else { "rebased" };
     let epoch_header = epoch.map(|e| format!("{e:.6}"));
 
+    let cors = cors_origin_for(&request);
     let mut headers: Vec<tiny_http::Header> = Vec::new();
     for (name, value) in [
         ("Content-Type", "video/mp4"),
-        ("Access-Control-Allow-Origin", "*"),
+        ("Access-Control-Allow-Origin", cors.as_str()),
         // Without the expose header, cross-origin fetch() cannot READ
         // X-Timeline and the player would silently fall back to rebased math.
         ("Access-Control-Expose-Headers", "X-Timeline, X-Stream-Epoch"),
@@ -767,6 +860,34 @@ mod tests {
         assert_eq!(parse_start_query("/fmp4/v1/abc"), 0.0);
         assert_eq!(parse_start_query("/fmp4/v1/abc?start=banana"), 0.0);
         assert_eq!(parse_start_query("/fmp4/v1/abc?other=1"), 0.0);
+    }
+
+    #[test]
+    fn safe_upstream_allows_public_and_blocks_local_private_and_credentials() {
+        // The real shapes: googlevideo/CDN URLs pass.
+        assert!(is_safe_upstream("https://rr3---sn-example.googlevideo.com/videoplayback?x=1"));
+        assert!(is_safe_upstream("http://93.184.216.34/stream.mp4")); // public v4 literal
+        // Everything the proxy must never be a bounce into:
+        for bad in [
+            "http://127.0.0.1:8080/llm",
+            "http://localhost/x",
+            "http://foo.localhost/x",
+            "http://bar.local/x",
+            "http://10.0.0.5/x",
+            "http://172.16.1.1/x",
+            "http://192.168.1.10/x",
+            "http://169.254.1.1/x",
+            "http://0.0.0.0/x",
+            "http://[::1]/x",
+            "http://[fc00::1]/x",
+            "http://[fe80::1]/x",
+            "http://user:pass@example.com/x", // credential-bearing
+            "ftp://example.com/x",             // wrong scheme
+            "file:///etc/passwd",
+            "not a url",
+        ] {
+            assert!(!is_safe_upstream(bad), "should reject: {bad}");
+        }
     }
 
     #[test]
@@ -1156,13 +1277,28 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
         // ── ScreenCaptureKit path ──
         let audio = req.audio;
         let fifo_path = if audio {
-            let p = std::env::temp_dir().join(format!("saucebunny-share-{}.pcm", std::process::id()));
-            let _ = std::fs::remove_file(&p);
-            let mk = std::process::Command::new("/usr/bin/mkfifo").arg(&p).status();
-            match mk {
-                Ok(st) if st.success() => Some(p),
-                _ => None, // no FIFO -> degrade to video-only
-            }
+            // Private 0700 directory with a CSPRNG-random name - the old
+            // predictable /tmp/saucebunny-share-<pid>.pcm path was open to
+            // pre-creation/symlink games by any local process. Startup sweeps
+            // stale saucebunny-share-* dirs from prior force-quits.
+            let make = || -> Option<std::path::PathBuf> {
+                use std::io::Read;
+                use std::os::unix::fs::PermissionsExt;
+                let mut rnd = [0u8; 8];
+                std::fs::File::open("/dev/urandom").ok()?.read_exact(&mut rnd).ok()?;
+                let tag: String = rnd.iter().map(|b| format!("{b:02x}")).collect();
+                let dir = std::env::temp_dir().join(format!("saucebunny-share-{tag}"));
+                std::fs::create_dir(&dir).ok()?;
+                std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).ok()?;
+                let p = dir.join("audio.pcm");
+                let ok = std::process::Command::new("/usr/bin/mkfifo")
+                    .arg(&p)
+                    .status()
+                    .map(|st| st.success())
+                    .unwrap_or(false);
+                if ok { Some(p) } else { let _ = std::fs::remove_dir_all(&dir); None }
+            };
+            make() // None -> degrade to video-only
         } else {
             None
         };
@@ -1318,10 +1454,11 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
         }
     };
 
+    let cors = cors_origin_for(&request);
     let mut headers: Vec<tiny_http::Header> = Vec::new();
     for (name, value) in [
         ("Content-Type", "video/mp4"),
-        ("Access-Control-Allow-Origin", "*"),
+        ("Access-Control-Allow-Origin", cors.as_str()),
         ("Cache-Control", "no-store"),
     ] {
         if let Ok(h) = tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()) {
