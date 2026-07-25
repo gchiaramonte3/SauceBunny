@@ -1002,7 +1002,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-25-r143-tier-c-transfer";
+pub const BACKEND_BUILD_ID: &str = "2026-07-25-r144-peer-routes";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {
@@ -1017,6 +1017,31 @@ pub fn get_backend_build_id() -> &'static str {
 #[tauri::command]
 pub fn get_stream_proxy_base() -> Option<String> {
     crate::stream_proxy::base_url()
+}
+
+/// Register a LOCAL file on the proxy's peer routes (Tier B, phase 3a) and
+/// return the raw route URL (`…/t/<tok>/peer/v1/<id>`). MSEStreamPlayer's
+/// existing `/v1/` → `/fmp4/v1/` string-replace turns it into the remux URL,
+/// so the whole streaming frontend works on it unchanged. The path itself
+/// never appears in any URL; the CSPRNG id is the only thing on the wire.
+#[tauri::command]
+pub fn peer_media_register(path: String) -> Result<serde_json::Value, crate::AppError> {
+    let p = std::path::PathBuf::from(&path);
+    if !p.is_file() {
+        return Err(crate::AppError::invalid("That source is not a plain file."));
+    }
+    let base = crate::stream_proxy::base_url()
+        .ok_or_else(|| crate::AppError::internal("The media proxy is not running."))?;
+    let id = crate::stream_proxy::register_peer_media(p)
+        .map_err(|e| crate::AppError::internal(format!("mint peer id: {e}")))?;
+    Ok(serde_json::json!({ "id": id, "url": format!("{base}/peer/v1/{id}") }))
+}
+
+/// Withdraw a peer media registration (source change, session end).
+#[tauri::command]
+pub fn peer_media_unregister(id: String) -> Result<(), crate::AppError> {
+    crate::stream_proxy::unregister_peer_media(&id);
+    Ok(())
 }
 
 // ============================================================

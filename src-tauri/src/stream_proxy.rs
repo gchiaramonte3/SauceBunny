@@ -294,13 +294,43 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
     }
     if raw_path.trim_start_matches('/').starts_with("fmp4/v1/") {
         match decode_after("fmp4/v1/", &raw_path) {
-            Some(u) => return serve_fmp4(request, u, parse_start_query(&raw_path), parse_audio_query(&raw_path)),
+            Some(u) => return serve_fmp4(request, u, parse_start_query(&raw_path), parse_audio_query(&raw_path), false),
             None => {
                 return request.respond(
                     tiny_http::Response::from_string("bad fmp4 path").with_status_code(400),
                 );
             }
         }
+    }
+
+    // ── Peer media routes (Tier B, phase 3a) ───────────────────────
+    // `peer/v1/<id>` → raw Range access to a REGISTERED local file (the
+    // mediabunny probe + scrub preview need random access). `peer/fmp4/v1/
+    // <id>?start=N` → the same fMP4 remux as the web route, input = that
+    // local file. Ids are CSPRNG-minted at registration; a path never
+    // appears in any URL, and the existing http(s)-only guards on the web
+    // routes are untouched.
+    if raw_path.trim_start_matches('/').starts_with("peer/fmp4/v1/") {
+        return match peer_media_path_for(&raw_path, "peer/fmp4/v1/") {
+            Some(p) => serve_fmp4(
+                request,
+                p.to_string_lossy().into_owned(),
+                parse_start_query(&raw_path),
+                None,
+                true,
+            ),
+            None => request.respond(
+                tiny_http::Response::from_string("unknown peer media").with_status_code(404),
+            ),
+        };
+    }
+    if raw_path.trim_start_matches('/').starts_with("peer/v1/") {
+        return match peer_media_path_for(&raw_path, "peer/v1/") {
+            Some(p) => serve_local_file(request, p),
+            None => request.respond(
+                tiny_http::Response::from_string("unknown peer media").with_status_code(404),
+            ),
+        };
     }
 
     let upstream = match decode_upstream(&raw_path) {
@@ -593,7 +623,11 @@ fn decode_after(prefix: &str, url_path: &str) -> Option<String> {
 /// stdout to the response. ffmpeg is killed when the client disconnects
 /// (MSE torn down on seek/source-change) or when it finishes — `respond`
 /// returns once the socket closes either way.
-fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: Option<String>) -> std::io::Result<()> {
+/// `local`: the input is a registered LOCAL file (Tier B peer route), not an
+/// upstream URL. Same remux, three differences: no User-Agent (meaningless
+/// for a file), never HLS handling (a filename containing "m3u8" must not
+/// trigger the ADTS filter), and logs never print the path.
+fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: Option<String>, local: bool) -> std::io::Result<()> {
     // Each remux is a whole ffmpeg process; MSE teardown/seek churn can pile
     // them up faster than they die. Beyond the cap the player's onMediaError
     // path takes over (download fallback), same as any other stream failure.
@@ -615,7 +649,7 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
     };
     eprintln!(
         "[media-proxy] FMP4 start={start} host={}{}",
-        upstream.split('/').nth(2).unwrap_or("?"),
+        if local { "local-file" } else { upstream.split('/').nth(2).unwrap_or("?") },
         if audio.is_some() { " +audio(2-input)" } else { "" }
     );
 
@@ -628,7 +662,8 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
     // keyframe-accurate) is applied to EACH input so a 2-input merge stays
     // in sync on scrub-rebuilds.
     if start > 0.0 { cmd.arg("-ss").arg(format!("{start}")); }
-    cmd.arg("-user_agent").arg(SAFARI_UA).arg("-i").arg(&upstream);
+    if !local { cmd.arg("-user_agent").arg(SAFARI_UA); }
+    cmd.arg("-i").arg(&upstream);
     // ── input 1: a separate audio track for DASH-split sources (Reddit,
     // YouTube >360p). ffmpeg merges the two into one fMP4 — full audio, no
     // download wait. `-map` pins video from input 0, audio from input 1.
@@ -641,7 +676,8 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
     // HLS segments carry AAC in ADTS framing; the MP4 muxer DROPS the audio
     // ("Malformed AAC bitstream") unless it's converted to ASC. Apply ONLY for
     // HLS inputs — running it on already-ASC MP4/DASH audio would corrupt those.
-    let hls = upstream.contains("m3u8") || audio.as_deref().is_some_and(|a| a.contains("m3u8"));
+    let hls = !local
+        && (upstream.contains("m3u8") || audio.as_deref().is_some_and(|a| a.contains("m3u8")));
     if hls {
         cmd.arg("-bsf:a").arg("aac_adtstoasc");
     }
@@ -761,6 +797,170 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
     let _ = child.kill();
     let _ = child.wait();
     result
+}
+
+// ── Peer media (Tier B): registered local files ─────────────────────
+// The frontend registers the CURRENT source's path and gets back an opaque
+// CSPRNG id; both peer routes resolve ids through this map and 404 anything
+// else. Registration is the authorization: only files the app itself loaded
+// are ever reachable, and unregistering (source change, app quit) closes
+// the route immediately.
+
+fn peer_media() -> &'static std::sync::Mutex<std::collections::HashMap<String, std::path::PathBuf>> {
+    static M: OnceLock<std::sync::Mutex<std::collections::HashMap<String, std::path::PathBuf>>> =
+        OnceLock::new();
+    M.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Register a local file for peer-route serving. Returns the minted id.
+pub fn register_peer_media(path: std::path::PathBuf) -> std::io::Result<String> {
+    let id = mint_token()?; // CSPRNG base64url — same unguessability as the session token
+    peer_media()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id.clone(), path);
+    Ok(id)
+}
+
+/// Withdraw a registration; in-flight responses finish, new requests 404.
+pub fn unregister_peer_media(id: &str) {
+    peer_media()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(id);
+}
+
+/// Resolve `/<prefix><id>[?query]` to the registered path (None = 404).
+fn peer_media_path_for(raw_path: &str, prefix: &str) -> Option<std::path::PathBuf> {
+    let trimmed = raw_path.trim_start_matches('/');
+    let after = trimmed.strip_prefix(prefix)?;
+    let id = after.split(['?', '#']).next().unwrap_or(after);
+    if id.is_empty() {
+        return None;
+    }
+    peer_media().lock().ok()?.get(id).cloned()
+}
+
+/// Parse a request `Range: bytes=a-b` header against a known total length.
+/// Handles the open form (`bytes=100-`) and the suffix form (`bytes=-500`).
+/// Returns the INCLUSIVE (start, end) byte pair, or None when malformed or
+/// unsatisfiable.
+fn parse_byte_range(header: &str, total: u64) -> Option<(u64, u64)> {
+    if total == 0 {
+        return None;
+    }
+    let spec = header.trim().strip_prefix("bytes=")?;
+    // Multi-range requests are legal HTTP but nothing we serve sends them.
+    let spec = spec.split(',').next()?.trim();
+    let (a, b) = spec.split_once('-')?;
+    let (a, b) = (a.trim(), b.trim());
+    if a.is_empty() {
+        // Suffix form: last N bytes.
+        let n: u64 = b.parse().ok()?;
+        if n == 0 {
+            return None;
+        }
+        let start = total.saturating_sub(n);
+        return Some((start, total - 1));
+    }
+    let start: u64 = a.parse().ok()?;
+    if start >= total {
+        return None;
+    }
+    let end: u64 = if b.is_empty() { total - 1 } else { b.parse().ok()? };
+    if end < start {
+        return None;
+    }
+    Some((start, end.min(total - 1)))
+}
+
+/// Serve a registered local file with byte-range support: the random-access
+/// substrate for the mediabunny probe and the frame-accurate scrub preview
+/// over the peer route.
+fn serve_local_file(request: tiny_http::Request, path: std::path::PathBuf) -> std::io::Result<()> {
+    use std::io::{Read, Seek};
+
+    let mut file = match std::fs::File::open(&path) {
+        Ok(f) => f,
+        Err(_) => {
+            return request.respond(
+                tiny_http::Response::from_string("file unavailable").with_status_code(404),
+            );
+        }
+    };
+    let total = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let cors = cors_origin_for(&request);
+    let range_header = request
+        .headers()
+        .iter()
+        .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("range"))
+        .map(|h| h.value.as_str().to_string());
+
+    let mut headers: Vec<tiny_http::Header> = Vec::new();
+    for (name, value) in [
+        ("Content-Type", "video/mp4"),
+        ("Access-Control-Allow-Origin", cors.as_str()),
+        ("Accept-Ranges", "bytes"),
+        ("Cache-Control", "no-store"),
+    ] {
+        if let Ok(h) = tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()) {
+            headers.push(h);
+        }
+    }
+
+    match range_header.as_deref().map(|r| parse_byte_range(r, total)) {
+        // Explicit satisfiable range → 206 with exactly those bytes.
+        Some(Some((start, end))) => {
+            if file.seek(std::io::SeekFrom::Start(start)).is_err() {
+                return request.respond(
+                    tiny_http::Response::from_string("seek failed").with_status_code(500),
+                );
+            }
+            let len = end - start + 1;
+            if let Ok(h) = tiny_http::Header::from_bytes(
+                "Content-Range".as_bytes(),
+                format!("bytes {start}-{end}/{total}").as_bytes(),
+            ) {
+                headers.push(h);
+            }
+            let response = tiny_http::Response::new(
+                tiny_http::StatusCode(206),
+                headers,
+                file.take(len),
+                Some(len as usize),
+                None,
+            );
+            request.respond(response)
+        }
+        // A Range header we could not honour → 416 with the total.
+        Some(None) => {
+            if let Ok(h) = tiny_http::Header::from_bytes(
+                "Content-Range".as_bytes(),
+                format!("bytes */{total}").as_bytes(),
+            ) {
+                headers.push(h);
+            }
+            request.respond(
+                tiny_http::Response::from_string("range not satisfiable")
+                    .with_status_code(416)
+                    .with_header(
+                        tiny_http::Header::from_bytes("Access-Control-Allow-Origin".as_bytes(), cors.as_bytes())
+                            .expect("static header"),
+                    ),
+            )
+        }
+        // No Range → the whole file.
+        None => {
+            let response = tiny_http::Response::new(
+                tiny_http::StatusCode(200),
+                headers,
+                file,
+                Some(total as usize),
+                None,
+            );
+            request.respond(response)
+        }
+    }
 }
 
 /// Parse the byte count out of a `Content-Range: bytes <start>-<end>/<total>`
@@ -1487,4 +1687,49 @@ fn serve_share(request: tiny_http::Request, req: ShareReq) -> std::io::Result<()
         }
     }
     result
+}
+
+#[cfg(test)]
+mod peer_media_tests {
+    use super::*;
+
+    #[test]
+    fn byte_ranges_parse_like_a_media_engine_sends_them() {
+        // WKWebView probe + mediabunny chunk reads.
+        assert_eq!(parse_byte_range("bytes=0-1", 100), Some((0, 1)));
+        assert_eq!(parse_byte_range("bytes=10-49", 100), Some((10, 49)));
+        // Open end clamps to EOF; over-long end clamps too.
+        assert_eq!(parse_byte_range("bytes=90-", 100), Some((90, 99)));
+        assert_eq!(parse_byte_range("bytes=0-9999", 100), Some((0, 99)));
+        // Suffix form (tail probe).
+        assert_eq!(parse_byte_range("bytes=-20", 100), Some((80, 99)));
+        assert_eq!(parse_byte_range("bytes=-2000", 100), Some((0, 99)));
+        // Unsatisfiable / malformed.
+        assert_eq!(parse_byte_range("bytes=100-", 100), None);
+        assert_eq!(parse_byte_range("bytes=5-2", 100), None);
+        assert_eq!(parse_byte_range("bytes=-0", 100), None);
+        assert_eq!(parse_byte_range("bites=0-1", 100), None);
+        assert_eq!(parse_byte_range("bytes=a-b", 100), None);
+        assert_eq!(parse_byte_range("bytes=0-1", 0), None);
+    }
+
+    #[test]
+    fn peer_ids_resolve_only_while_registered_and_never_carry_paths() {
+        let path = std::path::PathBuf::from("/tmp/peer-media-test.mov");
+        let id = register_peer_media(path.clone()).expect("mint");
+        // The id is opaque (no path bytes) and unguessable-length.
+        assert!(!id.contains("tmp"));
+        assert!(id.len() >= 16);
+        // Both route shapes resolve, query stripped.
+        let raw = format!("/peer/v1/{id}");
+        assert_eq!(peer_media_path_for(&raw, "peer/v1/"), Some(path.clone()));
+        let fmp4 = format!("/peer/fmp4/v1/{id}?start=3.5");
+        assert_eq!(peer_media_path_for(&fmp4, "peer/fmp4/v1/"), Some(path.clone()));
+        // Unknown / empty ids 404.
+        assert_eq!(peer_media_path_for("/peer/v1/nope", "peer/v1/"), None);
+        assert_eq!(peer_media_path_for("/peer/v1/", "peer/v1/"), None);
+        // Unregistering closes the door.
+        unregister_peer_media(&id);
+        assert_eq!(peer_media_path_for(&raw, "peer/v1/"), None);
+    }
 }

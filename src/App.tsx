@@ -19,6 +19,7 @@ import { Sidebar } from "./components/Sidebar";
 import { PeoplePanel } from "./components/PeoplePanel";
 import { ReactionLayer } from "./components/ReactionLayer";
 import { MediaSpikePanel } from "./components/MediaSpikePanel";
+import { PeerStreamSpike } from "./components/PeerStreamSpike";
 import { CoReviewLobby } from "./components/CoReviewLobby";
 import { Monitor, type AspectId } from "./components/Monitor";
 import type { Notif } from "./components/NotificationBell";
@@ -1112,6 +1113,12 @@ export default function App() {
   const [mediaSpikeOpen, setMediaSpikeOpen] = useState<boolean>(() => {
     if (!import.meta.env.DEV) return false;
     try { return localStorage.getItem("saucebunny.devMediaSpike") === "1"; } catch { return false; }
+  });
+  // Dev-only Tier B 3a spike: stream the loaded local file through the
+  // proxy's peer routes with the real MSE player (peer-media plan).
+  const [peerSpikeOpen, setPeerSpikeOpen] = useState<boolean>(() => {
+    if (!import.meta.env.DEV) return false;
+    try { return localStorage.getItem("saucebunny.devPeerStream") === "1"; } catch { return false; }
   });
   const [settingsInitialTab, setSettingsInitialTab] = useState<"general" | "transcription" | "ai-summary" | "commands" | "about">("general");
 
@@ -5487,6 +5494,14 @@ export default function App() {
       {buildBanner}
       {import.meta.env.DEV && mediaSpikeOpen && (
         <MediaSpikePanel appendLog={appendLog} onClose={() => setMediaSpikeOpen(false)} />
+      )}
+      {import.meta.env.DEV && peerSpikeOpen && (
+        <PeerStreamSpike
+          localFilePath={localFilePath}
+          duration={metadata?.duration ?? null}
+          appendLog={appendLog}
+          onClose={() => setPeerSpikeOpen(false)}
+        />
       )}
       <div className="cp-titlebar" data-tauri-drag-region>
         <div className="cp-titlebar-title" data-tauri-drag-region>
