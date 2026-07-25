@@ -102,6 +102,8 @@ type Props = {
    * prep + <video> path. Controlled by Settings → Local playback.
    */
   useWebCodecs?: boolean;
+  /** NLE-style audio blips while scrubbing (MediaBunnyPlayer only). */
+  scrubAudio?: boolean;
   onMediaError?: (msg: string) => void;
   /** Transient toast — auto-fades after a few seconds. */
   toast: { id: number; kind: ToastKind; title: string; body?: string } | null;
@@ -221,7 +223,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     resumeTitle, onResume, onboarding,
     aspect,
     sourceKind, localFilePath, webStreamUrl, webCachedUseMediabunny, streamStartAt, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
-    playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs,
+    playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs, scrubAudio,
     streamLoadingPhase,
     toast, onToastDismiss,
     onPlayerTimeUpdate, onPlayerStateChange, onPlayerReady, onSurfaceClick,
@@ -390,6 +392,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               filename={metadata?.title}
               hasVideo={!!metadata?.vcodec}
               initialVolume={initialVolume}
+              scrubAudio={scrubAudio}
               onTimeUpdate={onPlayerTimeUpdate}
               onPlayStateChange={onPlayerStateChange}
               onReady={onPlayerReady}
@@ -460,6 +463,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               filename={metadata?.title}
               hasVideo
               initialVolume={initialVolume}
+              scrubAudio={scrubAudio}
               onTimeUpdate={onPlayerTimeUpdate}
               onPlayStateChange={onPlayerStateChange}
               onReady={onPlayerReady}

@@ -264,6 +264,9 @@ export default function App() {
       // whenever the cap is changed in Settings.
       mediaCacheCapGb: stored.mediaCacheCapGb ?? 0,
       clearCacheOnQuit: stored.clearCacheOnQuit ?? false,
+      // r143: NLE-style audio blips while dragging the playhead (WebCodecs
+      // player). Editors expect scrub audio, so it defaults on.
+      scrubAudio: stored.scrubAudio ?? true,
     };
   });
   const setDefaults = useCallback((d: Defaults | ((prev: Defaults) => Defaults)) => {
@@ -5896,6 +5899,7 @@ export default function App() {
                     /* Flashed briefly when the persistent playback speed changes. */
                     playbackRateHud={rateHud}
                     useWebCodecs={localPlayer === "mediabunny" && !webCodecsFallbackForImport}
+                    scrubAudio={defaults.scrubAudio}
                     onMediaError={(msg) => {
                       // MediaBunnyPlayer prefixes codec-incompatibility errors
                       // with `[WEBCODECS_UNSUPPORTED]` — that's our signal to

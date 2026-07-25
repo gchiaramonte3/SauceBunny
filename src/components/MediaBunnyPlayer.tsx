@@ -21,6 +21,12 @@ const ANCHOR_FALLBACK_MS = 1000;
  *  considered over and the decode pipelines are rebuilt. Matches
  *  LocalMediaPlayer's settle so the two local engines feel the same. */
 const SCRUB_SETTLE_MS = 200;
+/** Audio-scrub blip length (s). Long enough to hear a syllable at a slow
+ *  drag; a fast drag supersedes it long before it ends, which is what makes
+ *  the classic NLE scrub chatter. */
+const SCRUB_BLIP_S = 0.08;
+/** Per-blip fade in/out (s) so back-to-back blips don't click at the seams. */
+const SCRUB_BLIP_FADE_S = 0.005;
 
 /**
  * Alternative to LocalMediaPlayer that decodes the original file via
@@ -45,6 +51,8 @@ type Props = {
   filename?: string;
   hasVideo: boolean;
   initialVolume: number; // 0..1
+  /** NLE-style audio blips while scrubbing (Settings, default on). */
+  scrubAudio?: boolean;
   onTimeUpdate?: (seconds: number) => void;
   onPlayStateChange?: (playing: boolean) => void;
   onReady?: (duration: number) => void;
@@ -53,7 +61,7 @@ type Props = {
 };
 
 export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function MediaBunnyPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick },
+  { path, filename, hasVideo, initialVolume, scrubAudio, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick },
   ref,
 ) {
   // ─── Refs (mutable across renders without triggering re-render) ──────
@@ -140,9 +148,21 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
   const scrubLatchRef = useRef(false);
   const scrubResumeRef = useRef(false);
   const scrubSettleRef = useRef(0);
+  /** Audio-scrub pref (Settings → Local playback), mirrored to a ref so the
+   *  []-deps imperative handle and the pump drain read the live value. */
+  const scrubAudioPrefRef = useRef(scrubAudio !== false);
+  /** The blip currently sounding, so the next target can cut it off. One
+   *  envelope gain + the chunk nodes scheduled under it (AAC chunks are only
+   *  ~21ms, so a blip is several consecutive chunks). */
+  const scrubBlipRef = useRef<{ nodes: AudioBufferSourceNode[]; env: GainNode } | null>(null);
+  /** Latest-wins decoder for scrub BLIPS (audio twin of scrubPumpRef). */
+  const scrubAudioPumpRef = useRef<ScrubPump | null>(null);
 
   // Driving a setState for the visible play/pause UI on audio-only mode.
   const [isPlaying, setIsPlaying] = useState(false);
+
+  // Live-mirror the pref; the imperative handle and pump drains read the ref.
+  useEffect(() => { scrubAudioPrefRef.current = scrubAudio !== false; }, [scrubAudio]);
 
   // ─── Helpers ────────────────────────────────────────────────────────
   const currentMediaTime = () => {
@@ -185,6 +205,19 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     lastDrawnRef.current = src;
   };
 
+  /** Cut the current scrub blip off (start of the next blip, or any path
+   *  that takes over the transport). Ref-only, safe from render scope. */
+  const stopScrubBlip = () => {
+    const blip = scrubBlipRef.current;
+    if (!blip) return;
+    scrubBlipRef.current = null;
+    for (const n of blip.nodes) {
+      try { n.stop(); } catch { /* already stopped */ }
+      try { n.disconnect(); } catch { /* ignore */ }
+    }
+    try { blip.env.disconnect(); } catch { /* ignore */ }
+  };
+
   // Latest-wins scrub pump, created once. Its drain closes over refs only
   // (genRef/videoSinkRef and the ref-reading drawCanvas), so a first-render
   // closure stays correct across re-renders. The generation gate makes a
@@ -203,6 +236,64 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     });
   }
 
+  // Audio twin of the pump above: an NLE-style blip of the sound under the
+  // cursor. Same latest-wins shape (a fast drag supersedes each blip, which
+  // is exactly the classic scrub chatter). One blip = ~80ms of consecutive
+  // decoded chunks (AAC chunks are only ~21ms each) scheduled sample-
+  // continuously under a single 5ms-fade envelope, riding the master gain so
+  // volume and mute apply. Deliberately fire-and-forget: it never touches
+  // the anchor, the playback generation, or scheduledRef, so it cannot
+  // interact with the clock model.
+  if (!scrubAudioPumpRef.current) {
+    scrubAudioPumpRef.current = createScrubPump(async (target: number) => {
+      if (!scrubAudioPrefRef.current || mutedRef.current) return;
+      const gen = genRef.current;
+      const sink = audioSinkRef.current;
+      const ctx = audioCtxRef.current;
+      const gain = gainRef.current;
+      if (!sink || !ctx || !gain) return;
+      if (ctx.state === "suspended") {
+        // A scrub IS a user gesture, so WKWebView allows the resume here.
+        try { await ctx.resume(); } catch { return; }
+        if (gen !== genRef.current) return;
+      }
+      stopScrubBlip();
+      const env = ctx.createGain();
+      env.connect(gain);
+      const start = ctx.currentTime + 0.005; // scheduling headroom
+      env.gain.setValueAtTime(0, start);
+      env.gain.linearRampToValueAtTime(1, start + SCRUB_BLIP_FADE_S);
+      env.gain.setValueAtTime(1, start + SCRUB_BLIP_S - SCRUB_BLIP_FADE_S);
+      env.gain.linearRampToValueAtTime(0, start + SCRUB_BLIP_S);
+      const entry = { nodes: [] as AudioBufferSourceNode[], env };
+      scrubBlipRef.current = entry;
+      try {
+        for await (const w of sink.buffers(target, target + SCRUB_BLIP_S)) {
+          // Bail if playback took over or a newer blip cut this one off.
+          if (gen !== genRef.current || scrubBlipRef.current !== entry) break;
+          const off = Math.max(0, target - w.timestamp);
+          if (off >= w.buffer.duration) continue;
+          const src = ctx.createBufferSource();
+          src.buffer = w.buffer;
+          src.connect(env);
+          // The envelope bounds the audible window, so chunks just play out.
+          src.start(start + Math.max(0, w.timestamp - target), off);
+          entry.nodes.push(src);
+        }
+      } catch { /* sink torn down mid-drag */ }
+      // The envelope is fully closed at start+SCRUB_BLIP_S; release the graph
+      // shortly after (stopScrubBlip may already have — everything is guarded).
+      window.setTimeout(() => {
+        if (scrubBlipRef.current === entry) scrubBlipRef.current = null;
+        for (const n of entry.nodes) {
+          try { n.stop(); } catch { /* done */ }
+          try { n.disconnect(); } catch { /* ignore */ }
+        }
+        try { env.disconnect(); } catch { /* ignore */ }
+      }, (SCRUB_BLIP_S + 0.05) * 1000);
+    });
+  }
+
   /** Cancel all in-flight work without changing playing state. */
   const cancelInFlight = () => {
     genRef.current++;
@@ -213,6 +304,8 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     // Drop any pending scrub target too; the in-flight decode (if any) is
     // gated by the gen bump above and won't paint.
     scrubPumpRef.current?.cancel();
+    scrubAudioPumpRef.current?.cancel();
+    stopScrubBlip();
     for (const node of scheduledRef.current) {
       try { node.stop(); } catch { /* already stopped */ }
       try { node.disconnect(); } catch { /* ignore */ }
@@ -517,6 +610,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
           cancelInFlight(); // playback really is being interrupted here
         }
         scrubPumpRef.current?.request(clamped);
+        scrubAudioPumpRef.current?.request(clamped);
         if (scrubSettleRef.current) window.clearTimeout(scrubSettleRef.current);
         scrubSettleRef.current = window.setTimeout(() => {
           scrubSettleRef.current = 0;
@@ -525,6 +619,9 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
           scrubResumeRef.current = false;
           const ctx = audioCtxRef.current;
           if (!ctx || !playingRef.current) return;
+          // A blip still sounding would double the first ~50ms of the
+          // resumed audio at the same position — cut it before the rebuild.
+          stopScrubBlip();
           const gen = ++genRef.current;
           // Anchored from the first delivered sample, not from here — this is
           // the path a transcript-cue click takes, and anchoring at the request
@@ -545,6 +642,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
         // generation check still prevents a scrub frame landing after playback
         // resumes, which is the case that gate exists for.
         scrubPumpRef.current?.request(clamped);
+        scrubAudioPumpRef.current?.request(clamped);
       }
     },
     getCurrentTime: () => currentMediaTime(),

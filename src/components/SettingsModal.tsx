@@ -170,6 +170,12 @@ export type Defaults = {
   mediaCacheCapGb: number;
   /** Empty the media cache automatically when the app quits (r141). */
   clearCacheOnQuit: boolean;
+  /**
+   * NLE-style audio while scrubbing (r143): dragging the playhead plays
+   * short blips of the sound under the cursor. WebCodecs player only; the
+   * native <video> players show a silent frame preview instead.
+   */
+  scrubAudio: boolean;
 };
 
 type Props = {
@@ -854,6 +860,21 @@ export function SettingsModal(props: Props) {
                 aria-checked={defaults.useWebCodecsDecoder}
                 aria-label="WebCodecs decoder"
                         onClick={() => setDefaults({ ...defaults, useWebCodecsDecoder: !defaults.useWebCodecsDecoder })}
+                      />
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Audio while scrubbing
+                      <span className="desc">Dragging the playhead plays short blips of the sound under the cursor, like an NLE. Applies to the WebCodecs player; follows the player volume and mute.</span>
+                    </div>
+                    <div className="v">
+                      <button
+                        className={"cp-toggle-switch" + (defaults.scrubAudio ? " on" : "")}
+                        role="switch"
+                        aria-checked={defaults.scrubAudio}
+                        aria-label="Audio while scrubbing"
+                        onClick={() => setDefaults({ ...defaults, scrubAudio: !defaults.scrubAudio })}
                       />
                     </div>
                   </div>
