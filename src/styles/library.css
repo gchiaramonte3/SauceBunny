@@ -118,6 +118,29 @@
   object-fit: cover;
   object-position: right center;
 }
+/* Ambient hero montage layers (HeroMontage.tsx): same geometry as the static
+   backdrop, stacked over it, under the shade. The dissolve is DELIBERATELY
+   glacial - a 20s opacity blend so frames melt into each other - and each
+   frame carries a barely-there scale drift that alternates direction (in:
+   100% -> 103%; out: arrives at 103% and settles to 100%), so the art is
+   never fully still. Anchored right-center to match object-position, so the
+   pinned right edge never reveals a gap. The drift runs slightly longer than
+   the 30s flip cadence so motion never visibly halts before the next frame. */
+.cp-lib-hero-bg.cp-hero-cycle {
+  opacity: 0;
+  transition: opacity 20s linear;
+  transform-origin: right center;
+  will-change: opacity, transform;
+}
+.cp-lib-hero-bg.cp-hero-cycle.show { opacity: 1; }
+.cp-lib-hero-bg.cp-hero-cycle.kb-in  { animation: cp-hero-kb-in 34s linear forwards; }
+.cp-lib-hero-bg.cp-hero-cycle.kb-out { animation: cp-hero-kb-out 34s linear forwards; }
+@keyframes cp-hero-kb-in  { from { transform: scale(1); }     to { transform: scale(1.03); } }
+@keyframes cp-hero-kb-out { from { transform: scale(1.03); }  to { transform: scale(1); } }
+/* Belt + braces: the component already renders nothing under reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .cp-lib-hero-bg.cp-hero-cycle { transition: none; animation: none; }
+}
 /* Two-axis dissolve: fully opaque bg-0 behind the text block on the left,
    and a bottom fade into the page. rgba stops are --bg-0 at N% — tokens
    carry no alpha variants. Horizontal stops are PIXEL-FLOORED with max():

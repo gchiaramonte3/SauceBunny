@@ -373,6 +373,7 @@ export function LibraryView({
             onOpen={onOpenRecentSource}
             onAddFolder={() => void addFolder()}
             onPasteUrl={onSwitchToClip}
+            montageActive={homeVisible}
           />
           <div className="cp-lib-rows">
             {/* Ambient montage of already-cached posters — beneath the SHELVES

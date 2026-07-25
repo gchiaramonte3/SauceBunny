@@ -168,7 +168,6 @@ export type AppView = "home" | "library" | "clip" | "coreview" | "reader";
 const DEFAULTS_KEY  = "cp-defaults-v2";
 const RECENTS_KEY   = "cp-recents";
 const ASPECT_KEY    = "cp-aspect";
-const ACTIVE_VIEW_KEY = "saucebunny.activeView";
 
 // In-browser audio extraction (mediabunny/WebCodecs → OfflineAudioContext)
 // decodes the WHOLE track into memory at the source sample rate, so it's only
@@ -762,18 +761,16 @@ export default function App() {
     });
   }, []);
   // ── Top-level view (nav rail): Home / Library / Clip / Co-Review ──
-  // Single state switch — no router (CLAUDE.md). Persisted so the app
-  // reopens where you left it; a stored landing/browser view ("home" or
-  // "library") is restored, anything else (missing, corrupt, future value)
-  // falls back to "clip", the working view.
+  // Single state switch — no router (CLAUDE.md). Every launch lands on Home
+  // (user decision, r140): the poster wall is the app's front door, and Clip
+  // is one click away from the hero or any card. The view is session state,
+  // not a persisted preference — the old restore-where-you-left-it behavior
+  // meant relaunching mid-edit dropped you into a Clip view whose source had
+  // not loaded yet.
   // The panel window (?window=panel) never mounts App, so it's untouched.
-  const [activeView, setActiveViewState] = useState<AppView>(() => {
-    const stored = loadJson<string>(ACTIVE_VIEW_KEY, "clip");
-    return stored === "home" || stored === "library" || stored === "reader" ? stored : "clip";
-  });
+  const [activeView, setActiveViewState] = useState<AppView>("home");
   const setActiveView = useCallback((v: AppView) => {
     setActiveViewState(v);
-    saveJson(ACTIVE_VIEW_KEY, v);
     // Arriving at Clip always presents the full workbench: both side panels
     // open on EVERY entry (nav, shortcut, imports all route through here).
     // Raw setters on purpose — this is an arrival default, not a user toggle,

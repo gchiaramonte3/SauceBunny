@@ -146,6 +146,16 @@ export function listThumbs(): string[] {
 }
 
 /**
+ * The PATHS behind listThumbs() — every library video whose poster the cards
+ * have already materialized. The hero montage walks these and asks
+ * requestHeroStill for a band-resolution still one frame per cycle; the path
+ * set itself is a pure read, so an empty library costs nothing.
+ */
+export function listThumbPaths(): string[] {
+  return Array.from(thumbCache.keys());
+}
+
+/**
  * Subscribe to cache growth — the callback fires whenever a new poster URL is
  * cached. Returns an unsubscribe fn. Used by the ambient backdrop to re-read
  * listThumbs() as cards fill the cache (a pure notification, no decode/scan).

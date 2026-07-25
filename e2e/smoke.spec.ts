@@ -25,8 +25,12 @@ async function boot(page: Page): Promise<void> {
     localStorage.setItem("saucebunny.welcomed", "1");
   });
   await page.goto("/");
-  // The app shell is up once the toolbar renders.
-  await expect(page.locator(".cp-toolbar")).toBeVisible({ timeout: 15_000 });
+  // Every launch lands on Home (r140); the suite's tests exercise the Clip
+  // workbench, so boot() walks there the way a user would (mod+3) and hands
+  // back the same starting state as before: Clip view, toolbar up.
+  await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press("Control+3");
+  await expect(page.locator(".cp-toolbar")).toBeVisible();
 }
 
 test("first launch: welcome screen shows once, Get started reveals the app", async ({ page }) => {
@@ -41,7 +45,7 @@ test("first launch: welcome screen shows once, Get started reveals the app", asy
   await expect(page.locator(".cp-welcome")).toBeVisible({ timeout: 15_000 });
   await page.locator(".cp-welcome-cta").click();
   await expect(page.locator(".cp-welcome")).toHaveCount(0);
-  await expect(page.locator(".cp-toolbar")).toBeVisible();
+  await expect(page.locator(".cp-view-home")).toBeVisible(); // launches land on Home
   const flag = await page.evaluate(() => localStorage.getItem("saucebunny.welcomed"));
   expect(flag).toBe("1");
   expect(pageErrors).toEqual([]);
@@ -129,7 +133,7 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await page.keyboard.press("Control+1");
   await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
-  // The choice persists (saucebunny.activeView) across reload.
+  // Relaunch always lands on Home (r140) - the view is session state now.
   await page.reload();
   await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible({ timeout: 15_000 });
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
@@ -198,18 +202,21 @@ test("sessions live in Review: no toolbar popover, the lobby owns start/join", a
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
-test("side panel boots open; an explicit close persists across reload", async ({ page }) => {
+test("side panel boots open; Clip arrival re-presents the workbench", async ({ page }) => {
   await boot(page);
   // Fresh profile: the drawer is open by default.
   await expect(page.locator(".cp-queue-drawer.open")).toBeVisible();
-  // The toolbar toggle is a USER choice — it closes the drawer and persists.
+  // The toolbar toggle is a USER choice — the drawer stays closed while this
+  // Clip session continues.
   await page.locator(".cp-queue-toggle").click();
   await expect(page.locator(".cp-queue-drawer.open")).toHaveCount(0);
+  // Relaunches land on Home (r140), and every ARRIVAL at Clip re-presents
+  // the full workbench (setActiveView's arrival default) — so after a
+  // reload the drawer is back open regardless of the last toggle.
   await page.reload();
-  await expect(page.locator(".cp-toolbar")).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator(".cp-queue-drawer.open")).toHaveCount(0);
-  // Toggling back open persists too.
-  await page.locator(".cp-queue-toggle").click();
+  await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press("Control+3");
+  await expect(page.locator(".cp-toolbar")).toBeVisible();
   await expect(page.locator(".cp-queue-drawer.open")).toBeVisible();
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
@@ -293,7 +300,10 @@ test("first-run checklist: pending steps render, folder step opens Settings, dis
   await card.getByRole("button", { name: "Don't show again" }).click();
   await expect(card).toHaveCount(0);
   await page.reload();
-  await expect(page.locator(".cp-toolbar")).toBeVisible({ timeout: 15_000 });
+  // Relaunch lands on Home (r140) - walk back into Clip like boot() does.
+  await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press("Control+3");
+  await expect(page.locator(".cp-toolbar")).toBeVisible();
   await expect(page.locator(".cp-getting-started")).toHaveCount(0);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });

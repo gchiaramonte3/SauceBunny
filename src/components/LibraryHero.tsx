@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { rememberAspect } from "../lib/art-aspect";
+import { HeroMontage } from "./HeroMontage";
 import { IconPlay } from "./Icons";
 import { requestHeroStill } from "../hooks/use-library-scan";
 import { useLazyThumbnails } from "../hooks/use-lazy-thumbnails";
@@ -21,6 +22,9 @@ type Props = {
   onAddFolder: () => void;
   /** Switches to the Clip view and focuses the URL field. */
   onPasteUrl: () => void;
+  /** Home is the active view — gates the ambient montage's flip timer so a
+   *  hidden (keep-alive) Home never decodes or animates. */
+  montageActive: boolean;
 };
 
 /**
@@ -37,7 +41,7 @@ type Props = {
  * chaining; when every candidate fails the shade over bg-0 carries the band.
  * With no recents yet it flips to the empty invitation on the brand wash.
  */
-export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl }: Props) {
+export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl, montageActive }: Props) {
   const ref = useRef<HTMLElement>(null);
   // Local-file art rides the same lazy intersection gate as the cards, but
   // asks for the hero-resolution still (sharp at band size, not the 480px
@@ -109,6 +113,11 @@ export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl }: Props) 
           />
         </>
       )}
+      {/* Ambient wander through the library's cached frames — layers OVER the
+          static backdrop (which stays the fallback face until the first flip
+          and whenever the library is too small), UNDER the shade so the text
+          block always reads. */}
+      <HeroMontage active={montageActive} />
       <div className="cp-lib-hero-shade" />
       <div className="cp-lib-hero-content">
         <span className="cp-lib-hero-kicker">Continue watching</span>

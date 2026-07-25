@@ -27,7 +27,10 @@ async function boot(page: Page): Promise<void> {
     localStorage.setItem("saucebunny.welcomed", "1");
   });
   await page.goto("/");
-  await expect(page.locator(".cp-toolbar")).toBeVisible({ timeout: 15_000 });
+  // Launches land on Home (r140); these specs exercise Clip-view shortcuts.
+  await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press("Control+3");
+  await expect(page.locator(".cp-toolbar")).toBeVisible();
 }
 
 test("cheat-sheet lists Undo ⌘Z / Redo ⇧⌘Z from the registry", async ({ page }) => {
