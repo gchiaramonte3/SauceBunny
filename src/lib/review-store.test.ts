@@ -317,3 +317,55 @@ describe("write-through (debounced save)", () => {
     expect(fs.get(`${DIR}/${file}.bak`)).toBe(smallText);
   });
 });
+
+describe("boot-race durability (r140)", () => {
+  /** Drain pending microtasks so an unawaited hydrate can advance to (and
+   *  park on) the gated read. */
+  const pump = async (n = 12) => { for (let i = 0; i < n; i++) await Promise.resolve(); };
+
+  it("hydration never installs the disk copy over a doc edited this session", async () => {
+    const file = reviewFileName("/race.mp4");
+    fs.set(`${DIR}/index.json`, serializeReviewIndex(new Map([
+      ["/race.mp4", { file, updatedAt: 1, count: 1, bytes: 200 }],
+    ])));
+    fs.set(`${DIR}/${file}`, JSON.stringify(mkDoc("/race.mp4", { comments: [mkComment("v1", "old", "stale disk copy")] })));
+    // Hold the DOC read open - the slow-disk shape the 2s boot race renders
+    // through - while the index loads normally.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const base = vi.mocked(invoke).getMockImplementation()!;
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
+      const a = args as { path?: string } | undefined;
+      if (cmd === "read_text_file_capped" && a?.path === `${DIR}/${file}`) await gate;
+      return base(cmd, args as Parameters<typeof base>[1]);
+    });
+    const hydration = hydrateReviewStore({ migrate: false });
+    await pump(); // past the index read, parked on the doc read
+    // The UI rendered and the user edited before the disk copy arrived.
+    saveReview(mkDoc("/race.mp4", { comments: [mkComment("v1", "new", "fresh edit")] }));
+    release();
+    await hydration;
+    expect(loadReview("/race.mp4").comments[0].body).toBe("fresh edit");
+  });
+
+  it("a flush firing before the index hydrates re-arms instead of writing blind", async () => {
+    fs.set(`${DIR}/index.json`, serializeReviewIndex(new Map()));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const base = vi.mocked(invoke).getMockImplementation()!;
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
+      const a = args as { path?: string } | undefined;
+      if (cmd === "read_text_file_capped" && a?.path === `${DIR}/index.json`) await gate;
+      return base(cmd, args as Parameters<typeof base>[1]);
+    });
+    const hydration = hydrateReviewStore({ migrate: false });
+    await pump(); // reviewsDir resolved; index read parked
+    saveReview(mkDoc("/early.mp4", { comments: [mkComment("v1", "c1")] }));
+    await vi.advanceTimersByTimeAsync(600); // debounce fires; flush must hold
+    expect(fs.has(`${DIR}/${reviewFileName("/early.mp4")}`)).toBe(false);
+    release();
+    await hydration;
+    await vi.advanceTimersByTimeAsync(600); // the re-armed flush lands now
+    expect(fs.has(`${DIR}/${reviewFileName("/early.mp4")}`)).toBe(true);
+  });
+});

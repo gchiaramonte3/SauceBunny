@@ -23,14 +23,15 @@
  * `hydrateReviewStore()` fills the Map from disk once at boot — main.tsx
  * awaits it (race-capped) before the first render, in both windows.
  *
- * Durability model — direct overwrite, with a shrink guard: `write_text_to_path`
- * is a plain fs::write (not atomic), and without a rename command a tmp-file
- * dance buys nothing. That's accepted deliberately: docs are small JSON blobs,
- * the debounce leaves at most ~500 ms in flight, and the medium this replaces
- * (localStorage) had no better crash guarantee. The failure class actually
- * worth guarding is a LOGICAL clobber — a bug overwriting a rich doc with a
- * near-empty one — so when a doc shrinks below half its last persisted size,
- * the previous file content is kept beside it as `<name>.bak` first.
+ * Durability model (r140): every write is TRANSACTIONAL — `write_text_to_path
+ * { atomic: true }` stages a sibling temp file, fsyncs, then renames over the
+ * target, so a crash mid-save leaves the old or the new complete file, never
+ * a truncated one. On top of that sit the LOGICAL clobber guards: a doc that
+ * shrinks below half its last persisted size keeps the previous content as
+ * `<name>.bak` first, an empty doc never overwrites one the index says has
+ * content, flushes hold until the index has hydrated (the guards compare
+ * against it), and boot hydration never installs a disk copy over a doc the
+ * user already edited this session.
  *
  * Docs held in the Map are shared references: review ops are pure (they
  * return NEW docs, per review.ts's contract), so handing out the stored
@@ -76,6 +77,10 @@ const dirty = new Set<string>();
 let reviewsDir: string | null = null;
 let dirEnsured = false;
 let hydrated = false;
+/** True once index.json has been read (or proven absent) — flushes hold until
+ *  then, because the shrink/empty-over-content clobber guards compare against
+ *  index entries: a write that races ahead of the index bypasses them all. */
+let indexReady = false;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Test-only: wipe module state so each vitest case starts cold. */
@@ -86,6 +91,7 @@ export function resetReviewStoreForTests(): void {
   reviewsDir = null;
   dirEnsured = false;
   hydrated = false;
+  indexReady = false;
   if (flushTimer !== null) clearTimeout(flushTimer);
   flushTimer = null;
 }
@@ -204,6 +210,10 @@ async function flushDirtyDocs(): Promise<void> {
   // No dir (hydration failed / e2e mock / plain-browser dev) → memory-only
   // session; keep the dirty set so a later flush can still land.
   if (!reviewsDir || dirty.size === 0) return;
+  // Index not read yet (slow disk at boot): every clobber guard below depends
+  // on it, so hold the write and re-arm — the edit stays dirty, nothing is
+  // lost, and the flush lands the moment hydration finishes.
+  if (!indexReady) { scheduleFlush(); return; }
   const keys = [...dirty];
   dirty.clear();
   try {
@@ -259,14 +269,14 @@ async function flushDirtyDocs(): Promise<void> {
       // overwriting so a genuine shrink is still recoverable.
       if (existing && existing.length > 2) {
         try {
-          await invoke("write_text_to_path", { path: `${path}.bak`, text: existing });
+          await invoke("write_text_to_path", { path: `${path}.bak`, text: existing, atomic: true });
         } catch {
           /* .bak is best-effort; the successful read already proved the file exists */
         }
       }
     }
     try {
-      await invoke("write_text_to_path", { path, text: json });
+      await invoke("write_text_to_path", { path, text: json, atomic: true });
       const count = doc.comments.filter(
         (c) => c.parentId === null && c.versionId === doc.activeVersionId,
       ).length;
@@ -282,6 +292,7 @@ async function flushDirtyDocs(): Promise<void> {
     await invoke("write_text_to_path", {
       path: `${reviewsDir}/${INDEX_FILE}`,
       text: serializeReviewIndex(index),
+      atomic: true,
     });
   } catch (err) {
     console.warn("review-store: index write failed:", err);
@@ -315,6 +326,7 @@ export async function hydrateReviewStore(opts?: { migrate?: boolean }): Promise<
     reviewsDir = `${root}/Reviews`;
   } catch (err) {
     console.warn("review-store: could not resolve Reviews dir:", err);
+    indexReady = true; // memory-only session: nothing to guard against
     return;
   }
 
@@ -330,6 +342,9 @@ export async function hydrateReviewStore(opts?: { migrate?: boolean }): Promise<
   const entries = [...parseReviewIndex(indexText)];
   // Keep every index entry — filename + shrink guard survive even unloaded.
   for (const [key, entry] of entries) index.set(key, entry);
+  // The clobber guards have their comparison basis now — writes may proceed
+  // (doc BODIES may still be loading; the dirty-key guard above covers them).
+  indexReady = true;
   // Per-doc reads run through a small worker pool instead of strictly one at
   // a time: main.tsx gates first render on this, the files are tiny, and the
   // real cost was one full IPC round-trip PER DOC in sequence. Each doc
@@ -352,7 +367,14 @@ export async function hydrateReviewStore(opts?: { migrate?: boolean }): Promise<
         if (typeof text !== "string" || !text) continue;
         const parsed: unknown = JSON.parse(text);
         if (looksLikeReviewDoc(parsed) && parsed.sourceKey === key) {
-          docs.set(key, parsed);
+          // The UI can render (and take edits) before this read returns — the
+          // boot gate is a 2s RACE, not a barrier. An edited doc is the newer
+          // truth; installing the disk copy over it would silently drop the
+          // user's changes. The dirty flush will persist the merge-worthy
+          // state; unedited keys still hydrate normally.
+          if (!dirty.has(key)) {
+            docs.set(key, parsed);
+          }
           loadedDocs++;
           loadedBytes += text.length;
         }

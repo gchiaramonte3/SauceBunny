@@ -515,16 +515,18 @@ pub async fn write_bytes_to_path(
     bytes: Vec<u8>,
     if_not_exists: Option<bool>,
     unique: Option<bool>,
+    atomic: Option<bool>,
 ) -> Result<String, crate::AppError> {
-    write_bytes_impl(&path, &bytes, if_not_exists.unwrap_or(false), unique.unwrap_or(false))
+    write_bytes_impl(&path, &bytes, if_not_exists.unwrap_or(false), unique.unwrap_or(false), atomic.unwrap_or(false))
 }
 
-/// Shared body of the two byte-writer commands (JSON-args and raw-body).
+/// Shared body of the byte/text/raw writer commands.
 fn write_bytes_impl(
     path: &str,
     bytes: &[u8],
     if_not_exists: bool,
     unique: bool,
+    atomic: bool,
 ) -> Result<String, crate::AppError> {
     let mut p = PathBuf::from(path);
     if let Some(parent) = p.parent() {
@@ -543,7 +545,36 @@ fn write_bytes_impl(
     } else if if_not_exists && p.exists() {
         return Err(format!("File already exists: {}", p.display()).into());
     }
-    std::fs::write(&p, bytes).map_err(|e| format!("write failed: {e}"))?;
+    if atomic {
+        // Transactional overwrite for app documents (review/screening JSON):
+        // write a sibling temp file, flush it to disk, then rename over the
+        // target. Same directory → same filesystem → the rename is atomic, so
+        // a crash mid-save leaves either the OLD complete file or the NEW
+        // complete file, never a truncated one. A plain fs::write truncates
+        // FIRST — a crash in that window destroyed the only copy.
+        let file_name = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| crate::AppError::invalid(format!("Not a file path: {}", p.display())))?;
+        let tmp = p.with_file_name(format!(".{file_name}.tmp-{}", std::process::id()));
+        let write_and_sync = || -> std::io::Result<()> {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(bytes)?;
+            f.sync_all()?;
+            Ok(())
+        };
+        if let Err(e) = write_and_sync() {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("write failed: {e}").into());
+        }
+        if let Err(e) = std::fs::rename(&tmp, &p) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("rename failed: {e}").into());
+        }
+    } else {
+        std::fs::write(&p, bytes).map_err(|e| format!("write failed: {e}"))?;
+    }
     Ok(p.to_string_lossy().into_owned())
 }
 
@@ -557,8 +588,9 @@ pub async fn write_text_to_path(
     text: String,
     if_not_exists: Option<bool>,
     unique: Option<bool>,
+    atomic: Option<bool>,
 ) -> Result<String, crate::AppError> {
-    write_bytes_impl(&path, text.as_bytes(), if_not_exists.unwrap_or(false), unique.unwrap_or(false))
+    write_bytes_impl(&path, text.as_bytes(), if_not_exists.unwrap_or(false), unique.unwrap_or(false), atomic.unwrap_or(false))
 }
 
 /// `write_bytes_to_path` for LARGE payloads (the local clip exporter): the
@@ -589,7 +621,7 @@ pub async fn write_raw_to_path(request: tauri::ipc::Request<'_>) -> Result<Strin
             "write_raw_to_path: expected a raw body (pass the Uint8Array as the invoke payload)",
         ));
     };
-    write_bytes_impl(&path, bytes, false, unique)
+    write_bytes_impl(&path, bytes, false, unique, false)
 }
 
 /// Decode a percent-encoded UTF-8 string (the output of JS

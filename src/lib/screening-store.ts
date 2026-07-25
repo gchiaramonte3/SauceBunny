@@ -187,14 +187,18 @@ export async function saveScreening(doc: ScreeningDoc): Promise<void> {
   const json = JSON.stringify(doc, null, 2);
   try {
     await invoke("ensure_dir_exists", { path: dir });
-    await invoke("write_text_to_path", { path: `${dir}/${file}`, text: json });
+    await invoke("write_text_to_path", { path: `${dir}/${file}`, text: json, atomic: true });
     index.set(doc.id, indexEntryFor(doc, json.length));
     const indexJson = JSON.stringify(
       { version: 1, screenings: Object.fromEntries(index) } satisfies ScreeningIndexFile,
       null, 2,
     );
-    await invoke("write_text_to_path", { path: `${dir}/${INDEX_FILE}`, text: indexJson });
-  } catch { /* disk full, permissions, sandbox - the session continues */ }
+    await invoke("write_text_to_path", { path: `${dir}/${INDEX_FILE}`, text: indexJson, atomic: true });
+  } catch (err) {
+    // The session continues (disk full, permissions), but not SILENTLY - a
+    // screening that never lands on disk should at least say so somewhere.
+    console.warn("screening-store: save failed:", err);
+  }
 }
 
 /** Test seam: forget the cached dir + index. */

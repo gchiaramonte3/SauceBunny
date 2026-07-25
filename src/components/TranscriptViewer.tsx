@@ -953,7 +953,7 @@ export function TranscriptViewer({
       // String arg, not a byte array: the encode → Array.from route decimal-
       // prints every byte and rebuilds the WHOLE transcript per committed cue
       // edit at ~3x the size, synchronously on the main thread.
-      await invoke("write_text_to_path", { path, text: serialized });
+      await invoke("write_text_to_path", { path, text: serialized, atomic: true });
       // Local fast path — reparse immediately instead of waiting for the
       // reload-token round trip (which follows anyway and reads the same bytes).
       setRaw(serialized);
