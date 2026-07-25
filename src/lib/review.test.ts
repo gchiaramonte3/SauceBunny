@@ -9,7 +9,7 @@ import {
   loadReviewHistory, upsertReviewHistory, removeReviewHistory, clearReviewHistory,
   buildComment, insertComment, setResolved, setLike, applyReviewOp, mergeReviewDoc,
   inverseReviewOps, restampReviewOp,
-  annotationHasContent, annotationsOf, labelSuffix,
+  annotationHasContent, annotationsOf, labelSuffix, sanitizeDocForWire,
   type ReviewDoc, type ReviewComment, type AnnotationStrokes,
 } from "./review";
 
@@ -579,5 +579,44 @@ describe("mergeReviewDoc across different sources", () => {
     const merged = mergeReviewDoc(mine, theirs);
     expect(merged.sourceKey).toBe("same");
     expect(merged.comments.map((c) => c.id).sort()).toEqual(["mine", "theirs"]);
+  });
+});
+
+describe("wire sanitization (sanitizeDocForWire)", () => {
+  // The audit's regression contract: a serialized session broadcast must
+  // never carry a host-local filesystem identity.
+  const HOST_MARKERS = ["/Users/", "/Volumes/", "file://", "C:\\"];
+
+  it("replaces a path sourceKey with the wire key and strips version paths", () => {
+    const doc = emptyDoc("/Users/alice/Clients/Confidential Project/rough-cut.mov");
+    const { doc: withV } = ensureVersion(doc, "/Volumes/RAID/Confidential Project/rough-cut.mov", "rough-cut.mov");
+    const wired = sanitizeDocForWire(withV, "fp-1a2b3c4d");
+    expect(wired.sourceKey).toBe("fp-1a2b3c4d");
+    expect(wired.versions[0].path).toBe("");
+    expect(wired.versions[0].id).toBe(withV.versions[0].id);     // shared identity survives
+    expect(wired.versions[0].label).toBe(withV.versions[0].label);
+    const serialized = JSON.stringify(wired);
+    for (const marker of HOST_MARKERS) expect(serialized).not.toContain(marker);
+  });
+
+  it("passes web-keyed docs through untouched (the room is already watching the URL)", () => {
+    const doc = emptyDoc("https://youtu.be/abc123");
+    const { doc: withV } = ensureVersion(doc, "https://youtu.be/abc123", "V1");
+    const wired = sanitizeDocForWire(withV, "fp-unused");
+    expect(wired.sourceKey).toBe("https://youtu.be/abc123");
+    expect(wired.versions[0].path).toBe("https://youtu.be/abc123");
+  });
+
+  it("never leaks the path even when no wire key exists yet", () => {
+    const wired = sanitizeDocForWire(emptyDoc("/Users/alice/cut.mov"), null);
+    expect(JSON.stringify(wired)).not.toContain("/Users/");
+  });
+
+  it("does not mutate the host's copy", () => {
+    const doc = emptyDoc("/Users/alice/cut.mov");
+    const { doc: withV } = ensureVersion(doc, "/Users/alice/cut.mov");
+    sanitizeDocForWire(withV, "fp-x");
+    expect(withV.sourceKey).toBe("/Users/alice/cut.mov"); // sessionDoc keeps the real key
+    expect(withV.versions[0].path).toBe("/Users/alice/cut.mov");
   });
 });

@@ -29,7 +29,7 @@ import { getLastUserSeekAt, getPlayheadFrames } from "../lib/playhead-store";
 import { createClockEstimator, expectedPosition } from "../lib/session-clock";
 import {
   loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc,
-  resolveByFingerprint, linkFingerprint,
+  resolveByFingerprint, linkFingerprint, sanitizeDocForWire,
   commentMarkers as reviewMarkersOf, annotationsOf,
   loadReviewer, reviewerColorFor, initialsOf,
   type AnnotationStrokes, type ReviewDoc, type ReviewOp,
@@ -652,8 +652,12 @@ export function useCoReview({
     // Guests are still holding the OUTGOING doc, so push the new one now.
     // Previously the snapshot only went out when a peer joined, which meant a
     // mid-session source change left every guest editing the old source.
-    void invoke("session_broadcast", { msg: { kind: "reviewDoc", doc: JSON.stringify(doc) } })
-      .catch(() => { /* session raced closed */ });
+    void invoke("session_broadcast", {
+      // Wire boundary: local filesystem identity stays on this machine — the
+      // doc travels keyed by the session fingerprint with version paths
+      // stripped (see sanitizeDocForWire). sessionDoc keeps the REAL doc.
+      msg: { kind: "reviewDoc", doc: JSON.stringify(sanitizeDocForWire(doc, sessionSourceRef.current.reviewKey || null)) },
+    }).catch(() => { /* session raced closed */ });
   }, [coSession.role, reviewSourceKey, persistDoc, metadataRef]);
   // Presenter → everyone: the current source whenever it changes. r124: this
   // fires for LOCAL FILES and for clearing too. It used to early-return unless
@@ -697,7 +701,11 @@ export function useCoReview({
       sendLoadSource(sessionSourceRef.current);
     }
     const d = sessionDocRef.current;
-    if (d) void invoke("session_broadcast", { msg: { kind: "reviewDoc", doc: JSON.stringify(d) } }).catch(() => {});
+    if (d) {
+      // Same wire-boundary sanitization as the source-follow broadcast above.
+      const wired = sanitizeDocForWire(d, sessionSourceRef.current.reviewKey || null);
+      void invoke("session_broadcast", { msg: { kind: "reviewDoc", doc: JSON.stringify(wired) } }).catch(() => {});
+    }
     // Re-broadcast persistent presence so a newcomer converges on the live
     // room: the host's own hand + share, and every currently-raised hand.
     const selfId = coSessionRef.current.selfId ?? "m0";

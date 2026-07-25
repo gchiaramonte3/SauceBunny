@@ -107,6 +107,33 @@ function newId(): string {
 // ~/Documents/Sauce Bunny/Reviews/ at boot), which is what keeps loadReview
 // SYNCHRONOUS for its many call sites; saves write through to disk debounced.
 
+/** True when a review key/path is a filesystem location on SOMEONE'S machine
+ *  (POSIX or Windows absolute, or a file URL) — meaningless, and not ours to
+ *  reveal, on a peer's machine. */
+export function isHostLocalKey(s: string): boolean {
+  return s.startsWith("/") || s.startsWith("file://") || /^[A-Za-z]:[\\/]/.test(s);
+}
+
+/**
+ * A copy of `doc` that is safe to put ON THE WIRE (the co-review `reviewDoc`
+ * broadcast). A locally-keyed doc used to ship the host's absolute file path
+ * twice — as `sourceKey` (the first-review fallback before the fingerprint
+ * index knows the file) and inside every version's `path` — so guests
+ * received, and then persisted docs under, strings like
+ * `/Users/<name>/Clients/<project>/cut.mov`. On the wire the sourceKey is the
+ * session's content-fingerprint key (the identity `loadSource` already
+ * announces) and local version paths are dropped; a version's shared identity
+ * is its id + label. URLs pass through — the room is already watching them.
+ * Host-local state (sessionDoc, persistence) must never go through this.
+ */
+export function sanitizeDocForWire(doc: ReviewDoc, wireKey: string | null): ReviewDoc {
+  return {
+    ...doc,
+    sourceKey: isHostLocalKey(doc.sourceKey) ? (wireKey || "shared-local") : doc.sourceKey,
+    versions: doc.versions.map((v) => (isHostLocalKey(v.path) ? { ...v, path: "" } : v)),
+  };
+}
+
 export function emptyDoc(sourceKey: string): ReviewDoc {
   return { sourceKey, versions: [], activeVersionId: null, comments: [], status: {} };
 }
