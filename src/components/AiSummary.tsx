@@ -308,7 +308,7 @@ export function AiSummary({
         }, ctrl.signal);
       } else {
         // Cloud (Claude / ChatGPT) — one-shot via Rust; the reply lands at once.
-        const reply = await cloudChat(provider as Exclude<typeof provider, "local">, system, history);
+        const reply = await cloudChat(provider as Exclude<typeof provider, "local">, system, history, ctrl.signal);
         if (!ctrl.signal.aborted) {
           setMessages((prev) => {
             const next = [...prev];

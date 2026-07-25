@@ -434,6 +434,12 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     pendingLandRef.current = null;
     mimeRef.current = null;
     seekingRef.current = false;
+    // A scrub gesture dies with its source. If the path changes mid-gesture
+    // (scrub, then load another URL within the 300ms settle), the cleanup
+    // cancels the settle timer, so a leaked wantPlay would be consumed by
+    // the NEXT source's pipeline-open and auto-play a source the app
+    // mounted paused (the scrub-then-switch resume race).
+    wantPlayRef.current = false;
     failedRef.current = false;
     setScrubPreview(false);
 

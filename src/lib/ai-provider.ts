@@ -59,9 +59,26 @@ export function deleteApiKey(p: CloudProvider): Promise<void> {
 }
 
 /** One-shot cloud chat via Rust (reqwest + Keychain key). Returns the full text.
- *  `system` carries the transcript + rules; `messages` are the user/assistant turns. */
-export function cloudChat(provider: CloudProvider, system: string, messages: ChatMessage[]): Promise<string> {
-  return invoke<string>("cloud_chat", {
-    args: { provider, model: loadCloudModel(provider), system, messages },
-  });
+ *  `system` carries the transcript + rules; `messages` are the user/assistant turns.
+ *  `signal` aborts the REQUEST, not just the UI: it fires `cloud_chat_cancel`,
+ *  which drops the Rust-side reqwest future and closes the connection, so a
+ *  stopped run stops the provider generating (and billing) too (r142). */
+export async function cloudChat(
+  provider: CloudProvider, system: string, messages: ChatMessage[], signal?: AbortSignal,
+): Promise<string> {
+  const requestId = signal ? crypto.randomUUID() : undefined;
+  const onAbort = requestId
+    ? () => { void invoke("cloud_chat_cancel", { requestId }).catch(() => { /* already done */ }); }
+    : undefined;
+  if (signal && onAbort) {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+  try {
+    return await invoke<string>("cloud_chat", {
+      args: { provider, model: loadCloudModel(provider), system, messages, request_id: requestId ?? null },
+    });
+  } finally {
+    if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+  }
 }

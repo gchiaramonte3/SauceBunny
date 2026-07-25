@@ -85,10 +85,26 @@ export function fpsToRateKey(fps: number): FrameRateKey | null {
 
 const pad = (n: number) => n.toString().padStart(2, "0");
 
-/** 0-based frame index from media start: round(seconds × fpsExact). */
+/** Float-noise guard for frame math, in FRAMES (~4µs at 24fps). Orders of
+ *  magnitude above f64 arithmetic error on frame-aligned seconds, and orders
+ *  of magnitude below any real quantum in the app (SRT millisecond = 0.024
+ *  frames at 24fps), so it can only ever absorb noise, never move a mark. */
+const FRAME_EPS = 1e-4;
+
+/** 0-based frame index from media start: floor(seconds × fpsExact + eps).
+ *
+ *  FLOOR, not round (r142): a time belongs to the frame being DISPLAYED at
+ *  that instant, which is every NLE's convention. round() named the NEXT
+ *  frame whenever the time sat past a frame's midpoint (e.g. 60.000s at
+ *  23.976 is 56% through frame 1438; round exported 1439, whose content
+ *  starts 18ms after the marked moment). Frame-aligned inputs (the
+ *  frames-canonical playhead) are unchanged: the epsilon absorbs f64 noise
+ *  so an exact boundary can't floor into the previous frame. Mid-frame
+ *  inputs (transcript cues, co-review peers at another rate) now export
+ *  the frame the reviewer actually saw, one lower than round() gave. */
 export function frameIndex(seconds: number, rate: FrameRateKey): number {
   const { num, den } = RATE_TABLE[rate].fpsExact;
-  return Math.round((Math.max(0, seconds) * num) / den);
+  return Math.floor((Math.max(0, seconds) * num) / den + FRAME_EPS);
 }
 
 // --- Drop-frame timecode (canonical SMPTE, 29.97 / 59.94 only) --------------
@@ -167,7 +183,7 @@ export function totalFrames(seconds: number, settings: MarkerExportSettings): nu
   return frameIndex(seconds, settings.frameRate) + start;
 }
 
-/** Span length in frames: round(out × fpsExact) − round(in × fpsExact). */
+/** Span length in frames: frameIndex(out) − frameIndex(in). */
 export function durationFrames(inSec: number, outSec: number, rate: FrameRateKey): number {
   return frameIndex(outSec, rate) - frameIndex(inSec, rate);
 }

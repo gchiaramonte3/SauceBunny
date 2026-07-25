@@ -14,6 +14,9 @@
 
 use crate::AppError;
 use serde::Deserialize;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::Notify;
 
 /// Keychain service; the account is the provider ("anthropic" / "openai").
 const KEYCHAIN_SERVICE: &str = "com.saucebunny.desktop.ai";
@@ -113,6 +116,67 @@ pub struct CloudChatArgs {
     /// User/assistant turns.
     pub messages: Vec<CloudChatMsg>,
     pub max_tokens: Option<u32>,
+    /// Optional caller-minted id enabling `cloud_chat_cancel`. Without it the
+    /// request simply isn't cancellable (the pre-r142 behaviour).
+    pub request_id: Option<String>,
+}
+
+/// In-flight chat requests by caller-minted id. `cloud_chat_cancel` looks the
+/// id up and fires its Notify; the select! below drops the reqwest future,
+/// closing the connection so a stopped request stops BILLING too (streaming
+/// APIs meter on delivery; a one-shot body abandoned mid-generation is closed
+/// at the socket and the provider halts generation server-side).
+fn chat_cancels() -> &'static Mutex<HashMap<String, Arc<Notify>>> {
+    static M: OnceLock<Mutex<HashMap<String, Arc<Notify>>>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Removes the registry entry when `cloud_chat` returns by ANY path (success,
+/// API error, cancellation) so ids can't accumulate.
+struct CancelGuard(Option<String>);
+impl Drop for CancelGuard {
+    fn drop(&mut self) {
+        if let Some(id) = self.0.take() {
+            if let Ok(mut m) = chat_cancels().lock() {
+                m.remove(&id);
+            }
+        }
+    }
+}
+
+/// Abort an in-flight `cloud_chat` by its caller-minted request id. Unknown
+/// ids are a no-op (the request already finished).
+#[tauri::command]
+pub fn cloud_chat_cancel(request_id: String) -> Result<(), AppError> {
+    if let Ok(m) = chat_cancels().lock() {
+        if let Some(n) = m.get(&request_id) {
+            // notify_one stores a permit, so a cancel that lands before the
+            // request future is first polled still wins (no lost wakeup).
+            n.notify_one();
+        }
+    }
+    Ok(())
+}
+
+/// Send + read-body under the caller's cancel Notify. Dropping the reqwest
+/// future on cancel is what actually tears the connection down.
+async fn post_and_read(
+    req: reqwest::RequestBuilder,
+    cancel: Option<Arc<Notify>>,
+) -> Result<(reqwest::StatusCode, String), AppError> {
+    let fut = async {
+        let resp = req.send().await?;
+        let status = resp.status();
+        let text = resp.text().await?;
+        Ok::<_, AppError>((status, text))
+    };
+    match cancel {
+        Some(n) => tokio::select! {
+            _ = n.notified() => Err(AppError::invalid("Stopped.")),
+            r = fut => r,
+        },
+        None => fut.await,
+    }
 }
 
 /// One-shot chat completion against the user's chosen cloud provider, using the
@@ -128,6 +192,18 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
     let client = reqwest::Client::new();
     let max_tokens = args.max_tokens.unwrap_or(4096);
 
+    // Register for cancellation before any network I/O so a Stop clicked the
+    // instant after send can't miss. The guard unregisters on every exit.
+    let cancel = args.request_id.clone().map(|id| {
+        let n = Arc::new(Notify::new());
+        if let Ok(mut m) = chat_cancels().lock() {
+            m.insert(id.clone(), n.clone());
+        }
+        (id, n)
+    });
+    let _guard = CancelGuard(cancel.as_ref().map(|(id, _)| id.clone()));
+    let cancel = cancel.map(|(_, n)| n);
+
     match args.provider.as_str() {
         "anthropic" => {
             let body = serde_json::json!({
@@ -138,16 +214,13 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
                     .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
                     .collect::<Vec<_>>(),
             });
-            let resp = client
+            let req = client
                 .post("https://api.anthropic.com/v1/messages")
                 .header("x-api-key", key)
                 .header("anthropic-version", "2023-06-01")
                 .header("content-type", "application/json")
-                .json(&body)
-                .send()
-                .await?;
-            let status = resp.status();
-            let text = resp.text().await?;
+                .json(&body);
+            let (status, text) = post_and_read(req, cancel).await?;
             if !status.is_success() {
                 return Err(AppError::invalid(format!(
                     "Claude API error {}: {}",
@@ -176,15 +249,12 @@ pub async fn cloud_chat(args: CloudChatArgs) -> Result<String, AppError> {
                 msgs.push(serde_json::json!({ "role": m.role, "content": m.content }));
             }
             let body = serde_json::json!({ "model": args.model, "messages": msgs });
-            let resp = client
+            let req = client
                 .post("https://api.openai.com/v1/chat/completions")
                 .header("authorization", format!("Bearer {key}"))
                 .header("content-type", "application/json")
-                .json(&body)
-                .send()
-                .await?;
-            let status = resp.status();
-            let text = resp.text().await?;
+                .json(&body);
+            let (status, text) = post_and_read(req, cancel).await?;
             if !status.is_success() {
                 return Err(AppError::invalid(format!(
                     "OpenAI API error {}: {}",

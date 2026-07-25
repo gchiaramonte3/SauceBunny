@@ -126,7 +126,7 @@ export function ReaderAnalysis({ transcriptPath, visible, selectedModelId, style
         if (!built) { setError("This transcript has no readable content to analyze."); setPhase("error"); return; }
         setPhase("generating");
         const system = buildSystemPrompt(built.text, built.truncated, style ?? DEFAULT_STYLE, built.hasSpeakers);
-        full = await cloudChat(provider, system, [{ role: "user", content: userTurn }]);
+        full = await cloudChat(provider, system, [{ role: "user", content: userTurn }], ctrl.signal);
         if (ctrl.signal.aborted) { setPhase("idle"); return; }
         modelUsed = loadCloudModel(provider);
       }
@@ -152,8 +152,8 @@ export function ReaderAnalysis({ transcriptPath, visible, selectedModelId, style
   }, [transcriptPath, phase, selectedModelId, style]);
 
   const busy = phase === "starting" || phase === "generating";
-  // Abort + return to idle immediately (a cloud invoke can't be interrupted, but
-  // its result is dropped by the aborted check in analyze()).
+  // Abort + return to idle immediately. Cloud runs are truly cancelled (the
+  // signal fires cloud_chat_cancel in Rust, r142); local streams abort the fetch.
   function stop() { abortRef.current?.abort(); setStream(""); setPhase("idle"); }
 
   if (!transcriptPath) {

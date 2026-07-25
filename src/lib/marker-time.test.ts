@@ -60,23 +60,25 @@ describe("spec §3 sample — 23.976 NDF, Start TC 01:00:00:00 (startFrames 8640
     expect(framesToTc(87311, "23.976", false)).toBe("01:00:37:23");
   });
 
-  it("note b — span 60.000→90.000s → 01:00:59:23, 719 frames long", () => {
-    expect(frameIndex(60, "23.976")).toBe(1439);
-    expect(totalFrames(60, S976)).toBe(87839);
-    expect(framesToTc(87839, "23.976", false)).toBe("01:00:59:23");
+  it("note b — span 60.000→90.000s → 01:00:59:22, 719 frames long", () => {
+    // 60.000s sits 56% through frame 1438 — floor names the DISPLAYED frame
+    // (round used to bump this to 1439, an 18ms-later frame; r142).
+    expect(frameIndex(60, "23.976")).toBe(1438);
+    expect(totalFrames(60, S976)).toBe(87838);
+    expect(framesToTc(87838, "23.976", false)).toBe("01:00:59:22");
     expect(durationFrames(60, 90, "23.976")).toBe(719);
   });
 
-  it("note b out — 90.000s → 01:01:29:22", () => {
-    expect(frameIndex(90, "23.976")).toBe(2158);
-    expect(totalFrames(90, S976)).toBe(88558);
-    expect(framesToTc(88558, "23.976", false)).toBe("01:01:29:22");
+  it("note b out — 90.000s → 01:01:29:21", () => {
+    expect(frameIndex(90, "23.976")).toBe(2157);
+    expect(totalFrames(90, S976)).toBe(88557);
+    expect(framesToTc(88557, "23.976", false)).toBe("01:01:29:21");
   });
 
-  it("note c — point at 253.000s → 01:04:12:18", () => {
-    expect(frameIndex(253, "23.976")).toBe(6066);
-    expect(totalFrames(253, S976)).toBe(92466);
-    expect(framesToTc(92466, "23.976", false)).toBe("01:04:12:18");
+  it("note c — point at 253.000s → 01:04:12:17", () => {
+    expect(frameIndex(253, "23.976")).toBe(6065);
+    expect(totalFrames(253, S976)).toBe(92465);
+    expect(framesToTc(92465, "23.976", false)).toBe("01:04:12:17");
   });
 });
 
@@ -92,7 +94,7 @@ describe("FCPXML rational time (23.976, numerator = frames × 1001)", () => {
 
   it("secondsToRational gives the clip-local marker start", () => {
     expect(secondsToRational(38, S976)).toBe("911911/24000s");
-    expect(secondsToRational(60, S976)).toBe("1440439/24000s");
+    expect(secondsToRational(60, S976)).toBe("1439438/24000s");
   });
 });
 
@@ -142,6 +144,26 @@ describe("29.97 drop-frame vs non-drop", () => {
       const frames = tcToFrames(tc, "59.94", true);
       expect(frames).not.toBeNull();
       expect(framesToTc(frames as number, "59.94", true)).toBe(tc);
+    }
+  });
+});
+
+describe("frameIndex floor convention (r142)", () => {
+  it("mid-frame times name the DISPLAYED frame, not the nearest boundary", () => {
+    // 60.000s is 56% through frame 1438 @23.976 — round() used to say 1439.
+    expect(frameIndex(60, "23.976")).toBe(1438);
+    // Just past a boundary stays on that frame until the next one starts.
+    expect(frameIndex(1438 * (1001 / 24000) + 0.02, "23.976")).toBe(1438);
+  });
+
+  it("frame-aligned seconds survive f64 noise exactly (frames-canonical playhead)", () => {
+    // The playhead store is integer frames; seconds arrive as f*den/num.
+    // The epsilon must absorb the float error so an exact boundary can
+    // never floor into the PREVIOUS frame.
+    for (const f of [1, 23, 24, 1438, 86400, 2000000]) {
+      expect(frameIndex((f * 1001) / 24000, "23.976")).toBe(f);
+      expect(frameIndex(f / 25, "25")).toBe(f);
+      expect(frameIndex((f * 1001) / 30000, "29.97")).toBe(f);
     }
   });
 });

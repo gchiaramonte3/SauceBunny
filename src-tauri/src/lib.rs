@@ -163,6 +163,7 @@ pub fn run() {
             commands::delete_api_key,
             commands::has_api_key,
             commands::cloud_chat,
+            commands::cloud_chat_cancel,
             commands::set_turn_password,
             commands::get_turn_password,
             commands::probe_local_file,

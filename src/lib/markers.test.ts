@@ -18,7 +18,7 @@ import type { ReviewComment, ReviewDoc } from "./review";
 // marker-time.test; here we assert the SERIALIZERS place those exact frames in
 // each format. The sample's artificial names ("Reaction" etc.) are replaced
 // with realistic authors/bodies — the frame-exact invariants don't depend on
-// them, so the golden numbers (911 / 1439→2158 / 719 / 01:00:37:23 …) stay.
+// them, so the golden numbers (911 / 1438→2157 / 719 / 01:00:37:23 …) stay.
 
 const S976: MarkerExportSettings = {
   frameRate: "23.976",
@@ -67,9 +67,9 @@ describe("Avid .txt", () => {
 
   it("places each note on the frame-exact absolute sequence timecode", () => {
     expect(txt).toContain("\t01:00:37:23\t"); // note a, 38s
-    expect(txt).toContain("\t01:00:59:23\t"); // note b in, 60s (range start)
-    expect(txt).toContain("\t01:01:29:22\t"); // note b out, 90s (range end)
-    expect(txt).toContain("\t01:04:12:18\t"); // note c, 253s
+    expect(txt).toContain("\t01:00:59:22\t"); // note b in, 60s (range start)
+    expect(txt).toContain("\t01:01:29:21\t"); // note b out, 90s (range end)
+    expect(txt).toContain("\t01:04:12:17\t"); // note c, 253s
   });
 
   it("emits exactly two bracket point markers for the spanned note", () => {
@@ -78,8 +78,8 @@ describe("Avid .txt", () => {
     expect(starts).toHaveLength(1);
     expect(ends).toHaveLength(1);
     // Same author + colour on both bracket lines, one at each end.
-    expect(starts[0]).toContain("01:00:59:23");
-    expect(ends[0]).toContain("01:01:29:22");
+    expect(starts[0]).toContain("01:00:59:22");
+    expect(ends[0]).toContain("01:01:29:21");
     expect(starts[0].startsWith("Kim\t")).toBe(true);
     expect(ends[0].startsWith("Kim\t")).toBe(true);
   });
@@ -96,12 +96,12 @@ describe("Premiere .xml (FCP7 / XMEML)", () => {
 
   it("uses 0-based frame counts from sequence start", () => {
     expect(xml).toContain("<in>911</in>");  // 38s
-    expect(xml).toContain("<in>6066</in>"); // 253s
+    expect(xml).toContain("<in>6065</in>"); // 253s
   });
 
   it("spans via <out> > <in>", () => {
-    expect(xml).toContain("<in>1439</in>");
-    expect(xml).toContain("<out>2158</out>");
+    expect(xml).toContain("<in>1438</in>");
+    expect(xml).toContain("<out>2157</out>");
   });
 
   it("marks point markers with <out>-1</out>", () => {
@@ -130,7 +130,7 @@ describe("Resolve .edl (CMX3600)", () => {
 
   it("places events on the absolute record timecode + 1-frame out", () => {
     expect(edl).toContain("01:00:37:23 01:00:38:00"); // note a rec in/out
-    expect(edl).toContain("01:00:59:23 01:01:00:00"); // note b rec in/out
+    expect(edl).toContain("01:00:59:22 01:00:59:23"); // note b rec in/out
   });
 
   it("has the CMX3600 header and per-marker colour token", () => {
@@ -144,7 +144,7 @@ describe("FCPXML", () => {
 
   it("frame-aligns every rational (numerator = frames × 1001)", () => {
     expect(x).toContain('start="911911/24000s"');   // note a, frame 911
-    expect(x).toContain('start="1440439/24000s"');  // note b in, frame 1439
+    expect(x).toContain('start="1439438/24000s"');  // note b in, frame 1438
     expect(x).toContain('duration="719719/24000s"'); // note b span, 719 frames
   });
 
@@ -184,8 +184,8 @@ describe("CSV", () => {
   it("populates In+Out+Duration for the spanned note", () => {
     const kim = rows.find((r) => r.startsWith("Kim,")) as string;
     const cells = kim.split(",");
-    expect(cells[1]).toBe("01:00:59:23"); // In
-    expect(cells[2]).toBe("01:01:29:22"); // Out
+    expect(cells[1]).toBe("01:00:59:22"); // In
+    expect(cells[2]).toBe("01:01:29:21"); // Out
     expect(cells[3]).toBe("00:00:29:23"); // Duration (719 frames @23.976)
   });
 });
@@ -297,7 +297,7 @@ describe("transcriptToAvidTxt", () => {
     expect(cols[2]).toBe("V1");
     expect(cols[3]).toBe("red");                                    // default color
     expect(cols[4]).toBe("So here's the thing about the pipeline."); // Comment
-    expect(lines[1].startsWith("Bob\t01:04:12:18\t")).toBe(true);  // 253s
+    expect(lines[1].startsWith("Bob\t01:04:12:17\t")).toBe(true);  // 253s
   });
 
   it("honors a chosen marker color for the whole batch", () => {
