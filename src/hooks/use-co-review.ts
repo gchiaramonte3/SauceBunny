@@ -138,6 +138,19 @@ export type LiveReaction = {
   at: number;
 };
 
+/** One `session:transfer` progress event (either direction, r143). */
+export type TransferProgress = {
+  phase: "hashing" | "checking" | "receiving" | "sending" | "sent"
+    | "sendStopped" | "cancelled" | "stalled" | "failed" | "done";
+  name: string;
+  received: number;
+  total: number;
+  /** Present on host-side "sending" events: which member is receiving. */
+  member?: string;
+  /** Present on "done": the final local path of the received file. */
+  path?: string;
+};
+
 export type CoReview = {
   /** Session state pushed from Rust over `session:state`. */
   coSession: CoSessionState;
@@ -183,6 +196,13 @@ export type CoReview = {
   makePresenter: (memberId: string) => void;
   /** Point at YOUR copy of the presenter's local file (fingerprint ladder). */
   adoptPendingSource: () => Promise<void>;
+  /** Tier C: the host's standing file offer (guests render the Get chip). */
+  offeredFile: { name: string; size: number; blake3: string } | null;
+  /** Live transfer progress on this machine, either direction. */
+  transfer: TransferProgress | null;
+  offerCurrentFile: (path: string, name?: string) => Promise<void>;
+  fetchOfferedFile: () => Promise<void>;
+  cancelFetch: () => void;
   /** True when YOUR hand is up. */
   handRaised: boolean;
   /** Fire a transient reaction (throttled; echoes locally). */
@@ -276,6 +296,13 @@ export function useCoReview({
   const [pendingSource, setPendingSource] = useState<SessionSource | null>(null);
   // Who has reported they can/can't open the current source.
   const [sourceStatus, setSourceStatus] = useState<ReadonlyMap<string, string>>(new Map());
+  // Tier C: the host's standing offer of the current source's file, and the
+  // live transfer this machine is running (either direction). The offer is
+  // room-truth (rides the wire); the transfer is local progress.
+  const [offeredFile, setOfferedFile] = useState<{ name: string; size: number; blake3: string } | null>(null);
+  const offeredFileRef = useRef(offeredFile);
+  offeredFileRef.current = offeredFile;
+  const [transfer, setTransfer] = useState<TransferProgress | null>(null);
 
   // Send a session message the right way for our role: the host broadcasts to
   // all peers; a peer sends up to the host, which relays it to everyone else.
@@ -331,6 +358,7 @@ export function useCoReview({
           coReadyRef.current = false;
           setPendingSource(null);
           setSourceStatus(new Map());
+          setOfferedFile(null); // the offer was for the outgoing source
           return;
         }
         slog("info",
@@ -342,6 +370,7 @@ export function useCoReview({
           duration: m.duration, reviewKey: m.reviewKey,
         };
         setSourceStatus(new Map());
+        setOfferedFile(null); // a new source invalidates the old offer
         if (src.kind === "web" && m.url) {
           if (activeSourceUrlRef.current === m.url) {
             slog("info", "Already on that URL; ignoring.");
@@ -391,6 +420,11 @@ export function useCoReview({
       }
       case "sourceStatus":
         setSourceStatus((prev) => new Map(prev).set(m.from, m.state));
+        return;
+      case "offerFile":
+        // Tier C: the host's offer (empty name withdraws it). Host-originated
+        // only; the Rust relay never forwards a peer's version of this.
+        setOfferedFile(m.name ? { name: m.name, size: m.size, blake3: m.blake3 } : null);
         return;
       case "presenter":
         // Rust already updated its own gate; mirror it so the UI can badge
@@ -627,6 +661,8 @@ export function useCoReview({
       // broadcast, and the rebroadcast is gated on a source being set.
       setPendingSource(null);
       setSourceStatus(new Map());
+      setOfferedFile(null);
+      setTransfer(null);
       pendingOpsRef.current = [];
       coLastHostPosRef.current = null;
       coReadyRef.current = false;
@@ -681,6 +717,12 @@ export function useCoReview({
   const sessionSourceRef = useRef(sessionSource);
   sessionSourceRef.current = sessionSource;
   const sendLoadSource = useCallback((src: SessionSource) => {
+    // A source change invalidates any standing Tier C offer: the offered
+    // bytes belong to the OUTGOING source. Withdraw before announcing.
+    if (offeredFileRef.current && coRoleRef.current === "host") {
+      setOfferedFile(null);
+      void invoke("session_clear_offer").catch(() => {});
+    }
     sendSessionMsg({
       kind: "loadSource",
       from: "",                 // host stamps the true sender
@@ -977,6 +1019,66 @@ export function useCoReview({
    *  ladder teaches itself. */
   const pendingSourceRef = useRef<SessionSource | null>(null);
   pendingSourceRef.current = pendingSource;
+  // Tier C progress (either direction). Terminal happy phases self-clear so
+  // the room head returns to normal without a click; the unhappy ones stay
+  // until the user acts (retry or cancel is their decision to make).
+  const transferClearRef = useRef(0);
+  useEffect(() => {
+    const un = listen<TransferProgress>("session:transfer", (e) => {
+      const p = e.payload;
+      setTransfer(p);
+      if (transferClearRef.current) window.clearTimeout(transferClearRef.current);
+      if (p.phase === "done" || p.phase === "sent" || p.phase === "cancelled") {
+        transferClearRef.current = window.setTimeout(() => setTransfer(null), 4000);
+      }
+    });
+    return () => {
+      if (transferClearRef.current) window.clearTimeout(transferClearRef.current);
+      void un.then((f) => f());
+    };
+  }, []);
+
+  /** Host: offer the loaded file's bytes to the room (Tier C). The click
+   *  that calls this IS the sender's consent; hashing progress arrives on
+   *  session:transfer as phase "hashing". */
+  const offerCurrentFile = useCallback(async (path: string, name?: string) => {
+    try {
+      const info = await invoke<{ name: string; size: number; blake3: string }>(
+        "session_offer_file", { path, name: name ?? null },
+      );
+      setOfferedFile(info);
+      slog("ok", `Offered "${info.name}" to the room.`);
+    } catch (e) {
+      slog("err", `Could not offer the file: ${formatError(e)}`);
+    }
+  }, [slog]);
+
+  /** Guest: fetch the offered file (consent = clicking the chip that names
+   *  the file and its size), then link its fingerprint and open it - Tier A
+   *  hits forever after. */
+  const fetchOfferedFile = useCallback(async () => {
+    const offer = offeredFileRef.current;
+    if (!offer) return;
+    const pending = pendingSourceRef.current;
+    try {
+      const path = await invoke<string>("session_fetch_file", {
+        blake3Hex: offer.blake3, name: offer.name,
+      });
+      if (pending?.fingerprint) linkFingerprint(pending.fingerprint, path);
+      await loadLocalPath(path);
+      setPendingSource(null);
+      sendSessionMsg({ kind: "sourceStatus", from: "", state: "ready", detail: null });
+    } catch (e) {
+      slog("err", `Transfer: ${formatError(e)}`);
+    }
+  }, [loadLocalPath, sendSessionMsg, slog]);
+
+  /** Guest: stop the in-flight fetch. The partial stays; fetching resumes. */
+  const cancelFetch = useCallback(() => {
+    const offer = offeredFileRef.current;
+    if (offer) void invoke("session_cancel_fetch", { blake3Hex: offer.blake3 }).catch(() => {});
+  }, []);
+
   const adoptPendingSource = useCallback(async () => {
     const pending = pendingSourceRef.current;
     if (!pending || pending.kind !== "file") return;
@@ -1019,6 +1121,11 @@ export function useCoReview({
     sourceStatus,
     makePresenter,
     adoptPendingSource,
+    offeredFile,
+    transfer,
+    offerCurrentFile,
+    fetchOfferedFile,
+    cancelFetch,
     handRaised: coSession.selfId != null ? raisedHands.has(coSession.selfId) : raisedHands.has("m0"),
     sendReaction,
     toggleHand,

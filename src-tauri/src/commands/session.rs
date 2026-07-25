@@ -27,7 +27,7 @@ use super::*;
 use iroh::endpoint::{presets, Connection, SendStream};
 use iroh::Endpoint;
 use iroh_tickets::endpoint::EndpointTicket;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::BufReader;
@@ -84,6 +84,23 @@ const HOST_NAME: &str = "Host";
 /// How long a freshly-accepted connection gets to open its stream and send
 /// `Hello` before we drop it.
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+
+// ── Tier C file transfer (see _design/p2p-media-plan.md §Phase 2) ──────
+/// Concurrent file substreams the host will serve at once.
+const MAX_TRANSFERS: usize = 4;
+/// Read/write chunk for the transfer loops.
+const TRANSFER_CHUNK: usize = 256 * 1024;
+/// Pace the file substream (risk R4): it shares one physical link with the
+/// live camera/mic mesh and the 2 Hz transport heartbeat, and an unpaced
+/// QUIC bulk stream would take the whole uplink. ~24 MB/s (~190 Mbit/s) is
+/// far above any home uplink (where the link itself throttles first) while
+/// still bounding the damage on a LAN.
+const TRANSFER_BYTES_PER_SEC: u64 = 24 * 1024 * 1024;
+/// A substream must state its business promptly or it is dropped.
+const SUBSTREAM_REQ_TIMEOUT: Duration = Duration::from_secs(10);
+/// Guest-side stall cutoff: no bytes for this long ends the fetch (the
+/// partial is kept and the next fetch resumes by offset).
+const FETCH_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// End-to-end budget for a peer joining (connect + open_bi + Hello).
 const JOIN_TIMEOUT: Duration = Duration::from_secs(20);
@@ -173,6 +190,15 @@ pub enum SessionMsg {
     /// forget: never persisted, never replayed to late joiners. `from` is
     /// rewritten by the host like Rtc/Sharing so it can't be spoofed.
     Reaction { from: String, emote: String, on: bool },
+    /// host → everyone (Tier C): the current source's file can be fetched
+    /// from the host over a dedicated typed substream. `size` + `blake3`
+    /// let a guest render consent UI ("Reel_04.mov, 4.1 GB") and verify the
+    /// received copy. An empty `name` withdraws the offer. Host-originated
+    /// ONLY: the peer read loop deliberately ignores this kind (in v1 only
+    /// the host serves bytes; a relayed offer would promise bytes the host
+    /// cannot serve). `size` is f64 for the same reason as `duration` on
+    /// LoadSource: file sizes fit f64 exactly and the binding stays number.
+    OfferFile { from: String, name: String, size: f64, blake3: String },
 }
 
 /// One session member: a session-scoped id (m0 = host, m1, m2, ... minted
@@ -307,6 +333,25 @@ struct HostShared {
     /// std Mutex — never held across an await. Finished handles are pruned
     /// as new connections arrive; aborting a finished task is a no-op.
     tasks: Mutex<Vec<JoinHandle<()>>>,
+    /// The one file currently offered to the room (Tier C). Offering a new
+    /// file replaces it; clearing withdraws it. Guests request by BLAKE3
+    /// hash, never by path (R11: only this explicitly-offered file is ever
+    /// readable over the wire). std Mutex, cloned out, never held across an
+    /// await.
+    offered: Mutex<Option<OfferedFile>>,
+    /// Concurrent file substreams being served, bounded by MAX_TRANSFERS so
+    /// a guest cannot fan requests into an unbounded set of readers.
+    active_transfers: Arc<AtomicUsize>,
+}
+
+/// The host-side record of a Tier C offer: where the bytes live and the
+/// identity guests verify against. The path NEVER crosses the wire.
+#[derive(Clone)]
+struct OfferedFile {
+    path: std::path::PathBuf,
+    name: String,
+    size: u64,
+    blake3: String,
 }
 
 struct PeerConn {
@@ -763,6 +808,18 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
     broadcast_peer_list(&shared).await;
     emit_state_now(&app).await;
 
+    // Tier C: every bi-stream opened AFTER the control stream is a typed
+    // request (risk R5: the control stream was accepted above, before this
+    // task exists, so this loop structurally cannot consume control-plane
+    // messages). Runs only for peers that passed the Hello handshake, and
+    // dies with the connection at disconnect below.
+    let sub_task = tokio::spawn(serve_substreams(
+        app.clone(),
+        conn.clone(),
+        shared.clone(),
+        member.clone(),
+    ));
+
     // 3. Keep reading this peer's lines. A peer sends review ops + presence
     //    (Phase 2): apply them on the HOST frontend (session:msg) AND relay to
     //    every OTHER peer so the whole star converges. EOF/error = disconnect.
@@ -876,13 +933,166 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
 
     // 4. Disconnect: remove from the roster (release the lock BEFORE
     //    emit_state_now — see lock-order note on SessionManager), then
-    //    tell the survivors and the UI.
+    //    tell the survivors and the UI. The substream acceptor dies with us
+    //    (its Connection clone drops when the abort lands, and any in-flight
+    //    transfer task exits on its next failed stream write).
+    sub_task.abort();
     {
         let mut peers = shared.peers.lock().await;
         peers.retain(|p| p.id != id);
     }
     broadcast_peer_list(&shared).await;
     emit_state_now(&app).await;
+}
+
+// ============================================================
+// TIER C — typed substreams (file transfer)
+// ============================================================
+
+/// A substream's one-line request. `t` is the discriminator (risk R5): every
+/// stream after the control stream states its type up front, and unknown
+/// types are refused with a header rather than guessed at.
+#[derive(serde::Deserialize)]
+struct SubstreamReq {
+    t: String,
+    #[serde(default)]
+    blake3: String,
+    #[serde(default)]
+    offset: u64,
+}
+
+/// Accept every bi-stream a registered peer opens after its control stream,
+/// and serve typed requests. Bounded by MAX_TRANSFERS across the room.
+async fn serve_substreams(app: AppHandle, conn: Connection, shared: Arc<HostShared>, member: String) {
+    while let Ok((send, recv)) = conn.accept_bi().await {
+        let counter = shared.active_transfers.clone();
+        if counter.fetch_add(1, Ordering::SeqCst) >= MAX_TRANSFERS {
+            counter.fetch_sub(1, Ordering::SeqCst);
+            tokio::spawn(async move {
+                let mut send = send;
+                let _ = send
+                    .write_all(b"{\"t\":\"file-response\",\"ok\":false,\"error\":\"busy\"}\n")
+                    .await;
+                let _ = send.finish();
+            });
+            continue;
+        }
+        let app = app.clone();
+        let shared = shared.clone();
+        let member = member.clone();
+        tokio::spawn(async move {
+            struct Guard(Arc<AtomicUsize>);
+            impl Drop for Guard {
+                fn drop(&mut self) {
+                    self.0.fetch_sub(1, Ordering::SeqCst);
+                }
+            }
+            let _g = Guard(counter);
+            serve_file_substream(app, send, recv, shared, member).await;
+        });
+    }
+}
+
+/// Serve one file request: header line in, header line out, then raw bytes
+/// from the requested offset to EOF, paced per TRANSFER_BYTES_PER_SEC.
+async fn serve_file_substream(
+    app: AppHandle,
+    mut send: SendStream,
+    recv: iroh::endpoint::RecvStream,
+    shared: Arc<HostShared>,
+    member: String,
+) {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+
+    let mut reader = BufReader::new(recv);
+    let line = match tokio::time::timeout(SUBSTREAM_REQ_TIMEOUT, read_line_bounded(&mut reader, MAX_HELLO_BYTES)).await {
+        Ok(Ok(Some(l))) => l,
+        _ => return, // silent stream, oversize line, or EOF — nothing owed
+    };
+    let req = match serde_json::from_str::<SubstreamReq>(line.trim()) {
+        Ok(r) if r.t == "file-request" => r,
+        _ => {
+            let _ = send
+                .write_all(b"{\"t\":\"file-response\",\"ok\":false,\"error\":\"unknown request\"}\n")
+                .await;
+            let _ = send.finish();
+            return;
+        }
+    };
+    // Authorization (risk R11, Tier C shape): the ONLY thing servable is the
+    // file the host explicitly offered, matched by hash. No path ever comes
+    // off the wire, and withdrawing the offer closes the door immediately.
+    let offered = shared.offered.lock().map(|g| g.clone()).unwrap_or(None);
+    let Some(file_info) = offered.filter(|f| f.blake3 == req.blake3) else {
+        let _ = send
+            .write_all(b"{\"t\":\"file-response\",\"ok\":false,\"error\":\"not offered\"}\n")
+            .await;
+        let _ = send.finish();
+        return;
+    };
+    let offset = req.offset.min(file_info.size);
+    let mut file = match tokio::fs::File::open(&file_info.path).await {
+        Ok(f) => f,
+        Err(_) => {
+            let _ = send
+                .write_all(b"{\"t\":\"file-response\",\"ok\":false,\"error\":\"file moved\"}\n")
+                .await;
+            let _ = send.finish();
+            return;
+        }
+    };
+    if file.seek(std::io::SeekFrom::Start(offset)).await.is_err() {
+        let _ = send.finish();
+        return;
+    }
+    let header = format!(
+        "{{\"t\":\"file-response\",\"ok\":true,\"size\":{},\"offset\":{}}}\n",
+        file_info.size, offset
+    );
+    if send.write_all(header.as_bytes()).await.is_err() {
+        return;
+    }
+    session_log(&app, "info", format!("Sending \"{}\" to {member} from byte {offset}.", file_info.name));
+
+    let started = std::time::Instant::now();
+    let mut last_emit = std::time::Instant::now();
+    let mut sent: u64 = offset;
+    let mut buf = vec![0u8; TRANSFER_CHUNK];
+    loop {
+        let n = match file.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(_) => break,
+        };
+        if send.write_all(&buf[..n]).await.is_err() {
+            // Receiver cancelled or dropped; their partial stays resumable.
+            let _ = app.emit("session:transfer", serde_json::json!({
+                "phase": "sendStopped", "member": member, "name": file_info.name,
+                "received": sent as f64, "total": file_info.size as f64,
+            }));
+            return;
+        }
+        sent += n as u64;
+        // R4 pacing: sleep whenever we are ahead of the byte budget.
+        let target = Duration::from_secs_f64((sent - offset) as f64 / TRANSFER_BYTES_PER_SEC as f64);
+        let elapsed = started.elapsed();
+        if target > elapsed {
+            tokio::time::sleep(target - elapsed).await;
+        }
+        if last_emit.elapsed().as_millis() >= 250 {
+            last_emit = std::time::Instant::now();
+            let _ = app.emit("session:transfer", serde_json::json!({
+                "phase": "sending", "member": member, "name": file_info.name,
+                "received": sent as f64, "total": file_info.size as f64,
+            }));
+        }
+    }
+    let _ = send.finish();
+    let _ = app.emit("session:transfer", serde_json::json!({
+        "phase": if sent >= file_info.size { "sent" } else { "sendStopped" },
+        "member": member, "name": file_info.name,
+        "received": sent as f64, "total": file_info.size as f64,
+    }));
 }
 
 /// Relay one message to every peer EXCEPT the sender (host-side fan-out of a
@@ -1054,7 +1264,8 @@ async fn peer_read_loop(
                     | SessionMsg::ReviewDoc { .. }
                     | SessionMsg::Presence { .. }
                     | SessionMsg::Sharing { .. }
-                    | SessionMsg::Reaction { .. }) => {
+                    | SessionMsg::Reaction { .. }
+                    | SessionMsg::OfferFile { .. }) => {
                         let _ = app.emit("session:msg", &msg);
                     }
                     // Host never sends these to a peer.
@@ -1210,6 +1421,348 @@ fn clean_host_name(raw: &str) -> String {
 fn sanitize_name(raw: &str) -> String {
     let cleaned: String = raw.trim().chars().filter(|c| !c.is_control()).take(40).collect();
     cleaned.trim().to_string()
+}
+
+// ============================================================
+// TIER C — offer / fetch commands
+// ============================================================
+
+/// A received filename becomes a path segment on the GUEST's disk: strip
+/// separators and control chars, cap the length, never yield empty.
+fn sanitize_transfer_filename(raw: &str) -> String {
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control() && *c != '/' && *c != '\\' && *c != ':')
+        .take(120)
+        .collect();
+    let cleaned = cleaned.trim().trim_start_matches('.').to_string();
+    if cleaned.is_empty() { "transfer".to_string() } else { cleaned }
+}
+
+/// In-flight guest fetches by hash, so Stop can interrupt the read loop.
+/// Same shape as cloud_ai's chat cancel registry.
+fn fetch_cancels() -> &'static std::sync::Mutex<HashMap<String, Arc<tokio::sync::Notify>>> {
+    static M: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Notify>>>> =
+        std::sync::OnceLock::new();
+    M.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Host: hash the CURRENT source file and offer it to the room (Tier C).
+/// The click that invokes this IS the sender's consent. Returns
+/// `{ name, size, blake3 }` so the host UI can mirror the offer.
+#[tauri::command]
+pub async fn session_offer_file(
+    app: AppHandle,
+    state: State<'_, SessionManager>,
+    path: String,
+    name: Option<String>,
+) -> Result<serde_json::Value, crate::AppError> {
+    let shared = {
+        let inner = state.inner.lock().await;
+        let Session::Host { shared, .. } = &inner.session else {
+            return Err(crate::AppError::invalid("Only the session host can offer the file."));
+        };
+        shared.clone()
+    };
+    let meta = tokio::fs::metadata(&path)
+        .await
+        .map_err(|e| format!("read file: {e}"))?;
+    if !meta.is_file() {
+        return Err(crate::AppError::invalid("That source is not a plain file."));
+    }
+    let size = meta.len();
+    let path_buf = std::path::PathBuf::from(&path);
+    let display = name
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| {
+            path_buf
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "file".into())
+        });
+    let display = sanitize_transfer_filename(&display);
+
+    let _ = app.emit("session:transfer", serde_json::json!({
+        "phase": "hashing", "name": display, "received": 0.0, "total": size as f64,
+    }));
+    // BLAKE3 over the whole file (the guest's verification anchor). Blocking:
+    // this is a multi-GB sequential read; blake3 itself runs multiple GB/s.
+    let hash = tokio::task::spawn_blocking({
+        let path_buf = path_buf.clone();
+        move || -> Result<String, String> {
+            let mut hasher = blake3::Hasher::new();
+            let file = std::fs::File::open(&path_buf).map_err(|e| e.to_string())?;
+            hasher.update_reader(file).map_err(|e| e.to_string())?;
+            Ok(hasher.finalize().to_hex().to_string())
+        }
+    })
+    .await
+    .map_err(|e| format!("hash task: {e}"))?
+    .map_err(|e| format!("hash file: {e}"))?;
+
+    if let Ok(mut slot) = shared.offered.lock() {
+        *slot = Some(OfferedFile {
+            path: path_buf,
+            name: display.clone(),
+            size,
+            blake3: hash.clone(),
+        });
+    }
+    let msg = SessionMsg::OfferFile {
+        from: "m0".into(),
+        name: display.clone(),
+        size: size as f64,
+        blake3: hash.clone(),
+    };
+    // Sender id 0 is never minted for a peer, so this fans out to everyone.
+    relay_to_others(&shared, 0, &msg).await;
+    session_log(&app, "ok", format!("Offered \"{display}\" ({size} bytes) to the room."));
+    Ok(serde_json::json!({ "name": display, "size": size as f64, "blake3": hash }))
+}
+
+/// Host: withdraw the current offer. Guests' in-flight fetches finish; new
+/// requests are refused.
+#[tauri::command]
+pub async fn session_clear_offer(state: State<'_, SessionManager>) -> Result<(), crate::AppError> {
+    let shared = {
+        let inner = state.inner.lock().await;
+        let Session::Host { shared, .. } = &inner.session else {
+            return Ok(()); // no session, nothing offered
+        };
+        shared.clone()
+    };
+    if let Ok(mut slot) = shared.offered.lock() {
+        *slot = None;
+    }
+    let msg = SessionMsg::OfferFile { from: "m0".into(), name: String::new(), size: 0.0, blake3: String::new() };
+    relay_to_others(&shared, 0, &msg).await;
+    Ok(())
+}
+
+/// Guest: fetch the offered file over a dedicated substream into the media
+/// cache, resuming any partial by offset, verifying BLAKE3 before the final
+/// rename. Emits `session:transfer` progress; returns the final local path.
+#[tauri::command]
+pub async fn session_fetch_file(
+    app: AppHandle,
+    state: State<'_, SessionManager>,
+    blake3_hex: String,
+    name: String,
+) -> Result<String, crate::AppError> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    if blake3_hex.len() != 64 || !blake3_hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(crate::AppError::invalid("Bad file id."));
+    }
+    let conn = {
+        let inner = state.inner.lock().await;
+        let Session::Peer { _conn, .. } = &inner.session else {
+            return Err(crate::AppError::invalid("Join a session first."));
+        };
+        _conn.clone()
+    };
+
+    // Cancel registration (RAII removal on every exit path).
+    let notify = Arc::new(tokio::sync::Notify::new());
+    if let Ok(mut m) = fetch_cancels().lock() {
+        if m.contains_key(&blake3_hex) {
+            return Err(crate::AppError::invalid("That file is already being received."));
+        }
+        m.insert(blake3_hex.clone(), notify.clone());
+    }
+    struct CancelGuard(String);
+    impl Drop for CancelGuard {
+        fn drop(&mut self) {
+            if let Ok(mut m) = fetch_cancels().lock() {
+                m.remove(&self.0);
+            }
+        }
+    }
+    let _guard = CancelGuard(blake3_hex.clone());
+
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("app_cache_dir: {e}"))?;
+    let dir = cache.join(super::MEDIA_CACHE_DIRNAME).join("transfers");
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| format!("create transfers dir: {e}"))?;
+    let part = dir.join(format!("{blake3_hex}.part"));
+    let display = sanitize_transfer_filename(&name);
+
+    // Resume: an existing partial sets the offset, and its bytes are folded
+    // into the hasher so the final verify still covers the WHOLE file.
+    let mut hasher = blake3::Hasher::new();
+    let mut offset: u64 = 0;
+    if let Ok(m) = tokio::fs::metadata(&part).await {
+        if m.is_file() && m.len() > 0 {
+            offset = m.len();
+            let _ = app.emit("session:transfer", serde_json::json!({
+                "phase": "checking", "name": display, "received": offset as f64, "total": 0.0,
+            }));
+            let p2 = part.clone();
+            hasher = tokio::task::spawn_blocking(move || -> Result<blake3::Hasher, String> {
+                let mut h = blake3::Hasher::new();
+                let f = std::fs::File::open(&p2).map_err(|e| e.to_string())?;
+                h.update_reader(f).map_err(|e| e.to_string())?;
+                Ok(h)
+            })
+            .await
+            .map_err(|e| format!("rehash task: {e}"))?
+            .map_err(|e| format!("rehash partial: {e}"))?;
+        }
+    }
+
+    let (mut send, recv) = conn
+        .open_bi()
+        .await
+        .map_err(|e| format!("open transfer stream: {e}"))?;
+    let req = format!("{{\"t\":\"file-request\",\"blake3\":\"{blake3_hex}\",\"offset\":{offset}}}\n");
+    send.write_all(req.as_bytes())
+        .await
+        .map_err(|e| format!("send request: {e}"))?;
+    let _ = send.finish();
+
+    let mut reader = BufReader::new(recv);
+    let header = match tokio::time::timeout(Duration::from_secs(15), read_line_bounded(&mut reader, MAX_HELLO_BYTES)).await {
+        Ok(Ok(Some(l))) => l,
+        Ok(Ok(None)) | Ok(Err(_)) => return Err(crate::AppError::invalid("The host closed the transfer stream.")),
+        Err(_) => {
+            return Err(crate::AppError::invalid(
+                "The host didn't answer. Their Sauce Bunny may be older than this one.",
+            ))
+        }
+    };
+    #[derive(serde::Deserialize)]
+    struct FetchHeader {
+        ok: bool,
+        #[serde(default)]
+        size: u64,
+        #[serde(default)]
+        error: String,
+    }
+    let head: FetchHeader = serde_json::from_str(header.trim())
+        .map_err(|_| crate::AppError::invalid("Unreadable transfer header."))?;
+    if !head.ok {
+        return Err(crate::AppError::invalid(match head.error.as_str() {
+            "busy" => "The host is sending to too many people right now. Try again in a moment.",
+            "not offered" => "That file is no longer offered.",
+            "file moved" => "The host's copy moved or was deleted.",
+            _ => "The host refused the transfer.",
+        }));
+    }
+    let total = head.size;
+    if offset > total {
+        // Stale partial from a different file that hashed the same name slot.
+        offset = 0;
+        hasher = blake3::Hasher::new();
+        let _ = tokio::fs::remove_file(&part).await;
+    }
+
+    let mut out = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&part)
+        .await
+        .map_err(|e| format!("open partial: {e}"))?;
+    let mut received = offset;
+    let mut last_emit = std::time::Instant::now();
+    let _ = app.emit("session:transfer", serde_json::json!({
+        "phase": "receiving", "name": display, "received": received as f64, "total": total as f64,
+    }));
+
+    let mut buf = vec![0u8; TRANSFER_CHUNK];
+    loop {
+        let read = tokio::select! {
+            _ = notify.notified() => {
+                let _ = out.flush().await;
+                let _ = app.emit("session:transfer", serde_json::json!({
+                    "phase": "cancelled", "name": display, "received": received as f64, "total": total as f64,
+                }));
+                return Err(crate::AppError::invalid("Stopped. The partial copy is kept; fetching again resumes."));
+            }
+            r = tokio::time::timeout(FETCH_READ_TIMEOUT, reader.read(&mut buf)) => r,
+        };
+        let n = match read {
+            Ok(Ok(0)) => break,
+            Ok(Ok(n)) => n,
+            Ok(Err(e)) => {
+                let _ = out.flush().await;
+                let _ = app.emit("session:transfer", serde_json::json!({
+                    "phase": "stalled", "name": display, "received": received as f64, "total": total as f64,
+                }));
+                return Err(crate::AppError::invalid(format!(
+                    "The connection dropped mid-transfer ({e}). Fetching again resumes where it stopped."
+                )));
+            }
+            Err(_) => {
+                let _ = out.flush().await;
+                let _ = app.emit("session:transfer", serde_json::json!({
+                    "phase": "stalled", "name": display, "received": received as f64, "total": total as f64,
+                }));
+                return Err(crate::AppError::invalid(
+                    "The transfer stalled. Fetching again resumes where it stopped.",
+                ));
+            }
+        };
+        hasher.update(&buf[..n]);
+        out.write_all(&buf[..n])
+            .await
+            .map_err(|e| format!("write partial: {e}"))?;
+        received += n as u64;
+        if last_emit.elapsed().as_millis() >= 250 {
+            last_emit = std::time::Instant::now();
+            let _ = app.emit("session:transfer", serde_json::json!({
+                "phase": "receiving", "name": display, "received": received as f64, "total": total as f64,
+            }));
+        }
+    }
+    out.flush().await.map_err(|e| format!("flush partial: {e}"))?;
+    out.sync_all().await.map_err(|e| format!("sync partial: {e}"))?;
+    drop(out);
+
+    if received != total {
+        let _ = app.emit("session:transfer", serde_json::json!({
+            "phase": "stalled", "name": display, "received": received as f64, "total": total as f64,
+        }));
+        return Err(crate::AppError::invalid(
+            "The host stopped before the file finished. Fetching again resumes where it stopped.",
+        ));
+    }
+    let got = hasher.finalize().to_hex().to_string();
+    if got != blake3_hex.to_ascii_lowercase() {
+        let _ = tokio::fs::remove_file(&part).await;
+        let _ = app.emit("session:transfer", serde_json::json!({
+            "phase": "failed", "name": display, "received": received as f64, "total": total as f64,
+        }));
+        return Err(crate::AppError::invalid(
+            "The received file failed verification and was removed. Fetch it again.",
+        ));
+    }
+
+    let final_path = dir.join(format!("{}-{}", &blake3_hex[..8], display));
+    tokio::fs::rename(&part, &final_path)
+        .await
+        .map_err(|e| format!("finalize transfer: {e}"))?;
+    let final_str = final_path.to_string_lossy().into_owned();
+    let _ = app.emit("session:transfer", serde_json::json!({
+        "phase": "done", "name": display, "received": total as f64, "total": total as f64, "path": final_str,
+    }));
+    session_log(&app, "ok", format!("Received \"{display}\" ({total} bytes), verified."));
+    Ok(final_str)
+}
+
+/// Guest: stop an in-flight fetch. The partial is kept for resume.
+#[tauri::command]
+pub fn session_cancel_fetch(blake3_hex: String) -> Result<(), crate::AppError> {
+    if let Ok(m) = fetch_cancels().lock() {
+        if let Some(n) = m.get(&blake3_hex) {
+            n.notify_one();
+        }
+    }
+    Ok(())
 }
 
 // ============================================================
@@ -1577,5 +2130,53 @@ mod invite_tests {
     fn legacy_raw_ticket_passes_through() {
         assert_eq!(parse_invite(TICKET), TICKET);
         assert_eq!(parse_invite(&format!("{TICKET}\n")), TICKET);
+    }
+}
+
+#[cfg(test)]
+mod transfer_tests {
+    use super::*;
+
+    #[test]
+    fn offer_file_serializes_with_the_camel_case_kind_the_frontend_matches() {
+        let msg = SessionMsg::OfferFile {
+            from: "m0".into(),
+            name: "Reel_04.mov".into(),
+            size: 4_100_000_000.0,
+            blake3: "ab".repeat(32),
+        };
+        let line = serde_json::to_string(&msg).unwrap();
+        assert!(line.contains("\"kind\":\"offerFile\""), "{line}");
+        assert!(line.contains("\"blake3\""), "{line}");
+        // Withdrawal shape: empty name is the sentinel the frontend clears on.
+        let clear = SessionMsg::OfferFile { from: "m0".into(), name: String::new(), size: 0.0, blake3: String::new() };
+        let line = serde_json::to_string(&clear).unwrap();
+        assert!(line.contains("\"name\":\"\""), "{line}");
+    }
+
+    #[test]
+    fn substream_requests_parse_and_unknown_types_are_refusable() {
+        let ok: SubstreamReq =
+            serde_json::from_str(r#"{"t":"file-request","blake3":"aa","offset":42}"#).unwrap();
+        assert_eq!(ok.t, "file-request");
+        assert_eq!(ok.offset, 42);
+        // Offset defaults to 0 (fresh fetch sends none on resume-less paths).
+        let fresh: SubstreamReq = serde_json::from_str(r#"{"t":"file-request","blake3":"aa"}"#).unwrap();
+        assert_eq!(fresh.offset, 0);
+        // A future stream type still parses (t is just a string), so the
+        // handler can refuse it EXPLICITLY instead of erroring opaquely.
+        let future: SubstreamReq = serde_json::from_str(r#"{"t":"media-request","blake3":""}"#).unwrap();
+        assert_ne!(future.t, "file-request");
+    }
+
+    #[test]
+    fn transfer_filenames_cannot_escape_the_transfers_dir() {
+        assert_eq!(sanitize_transfer_filename("../../etc/passwd"), "etcpasswd");
+        assert_eq!(sanitize_transfer_filename("a/b\\c:d.mov"), "abcd.mov");
+        assert_eq!(sanitize_transfer_filename("  .hidden  "), "hidden");
+        assert_eq!(sanitize_transfer_filename(""), "transfer");
+        assert_eq!(sanitize_transfer_filename("\u{7}\u{8}"), "transfer");
+        let long = "x".repeat(400);
+        assert!(sanitize_transfer_filename(&long).len() <= 120);
     }
 }

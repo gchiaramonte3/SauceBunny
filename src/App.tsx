@@ -189,6 +189,16 @@ const LOG_MAX = 5000;
 migrateLegacyStorageKeys();
 
 
+/** Human size for the Tier C transfer UI: "4.1 GB", "820 MB", "12 KB". */
+function formatTransferSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "0 KB";
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1) return `${Math.round(mb)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 export default function App() {
   // ====== Persisted defaults (used to seed new fetches + Settings tab) ======
   const [defaults, setDefaultsState] = useState<Defaults>(() => {
@@ -5185,6 +5195,7 @@ export default function App() {
     meshStreams, meshStates, meshMutedForMe, toggleMuteForMe,
     shareState, shareStream, sharingMembers, startShare, stopShare,
     isPresenter, pendingSource, sourceStatus, makePresenter, adoptPendingSource,
+    offeredFile, transfer, offerCurrentFile, fetchOfferedFile, cancelFetch,
     startCoReview, joinCoReview, leaveCoReview,
   } = useCoReview({
     isPlaying, fps, playbackRate,
@@ -5749,6 +5760,34 @@ export default function App() {
                           {blockedMembers.join(", ")} can&apos;t open this
                         </span>
                       )}
+                      {/* Tier C, sender side. Offering is explicit (this click
+                          is the consent step for a multi-GB read), and the
+                          transfer row narrates hash + send progress. */}
+                      {isPresenter && sourceKind === "file" && localFilePath
+                        && blockedMembers.length > 0 && !offeredFile
+                        && transfer?.phase !== "hashing" && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-compact"
+                          title="Send your copy of this file over the session. They see the name and size and choose to accept."
+                          onClick={() => { void offerCurrentFile(localFilePath, metadata?.title ?? undefined); }}
+                        >
+                          Send them the file
+                        </button>
+                      )}
+                      {transfer?.phase === "hashing" && (
+                        <span className="cp-room-blocked">Preparing the file…</span>
+                      )}
+                      {transfer?.phase === "sending" && (
+                        <span className="cp-room-blocked">
+                          {`Sending to ${coSession.peers.find((p) => p.id === transfer.member)?.name ?? "a guest"} · ${transfer.total > 0 ? Math.floor((transfer.received / transfer.total) * 100) : 0}%`}
+                        </span>
+                      )}
+                      {isPresenter && offeredFile && transfer?.phase !== "sending" && (
+                        <span className="cp-room-blocked" title="Guests without the file see a Get button">
+                          File offered to the room
+                        </span>
+                      )}
                     </div>
                     {/* Change what the room is watching without leaving the
                         session. The room hides Clip's toolbar (and with it the
@@ -5790,20 +5829,56 @@ export default function App() {
                     a non-presenter just saw the solo empty state. */}
                 {roomActive && !isPresenter && pendingSource && (
                   <div className="cp-room-waiting">
-                    <span>
-                      {pendingSource.kind === "file"
-                        ? `${presenterName} is watching ${pendingSource.title ?? "a local file"}. That file lives on their Mac.`
-                        : `Loading ${pendingSource.title ?? "the shared source"}…`}
-                    </span>
-                    {pendingSource.kind === "file" && (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-compact"
-                        title="Point at your own copy of this file"
-                        onClick={() => { void adoptPendingSource(); }}
-                      >
-                        Open my copy…
-                      </button>
+                    {transfer && (transfer.phase === "receiving" || transfer.phase === "checking") ? (
+                      /* Tier C, receiver side: determinate progress in place
+                         of the waiting affordances (spec 5c). The partial is
+                         kept on Cancel, so fetching again resumes. */
+                      <div className="cp-transfer-row">
+                        <span className="cp-transfer-label">
+                          {transfer.phase === "checking"
+                            ? `Checking the partial copy of ${transfer.name}…`
+                            : `Receiving ${transfer.name} · ${formatTransferSize(transfer.received)} of ${formatTransferSize(transfer.total)}`}
+                        </span>
+                        <div className="cp-transfer-bar" aria-hidden>
+                          <div
+                            className="cp-transfer-fill"
+                            style={{ width: `${transfer.total > 0 ? Math.min(100, (transfer.received / transfer.total) * 100) : 0}%` }}
+                          />
+                        </div>
+                        <button type="button" className="cp-transfer-cancel" onClick={cancelFetch}>
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <span>
+                          {pendingSource.kind === "file"
+                            ? `${presenterName} is watching ${pendingSource.title ?? "a local file"}. That file lives on their Mac.`
+                            : `Loading ${pendingSource.title ?? "the shared source"}…`}
+                        </span>
+                        {pendingSource.kind === "file" && offeredFile && (
+                          /* The chip names the file and its size; clicking it
+                             IS the consent to a multi-GB write on this disk. */
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-compact"
+                            title="The host sends their copy over the session. It is verified, saved to the cache, and opens when done."
+                            onClick={() => { void fetchOfferedFile(); }}
+                          >
+                            {`Get "${offeredFile.name}" (${formatTransferSize(offeredFile.size)})`}
+                          </button>
+                        )}
+                        {pendingSource.kind === "file" && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-compact"
+                            title="Point at your own copy of this file"
+                            onClick={() => { void adoptPendingSource(); }}
+                          >
+                            Open my copy…
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

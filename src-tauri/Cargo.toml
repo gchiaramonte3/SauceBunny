@@ -46,6 +46,9 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # yt-dlp updater integrity: verify the release's SHA2-256SUMS entry before the
 # downloaded binary is made executable. (MIT OR Apache-2.0, RustCrypto.)
 sha2 = "0.10"
+# Tier C transfer verification. Already in the lock file as a transitive dep
+# of the iroh stack, so this adds zero new crates. MIT OR Apache-2.0.
+blake3 = "1"
 # Cloud AI (opt-in Claude/ChatGPT): the user's API key lives in the macOS
 # Keychain, never plaintext localStorage and never in the webview. keyring 2.x
 # ships the Apple keystore in its default features.

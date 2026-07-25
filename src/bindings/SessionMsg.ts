@@ -6,4 +6,4 @@ export type SessionMsg = { "kind": "hello", name: string, install: string, } | {
  * Host-stamped sender id + the presenter epoch it was sent under, so
  * lines from a superseded presenter can be ordered and discarded.
  */
-from: string, epoch: number, } | { "kind": "reviewOp", op: string, } | { "kind": "reviewDoc", doc: string, } | { "kind": "presence", name: string, position: number, } | { "kind": "sharing", from: string, on: boolean, } | { "kind": "reaction", from: string, emote: string, on: boolean, };
+from: string, epoch: number, } | { "kind": "reviewOp", op: string, } | { "kind": "reviewDoc", doc: string, } | { "kind": "presence", name: string, position: number, } | { "kind": "sharing", from: string, on: boolean, } | { "kind": "reaction", from: string, emote: string, on: boolean, } | { "kind": "offerFile", from: string, name: string, size: number, blake3: string, };

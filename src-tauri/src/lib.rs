@@ -228,6 +228,10 @@ pub fn run() {
             commands::session_leave,
             commands::session_broadcast,
             commands::session_send,
+            commands::session_offer_file,
+            commands::session_clear_offer,
+            commands::session_fetch_file,
+            commands::session_cancel_fetch,
         ])
         .setup(|app| {
             // Fit the main window to the screen at launch. The static conf
