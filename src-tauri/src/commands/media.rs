@@ -1147,6 +1147,74 @@ fn poster_vf(chosen: Option<f64>) -> String {
     }
 }
 
+/// The hash-keyed cache location of a source's poster JPEG. Keyed off
+/// (path, mtime, chosen-time bucket): re-importing the same file reuses the
+/// cached thumbnail, editing the file invalidates it, and each chosen poster
+/// time gets its own file (the representative auto-grab is bucket -1 — also
+/// distinct from the pre-r111 two-part key, so upgrading never reuses a stale
+/// black frame). Shared by the ffmpeg generator and the WebCodecs poster
+/// writer so both paths hit ONE cache. The `saucebunny-thumb-` prefix is what
+/// exempts these from the daily cache sweep.
+fn poster_cache_path(cache: &std::path::Path, input_path: &str, chosen: Option<f64>) -> PathBuf {
+    let mtime = std::fs::metadata(input_path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    use std::hash::{Hash, Hasher};
+    input_path.hash(&mut hasher);
+    mtime.hash(&mut hasher);
+    let time_bucket: i64 = chosen.map(|t| (t * 1000.0) as i64).unwrap_or(-1);
+    time_bucket.hash(&mut hasher);
+    let key = format!("{:016x}", hasher.finish());
+    cache.join(format!("saucebunny-thumb-{key}.jpg"))
+}
+
+/// Persist a poster JPEG the frontend already decoded (mediabunny/WebCodecs)
+/// into the SAME hash-keyed cache `generate_local_thumbnail` uses, returning
+/// the file path for an asset:// reference. Raw IPC body = the JPEG bytes;
+/// the source path rides percent-encoded in `x-source-path`, the chosen
+/// poster time (seconds) optionally in `x-time-seconds`. This replaced a
+/// session blob: URL that pinned the decoded JPEG for the app's lifetime and
+/// was persisted into recents, where it rendered as a broken image after
+/// relaunch (blob URLs die with the page).
+#[tauri::command]
+pub async fn save_poster_to_cache(
+    app: AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<String, crate::AppError> {
+    let enc = request
+        .headers()
+        .get("x-source-path")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| crate::AppError::internal("save_poster_to_cache: missing x-source-path header"))?;
+    let src = super::system::percent_decode_utf8(enc)?;
+    let chosen: Option<f64> = request
+        .headers()
+        .get("x-time-seconds")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|t| t.is_finite() && *t >= 0.0);
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(crate::AppError::internal(
+            "save_poster_to_cache: expected a raw body (pass the JPEG bytes as the invoke payload)",
+        ));
+    };
+    if bytes.is_empty() {
+        return Err(crate::AppError::internal("save_poster_to_cache: empty poster payload"));
+    }
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("app_cache_dir: {e}"))?;
+    std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
+    let out_path = poster_cache_path(&cache, &src, chosen);
+    std::fs::write(&out_path, bytes).map_err(|e| format!("write failed: {e}"))?;
+    Ok(out_path.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 pub async fn generate_local_thumbnail(
     app: AppHandle,
@@ -1162,32 +1230,13 @@ pub async fn generate_local_thumbnail(
         .app_cache_dir()
         .map_err(|e| format!("app_cache_dir: {e}"))?;
     std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
-    // Stable-per-file name keyed off (path, mtime). Re-importing the same
-    // file reuses the cached thumbnail; editing the file invalidates it.
-    let mtime = std::fs::metadata(&in_path)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
     // A chosen poster (valid, finite, ≥0) forces an exact-frame grab; anything
     // else is the representative auto-thumbnail.
     let chosen: Option<f64> = match args.time_seconds {
         Some(t) if t.is_finite() && t >= 0.0 => Some(t),
         _ => None,
     };
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    use std::hash::{Hash, Hasher};
-    args.input_path.hash(&mut hasher);
-    mtime.hash(&mut hasher);
-    // Fold the chosen time (bucketed to whole ms) into the key so each chosen
-    // poster gets its own cache file — and the representative grab (bucket -1)
-    // is distinct from any chosen time AND from the pre-r111 (path, mtime)-only
-    // key, so upgrading never reuses a stale black frame.
-    let time_bucket: i64 = chosen.map(|t| (t * 1000.0) as i64).unwrap_or(-1);
-    time_bucket.hash(&mut hasher);
-    let key = format!("{:016x}", hasher.finish());
-    let out_path = cache.join(format!("saucebunny-thumb-{key}.jpg"));
+    let out_path = poster_cache_path(&cache, &args.input_path, chosen);
     // Size-checked hit: a 0-byte file left by a failed run is a poison pill,
     // not a cache entry - delete and regenerate.
     match std::fs::metadata(&out_path) {

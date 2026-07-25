@@ -595,7 +595,7 @@ pub async fn write_raw_to_path(request: tauri::ipc::Request<'_>) -> Result<Strin
 /// Decode a percent-encoded UTF-8 string (the output of JS
 /// `encodeURIComponent`). Malformed escapes pass through as literal bytes;
 /// only invalid UTF-8 in the decoded result is an error.
-fn percent_decode_utf8(s: &str) -> Result<String, crate::AppError> {
+pub(crate) fn percent_decode_utf8(s: &str) -> Result<String, crate::AppError> {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;

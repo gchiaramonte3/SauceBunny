@@ -139,6 +139,9 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
         helpersRef.current.appendLog(asLogTag(e.payload.tag), "web-preview", e.payload.line);
       });
       unlistens.push(p, d, g);
+      // Cleanup during the awaits above saw an empty array — release what
+      // registered late (StrictMode hits this on every dev boot).
+      if (!mounted) { unlistens.forEach((u) => u()); unlistens.length = 0; }
     })();
     return () => { mounted = false; unlistens.forEach((u) => u()); };
   }, []);

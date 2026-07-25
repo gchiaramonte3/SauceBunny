@@ -789,7 +789,18 @@ export function Sidebar(props: Props) {
               <div className="cp-recent-group" key={g.lead.id}>
                 <div className="cp-recent" onClick={() => onPickRecent(g.lead)} title={g.lead.path}>
                   <div className="thumb">
-                    {g.lead.thumbnail && <img src={g.lead.thumbnail} alt="" referrerPolicy="no-referrer" />}
+                    {g.lead.thumbnail && (
+                      <img
+                        src={g.lead.thumbnail}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        // Recents persisted before posters became cache files
+                        // can carry a dead blob: URL (they die with the page);
+                        // break to the empty thumb square, not a broken-image
+                        // glyph.
+                        onError={(e) => e.currentTarget.classList.add("cp-thumb-dead")}
+                      />
+                    )}
                   </div>
                   <div className="body">
                     <div className="title" title={decodeHtmlEntities(g.lead.title)}>{decodeHtmlEntities(g.lead.title)}</div>

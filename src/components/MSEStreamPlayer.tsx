@@ -601,24 +601,40 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
           // path above didn't already establish the MIME.
           if (!mimeRef.current) {
             const input = new Input({ source: new UrlSource(path), formats: ALL_FORMATS });
+            // Parked in the ref so teardownPipeline can cancel an in-flight
+            // probe; the finally below releases OUR handle once the probe is
+            // done with it either way.
             probeInputRef.current = input;
-            const [vt, at, dur] = await Promise.all([
-              hasVideo ? input.getPrimaryVideoTrack() : Promise.resolve(null),
-              input.getPrimaryAudioTrack(),
-              input.computeDuration().catch(() => 0),
-            ]);
-            if (disposed || gen !== genRef.current) return;
-            const [vCodec, aCodec] = await Promise.all([
-              vt ? vt.getCodecParameterString() : Promise.resolve(null),
-              at ? at.getCodecParameterString() : Promise.resolve(null),
-            ]);
-            if (disposed || gen !== genRef.current) return;
-            mimeRef.current = `video/mp4; codecs="${[vCodec, aCodec].filter(Boolean).join(", ")}"`;
-            // Prefer the authoritative metadata duration; only trust the probe
-            // when metadata didn't give us one (the probe can read short).
-            totalDurationRef.current = knownDurationRef.current > 0
-              ? knownDurationRef.current
-              : (dur && isFinite(dur) ? dur : 0);
+            try {
+              const [vt, at, dur] = await Promise.all([
+                hasVideo ? input.getPrimaryVideoTrack() : Promise.resolve(null),
+                input.getPrimaryAudioTrack(),
+                input.computeDuration().catch(() => 0),
+              ]);
+              if (disposed || gen !== genRef.current) return;
+              const [vCodec, aCodec] = await Promise.all([
+                vt ? vt.getCodecParameterString() : Promise.resolve(null),
+                at ? at.getCodecParameterString() : Promise.resolve(null),
+              ]);
+              if (disposed || gen !== genRef.current) return;
+              mimeRef.current = `video/mp4; codecs="${[vCodec, aCodec].filter(Boolean).join(", ")}"`;
+              // Prefer the authoritative metadata duration; only trust the probe
+              // when metadata didn't give us one (the probe can read short).
+              totalDurationRef.current = knownDurationRef.current > 0
+                ? knownDurationRef.current
+                : (dur && isFinite(dur) ? dur : 0);
+            } finally {
+              // The probe's answers are copied into refs above — the demuxer
+              // and its byte cache have no further use. It used to sit parked
+              // until teardownPipeline, i.e. for the WHOLE SESSION on a web
+              // source played without an out-of-buffer seek (the Clip view
+              // never unmounts). Ownership check mirrors teardown's
+              // take-then-null, so whichever runs first disposes, never both.
+              if (probeInputRef.current === input) {
+                probeInputRef.current = null;
+                queueMicrotask(() => { void input.dispose(); });
+              }
+            }
           }
           const mime = mimeRef.current;
           const total = totalDurationRef.current;

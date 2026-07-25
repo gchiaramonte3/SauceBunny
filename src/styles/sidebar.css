@@ -512,6 +512,10 @@
   position: relative;
 }
 .cp-recent .thumb img { width: 100%; height: 100%; object-fit: cover; }
+/* A recent persisted before posters became cache files can carry a dead
+   blob: URL (they die with the page) - hide it so the empty thumb square
+   shows instead of a broken-image glyph. */
+.cp-recent .thumb img.cp-thumb-dead { display: none; }
 .cp-recent .body { flex: 1; min-width: 0; }
 .cp-recent .body .title {
   font-family: var(--font-sans);

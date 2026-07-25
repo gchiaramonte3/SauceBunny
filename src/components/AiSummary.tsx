@@ -154,8 +154,12 @@ export function AiSummary({
         if (e.payload.success) await refreshModels();
         else { setPhase("error"); setPhaseMsg(e.payload.error ?? "Download failed"); }
       }));
+      // Cleanup between the two awaits released the first listener and saw
+      // nothing else; release whatever registered after it. Cleanup empties
+      // the array so nothing here is ever released twice.
+      if (!mounted) { unlisteners.forEach((u) => u()); unlisteners.length = 0; }
     })();
-    return () => { mounted = false; unlisteners.forEach((u) => u()); };
+    return () => { mounted = false; unlisteners.forEach((u) => u()); unlisteners.length = 0; };
   }, [refreshModels]);
 
   const downloaded = useMemo(() => (models ?? []).filter((m) => m.downloaded), [models]);

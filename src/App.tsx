@@ -1680,6 +1680,16 @@ export default function App() {
         appendLog(asLogTag(e.payload.tag), "playback-prep", e.payload.line);
       });
       unlistens.push(a, b, c, d, f, g, h, i, j, k, l, m, jPhase, mPrep, nPrep);
+      // Cleanup that fired DURING the awaits above found an empty array and
+      // unregistered nothing — under StrictMode that leaked all 15 listeners
+      // on every dev boot. The handlers were inert (each starts with a
+      // `mounted` check) but still registered forever. Sweep them here; the
+      // registration order is load-bearing, so this stays a tail check
+      // rather than a Promise.all restructure.
+      if (!mounted) {
+        unlistens.forEach((u) => u());
+        unlistens.length = 0;
+      }
     })();
     return () => {
       mounted = false;
@@ -2635,12 +2645,24 @@ export default function App() {
               : null;
             if (blob) {
               if (sourceSeqRef.current !== seq) return;
-              // Object URLs are auto-revoked when the page unloads. For
-              // a thumbnail that lives for the session this is fine; the
-              // small leak (one URL per import) is bounded by recents
-              // and gets purged on app close.
-              const objectUrl = URL.createObjectURL(blob);
-              setMetadata((prev) => (prev ? { ...prev, thumbnail: objectUrl } : prev));
+              // Persist into the SAME hash-keyed thumb cache the ffmpeg path
+              // uses and reference it via asset://. The old session blob: URL
+              // pinned the decoded JPEG for the app's lifetime AND escaped
+              // into persisted recents/queue rows, where it rendered as a
+              // broken image after relaunch (blob URLs die with the page).
+              const posterPath = await invoke<string>(
+                "save_poster_to_cache",
+                new Uint8Array(await blob.arrayBuffer()),
+                {
+                  headers: {
+                    "x-source-path": encodeURIComponent(lf.path),
+                    ...(chosen != null ? { "x-time-seconds": String(chosen) } : {}),
+                  },
+                },
+              );
+              if (sourceSeqRef.current !== seq) return;
+              const { convertFileSrc } = await import("@tauri-apps/api/core");
+              setMetadata((prev) => (prev ? { ...prev, thumbnail: convertFileSrc(posterPath) } : prev));
               return;
             }
             // Step 2: ffmpeg fallback (legacy path).
@@ -4765,6 +4787,11 @@ export default function App() {
     (async () => {
       const bind = async (id: string, fn: () => void) => {
         const off = await listen(`menu:${id}`, () => { if (mounted) fn(); });
+        // Cleanup can run mid-Promise.all (this effect re-attaches whenever a
+        // handler dep changes): it iterates the array as-is, so a bind that
+        // resolves after that must release itself instead of pushing into a
+        // list nobody will read again.
+        if (!mounted) { off(); return; }
         unlistens.push(off);
       };
       await Promise.all([

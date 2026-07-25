@@ -623,6 +623,9 @@ export function SettingsModal(props: Props) {
         }
       });
       unlistens.push(a, b);
+      // Cleanup during the two awaits above saw an empty array — release the
+      // late registrations here (StrictMode hits this on every modal open).
+      if (!mounted) { unlistens.forEach((u) => u()); unlistens.length = 0; }
     })();
     return () => {
       mounted = false;

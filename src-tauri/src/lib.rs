@@ -170,6 +170,7 @@ pub fn run() {
             commands::prepare_local_for_playback,
             commands::extract_local_frame,
             commands::generate_local_thumbnail,
+            commands::save_poster_to_cache,
             commands::scan_library_folder,
             commands::scan_transcript_library,
             commands::rename_transcript,
