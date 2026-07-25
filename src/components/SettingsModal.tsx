@@ -476,7 +476,9 @@ export function SettingsModal(props: Props) {
       if (!path) return;
       const payload = {
         app: "sauce-bunny", kind: "settings", version: SETTINGS_EXPORT_VERSION,
-        defaults,
+        // The TURN password is Keychain-only (r140) - the export carries the
+        // field blanked so old-shape importers stay happy without the secret.
+        defaults: { ...defaults, turnPassword: "" },
         keybindings: loadKeybindings(),
         sections: loadJson<Record<string, boolean>>(SECTIONS_LS_KEY, {}),
         media: loadJson<Record<string, unknown>>(DEVICE_CHOICE_KEY, {}),
@@ -510,7 +512,7 @@ export function SettingsModal(props: Props) {
       const isObj = (v: unknown): v is Record<string, unknown> =>
         typeof v === "object" && v !== null && !Array.isArray(v);
       const wrote: string[] = [];
-      if (isObj(parsed.defaults)) { saveJson(DEFAULTS_LS_KEY, parsed.defaults); wrote.push("preferences"); }
+      if (isObj(parsed.defaults)) { saveJson(DEFAULTS_LS_KEY, { ...parsed.defaults, turnPassword: "" }); wrote.push("preferences"); }
       if (isObj(parsed.keybindings)) { saveJson(KEYBINDINGS_STORAGE_KEY, parsed.keybindings); wrote.push("shortcuts"); }
       if (isObj(parsed.sections)) { saveJson(SECTIONS_LS_KEY, parsed.sections); wrote.push("section layout"); }
       if (isObj(parsed.media)) { saveJson(DEVICE_CHOICE_KEY, parsed.media); wrote.push("devices"); }
@@ -814,7 +816,7 @@ export function SettingsModal(props: Props) {
                   <div className="cp-pane-row">
                     <div className="k">
                       TURN relay
-                      <span className="desc">Optional. Webcams connect direct or via STUN; a TURN server helps strict networks. Empty uses STUN only.</span>
+                      <span className="desc">Optional. Webcams connect direct or via STUN; a TURN server helps strict networks. Empty uses STUN only. The password is stored in the macOS Keychain and never included in settings exports.</span>
                     </div>
                     <div className="v" style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 320 }}>
                       <input className="cp-input" placeholder="turn:host:3478" value={defaults.turnUrl}

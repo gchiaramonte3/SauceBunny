@@ -232,7 +232,11 @@ export default function App() {
       // Co-review mesh TURN relay (Settings -> General); empty = STUN only.
       turnUrl: stored.turnUrl ?? "",
       turnUsername: stored.turnUsername ?? "",
-      turnPassword: stored.turnPassword ?? "",
+      // NEVER hydrated from localStorage: the password lives in the macOS
+      // Keychain (r140) and is loaded by the effect below. Pre-r140 installs
+      // that persisted it are migrated (and the stored copy stripped) there
+      // too. It used to ride settings-export files via the defaults object.
+      turnPassword: "",
       // Default off — diarization adds 10–60s per transcript and the
       // first-run model download is hundreds of MB. Opt-in via Sidebar.
       detectSpeakers: stored.detectSpeakers ?? false,
@@ -260,10 +264,50 @@ export default function App() {
   const setDefaults = useCallback((d: Defaults | ((prev: Defaults) => Defaults)) => {
     setDefaultsState((prev) => {
       const next = typeof d === "function" ? (d as (p: Defaults) => Defaults)(prev) : d;
-      saveJson(DEFAULTS_KEY, next);
+      // The TURN password is Keychain-only (r140): persist the shape with the
+      // secret blanked so localStorage (and anything that reads it, like the
+      // settings exporter) never carries it again.
+      saveJson(DEFAULTS_KEY, { ...next, turnPassword: "" });
       return next;
     });
   }, []);
+
+  // TURN password ⇄ Keychain (r140). On mount: migrate a pre-r140 localStorage
+  // copy into the Keychain (stripping the stored one), else hydrate from the
+  // Keychain. After that, edits to the field write through (debounced; empty
+  // clears the entry). The first tick is skipped so a mount with the
+  // still-empty default can't clear a real entry before hydration lands.
+  const turnPwReadyRef = useRef(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const legacy = loadJson<Record<string, unknown>>(DEFAULTS_KEY, {});
+        const legacyPw = typeof legacy.turnPassword === "string" ? legacy.turnPassword : "";
+        if (legacyPw) {
+          await invoke("set_turn_password", { password: legacyPw });
+          saveJson(DEFAULTS_KEY, { ...legacy, turnPassword: "" });
+          setDefaultsState((d) => ({ ...d, turnPassword: legacyPw }));
+        } else {
+          const pw = await invoke<string>("get_turn_password");
+          if (pw) setDefaultsState((d) => ({ ...d, turnPassword: pw }));
+        }
+      } catch {
+        // Keychain unavailable (locked, denied): the field still works for
+        // this session; nothing is persisted anywhere.
+      } finally {
+        turnPwReadyRef.current = true;
+      }
+    })();
+  }, []); // mount-only by design
+  useEffect(() => {
+    if (!turnPwReadyRef.current) return;
+    const t = window.setTimeout(() => {
+      invoke("set_turn_password", { password: defaults.turnPassword }).catch(() => {
+        /* surfaced implicitly: the field empties on next launch */
+      });
+    }, 600);
+    return () => window.clearTimeout(t);
+  }, [defaults.turnPassword]);
 
   // ── Editable keyboard shortcuts (Settings → Commands) ──
   // Overrides only; an action with no override uses its defaults. The keydown

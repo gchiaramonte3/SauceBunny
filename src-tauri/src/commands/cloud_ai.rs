@@ -38,6 +38,44 @@ pub fn set_api_key(provider: String, key: String) -> Result<(), AppError> {
         .map_err(|e| AppError::internal(format!("Couldn't save the key to the Keychain: {e}")))
 }
 
+// ── TURN relay credential (co-review) ───────────────────────────────
+// Same Keychain home as the AI keys, one deliberate difference: the frontend
+// CAN read this back. The RTCPeerConnection is built in the webview, so the
+// credential has to reach JS at session time — the point of moving it here is
+// that it no longer PERSISTS webview-side (it used to live in localStorage
+// defaults, which also leaked it into settings-export files).
+const TURN_ACCOUNT: &str = "turn-password";
+
+fn turn_entry() -> Result<keyring::Entry, AppError> {
+    keyring::Entry::new(KEYCHAIN_SERVICE, TURN_ACCOUNT)
+        .map_err(|e| AppError::internal(format!("Keychain unavailable: {e}")))
+}
+
+/// Store the TURN password; an empty/whitespace value clears it (idempotent).
+#[tauri::command]
+pub fn set_turn_password(password: String) -> Result<(), AppError> {
+    let p = password.trim();
+    if p.is_empty() {
+        return match turn_entry()?.delete_password() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(AppError::internal(format!("Couldn't clear the TURN password: {e}"))),
+        };
+    }
+    turn_entry()?
+        .set_password(p)
+        .map_err(|e| AppError::internal(format!("Couldn't save the TURN password to the Keychain: {e}")))
+}
+
+/// Read the TURN password back for the session's RTC config. Empty = none set.
+#[tauri::command]
+pub fn get_turn_password() -> Result<String, AppError> {
+    match turn_entry()?.get_password() {
+        Ok(p) => Ok(p),
+        Err(keyring::Error::NoEntry) => Ok(String::new()),
+        Err(e) => Err(AppError::internal(format!("Couldn't read the TURN password: {e}"))),
+    }
+}
+
 /// Forget a provider's key. Absent is success (idempotent).
 #[tauri::command]
 pub fn delete_api_key(provider: String) -> Result<(), AppError> {
