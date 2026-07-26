@@ -167,11 +167,22 @@ pub(crate) fn sidecar_path(name: &str) -> Result<PathBuf, crate::AppError> {
     }
 }
 
-/// Permissive URL validation — any http(s) URL with a real host is
-/// accepted. yt-dlp's per-site extractors (or its `generic` fallback for
-/// pages that just embed video) decide whether the source is actually
-/// usable. We only enforce the bare minimum so the rest of the pipeline
-/// gets a parseable URL instead of a malformed string.
+/// Source-URL validation for every path that hands a URL to yt-dlp.
+///
+/// Deliberately permissive about SITES — yt-dlp's per-site extractors (or its
+/// `generic` fallback for pages that just embed video) decide whether a source
+/// is usable, and second-guessing that list here would only break sources.
+///
+/// NOT permissive about ADDRESSES. A URL reaching this function is not always
+/// something the user typed: in a co-review session the presenter's
+/// `LoadSource` is fetched automatically by every guest, so a hostile (or
+/// merely careless) presenter could otherwise aim each guest's yt-dlp at that
+/// guest's OWN loopback services or LAN devices — with their browser cookie
+/// jar attached if they enabled the cookies setting. The proxy already had
+/// exactly the right check for this (`is_safe_upstream`: no loopback, RFC1918,
+/// link-local, unique-local, `.local`/`.localhost`, no embedded credentials),
+/// and it was simply never consulted here. One implementation, both callers,
+/// and the proxy's 16-URL hostile-input test now covers this path too.
 fn validate_source_url(url: &str) -> Result<(), crate::AppError> {
     let parsed =
         url::Url::parse(url).map_err(|_| crate::AppError::invalid("Not a valid URL"))?;
@@ -180,6 +191,11 @@ fn validate_source_url(url: &str) -> Result<(), crate::AppError> {
     }
     if parsed.host_str().unwrap_or("").is_empty() {
         return Err(crate::AppError::invalid("URL has no host"));
+    }
+    if !crate::stream_proxy::is_safe_upstream(url) {
+        return Err(crate::AppError::invalid(
+            "Sauce Bunny only opens public web addresses. That link points at this machine or your local network.",
+        ));
     }
     Ok(())
 }
@@ -391,5 +407,42 @@ mod tests {
     fn short_err_leaves_short_messages_alone() {
         assert_eq!(short_err("tiny"), "tiny");
         assert_eq!(short_err(""), "");
+    }
+}
+
+#[cfg(test)]
+mod source_url_tests {
+    use super::validate_source_url;
+
+    #[test]
+    fn public_video_urls_still_pass() {
+        for url in [
+            "https://www.youtube.com/watch?v=abc123",
+            "https://vimeo.com/12345",
+            "http://example.com/clip.mp4",
+            "https://v.redd.it/xyz/DASH_720.mp4",
+        ] {
+            assert!(validate_source_url(url).is_ok(), "should accept {url}");
+        }
+    }
+
+    #[test]
+    fn a_presenter_cannot_aim_a_guests_ytdlp_at_the_guests_own_machine() {
+        // Every one of these is auto-fetched by each guest when a co-review
+        // presenter sends LoadSource, with the guest's browser cookies
+        // attached if they enabled that setting. None may reach yt-dlp.
+        for url in [
+            "http://127.0.0.1:11434/api/tags",       // a local LLM server
+            "http://localhost:51314/v1/models",      // our own llama-server
+            "http://[::1]:8080/",                    // loopback v6
+            "http://192.168.1.1/cgi-bin/admin",      // the router
+            "http://10.0.0.5/nas/private.mp4",       // RFC1918
+            "http://169.254.169.254/latest/meta-data/", // link-local metadata
+            "http://nas.local/vault",                // mDNS
+            "http://user:pass@example.com/x.mp4",    // embedded credentials
+            "file:///etc/passwd",                    // not http(s)
+        ] {
+            assert!(validate_source_url(url).is_err(), "must refuse {url}");
+        }
     }
 }

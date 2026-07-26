@@ -191,7 +191,7 @@ pub fn start() -> std::io::Result<String> {
 /// machine/LAN), and never credential-bearing URLs. Hostnames that RESOLVE to
 /// private addresses are not caught (that needs DNS resolution here); the
 /// threat this closes is the renderer bouncing through ffmpeg to local ports.
-fn is_safe_upstream(url: &str) -> bool {
+pub(crate) fn is_safe_upstream(url: &str) -> bool {
     let Ok(parsed) = reqwest::Url::parse(url) else { return false };
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return false;

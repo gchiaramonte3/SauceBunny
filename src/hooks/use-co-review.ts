@@ -30,7 +30,7 @@ import { saveScreening } from "../lib/screening-store";
 import { getLastUserSeekAt, getPlayheadFrames } from "../lib/playhead-store";
 import { acceptTransport, createClockEstimator, expectedPosition } from "../lib/session-clock";
 import {
-  loadReview, saveReview, ensureVersion, applyReviewOp, mergeReviewDoc,
+  loadReview, saveReview, ensureVersion, applyReviewOp, attributeReviewOp, mergeReviewDoc,
   resolveByFingerprint, linkFingerprint, sanitizeDocForWire,
   commentMarkers as reviewMarkersOf, annotationsOf,
   loadReviewer, reviewerColorFor, initialsOf,
@@ -350,7 +350,9 @@ export function useCoReview({
     if (!sessionDocRef.current) pendingOpsRef.current.push(op);
     else setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
     recordOpInScreening(op);
-    sendSessionMsg({ kind: "reviewOp", op: JSON.stringify(op) });
+    // `from` is stamped by the HOST on relay; whatever we put here is
+    // overwritten, so send it empty rather than asserting an identity.
+    sendSessionMsg({ kind: "reviewOp", op: JSON.stringify(op), from: "" });
   }, [sendSessionMsg, recordOpInScreening]);
 
   // Latest-closure ref so the once-registered session:msg listener never stales.
@@ -470,7 +472,11 @@ export function useCoReview({
         return;
       case "reviewOp":
         try {
-          const op = JSON.parse(m.op) as ReviewOp;
+          // Attribute by the HOST-STAMPED sender id, never by what the
+          // payload claims: the op names its own author, and the relay is
+          // payload-agnostic, so trusting it let any peer sign review
+          // content (including the source verdict) as somebody else.
+          const op = attributeReviewOp(JSON.parse(m.op) as ReviewOp, nameForMember(m.from));
           setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
           // Everyone's notes belong to the screening, not just ours.
           recordOpRef.current(op);

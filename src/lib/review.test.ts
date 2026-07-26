@@ -10,7 +10,7 @@ import {
   buildComment, insertComment, setResolved, setLike, applyReviewOp, mergeReviewDoc,
   inverseReviewOps, restampReviewOp,
   annotationHasContent, annotationsOf, labelSuffix, sanitizeDocForWire,
-  type ReviewDoc, type ReviewComment, type AnnotationStrokes,
+  type ReviewDoc, type ReviewComment, type AnnotationStrokes, attributeReviewOp,
 } from "./review";
 
 // Fixture shims over the live primitives - the one-shot legacy wrappers
@@ -618,5 +618,46 @@ describe("wire sanitization (sanitizeDocForWire)", () => {
     sanitizeDocForWire(withV, "fp-x");
     expect(withV.sourceKey).toBe("/Users/alice/cut.mov"); // sessionDoc keeps the real key
     expect(withV.versions[0].path).toBe("/Users/alice/cut.mov");
+  });
+});
+
+describe("attributeReviewOp — a peer cannot sign as somebody else (r148)", () => {
+  const stolen = { t: "status" as const, versionId: "v1", state: "approved" as const, reviewer: "Gasper", at: 100 };
+
+  it("rewrites a forged verdict to whoever the host says sent it", () => {
+    // The hole: ReviewOp names its own author and the relay is payload
+    // agnostic, so a guest could stamp the source-level verdict as the host.
+    const fixed = attributeReviewOp(stolen, "Nika");
+    expect(fixed).toMatchObject({ t: "status", reviewer: "Nika", state: "approved" });
+  });
+
+  it("rewrites a forged comment author and a forged reaction", () => {
+    const comment = {
+      id: "c1", versionId: "v1", parentId: null, timeStart: 1, timeEnd: null,
+      body: "ship it", resolved: false, author: "Gasper",
+      createdAt: 1, updatedAt: 1, annotation: null,
+    };
+    expect(attributeReviewOp({ t: "add", comment }, "Nika"))
+      .toMatchObject({ comment: { author: "Nika", body: "ship it" } });
+    expect(attributeReviewOp({ t: "like", id: "c1", name: "Gasper", liked: true }, "Nika"))
+      .toMatchObject({ name: "Nika" });
+  });
+
+  it("leaves an honest op untouched (same object, no churn)", () => {
+    const honest = { ...stolen, reviewer: "Nika" };
+    expect(attributeReviewOp(honest, "Nika")).toBe(honest);
+  });
+
+  it("leaves an UNSTAMPED op alone rather than dropping the sender's work", () => {
+    // An older peer sends no `from`. Unattributed is not forged; discarding
+    // it would silently lose that person's notes.
+    expect(attributeReviewOp(stolen, "")).toBe(stolen);
+  });
+
+  it("passes through ops that carry no identity at all", () => {
+    const edit = { t: "edit" as const, id: "c1", body: "x", at: 5 };
+    const del = { t: "del" as const, id: "c1" };
+    expect(attributeReviewOp(edit, "Nika")).toBe(edit);
+    expect(attributeReviewOp(del, "Nika")).toBe(del);
   });
 });

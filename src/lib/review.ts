@@ -728,3 +728,40 @@ export function reviewToMarkdown(doc: ReviewDoc, title = "Review"): string {
 
 
 
+
+/**
+ * Rewrite the identity fields of a REMOTE review op to the name the host
+ * attributes to its sender.
+ *
+ * Why this exists: a ReviewOp names its own author in the payload
+ * (`comment.author`, `like.name`, `status.reviewer`), and the relay treats
+ * the payload as opaque. So before the host began stamping the sending
+ * connection's member id, any peer could post, edit or delete review content
+ * — or stamp the source-level verdict — signed as somebody else. The wire id
+ * is the only trustworthy identity in the room, so the receiver overwrites
+ * what the payload claims with the name that id resolves to.
+ *
+ * `senderName` empty (an older peer that sends no `from`) leaves the op
+ * untouched: unattributed is not the same as forged, and dropping it would
+ * silently lose that person's notes.
+ *
+ * Ops with no identity field (`edit`, `del`, `resolve`, reply edits/deletes)
+ * pass through unchanged — they address an existing comment by id, and who
+ * MAY perform them is an authorization question this room does not model
+ * (everyone present can edit the shared doc, exactly like a shared document).
+ */
+export function attributeReviewOp(op: ReviewOp, senderName: string): ReviewOp {
+  if (!senderName) return op;
+  switch (op.t) {
+    case "add":
+      return op.comment.author === senderName
+        ? op
+        : { ...op, comment: { ...op.comment, author: senderName } };
+    case "like":
+      return op.name === senderName ? op : { ...op, name: senderName };
+    case "status":
+      return op.reviewer === senderName ? op : { ...op, reviewer: senderName };
+    default:
+      return op;
+  }
+}

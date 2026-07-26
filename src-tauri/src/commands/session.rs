@@ -186,7 +186,21 @@ pub enum SessionMsg {
     /// A shared review mutation. `op` is a frontend-serialized JSON string
     /// (a ReviewOp) — OPAQUE to Rust, which only relays it. Flows
     /// peer→host→(other peers + host frontend), and host→all peers.
-    ReviewOp { op: String },
+    ///
+    /// `from` is HOST-STAMPED with the sending connection's member id, the
+    /// same way Rtc/Sharing/Reaction are. Without it this message — the one
+    /// carrying the actual product output — was the only unauthenticated
+    /// kind in the protocol: the op payload names its own author, so any
+    /// peer could post, edit, or delete review content, or stamp the
+    /// source-level verdict, signed as somebody else. Receivers resolve the
+    /// display name from this id instead of trusting the payload.
+    /// `#[serde(default)]` keeps an older peer's unstamped op parseable
+    /// (it simply arrives unattributed) rather than dropping it.
+    ReviewOp {
+        op: String,
+        #[serde(default)]
+        from: String,
+    },
     /// Full review-doc snapshot (opaque JSON string) — host→peers, sent when a
     /// peer joins so the newcomer converges on the shared doc.
     ReviewDoc { doc: String },
@@ -593,6 +607,7 @@ pub async fn session_broadcast(
             SessionMsg::LoadSource { from: "m0".into(), source_kind, url, fingerprint, title, duration, review_key },
         SessionMsg::SourceStatus { state, detail, .. } =>
             SessionMsg::SourceStatus { from: "m0".into(), state, detail },
+        SessionMsg::ReviewOp { op, .. } => SessionMsg::ReviewOp { op, from: "m0".into() },
         SessionMsg::Transport { playing, position, rate, at_ms, seq, .. } =>
             SessionMsg::Transport {
                 playing, position, rate, at_ms, seq, from: "m0".into(),
@@ -876,7 +891,10 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
                 }
                 if let Ok(msg) = parsed {
                     match msg {
-                        SessionMsg::ReviewOp { .. } => {
+                        SessionMsg::ReviewOp { op, .. } => {
+                            // Stamp the connection's own member id — a peer
+                            // cannot sign review content as anybody else.
+                            let msg = SessionMsg::ReviewOp { op, from: member.clone() };
                             let _ = app.emit("session:msg", &msg);
                             relay_to_others(&shared, id, &msg).await;
                         }
@@ -2234,8 +2252,24 @@ mod tests {
     }
 
     #[test]
+    fn an_unstamped_review_op_from_an_older_peer_still_parses() {
+        // #[serde(default)] is what keeps a build that predates the identity
+        // stamp usable: its ops arrive unattributed (the receiver then leaves
+        // the payload's own author alone) rather than failing to parse and
+        // silently losing that person's notes.
+        let line = r#"{"kind":"reviewOp","op":"{}"}"#;
+        match serde_json::from_str::<SessionMsg>(line).unwrap() {
+            SessionMsg::ReviewOp { op, from } => {
+                assert_eq!(op, "{}");
+                assert_eq!(from, "", "missing stamp must read as unattributed, not fail");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
     fn phase2_variant_tags_and_round_trip() {
-        let op = serde_json::to_string(&SessionMsg::ReviewOp { op: "{}".into() }).unwrap();
+        let op = serde_json::to_string(&SessionMsg::ReviewOp { op: "{}".into(), from: "m2".into() }).unwrap();
         assert!(op.contains(r#""kind":"reviewOp""#), "json: {op}");
         let doc = serde_json::to_string(&SessionMsg::ReviewDoc { doc: "{}".into() }).unwrap();
         assert!(doc.contains(r#""kind":"reviewDoc""#), "json: {doc}");
@@ -2245,7 +2279,10 @@ mod tests {
         // Round-trip a relayed op line.
         let back: SessionMsg = serde_json::from_str(op.trim()).unwrap();
         match back {
-            SessionMsg::ReviewOp { op } => assert_eq!(op, "{}"),
+            SessionMsg::ReviewOp { op, from } => {
+                assert_eq!(op, "{}");
+                assert_eq!(from, "m2", "the host stamp must survive the round trip");
+            }
             _ => panic!("wrong variant"),
         }
     }
