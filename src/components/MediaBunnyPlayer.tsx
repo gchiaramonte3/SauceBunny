@@ -3,7 +3,7 @@ import {
 } from "react";
 import {
   Input, ALL_FORMATS,
-  CanvasSink, AudioBufferSink,
+  CanvasSink, AudioBufferSink, EncodedPacketSink,
   type InputVideoTrack, type InputAudioTrack, type WrappedCanvas,
 } from "mediabunny";
 import { mediabunnySource } from "../lib/mediabunny-source";
@@ -21,6 +21,16 @@ const ANCHOR_FALLBACK_MS = 1000;
  *  considered over and the decode pipelines are rebuilt. Matches
  *  LocalMediaPlayer's settle so the two local engines feel the same. */
 const SCRUB_SETTLE_MS = 200;
+/** Fast-drag detector: seeks landing closer together in time than this and
+ *  farther apart in media than FAST_SCRUB_MIN_JUMP_S get KEYFRAME previews
+ *  (one decode each) instead of exact frames (keyframe + forward-walk, up to
+ *  a whole GOP of hidden decodes per painted frame). */
+const FAST_SCRUB_GAP_MS = 160;
+const FAST_SCRUB_MIN_JUMP_S = 0.35;
+/** After the last seek of a fast drag, decode the EXACT frame under the
+ *  cursor once the hand rests (the NLE settle). */
+const FAST_SCRUB_EXACT_MS = 170;
+
 /** Audio-scrub blip length (s). Long enough to hear a syllable at a slow
  *  drag; a fast drag supersedes it long before it ends, which is what makes
  *  the classic NLE scrub chatter. */
@@ -157,6 +167,13 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
   const scrubBlipRef = useRef<{ nodes: AudioBufferSourceNode[]; env: GainNode } | null>(null);
   /** Latest-wins decoder for scrub BLIPS (audio twin of scrubPumpRef). */
   const scrubAudioPumpRef = useRef<ScrubPump | null>(null);
+  /** Keyframe index over the video track (fast-scrub previews). */
+  const keyPacketSinkRef = useRef<EncodedPacketSink | null>(null);
+  /** Fast-drag state: last request (for velocity), current mode, and the
+   *  trailing exact-decode timer. */
+  const scrubLastReqRef = useRef<{ t: number; at: number } | null>(null);
+  const scrubFastRef = useRef(false);
+  const scrubExactTimerRef = useRef(0);
 
   // Driving a setState for the visible play/pause UI on audio-only mode.
   const [isPlaying, setIsPlaying] = useState(false);
@@ -229,8 +246,19 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       const gen = genRef.current;
       const sink = videoSinkRef.current;
       if (!sink) return;
+      let decodeAt = target;
+      if (scrubFastRef.current && keyPacketSinkRef.current) {
+        // Fast drag: paint the keyframe at-or-before the cursor. Decoding a
+        // keyframe timestamp needs no forward walk, so preview rate stops
+        // depending on the source's GOP length. The trailing settle pass
+        // (seekTo) repaints the exact frame once the hand rests.
+        try {
+          const pkt = await keyPacketSinkRef.current.getKeyPacket(target, { verifyKeyPackets: false });
+          if (pkt) decodeAt = pkt.timestamp;
+        } catch { /* fall back to the exact decode */ }
+      }
       let wrapped: WrappedCanvas | null = null;
-      try { wrapped = await sink.getCanvas(target); }
+      try { wrapped = await sink.getCanvas(decodeAt); }
       catch { return; }
       if (gen === genRef.current && wrapped) drawCanvas(wrapped.canvas);
     });
@@ -306,6 +334,11 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     scrubPumpRef.current?.cancel();
     scrubAudioPumpRef.current?.cancel();
     stopScrubBlip();
+    if (scrubExactTimerRef.current) {
+      window.clearTimeout(scrubExactTimerRef.current);
+      scrubExactTimerRef.current = 0;
+    }
+    scrubFastRef.current = false;
     for (const node of scheduledRef.current) {
       try { node.stop(); } catch { /* already stopped */ }
       try { node.disconnect(); } catch { /* ignore */ }
@@ -591,6 +624,27 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     seekTo: (s: number) => {
       const clamped = Math.max(0, Math.min(durationRef.current, s));
       const wasPlaying = playingRef.current;
+      // Fast-drag detection: closely-spaced seeks covering real media
+      // distance switch the preview pump to keyframe mode (one decode per
+      // painted frame). The trailing timer decodes the EXACT resting frame
+      // once seeks stop, so precision returns the moment the hand does.
+      {
+        const now = performance.now();
+        const last = scrubLastReqRef.current;
+        scrubLastReqRef.current = { t: clamped, at: now };
+        scrubFastRef.current = !!last
+          && now - last.at < FAST_SCRUB_GAP_MS
+          && Math.abs(clamped - last.t) > FAST_SCRUB_MIN_JUMP_S;
+        if (scrubExactTimerRef.current) window.clearTimeout(scrubExactTimerRef.current);
+        if (scrubFastRef.current) {
+          scrubExactTimerRef.current = window.setTimeout(() => {
+            scrubExactTimerRef.current = 0;
+            scrubFastRef.current = false;
+            const rest = scrubLastReqRef.current;
+            if (rest) scrubPumpRef.current?.request(rest.t);
+          }, FAST_SCRUB_EXACT_MS);
+        }
+      }
       startMediaTimeRef.current = clamped;
       // Via the ref, like the 100ms tick and the shuttle loop: this handle is
       // built with [] deps, so calling the prop directly would publish through
@@ -812,6 +866,10 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
             onError?.(`[WEBCODECS_UNSUPPORTED] ProRes is 10-bit; WKWebView can't paint it to a canvas`);
             return;
           }
+          // Packet-level keyframe lookup: lets a fast drag snap its preview
+          // to the keyframe at-or-before the cursor, ONE decode per painted
+          // frame instead of a keyframe-to-target walk.
+          keyPacketSinkRef.current = new EncodedPacketSink(vt);
           videoSinkRef.current = new CanvasSink(vt, {
             poolSize: 4,
             // Scrub latency: `optimizeForLatency` tells WebCodecs to emit each

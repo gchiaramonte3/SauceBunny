@@ -1,7 +1,7 @@
 import {
   forwardRef, memo, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
-import { Input, UrlSource, CanvasSink, ALL_FORMATS } from "mediabunny";
+import { Input, UrlSource, CanvasSink, EncodedPacketSink, ALL_FORMATS } from "mediabunny";
 import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle } from "./player-handle";
 import { base64UrlEncode } from "../lib/stream-proxy";
@@ -171,6 +171,12 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   // canvas — instant + every frame, vs the <video>'s laggy native seek.
   // Hidden again once the real video shows a frame at the new position.
   const previewSinkRef = useRef<CanvasSink | null>(null);
+  /** Keyframe index over the preview input (fast-drag snap). */
+  const previewKeySinkRef = useRef<EncodedPacketSink | null>(null);
+  /** Fast-drag mode for the preview + its velocity/settle bookkeeping. */
+  const previewFastRef = useRef(false);
+  const previewLastReqRef = useRef<{ t: number; at: number } | null>(null);
+  const previewExactTimerRef = useRef(0);
   const previewInputRef = useRef<Input | null>(null);
   const previewTargetRef = useRef<number | null>(null);
   const previewBusyRef = useRef(false);
@@ -252,6 +258,22 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       // listeners hide it once the real video catches up post-gesture.
       // Peer streams skip it: no random access on the raw route.
       if (!disableScrubPreviewRef.current) {
+        // Fast-drag detection (mirrors MediaBunnyPlayer): closely-spaced
+        // seeks covering real distance preview KEYFRAMES; a trailing pass
+        // decodes the exact resting frame.
+        const nowMs = performance.now();
+        const last = previewLastReqRef.current;
+        previewLastReqRef.current = { t: target, at: nowMs };
+        previewFastRef.current = !!last && nowMs - last.at < 160 && Math.abs(target - last.t) > 0.35;
+        if (previewExactTimerRef.current) window.clearTimeout(previewExactTimerRef.current);
+        if (previewFastRef.current) {
+          previewExactTimerRef.current = window.setTimeout(() => {
+            previewExactTimerRef.current = 0;
+            previewFastRef.current = false;
+            const rest = previewLastReqRef.current;
+            if (rest) requestPreviewRef.current?.(rest.t);
+          }, 170);
+        }
         setScrubPreview(true);
         requestPreviewRef.current?.(target);
       }
@@ -475,6 +497,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             if (disposed || !vt || !(await vt.canDecode())) return null;
             const sink = new CanvasSink(vt, { poolSize: 2 });
             previewSinkRef.current = sink;
+            // Keyframe index for fast drags: decoding a keyframe timestamp
+            // needs ONE ranged fetch + one decode, vs keyframe + a forward
+            // walk of fetches for an exact mid-GOP frame. Over the network
+            // that walk is the whole scrub lag.
+            previewKeySinkRef.current = new EncodedPacketSink(vt);
             return sink;
           } catch {
             return null;
@@ -493,7 +520,13 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         while (previewTargetRef.current != null && !disposed) {
           const t = previewTargetRef.current;
           previewTargetRef.current = null;
-          const wrapped = await sink.getCanvas(Math.max(0, t)).catch(() => null);
+          let decodeAt = Math.max(0, t);
+          const keySink = previewKeySinkRef.current;
+          if (previewFastRef.current && keySink) {
+            const pkt = await keySink.getKeyPacket(decodeAt, { verifyKeyPackets: false }).catch(() => null);
+            if (pkt) decodeAt = pkt.timestamp;
+          }
+          const wrapped = await sink.getCanvas(decodeAt).catch(() => null);
           if (!wrapped) continue;
           const dst = scrubCanvasRef.current;
           if (dst) {
@@ -845,6 +878,13 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       previewTargetRef.current = null;
       previewBusyRef.current = false;
       previewSinkRef.current = null;
+      previewKeySinkRef.current = null;
+      previewFastRef.current = false;
+      previewLastReqRef.current = null;
+      if (previewExactTimerRef.current) {
+        window.clearTimeout(previewExactTimerRef.current);
+        previewExactTimerRef.current = 0;
+      }
       const previewInput = previewInputRef.current;
       previewInputRef.current = null;
       if (previewInput) queueMicrotask(() => { void previewInput.dispose(); });

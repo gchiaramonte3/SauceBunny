@@ -60,6 +60,9 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
   const scrubbingRef = useRef(false);
   const wasPlayingRef = useRef(false);
   const settleTimerRef = useRef(0);
+  /** Exact target of the newest seek; the settle re-seeks to it precisely
+   *  after fastSeek keyframe previews. */
+  const lastSeekTargetRef = useRef(0);
   const retriedLoadRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
@@ -112,7 +115,17 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
         wasPlayingRef.current = !el.paused;
         if (!el.paused) { try { el.pause(); } catch { /* ignore */ } }
       }
-      el.currentTime = target;
+      // Mid-drag seeks use fastSeek when the engine has it: WebKit lands on
+      // the nearest keyframe without the exact-frame walk, so long-GOP files
+      // preview at drag speed. The settle below re-seeks EXACTLY (plain
+      // currentTime) once the hand rests, so precision is unchanged.
+      const canFastSeek = typeof (el as HTMLMediaElement & { fastSeek?: (t: number) => void }).fastSeek === "function";
+      if (!gestureStart && canFastSeek) {
+        try { (el as HTMLMediaElement & { fastSeek: (t: number) => void }).fastSeek(target); }
+        catch { el.currentTime = target; }
+      } else {
+        el.currentTime = target;
+      }
       // One line per GESTURE, not per seek. A drag fires this once per vsync and
       // every log line is App state, so this was a full App re-render per drag
       // frame — the one thing on the scrub path that still re-rendered the tree.
@@ -121,10 +134,17 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
         onDiagRef.current?.("info",
           `seek → ${target.toFixed(1)}s (file duration ${(el.duration || 0).toFixed(1)}s, landed ${el.currentTime.toFixed(1)}s)`);
       }
+      lastSeekTargetRef.current = target;
       if (settleTimerRef.current) window.clearTimeout(settleTimerRef.current);
       settleTimerRef.current = window.setTimeout(() => {
         settleTimerRef.current = 0;
         scrubbingRef.current = false;
+        const m = mediaRef.current;
+        // fastSeek previews land on keyframes; the gesture's RESTING frame
+        // must be exact, so re-seek precisely before resuming.
+        if (m && Math.abs(m.currentTime - lastSeekTargetRef.current) > 0.001) {
+          try { m.currentTime = lastSeekTargetRef.current; } catch { /* ignore */ }
+        }
         if (wasPlayingRef.current) mediaRef.current?.play().catch(() => { /* ignore */ });
       }, 200);
     },
