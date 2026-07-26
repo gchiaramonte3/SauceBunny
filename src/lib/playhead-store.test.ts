@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   getPlayheadFrames,
+  getPlayheadSeconds,
   playheadFramesToSeconds,
   setPlayheadFrames,
   subscribePlayhead,
@@ -95,5 +96,45 @@ describe("playheadFramesToSeconds", () => {
     const derived = playheadFramesToSeconds(frames, r);
     expect(derived).toBeLessThanOrEqual(raw);
     expect(raw - derived).toBeLessThan(1 / r);
+  });
+
+  describe("getPlayheadSeconds (the action-time read)", () => {
+    it("agrees with the hook's snapshot formula", () => {
+      // If these ever diverge, a mark taken from a handler lands on a
+      // different frame than the one the composer was showing when it was
+      // clicked. Same function underneath; this pins that.
+      for (const fps of [23.976, 24, 25, 29.97, 30, 59.94, 60]) {
+        for (const f of [0, 1, 47, 1234, 99999]) {
+          setPlayheadFrames(f);
+          expect(getPlayheadSeconds(fps)).toBe(playheadFramesToSeconds(f, fps));
+        }
+      }
+    });
+
+    it("returns null when inactive, so a mark cannot be stamped at 0:00", () => {
+      // The whole reason the seconds shape is nullable. A hidden tab or a
+      // source-less panel must refuse the mark, not quietly claim frame 0.
+      setPlayheadFrames(500);
+      expect(getPlayheadSeconds(30, false)).toBeNull();
+      expect(getPlayheadSeconds(30, true)).toBeCloseTo(500 / 30, 10);
+    });
+
+    it("reads the CURRENT value, not one captured at subscribe time", () => {
+      // The point of an action-time reader: a handler created on an early
+      // render must still see where the playhead is when the user clicks.
+      const handler = () => getPlayheadSeconds(30);
+      setPlayheadFrames(30);
+      expect(handler()).toBe(1);
+      setPlayheadFrames(90);
+      expect(handler()).toBe(3);
+    });
+
+    it("does not subscribe, so calling it cannot trigger a render", () => {
+      let ticks = 0;
+      const off = subscribePlayhead(() => { ticks += 1; });
+      for (let i = 0; i < 100; i += 1) getPlayheadSeconds(30);
+      expect(ticks).toBe(0);
+      off();
+    });
   });
 });

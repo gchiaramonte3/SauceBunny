@@ -10,8 +10,15 @@ import { useSyncExternalStore } from "react";
  * this module, and only the handful of components that actually paint it
  * subscribe (via `useSyncExternalStore`): the Transport timecode readout, the
  * Timeline cursor, the TranscriptViewer karaoke highlight, the CaptionOverlay
- * cue lookup, and the annotation proximity fade. Everything else in the App
- * tree stops re-rendering on playback ticks entirely.
+ * cue lookup, the annotation proximity fade, and the review composer (its
+ * "Comment at 1:23" placeholder and the range pill's following edge).
+ * Everything else in the App tree stops re-rendering on playback ticks
+ * entirely.
+ *
+ * "Only what paints it" means the SMALLEST component that paints it. ReviewPanel
+ * subscribed at its own top for a value the composer used, and paid for it by
+ * re-rendering the whole thread list every frame; the fix was to push the
+ * subscription down rather than to memoize the rows above it.
  *
  * Canonical unit: integer FRAMES at the source fps — exactly the quantization
  * the old `playheadFrames` state used (`Math.floor(seconds × fps)` on the way
@@ -105,6 +112,24 @@ export function playheadFramesToSeconds(frames: number, fps: number): number {
 /** Live playhead in frames — re-renders the caller on every tick. */
 export function usePlayheadFrames(): number {
   return useSyncExternalStore(subscribePlayhead, getPlayheadFrames);
+}
+
+/**
+ * Playhead in seconds, read at ACTION time. The counterpart to
+ * `getPlayheadFrames` for the handlers that want the seconds shape, including
+ * the `null while inactive` rule so a mark taken with no playable source is
+ * refused rather than silently stamped at 0:00.
+ *
+ * This exists so a component does not have to subscribe (and therefore
+ * re-render 60×/s) just to have a value ready for a click handler. That was
+ * exactly ReviewPanel's mistake: it took `usePlayheadSeconds` at the top and
+ * then used the result almost entirely inside mark-in/mark-out/submit
+ * handlers, so every comment row in the thread list re-rendered every frame
+ * of playback to serve four functions that could have read the value when
+ * they fired.
+ */
+export function getPlayheadSeconds(fps: number, active = true): number | null {
+  return active ? playheadFramesToSeconds(playheadFrames, fps) : null;
 }
 
 /**

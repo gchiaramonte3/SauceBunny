@@ -8,7 +8,7 @@ import type { DictateDoneEvent, DictateLevelEvent, DictatePartialEvent } from ".
 import { DictationWave } from "./DictationWave";
 import { EmojiPicker } from "./EmojiPicker";
 import { IconDownload, IconRange } from "./Icons";
-import { usePlayheadSeconds } from "../lib/playhead-store";
+import { getPlayheadSeconds, usePlayheadSeconds } from "../lib/playhead-store";
 import { secondsToHms, secondsToTc } from "../lib/timecode";
 import { loadJson, saveJson } from "../lib/storage";
 import { formatError } from "../lib/error-format";
@@ -16,7 +16,7 @@ import { appUndo } from "../lib/undo";
 import {
   loadReview, saveReview, ensureVersion,
   buildComment, insertComment, editComment, deleteComment, editReply, removeReply,
-  setResolved, setLike, reactionsOf, rootComments, repliesOf, openCount,
+  setResolved, setLike, reactionsOf, rootComments, openCount,
   applyReviewOp, inverseReviewOps, restampReviewOp,
   reviewToMarkdown,
   avatarColor, initialsOf, loadReviewer, AVATAR_COLORS, AUTHOR_KEY, AUTHOR_COLOR_KEY, REVIEW_CHANGED_EVENT,
@@ -61,7 +61,7 @@ function loadMarkerSettings(fps: number): MarkerExportSettings {
  * threaded comments anchored to the player's playhead, click-to-seek, resolve,
  * and a per-version approval status. All state is local (localStorage, keyed per
  * source); no server, no accounts. Reuses the drawer's existing playhead
- * (`currentSec`) + seek (`onSeek`) — the same wiring the transcript tab uses.
+ * (the playhead store) + seek (`onSeek`) — the same wiring the transcript tab uses.
  *
  * ReviewPanel itself is a thin orchestrator: it owns state + handlers and
  * composes three sibling presentational pieces — ReviewToolbar, ReviewComposer,
@@ -128,6 +128,10 @@ function Avatar({ name, size = 30, color }: { name: string; size?: number; color
     </span>
   );
 }
+
+/** Shared empty replies array. A fresh `[]` per render would give every
+ *  reply-less root a new prop identity on every tick, for nothing. */
+const NO_REPLIES: ReviewComment[] = [];
 
 export function ReviewPanel({
   sourceKey,
@@ -197,11 +201,20 @@ export function ReviewPanel({
   sessionDoc?: ReviewDoc | null;
   onSessionOp?: (op: ReviewOp) => void;
 }) {
-  // Live playhead (seconds) from the store — re-renders per tick while the
-  // Review tab is up, exactly like the old 60Hz currentSec prop, so the
-  // composer timestamp and the range-draft's playhead-following end keep
-  // their cadence. Null while inactive (tab hidden / no source).
-  const currentSec = usePlayheadSeconds(fps, playheadActive);
+  // NOTE: this component deliberately does NOT subscribe to the playhead at
+  // the top. It used to, and the cost was the whole thread list — every
+  // comment row, every reply, unmemoized — re-rendering 60×/s for the entire
+  // duration of playback. What actually wanted the live value was the
+  // composer's "Comment at 1:23" placeholder and the range band's following
+  // edge; everything else was mark-in, mark-out, tap and submit, which are
+  // handlers and can read the value when they fire. That is the store's own
+  // documented rule (see the cadence contract in playhead-store.ts), and this
+  // file was the one place breaking it.
+  //
+  // So: handlers call `getPlayheadSeconds` at action time, the composer
+  // subscribes for itself, and the only render-time subscription left up here
+  // is the narrow one below, live for as long as a range edge is armed.
+  const playheadAt = () => getPlayheadSeconds(fps, playheadActive);
   const [doc, setDoc] = useState<ReviewDoc | null>(null);
   const [sort, setSort] = useState<CommentSort>("time");
   const [text, setText] = useState("");
@@ -247,8 +260,8 @@ export function ReviewPanel({
   const clearRange = () => { setRangeIn(null); setRangeOut(null); };
   const markRangeIn = () => {
     if (!ensureNamed()) return;
-    if (currentSec == null) return; // no playable playhead — a mark at 0:00 would be a lie
-    const t = currentSec;
+    const t = playheadAt();
+    if (t == null) return; // no playable playhead — a mark at 0:00 would be a lie
     if (rangeOut == null) { setRangeIn(t); return; }          // IDLE / IN-ARMED: (re)arm IN
     if (rangeIn == null) {                                    // OUT-ARMED: complete
       const a = Math.min(t, rangeOut), b = Math.max(t, rangeOut);
@@ -262,8 +275,8 @@ export function ReviewPanel({
   };
   const markRangeOut = () => {
     if (!ensureNamed()) return;
-    if (currentSec == null) return; // no playable playhead — a mark at 0:00 would be a lie
-    const t = currentSec;
+    const t = playheadAt();
+    if (t == null) return; // no playable playhead — a mark at 0:00 would be a lie
     if (rangeIn == null) { setRangeOut(t); return; }          // IDLE / OUT-ARMED: (re)arm OUT
     if (rangeOut == null) {                                   // IN-ARMED: complete
       const a = Math.min(rangeIn, t), b = Math.max(rangeIn, t);
@@ -278,8 +291,9 @@ export function ReviewPanel({
   // Composer button keeps its tap cycle: arm IN → complete → re-arm.
   const tapRange = () => {
     if (rangeIn != null && rangeOut != null) {                // SET → re-arm
-      if (!ensureNamed() || currentSec == null) return;
-      setRangeIn(currentSec); setRangeOut(null);
+      const t = playheadAt();
+      if (!ensureNamed() || t == null) return;
+      setRangeIn(t); setRangeOut(null);
     } else if (rangeIn != null) markRangeOut();               // IN-ARMED → complete
     else markRangeIn();                                       // IDLE / OUT-ARMED
   };
@@ -292,7 +306,12 @@ export function ReviewPanel({
   // it re-rendered the whole App tree at source-fps. Follow the playhead only
   // while an edge is still armed.
   const rangeArmed = rangeIn == null || rangeOut == null;
-  const liveSec = rangeArmed ? currentSec : null;
+  // Exactly one edge marked — the state in which the OTHER edge tracks the
+  // playhead and the preview band therefore has to repaint per tick. With
+  // neither marked there is no band (the effect below returns early) and with
+  // both marked the band is fixed, so those two states subscribe to nothing.
+  const rangeDrafting = rangeArmed && (rangeIn != null || rangeOut != null);
+  const liveSec = usePlayheadSeconds(fps, playheadActive && rangeDrafting);
   useEffect(() => {
     if (rangeIn == null && rangeOut == null) { onRangeDraft?.(null); return; }
     const t = liveSec ?? rangeIn ?? rangeOut ?? 0;
@@ -663,6 +682,26 @@ export function ReviewPanel({
   const open = viewDoc ? openCount(viewDoc, versionId) : 0;
   const resolved = roots.length - open;
 
+  // Replies, bucketed by parent, once per document.
+  //
+  // This was `repliesOf(viewDoc, c.id)` inline in the row map, so rendering N
+  // roots scanned and sorted the whole comment array N times. The scan was the
+  // smaller half of the problem: it also handed every row a brand-new array on
+  // every render, which forecloses memoizing CommentRow later. One pass, and
+  // each root keeps the same array identity until the doc actually changes.
+  const repliesByParent = useMemo(() => {
+    const m = new Map<string, ReviewComment[]>();
+    if (!viewDoc) return m;
+    for (const c of viewDoc.comments) {
+      if (!c.parentId) continue;
+      const bucket = m.get(c.parentId);
+      if (bucket) bucket.push(c);
+      else m.set(c.parentId, [c]);
+    }
+    for (const bucket of m.values()) bucket.sort((a, b) => a.createdAt - b.createdAt);
+    return m;
+  }, [viewDoc]);
+
   // The visible list = current open/resolved filter ∩ text search (body or author).
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -700,7 +739,7 @@ export function ReviewPanel({
     // range commits the live span the pill is showing — the SAME clamped
     // values the preview computes (scrubbing behind an armed IN / ahead of
     // an armed OUT collapses to the mark), degrading to a point comment.
-    const t = currentSec ?? 0;
+    const t = playheadAt() ?? 0;
     let timeStart = t;
     let timeEnd: number | null = null;
     if (rangeIn != null && rangeOut != null) {
@@ -812,7 +851,7 @@ export function ReviewPanel({
             fps={fps}
             myName={author}
             myColor={authorColor}
-            replies={repliesOf(viewDoc, c.id)}
+            replies={repliesByParent.get(c.id) ?? NO_REPLIES}
             onSeek={onSeek}
             onShowAnnotation={onShowAnnotation}
             onResolve={() => { const at = Date.now(), v = !c.resolved; dispatchUndoable(v ? "resolve comment" : "reopen comment", { t: "resolve", id: c.id, resolved: v, at }, (d) => setResolved(d, c.id, v, at)); }}
@@ -851,7 +890,7 @@ export function ReviewPanel({
         resizing={composerResizing}
         onResizeReset={() => setComposerHeight(null)}
         submit={submit} hasDraft={annotationHasContent(draft)}
-        currentSec={currentSec} fps={fps}
+        playheadActive={playheadActive} fps={fps}
         rangeIn={rangeIn} rangeOut={rangeOut} onRangeTap={tapRange} onRangeClear={clearRange}
         rangeColor={authorColor}
       />
@@ -1090,7 +1129,7 @@ function ReviewComposer({
   toggleDictation, levelRef,
   text, setText, composerRef, autosize,
   onResizeStart, resizing, onResizeReset,
-  submit, hasDraft, currentSec, fps,
+  submit, hasDraft, playheadActive, fps,
   rangeIn, rangeOut, onRangeTap, onRangeClear, rangeColor,
 }: {
   drawActive: boolean;
@@ -1118,7 +1157,7 @@ function ReviewComposer({
   onResizeReset: () => void;
   submit: () => void;
   hasDraft: boolean;
-  currentSec: number | null;
+  playheadActive: boolean;
   fps: number;
   rangeIn: number | null;
   rangeOut: number | null;
@@ -1126,6 +1165,13 @@ function ReviewComposer({
   onRangeClear: () => void;
   rangeColor: string;
 }) {
+  // The composer subscribes to the playhead itself rather than taking it as a
+  // prop from ReviewPanel. Same value, same cadence, but the re-render it
+  // causes now stops at this subtree instead of dragging the whole thread list
+  // along with it 60 times a second. Two things here read it: the "Comment
+  // at 1:23" placeholder and the range pill's unmarked, following edge.
+  const currentSec = usePlayheadSeconds(fps, playheadActive);
+
   // Insert an emoji at the textarea caret (replacing any selection), then
   // restore focus + caret so typing continues seamlessly.
   const insertEmoji = (emoji: string) => {
