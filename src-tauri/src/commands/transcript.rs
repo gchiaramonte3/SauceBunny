@@ -784,7 +784,9 @@ pub fn list_whisper_models(app: AppHandle) -> Result<Vec<WhisperModel>, crate::A
     let mut out = Vec::with_capacity(WHISPER_MODELS.len());
     for (id, name, size) in WHISPER_MODELS {
         let p = dir.join(format!("ggml-{id}.bin"));
-        let downloaded = p.exists();
+        // Size-checked, not exists(): a truncated file must not be offered as
+        // a usable model (see model_file_complete).
+        let downloaded = model_file_complete(&p, *size);
         out.push(WhisperModel {
             id: (*id).to_string(),
             name: (*name).to_string(),
@@ -854,9 +856,15 @@ pub async fn download_whisper_model(
         model.0
     );
     let dest = model_path(&app, &args.model_id)?;
-    let tmp = dest.with_extension("bin.partial");
+    // Per-JOB temp, not per-model: two downloads of the same model (a
+    // double-click, or a retry started before the first died) otherwise wrote
+    // the same file and produced an interleaved, corrupt result that still
+    // passed the size band. Job ids are UUIDs, so this is collision-free.
+    let tmp = dest.with_extension(format!("{}.partial", args.job_id));
 
-    if dest.exists() {
+    // A COMPLETE file means installed; a truncated leftover must be
+    // re-downloaded rather than reported as already present.
+    if model_file_complete(&dest, expected_bytes) {
         return Ok(args.job_id);
     }
 
@@ -916,6 +924,27 @@ pub async fn download_whisper_model(
 // (stringified by the callers), so they ride the `From<String>` → `Invalid`
 // bridge to keep their bare Display text — do not re-wrap them in variants
 // whose Display adds a prefix.
+/// Is a downloaded model file actually COMPLETE?
+///
+/// `exists()` was the old answer, and it is wrong in the one case that
+/// matters: a download cut short by a dropped connection leaves a partial
+/// file that gets renamed into place, reported as Installed, and then fails
+/// cryptically inside whisper-cli on every run with no way for the user to
+/// tell what happened. A size within the same ±2% band the downloader
+/// enforces is cheap (one stat) and catches truncation directly.
+///
+/// `expected` of 0 means "no size known" and falls back to a non-empty check.
+pub(crate) fn model_file_complete(path: &std::path::Path, expected: u64) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else { return false };
+    if !meta.is_file() {
+        return false;
+    }
+    if expected == 0 {
+        return meta.len() > 0;
+    }
+    meta.len() >= expected.saturating_sub(expected / 50)
+}
+
 pub(crate) async fn download_with_progress(
     app: &AppHandle,
     url: &str,
@@ -950,16 +979,31 @@ pub(crate) async fn download_with_progress(
             expected_bytes.unwrap_or(0),
         ).into());
     }
-    // Sweep stale *.partial / *.part temps from a prior killed download in
-    // this dir (they otherwise accumulate - the 24h cache sweep skips the
-    // models dir).
+    // Sweep temps left by a KILLED download so they cannot accumulate (the
+    // 24h cache sweep skips the models dir). Two guards, both learned the
+    // hard way: never touch the file THIS download is about to write, and
+    // never touch one younger than an hour - a sibling download in flight
+    // (the user queues two models) owns that file, and deleting it made the
+    // two downloads fight over the same directory.
     if let Some(dir) = dest.parent() {
         if let Ok(rd) = std::fs::read_dir(dir) {
             for e in rd.flatten() {
+                let path = e.path();
+                if path.as_path() == dest {
+                    continue; // ours
+                }
                 let n = e.file_name();
                 let n = n.to_string_lossy();
-                if n.ends_with(".partial") || n.ends_with(".part") {
-                    let _ = std::fs::remove_file(e.path());
+                if !(n.ends_with(".partial") || n.ends_with(".part")) {
+                    continue;
+                }
+                let stale = e
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .map(|t| t.elapsed().map(|d| d.as_secs() > 3600).unwrap_or(false))
+                    .unwrap_or(false);
+                if stale {
+                    let _ = std::fs::remove_file(path);
                 }
             }
         }
@@ -997,6 +1041,19 @@ pub(crate) async fn download_with_progress(
         }
     }
     file.flush().await.map_err(|e| format!("flush: {e}"))?;
+    // A dropped connection ends the chunk loop cleanly, so "the loop
+    // finished" is NOT "the file is whole". Without this check a truncated
+    // model was renamed into place and listed as Installed, then failed
+    // inside whisper-cli forever with nothing pointing at the real cause.
+    // Delete the partial and say what happened; the user can retry.
+    if total > 0 && done < total {
+        drop(file);
+        let _ = tokio::fs::remove_file(dest).await;
+        return Err(format!(
+            "The download stopped early ({done} of {total} bytes). Nothing was installed. Check your connection and try again."
+        )
+        .into());
+    }
     let _ = app.emit(
         "model-download-progress",
         ModelProgressEvent {
@@ -3301,3 +3358,51 @@ mod nightly_transcript_tests {
     }
 }
 
+
+#[cfg(test)]
+mod model_completeness_tests {
+    use super::model_file_complete;
+    use std::io::Write;
+
+    fn write(dir: &std::path::Path, name: &str, bytes: usize) -> std::path::PathBuf {
+        let p = dir.join(name);
+        let mut f = std::fs::File::create(&p).unwrap();
+        f.write_all(&vec![7u8; bytes]).unwrap();
+        p
+    }
+
+    #[test]
+    fn a_truncated_model_is_not_installed() {
+        // The bug: a download cut short by a dropped connection was renamed
+        // into place, listed as Installed, and then failed inside whisper-cli
+        // on every run with nothing naming the real cause.
+        let dir = std::env::temp_dir().join(format!("sb-model-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let full = write(&dir, "full.bin", 1000);
+        let short = write(&dir, "short.bin", 400);
+        let empty = write(&dir, "empty.bin", 0);
+
+        assert!(model_file_complete(&full, 1000), "a complete file is installed");
+        assert!(!model_file_complete(&short, 1000), "a truncated file must NOT read as installed");
+        assert!(!model_file_complete(&empty, 1000));
+        assert!(!model_file_complete(&dir.join("missing.bin"), 1000));
+
+        // The same ±2% tolerance the downloader enforces: upstream files drift
+        // slightly from the recorded table, and a rebuild must not orphan a
+        // model the user already has.
+        let nearly = write(&dir, "nearly.bin", 985);
+        assert!(model_file_complete(&nearly, 1000), "within 2% is complete");
+        let under = write(&dir, "under.bin", 950);
+        assert!(!model_file_complete(&under, 1000), "5% short is truncated");
+
+        // No size known (0) degrades to non-empty rather than refusing.
+        assert!(model_file_complete(&full, 0));
+        assert!(!model_file_complete(&empty, 0));
+
+        // A directory is never a model file.
+        assert!(!model_file_complete(&dir, 0));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

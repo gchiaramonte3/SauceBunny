@@ -125,7 +125,10 @@ pub fn list_llm_models(app: AppHandle) -> Result<Vec<LlmModel>, crate::AppError>
             ctx: m.ctx,
             recommended: m.recommended,
             blurb: m.blurb.into(),
-            downloaded: dir.join(m.file).is_file(),
+            // Size-checked, not is_file(): a truncated GGUF renamed into
+            // place would be offered as usable and then fail inside
+            // llama-server forever (see model_file_complete).
+            downloaded: super::transcript::model_file_complete(&dir.join(m.file), m.size),
         })
         .collect())
 }
@@ -138,9 +141,11 @@ pub async fn download_llm_model(
     let s = spec(&args.model_id).ok_or_else(|| format!("Unknown model: {}", args.model_id))?;
     let dest = llm_model_path(&app, &args.model_id)?;
     let url = s.url.to_string();
-    let tmp = dest.with_extension("gguf.partial");
+    // Per-JOB temp so two downloads of the same model cannot interleave into
+    // one corrupt file (job ids are UUIDs).
+    let tmp = dest.with_extension(format!("{}.partial", args.job_id));
 
-    if dest.exists() {
+    if super::transcript::model_file_complete(&dest, s.size) {
         // Already present — the frontend re-lists and clears its busy state.
         return Ok(args.job_id);
     }
