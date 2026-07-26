@@ -38,6 +38,10 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BIN_DIR="${ROOT_DIR}/src-tauri/binaries"
 VERSIONS_FILE="${ROOT_DIR}/SIDECAR-VERSIONS.md"
 FFMPEG_DST="${BIN_DIR}/ffmpeg-aarch64-apple-darwin"
+
+# shellcheck source=scripts/sidecar-pin.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sidecar-pin.sh"
+sb_pin_parse_args "$@"
 FFMPEG_TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${FFMPEG_TMP_DIR}"' EXIT
 
@@ -70,6 +74,12 @@ if [ ! -x "${FFMPEG_TMP}" ]; then
   echo "✗ unzip didn't produce ${FFMPEG_TMP} — archive shape changed?"
   exit 1
 fi
+# Verify BEFORE chmod. This artifact is discovered by SCRAPING the vendor's
+# homepage for a filename, so neither the URL nor the bytes are pinned by
+# anything upstream: this check is the only thing standing between "the page
+# changed" and "we shipped it, signed".
+echo "→ Verifying against sidecars.lock.json:"
+sb_pin_check "ffmpeg" "${FFMPEG_TMP}" || exit 1
 chmod +x "${FFMPEG_TMP}"
 
 # ── Guard rails — refuse to install a Homebrew-tied binary ──────────

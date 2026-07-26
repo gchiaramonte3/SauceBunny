@@ -42,6 +42,22 @@ for req in $REQUIRED_SIDECARS; do
   fi
 done
 echo
+
+# Integrity: are these the exact bytes we decided to ship?
+#
+# The self-containment check below proves a binary will RUN on someone else's
+# Mac. It says nothing about whether the binary is the one we reviewed. Until
+# sidecars.lock.json existed, ffmpeg was fetched by scraping a vendor's
+# homepage for a filename and yt-dlp came from a mutable "latest" pointer, so
+# the answer to "what is in the .dmg you signed" was "whatever the network
+# served that day". This gate is the last place to catch that before a release
+# goes out with your signature on it.
+if bash "${ROOT_DIR}/scripts/verify-sidecars.sh" --quiet; then
+  pass "every sidecar matches its pin in sidecars.lock.json"
+else
+  fatal "a sidecar does not match sidecars.lock.json (see above) — do not ship until you know why"
+fi
+echo
 for bin in "${ROOT_DIR}"/src-tauri/binaries/*-aarch64-apple-darwin; do
   [ -f "$bin" ] || continue
   name=$(basename "$bin" -aarch64-apple-darwin)

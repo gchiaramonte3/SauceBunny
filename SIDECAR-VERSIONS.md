@@ -4,6 +4,42 @@ This file tracks the version of every binary we ship under
 `src-tauri/binaries/`. Updated automatically by the scripts under
 `scripts/` — do not edit by hand.
 
+## Integrity: sidecars.lock.json
+
+Versions are not the same as bytes. Every binary that ships inside the `.dmg`
+is also pinned by SHA-256 in `sidecars.lock.json` at the repo root, checked in
+three places:
+
+- **On fetch** — `refresh:sidecars` and `refresh:ffmpeg` verify the download
+  BEFORE it is made executable or installed. The order matters: the smoke test
+  runs the binary, and "it runs" is not evidence that it is the artifact we
+  reviewed.
+- **On demand** — `npm run verify:sidecars` checks everything installed.
+- **On release** — `npm run check:release` refuses to pass on a mismatch.
+
+This is trust-on-first-use, and it exists because two of these downloads had no
+upstream integrity story at all: ffmpeg is discovered by SCRAPING a vendor's
+homepage for a filename, and yt-dlp came from a mutable "latest" pointer. What
+ended up inside a signed build was whatever the network served that day. The
+committed lock file is the only anchor a compromised publisher cannot move.
+
+Accepting a new upstream build is deliberate:
+
+```bash
+npm run refresh:ffmpeg -- --accept-new   # verifies, then moves the pin
+git diff sidecars.lock.json              # THIS is the review step
+```
+
+For a locally built sidecar (whisper-cli, llama-server, the Swift three) a
+changed hash means a rebuild, not an attack. Re-pin it explicitly:
+
+```bash
+npm run repin:sidecar whisper-cli -- --note "rebuilt against whisper.cpp v1.8.2"
+```
+
+Never re-pin to silence an error. For a DOWNLOADED sidecar, a changed hash is
+exactly the event this mechanism exists to surface.
+
 Every bundled binary MUST be self-contained (no `/opt/homebrew/`,
 `/usr/local/`, or `/Users/` dylib references) so the app actually
 works on a user's Mac. Each script enforces this with an `otool -L`

@@ -29,6 +29,10 @@ VERSIONS_FILE="${ROOT_DIR}/SIDECAR-VERSIONS.md"
 
 mkdir -p "${BIN_DIR}"
 
+# shellcheck source=scripts/sidecar-pin.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sidecar-pin.sh"
+sb_pin_parse_args "$@"
+
 # yt-dlp publishes a single-file macOS executable on every release.
 # The latest-release alias always 302s to the most recent stable.
 YT_DLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
@@ -37,6 +41,13 @@ YT_DLP_TMP="${YT_DLP_DST}.new"
 
 echo "→ Fetching latest yt-dlp from ${YT_DLP_URL}"
 curl -fL --progress-bar -o "${YT_DLP_TMP}" "${YT_DLP_URL}"
+
+# Verify BEFORE the file can be executed. The order matters: the smoke test
+# below runs this binary, and "it runs" is not evidence that it is the artifact
+# we reviewed. This URL is the MUTABLE latest-release alias, so what arrives
+# changes without warning - which is the whole reason for the pin.
+echo "→ Verifying against sidecars.lock.json:"
+sb_pin_check "yt-dlp" "${YT_DLP_TMP}" || { rm -f "${YT_DLP_TMP}"; exit 1; }
 chmod +x "${YT_DLP_TMP}"
 
 # Quick smoke before atomically replacing the existing binary.

@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "_readme": "Trust-on-first-use pins for every binary that ships inside the signed .dmg. The fetch scripts verify a download against this file and REFUSE to install on a mismatch; scripts/verify-sidecars.sh checks what is currently installed and runs as part of the release gate. Moving a pin requires re-running the fetch script with --accept-new, which rewrites this file - and the resulting git diff IS the human review step. That is the whole point: an upstream swap becomes a visible change to a committed file instead of a silent one on the network. Publisher checksums are cross-checked where they exist, but they are served by the same host as the artifact, so this file is the only anchor a compromised publisher cannot move. kind=source pins bytes we built ourselves: a changed hash there means a rebuild, not an attack, but it should still be a deliberate diff.",
+  "binaries": {
+    "ffmpeg": {
+      "kind": "download-zip",
+      "source": "osxexperts.net (ffmpegNNarm.zip)",
+      "publisher_checksums": "none published",
+      "sha256": "9a08d61f9328e8164ba560ee7a79958e357307fcfeea6fe626b7d66cdc287028",
+      "bytes": 51860280
+    },
+    "ffprobe": {
+      "kind": "download-zip",
+      "source": "ffmpeg.martin-riedl.de (macos/arm64 release)",
+      "publisher_checksums": ".zip.sha256 alongside the artifact",
+      "sha256": "3ec76ddd72068162294249465c36257d6c1add564f9b078e31e173837832967d",
+      "bytes": 63314208
+    },
+    "llama-server": {
+      "kind": "source",
+      "source": "github.com/ggml-org/llama.cpp, built locally",
+      "publisher_checksums": "n/a (compiled output is not reproducible)",
+      "sha256": "436a155dd81bd692a192ab429fb3f2e463057f303ad0f47662390ab95994304a",
+      "bytes": 20498240
+    },
+    "saucebunny-capture": {
+      "kind": "source",
+      "source": "swift-sidecar/ in this repo",
+      "publisher_checksums": "n/a",
+      "sha256": "f05145863980ca64f76cd02e4469a205d2c666fdbc1370434043962c00a29e9c",
+      "bytes": 173392
+    },
+    "saucebunny-diarize": {
+      "kind": "source",
+      "source": "swift-sidecar/ in this repo",
+      "publisher_checksums": "n/a",
+      "sha256": "aed0118325a69fba7610e10d055ff67a9f7a2d231e3773ea8b7dcc6a0103210d",
+      "bytes": 10125120
+    },
+    "saucebunny-dictate": {
+      "kind": "source",
+      "source": "swift-sidecar/ in this repo",
+      "publisher_checksums": "n/a",
+      "sha256": "eb57c3af7a1c105092c532a0ca898d77eba8ab5469906b4f1c135a37c83d059e",
+      "bytes": 68480
+    },
+    "whisper-cli": {
+      "kind": "source",
+      "source": "github.com/ggml-org/whisper.cpp, built locally",
+      "publisher_checksums": "n/a (compiled output is not reproducible)",
+      "sha256": "1e54b91888bfb3436d0f3c9b2861bf202f7e187d216548c8b7421d2b343352a6",
+      "bytes": 3199896
+    },
+    "yt-dlp": {
+      "kind": "download",
+      "source": "github.com/yt-dlp/yt-dlp releases (yt-dlp_macos)",
+      "publisher_checksums": "SHA2-256SUMS on the same immutable release",
+      "sha256": "498bd0dae17855c599d371d68ec5bafc439a9d8640e838be25c765a9792f261b",
+      "bytes": 38256544
+    }
+  }
+}
