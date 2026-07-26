@@ -110,7 +110,21 @@ class OpusAudioDecoder extends CustomAudioDecoder {
       coupledStreamCount: cfg.coupledStreamCount,
       channelMappingTable: cfg.channelMappingTable,
     });
-    await this.decoder.ready;
+    // Bounded, ALWAYS. opus-decoder's bootstrap resolves or parks - it has no
+    // rejection path - so a blocked WebAssembly instantiate leaves `ready`
+    // pending forever. mediabunny then queues every decode behind this init,
+    // the audio loop awaits a generator that never yields, and the file plays
+    // silently with no error on any layer. A REJECTION is recoverable:
+    // mediabunny surfaces it, MediaBunnyPlayer turns it into the
+    // [WEBCODECS_UNSUPPORTED] sentinel, and App transcodes with ffmpeg and
+    // plays the file WITH sound.
+    await Promise.race([
+      this.decoder.ready,
+      new Promise<never>((_, reject) => setTimeout(
+        () => reject(new Error("Opus WASM decoder did not start within 3s (WebAssembly may be blocked)")),
+        3000,
+      )),
+    ]);
   }
 
   decode(packet: EncodedPacket): void {
@@ -150,9 +164,12 @@ let registered = false;
 
 /** Register Sauce Bunny's custom mediabunny decoders (audio + video).
  *  Idempotent; call once at startup. */
-export function registerLocalDecoders(): void {
+export function registerLocalDecoders(blobWorkerOk = true): void {
   if (registered) return;
   registered = true;
   registerDecoder(OpusAudioDecoder); // libopus (we own this)
-  registerProresDecoder();           // turbores, via the official adapter
+  // turbores spawns its Workers from blob: URLs. Without that permission it
+  // does not fail - getCanvas() simply never settles (measured: still pending
+  // after 40s), which strands the player with neither onReady nor onError.
+  if (blobWorkerOk) registerProresDecoder();
 }

@@ -105,6 +105,7 @@ import {
 import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, looksLikeExtractorRot, prettyHost } from "./lib/validation";
 import { sanitizeFilename, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
+import { capabilitySummary, probePlatformCapabilities } from "./lib/platform-capabilities";
 import { buildDiagnosticsReport, diagnosticsFilename } from "./lib/diagnostics";
 import { extractFrameAsBlob, extractPosterBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
 import { chosenPosterFor, sourceTimecodeFor, setSourceTimecode, clearSourceTimecode } from "./lib/library";
@@ -1287,6 +1288,24 @@ export default function App() {
       return next.length > LOG_MAX ? next.slice(next.length - LOG_MAX) : next;
     });
   }, []);
+
+  // Startup capability line + a catch-all for silent promise rejections
+  // (r150). Both exist because a CSP that forbade WebAssembly made the Opus
+  // decoder's init PARK rather than throw: audio went silent with no error on
+  // any layer, in the packaged app only, and it took three reports and a
+  // WKWebView A/B to find. There was exactly ONE unhandled rejection carrying
+  // the real reason and nothing surfaced it. Now the log answers "can this
+  // build run WASM?" before anyone has to ask.
+  useEffect(() => {
+    void probePlatformCapabilities().then((caps) => {
+      appendLog(caps.wasm && caps.blobWorker ? "info" : "warn", "media", capabilitySummary(caps));
+    });
+    const onRejection = (e: PromiseRejectionEvent) => {
+      appendLog("warn", "media", `Unhandled rejection: ${String(e.reason)}`);
+    };
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => window.removeEventListener("unhandledrejection", onRejection);
+  }, [appendLog]);
 
   // ====== Web-source playback (r80) — stream ↔ download state machine ======
   // Owns the entire web stream → resolve → download-fallback → watchdog →

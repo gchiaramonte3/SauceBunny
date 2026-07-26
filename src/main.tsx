@@ -21,14 +21,31 @@ import "@fontsource/nunito-sans/800.css";
 // with "no encoder available". Registered once at app startup; tree
 // shaken out of any build that doesn't use Mp3OutputFormat.
 import { registerMp3Encoder } from "@mediabunny/mp3-encoder";
-registerMp3Encoder();
+import { platformSupports } from "./lib/platform-capabilities";
+
+// EVERY registration below is gated on measured capability (r150). Each of
+// these extensions is WASM-backed and most spawn a blob: Worker; registering
+// one the platform cannot run does not fail loudly, it HANGS - mediabunny
+// queues work behind an init promise that never settles, and the feature goes
+// silent with no error anywhere. That is exactly how a CSP missing
+// 'wasm-unsafe-eval' produced perfect video with no audio in the packaged app
+// while `tauri dev` (which serves with no CSP at all) was fine.
+const platform = platformSupports();
+
+// MP3 encoding is WASM + Worker.
+if (platform.wasm && platform.blobWorker) registerMp3Encoder();
 
 // Custom mediabunny decoders (WASM libopus) so local playback can be
 // mediabunny-first even where WKWebView lacks a WebCodecs AudioDecoder —
 // e.g. AV1+Opus YouTube downloads play in-app with no ffmpeg transcode.
 // Decode-only; does not touch the web-streaming (MSE/proxy) path.
 import { registerLocalDecoders } from "./lib/mediabunny-decoders";
-registerLocalDecoders();
+// Custom decoders are a POLYFILL, not an upgrade: mediabunny always prefers a
+// matching custom decoder over the platform's own, so registering one where
+// WASM cannot run replaces a working native decoder with a broken one. Only
+// register when WebAssembly is actually usable; otherwise mediabunny falls
+// through to WebCodecs, and past that the app's ffmpeg-transcode path.
+if (platform.wasm) registerLocalDecoders(platform.blobWorker);
 
 import "./styles/app.css";
 
