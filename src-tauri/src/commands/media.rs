@@ -1164,6 +1164,12 @@ fn poster_cache_path(cache: &std::path::Path, input_path: &str, chosen: Option<f
         .unwrap_or(0);
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     use std::hash::{Hash, Hasher};
+    // v2 salt (r147): before the unpaintable-sample guard existed, the fast
+    // poster path could persist a BLACK JPEG for 10-bit sources (decode-but-
+    // paint-black in WKWebView). Salting the key orphans any poisoned
+    // entries so posters regenerate through the fixed pipeline; the orphans
+    // are ordinary cache files the retention controls reclaim.
+    "poster-v2".hash(&mut hasher);
     input_path.hash(&mut hasher);
     mtime.hash(&mut hasher);
     let time_bucket: i64 = chosen.map(|t| (t * 1000.0) as i64).unwrap_or(-1);

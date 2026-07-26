@@ -190,6 +190,13 @@ export async function extractPosterBlob(
     const vt = await input.getPrimaryVideoTrack();
     if (!vt) return null;
     if (!(await vt.canDecode())) return null;
+    // ProRes DECODES here (turbores registers the decoder) but cannot PAINT:
+    // every ProRes flavour is 10-bit+, WKWebView has no 10-bit VideoFrame,
+    // and getCanvas() silently yields BLACK (the d1da322 scar). Returning
+    // null hands the poster to the caller's ffmpeg fallback, which handles
+    // ProRes natively (~0.1s measured on the reporting file) — the same
+    // routing playback uses for these sources.
+    if (String(vt.codec ?? "").toLowerCase().includes("prores")) return null;
     // One shared sink reused across every candidate decode (poolSize 1).
     const sink = new CanvasSink(vt, { poolSize: 1 });
     const maxWidth = opts?.maxWidth;
@@ -199,6 +206,15 @@ export async function extractPosterBlob(
     if (typeof opts?.atSeconds === "number" && Number.isFinite(opts.atSeconds)) {
       const wrapped = await sink.getCanvas(Math.max(0, opts.atSeconds));
       if (!wrapped) return null;
+      // Unpaintable-sample guard for the chosen frame too: a canvas that
+      // reads pure black is the silent 10-bit failure, not the user's frame.
+      // ffmpeg re-grabs the SAME exact timestamp (poster_vf's chosen path),
+      // so a genuinely dark chosen frame still comes back correct.
+      const probe = document.createElement("canvas");
+      probe.width = 16;
+      probe.height = 9;
+      const pctx = probe.getContext("2d", { willReadFrequently: true });
+      if (pctx && meanLuma(pctx, wrapped.canvas) < 2) return null;
       return await canvasToBlob(wrapped.canvas, maxWidth, "image/jpeg", quality);
     }
 
@@ -256,6 +272,12 @@ export async function extractPosterBlob(
         bestOffset = t;
       }
     }
+    // Every candidate painted essentially BLACK. A real video is never pure
+    // black at five spread offsets — this is the unpaintable-sample
+    // signature (a codec that decodes but paints black in WKWebView).
+    // Return null so the ffmpeg fallback makes the poster instead of a
+    // black JPEG being shown AND persisted to the disk cache.
+    if (bestLuma < 2) return null;
     // Everything was dim — re-decode the brightest candidate (a fresh getCanvas,
     // so we never hold a poolSize-1 canvas across another decode).
     if (bestOffset == null) return null;
