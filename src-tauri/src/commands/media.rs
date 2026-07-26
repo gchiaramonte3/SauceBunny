@@ -922,6 +922,13 @@ pub async fn probe_local_file(app: AppHandle, path: String) -> Result<LocalFileM
         // handleOpenRecentSource), so this must stay machine-readable.
         return Err(crate::AppError::not_found(path));
     }
+    // THE choke point: every local source in the app arrives here first —
+    // toolbar import, drag and drop, recents, library open, reader
+    // follow-along, and co-review (fingerprint hit, peer fetch, "Find your
+    // copy"). App.tsx writes `localFilePath` in exactly one place, right after
+    // this call returns, and hands that same string to assetUrl() for the
+    // native <video>. Granting here is what lets the static scope stay narrow.
+    super::allow_asset_read(&app, &p);
     let size_bytes = p.metadata().map(|m| m.len()).unwrap_or(0);
     let filename = p
         .file_name()

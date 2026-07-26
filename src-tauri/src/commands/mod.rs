@@ -200,6 +200,56 @@ fn validate_source_url(url: &str) -> Result<(), crate::AppError> {
     Ok(())
 }
 
+/// Grant the webview `asset://` read access to ONE file it is about to be
+/// handed.
+///
+/// The static scope in tauri.conf.json is `$APPCACHE/**`: every artifact the
+/// app writes for itself (poster JPEGs, ffmpeg playback copies, downloaded
+/// sources, cached audio). It cannot cover the user's OWN media, whose paths
+/// are arbitrary and known only at runtime — which is why the scope used to be
+/// `**`, i.e. the entire filesystem readable by anything running in the
+/// webview.
+///
+/// Tauri 2's asset scope is live and shared: `asset_protocol_scope()` hands
+/// back a Scope whose inner Arc is the same one the protocol handler holds, so
+/// a narrow static list plus a per-file grant has the reach of `**` for real
+/// usage and none of its blast radius. Both windows see it; the scope is
+/// app-wide, not per-webview.
+///
+/// Deliberately called from ONE place (`probe_local_file`), the command every
+/// local source in the app passes through. Do NOT add grants to the thumbnail
+/// commands: those run per library item, `Scope::is_allowed` is a linear glob
+/// scan on every asset request, and a few hundred library items would put that
+/// scan on the byte-range path during playback.
+pub(crate) fn allow_asset_read(app: &AppHandle, path: &std::path::Path) {
+    let scope = app.asset_protocol_scope();
+    // Already covered (anything in the cache, or a source re-opened this
+    // session): return before touching the pattern set, so it grows with
+    // sources opened rather than with calls made.
+    if scope.is_allowed(path) {
+        return;
+    }
+    if let Err(e) = scope.allow_file(path) {
+        eprintln!("[asset-scope] could not grant {}: {e}", path.display());
+        return;
+    }
+    // A denied asset read is HTTP 403 with an EMPTY body, so it surfaces as a
+    // black video or a broken thumbnail and never as an error. If the grant
+    // did not take, say so HERE, at open time, while the path is still in
+    // hand. The known case is a symlink with a RELATIVE target: Tauri reads
+    // the link before canonicalizing, so the relative target misses every
+    // absolute pattern. Playback still works (the native player errors into
+    // the mediabunny path, which reads through IPC and is not scope-gated),
+    // but this line is the difference between a diagnosable slow path and a
+    // mystery.
+    if !scope.is_allowed(path) {
+        eprintln!(
+            "[asset-scope] granted {} but the scope still refuses it (relative symlink?)",
+            path.display(),
+        );
+    }
+}
+
 // HH:MM:SS:FF (frame-accurate) → fractional seconds. Falls back to HH:MM:SS.
 fn timecode_to_seconds(tc: &str, fps: f64) -> Result<f64, crate::AppError> {
     let parts: Vec<&str> = tc.trim().split(':').collect();

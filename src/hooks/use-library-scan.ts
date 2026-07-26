@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
+import { assetUrl } from "../lib/asset-url";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   extractFrameAsBlob,
@@ -27,7 +28,7 @@ import type { LibraryFolder } from "../types";
 //      blob: object URL.
 //   2. generate_local_thumbnail — the ffmpeg fallback for codecs WebCodecs
 //      can't decode; has its own (path, mtime, time)-keyed disk cache, yields
-//      an asset:// URL via convertFileSrc.
+//      an asset:// URL via assetUrl.
 // Total failure marks the path bad for the session → placeholder, no retry
 // loop. The poster frame is representative (extractPosterBlob skips black
 // intro fades) or, when the user picked one, that exact timestamp.
@@ -126,14 +127,14 @@ async function loadThumbnail(path: string): Promise<string | null> {
           },
         },
       );
-      if (typeof saved === "string" && saved !== "") return convertFileSrc(saved);
+      if (typeof saved === "string" && saved !== "") return assetUrl(saved);
     } catch { /* cache write failed; the session blob below still works */ }
     return URL.createObjectURL(blob);
   }
   const out = await invoke<string>("generate_local_thumbnail", {
     args: { input_path: path, duration_seconds: null, time_seconds: chosen ?? null },
   });
-  return typeof out === "string" && out !== "" ? convertFileSrc(out) : null;
+  return typeof out === "string" && out !== "" ? assetUrl(out) : null;
 }
 
 /**
@@ -245,7 +246,7 @@ function requestThumbnailInner(path: string, prefetch: boolean): Promise<string 
       }).catch(() => "");
       if (!current()) return null;
       if (typeof onDisk === "string" && onDisk !== "") {
-        const url = convertFileSrc(onDisk);
+        const url = assetUrl(onDisk);
         rememberThumb(path, url);
         return url;
       }

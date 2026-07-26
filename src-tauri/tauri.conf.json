@@ -30,7 +30,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "**"
+          "$APPCACHE/**"
         ]
       }
     },

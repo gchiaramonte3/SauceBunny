@@ -52,11 +52,21 @@ spawned only from the Rust backend (`app.shell()`); the webview capability
 file (`src-tauri/capabilities/`) deliberately grants NO shell permissions, so
 the renderer cannot spawn a process directly.
 
-**Known gap, stated plainly:** the renderer is not otherwise sandboxed. The
-asset-protocol scope in `tauri.conf.json` is currently `**`, and the app's own
-file commands accept absolute paths, so code running in the webview can read
-and write files as the user. Treat "no shell grants" as one wall, not a
-containment boundary. Narrowing this is tracked work, not a claimed property.
+**Asset-protocol scope.** The `asset://` protocol, which is how the webview
+loads a video, an audio file, or a poster off disk, is scoped to `$APPCACHE/**`
+(the app's own cache folder) plus, at runtime, each individual file you open.
+That per-file grant is made in Rust by `probe_local_file`, the one command every
+local source passes through; the webview cannot grant itself anything. This
+replaced a `**` scope under which the renderer could read any file on the
+machine over `asset://`. Both halves are pinned by
+`src/lib/asset-scope-contract.test.ts`.
+
+**Known gap, stated plainly:** the renderer is still not sandboxed. The app's
+own file commands (`write_text_to_path`, `write_bytes_to_path`,
+`read_text_file_capped`) accept absolute paths with no scope of their own, so
+code running in the webview can still read and write files as you. Treat "no
+shell grants, narrow asset scope" as two walls, not a containment boundary.
+Scoping those commands is tracked work, not a claimed property.
 
 ### 4. What the app deliberately does NOT do
 

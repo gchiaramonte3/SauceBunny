@@ -5169,6 +5169,7 @@ dependencies = [
  "iroh",
  "iroh-tickets",
  "keyring",
+ "log",
  "objc2",
  "objc2-foundation",
  "once_cell",

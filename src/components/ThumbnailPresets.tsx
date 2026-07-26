@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
+import { assetUrl } from "../lib/asset-url";
 import { secondsToClock } from "../lib/timecode";
 
 /**
@@ -36,7 +37,7 @@ export function ThumbnailPresets({ path, offsets, dur, approx, hasChosen, onPick
           const out = await invoke<string>("generate_local_thumbnail", {
             args: { input_path: path, duration_seconds: dur, time_seconds: sec },
           });
-          return typeof out === "string" && out !== "" ? convertFileSrc(out) : null;
+          return typeof out === "string" && out !== "" ? assetUrl(out) : null;
         } catch {
           return null;
         }

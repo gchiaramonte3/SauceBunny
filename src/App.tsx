@@ -107,6 +107,7 @@ import { sanitizeFilename, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
 import { capabilitySummary, probePlatformCapabilities } from "./lib/platform-capabilities";
 import { onReviewStoreProblem } from "./lib/review-store";
+import { assetUrl } from "./lib/asset-url";
 import { buildDiagnosticsReport, diagnosticsFilename } from "./lib/diagnostics";
 import { extractFrameAsBlob, extractPosterBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
 import { chosenPosterFor, sourceTimecodeFor, setSourceTimecode, clearSourceTimecode } from "./lib/library";
@@ -2782,8 +2783,7 @@ export default function App() {
                 },
               );
               if (sourceSeqRef.current !== seq) return;
-              const { convertFileSrc } = await import("@tauri-apps/api/core");
-              setMetadata((prev) => (prev ? { ...prev, thumbnail: convertFileSrc(posterPath) } : prev));
+              setMetadata((prev) => (prev ? { ...prev, thumbnail: assetUrl(posterPath) } : prev));
               return;
             }
             // Step 2: ffmpeg fallback (legacy path).
@@ -2791,8 +2791,7 @@ export default function App() {
               args: { input_path: lf.path, duration_seconds: lf.duration, time_seconds: chosen ?? null },
             });
             if (sourceSeqRef.current !== seq) return;
-            const { convertFileSrc } = await import("@tauri-apps/api/core");
-            setMetadata((prev) => (prev ? { ...prev, thumbnail: convertFileSrc(thumbPath) } : prev));
+            setMetadata((prev) => (prev ? { ...prev, thumbnail: assetUrl(thumbPath) } : prev));
           } catch (err) {
             if (sourceSeqRef.current !== seq) return;
             appendLog("warn", "local", `Thumbnail generation failed: ${formatError(err)}`);
@@ -4361,11 +4360,10 @@ export default function App() {
           args: { url: activeSourceUrl, job_id: jobId, cookies_browser: cookies },
         }));
         if (cancelled || sourceSeqRef.current !== seq) return;
-        const { convertFileSrc } = await import("@tauri-apps/api/core");
         // Keep the RAW fs path too — Clear cache excludes the files the
         // current session is playing from, and it matches on raw paths.
         webAudioCachedPathRef.current = path;
-        setWebAudioCachedSrc(convertFileSrc(path));
+        setWebAudioCachedSrc(assetUrl(path));
         appendLog("ok", "audio-cache", "Audio cached. Transcribe will be instant for this source.");
       } catch (err) {
         if (cancelled || sourceSeqRef.current !== seq) return;

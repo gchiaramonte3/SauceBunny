@@ -126,8 +126,51 @@ fn build_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<Men
     )
 }
 
+// ── Make the framework's own failures audible ────────────────────────
+//
+// Tauri reports protocol and scope failures through the `log` facade. The one
+// that matters here is "asset protocol not configured to allow the path: …"
+// from tauri::protocol::asset, which answers a denied read with 403 and an
+// EMPTY body. With no logger installed those records were dropped, so a scope
+// miss surfaced only as a black video or a broken thumbnail - the exact silent
+// shape that made the r150 CSP bug take three reports to find. The asset scope
+// is not allowed to fail that quietly.
+//
+// stderr only: no file, no network, no telemetry. Visible in `tauri dev` and
+// when the app binary is launched from a terminal. WARN is limited to the
+// framework crates so an app-wide dependency (iroh, quinn, rustls) cannot
+// flood the terminal; ERROR is let through from everywhere, because an error
+// nobody sees is how this class of bug happens.
+struct StderrLog;
+
+impl log::Log for StderrLog {
+    fn enabled(&self, meta: &log::Metadata) -> bool {
+        match meta.level() {
+            log::Level::Error => true,
+            log::Level::Warn => {
+                let t = meta.target();
+                t.starts_with("tauri") || t.starts_with("wry") || t.starts_with("tao")
+            }
+            _ => false,
+        }
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            eprintln!("[{}] {}: {}", record.level(), record.target(), record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+static STDERR_LOG: StderrLog = StderrLog;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Best effort: a second call (tests, a plugin that got there first) is a
+    // no-op rather than a panic.
+    let _ = log::set_logger(&STDERR_LOG).map(|()| log::set_max_level(log::LevelFilter::Warn));
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())

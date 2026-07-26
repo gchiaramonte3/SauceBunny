@@ -1,7 +1,7 @@
 import {
   forwardRef, memo, useEffect, useImperativeHandle, useRef, useState,
 } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { assetUrl } from "../lib/asset-url";
 import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle } from "./player-handle";
 
@@ -360,8 +360,10 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
   //     localhost media proxy (http://127.0.0.1:<port>/v1/… from r58,
   //     used for YouTube and any Referer-gated CDN). WebKit's media
   //     engine streams both through its native Range/206 path.
-  //   • Anything else → local file path → asset:// via convertFileSrc.
-  const src = /^https?:\/\//i.test(path) ? path : convertFileSrc(path);
+  //   • Anything else → local file path → asset:// via assetUrl.
+  // The path is either an $APPCACHE playback/download copy (static scope)
+  // or a source probe_local_file granted per file. See lib/asset-url.ts.
+  const src = /^https?:\/\//i.test(path) ? path : assetUrl(path);
 
   return (
     <div className="cp-local-media" onClick={onSurfaceClick}>

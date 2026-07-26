@@ -46,6 +46,14 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # yt-dlp updater integrity: verify the release's SHA2-256SUMS entry before the
 # downloaded binary is made executable. (MIT OR Apache-2.0, RustCrypto.)
 sha2 = "0.10"
+# Tauri reports protocol and scope failures through the `log` facade - notably
+# "asset protocol not configured to allow the path: …", which answers with 403
+# and an EMPTY body. With no logger installed those records were DROPPED, so a
+# denied read showed up only as a black video or a broken thumbnail: the same
+# silent shape as the r150 CSP bug. lib.rs installs a stderr logger so the
+# message survives. Already in Cargo.lock as a transitive dep of tauri, so this
+# adds no new crate. MIT OR Apache-2.0.
+log = "0.4"
 # Tier C transfer verification. Already in the lock file as a transitive dep
 # of the iroh stack, so this adds zero new crates. MIT OR Apache-2.0.
 blake3 = "1"

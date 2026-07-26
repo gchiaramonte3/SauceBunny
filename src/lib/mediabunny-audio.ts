@@ -1,5 +1,5 @@
 import { Input, UrlSource, ALL_FORMATS, AudioBufferSink } from "mediabunny";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { assetUrl } from "./asset-url";
 
 /**
  * Extracts the audio track of a local file, resamples to 16kHz mono, and
@@ -22,7 +22,7 @@ export async function extractAudioAsWav16k(
   endSeconds?: number,
   signal?: AbortSignal,
 ): Promise<Blob | null> {
-  const url = convertFileSrc(localPath);
+  const url = assetUrl(localPath);
   const input = new Input({ source: new UrlSource(url), formats: ALL_FORMATS });
   // Abort has to reach the demuxer, not just the loop guard below: the decode
   // sits inside the iterator's byte reads, so a caller that gives up (its

@@ -278,6 +278,19 @@ in the path (`/t/<token>/…`). Without it the loopback server would be an open
 relay for any local process or port-scanning webpage. Keep the token check
 intact when touching `stream_proxy.rs`.
 
+**Asset-protocol scope:** `app.security.assetProtocol.scope` is `$APPCACHE/**`
+and nothing else. Anything outside the cache is granted PER FILE at runtime by
+`allow_asset_read` in `probe_local_file` — the one command every local source
+passes through. Mint asset URLs only via `assetUrl()` in `src/lib/asset-url.ts`.
+A path covered by neither half returns 403 with an EMPTY body, so it shows up as
+a black video or a broken thumbnail and never as an error. mediabunny's local
+reads are NOT affected (they go through `read_file_range`, which the scope does
+not gate), so do NOT add grants to the thumbnail commands: those run per library
+item, `Scope::is_allowed` is a linear glob scan on every asset request, and a
+large library would put a thousand-pattern scan on the playback byte-range path.
+Guarded by `src/lib/asset-scope-contract.test.ts` — do not widen the scope to
+get unblocked.
+
 Don't reintroduce the IFrame, custom URI schemes for `<video>`, or WebCodecs-audio — all three are proven non-starters in WKWebView (see the deep-research notes that drove r61/r63).
 
 ---
