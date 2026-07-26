@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { usePlayheadSeconds } from "../lib/playhead-store";
-import { parseSrt, type Cue } from "../lib/srt";
+import { cueIndexAt, parseSrt, type Cue } from "../lib/srt";
 import {
   loadSpeakerOverrides,
   resolveSpeakerName,
@@ -139,6 +139,9 @@ export function CaptionOverlay({ path, reloadToken, fps, enabled, style }: Props
   // every tick (the snapshot pins to null → no notifications reach React).
   const currentSec = usePlayheadSeconds(fps, enabled) ?? 0;
   const [cues, setCues] = useState<Cue[]>([]);
+  // Diarization is a property of the transcript, not of the playhead: compute
+  // it once per cue array instead of scanning every cue on every tick.
+  const hasSpeakersMemo = useMemo(() => cues.some((c) => !!c.speaker), [cues]);
   // The path+token the current `cues` belong to. Guards against showing one
   // source's captions over another's video during the async load gap, while
   // the token component forces a re-read when the SAME path is overwritten.
@@ -225,7 +228,11 @@ export function CaptionOverlay({ path, reloadToken, fps, enabled, style }: Props
   if (!enabled || loadedFor.current !== loadKey || cues.length === 0) return null;
   // Shift the lookup by the user's sync offset (streaming drift correction).
   const t = currentSec + (style?.syncSec ?? 0);
-  const active = cues.find((c) => t >= c.start && t < c.end);
+  // Binary search, not find(): this render body runs on EVERY playhead tick,
+  // and a three-hour transcript is tens of thousands of cues. Shared with the
+  // transcript reader (lib/srt.ts) so both answer the question the same way.
+  const activeIdx = cueIndexAt(cues, t);
+  const active = activeIdx >= 0 ? cues[activeIdx] : undefined;
   const text = active?.text?.trim();
   if (!text) return null;
 
@@ -242,7 +249,10 @@ export function CaptionOverlay({ path, reloadToken, fps, enabled, style }: Props
   // Show a name for the untagged turn too WHEN the transcript has other
   // identified speakers (so a renamed "Unknown speaker" shows here, matching the
   // panel) — but stay label-free for fully un-diarized transcripts.
-  const hasIdentifiedSpeakers = cues.some((c) => !!c.speaker);
+  // Whether this transcript is diarized at all is a property of the FILE, so
+  // it is computed once per cue array rather than re-scanned every tick (the
+  // second full linear pass this component used to do at 60Hz).
+  const hasIdentifiedSpeakers = hasSpeakersMemo;
   const speakerName = active && (active.speaker || hasIdentifiedSpeakers)
     ? resolveSpeakerName(active.speaker ?? null, overrides, { unknownWhenNull: hasIdentifiedSpeakers })
     : null;

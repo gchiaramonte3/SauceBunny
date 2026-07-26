@@ -597,8 +597,20 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       sbRef.current = null;
       msRef.current = null;
       objectUrlRef.current = null;
+      // UNPARK every producer waiting on an append we are about to drop.
+      // startFetch awaits a promise the pump resolves on the SourceBuffer's
+      // updateend; clearing the queue without resolving left that task parked
+      // forever, holding its chunk, its reader and its whole response object.
+      // One leaked task per seek rebuild, and a scrub is many rebuilds. The
+      // refs are nulled BEFORE resolving so a resolve-triggered pump finds
+      // nothing to do, and the woken producer exits on its generation check
+      // (genRef was bumped at the top of this function).
+      const dropped = queueRef.current;
+      const inFlight = currentRef.current;
       currentRef.current = null;
       queueRef.current = [];
+      inFlight?.resolve();
+      for (const item of dropped) item.resolve();
       endedRef.current = false;
       if (objUrl) { try { URL.revokeObjectURL(objUrl); } catch { /* ignore */ } }
       // Cancelling the reader aborts the fetch → ffmpeg sees the client

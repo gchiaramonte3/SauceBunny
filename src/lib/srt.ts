@@ -518,3 +518,31 @@ export function serializeCues(cues: Cue[], format: "srt" | "vtt" = "srt"): strin
 export function fmtTime(seconds: number): string {
   return secondsToClock(seconds);
 }
+
+/**
+ * Index of the cue covering `t` seconds, or -1. Binary search over cues that
+ * are already sorted by start (parseSrt guarantees it).
+ *
+ * Why this is shared rather than inlined: the caption overlay and the
+ * transcript reader both answer this question, both on every playhead tick.
+ * The reader had a binary search; the overlay had `cues.find(...)` plus a
+ * second `cues.some(...)` in the same render body, so a three-hour interview
+ * cost hundreds of thousands of predicate calls per second to display one
+ * line of text. Same question, one implementation.
+ *
+ * Cue ranges are half-open (`start <= t < end`) to match how the SRT format
+ * and every consumer here treat them, and gaps between cues return -1 rather
+ * than the nearest neighbour: no caption is the correct answer during silence.
+ */
+export function cueIndexAt(cues: readonly Cue[], t: number): number {
+  let lo = 0;
+  let hi = cues.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const c = cues[mid];
+    if (t < c.start) hi = mid - 1;
+    else if (t >= c.end) lo = mid + 1;
+    else return mid;
+  }
+  return -1;
+}

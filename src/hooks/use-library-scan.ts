@@ -65,7 +65,12 @@ const thumbGen = new Map<string, number>();
  * reject, so a failed decode never leaks a slot or strands a queued waiter.
  */
 async function withDecodeSlot<T>(job: () => Promise<T>, prefetch = false): Promise<T> {
-  if (thumbRunning >= THUMB_CONCURRENCY) {
+  // WHILE, not if: a released waiter resumes on a microtask, and a caller
+  // arriving in that window sees the decremented count and takes the slot
+  // first. With a single `if` the woken waiter then incremented anyway and
+  // the documented cap was only advisory - which matters because each slot
+  // is a full video decode.
+  while (thumbRunning >= THUMB_CONCURRENCY) {
     await new Promise<void>((release) =>
       (prefetch ? thumbPrefetchWaiters : thumbWaiters).push(release));
   }

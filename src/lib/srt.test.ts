@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSrt, groupIntoTurns, fmtTime, serializeCues, secondsToCueTc, type Cue } from "./srt";
+import { parseSrt, groupIntoTurns, fmtTime, serializeCues, secondsToCueTc, cueIndexAt, type Cue } from "./srt";
 
 // The parser is the single highest-blast-radius pure module in the app: the
 // transcript panel, the on-video captions, search, click-to-seek, and every
@@ -278,5 +278,40 @@ describe("serializeCues", () => {
     const reparsed = parseSrt(serializeCues([cue({ text: "line one\n\nline two" })]));
     expect(reparsed).toHaveLength(1);
     expect(reparsed[0].text).toBe("line one line two");
+  });
+});
+
+describe("cueIndexAt", () => {
+  const cues: Cue[] = [
+    { index: 1, start: 0, end: 2, text: "one", speaker: null },
+    { index: 2, start: 2, end: 4, text: "two", speaker: null },
+    // A deliberate gap 4-6: silence has no caption.
+    { index: 3, start: 6, end: 8, text: "three", speaker: null },
+  ];
+
+  it("finds the covering cue, with half-open ranges", () => {
+    expect(cueIndexAt(cues, 0)).toBe(0);
+    expect(cueIndexAt(cues, 1.99)).toBe(0);
+    expect(cueIndexAt(cues, 2)).toBe(1);      // boundary belongs to the NEXT cue
+    expect(cueIndexAt(cues, 7.5)).toBe(2);
+  });
+
+  it("returns -1 in gaps and outside the transcript", () => {
+    expect(cueIndexAt(cues, 5)).toBe(-1);
+    expect(cueIndexAt(cues, -1)).toBe(-1);
+    expect(cueIndexAt(cues, 99)).toBe(-1);
+    expect(cueIndexAt([], 1)).toBe(-1);
+  });
+
+  it("agrees with a linear scan across a large transcript", () => {
+    // The property that matters: swapping the overlay's find() for this must
+    // not change a single frame's caption.
+    const many: Cue[] = Array.from({ length: 5000 }, (_, i) => ({
+      index: i + 1, start: i * 3, end: i * 3 + 2.5, text: `cue ${i}`, speaker: null,
+    }));
+    for (const t of [0, 1.2, 2.6, 2.9, 3, 7499.9, 14997, 14999.5, 15000]) {
+      const linear = many.findIndex((c) => t >= c.start && t < c.end);
+      expect(cueIndexAt(many, t), `t=${t}`).toBe(linear);
+    }
   });
 });
