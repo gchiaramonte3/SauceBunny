@@ -28,7 +28,8 @@ export type DiagnosticsInput = {
   /** navigator.userAgent — carries the macOS + WebKit versions. */
   userAgent: string;
   generatedAt: Date;
-  /** Full persisted defaults snapshot (there are no secrets in it). */
+  /** Full persisted defaults snapshot. Secret-shaped keys are REDACTED by
+   *  the printer (see SECRET_KEY_PATTERNS) - do not rely on callers to strip. */
   settings: Record<string, unknown>;
   /** Sidecar versions from existing commands (yt-dlp is the only one exposed today). */
   sidecars: { name: string; version: string }[];
@@ -68,6 +69,29 @@ export function diagnosticsFilename(now: Date): string {
   );
 }
 
+/**
+ * Settings keys whose VALUE must never be written into a file the user is
+ * told to email to a stranger. Redaction lives here, at the printer, rather
+ * than at the call site: this report is assembled from a spread of the whole
+ * persisted defaults object, so anything added to that object later would
+ * otherwise be printed verbatim by default. The presence of the key is still
+ * reported (it is diagnostically useful to know a relay is configured) - only
+ * the value is replaced.
+ *
+ * Matching is case-insensitive substring, so a future `turnPassword2` or
+ * `apiKeyBackup` is caught without anyone remembering to update this list.
+ */
+const SECRET_KEY_PATTERNS = ["password", "secret", "token", "apikey", "api_key", "credential"];
+
+function redactSetting(key: string, value: unknown): string {
+  const k = key.toLowerCase();
+  if (SECRET_KEY_PATTERNS.some((p) => k.includes(p))) {
+    const len = typeof value === "string" ? value.length : 0;
+    return len > 0 ? `"<redacted, ${len} chars>"` : '""';
+  }
+  return JSON.stringify(value);
+}
+
 export function buildDiagnosticsReport(d: DiagnosticsInput): string {
   const out: string[] = [];
   const push = (s = "") => out.push(s);
@@ -88,7 +112,7 @@ export function buildDiagnosticsReport(d: DiagnosticsInput): string {
   push("== Settings ==");
   // Sorted for a stable, diffable report regardless of object insertion order.
   for (const key of Object.keys(d.settings).sort()) {
-    push(`${key} = ${JSON.stringify(d.settings[key])}`);
+    push(`${key} = ${redactSetting(key, d.settings[key])}`);
   }
   push();
 

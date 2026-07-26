@@ -169,9 +169,11 @@ Key points:
 frontend subsystem — session lifecycle, transport follow, shared-doc sync,
 ghost cursors, screening mode — extracted from App.tsx in the same shape as
 `use-panel-bus`/`use-web-playback`). A peer-to-peer collab *primitive* in the
-same spirit as the stream proxy — not an app backend. **Media never transits peers**: everyone plays their own copy of
-the source; only tiny newline-delimited JSON control lines (`SessionMsg`) cross
-the wire.
+same spirit as the stream proxy — not an app backend. **Media transits peers only on request**: by default everyone plays their own
+copy and only tiny newline-delimited JSON control lines (`SessionMsg`) cross the
+wire. Two opt-in paths carry bytes, each requiring a click on both sides — the
+host offering a file, and a guest choosing to receive it (verified BLAKE3
+transfer) or to watch it live (fMP4 remuxed over a typed substream).
 
 ```
 host: session_start ─► iroh QUIC endpoint + one-line ticket (join code)

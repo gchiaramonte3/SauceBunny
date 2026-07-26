@@ -122,3 +122,37 @@ describe("co-review session block (r131)", () => {
     expect(r).toContain("(nobody)");
   });
 });
+
+describe("secret redaction (r148)", () => {
+  // The bug: the report is built from a spread of the whole persisted
+  // defaults object, which carries the TURN relay password hydrated out of
+  // the Keychain. Every other exit (localStorage, settings export, settings
+  // import) blanked it; this one printed it verbatim into the file the app
+  // tells the user to attach to a bug report.
+  it("never prints a password value, and says so where it was", () => {
+    const out = buildDiagnosticsReport(baseInput({
+      settings: { turnUrl: "turn:relay.example:3478", turnUsername: "gasper", turnPassword: "hunter2-real-secret" },
+    }));
+    expect(out).not.toContain("hunter2-real-secret");
+    expect(out).toContain("turnPassword = \"<redacted, 19 chars>\"");
+    // Non-secret siblings stay readable - the report has to remain useful.
+    expect(out).toContain("turn:relay.example:3478");
+    expect(out).toContain("gasper");
+  });
+
+  it("catches secret-shaped keys added later, without anyone updating a list", () => {
+    const out = buildDiagnosticsReport(baseInput({
+      settings: { openaiApiKey: "sk-proj-abc", sessionToken: "tok_live_1", awsCredential: "AKIA1", nested: { safe: 1 } },
+    }));
+    expect(out).not.toContain("sk-proj-abc");
+    expect(out).not.toContain("tok_live_1");
+    expect(out).not.toContain("AKIA1");
+    expect(out).toContain("nested = {\"safe\":1}");
+  });
+
+  it("reports an empty secret as empty rather than claiming redaction", () => {
+    const out = buildDiagnosticsReport(baseInput({ settings: { turnPassword: "" } }));
+    expect(out).toContain('turnPassword = ""');
+    expect(out).not.toContain("redacted");
+  });
+});

@@ -4,12 +4,22 @@
 //! same spirit as `stream_proxy.rs`, NOT an app backend. Nothing here serves
 //! app logic over a socket:
 //!
-//!   - Media NEVER transits peers. Every participant plays their own copy of
-//!     the source; only tiny JSON control lines (roster, load-source,
-//!     transport truth) cross the wire.
+//!   - Media transits peers ONLY when a human asks for it. The default is
+//!     still that every participant plays their own copy and nothing but
+//!     tiny JSON control lines (roster, load-source, transport truth) cross
+//!     the wire — the fingerprint ladder resolves a local copy first. Two
+//!     opt-in paths carry bytes, and BOTH need a click on each side: the
+//!     host offers a file (`session_offer_file`), and a guest chooses to
+//!     receive it (`serve_file_substream`) or to watch it live
+//!     (`serve_media_substream`). Each serves only the one explicitly
+//!     offered file, matched by BLAKE3, and no filesystem path is ever on
+//!     the wire.
 //!   - Connections are iroh QUIC — dialed by endpoint public key, end-to-end
-//!     encrypted. n0's public discovery + relays are connect-assist only and
-//!     carry nothing but that E2E-encrypted control traffic.
+//!     encrypted. n0's public discovery + relays are connect-assist only.
+//!     NOTE: with the media paths above, a relay-only connection can now
+//!     carry GIGABYTES of E2E-encrypted media rather than kilobytes of
+//!     control traffic (see the R6 decision still open in the peer-media
+//!     plan: refuse Tier B on a relay path, or force the lowest rung).
 //!   - A relay-URL override setting + LAN-only mode is Phase 3.
 //!
 //! Topology: star. The host accepts up to `MAX_PEERS` peer connections; each

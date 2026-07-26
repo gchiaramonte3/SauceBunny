@@ -5,8 +5,14 @@ dist
 
 # Rust / Tauri
 src-tauri/target
-src-tauri/Cargo.lock
 src-tauri/gen
+# NOTE: src-tauri/Cargo.lock is deliberately COMMITTED (r148). This crate
+# builds a signed, distributed BINARY, not a library — the lockfile is what
+# makes "the code we audited" and "the code we shipped" the same thing, and
+# it is what THIRD-PARTY-LICENSES.md points reviewers at. package-lock.json
+# has always been committed for exactly this reason; the Rust side was
+# ignored by oversight, which meant ~780 crates behind caret ranges resolved
+# fresh on every clone, every CI run, and every release build.
 
 # Swift sidecar (saucebunny-diarize) — SwiftPM artifacts + the resolved
 # manifest. Built locally per-machine via `npm run build:diarizer`.

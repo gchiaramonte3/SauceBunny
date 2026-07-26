@@ -37,19 +37,37 @@ transmits them. Turning the setting to "none" disables this entirely.
 
 ### 3. Bundled sidecar binaries
 
-yt-dlp, ffmpeg, ffprobe, whisper-cli, saucebunny-diarize, and llama-server
-(loopback HTTP for the AI Summary tab, token-gated) run as
-subprocesses with argument arrays (never shell strings). They are
-self-contained static builds; the fetch/build scripts enforce with `otool -L`
-that no binary references non-system dylib paths. Sidecars are spawned only
-from the Rust backend (`app.shell()`); the webview capability file
-(`src-tauri/capabilities/`) deliberately grants NO shell permissions, so a
-compromised renderer cannot execute or spawn anything.
+yt-dlp, ffmpeg, ffprobe, whisper-cli, saucebunny-diarize, llama-server
+(loopback HTTP for the AI Summary tab, token-gated), **saucebunny-dictate**
+(microphone capture for voice dictation), and **saucebunny-capture**
+(ScreenCaptureKit screen sharing in co-review) run as subprocesses with
+argument arrays (never shell strings). The last two are listed explicitly
+because they hold the most sensitive permissions in the app: each is spawned
+only in response to a direct user action (pressing dictate; starting a screen
+share), and macOS gates both behind its own TCC prompt.
+
+They are self-contained static builds; the fetch/build scripts enforce with
+`otool -L` that no binary references non-system dylib paths. Sidecars are
+spawned only from the Rust backend (`app.shell()`); the webview capability
+file (`src-tauri/capabilities/`) deliberately grants NO shell permissions, so
+the renderer cannot spawn a process directly.
+
+**Known gap, stated plainly:** the renderer is not otherwise sandboxed. The
+asset-protocol scope in `tauri.conf.json` is currently `**`, and the app's own
+file commands accept absolute paths, so code running in the webview can read
+and write files as the user. Treat "no shell grants" as one wall, not a
+containment boundary. Narrowing this is tracked work, not a claimed property.
 
 ### 4. What the app deliberately does NOT do
 
 - No network calls except (a) user-initiated downloads (media, captions,
-  models, the yt-dlp updater) and (b) user-initiated co-review sessions.
+  models, the yt-dlp updater), (b) user-initiated co-review sessions, and
+  (c) **cloud AI, only if you opt in and supply your own API key**: choosing
+  Claude or ChatGPT in Settings ▸ AI APIs sends your transcript text to
+  `api.anthropic.com` or `api.openai.com` from the Rust backend. That is a
+  real third party receiving your content, which is why the local Qwen model
+  is the default and the cloud option ships switched off. Nothing is sent
+  until you both add a key and select that provider.
   Co-review is peer-to-peer and end-to-end encrypted, but reaching the other
   Macs uses third-party plumbing: iroh's public discovery/relay
   infrastructure for the session channel, a public STUN server for the

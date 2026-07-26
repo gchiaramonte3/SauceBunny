@@ -40,6 +40,13 @@ let screeningsDir: string | null = null;
 let index: Map<string, ScreeningIndexEntry> = new Map();
 let hydrated = false;
 
+/** Test-only: drop the module-level index + hydration latch so each case
+ *  starts from a cold launch (mirrors resetReviewStoreForTests). */
+export function resetScreeningStoreForTests(): void {
+  index = new Map();
+  hydrated = false;
+}
+
 /** FNV-1a 32-bit hex — same helper the review store uses, kept local so the
  *  two stores stay independent. */
 function fnv1a(s: string): string {
@@ -183,6 +190,14 @@ export async function loadScreening(id: string): Promise<ScreeningDoc | null> {
 export async function saveScreening(doc: ScreeningDoc): Promise<void> {
   const dir = await resolveDir();
   if (!dir) return;
+  // Read the on-disk index BEFORE rewriting it. Without this the module-level
+  // `index` is an empty Map on every fresh launch, so the first save of each
+  // session wrote an index.json containing ONLY that screening and erased
+  // every earlier row - the documents stayed on disk as orphans nothing could
+  // list. hydrateScreeningIndex is idempotent, so this costs one small read
+  // per launch. (review-store.ts:214 carries an explicit indexReady guard
+  // against exactly this hazard; this store was missing its half.)
+  await hydrateScreeningIndex();
   const file = screeningFileName(doc);
   const json = JSON.stringify(doc, null, 2);
   try {

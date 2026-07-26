@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { parseScreeningIndex, screeningFileName, indexEntryFor } from "./screening-store";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+
+import { invoke } from "@tauri-apps/api/core";
+import {
+  parseScreeningIndex, screeningFileName, indexEntryFor,
+  saveScreening, resetScreeningStoreForTests,
+} from "./screening-store";
+
+const LIB = "/docs/Sauce Bunny/Transcripts";
+const DIR = "/docs/Sauce Bunny/Screenings";
 import { newScreening, openSegment, noteComment } from "./screening";
 import type { SessionSource } from "../hooks/use-co-review";
 
@@ -74,5 +84,44 @@ describe("indexEntryFor", () => {
     expect(e.commentCount).toBe(3);
     expect(e.participants).toEqual(["Me", "Gasper"]);
     expect(e.bytes).toBe(1234);
+  });
+});
+
+describe("saveScreening does not erase earlier screenings (r148)", () => {
+  // The bug: index.json is rewritten wholesale from the module-level Map, but
+  // nothing ever read it back in. So on every fresh launch the Map was empty
+  // and the first save of the session replaced the whole index with one row.
+  // The documents survived on disk as orphans; the index lost them.
+  it("merges into the on-disk index instead of replacing it", async () => {
+    resetScreeningStoreForTests();
+    const priorRow = {
+      file: "2026-07-01-old.json", title: "Yesterday's cut", startedAt: 1, endedAt: 2,
+      participants: ["Gasper"], segmentCount: 1, commentCount: 3, bytes: 100,
+    };
+    const files = new Map<string, string>([
+      [`${DIR}/index.json`, JSON.stringify({ version: 1, screenings: { old: priorRow } })],
+    ]);
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
+      const a = args as { path?: string; text?: string } | undefined;
+      if (cmd === "default_transcript_library_path") return LIB;
+      if (cmd === "ensure_dir_exists") return null;
+      if (cmd === "read_text_file_capped") {
+        const hit = files.get(a?.path ?? "");
+        if (hit === undefined) throw new Error("ENOENT");
+        return hit;
+      }
+      if (cmd === "write_text_to_path") { files.set(a?.path ?? "", a?.text ?? ""); return null; }
+      return null;
+    });
+
+    const doc = newScreening("code-1", "Today's cut", "host");
+    await saveScreening(doc);
+
+    const written = JSON.parse(files.get(`${DIR}/index.json`)!) as {
+      screenings: Record<string, { title: string }>;
+    };
+    // Both rows must be present: the new one AND the one from the last launch.
+    expect(Object.keys(written.screenings).sort()).toEqual(["old", doc.id].sort());
+    expect(written.screenings.old.title).toBe("Yesterday's cut");
   });
 });
