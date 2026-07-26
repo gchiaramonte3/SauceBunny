@@ -206,6 +206,13 @@ command -v xcrun >/dev/null && pass "xcrun present" || fatal "xcrun missing — 
 echo
 if [ "$fail" -eq 0 ]; then
   printf "\033[32m✓ All checks passed — safe to run \`npm run tauri build\`\033[0m\n"
+  # Everything above is a PRE-build gate: it reads sources, sidecars and
+  # config. It cannot see the artifact, and the artifact is where the CSP,
+  # the license files and the Info.plist keys actually land. Point at the
+  # step that does look, because a green check here has previously been
+  # mistaken for "the build is shippable".
+  printf "\n  Then verify what the build actually produced:\n"
+  printf "      npm run verify:bundle\n"
   exit 0
 else
   printf "\033[31m✗ %d check(s) failed — fix before building\033[0m\n" "$fail"

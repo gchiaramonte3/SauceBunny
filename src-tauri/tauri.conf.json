@@ -59,9 +59,9 @@
       "binaries/llama-server"
     ],
     "resources": {
-      "../LICENSE": "licenses/",
-      "../THIRD-PARTY-LICENSES.md": "licenses/",
-      "../licenses/GPLv3.txt": "licenses/",
+      "../LICENSE": "licenses/LICENSE",
+      "../THIRD-PARTY-LICENSES.md": "licenses/THIRD-PARTY-LICENSES.md",
+      "../licenses/GPLv3.txt": "licenses/GPLv3.txt",
       "icons/Assets.car": "."
     },
     "macOS": {

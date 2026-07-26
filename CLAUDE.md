@@ -365,6 +365,27 @@ npm run tauri build      # produces signed + notarized .dmg
 
 ---
 
+## Bundling gotchas
+
+- **`bundle.resources` keys must be DISTINCT destination file paths.** Several
+  sources mapped at one directory key (`"../LICENSE": "licenses/"`,
+  `"../THIRD-PARTY-LICENSES.md": "licenses/"`, …) silently collapse: the map is
+  keyed by destination, so they overwrite each other and the bundle ships a
+  single FILE named `licenses` holding whichever one survived. Every build
+  before r153 was missing the MIT LICENSE and the GPLv3 text that bundled
+  ffmpeg requires. Write `"licenses/LICENSE"` etc. No comment keys either -
+  tauri treats every key as a resource path and fails the build.
+- **Verify the artifact, not just the source.** `npm run verify:bundle` asserts
+  the things that have actually broken: the CSP tokens baked into the binary
+  (a frontend rebuild does NOT change them), the narrowed asset scope, the
+  license files, non-stub sidecars, `Assets.car`, the Info.plist keys TCC needs,
+  and the signature. Run it after `npm run tauri build`.
+- **`grep -q` in a pipeline is a trap under `set -o pipefail`.** grep exits the
+  moment it matches, the writer upstream takes SIGPIPE (141), and pipefail
+  reports the pipeline failed on a SUCCESSFUL match. Two checks in
+  verify-bundle.sh were wrong this way before being caught by dogfooding.
+  Use `case "$var" in *needle*)`, which has no pipe.
+
 ## Open source hygiene
 
 - **License:** MIT. All new source files should be compatible.

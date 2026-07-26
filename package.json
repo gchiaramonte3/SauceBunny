@@ -22,6 +22,7 @@
     "build:whisper": "bash scripts/build-whisper.sh",
     "build:llama": "bash scripts/build-llama.sh",
     "check:release": "bash scripts/check-notarization-ready.sh",
+    "verify:bundle": "bash scripts/verify-bundle.sh",
     "test:e2e": "playwright test",
     "set-version": "bash scripts/set-version.sh",
     "lint": "eslint src e2e --max-warnings 22"

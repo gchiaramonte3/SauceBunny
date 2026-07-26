@@ -77,3 +77,49 @@ jobs:
       # the shell-level smoke: boots, chrome wired, no pageerrors.
       - run: npx playwright install chromium
       - run: npx playwright test
+
+  # ── The artifact, not just the source ────────────────────────────────
+  #
+  # Every job above checks SOURCE. Nothing looked at what actually ships, and
+  # three real defects walked through that gap: a CSP baked into the binary
+  # that forbade WebAssembly (audio silent in the .dmg, fine in `tauri dev`,
+  # three user reports to find), a resource map that collapsed three license
+  # files into one so the MIT LICENSE and the GPLv3 text never shipped, and a
+  # DMG step that failed while the .app it had produced was fine.
+  #
+  # This job builds the real bundle and asserts those properties. Sidecars are
+  # STUBBED (they are not in git; two are compiled from source and far too slow
+  # for CI), so verify-bundle.sh's non-stub sidecar checks are expected to fail
+  # here — hence `--allow-stub-sidecars`. What CI proves is the part that broke:
+  # the release-profile Rust build compiles, the bundle is produced, the CSP and
+  # asset scope are baked in correctly, the licenses land as separate files, and
+  # Info.plist carries the keys the app needs at runtime.
+  #
+  # Runtime ~12-18 min cold, ~6-8 warm. Signing and notarization need
+  # credentials this project does not have; that stays a local step.
+  bundle:
+    name: Build + verify the app bundle
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      # Same stubbing the cargo job uses: real binaries are gitignored.
+      - name: Stub sidecars
+        run: |
+          mkdir -p src-tauri/binaries
+          for n in yt-dlp ffmpeg ffprobe whisper-cli llama-server \
+                   saucebunny-diarize saucebunny-dictate saucebunny-capture; do
+            : > "src-tauri/binaries/${n}-aarch64-apple-darwin"
+            chmod +x "src-tauri/binaries/${n}-aarch64-apple-darwin"
+          done
+      - name: Build the bundle
+        run: npm run tauri build -- --bundles app
+      - name: Verify the bundle
+        run: bash scripts/verify-bundle.sh --allow-stub-sidecars

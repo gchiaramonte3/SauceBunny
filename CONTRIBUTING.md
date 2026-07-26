@@ -70,6 +70,28 @@ are still verified manually, so please also describe the smoke-test you ran
 in the PR body (e.g. "Pulled a YouTube clip, generated a transcript with
 diarization on, dragged two speaker bubbles to merge — no regressions").
 
+### If you touched packaging
+
+Everything above checks *source*. Nothing in it can see the artifact, and
+three real defects used that gap: a CSP compiled into the binary that
+forbade WebAssembly (audio was silent in the .dmg and perfect in
+`tauri dev`), a resource map that collapsed three license files into one so
+the MIT and GPLv3 texts shipped in no build at all, and a DMG step that
+failed while the .app it had just produced was fine.
+
+So if you changed `tauri.conf.json`, `Info.plist` keys, entitlements, icons,
+or anything under `scripts/`, build once and check the result:
+
+```bash
+npm run tauri build
+npm run verify:bundle
+```
+
+CI does this too (the `bundle` job), but with stubbed sidecars and no
+signing identity, so it passes `--allow-stub-sidecars` and can only prove
+the parts that do not need real binaries. A release must run it *without*
+that flag, which `npm run check:release` does for you.
+
 ## Nightly real-sidecar smoke
 
 Per-push CI stubs the sidecar binaries, so it never actually *runs* whisper,
