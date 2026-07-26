@@ -1002,7 +1002,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-25-r144-peer-routes";
+pub const BACKEND_BUILD_ID: &str = "2026-07-25-r145-tier-b-stream";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {
@@ -1033,6 +1033,23 @@ pub fn peer_media_register(path: String) -> Result<serde_json::Value, crate::App
     let base = crate::stream_proxy::base_url()
         .ok_or_else(|| crate::AppError::internal("The media proxy is not running."))?;
     let id = crate::stream_proxy::register_peer_media(p)
+        .map_err(|e| crate::AppError::internal(format!("mint peer id: {e}")))?;
+    Ok(serde_json::json!({ "id": id, "url": format!("{base}/peer/v1/{id}") }))
+}
+
+/// Register the host's OFFERED file as a REMOTE stream source (Tier B 3d,
+/// guest side): the returned peer URL streams it live over the session
+/// substream. Same URL shape as the local registration, so the MSE player
+/// needs no byte-path changes; the raw route answers 405 for it, which is
+/// why callers must pass codec strings to the player (no probe).
+#[tauri::command]
+pub fn peer_media_register_remote(blake3: String) -> Result<serde_json::Value, crate::AppError> {
+    if blake3.len() != 64 || !blake3.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(crate::AppError::invalid("Bad file id."));
+    }
+    let base = crate::stream_proxy::base_url()
+        .ok_or_else(|| crate::AppError::internal("The media proxy is not running."))?;
+    let id = crate::stream_proxy::register_peer_media_remote(blake3)
         .map_err(|e| crate::AppError::internal(format!("mint peer id: {e}")))?;
     Ok(serde_json::json!({ "id": id, "url": format!("{base}/peer/v1/{id}") }))
 }

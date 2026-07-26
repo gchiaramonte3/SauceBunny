@@ -5192,6 +5192,50 @@ export default function App() {
   // (commands/session.rs) as a dumb relay; the frontend is the review
   // source-of-truth. WEB-ONLY — a local file can't be pushed to peers, so
   // hosting is gated to web sources. The playhead is NOT passed in: the
+  // Tier B (r145): mount the host's offered file as a LIVE stream. Mirrors
+  // handleFetch's stub-mount path, but the "resolve" is a proxy peer route
+  // registered against the live session, so there is no extraction and no
+  // download fallback (a dead stream resets; the room still offers Get).
+  const peerRegIdRef = useRef<string | null>(null);
+  const loadPeerStream = useCallback(async (
+    offer: { name: string; blake3: string; vcodec: string | null; acodec: string | null },
+    pending: { title: string | null; duration: number | null },
+  ) => {
+    if (peerRegIdRef.current) {
+      void invoke("peer_media_unregister", { id: peerRegIdRef.current }).catch(() => {});
+      peerRegIdRef.current = null;
+    }
+    const reg = await invoke<{ id: string; url: string }>("peer_media_register_remote", { blake3: offer.blake3 });
+    peerRegIdRef.current = reg.id;
+    const marker = `peer://${offer.blake3.slice(0, 12)}`;
+    resetForNewSource(marker);
+    activeSourceUrlRef.current = marker;
+    setActiveSourceUrl(marker);
+    const seq = ++sourceSeqRef.current;
+    setMetadata({
+      title: pending.title ?? offer.name,
+      duration: pending.duration,
+      thumbnail: null,
+      uploader: null,
+      upload_date: null,
+      view_count: null,
+      webpage_url: marker,
+      width: null,
+      height: null,
+      fps: null,
+      vcodec: offer.vcodec,
+      acodec: offer.acodec,
+      ext: null,
+      has_subs: false,
+    });
+    setSourceKind("youtube");
+    setStatus("loaded");
+    publishPlayheadFrames(0);
+    setInFrames(null);
+    setOutFrames(null);
+    webPlayback.loadPeerStream(marker, { url: reg.url, videoCodec: offer.vcodec, audioCodec: offer.acodec }, seq);
+  }, [resetForNewSource, webPlayback]);
+
   // hook's heartbeat/presence/chase read getPlayheadFrames() when they fire
   // (a render-mirrored value would go stale now that playback ticks don't
   // re-render App).
@@ -5202,13 +5246,13 @@ export default function App() {
     meshStreams, meshStates, meshMutedForMe, toggleMuteForMe,
     shareState, shareStream, sharingMembers, startShare, stopShare,
     isPresenter, pendingSource, sourceStatus, makePresenter, adoptPendingSource,
-    offeredFile, transfer, offerCurrentFile, fetchOfferedFile, cancelFetch,
+    offeredFile, transfer, offerCurrentFile, fetchOfferedFile, watchOfferedStream, cancelFetch,
     startCoReview, joinCoReview, leaveCoReview,
   } = useCoReview({
     isPlaying, fps, playbackRate,
     sessionSource, activeSourceUrlRef, reviewSourceKey,
     playerRef, metadataRef,
-    onChaseSeek, setUrl, handleFetch, loadLocalPath,
+    onChaseSeek, setUrl, handleFetch, loadLocalPath, loadPeerStream,
     pushNotification, setQueueOpen,
     setReviewMarkers, setReviewAnnotations,
     turn: { url: defaults.turnUrl, username: defaults.turnUsername, password: defaults.turnPassword },
@@ -5785,7 +5829,7 @@ export default function App() {
                           type="button"
                           className="btn btn-ghost btn-compact"
                           title="Send your copy of this file over the session. They see the name and size and choose to accept."
-                          onClick={() => { void offerCurrentFile(localFilePath, metadata?.title ?? undefined); }}
+                          onClick={() => { void offerCurrentFile(localFilePath, metadata?.title ?? undefined, metadata?.vcodec ?? null, metadata?.acodec ?? null); }}
                         >
                           Send them the file
                         </button>
@@ -5871,6 +5915,19 @@ export default function App() {
                             ? `${presenterName} is watching ${pendingSource.title ?? "a local file"}. That file lives on their Mac.`
                             : `Loading ${pendingSource.title ?? "the shared source"}…`}
                         </span>
+                        {pendingSource.kind === "file" && offeredFile && offeredFile.vcodec && (
+                          /* Tier B: watch NOW, streamed live from the host.
+                             Needs codec strings (no probe on a peer route);
+                             an older host's offer just hides this chip. */
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-compact"
+                            title="Streams live over the session. Nothing is saved on this Mac."
+                            onClick={() => { void watchOfferedStream(); }}
+                          >
+                            {`Watch now (streams from ${presenterName})`}
+                          </button>
+                        )}
                         {pendingSource.kind === "file" && offeredFile && (
                           /* The chip names the file and its size; clicking it
                              IS the consent to a multi-GB write on this disk. */
@@ -5948,6 +6005,7 @@ export default function App() {
                        native <video> over asset:// — same lesson as r107 locals). */
                     webCachedUseMediabunny={webCachedPlayer === "mediabunny"}
                     streamStartAt={webPlayback.streamStartAt}
+                    disableScrubPreview={activeSourceUrl?.startsWith("peer://") ?? false}
                     onDiag={(tag, msg) => appendLog(asLogTag(tag), "seek", msg)}
                     /* Audio track + codecs are meaningful only while STREAMING (the
                        cached file is already muxed and sample-accurate). */

@@ -75,6 +75,8 @@ export type WebPlayback = {
    *  Stream-first loads skip yt-dlp and hand it straight to the proxy/MSE
    *  path; if it then fails, the machine retries with ONE fresh resolve. */
   loadWeb: (url: string, mode: "stream-first" | "download-first", seq: number, warmStream?: CachedStream | null) => void;
+  /** Tier B: stream a session host's offered file (already-proxied peer URL). */
+  loadPeerStream: (markerUrl: string, stream: { url: string; videoCodec: string | null; audioCodec: string | null }, seq: number) => void;
   /** Warm boot from a COMPLETE downloaded copy: skip resolve/proxy entirely
    *  and play the file (LocalMediaPlayer) immediately. */
   loadCached: (url: string, cachePath: string, seq: number) => void;
@@ -107,6 +109,12 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
   // resolve effect consumes this instead of calling yt-dlp — unless the
   // machine is in a `fresh: true` retry, which bypasses (and clears) it.
   const warmStreamRef = useRef<{ seq: number; stream: CachedStream } | null>(null);
+  // Tier B peer stream (r145): a URL that is ALREADY a full proxy peer route
+  // (…/t/<tok>/peer/v1/<id>), handed in by loadPeerStream. Consumed instead
+  // of extraction; a fresh retry cannot re-resolve it (there is nothing to
+  // re-resolve), so it RESETS the machine instead of falling into a yt-dlp
+  // download of a peer:// marker.
+  const peerStreamRef = useRef<{ seq: number; url: string; videoCodec: string | null; audioCodec: string | null } | null>(null);
 
   // Effect keys: only kind / seq / streaming-readiness re-trigger work — NOT
   // download progress (which keeps kind+seq stable, so the download isn't
@@ -159,6 +167,27 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     let cancelled = false;
     void (async () => {
       const h = helpersRef.current;
+      const peer = peerStreamRef.current;
+      if (peer && peer.seq === mySeq) {
+        if (fresh) {
+          // A peer stream that died has no re-resolve and no download
+          // fallback; surface the end and return to the empty state. The
+          // room UI still offers "Get the file".
+          peerStreamRef.current = null;
+          h.appendLog("warn", "session", "The peer stream ended. Ask the host to offer the file again, or get the file instead.");
+          dispatch({ t: "RESET" });
+          return;
+        }
+        const info: StreamInfo = {
+          url: peer.url,
+          audioUrl: null,
+          videoCodec: peer.videoCodec,
+          audioCodec: peer.audioCodec,
+        };
+        h.appendLog("ok", "session", "Streaming from the host over the session");
+        dispatch({ t: "RESOLVED", seq: mySeq, stream: info, fromCache: false });
+        return;
+      }
       const warm = warmStreamRef.current;
       if (fresh) warmStreamRef.current = null; // a failed cached URL must not be replayed
       if (!fresh && warm && warm.seq === mySeq) {
@@ -310,6 +339,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
   }, []);
 
   const loadWeb = useCallback((url: string, mode: "stream-first" | "download-first", seqArg: number, warmStream?: CachedStream | null) => {
+    peerStreamRef.current = null;
     warmStreamRef.current = mode === "stream-first" && warmStream
       ? { seq: seqArg, stream: warmStream }
       : null;
@@ -318,7 +348,17 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
 
   const loadCached = useCallback((url: string, cachePath: string, seqArg: number) => {
     warmStreamRef.current = null;
+    peerStreamRef.current = null;
     dispatch({ t: "LOAD_CACHED", seq: seqArg, url, cachePath });
+  }, []);
+
+  /** Tier B: stream the host's offered file over the session. `markerUrl` is
+   *  a peer:// display marker (never fetched); `stream.url` is the full
+   *  proxy peer route the MSE player consumes verbatim. */
+  const loadPeerStream = useCallback((markerUrl: string, stream: { url: string; videoCodec: string | null; audioCodec: string | null }, seqArg: number) => {
+    warmStreamRef.current = null;
+    peerStreamRef.current = { seq: seqArg, ...stream };
+    dispatch({ t: "LOAD", seq: seqArg, url: markerUrl, mode: "stream-first" });
   }, []);
 
   const onPlayerReady = useCallback(() => {
@@ -386,6 +426,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
     downloadJobId: state.kind === "downloading" ? state.jobId : null,
     loadWeb,
     loadCached,
+    loadPeerStream,
     onPlayerReady,
     consumeResume,
     onMediaError,

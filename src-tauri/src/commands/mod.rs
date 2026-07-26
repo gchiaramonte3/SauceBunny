@@ -37,6 +37,8 @@ pub mod llm;
 pub use llm::*;
 pub mod cloud_ai;
 pub use cloud_ai::*;
+// Tier B bridge (no invoke commands of its own; used by stream_proxy + session).
+pub mod peer_stream;
 pub mod session;
 pub use session::*;
 pub mod library;

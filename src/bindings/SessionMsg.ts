@@ -6,4 +6,11 @@ export type SessionMsg = { "kind": "hello", name: string, install: string, } | {
  * Host-stamped sender id + the presenter epoch it was sent under, so
  * lines from a superseded presenter can be ordered and discarded.
  */
-from: string, epoch: number, } | { "kind": "reviewOp", op: string, } | { "kind": "reviewDoc", doc: string, } | { "kind": "presence", name: string, position: number, } | { "kind": "sharing", from: string, on: boolean, } | { "kind": "reaction", from: string, emote: string, on: boolean, } | { "kind": "offerFile", from: string, name: string, size: number, blake3: string, };
+from: string, epoch: number, } | { "kind": "reviewOp", op: string, } | { "kind": "reviewDoc", doc: string, } | { "kind": "presence", name: string, position: number, } | { "kind": "sharing", from: string, on: boolean, } | { "kind": "reaction", from: string, emote: string, on: boolean, } | { "kind": "offerFile", from: string, name: string, size: number, blake3: string, 
+/**
+ * Codec strings (e.g. "avc1.640028" / "mp4a.40.2") so a guest can
+ * build the MSE MIME for the LIVE stream without probing (the peer
+ * raw route has no random access). Absent on older builds; the
+ * guest then only offers the transfer, not the stream.
+ */
+vcodec: string | null, acodec: string | null, };

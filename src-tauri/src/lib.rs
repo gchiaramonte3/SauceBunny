@@ -215,6 +215,7 @@ pub fn run() {
             commands::get_backend_build_id,
             commands::get_stream_proxy_base,
             commands::peer_media_register,
+            commands::peer_media_register_remote,
             commands::peer_media_unregister,
             commands::ytdlp_version,
             commands::update_ytdlp,

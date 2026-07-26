@@ -32,6 +32,10 @@ import { base64UrlEncode } from "../lib/stream-proxy";
  */
 type Props = {
   path: string; // http(s) RAW proxy URL (…/v1/<b64>); we derive the /fmp4/ URL from it
+  /** Tier B peer streams: the raw route has no random access (405), so the
+   *  frame-accurate scrub overlay must not open its mediabunny pipeline.
+   *  Explicit flag rather than a silent probe failure (plan risk note). */
+  disableScrubPreview?: boolean;
   filename?: string;
   hasVideo: boolean;
   initialVolume: number; // 0..1
@@ -72,7 +76,7 @@ type Props = {
 const BUFFER_AHEAD_SECONDS = 30;
 
 export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSEStreamPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration, audioStreamUrl, videoCodec, audioCodec, onDiag, startAtSeconds },
+  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration, audioStreamUrl, videoCodec, audioCodec, onDiag, startAtSeconds, disableScrubPreview },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -109,6 +113,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   useEffect(() => { audioCodecRef.current = audioCodec ?? null; }, [audioCodec]);
   const onDiagRef = useRef<Props["onDiag"]>(undefined);
   useEffect(() => { onDiagRef.current = onDiag; }, [onDiag]);
+  useEffect(() => { disableScrubPreviewRef.current = !!disableScrubPreview; }, [disableScrubPreview]);
   // Read at pipeline-build time only (a prop change must not rebuild).
   const startAtSecondsRef = useRef(0);
   useEffect(() => {
@@ -177,6 +182,8 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   // <video> must NOT report its time (it would yank the playhead back to
   // the pre-seek position — the "scrubbing won't go past here" wrestling).
   const seekingRef = useRef(false);
+  /** Mirror of the disableScrubPreview prop for the []-deps handle. */
+  const disableScrubPreviewRef = useRef(!!disableScrubPreview);
 
   // Per-source once-guard: a single decode/append failure can fire several error
   // signals (SourceBuffer 'error', appendBuffer throw, <video> 'error') in
@@ -243,8 +250,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       // frame at `target` is drawn instantly to a canvas above the <video>,
       // hiding the video's laggier native seek. The 'seeked'/'loadeddata'
       // listeners hide it once the real video catches up post-gesture.
-      setScrubPreview(true);
-      requestPreviewRef.current?.(target);
+      // Peer streams skip it: no random access on the raw route.
+      if (!disableScrubPreviewRef.current) {
+        setScrubPreview(true);
+        requestPreviewRef.current?.(target);
+      }
       if (seekSettleRef.current != null) window.clearTimeout(seekSettleRef.current);
       seekSettleRef.current = window.setTimeout(() => {
         seekSettleRef.current = null;

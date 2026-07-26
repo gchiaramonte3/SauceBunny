@@ -198,7 +198,20 @@ pub enum SessionMsg {
     /// the host serves bytes; a relayed offer would promise bytes the host
     /// cannot serve). `size` is f64 for the same reason as `duration` on
     /// LoadSource: file sizes fit f64 exactly and the binding stays number.
-    OfferFile { from: String, name: String, size: f64, blake3: String },
+    OfferFile {
+        from: String,
+        name: String,
+        size: f64,
+        blake3: String,
+        /// Codec strings (e.g. "avc1.640028" / "mp4a.40.2") so a guest can
+        /// build the MSE MIME for the LIVE stream without probing (the peer
+        /// raw route has no random access). Absent on older builds; the
+        /// guest then only offers the transfer, not the stream.
+        #[serde(default)]
+        vcodec: Option<String>,
+        #[serde(default)]
+        acodec: Option<String>,
+    },
 }
 
 /// One session member: a session-scoped id (m0 = host, m1, m2, ... minted
@@ -289,6 +302,9 @@ enum Session {
         /// Latest presenter epoch from the host (see HostShared).
         presenter_epoch: Arc<AtomicU64>,
         read_task: JoinHandle<()>,
+        /// Tier B: services the proxy's media-stream requests over this
+        /// connection while the session lives (peer_stream hook).
+        media_task: JoinHandle<()>,
         // Held so the QUIC stream/connection stay open for the session's
         // lifetime (dropping the send half would RESET the stream and the
         // host would drop us). `send` is also written to by `session_send`
@@ -502,6 +518,11 @@ pub async fn session_join(
         },
         generation,
     ));
+    // Tier B: while this session lives, the loopback proxy can ask for the
+    // host's offered file as a live fMP4 stream (peer_stream bridge).
+    let (media_tx, media_rx) = tokio::sync::mpsc::unbounded_channel();
+    crate::commands::peer_stream::install_media_hook(media_tx);
+    let media_task = tokio::spawn(peer_media_service(conn.clone(), media_rx));
     inner.session = Session::Peer {
         endpoint,
         roster,
@@ -510,6 +531,7 @@ pub async fn session_join(
         presenter: peer_presenter,
         presenter_epoch: peer_presenter_epoch,
         read_task,
+        media_task,
         _conn: conn,
         send,
     };
@@ -959,6 +981,9 @@ struct SubstreamReq {
     blake3: String,
     #[serde(default)]
     offset: u64,
+    /// media-request only: seconds to start the live remux from.
+    #[serde(default)]
+    start: f64,
 }
 
 /// Accept every bi-stream a registered peer opens after its control stream,
@@ -1010,8 +1035,8 @@ async fn serve_file_substream(
         _ => return, // silent stream, oversize line, or EOF — nothing owed
     };
     let req = match serde_json::from_str::<SubstreamReq>(line.trim()) {
-        Ok(r) if r.t == "file-request" => r,
-        _ => {
+        Ok(r) => r,
+        Err(_) => {
             let _ = send
                 .write_all(b"{\"t\":\"file-response\",\"ok\":false,\"error\":\"unknown request\"}\n")
                 .await;
@@ -1019,6 +1044,18 @@ async fn serve_file_substream(
             return;
         }
     };
+    // Tier B live stream shares the substream shape (risk R5: one explicit
+    // discriminator, every unknown type refused with a header).
+    if req.t == "media-request" {
+        return serve_media_substream(app, send, shared, member, req.blake3, req.start).await;
+    }
+    if req.t != "file-request" {
+        let _ = send
+            .write_all(b"{\"t\":\"file-response\",\"ok\":false,\"error\":\"unknown request\"}\n")
+            .await;
+        let _ = send.finish();
+        return;
+    }
     // Authorization (risk R11, Tier C shape): the ONLY thing servable is the
     // file the host explicitly offered, matched by hash. No path ever comes
     // off the wire, and withdrawing the offer closes the door immediately.
@@ -1093,6 +1130,129 @@ async fn serve_file_substream(
         "member": member, "name": file_info.name,
         "received": sent as f64, "total": file_info.size as f64,
     }));
+}
+
+/// Serve one LIVE media request (Tier B 3c): remux the offered file to fMP4
+/// from `start` seconds and stream it into the substream. Authorization is
+/// identical to the file transfer: hash match against the ONE explicitly
+/// offered file. One JSON header line out (timeline mode + epoch, the same
+/// contract the proxy's web route ships in HTTP headers), then raw fMP4 to
+/// EOF. Deliberately unpaced: a live stream self-limits at media rate, and
+/// the guest's MSE buffer-ahead cap backpressures through QUIC and the
+/// ffmpeg pipe (the 3b property).
+async fn serve_media_substream(
+    app: AppHandle,
+    mut send: SendStream,
+    shared: Arc<HostShared>,
+    member: String,
+    blake3: String,
+    start: f64,
+) {
+    use tokio::io::AsyncReadExt;
+
+    let offered = shared.offered.lock().map(|g| g.clone()).unwrap_or(None);
+    let Some(file_info) = offered.filter(|f| f.blake3 == blake3) else {
+        let _ = send
+            .write_all(b"{\"t\":\"media-response\",\"ok\":false,\"error\":\"not offered\"}\n")
+            .await;
+        let _ = send.finish();
+        return;
+    };
+    let Some(ff) = crate::stream_proxy::ffmpeg_path() else {
+        let _ = send
+            .write_all(b"{\"t\":\"media-response\",\"ok\":false,\"error\":\"no ffmpeg\"}\n")
+            .await;
+        let _ = send.finish();
+        return;
+    };
+    let start = if start.is_finite() { start.clamp(0.0, 86_400.0) } else { 0.0 };
+
+    // Epoch probe on OUR OWN file (fast, local; memoized per (path, start)).
+    // Absolute timeline is what makes a guest's far seek land exactly; a
+    // probe failure is VISIBLE as "rebased" in the header (risk R8), which
+    // the player already treats as keyframe-precision landing.
+    let path_str = file_info.path.to_string_lossy().into_owned();
+    let epoch = if start > 0.0 {
+        let p = path_str.clone();
+        tokio::task::spawn_blocking(move || crate::stream_proxy::probe_stream_epoch(&p, start))
+            .await
+            .ok()
+            .flatten()
+    } else {
+        Some(0.0)
+    };
+    let header = match epoch {
+        Some(e) => format!(
+            "{{\"t\":\"media-response\",\"ok\":true,\"timeline\":\"absolute\",\"epoch\":{e:.6}}}\n"
+        ),
+        None => "{\"t\":\"media-response\",\"ok\":true,\"timeline\":\"rebased\"}\n".to_string(),
+    };
+    if send.write_all(header.as_bytes()).await.is_err() {
+        return;
+    }
+
+    let mut cmd = tokio::process::Command::new(ff);
+    cmd.arg("-hide_banner").arg("-loglevel").arg("error");
+    if start > 0.0 {
+        cmd.arg("-ss").arg(format!("{start}"));
+    }
+    // Mirrors serve_fmp4's local branch: -c copy, absolute timestamps, 90kHz
+    // video timescale, streaming-friendly fragmented MP4.
+    cmd.arg("-i")
+        .arg(&file_info.path)
+        .arg("-c")
+        .arg("copy")
+        .arg("-copyts")
+        .arg("-muxpreload")
+        .arg("0")
+        .arg("-muxdelay")
+        .arg("0")
+        .arg("-video_track_timescale")
+        .arg("90000")
+        .arg("-movflags")
+        .arg("frag_keyframe+empty_moov+default_base_moof")
+        .arg("-f")
+        .arg("mp4")
+        .arg("pipe:1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        // Risk R12: the serving task OWNS its child; the task ending (guest
+        // seek teardown, disconnect, session end) kills exactly this ffmpeg.
+        // No shared singleton to clobber.
+        .kill_on_drop(true);
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            session_log(&app, "err", format!("Peer stream ffmpeg spawn failed: {e}."));
+            let _ = send.finish();
+            return;
+        }
+    };
+    let Some(mut stdout) = child.stdout.take() else {
+        let _ = send.finish();
+        return;
+    };
+    session_log(
+        &app,
+        "info",
+        format!("Streaming \"{}\" to {member} from {start:.2}s.", file_info.name),
+    );
+    let mut buf = vec![0u8; TRANSFER_CHUNK];
+    loop {
+        let n = match stdout.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(_) => break,
+        };
+        if send.write_all(&buf[..n]).await.is_err() {
+            // The guest tore this stream down (seek rebuild, pause+leave,
+            // disconnect). Normal lifecycle; kill_on_drop reaps ffmpeg.
+            return;
+        }
+    }
+    let _ = send.finish();
+    let _ = child.wait().await;
 }
 
 /// Relay one message to every peer EXCEPT the sender (host-side fan-out of a
@@ -1301,6 +1461,106 @@ async fn fail_peer_to_off(app: AppHandle, generation: u64, error: String) {
 
 /// Abort a session's tasks and close its endpoint. Call with the manager
 /// lock RELEASED — `Endpoint::close` waits on the network.
+/// Guest side of Tier B: service the proxy's media-stream requests over this
+/// session's connection. Each request opens a fresh typed substream to the
+/// host, forwards the header metadata, then pumps bytes into the bridge's
+/// BOUNDED channel — `send().await` parking is what carries MSE pause
+/// backpressure into QUIC (the 3b property). Dropping the reader (HTTP
+/// client gone / seek teardown) fails the send, which drops the RecvStream,
+/// which stops the host's write, which kills its ffmpeg.
+async fn peer_media_service(
+    conn: Connection,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<crate::commands::peer_stream::MediaStreamRequest>,
+) {
+    use crate::commands::peer_stream::{MediaStreamHandle, BRIDGE_CHANNEL_CHUNKS};
+    use tokio::io::AsyncReadExt;
+
+    #[derive(serde::Deserialize)]
+    struct MediaHeader {
+        ok: bool,
+        #[serde(default)]
+        timeline: String,
+        #[serde(default)]
+        epoch: Option<f64>,
+        #[serde(default)]
+        error: String,
+    }
+
+    while let Some(req) = rx.recv().await {
+        let conn = conn.clone();
+        tokio::spawn(async move {
+            let refuse = |msg: String, resp: &std::sync::mpsc::SyncSender<std::io::Result<MediaStreamHandle>>| {
+                let _ = resp.send(Err(std::io::Error::other(msg)));
+            };
+            let (mut send, recv) = match conn.open_bi().await {
+                Ok(v) => v,
+                Err(e) => return refuse(format!("open substream: {e}"), &req.resp),
+            };
+            let line = format!(
+                "{{\"t\":\"media-request\",\"blake3\":\"{}\",\"start\":{}}}\n",
+                req.blake3, req.start
+            );
+            if send.write_all(line.as_bytes()).await.is_err() {
+                return refuse("send request".into(), &req.resp);
+            }
+            let _ = send.finish();
+            let mut reader = BufReader::new(recv);
+            let header = match tokio::time::timeout(
+                Duration::from_secs(15),
+                read_line_bounded(&mut reader, MAX_HELLO_BYTES),
+            )
+            .await
+            {
+                Ok(Ok(Some(l))) => l,
+                Ok(_) => return refuse("host closed the stream".into(), &req.resp),
+                Err(_) => {
+                    return refuse(
+                        "the host didn't answer; their build may be older".into(),
+                        &req.resp,
+                    )
+                }
+            };
+            let head: MediaHeader = match serde_json::from_str(header.trim()) {
+                Ok(h) => h,
+                Err(_) => return refuse("unreadable stream header".into(), &req.resp),
+            };
+            if !head.ok {
+                return refuse(
+                    if head.error.is_empty() { "host refused the stream".into() } else { head.error },
+                    &req.resp,
+                );
+            }
+            let timeline = if head.timeline == "absolute" { "absolute" } else { "rebased" };
+            let (tx, brx) = tokio::sync::mpsc::channel::<Vec<u8>>(BRIDGE_CHANNEL_CHUNKS);
+            if req
+                .resp
+                .send(Ok(MediaStreamHandle {
+                    timeline: timeline.to_string(),
+                    epoch: if timeline == "absolute" { head.epoch } else { None },
+                    rx: brx,
+                }))
+                .is_err()
+            {
+                return; // worker gave up waiting; tear the substream down
+            }
+            let mut buf = vec![0u8; 64 * 1024];
+            loop {
+                let n = match reader.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => n,
+                    Err(_) => break,
+                };
+                if tx.send(buf[..n].to_vec()).await.is_err() {
+                    // Reader dropped: the HTTP response ended (seek teardown
+                    // or player gone). Dropping `reader` STOPs the stream and
+                    // the host's write fails on its next chunk.
+                    break;
+                }
+            }
+        });
+    }
+}
+
 async fn shutdown_session(old: Session) {
     match old {
         Session::Off => {}
@@ -1321,8 +1581,11 @@ async fn shutdown_session(old: Session) {
         Session::Peer {
             endpoint,
             read_task,
+            media_task,
             ..
         } => {
+            crate::commands::peer_stream::clear_media_hook();
+            media_task.abort();
             read_task.abort();
             endpoint.close().await;
         }
@@ -1457,6 +1720,8 @@ pub async fn session_offer_file(
     state: State<'_, SessionManager>,
     path: String,
     name: Option<String>,
+    vcodec: Option<String>,
+    acodec: Option<String>,
 ) -> Result<serde_json::Value, crate::AppError> {
     let shared = {
         let inner = state.inner.lock().await;
@@ -1514,11 +1779,16 @@ pub async fn session_offer_file(
         name: display.clone(),
         size: size as f64,
         blake3: hash.clone(),
+        vcodec: vcodec.clone(),
+        acodec: acodec.clone(),
     };
     // Sender id 0 is never minted for a peer, so this fans out to everyone.
     relay_to_others(&shared, 0, &msg).await;
     session_log(&app, "ok", format!("Offered \"{display}\" ({size} bytes) to the room."));
-    Ok(serde_json::json!({ "name": display, "size": size as f64, "blake3": hash }))
+    Ok(serde_json::json!({
+        "name": display, "size": size as f64, "blake3": hash,
+        "vcodec": vcodec, "acodec": acodec,
+    }))
 }
 
 /// Host: withdraw the current offer. Guests' in-flight fetches finish; new
@@ -1535,7 +1805,10 @@ pub async fn session_clear_offer(state: State<'_, SessionManager>) -> Result<(),
     if let Ok(mut slot) = shared.offered.lock() {
         *slot = None;
     }
-    let msg = SessionMsg::OfferFile { from: "m0".into(), name: String::new(), size: 0.0, blake3: String::new() };
+    let msg = SessionMsg::OfferFile {
+        from: "m0".into(), name: String::new(), size: 0.0, blake3: String::new(),
+        vcodec: None, acodec: None,
+    };
     relay_to_others(&shared, 0, &msg).await;
     Ok(())
 }
@@ -2144,12 +2417,17 @@ mod transfer_tests {
             name: "Reel_04.mov".into(),
             size: 4_100_000_000.0,
             blake3: "ab".repeat(32),
+            vcodec: Some("avc1.640028".into()),
+            acodec: Some("mp4a.40.2".into()),
         };
         let line = serde_json::to_string(&msg).unwrap();
         assert!(line.contains("\"kind\":\"offerFile\""), "{line}");
         assert!(line.contains("\"blake3\""), "{line}");
         // Withdrawal shape: empty name is the sentinel the frontend clears on.
-        let clear = SessionMsg::OfferFile { from: "m0".into(), name: String::new(), size: 0.0, blake3: String::new() };
+        let clear = SessionMsg::OfferFile {
+            from: "m0".into(), name: String::new(), size: 0.0, blake3: String::new(),
+            vcodec: None, acodec: None,
+        };
         let line = serde_json::to_string(&clear).unwrap();
         assert!(line.contains("\"name\":\"\""), "{line}");
     }

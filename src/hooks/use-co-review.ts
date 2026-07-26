@@ -107,6 +107,10 @@ type Args = {
   /** Open a file from THIS Mac's disk. Used by the fingerprint ladder when a
    *  guest turns out to already have the presenter's file. */
   loadLocalPath: (path: string) => Promise<unknown>;
+  /** Tier B: mount the host's offered file as a LIVE stream (App drives its
+   *  source machine; the hook owns session bookkeeping around it). */
+  loadPeerStream: (offer: { name: string; blake3: string; vcodec: string | null; acodec: string | null },
+    pending: { title: string | null; duration: number | null }) => Promise<void>;
   pushNotification: (kind: ToastKind, title: string, body: string) => void;
   /** The pipeline log, which the diagnostics export reads. Co-review is the
    *  one subsystem that inherently needs two machines to reproduce, and it
@@ -196,12 +200,13 @@ export type CoReview = {
   makePresenter: (memberId: string) => void;
   /** Point at YOUR copy of the presenter's local file (fingerprint ladder). */
   adoptPendingSource: () => Promise<void>;
-  /** Tier C: the host's standing file offer (guests render the Get chip). */
-  offeredFile: { name: string; size: number; blake3: string } | null;
+  /** Tier C/B: the host's standing file offer (guests render Get / Watch). */
+  offeredFile: { name: string; size: number; blake3: string; vcodec: string | null; acodec: string | null } | null;
   /** Live transfer progress on this machine, either direction. */
   transfer: TransferProgress | null;
-  offerCurrentFile: (path: string, name?: string) => Promise<void>;
+  offerCurrentFile: (path: string, name?: string, vcodec?: string | null, acodec?: string | null) => Promise<void>;
   fetchOfferedFile: () => Promise<void>;
+  watchOfferedStream: () => Promise<void>;
   cancelFetch: () => void;
   /** True when YOUR hand is up. */
   handRaised: boolean;
@@ -218,7 +223,7 @@ export function useCoReview({
   isPlaying, fps, playbackRate,
   sessionSource, activeSourceUrlRef, reviewSourceKey,
   playerRef, metadataRef,
-  onChaseSeek, setUrl, handleFetch, loadLocalPath,
+  onChaseSeek, setUrl, handleFetch, loadLocalPath, loadPeerStream,
   pushNotification, setQueueOpen,
   setReviewMarkers, setReviewAnnotations,
   turn, appendLog,
@@ -299,7 +304,10 @@ export function useCoReview({
   // Tier C: the host's standing offer of the current source's file, and the
   // live transfer this machine is running (either direction). The offer is
   // room-truth (rides the wire); the transfer is local progress.
-  const [offeredFile, setOfferedFile] = useState<{ name: string; size: number; blake3: string } | null>(null);
+  const [offeredFile, setOfferedFile] = useState<{
+    name: string; size: number; blake3: string;
+    vcodec: string | null; acodec: string | null;
+  } | null>(null);
   const offeredFileRef = useRef(offeredFile);
   offeredFileRef.current = offeredFile;
   const [transfer, setTransfer] = useState<TransferProgress | null>(null);
@@ -422,9 +430,12 @@ export function useCoReview({
         setSourceStatus((prev) => new Map(prev).set(m.from, m.state));
         return;
       case "offerFile":
-        // Tier C: the host's offer (empty name withdraws it). Host-originated
-        // only; the Rust relay never forwards a peer's version of this.
-        setOfferedFile(m.name ? { name: m.name, size: m.size, blake3: m.blake3 } : null);
+        // Tier C/B: the host's offer (empty name withdraws it). Host-
+        // originated only; the Rust relay never forwards a peer's version.
+        setOfferedFile(m.name ? {
+          name: m.name, size: m.size, blake3: m.blake3,
+          vcodec: m.vcodec ?? null, acodec: m.acodec ?? null,
+        } : null);
         return;
       case "presenter":
         // Rust already updated its own gate; mirror it so the UI can badge
@@ -763,6 +774,15 @@ export function useCoReview({
       const wired = sanitizeDocForWire(d, sessionSourceRef.current.reviewKey || null);
       void invoke("session_broadcast", { msg: { kind: "reviewDoc", doc: JSON.stringify(wired) } }).catch(() => {});
     }
+    // A standing Tier C/B offer is room-truth too: without this a late
+    // joiner never sees the Get/Watch chips.
+    const offer = offeredFileRef.current;
+    if (offer) {
+      void invoke("session_broadcast", { msg: {
+        kind: "offerFile", from: "m0", name: offer.name, size: offer.size,
+        blake3: offer.blake3, vcodec: offer.vcodec, acodec: offer.acodec,
+      } }).catch(() => {});
+    }
     // Re-broadcast persistent presence so a newcomer converges on the live
     // room: the host's own hand + share, and every currently-raised hand.
     const selfId = coSessionRef.current.selfId ?? "m0";
@@ -1041,10 +1061,10 @@ export function useCoReview({
   /** Host: offer the loaded file's bytes to the room (Tier C). The click
    *  that calls this IS the sender's consent; hashing progress arrives on
    *  session:transfer as phase "hashing". */
-  const offerCurrentFile = useCallback(async (path: string, name?: string) => {
+  const offerCurrentFile = useCallback(async (path: string, name?: string, vcodec?: string | null, acodec?: string | null) => {
     try {
-      const info = await invoke<{ name: string; size: number; blake3: string }>(
-        "session_offer_file", { path, name: name ?? null },
+      const info = await invoke<{ name: string; size: number; blake3: string; vcodec: string | null; acodec: string | null }>(
+        "session_offer_file", { path, name: name ?? null, vcodec: vcodec ?? null, acodec: acodec ?? null },
       );
       setOfferedFile(info);
       slog("ok", `Offered "${info.name}" to the room.`);
@@ -1072,6 +1092,27 @@ export function useCoReview({
       slog("err", `Transfer: ${formatError(e)}`);
     }
   }, [loadLocalPath, sendSessionMsg, slog]);
+
+  /** Guest: watch the host's offered file NOW as a live stream (Tier B).
+   *  App mounts the stream; this wrapper owns the session bookkeeping so
+   *  the room converges (pending cleared, readiness reported). */
+  const watchOfferedStream = useCallback(async () => {
+    const offer = offeredFileRef.current;
+    if (!offer) return;
+    const pending = pendingSourceRef.current;
+    try {
+      await loadPeerStream(
+        { name: offer.name, blake3: offer.blake3, vcodec: offer.vcodec, acodec: offer.acodec },
+        { title: pending?.title ?? offer.name, duration: pending?.duration ?? null },
+      );
+      setPendingSource(null);
+      sendSessionMsg({ kind: "sourceStatus", from: "", state: "ready", detail: null });
+      slog("ok", `Streaming "${offer.name}" from the host.`);
+    } catch (e) {
+      slog("err", `Stream: ${formatError(e)}`);
+      sendSessionMsg({ kind: "sourceStatus", from: "", state: "failed", detail: null });
+    }
+  }, [loadPeerStream, sendSessionMsg, slog]);
 
   /** Guest: stop the in-flight fetch. The partial stays; fetching resumes. */
   const cancelFetch = useCallback(() => {
@@ -1125,6 +1166,7 @@ export function useCoReview({
     transfer,
     offerCurrentFile,
     fetchOfferedFile,
+    watchOfferedStream,
     cancelFetch,
     handRaised: coSession.selfId != null ? raisedHands.has(coSession.selfId) : raisedHands.has("m0"),
     sendReaction,

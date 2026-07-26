@@ -312,13 +312,16 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
     // routes are untouched.
     if raw_path.trim_start_matches('/').starts_with("peer/fmp4/v1/") {
         return match peer_media_path_for(&raw_path, "peer/fmp4/v1/") {
-            Some(p) => serve_fmp4(
+            Some(PeerMedia::Local(p)) => serve_fmp4(
                 request,
                 p.to_string_lossy().into_owned(),
                 parse_start_query(&raw_path),
                 None,
                 true,
             ),
+            Some(PeerMedia::Remote { blake3 }) => {
+                serve_remote_fmp4(request, blake3, parse_start_query(&raw_path))
+            }
             None => request.respond(
                 tiny_http::Response::from_string("unknown peer media").with_status_code(404),
             ),
@@ -326,7 +329,13 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
     }
     if raw_path.trim_start_matches('/').starts_with("peer/v1/") {
         return match peer_media_path_for(&raw_path, "peer/v1/") {
-            Some(p) => serve_local_file(request, p),
+            Some(PeerMedia::Local(p)) => serve_local_file(request, p),
+            // A remote stream has no random access; the player skips the
+            // probe (codecs ride the offer) and the scrub preview is off.
+            Some(PeerMedia::Remote { .. }) => request.respond(
+                tiny_http::Response::from_string("no random access on a peer stream")
+                    .with_status_code(405),
+            ),
             None => request.respond(
                 tiny_http::Response::from_string("unknown peer media").with_status_code(404),
             ),
@@ -443,7 +452,7 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
 /// sidecar sits next to the main executable (Tauri copies it there). We
 /// check the plain name first (dev) then the target-triple name (some
 /// bundle layouts). Cached after first resolution.
-fn ffmpeg_path() -> Option<std::path::PathBuf> {
+pub(crate) fn ffmpeg_path() -> Option<std::path::PathBuf> {
     static FFMPEG: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
     FFMPEG
         .get_or_init(|| {
@@ -482,7 +491,7 @@ fn ffprobe_path() -> Option<std::path::PathBuf> {
 /// remux (RC7). Both use the same avformat backward seek, so they land on
 /// the same packet. `%+#48` bounds the read window while guaranteeing a
 /// video packet shows up even when a muxed source interleaves audio first.
-fn probe_stream_epoch(upstream: &str, start: f64) -> Option<f64> {
+pub(crate) fn probe_stream_epoch(upstream: &str, start: f64) -> Option<f64> {
     // Memoized per (upstream, start): scrubbing back to a spot re-serves the
     // same remux, and the epoch is a pure function of the seek landing point.
     static CACHE: OnceLock<std::sync::Mutex<std::collections::HashMap<(String, u64), f64>>> =
@@ -806,8 +815,18 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
 // are ever reachable, and unregistering (source change, app quit) closes
 // the route immediately.
 
-fn peer_media() -> &'static std::sync::Mutex<std::collections::HashMap<String, std::path::PathBuf>> {
-    static M: OnceLock<std::sync::Mutex<std::collections::HashMap<String, std::path::PathBuf>>> =
+/// What a peer-media id resolves to: the presenter's OWN file (3a), or a
+/// REMOTE stream pulled over the live session's QUIC substream (3c). The
+/// raw byte-range route serves Local only — a remote stream has no random
+/// access, which is also why the scrub preview is disabled for it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PeerMedia {
+    Local(std::path::PathBuf),
+    Remote { blake3: String },
+}
+
+fn peer_media() -> &'static std::sync::Mutex<std::collections::HashMap<String, PeerMedia>> {
+    static M: OnceLock<std::sync::Mutex<std::collections::HashMap<String, PeerMedia>>> =
         OnceLock::new();
     M.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
@@ -818,7 +837,18 @@ pub fn register_peer_media(path: std::path::PathBuf) -> std::io::Result<String> 
     peer_media()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .insert(id.clone(), path);
+        .insert(id.clone(), PeerMedia::Local(path));
+    Ok(id)
+}
+
+/// Register a REMOTE stream (the host's offered file, pulled over the
+/// session substream on demand). Returns the minted id.
+pub fn register_peer_media_remote(blake3: String) -> std::io::Result<String> {
+    let id = mint_token()?;
+    peer_media()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id.clone(), PeerMedia::Remote { blake3 });
     Ok(id)
 }
 
@@ -830,8 +860,8 @@ pub fn unregister_peer_media(id: &str) {
         .remove(id);
 }
 
-/// Resolve `/<prefix><id>[?query]` to the registered path (None = 404).
-fn peer_media_path_for(raw_path: &str, prefix: &str) -> Option<std::path::PathBuf> {
+/// Resolve `/<prefix><id>[?query]` to the registered entry (None = 404).
+fn peer_media_path_for(raw_path: &str, prefix: &str) -> Option<PeerMedia> {
     let trimmed = raw_path.trim_start_matches('/');
     let after = trimmed.strip_prefix(prefix)?;
     let id = after.split(['?', '#']).next().unwrap_or(after);
@@ -839,6 +869,62 @@ fn peer_media_path_for(raw_path: &str, prefix: &str) -> Option<std::path::PathBu
         return None;
     }
     peer_media().lock().ok()?.get(id).cloned()
+}
+
+/// Serve a REMOTE peer stream (Tier B 3c): ask the live session for the
+/// presenter's fMP4 bytes at `start` and pipe them through. The bridge
+/// (commands::peer_stream) owns the async→blocking crossing; this worker
+/// only drains a bounded channel, so MSE pause backpressure reaches the
+/// presenter's ffmpeg end to end (risk R7). A probe failure on the
+/// presenter side arrives as timeline "rebased", exactly like the web
+/// route's fallback — same header contract, same player behaviour.
+fn serve_remote_fmp4(request: tiny_http::Request, blake3: String, start: f64) -> std::io::Result<()> {
+    if ACTIVE_REMUXES.load(std::sync::atomic::Ordering::Relaxed) >= MAX_ACTIVE_REMUXES {
+        return request.respond(
+            tiny_http::Response::from_string("too many concurrent streams").with_status_code(503),
+        );
+    }
+    ACTIVE_REMUXES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let _remux_guard = CounterGuard(&ACTIVE_REMUXES);
+
+    let handle = match crate::commands::peer_stream::request_media_stream(blake3, start) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("[media-proxy] PEER-FMP4 start={start} -> 502 ({e})");
+            return request.respond(
+                tiny_http::Response::from_string(format!("peer stream unavailable: {e}"))
+                    .with_status_code(502),
+            );
+        }
+    };
+    eprintln!(
+        "[media-proxy] PEER-FMP4 start={start} timeline={} epoch={:?}",
+        handle.timeline, handle.epoch
+    );
+
+    let cors = cors_origin_for(&request);
+    let mut headers: Vec<tiny_http::Header> = Vec::new();
+    for (name, value) in [
+        ("Content-Type", "video/mp4"),
+        ("Access-Control-Allow-Origin", cors.as_str()),
+        ("Access-Control-Expose-Headers", "X-Timeline, X-Stream-Epoch"),
+        ("X-Timeline", handle.timeline.as_str()),
+        ("Cache-Control", "no-store"),
+    ] {
+        if let Ok(h) = tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()) {
+            headers.push(h);
+        }
+    }
+    if let Some(e) = handle.epoch {
+        if let Ok(h) =
+            tiny_http::Header::from_bytes("X-Stream-Epoch".as_bytes(), format!("{e:.6}").as_bytes())
+        {
+            headers.push(h);
+        }
+    }
+    let reader = crate::commands::peer_stream::ChannelReader::new(handle.rx);
+    let response = tiny_http::Response::new(tiny_http::StatusCode(200), headers, reader, None, None);
+    request.respond(response)
 }
 
 /// Parse a request `Range: bytes=a-b` header against a known total length.
@@ -1722,9 +1808,9 @@ mod peer_media_tests {
         assert!(id.len() >= 16);
         // Both route shapes resolve, query stripped.
         let raw = format!("/peer/v1/{id}");
-        assert_eq!(peer_media_path_for(&raw, "peer/v1/"), Some(path.clone()));
+        assert_eq!(peer_media_path_for(&raw, "peer/v1/"), Some(PeerMedia::Local(path.clone())));
         let fmp4 = format!("/peer/fmp4/v1/{id}?start=3.5");
-        assert_eq!(peer_media_path_for(&fmp4, "peer/fmp4/v1/"), Some(path.clone()));
+        assert_eq!(peer_media_path_for(&fmp4, "peer/fmp4/v1/"), Some(PeerMedia::Local(path.clone())));
         // Unknown / empty ids 404.
         assert_eq!(peer_media_path_for("/peer/v1/nope", "peer/v1/"), None);
         assert_eq!(peer_media_path_for("/peer/v1/", "peer/v1/"), None);
