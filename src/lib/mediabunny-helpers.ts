@@ -1,4 +1,4 @@
-import { Input, ALL_FORMATS, CanvasSink } from "mediabunny";
+import { Input, ALL_FORMATS, CanvasSink, EncodedPacketSink } from "mediabunny";
 import { mediabunnySource } from "./mediabunny-source";
 
 /**
@@ -216,6 +216,22 @@ export async function extractPosterBlob(
       ? [0.2, 0.45, 0.1, 0.65, 0.03].map((f) => f * dur)
       : [2, 5, 0];
 
+    // Posters need a REPRESENTATIVE frame, not an exact one: snap every
+    // candidate to the keyframe at-or-before it, so each try decodes ONE
+    // frame instead of walking a whole GOP (the difference between seconds
+    // and ~100ms per poster on long-GOP 4K — this was the slow-thumbnails
+    // report). The chosen-frame path above stays exact: the user picked
+    // that specific frame.
+    const keySink = new EncodedPacketSink(vt);
+    const snap = async (t: number): Promise<number> => {
+      try {
+        const pkt = await keySink.getKeyPacket(t, { verifyKeyPackets: false });
+        return pkt ? pkt.timestamp : t;
+      } catch {
+        return t;
+      }
+    };
+
     // Tiny scratch canvas for the mean-luma read (see meanLuma).
     const scratch = document.createElement("canvas");
     scratch.width = 16;
@@ -226,7 +242,7 @@ export async function extractPosterBlob(
     let bestOffset: number | null = null;
     let bestLuma = -1;
     for (const raw of candidates) {
-      const t = clamp(raw);
+      const t = await snap(clamp(raw));
       const wrapped = await sink.getCanvas(t);
       if (!wrapped) continue;
       // No 2D scratch context (headless) → can't luma-test; take the first frame.
