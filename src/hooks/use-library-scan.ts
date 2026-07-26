@@ -46,6 +46,8 @@ const THUMB_CONCURRENCY = 3;
 
 let thumbRunning = 0;
 const thumbWaiters: Array<() => void> = [];
+/** Background warm-up waiters — released only when no visible card waits. */
+const thumbPrefetchWaiters: Array<() => void> = [];
 /** Fired when a poster URL lands in the cache — the ambient backdrop subscribes
  *  so it can pick up frames the library cards materialize AFTER it first
  *  rendered (its parent doesn't re-render on a card's async thumbnail load). */
@@ -62,16 +64,19 @@ const thumbGen = new Map<string, number>();
  * capped no matter which surface asks. The finally runs on both resolve and
  * reject, so a failed decode never leaks a slot or strands a queued waiter.
  */
-async function withDecodeSlot<T>(job: () => Promise<T>): Promise<T> {
+async function withDecodeSlot<T>(job: () => Promise<T>, prefetch = false): Promise<T> {
   if (thumbRunning >= THUMB_CONCURRENCY) {
-    await new Promise<void>((release) => thumbWaiters.push(release));
+    await new Promise<void>((release) =>
+      (prefetch ? thumbPrefetchWaiters : thumbWaiters).push(release));
   }
   thumbRunning++;
   try {
     return await job();
   } finally {
     thumbRunning--;
-    thumbWaiters.shift()?.();
+    // Visible cards ALWAYS jump the warm-up sweep: a scroll must never wait
+    // behind background posters.
+    (thumbWaiters.shift() ?? thumbPrefetchWaiters.shift())?.();
   }
 }
 
@@ -100,7 +105,26 @@ async function loadThumbnail(path: string): Promise<string | null> {
     maxWidth: 480,
     quality: 0.8,
   });
-  if (blob) return URL.createObjectURL(blob);
+  if (blob) {
+    // Persist into the SAME hash-keyed disk cache the ffmpeg fallback uses,
+    // so every later session (and every later scroll) takes the instant
+    // lookup path instead of re-decoding. Blob URLs die with the page; the
+    // asset:// path does not. Failure to persist just keeps the session blob.
+    try {
+      const saved = await invoke<string>(
+        "save_poster_to_cache",
+        new Uint8Array(await blob.arrayBuffer()),
+        {
+          headers: {
+            "x-source-path": encodeURIComponent(path),
+            ...(chosen != null ? { "x-time-seconds": String(chosen) } : {}),
+          },
+        },
+      );
+      if (typeof saved === "string" && saved !== "") return convertFileSrc(saved);
+    } catch { /* cache write failed; the session blob below still works */ }
+    return URL.createObjectURL(blob);
+  }
   const out = await invoke<string>("generate_local_thumbnail", {
     args: { input_path: path, duration_seconds: null, time_seconds: chosen ?? null },
   });
@@ -135,6 +159,29 @@ export function invalidateThumb(path: string): void {
   thumbGen.set(path, (thumbGen.get(path) ?? 0) + 1);
 }
 
+/** Newest warm-up sweep wins; a rescan supersedes the previous walk. */
+let posterWarmupSweep = 0;
+
+/**
+ * Background poster warm-up: after a library scan lands, walk every video and
+ * materialize its poster through the SAME gate at LOW priority (visible cards
+ * always jump ahead; see withDecodeSlot). Disk hits cost one stat each, so a
+ * warmed library re-sweeps in moments; first-ever files pay their one decode
+ * HERE, in the background, instead of when the user scrolls onto them. One
+ * path at a time deliberately: the sweep must never own more than a single
+ * decode slot.
+ */
+export function prefetchThumbnails(paths: readonly string[]): void {
+  const sweep = ++posterWarmupSweep;
+  void (async () => {
+    for (const path of paths) {
+      if (sweep !== posterWarmupSweep) return; // superseded by a newer scan
+      if (thumbCache.has(path) || thumbFailed.has(path) || thumbPending.has(path)) continue;
+      await requestThumbnailInner(path, true).catch(() => null);
+    }
+  })();
+}
+
 /**
  * Snapshot of every poster URL already materialized in the cache — a pure read
  * of the shared thumbCache (blob:/asset:// URLs), NO decode or scan triggered.
@@ -167,6 +214,10 @@ export function subscribeThumbs(cb: () => void): () => void {
 
 /** Cached + de-duped + concurrency-capped poster fetch for one video path. */
 export function requestThumbnail(path: string): Promise<string | null> {
+  return requestThumbnailInner(path, false);
+}
+
+function requestThumbnailInner(path: string, prefetch: boolean): Promise<string | null> {
   const hit = thumbCache.get(path);
   if (hit) return Promise.resolve(hit);
   if (thumbFailed.has(path)) return Promise.resolve(null);
@@ -179,7 +230,21 @@ export function requestThumbnail(path: string): Promise<string | null> {
   const current = () => (thumbGen.get(path) ?? 0) === startGen;
   const job = (async () => {
     try {
-      const url = await withDecodeSlot(() => loadThumbnail(path));
+      // Disk first, OUTSIDE the decode gate: a poster ever made for this
+      // file (either pipeline, any session) costs one stat + no slot, so
+      // scrolling over known items stays instant even while the warm-up
+      // sweep owns the decoders.
+      const chosen = chosenPosterFor(path);
+      const onDisk = await invoke<string>("lookup_local_thumbnail", {
+        args: { input_path: path, duration_seconds: null, time_seconds: chosen ?? null },
+      }).catch(() => "");
+      if (!current()) return null;
+      if (typeof onDisk === "string" && onDisk !== "") {
+        const url = convertFileSrc(onDisk);
+        rememberThumb(path, url);
+        return url;
+      }
+      const url = await withDecodeSlot(() => loadThumbnail(path), prefetch);
       // Superseded mid-decode: discard rather than caching a stale frame, and
       // revoke the blob we just made so it doesn't leak. A newer job (spawned
       // by the remounted card) owns the poster now.
@@ -520,6 +585,28 @@ export function useLibraryScan(): LibraryScan {
     // Mount-only by design — add/remove/rescan trigger their own scans.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Poster warm-up: once every root has settled (no loads in flight), walk
+  // the scanned videos in shelf order and warm their posters in the
+  // background. This is what makes a scroll land on a ready image instead
+  // of a decode: the visible-first gate keeps it out of the way, and the
+  // disk cache makes every later session's sweep nearly free.
+  useEffect(() => {
+    const states = Object.values(scans);
+    if (states.length === 0 || states.some((s) => s.status === "loading")) return;
+    const paths: string[] = [];
+    const walk = (folder: LibraryFolder) => {
+      for (const item of folder.items) {
+        if (item.kind === "video") paths.push(item.path);
+      }
+      for (const sub of folder.folders) walk(sub);
+    };
+    for (const root of roots) {
+      const scan = scans[root];
+      if (scan?.status === "ok") walk(scan.tree);
+    }
+    if (paths.length > 0) prefetchThumbnails(paths);
+  }, [scans, roots]);
 
   const addFolder = useCallback(async () => {
     const picked = await openDialog({ directory: true, multiple: false });

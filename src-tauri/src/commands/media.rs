@@ -1215,6 +1215,35 @@ pub async fn save_poster_to_cache(
     Ok(out_path.to_string_lossy().to_string())
 }
 
+/// Pure probe of the poster disk cache: the cached JPEG's path when one
+/// exists for (path, mtime, chosen time), "" on a miss. Never spawns ffmpeg
+/// and never decodes — the library calls this BEFORE paying for any decode,
+/// so a poster ever made on this Mac (by either pipeline, in any session)
+/// renders instantly no matter where the user scrolls.
+#[tauri::command]
+pub fn lookup_local_thumbnail(
+    app: AppHandle,
+    args: LocalThumbnailArgs,
+) -> Result<String, crate::AppError> {
+    let in_path = PathBuf::from(&args.input_path);
+    if !in_path.is_file() {
+        return Ok(String::new());
+    }
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("app_cache_dir: {e}"))?;
+    let chosen: Option<f64> = match args.time_seconds {
+        Some(t) if t.is_finite() && t >= 0.0 => Some(t),
+        _ => None,
+    };
+    let out_path = poster_cache_path(&cache, &args.input_path, chosen);
+    match std::fs::metadata(&out_path) {
+        Ok(m) if m.len() > 0 => Ok(out_path.to_string_lossy().to_string()),
+        _ => Ok(String::new()),
+    }
+}
+
 #[tauri::command]
 pub async fn generate_local_thumbnail(
     app: AppHandle,
