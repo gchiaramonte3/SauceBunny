@@ -16,7 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_shell::{
@@ -56,9 +56,131 @@ fn is_ytdlp_progress(line: &str) -> bool {
 
 
 
-/// Ensure spawned binaries can find Homebrew tools (deno, ffmpeg's runtime
-/// libs, etc.) regardless of how the .app was launched.
-const HOMEBREW_PATH: &str = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+/// The OS's own directories. Always present, never ours to shadow.
+const SYSTEM_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+
+/// Homebrew, and it goes LAST.
+///
+/// One tool genuinely justifies its presence: yt-dlp's `web` player client
+/// deobfuscates YouTube's `nsig` with a JS runtime, and without `deno` on PATH
+/// it silently degrades to lower-resolution clients (see `YT_EXTRACTOR_ARGS`).
+/// We cannot bundle deno, so if the user has it we should find it.
+///
+/// It used to come FIRST, which handed `/opt/homebrew/bin` and `/usr/local/bin`
+/// the ability to shadow every tool a spawned yt-dlp resolves by name. Two
+/// distinct problems, and neither is hypothetical:
+///
+///   · Correctness. Our ffmpeg is built with libzimg because the 10-bit/HDR
+///     playback prep emits zscale/tonemap chains that swscale cannot do, and
+///     `check:release` refuses to ship one without it. A Homebrew ffmpeg has
+///     no such guarantee, so any spawn that did not pass `--ffmpeg-location`
+///     explicitly behaved differently on a machine with Homebrew installed
+///     than on a clean one. Seven of the ~14 yt-dlp spawn sites passed that
+///     flag; the rest inherited whatever was first on PATH.
+///
+///   · Integrity. Both directories are writable by the logged-in user on a
+///     normal Mac. A signed, notarized app that puts them ahead of its own
+///     binaries will execute an attacker-planted `ffmpeg` with its own
+///     entitlements, which is precisely the property the `otool -L`
+///     self-containment guard rails and sidecars.lock.json exist to protect.
+///
+/// Last place keeps deno reachable and makes shadowing impossible.
+const HOMEBREW_PATH: &str = "/opt/homebrew/bin:/usr/local/bin";
+
+/// The directory holding the bundled sidecars, when PATH lookup can actually
+/// find them there.
+///
+/// In a packaged .app that is `Contents/MacOS`, where Tauri strips the target
+/// triple, so `ffmpeg` and `ffprobe` are plain-named and resolvable by name.
+/// In a debug build the binaries live in `src-tauri/binaries` still carrying
+/// the `-aarch64-apple-darwin` suffix, so a lookup for `ffmpeg` finds nothing
+/// and dev falls through to whatever is installed. That is the dev behaviour
+/// we want, so this returns the directory in both cases and lets the name
+/// mismatch do the work.
+pub(crate) fn sidecar_dir() -> Option<PathBuf> {
+    sidecar_path("ffmpeg").ok()?.parent().map(PathBuf::from)
+}
+
+/// Pure (unit-tested): compose the PATH a spawned sidecar sees.
+///
+/// Order is the whole point. Ours first, the OS next, Homebrew last.
+fn compose_spawn_path(updated_bin: Option<&Path>, sidecars: Option<&Path>) -> String {
+    let mut parts: Vec<String> = Vec::with_capacity(4);
+    if let Some(p) = updated_bin {
+        parts.push(p.display().to_string());
+    }
+    if let Some(p) = sidecars {
+        parts.push(p.display().to_string());
+    }
+    parts.push(SYSTEM_PATH.to_string());
+    parts.push(HOMEBREW_PATH.to_string());
+    parts.join(":")
+}
+
+#[cfg(test)]
+mod spawn_path_tests {
+    use super::*;
+
+    fn dirs(path: &str) -> Vec<&str> {
+        path.split(':').collect()
+    }
+
+    #[test]
+    fn ours_comes_before_homebrew() {
+        let p = compose_spawn_path(None, Some(Path::new("/Apps/X.app/Contents/MacOS")));
+        let d = dirs(&p);
+        let ours = d.iter().position(|s| s.contains("Contents/MacOS")).unwrap();
+        let brew = d.iter().position(|s| *s == "/opt/homebrew/bin").unwrap();
+        assert!(ours < brew, "bundled sidecars must win over Homebrew: {p}");
+    }
+
+    #[test]
+    fn homebrew_is_last_so_it_can_shadow_nothing() {
+        let p = compose_spawn_path(
+            Some(Path::new("/data/bin")),
+            Some(Path::new("/Apps/X.app/Contents/MacOS")),
+        );
+        let d = dirs(&p);
+        // Every writable-by-the-user Homebrew dir sits after every other dir.
+        let brew_first = d.iter().position(|s| *s == "/opt/homebrew/bin").unwrap();
+        assert_eq!(
+            brew_first,
+            d.len() - 2,
+            "only /usr/local/bin may follow /opt/homebrew/bin: {p}"
+        );
+        assert_eq!(d.last(), Some(&"/usr/local/bin"));
+    }
+
+    #[test]
+    fn a_user_updated_ytdlp_still_outranks_the_bundled_one() {
+        let p = compose_spawn_path(
+            Some(Path::new("/data/bin")),
+            Some(Path::new("/Apps/X.app/Contents/MacOS")),
+        );
+        assert!(p.starts_with("/data/bin:"), "{p}");
+    }
+
+    #[test]
+    fn the_system_is_always_reachable() {
+        for p in [
+            compose_spawn_path(None, None),
+            compose_spawn_path(Some(Path::new("/data/bin")), None),
+        ] {
+            for d in ["/usr/bin", "/bin", "/usr/sbin", "/sbin"] {
+                assert!(dirs(&p).contains(&d), "missing {d} in {p}");
+            }
+        }
+    }
+
+    #[test]
+    fn deno_stays_reachable() {
+        // The one thing Homebrew is here for. If a future edit drops these
+        // entries, YouTube quietly stops offering 1080p+ and nothing errors.
+        let p = compose_spawn_path(None, None);
+        assert!(dirs(&p).contains(&"/opt/homebrew/bin"), "{p}");
+        assert!(dirs(&p).contains(&"/usr/local/bin"), "{p}");
+    }
+}
 
 /// Pull the most actionable line out of a stderr blob — usually the last
 /// non-empty, non-WARNING line. yt-dlp and ffmpeg both append the real error

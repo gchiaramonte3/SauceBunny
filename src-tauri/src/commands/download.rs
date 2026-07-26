@@ -108,16 +108,25 @@ async fn output_timed(
 ///
 /// The updated copy is run by NAME (`yt-dlp`, allowed in capabilities) with the
 /// app-data bin dir first on PATH, so command resolution picks it deterministically.
+///
+/// PATH order is ours → the OS → Homebrew, composed by `compose_spawn_path`;
+/// see `HOMEBREW_PATH` for why last place matters. The practical effect is that
+/// the bundled ffmpeg and ffprobe now resolve by NAME, so a spawn site that
+/// forgets `--ffmpeg-location` gets our libzimg build instead of whatever the
+/// user happens to have installed. The explicit flags stay where they are —
+/// belt and braces, and they also survive a debug build where the repo's
+/// binaries are triple-suffixed and unfindable by name.
 pub(crate) fn ytdlp(
     app: &AppHandle,
 ) -> Result<tauri_plugin_shell::process::Command, crate::AppError> {
+    let sidecars = super::sidecar_dir();
     if let Ok(data) = app.path().app_data_dir() {
         let bin_dir = data.join("bin");
         if bin_dir.join("yt-dlp").is_file() {
             // 10a: make WHICH copy runs inspectable - every call site (resolve,
             // metadata, captions, downloads) funnels through here.
             eprintln!("[yt-dlp] using {} copy: {}", resolved_ytdlp_kind(true), bin_dir.join("yt-dlp").display());
-            let path = format!("{}:{}", bin_dir.display(), HOMEBREW_PATH);
+            let path = super::compose_spawn_path(Some(&bin_dir), sidecars.as_deref());
             // --no-update: self-updating is the app's job (update_ytdlp), and
             // without it every spawn of an >90-day binary dumps a 4-line
             // "run yt-dlp -U" lecture into the pipeline log that users can't
@@ -134,7 +143,7 @@ pub(crate) fn ytdlp(
         // established message text must survive the r108 AppError sweep.
         .map_err(|e| crate::AppError::invalid(format!("sidecar yt-dlp not found: {e}")))?
         .arg("--no-update")
-        .env("PATH", HOMEBREW_PATH))
+        .env("PATH", super::compose_spawn_path(None, sidecars.as_deref())))
 }
 
 /// Pure (unit-tested): the resolution order in one word - an existing

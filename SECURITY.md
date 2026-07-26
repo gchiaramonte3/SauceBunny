@@ -47,10 +47,24 @@ only in response to a direct user action (pressing dictate; starting a screen
 share), and macOS gates both behind its own TCC prompt.
 
 They are self-contained static builds; the fetch/build scripts enforce with
-`otool -L` that no binary references non-system dylib paths. Sidecars are
-spawned only from the Rust backend (`app.shell()`); the webview capability
-file (`src-tauri/capabilities/`) deliberately grants NO shell permissions, so
-the renderer cannot spawn a process directly.
+`otool -L` that no binary references non-system dylib paths, and the exact
+bytes of every one are pinned by SHA-256 in `sidecars.lock.json` and verified
+before install and again at release. Sidecars are spawned only from the Rust
+backend (`app.shell()`); the webview capability file
+(`src-tauri/capabilities/`) deliberately grants NO shell permissions, so the
+renderer cannot spawn a process directly.
+
+**Spawn PATH.** yt-dlp resolves helper tools (notably ffmpeg) by name, so the
+PATH it is given decides which binaries this app executes. That PATH is
+composed in one place (`compose_spawn_path`) and ordered ours → the OS →
+Homebrew: the app's own sidecar directory first, `/opt/homebrew/bin` and
+`/usr/local/bin` last. Both of those are writable by the logged-in user on a
+normal Mac, and until this ordering they came *first*, which meant a file
+planted there ran with the signed app's identity and entitlements. Homebrew
+stays on the PATH at all because yt-dlp needs a JS runtime (`deno`) for
+YouTube's `nsig` deobfuscation and we cannot bundle one; last place keeps it
+reachable without letting it shadow anything. Pinned by tests in
+`src-tauri/src/commands/mod.rs`.
 
 **Asset-protocol scope.** The `asset://` protocol, which is how the webview
 loads a video, an audio file, or a poster off disk, is scoped to `$APPCACHE/**`
