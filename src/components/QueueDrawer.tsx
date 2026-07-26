@@ -324,7 +324,10 @@ export function QueueDrawer({
   }, [focusItem]);
   // The room forces the Review face without touching the persisted tab
   // choice - leaving the room lands back on whatever was active before.
-  const shownTab: TabId = roomFace ? "review" : activeTab;
+  // A tab persisted from the main window (or from before Review was hidden
+  // here) must not strand the panel on a face it cannot render.
+  const availableTab: TabId = embedded && activeTab === "review" ? "transcript" : activeTab;
+  const shownTab: TabId = roomFace ? "review" : availableTab;
   useEffect(() => { saveActiveTab(activeTab); }, [activeTab]);
   // Review-tab comfort width. Below ~520px the review toolbar wraps onto two
   // rows (filters row + icons row), which reads as clutter. When the user
@@ -373,11 +376,17 @@ export function QueueDrawer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transcriptArrivedTick]);
 
+  // Review is unavailable in the POPPED-OUT panel: that window mirrors a
+  // curated `panel:state` snapshot and is never handed a review source key,
+  // so the tab rendered permanently empty and a persisted tab choice could
+  // boot the panel straight into it (r151). A tab that cannot work is worse
+  // than a missing one; it comes back if and when the panel bus carries the
+  // review doc.
   const TABS: TabDef[] = [
     { id: "queue", label: "Queue", icon: IconStack, badge: queue.length },
     { id: "transcript", label: "Transcript", icon: IconTranscript },
     { id: "ai", label: "AI Summary", icon: IconAiSummary },
-    { id: "review", label: "Review", icon: IconReview },
+    ...(embedded ? [] : [{ id: "review" as const, label: "Review", icon: IconReview }]),
   ];
 
   // ── User-reorderable tab order ─────────────────────────────────

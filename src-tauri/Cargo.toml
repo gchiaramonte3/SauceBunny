@@ -79,7 +79,15 @@ iroh = "1"
 iroh-tickets = "1"
 
 [profile.release]
-panic = "abort"
+# NOT panic = "abort" (r151). Aborting saves a little binary size and buys
+# nothing this app wants: it turns a panic in ONE worker into the whole
+# application vanishing, and this design leans hard on isolation - a
+# thread-per-request media proxy, a task per peer connection, a task per
+# transcription job - precisely so that one failure cannot take the user's
+# session, their unsaved review notes and their in-flight export with it.
+# Unwinding also lets the RAII guards this codebase uses for concurrency
+# limits and registry cleanup actually run. Panics in a tokio task are
+# confined to that task; panics in a std thread kill that thread only.
 codegen-units = 1
 lto = true
 opt-level = "s"

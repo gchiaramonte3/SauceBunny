@@ -106,6 +106,7 @@ import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouT
 import { sanitizeFilename, suggestFilename } from "./lib/filename";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
 import { capabilitySummary, probePlatformCapabilities } from "./lib/platform-capabilities";
+import { onReviewStoreProblem } from "./lib/review-store";
 import { buildDiagnosticsReport, diagnosticsFilename } from "./lib/diagnostics";
 import { extractFrameAsBlob, extractPosterBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
 import { chosenPosterFor, sourceTimecodeFor, setSourceTimecode, clearSourceTimecode } from "./lib/library";
@@ -1304,8 +1305,17 @@ export default function App() {
       appendLog("warn", "media", `Unhandled rejection: ${String(e.reason)}`);
     };
     window.addEventListener("unhandledrejection", onRejection);
-    return () => window.removeEventListener("unhandledrejection", onRejection);
-  }, [appendLog]);
+    // Review notes that fail to reach disk must SAY so while the user can
+    // still act (r151). This was console.warn only, in an app with no console.
+    const unsubReview = onReviewStoreProblem(({ message }) => {
+      appendLog("err", "review", message);
+      pushNotification("error", "Couldn't save review notes", message);
+    });
+    return () => {
+      window.removeEventListener("unhandledrejection", onRejection);
+      unsubReview();
+    };
+  }, [appendLog, pushNotification]);
 
   // ====== Web-source playback (r80) — stream ↔ download state machine ======
   // Owns the entire web stream → resolve → download-fallback → watchdog →

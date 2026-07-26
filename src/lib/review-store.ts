@@ -83,6 +83,41 @@ let hydrated = false;
 let indexReady = false;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * Persistence failures were console.warn only, in an app that ships with no
+ * console (r151). A review note that never reaches disk is exactly the thing
+ * a user must be told about while they can still act - and two of these paths
+ * did not even re-arm the flush timer, so a deferred write was simply lost if
+ * the user made no further edit. This is the channel App subscribes to.
+ *
+ * Deliberately a listener rather than a direct import of the notification
+ * system: this module is pure enough to unit-test, and it must not grow a
+ * dependency on React or on App's toast plumbing.
+ */
+export type ReviewStoreProblem = {
+  /** What failed, in words a user can act on. */
+  message: string;
+  /** True when the data is still held in memory and a retry is scheduled. */
+  willRetry: boolean;
+};
+const problemListeners = new Set<(p: ReviewStoreProblem) => void>();
+
+/** Subscribe to persistence failures. Returns an unsubscribe fn. */
+export function onReviewStoreProblem(cb: (p: ReviewStoreProblem) => void): () => void {
+  problemListeners.add(cb);
+  return () => { problemListeners.delete(cb); };
+}
+
+/** Rate-limited so a failing disk cannot spam the user once per keystroke. */
+let lastProblemAt = 0;
+function reportProblem(message: string, willRetry: boolean, err: unknown): void {
+  console.warn(`review-store: ${message}`, err);
+  const now = Date.now();
+  if (now - lastProblemAt < 30_000) return;
+  lastProblemAt = now;
+  for (const cb of problemListeners) cb({ message, willRetry });
+}
+
 /** Test-only: wipe module state so each vitest case starts cold. */
 export function resetReviewStoreForTests(): void {
   docs.clear();
@@ -222,8 +257,12 @@ async function flushDirtyDocs(): Promise<void> {
       dirEnsured = true;
     }
   } catch (err) {
-    console.warn("review-store: could not create Reviews dir:", err);
+    reportProblem(
+      "Your review notes could not be saved to the Reviews folder. They are still here, and saving will be retried.",
+      true, err,
+    );
     for (const k of keys) dirty.add(k); // retry on the next save
+    scheduleFlush(); // re-arm: without this a deferred write is lost unless the user edits again
     return;
   }
   let indexDirty = false;
@@ -283,8 +322,12 @@ async function flushDirtyDocs(): Promise<void> {
       index.set(key, { file, updatedAt: Date.now(), count, bytes: bytes.length });
       indexDirty = true;
     } catch (err) {
-      console.warn(`review-store: write failed for ${file}:`, err);
+      reportProblem(
+        "A review note could not be written to disk. It is still here, and saving will be retried.",
+        true, err,
+      );
       dirty.add(key); // retry on the next save
+      scheduleFlush();
     }
   }
   if (!indexDirty) return;
@@ -295,7 +338,12 @@ async function flushDirtyDocs(): Promise<void> {
       atomic: true,
     });
   } catch (err) {
-    console.warn("review-store: index write failed:", err);
+    // The documents landed; only the index did not. Recoverable on the next
+    // write, but say so: a stale index is how notes go missing from lists.
+    reportProblem(
+      "The review index could not be updated. Your notes are saved; the list may look out of date until the next save.",
+      true, err,
+    );
   }
 }
 

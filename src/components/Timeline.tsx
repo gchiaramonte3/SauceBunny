@@ -37,18 +37,68 @@ export type TimelineRange = {
 /** The scrub cursor — the one element on the track that moves at up to 60Hz,
  *  so it alone subscribes to the playhead store. The rest of the timeline
  *  (ruler, filmstrip, marks, lanes) renders only when its own props change. */
-function PlayheadCursor({ durationFrames, onMouseDown }: {
+/**
+ * The playhead, and the timeline's keyboard interface.
+ *
+ * The slider role lives HERE rather than on the track for two reasons. First
+ * it is semantically the thumb, which is what a slider role describes.
+ * Second, and load-bearing: `aria-valuenow` has to carry the live playhead,
+ * and this component is the only part of the timeline that subscribes to it.
+ * Putting the role on the track would drag the whole timeline into a 60Hz
+ * re-render and undo the deliberate isolation that keeps scrubbing smooth.
+ *
+ * Keyboard map follows NLE convention rather than the browser default so it
+ * matches what the rest of the app does: arrows step ONE FRAME (the unit this
+ * app is precise in), Shift steps a second, Page steps ten, Home/End jump to
+ * the ends.
+ */
+function PlayheadCursor({ durationFrames, fps, onMouseDown, onSeek, disabled }: {
   durationFrames: number;
+  fps: number;
   onMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onSeek: (frames: number) => void;
+  disabled: boolean;
 }) {
   const frames = usePlayheadFrames();
   const left = durationFrames > 0 ? (frames / durationFrames) * 100 : 0;
+  const rate = Math.max(1, Math.round(fps));
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (disabled || durationFrames <= 0) return;
+    const second = rate;
+    let next: number | null = null;
+    switch (e.key) {
+      case "ArrowLeft":  next = frames - (e.shiftKey ? second : 1); break;
+      case "ArrowRight": next = frames + (e.shiftKey ? second : 1); break;
+      case "PageDown":   next = frames - second * 10; break;
+      case "PageUp":     next = frames + second * 10; break;
+      case "Home":       next = 0; break;
+      case "End":        next = durationFrames; break;
+      default: return;
+    }
+    // Stop here: the app binds bare arrows globally too, and letting the event
+    // through would seek twice for one keypress.
+    e.preventDefault();
+    e.stopPropagation();
+    onSeek(Math.max(0, Math.min(durationFrames, next)));
+  };
+
   return (
     <div
       className="cp-playhead"
       style={{ left: `${left}%` }}
       onMouseDown={onMouseDown}
-      title="Drag to scrub"
+      onKeyDown={onKeyDown}
+      role="slider"
+      tabIndex={disabled ? -1 : 0}
+      aria-label="Playhead"
+      aria-valuemin={0}
+      aria-valuemax={Math.max(0, durationFrames)}
+      aria-valuenow={frames}
+      // Screen readers should say the timecode, not a frame count.
+      aria-valuetext={secondsToHms(frames / rate)}
+      aria-disabled={disabled || undefined}
+      title="Drag to scrub, or focus and use the arrow keys"
     />
   );
 }
@@ -450,7 +500,13 @@ export function Timeline({
                 <span className="cp-ghost-chip">{g.name}</span>
               </div>
             ))}
-            <PlayheadCursor durationFrames={durationFrames} onMouseDown={onPlayheadDown} />
+            <PlayheadCursor
+              durationFrames={durationFrames}
+              fps={fps}
+              onMouseDown={onPlayheadDown}
+              onSeek={onSeek}
+              disabled={!!dim}
+            />
           </>
         )}
       </div>
