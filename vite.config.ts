@@ -11,6 +11,12 @@ export default defineConfig({
     // e2e/ is Playwright's turf (npm run test:e2e) — vitest must not collect it.
     // .claude/ holds agent worktrees (full repo copies) — same rule applies.
     exclude: [...configDefaults.exclude, "e2e/**", ".claude/**"],
+    // The default environment stays `node`. jsdom is roughly 200ms of setup
+    // per file, and the overwhelming majority of these tests are pure
+    // functions that have no use for a DOM. Component tests opt in with a
+    // `// @vitest-environment jsdom` pragma on their first line, which keeps
+    // the whole suite around a second.
+    setupFiles: ["./src/test-setup.ts"],
   },
   server: {
     port: 1420,

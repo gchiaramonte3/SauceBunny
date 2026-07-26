@@ -70,6 +70,50 @@ are still verified manually, so please also describe the smoke-test you ran
 in the PR body (e.g. "Pulled a YouTube clip, generated a transcript with
 diarization on, dragged two speaker bubbles to merge — no regressions").
 
+### Testing a component
+
+Three layers, and it is worth knowing which one your change belongs in:
+
+| Layer | What it proves | Where |
+|---|---|---|
+| unit | a pure function is correct | `src/lib/*.test.ts` |
+| component | a control behaves the way its props say | `src/components/*.test.tsx` |
+| e2e | the app boots and the chrome wires up | `e2e/*.spec.ts` |
+
+For a while only the first and third existed, so "every part correct, wired
+together wrong" had nowhere to be caught. The very first component test found
+a `disabled` prop on the timeline playhead that gated its keymap and dropped
+it out of the tab order, all of it unreachable because the only call site
+sits inside a `{!dim && …}` guard.
+
+Component tests are ordinary vitest files with one requirement: put
+
+```
+// @vitest-environment jsdom
+```
+
+on the **first line**. The default environment stays `node`, which is what
+keeps the ~550 pure tests running in about a second; jsdom costs roughly
+200ms per file and almost nothing else needs it.
+
+Conventions worth copying from `Timeline.test.tsx` and `CaptionOverlay.test.tsx`:
+
+- Mock `@tauri-apps/api/core` and `@tauri-apps/api/event` per file. There is
+  no backend in vitest.
+- Mock the decode helpers (`../lib/mediabunny-helpers`, `../lib/waveform`).
+  They reach for WebCodecs and a real file.
+- Move the playhead with `act(() => setPlayheadFrames(n))`, not by passing a
+  prop. It lives outside React on purpose, and the test should exercise the
+  same path playback does.
+- Assert what a user or a screen reader can observe. `getByRole` over
+  `querySelector` wherever the component has a role to find.
+
+`src/test-setup.ts` fills in the browser APIs jsdom does not implement
+(ResizeObserver, IntersectionObserver, matchMedia, a working localStorage).
+Add to it only when jsdom genuinely lacks something — a component test that
+passes because the setup file faked the behaviour under test is worth less
+than no test at all.
+
 ### If you touched packaging
 
 Everything above checks *source*. Nothing in it can see the artifact, and

@@ -328,6 +328,17 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
    - Update frontend callers to use `formatError(e)` from `lib/error-format.ts` instead of `String(e)`.
    - Re-run `cargo test --lib` if you add new `AppError` variants — the binding regenerates automatically.
 5. ~~**UI smoke harness**~~ — DONE (r105): `npm run test:e2e` drives the Vite-served frontend in Chromium with the Tauri IPC layer mocked at the `__TAURI_INTERNALS__` seam (`e2e/tauri-mock.ts`) — tauri-driver has no macOS/WKWebView support, so this is deliberately a *shell* smoke (boot, toolbar/sidebar/monitor render, settings modal, co-review popover, drawer — zero pageerrors), run in CI. Native playback/transcription pipelines remain covered by cargo/swift tests + manual verification.
+
+   **Component tests** (added later) fill the layer between the two: the e2e
+   suite proves the app boots, the vitest units prove the pure functions are
+   right, and neither could answer "does this control behave the way its props
+   say it does". Write one as `src/components/<Name>.test.tsx` with
+   `// @vitest-environment jsdom` as the FIRST line — the default environment
+   stays `node` so the ~550 pure tests keep running in about a second.
+   `src/test-setup.ts` fills in the browser APIs jsdom lacks; keep it small,
+   and never stub away behaviour the test is supposed to be checking. Mock
+   `@tauri-apps/api/*` and the heavy decode helpers (`mediabunny-helpers`,
+   `waveform`) per file with `vi.mock`. Wrap a `setPlayheadFrames` in `act()`.
 6. ~~**Transcript render performance**~~ — DONE (`68d4a25`): the karaoke render's O(turns²) cue-offset scan, per-turn name/alias resolution, and search-match lookup are precomputed in memos keyed on turns/overrides, so a playhead tick only re-marks the active cue.
 
 ---

@@ -52,19 +52,22 @@ export type TimelineRange = {
  * app is precise in), Shift steps a second, Page steps ten, Home/End jump to
  * the ends.
  */
-function PlayheadCursor({ durationFrames, fps, onMouseDown, onSeek, disabled }: {
+/** The scrub cursor. Rendered only when the track is live — the parent's
+ *  `{!dim && …}` guard is the disabled state, so there is no disabled variant
+ *  here. It used to take a `disabled` prop that gated the keymap and dropped
+ *  the control out of the tab order, and none of it could ever run. */
+function PlayheadCursor({ durationFrames, fps, onMouseDown, onSeek }: {
   durationFrames: number;
   fps: number;
   onMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
   onSeek: (frames: number) => void;
-  disabled: boolean;
 }) {
   const frames = usePlayheadFrames();
   const left = durationFrames > 0 ? (frames / durationFrames) * 100 : 0;
   const rate = Math.max(1, Math.round(fps));
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (disabled || durationFrames <= 0) return;
+    if (durationFrames <= 0) return;
     const second = rate;
     let next: number | null = null;
     switch (e.key) {
@@ -90,14 +93,13 @@ function PlayheadCursor({ durationFrames, fps, onMouseDown, onSeek, disabled }: 
       onMouseDown={onMouseDown}
       onKeyDown={onKeyDown}
       role="slider"
-      tabIndex={disabled ? -1 : 0}
+      tabIndex={0}
       aria-label="Playhead"
       aria-valuemin={0}
       aria-valuemax={Math.max(0, durationFrames)}
       aria-valuenow={frames}
       // Screen readers should say the timecode, not a frame count.
       aria-valuetext={secondsToHms(frames / rate)}
-      aria-disabled={disabled || undefined}
       title="Drag to scrub, or focus and use the arrow keys"
     />
   );
@@ -505,7 +507,6 @@ export function Timeline({
               fps={fps}
               onMouseDown={onPlayheadDown}
               onSeek={onSeek}
-              disabled={!!dim}
             />
           </>
         )}
