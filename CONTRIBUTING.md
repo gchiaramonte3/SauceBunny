@@ -33,7 +33,7 @@ under `~/.cache/fluidaudio/Models/`).
 ## Project shape
 
 The repo splits cleanly into React frontend, Rust Tauri shell, and a Swift
-sidecar for diarization. Read `ARCHITECTURE.md` for the full tour with a
+sidecar for diarization. Read `docs/ARCHITECTURE.md` for the full tour with a
 data-flow diagram.
 
 Sidecar binaries are **not** checked into git (they were ~150 MB of blobs).

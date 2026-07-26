@@ -34,3 +34,7 @@ playwright-report/
 
 # Editor/agent-local config (machine-specific, not shared)
 .claude/
+
+# Internal design notes / working docs (personal paths, session transcripts)
+# — deliberately local-only, never part of the public tree.
+_design/

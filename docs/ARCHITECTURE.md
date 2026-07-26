@@ -241,7 +241,7 @@ Done since this list was written: the commands.rs split (r47 — `commands/{down
 Remaining, roughly in priority order:
 
 1. **UI smoke harness** — unit tests cover the parsers/math; playback and the transcript pipeline are still verified manually. A Playwright (or tauri-driver) smoke run would close that gap.
-2. **First public release** — tagged v0.1.0 with a notarized .dmg (see DISTRIBUTION.md), plus an app-update story (tauri-plugin-updater) and a plan for yt-dlp staleness (YouTube breaks extractors faster than app releases ship).
+2. **First public release** — tagged v0.1.0 with a notarized .dmg (see docs/DISTRIBUTION.md), plus an app-update story (tauri-plugin-updater) and a plan for yt-dlp staleness (YouTube breaks extractors faster than app releases ship).
 3. **Linux / Windows builds** — macOS-first while we hit 1.0; cross-platform after.
 
 ## Media stream cache + timeline contract (r112–r114)

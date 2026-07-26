@@ -13,7 +13,7 @@ Sauce Bunny is a **local-first macOS desktop app** for transcribing, diarizing, 
 - **Shell:** Tauri 2 (Rust backend → WKWebView frontend)
 - **Target:** macOS 14+, Apple Silicon only. No Windows/Linux builds. (Floor raised from 13: the diarizer's FluidAudio dependency and native dictation need 14 — a 13 install whose headline features silently fail was worse than requiring 14.)
 - **License:** MIT
-- **Distribution:** self-hosted notarized `.dmg` (NOT Mac App Store). See `DISTRIBUTION.md` for the full reasoning and release flow. The app intentionally cannot pass App Store review (bundled yt-dlp + arbitrary subprocess spawning + cookie reads across apps), and we have decided that's the right tradeoff. Do NOT add MAS-compliance code (App Sandbox entitlements, security-scoped bookmarks, helper-app refactor of sidecars) — it would cost product features without unlocking any distribution channel we want.
+- **Distribution:** self-hosted notarized `.dmg` (NOT Mac App Store). See `docs/DISTRIBUTION.md` for the full reasoning and release flow. The app intentionally cannot pass App Store review (bundled yt-dlp + arbitrary subprocess spawning + cookie reads across apps), and we have decided that's the right tradeoff. Do NOT add MAS-compliance code (App Sandbox entitlements, security-scoped bookmarks, helper-app refactor of sidecars) — it would cost product features without unlocking any distribution channel we want.
 
 ## What this app is NOT
 
@@ -348,7 +348,7 @@ npm run check:release    # audits sidecars + entitlements + signing env
 npm run tauri build      # produces signed + notarized .dmg
 ```
 
-`check:release` refuses to pass if any binary in `src-tauri/binaries/` references a non-system dylib path (`/opt/homebrew/`, `/usr/local/`, `/Users/`), if entitlements aren't wired into `tauri.conf.json`, or if the signing identity env vars aren't set up. See `DISTRIBUTION.md` for the full first-time setup.
+`check:release` refuses to pass if any binary in `src-tauri/binaries/` references a non-system dylib path (`/opt/homebrew/`, `/usr/local/`, `/Users/`), if entitlements aren't wired into `tauri.conf.json`, or if the signing identity env vars aren't set up. See `docs/DISTRIBUTION.md` for the full first-time setup.
 
 ---
 
@@ -357,7 +357,7 @@ npm run tauri build      # produces signed + notarized .dmg
 - **License:** MIT. All new source files should be compatible.
 - **No secrets.** No API keys, tokens, credentials, or personal paths in any committed file.
 - **Dependencies:** Must be MIT, Apache-2.0, or BSD compatible. Check before adding.
-- **Docs:** Update `ARCHITECTURE.md` when structural changes are made. Keep `CONTRIBUTING.md` accurate.
+- **Docs:** Update `docs/ARCHITECTURE.md` when structural changes are made. Keep `CONTRIBUTING.md` accurate.
 - **Commits:** Imperative mood, max 72 chars first line. Format: `area: change` (e.g., `diarizer: switch to SpeakerKit primary backend`, `ui: add volume slider to player controls`).
 
 ---

@@ -62,12 +62,12 @@ npm test                                                     # frontend units
 
 `cargo test --lib` also regenerates the `ts-rs` TypeScript bindings in
 `src/bindings/` from the Rust structs — keep it green when you touch a
-cross-boundary type. Architecture tour: [ARCHITECTURE.md](ARCHITECTURE.md);
+cross-boundary type. Architecture tour: [ARCHITECTURE.md](docs/ARCHITECTURE.md);
 engineering rules: [CLAUDE.md](CLAUDE.md).
 
 ## How it works
 
-Tauri 2 shell (Rust) + React 18 frontend in WKWebView. Media and ML work is done by bundled, self-contained sidecars — yt-dlp, ffmpeg/ffprobe, whisper.cpp, llama.cpp (the AI Summary's local LLM, served over a token-gated loopback port), and our own Swift diarizer — orchestrated by thin Rust commands (argument arrays, never shell strings). Web playback streams through a token-gated `127.0.0.1` proxy that remuxes to fragmented MP4 for MSE (the only path WKWebView plays web video with sound). The full tour lives in [ARCHITECTURE.md](ARCHITECTURE.md); the project's engineering rules live in [CLAUDE.md](CLAUDE.md).
+Tauri 2 shell (Rust) + React 18 frontend in WKWebView. Media and ML work is done by bundled, self-contained sidecars — yt-dlp, ffmpeg/ffprobe, whisper.cpp, llama.cpp (the AI Summary's local LLM, served over a token-gated loopback port), and our own Swift diarizer — orchestrated by thin Rust commands (argument arrays, never shell strings). Web playback streams through a token-gated `127.0.0.1` proxy that remuxes to fragmented MP4 for MSE (the only path WKWebView plays web video with sound). The full tour lives in [ARCHITECTURE.md](docs/ARCHITECTURE.md); the project's engineering rules live in [CLAUDE.md](CLAUDE.md).
 
 ## Contributing
 
