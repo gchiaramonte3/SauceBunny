@@ -42,7 +42,7 @@ src/                          # React 18 + TypeScript (strict)
     mediabunny-audio.ts
   hooks/                      # Custom hooks — shared 3+ ways, or one cohesive
                               # subsystem extracted from App.tsx (use-panel-bus,
-                              # use-web-playback, use-co-review)
+                              # use-web-playback, use-co-review, use-transport)
   styles/
     tokens.css                # Design tokens (colors, spacing, type scale, radii)
     app.css                   # All component styles, organized by section comments
@@ -339,7 +339,25 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
    and never stub away behaviour the test is supposed to be checking. Mock
    `@tauri-apps/api/*` and the heavy decode helpers (`mediabunny-helpers`,
    `waveform`) per file with `vi.mock`. Wrap a `setPlayheadFrames` in `act()`.
-6. ~~**Transcript render performance**~~ — DONE (`68d4a25`): the karaoke render's O(turns²) cue-offset scan, per-turn name/alias resolution, and search-match lookup are precomputed in memos keyed on turns/overrides, so a playhead tick only re-marks the active cue.
+6. **Shrink `App.tsx`.** It is ~6,400 lines and the largest single risk in the
+   codebase: nothing can be tested without booting the whole app, and reviewing
+   a change to it means reading around a dozen unrelated subsystems. The
+   direction is the one already established — lift ONE cohesive subsystem at a
+   time into `src/hooks/use-*.ts`, destructure the result at the call site so
+   no existing reference has to change, and add tests to the extracted hook
+   that were impossible before. Do NOT attempt a single sweeping split.
+
+   Done so far: `use-panel-bus`, `use-web-playback`, `use-co-review`,
+   `use-library-scan`, `use-media-capture`, and `use-transport` (shuttle,
+   steps, seeks, in/out marks — 190 lines, 36 new tests). Extracting transport
+   also surfaced that `applyShuttle`/`exitShuttle` had never been part of
+   App's surface at all; every one of their references was another transport
+   handler. That kind of finding is the point of the exercise.
+
+   Plausible next candidates, each self-contained: the keyboard/shortcut
+   dispatch, the export/queue pipeline, and the transcript-history wiring.
+
+7. ~~**Transcript render performance**~~ — DONE (`68d4a25`): the karaoke render's O(turns²) cue-offset scan, per-turn name/alias resolution, and search-match lookup are precomputed in memos keyed on turns/overrides, so a playhead tick only re-marks the active cue.
 
 ---
 
