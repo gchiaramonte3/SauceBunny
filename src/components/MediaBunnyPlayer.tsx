@@ -7,6 +7,8 @@ import {
   type InputVideoTrack, type InputAudioTrack, type WrappedCanvas,
 } from "mediabunny";
 import { mediabunnySource } from "../lib/mediabunny-source";
+import { canvasLooksBlank } from "../lib/mediabunny-helpers";
+import { audioAnchorWaitMs, shouldRetakeAnchor } from "../lib/av-clock";
 import { createScrubPump, type ScrubPump } from "../lib/scrub-pump";
 import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle } from "./player-handle";
@@ -134,6 +136,13 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
    * that clock.
    */
   const anchoredRef = useRef(false);
+  /** True once the audio decoder has produced a buffer for THIS source. A
+   *  custom WASM decoder (Opus) pays a one-time instantiate on its first
+   *  decode; until that is paid the audio loop cannot win the anchor race. */
+  const audioWarmRef = useRef(false);
+  /** Has any audio buffer been delivered for the CURRENT generation? Gates
+   *  the one legitimate re-anchor (see runAudioLoop). */
+  const audioDeliveredRef = useRef(false);
   /** Audio source nodes currently scheduled — cancelled on stop/seek. */
   const scheduledRef = useRef<AudioBufferSourceNode[]>([]);
   /** Most recent drawn frame — kept so React renders stay idempotent. */
@@ -329,6 +338,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     // (stopPlayback reads currentMediaTime() before calling this, so the
     // resume point is already captured against the outgoing anchor.)
     anchoredRef.current = false;
+    audioDeliveredRef.current = false;
     // Drop any pending scrub target too; the in-flight decode (if any) is
     // gated by the gen bump above and won't paint.
     scrubPumpRef.current?.cancel();
@@ -439,7 +449,13 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
         if (gen !== genRef.current) return;
         if (!anchoredRef.current) {
           if (audioLeads) {
-            const deadline = performance.now() + 500;
+            // Audio owns the clock when there is an audio track, so the
+            // picture waits for it. How long depends on whether the audio
+            // decoder has already paid its instantiate: warm, it lands in
+            // milliseconds; COLD (first play of an Opus/WASM-decoded file)
+            // it can take most of a second, and cutting the wait short is
+            // exactly what hands the anchor to video and silences the file.
+            const deadline = performance.now() + audioAnchorWaitMs(audioWarmRef.current);
             while (!anchoredRef.current && performance.now() < deadline) {
               await new Promise<void>((r) => setTimeout(r, 10));
               if (gen !== genRef.current) return;
@@ -487,7 +503,27 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
         // timestamp would report a position up to one packet earlier than the
         // caller asked for, which lands a cue click on the previous cue and
         // creeps backwards across repeated play/pause cycles.
-        if (!anchoredRef.current) anchorClock(Math.max(fromTime, wrapped.timestamp), ctx);
+        const firstOfGeneration = !audioDeliveredRef.current;
+        audioDeliveredRef.current = true;
+        audioWarmRef.current = true; // the decoder has now paid its instantiate
+        if (!anchoredRef.current) {
+          anchorClock(Math.max(fromTime, wrapped.timestamp), ctx);
+        } else if (shouldRetakeAnchor({
+          // The video loop anchored while this decoder was still warming up,
+          // so the clock has run past the audio we are only now holding and
+          // every chunk would be dropped below as late — a perfect picture
+          // with no sound. Audio is the master clock: take it back. The rule
+          // (and why it is safe only here) lives in lib/av-clock.ts, pinned
+          // by av-clock.test.ts against this exact scenario.
+          firstOfGeneration,
+          scheduledCount: scheduledRef.current.length,
+          wouldLandAt: startContextTimeRef.current
+            + (wrapped.timestamp - startMediaTimeRef.current),
+          chunkDuration: wrapped.buffer.duration,
+          now: ctx.currentTime,
+        })) {
+          anchorClock(Math.max(fromTime, wrapped.timestamp), ctx);
+        }
         const source = ctx.createBufferSource();
         source.buffer = wrapped.buffer;
         source.connect(gain);
@@ -570,6 +606,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       }
     }
     if (gen !== genRef.current) return;
+    audioDeliveredRef.current = false;
     runAudioLoop(fromTime, gen);
     runVideoLoop(fromTime, gen);
     // Anchor fallback. runVideoLoop is the unconditional anchor, but it returns
@@ -801,6 +838,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     let cancelled = false;
     readyRef.current = false;
     playingRef.current = false;
+    audioWarmRef.current = false; // a new source means a cold decoder again
     setIsPlaying(false);
 
     // Fresh AudioContext per mount — old contexts may be in a weird state
@@ -852,20 +890,15 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
             onError?.(`[WEBCODECS_UNSUPPORTED] video codec "${codec}"`);
             return;
           }
-          // ProRes DECODES fine (turbores), but its output is 10/12-bit YUV.
-          // mediabunny can only paint a sample to a canvas by wrapping it in a
-          // WebCodecs VideoFrame, and this WKWebView's WebCodecs has no 10-bit
-          // VideoFrame — so getCanvas() silently yields a BLACK canvas (no throw,
-          // so the generic error path never fires). Treat "decodes but can't be
-          // painted here" like an unsupported codec: hand off to the ffmpeg-prep
-          // fallback, which transcodes to 8-bit H.264 for playback (the original
-          // ProRes is untouched and still used for export). turbores is the only
-          // custom-registered VIDEO decoder, so ProRes is the only >8-bit sample
-          // that reaches here — gate any future one the same way.
-          if (vt.codec === "prores") {
-            onError?.(`[WEBCODECS_UNSUPPORTED] ProRes is 10-bit; WKWebView can't paint it to a canvas`);
-            return;
-          }
+          // NO ProRes short-circuit (r148). turbores is the FASTER decoder
+          // for ProRes — ~310 fps vs ffmpeg's ~107 at 4K 422 HQ — so routing
+          // it to a transcode on sight would trade a 3x win for a subprocess
+          // and a wait. The old 10-bit black-canvas hazard is handled inside
+          // @mediabunny/prores: it probes which VideoFrame formats this
+          // platform can actually construct and passes them to turbores as
+          // allowedOutputFormats, so it never emits a sample WKWebView cannot
+          // wrap. The empirical paint check below is the backstop, and it now
+          // guards EVERY codec instead of banning one.
           // Packet-level keyframe lookup: lets a fast drag snap its preview
           // to the keyframe at-or-before the cursor, ONE decode per painted
           // frame instead of a keyframe-to-target walk.
@@ -883,7 +916,26 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
           // → same unsupported-render fallback rather than a silent black frame.
           try {
             const first = await videoSinkRef.current.getCanvas(0);
-            if (!cancelled && first) drawCanvas(first.canvas);
+            if (cancelled) return;
+            if (!first) throw new Error("no frame at 0s");
+            drawCanvas(first.canvas);
+            // A canvas that decoded but reads PURE BLACK is the silent
+            // failed-wrap signature (nothing throws). One black frame proves
+            // nothing — fades and slates are ordinary footage — so probe a
+            // second time deeper in. Two blacks = this platform cannot paint
+            // this source: hand off to the ffmpeg-prep fallback instead of
+            // playing a black picture.
+            if (canvasLooksBlank(first.canvas)) {
+              const probeAt = dur > 0 ? Math.min(dur * 0.25, Math.max(0, dur - 0.05)) : 1;
+              const second = await videoSinkRef.current.getCanvas(probeAt);
+              if (cancelled) return;
+              if (!second || canvasLooksBlank(second.canvas)) {
+                const codec = await vt.getCodec().catch(() => "unknown");
+                onError?.(`[WEBCODECS_UNSUPPORTED] ${codec} decodes but paints black here`);
+                return;
+              }
+              drawCanvas(second.canvas);
+            }
           } catch (e) {
             if (cancelled) return;
             const codec = await vt.getCodec().catch(() => "unknown");
@@ -901,6 +953,15 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
             return;
           }
           audioSinkRef.current = new AudioBufferSink(at);
+          // Pay the audio decoder's one-time instantiate NOW, not on the first
+          // play(). A custom WASM decoder (Opus registers one) builds libopus
+          // inside its first decode; when that cost lands during play() the
+          // video loop wins the anchor race, every audio chunk is then judged
+          // late and dropped, and the file plays SILENTLY behind a perfect
+          // picture. Fire and forget — onReady must not wait on it.
+          void audioSinkRef.current.getBuffer(0)
+            .then(() => { if (!cancelled) audioWarmRef.current = true; })
+            .catch(() => { /* still cold: the video loop just waits longer */ });
         }
 
         readyRef.current = true;

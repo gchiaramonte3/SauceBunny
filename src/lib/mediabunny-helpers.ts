@@ -134,6 +134,30 @@ async function canvasToBlob(
  * the read is a fixed ~144-pixel cost regardless of source resolution. Used by
  * extractPosterBlob to reject black intro/fade frames. Rec. 601 coefficients.
  */
+/**
+ * Does this decoded frame read as pure black?
+ *
+ * The failure it detects: a decoder can succeed while the platform cannot
+ * WRAP the result for painting (a >8-bit sample on a WebCodecs build with no
+ * matching VideoFrame format). Nothing throws — the canvas is simply black.
+ * Callers use it to route to the ffmpeg path instead of shipping a black
+ * poster or playing a black picture.
+ *
+ * Threshold 2/255 mean luma: a real frame, even a dark one, carries sensor
+ * noise and compression dither well above this; a failed wrap is exactly 0.
+ * Callers must still sample MORE THAN ONE timestamp before concluding the
+ * source is unpaintable — a deliberate black frame (fade in/out, slate) is
+ * ordinary footage.
+ */
+export function canvasLooksBlank(src: HTMLCanvasElement | OffscreenCanvas): boolean {
+  const scratch = document.createElement("canvas");
+  scratch.width = 16;
+  scratch.height = 9;
+  const ctx = scratch.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return false; // can't tell → assume paintable, never false-positive
+  return meanLuma(ctx, src) < 2;
+}
+
 function meanLuma(
   scratch: CanvasRenderingContext2D,
   src: HTMLCanvasElement | OffscreenCanvas,
@@ -190,13 +214,16 @@ export async function extractPosterBlob(
     const vt = await input.getPrimaryVideoTrack();
     if (!vt) return null;
     if (!(await vt.canDecode())) return null;
-    // ProRes DECODES here (turbores registers the decoder) but cannot PAINT:
-    // every ProRes flavour is 10-bit+, WKWebView has no 10-bit VideoFrame,
-    // and getCanvas() silently yields BLACK (the d1da322 scar). Returning
-    // null hands the poster to the caller's ffmpeg fallback, which handles
-    // ProRes natively (~0.1s measured on the reporting file) — the same
-    // routing playback uses for these sources.
-    if (String(vt.codec ?? "").toLowerCase().includes("prores")) return null;
+    // NOTE (r148): there is deliberately NO ProRes short-circuit here.
+    // turbores is the FASTER decoder for ProRes — ~310 fps vs ffmpeg's ~107
+    // at 4K 422 HQ multithreaded — so bailing to ffmpeg on sight of ProRes
+    // would trade a 3x speed win for a subprocess. The old 10-bit black-
+    // canvas hazard is handled by @mediabunny/prores itself: it probes which
+    // VideoFrame formats this platform can actually construct and passes
+    // them to turbores as allowedOutputFormats, so it never hands WKWebView
+    // a sample it cannot wrap. The empirical canvasLooksBlank guard below is
+    // the backstop if that ever fails, on any codec, rather than a blanket
+    // ban on one.
     // One shared sink reused across every candidate decode (poolSize 1).
     const sink = new CanvasSink(vt, { poolSize: 1 });
     const maxWidth = opts?.maxWidth;
@@ -207,14 +234,10 @@ export async function extractPosterBlob(
       const wrapped = await sink.getCanvas(Math.max(0, opts.atSeconds));
       if (!wrapped) return null;
       // Unpaintable-sample guard for the chosen frame too: a canvas that
-      // reads pure black is the silent 10-bit failure, not the user's frame.
-      // ffmpeg re-grabs the SAME exact timestamp (poster_vf's chosen path),
-      // so a genuinely dark chosen frame still comes back correct.
-      const probe = document.createElement("canvas");
-      probe.width = 16;
-      probe.height = 9;
-      const pctx = probe.getContext("2d", { willReadFrequently: true });
-      if (pctx && meanLuma(pctx, wrapped.canvas) < 2) return null;
+      // reads pure black is a failed wrap, not the user's frame. ffmpeg
+      // re-grabs the SAME exact timestamp (poster_vf's chosen path), so a
+      // genuinely dark chosen frame still comes back correct.
+      if (canvasLooksBlank(wrapped.canvas)) return null;
       return await canvasToBlob(wrapped.canvas, maxWidth, "image/jpeg", quality);
     }
 
