@@ -5177,7 +5177,7 @@ export default function App() {
     meshStreams, meshStates, meshMutedForMe, toggleMuteForMe,
     shareState, shareStream, sharingMembers, startShare, stopShare,
     isPresenter, pendingSource, sourceStatus, makePresenter, adoptPendingSource,
-    offeredFile, transfer, offerCurrentFile, fetchOfferedFile, watchOfferedStream, cancelFetch,
+    offeredFile, transfer, offerCurrentFile, offerError, fetchOfferedFile, watchOfferedStream, cancelFetch,
     startCoReview, joinCoReview, leaveCoReview,
   } = useCoReview({
     isPlaying, fps, playbackRate,
@@ -5764,6 +5764,15 @@ export default function App() {
                         >
                           Send them the file
                         </button>
+                      )}
+                      {/* An offer that failed used to go to the pipeline log
+                          and nowhere else: the host clicked, nothing visible
+                          happened, and the guests went on reading "That file
+                          lives on their Mac" with nobody able to say why. */}
+                      {offerError && (
+                        <span className="cp-room-blocked" role="alert">
+                          {`Could not offer the file: ${offerError}`}
+                        </span>
                       )}
                       {transfer?.phase === "hashing" && (
                         <span className="cp-room-blocked">Preparing the file…</span>

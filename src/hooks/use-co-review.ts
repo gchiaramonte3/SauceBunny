@@ -205,6 +205,9 @@ export type CoReview = {
   /** Live transfer progress on this machine, either direction. */
   transfer: TransferProgress | null;
   offerCurrentFile: (path: string, name?: string, vcodec?: string | null, acodec?: string | null) => Promise<void>;
+  /** Why the last offer failed, for the host to see. Null once it succeeds. */
+  offerError: string | null;
+  clearOfferError: () => void;
   fetchOfferedFile: () => Promise<void>;
   watchOfferedStream: () => Promise<void>;
   cancelFetch: () => void;
@@ -304,6 +307,11 @@ export function useCoReview({
   // Tier C: the host's standing offer of the current source's file, and the
   // live transfer this machine is running (either direction). The offer is
   // room-truth (rides the wire); the transfer is local progress.
+  // Why the last offer failed, for the host to actually SEE. It used to go to
+  // the pipeline log only, so a host clicked Offer, nothing appeared, and the
+  // guests kept reading "That file lives on their Mac" indefinitely with no
+  // one able to tell why.
+  const [offerError, setOfferError] = useState<string | null>(null);
   const [offeredFile, setOfferedFile] = useState<{
     name: string; size: number; blake3: string;
     vcodec: string | null; acodec: string | null;
@@ -1073,9 +1081,12 @@ export function useCoReview({
         "session_offer_file", { path, name: name ?? null, vcodec: vcodec ?? null, acodec: acodec ?? null },
       );
       setOfferedFile(info);
+      setOfferError(null);
       slog("ok", `Offered "${info.name}" to the room.`);
     } catch (e) {
-      slog("err", `Could not offer the file: ${formatError(e)}`);
+      const msg = formatError(e);
+      setOfferError(msg);
+      slog("err", `Could not offer the file: ${msg}`);
     }
   }, [slog]);
 
@@ -1171,6 +1182,8 @@ export function useCoReview({
     offeredFile,
     transfer,
     offerCurrentFile,
+    offerError,
+    clearOfferError: useCallback(() => setOfferError(null), []),
     fetchOfferedFile,
     watchOfferedStream,
     cancelFetch,

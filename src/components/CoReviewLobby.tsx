@@ -180,8 +180,17 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                   </button>
                 </section>
                 {localSource && (
+                  /* This said "Local files can't be shared yet. Load a web URL
+                     to screen together." — telling a host to abandon the exact
+                     workflow the app implements. Offering a local file, a
+                     guest watching it as a live stream, and a guest fetching a
+                     verified copy all ship (use-co-review's offerCurrentFile
+                     and the two guest paths). Screening a local rough cut with
+                     a producer IS the job; the string was left behind by the
+                     version that could not do it. */
                   <p className="cp-colobby-hint">
-                    Local files can't be shared yet. Load a web URL to screen together.
+                    Your file stays on this Mac. Once the session starts you can offer it,
+                    and each person chooses whether to watch it streamed or take a copy.
                   </p>
                 )}
 
