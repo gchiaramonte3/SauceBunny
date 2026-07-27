@@ -50,6 +50,7 @@ import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase";
 import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek } from "./lib/playhead-store";
 import { endSeekFrames } from "./lib/playhead-clock";
 import { usePanelBus } from "./hooks/use-panel-bus";
+import { useStreamRung } from "./hooks/use-stream-rung";
 import { useTransport } from "./hooks/use-transport";
 import { useWebPlayback } from "./hooks/use-web-playback";
 import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView, type SessionSource } from "./hooks/use-co-review";
@@ -619,6 +620,10 @@ export default function App() {
    *  live `url` input — editing the input box mid-playback must not repoint the
    *  cached audio at a different (or empty) URL. Cleared by resetForNewSource. */
   const [activeSourceUrl, setActiveSourceUrl] = useState<string | null>(null);
+  // Tier B adaptive quality (step 3e). Active only for a PEER source, where
+  // another Mac is transcoding on our behalf; a web stream has no rung and the
+  // request stays byte-identical to what earlier builds sent.
+  const streamRung = useStreamRung(activeSourceUrl?.startsWith("peer://") ?? false);
   /** True once the active player has reported ready (loadedmetadata /
    *  SourceBuffer open). Drives the r62 "resolving / starting playback"
    *  overlay so the user sees a clear status over the poster during the
@@ -5862,6 +5867,13 @@ export default function App() {
                     webCachedUseMediabunny={webCachedPlayer === "mediabunny"}
                     streamStartAt={webPlayback.streamStartAt}
                     disableScrubPreview={activeSourceUrl?.startsWith("peer://") ?? false}
+                    /* Tier B adaptive quality (step 3e). Null for a web source:
+                       the ladder only means anything when another Mac is
+                       encoding for us. */
+                    streamRung={streamRung.rung}
+                    onStreamStall={streamRung.onStall}
+                    onStreamInfo={streamRung.onStreamInfo}
+                    streamRungBadge={streamRung.badge}
                     onDiag={(tag, msg) => appendLog(asLogTag(tag), "seek", msg)}
                     /* Audio track + codecs are meaningful only while STREAMING (the
                        cached file is already muxed and sample-accurate). */
@@ -6309,6 +6321,8 @@ export default function App() {
         ].filter((p): p is string => !!p)}
         defaults={defaults}
         setDefaults={setDefaults}
+        streamRungPref={streamRung.pref}
+        setStreamRungPref={streamRung.setPref}
         keybindings={keybindings}
         setKeybindings={setKeybindings}
         initialTab={settingsInitialTab}

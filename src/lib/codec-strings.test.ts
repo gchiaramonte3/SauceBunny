@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { audioCodecCandidates, peerStreamMime, videoCodecCandidates } from "./codec-strings";
+import { audioCodecCandidates, encodedStreamMime, peerStreamMime, videoCodecCandidates } from "./codec-strings";
 
 /**
  * The support table below is MEASURED, not assumed. Chromium (Playwright) was
@@ -84,6 +84,38 @@ describe("audioCodecCandidates", () => {
     for (const c of [null, undefined, "", "something-weird"]) {
       expect(audioCodecCandidates(c)).toEqual(["mp4a.40.2"]);
     }
+  });
+});
+
+describe("encodedStreamMime", () => {
+  it("describes the ENCODER's output, not the source file", () => {
+    // Every rung produces H.264 High + AAC-LC whatever went in. That is the
+    // point of transcoding, and it is why the source codecs must not be used
+    // to describe the stream.
+    const mime = encodedStreamMime(webkitish);
+    expect(mime).not.toBeNull();
+    expect(webkitish(mime!)).toBe(true);
+    expect(mime).toContain("avc1.");
+    expect(mime).toContain("mp4a.40.2");
+  });
+
+  it("REGRESSION: a ProRes source streams once a rung is transcoding it", () => {
+    // The trap the ladder walks into if the MIME keeps coming from the offer.
+    // ProRes has no MP4 codec string at all, so describing the stream by its
+    // SOURCE returns null, the fast path is skipped, and the fallback probe
+    // reads the raw peer route -- which answers 405 by design. Dead session,
+    // on exactly the sources the ladder exists to make streamable.
+    expect(peerStreamMime("prores", "pcm_s16le", webkitish)).toBeNull();
+    expect(encodedStreamMime(webkitish)).not.toBeNull();
+  });
+
+  it("agrees with what the Rust encoder actually emits", () => {
+    // commands/rung.rs: -c:v h264_videotoolbox -profile:v high, -c:a aac.
+    // If that ever changes to HEVC or Opus, this is the assertion that should
+    // fail rather than a silent decode error on the guest.
+    expect(encodedStreamMime(webkitish)).toBe(
+      `video/mp4; codecs="${videoCodecCandidates("h264")[0]}, ${audioCodecCandidates("aac")[0]}"`,
+    );
   });
 });
 

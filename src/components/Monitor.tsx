@@ -67,6 +67,15 @@ type Props = {
   /** Tier B peer stream: no random access on the raw route, so the MSE
    *  player's frame-accurate scrub overlay stays off. */
   disableScrubPreview?: boolean;
+  /** Tier B quality rung to request, or null for passthrough / non-peer. */
+  streamRung?: number | null;
+  /** The <video> ran out of buffered media — feeds the rung policy. */
+  onStreamStall?: () => void;
+  /** What the presenter actually served (rung + relay path). */
+  onStreamInfo?: (info: { rung: number | null; relayed: boolean }) => void;
+  /** Short status for the streaming-quality chip. Empty means nothing worth
+   *  saying — auto sitting at the default rung, or not a peer stream at all. */
+  streamRungBadge?: string;
   /** Pipeline/seek diagnostics → the Pipeline log (channel "seek"). */
   onDiag?: (tag: string, message: string) => void;
   /** r75: RAW audio-track CDN URL for DASH-split sources (Reddit, YouTube
@@ -226,6 +235,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     resumeTitle, onResume, onboarding,
     aspect,
     sourceKind, localFilePath, webStreamUrl, webCachedUseMediabunny, streamStartAt, disableScrubPreview, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
+    streamRung, onStreamStall, onStreamInfo, streamRungBadge,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs, scrubAudio,
     streamLoadingPhase,
     toast, onToastDismiss,
@@ -448,6 +458,11 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               knownDuration={metadata?.duration ?? undefined}
               startAtSeconds={streamStartAt}
               disableScrubPreview={disableScrubPreview}
+              /* Tier B adaptive quality. Absent for a web source, where nobody
+                 is transcoding on our behalf. */
+              rung={streamRung}
+              onStall={onStreamStall}
+              onStreamInfo={onStreamInfo}
               initialVolume={initialVolume}
               onTimeUpdate={onPlayerTimeUpdate}
               onPlayStateChange={onPlayerStateChange}
@@ -520,6 +535,18 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
           />
         ) : (
           <ProximityAnnotation annotations={proximityAnnotations} fps={fps} />
+        )}
+
+        {/* Streaming-quality chip. Present only when there is something the
+            viewer could not otherwise know: that the picture has been reduced,
+            or — the case that actually matters — that their host's file is
+            crossing a public relay rather than a direct link between the two
+            Macs. Silent when auto is sitting at its default rung, because a
+            badge that is always on screen stops being read. */}
+        {streamRungBadge && (
+          <div className="cp-stream-rung" title="Streaming quality. Change it in Settings under Co-review calls.">
+            {streamRungBadge}
+          </div>
         )}
 
         {/* Type-a-timecode HUD — appears the moment the user types a digit

@@ -106,6 +106,27 @@
 
 /* Type-a-timecode HUD — centered over the video. Keyboard-driven (App owns
    the input), so it's pointer-events:none and never steals focus/clicks. */
+/* Streaming-quality chip (Tier B). Top-left so it cannot collide with the
+   timecode HUD (centred) or the transport (bottom). Quiet by design: it only
+   appears when the quality is not what the viewer would assume, and the one
+   case it must never miss is a relayed path. */
+.cp-stream-rung {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+  background: rgba(10, 10, 12, 0.72);
+  border: 1px solid var(--line-2);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+  z-index: 8;
+}
+
 .cp-tc-hud {
   position: absolute;
   left: 50%;

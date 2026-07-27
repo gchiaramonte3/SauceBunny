@@ -188,6 +188,13 @@ type Props = {
   cacheExcludePaths?: string[];
   defaults: Defaults;
   setDefaults: (d: Defaults) => void;
+  /** Tier B streaming quality: "auto" walks the ladder, a number pins it.
+   *  Owned by `useStreamRung` (which persists it) rather than living in
+   *  `defaults`, because the policy reads and writes it live during a session
+   *  — a downshift happens while the user is watching, not when Settings is
+   *  saved. */
+  streamRungPref: "auto" | 1080 | 720 | 540 | 360;
+  setStreamRungPref: (p: "auto" | 1080 | 720 | 540 | 360) => void;
   /** User keyboard-shortcut overrides + setter (Settings → Commands). */
   keybindings: KeybindingOverrides;
   setKeybindings: (next: KeybindingOverrides) => void;
@@ -379,6 +386,7 @@ function ModelInfoPopover({ id }: { id: string }) {
 export function SettingsModal(props: Props) {
   const {
     open, onClose, defaults, setDefaults, keybindings, setKeybindings,
+    streamRungPref, setStreamRungPref,
     onApplyToCurrent, initialTab, commands,
     diarizerReady, diarizerPrepareState, diarizerPrepareError,
     onPrepareDiarizerModels, onCancelDiarizerPrepare,
@@ -831,6 +839,33 @@ export function SettingsModal(props: Props) {
                 </CollapsibleSection>
 
                 <CollapsibleSection id="gen-coreview" label="Co-review calls" open={sectionOpen("gen-coreview")} onToggle={() => toggleSection("gen-coreview")}>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Streaming quality
+                      <span className="desc">
+                        When you watch a file streamed from someone else&rsquo;s Mac, they encode it live for you.
+                        Auto starts at 720p and drops a step if the picture keeps stalling, then climbs back once
+                        it has been steady for a while. Pin a size if you know the connection. Speech stays at full
+                        quality on every setting. A relayed connection is always held at the smallest size.
+                      </span>
+                    </div>
+                    <div className="v">
+                      <select
+                        className="cp-select"
+                        value={String(streamRungPref)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setStreamRungPref(v === "auto" ? "auto" : (Number(v) as 1080 | 720 | 540 | 360));
+                        }}
+                      >
+                        <option value="auto">Auto</option>
+                        <option value="1080">1080p</option>
+                        <option value="720">720p</option>
+                        <option value="540">540p</option>
+                        <option value="360">360p</option>
+                      </select>
+                    </div>
+                  </div>
                   <div className="cp-pane-row">
                     <div className="k">
                       TURN relay

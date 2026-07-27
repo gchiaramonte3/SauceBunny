@@ -5,7 +5,7 @@ import { Input, UrlSource, CanvasSink, EncodedPacketSink, ALL_FORMATS } from "me
 import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle } from "./player-handle";
 import { base64UrlEncode } from "../lib/stream-proxy";
-import { peerStreamMime } from "../lib/codec-strings";
+import { encodedStreamMime, peerStreamMime } from "../lib/codec-strings";
 
 /**
  * Streams a web source (YouTube/Vimeo/…) into a NATIVE `<video>` element via
@@ -63,6 +63,18 @@ type Props = {
    *  codecs are absent/unsupported we fall back to probing (then to download). */
   videoCodec?: string;
   audioCodec?: string;
+  /** Tier B: the quality rung to ask the presenter to encode, or null for
+   *  source passthrough. Changing it rebuilds the pipeline — see `rungKey`. */
+  rung?: number | null;
+  /** Fired when the <video> runs out of buffered media (`waiting`). The ONLY
+   *  starvation signal the app has; `src/lib/stream-rung.ts` turns a pattern
+   *  of these into a downshift. Deliberately raw: the policy lives there, not
+   *  here, so it can be tested without a media stack. */
+  onStall?: () => void;
+  /** Reports what the presenter ACTUALLY served (X-Rung / X-Relay), which is
+   *  not always what was asked for — an older host ignores the rung entirely,
+   *  and a relayed path caps the ladder regardless of preference. */
+  onStreamInfo?: (info: { rung: number | null; relayed: boolean }) => void;
   /** Initial pipeline start (seconds). A fresh-retry stream resumes where
    *  the dying one was (review fix: the retry previously restarted at 0). */
   startAtSeconds?: number;
@@ -77,7 +89,7 @@ type Props = {
 const BUFFER_AHEAD_SECONDS = 30;
 
 export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSEStreamPlayer(
-  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration, audioStreamUrl, videoCodec, audioCodec, onDiag, startAtSeconds, disableScrubPreview },
+  { path, filename, hasVideo, initialVolume, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, knownDuration, audioStreamUrl, videoCodec, audioCodec, onDiag, startAtSeconds, disableScrubPreview, rung, onStall, onStreamInfo },
   ref,
 ) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -112,6 +124,15 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const audioCodecRef = useRef<string | null>(null);
   useEffect(() => { videoCodecRef.current = videoCodec ?? null; }, [videoCodec]);
   useEffect(() => { audioCodecRef.current = audioCodec ?? null; }, [audioCodec]);
+  // Read at pipeline-build time. A rung CHANGE must rebuild, which the
+  // `rungKey` dependency below drives; the ref is so startFetch sees the
+  // current value without re-running its own effect.
+  const rungRef = useRef<number | null>(null);
+  useEffect(() => { rungRef.current = rung ?? null; }, [rung]);
+  const onStallRef = useRef<Props["onStall"]>(undefined);
+  useEffect(() => { onStallRef.current = onStall; }, [onStall]);
+  const onStreamInfoRef = useRef<Props["onStreamInfo"]>(undefined);
+  useEffect(() => { onStreamInfoRef.current = onStreamInfo; }, [onStreamInfo]);
   const onDiagRef = useRef<Props["onDiag"]>(undefined);
   useEffect(() => { onDiagRef.current = onDiag; }, [onDiag]);
   useEffect(() => { disableScrubPreviewRef.current = !!disableScrubPreview; }, [disableScrubPreview]);
@@ -662,9 +683,17 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             const supported = MSx && typeof MSx.isTypeSupported === "function"
               ? (m: string) => MSx.isTypeSupported(m)
               : null;
-            const mime = supported
-              ? peerStreamMime(videoCodecRef.current, audioCodecRef.current, supported)
-              : null;
+            // On a rung the presenter is TRANSCODING, so the stream is H.264
+            // High + AAC-LC no matter what the source file was. Describing it
+            // by the offer's source codecs would be wrong in general and fatal
+            // for a ProRes or DNxHD master, which has no MP4 codec string at
+            // all — peerStreamMime would return null and the fallback probe
+            // would hit the raw peer route's 405.
+            const mime = !supported
+              ? null
+              : rungRef.current
+                ? encodedStreamMime(supported)
+                : peerStreamMime(videoCodecRef.current, audioCodecRef.current, supported);
             if (mime) {
               mimeRef.current = mime;
               // Metadata duration (0 ⇒ filled when metadata lands via the
@@ -823,11 +852,28 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
               const qs: string[] = [];
               if (from > 0) qs.push(`start=${from.toFixed(3)}`);
               if (audioStreamUrl) qs.push(`audio=${base64UrlEncode(audioStreamUrl)}`);
+              // Tier B quality rung. Omitted entirely for a web source and for
+              // passthrough, so the request is byte-identical to what every
+              // build before the ladder sent.
+              if (rungRef.current) qs.push(`rung=${rungRef.current}`);
               const fmp4Url = path.replace("/v1/", "/fmp4/v1/")
                 + (qs.length ? `?${qs.join("&")}` : "");
               const resp = await fetch(fmp4Url);
               if (disposed || g !== genRef.current) { try { await resp.body?.cancel(); } catch { /* ignore */ } return; }
               if (!resp.ok || !resp.body) { fail(`fMP4 stream HTTP ${resp.status}`); return; }
+              // What the presenter really did, which can differ from the ask:
+              // a host on an older build ignores `rung` and serves the source,
+              // and a relayed path is a fact about the network rather than a
+              // preference. Reporting both is what stops the guest downshifting
+              // repeatedly against a host that was never going to comply.
+              {
+                const servedRaw = resp.headers.get("X-Rung");
+                const served = servedRaw && servedRaw !== "source" ? Number(servedRaw) : null;
+                onStreamInfoRef.current?.({
+                  rung: Number.isFinite(served) ? served : null,
+                  relayed: resp.headers.get("X-Relay") === "1",
+                });
+              }
               timelineAbsRef.current = resp.headers.get("x-timeline") === "absolute";
               // Review fix (mode-flip race): the (mode, baseTime, duration)
               // tuple commits HERE, atomically per pipeline, from this
@@ -921,8 +967,13 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       try { v?.pause(); } catch { /* ignore */ }
       try { if (v) { v.removeAttribute("src"); v.load(); } } catch { /* ignore */ }
     };
+    // A rung change is a different STREAM, not a different setting: the
+    // presenter re-encodes at a new resolution and bitrate, so the pipeline
+    // has to be torn down and rebuilt for it to take effect. Listing `rung`
+    // here is what makes that happen; `rungRef` above exists only so
+    // startFetch reads the current value without re-running its own effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path]);
+  }, [path, rung]);
 
   // ─── Native <video> events → parent callbacks ───────────────────────
   useEffect(() => {
@@ -1009,6 +1060,13 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     // mid-scrub (we pause on every seek tick), so clearing here is always
     // correct: if the video is genuinely playing, show it, not a stale frame.
     const onResume = () => setScrubPreview(false);
+    // The starvation signal. Nothing in this app listened for `waiting`
+    // anywhere before the ladder — there was no way to know a guest was
+    // running dry, which is why a stalled peer stream simply stayed stalled.
+    // Raw and unfiltered on purpose: debouncing here would hide the pattern
+    // the (tested, pure) policy in stream-rung.ts is built to read.
+    const onWaiting = () => onStallRef.current?.();
+    el.addEventListener("waiting", onWaiting);
     el.addEventListener("play", onPlay);
     el.addEventListener("pause", onPause);
     el.addEventListener("playing", onResume);
@@ -1024,6 +1082,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       // Mid-shuttle source swap: give the element back its pre-shuttle audio.
       if (preShuttleMutedRef.current != null) { el.muted = preShuttleMutedRef.current; preShuttleMutedRef.current = null; }
       el.playbackRate = userRateRef.current; // clear any shuttle override, keep the user rate
+      el.removeEventListener("waiting", onWaiting);
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
       el.removeEventListener("playing", onResume);

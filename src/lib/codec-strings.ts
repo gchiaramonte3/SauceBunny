@@ -101,6 +101,22 @@ export function audioCodecCandidates(raw: string | null | undefined): string[] {
 }
 
 /**
+ * The MIME for a stream the presenter is TRANSCODING to a quality rung.
+ *
+ * A rung's output is always H.264 High plus AAC-LC, whatever the source was —
+ * that is the point of encoding. Describing it by the SOURCE codecs, which is
+ * what the offer carries, is wrong in a way that fails hard rather than
+ * softly: a ProRes or DNxHD master has no MP4 codec string at all, so
+ * `videoCodecCandidates` correctly returns nothing, `peerStreamMime` returns
+ * null, the fast path is skipped, and the fallback probe reads the raw peer
+ * route — which answers 405 by design. Dead session, on the exact sources the
+ * ladder was added to make streamable.
+ */
+export function encodedStreamMime(isSupported: (mime: string) => boolean): string | null {
+  return peerStreamMime("h264", "aac", isSupported);
+}
+
+/**
  * Build the MSE MIME for a peer stream, or null if the platform will not take
  * any candidate pairing.
  *
