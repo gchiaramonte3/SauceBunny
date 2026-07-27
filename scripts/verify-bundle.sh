@@ -63,28 +63,68 @@ else
   fail "no executable at Contents/MacOS/sauce-bunny"
 fi
 
+# Read once; sections 2 and 3 both need it.
+BIN_STRINGS="$(strings "${BIN}" 2>/dev/null || true)"
+
 # ── 2. The CSP baked into the binary permits what startup registers ──
 # This is the r150 bug. The CSP lives in the Rust binary (generate_context!
 # compiles tauri.conf.json in), so a frontend-only rebuild does NOT change it,
 # and nothing outside the packaged app can observe it.
-CSP_LINE="$(strings "${BIN}" 2>/dev/null | grep -m1 "script-src" || true)"  # -m1 + || true: safe
-if [ -z "${CSP_LINE}" ]; then
-  fail "no CSP found in the binary (did tauri.conf.json lose app.security.csp?)"
-else
-  # Check the script-src DIRECTIVE specifically. A whole-string match would be
-  # vacuously true: 'blob:' appears later under media-src, so grepping the
-  # whole policy for it passes on exactly the broken r150 configuration.
-  SCRIPT_SRC="$(printf '%s' "${CSP_LINE}" | tr ';' '\n' | grep 'script-src' || true)"
-  WORKER_SRC="$(printf '%s' "${CSP_LINE}" | tr ';' '\n' | grep 'worker-src' || true)"
-  case "${SCRIPT_SRC}" in
-    *"'wasm-unsafe-eval'"*) pass "CSP script-src allows WebAssembly instantiation" ;;
-    *) fail "CSP script-src lacks 'wasm-unsafe-eval' — WASM decoders will HANG silently: ${SCRIPT_SRC}" ;;
-  esac
-  case "${WORKER_SRC}" in
-    *"blob:"*) pass "CSP worker-src allows blob: Workers" ;;
-    *) fail "CSP worker-src lacks blob: — ProRes decode and MP3 export will hang: ${WORKER_SRC:-<absent>}" ;;
-  esac
-fi
+#
+# Config first, binary second — the same two-part shape as the asset scope, and
+# for a sharper reason. The first version of this check ran
+# `strings … | grep -m1 script-src` and parsed whatever came back. That is
+# order-dependent, and the order differs by machine: locally the first hit is
+# the real policy, on a CI runner the first hit is Tauri's CSP TEMPLATE
+# (`…_root_script-src __TAURI_SCRIPT_NONCE__ style-src…`) run together with
+# half the string table. So the check FAILED every CI run on a bundle whose
+# CSP was perfectly correct. A gate that cries wolf is worse than no gate: it
+# trains people to ignore a red build.
+#
+# The config is unambiguous and parseable, so assert the directives there; the
+# binary only has to corroborate that this config is the one compiled in, for
+# which one distinctive token is enough.
+CSP_VERDICT="$(python3 -c '
+import json, sys
+with open(sys.argv[1]) as f:
+    conf = json.load(f)
+csp = conf.get("app", {}).get("security", {}).get("csp")
+if not csp:
+    print("FAIL\tno CSP in tauri.conf.json — the webview would run wide open"); raise SystemExit
+if isinstance(csp, dict):          # per-directive object form
+    parts = {k: " ".join(v) if isinstance(v, list) else str(v) for k, v in csp.items()}
+else:
+    parts = {}
+    for chunk in str(csp).split(";"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        name, _, rest = chunk.partition(" ")
+        parts[name] = rest
+# Each directive is checked on ITS OWN value. Searching the whole policy would
+# be vacuously true — "blob:" appears under media-src, so a whole-string match
+# passes on exactly the broken r150 configuration.
+problems = []
+if "wasm-unsafe-eval" not in parts.get("script-src", ""):
+    problems.append("script-src lacks '"'"'wasm-unsafe-eval'"'"' (WASM decoders hang silently)")
+if "blob:" not in parts.get("worker-src", ""):
+    problems.append("worker-src lacks blob: (ProRes decode and MP3 export hang)")
+if problems:
+    print("FAIL\t" + "; ".join(problems))
+else:
+    print("OK\tCSP allows WebAssembly instantiation and blob: Workers")
+' "${ROOT_DIR}/src-tauri/tauri.conf.json" 2>/dev/null || printf 'FAIL\tcould not read the CSP out of tauri.conf.json')"
+case "${CSP_VERDICT}" in
+  OK*) pass "${CSP_VERDICT#OK	}" ;;
+  *)   fail "${CSP_VERDICT#FAIL	}" ;;
+esac
+
+# `wasm-unsafe-eval` appears in our policy and NOT in Tauri's template, so its
+# presence proves the config above is what got compiled in.
+case "${BIN_STRINGS}" in
+  *"wasm-unsafe-eval"*) pass "  and that CSP is the one baked into this binary" ;;
+  *) fail "  the binary has no 'wasm-unsafe-eval' — it was built from a different config" ;;
+esac
 
 # ── 3. The asset-protocol scope is narrow ────────────────────────────
 # NOTE THE SHAPE, it bit this very script twice: `anything | grep -q` under
@@ -132,7 +172,6 @@ case "${SCOPE_VERDICT}" in
   *)     fail "${SCOPE_VERDICT#FAIL	}" ;;
 esac
 
-BIN_STRINGS="$(strings "${BIN}" 2>/dev/null || true)"
 case "${BIN_STRINGS}" in
   *"APPCACHE/**"*) pass "  and that scope is the one baked into this binary" ;;
   *) fail "  the binary does not contain \$APPCACHE/** - it was built from a different config" ;;
