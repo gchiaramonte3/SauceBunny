@@ -86,17 +86,41 @@ export function useStreamRung(active: boolean) {
     setState((s) => reduceRung(s, { t: "prefer", pref: next, at: Date.now() }));
   }, []);
 
-  const badge = useMemo(() => (active ? rungBadge(state) : ""), [active, state]);
+  // One chip, three things it can say. Folded together rather than exposed as
+  // separate flags because a value nothing renders is not a feature — an
+  // earlier draft returned `hostIgnoresRung` for a caller that never existed.
+  const { badge, badgeTitle } = useMemo(() => {
+    if (!active) return { badge: "", badgeTitle: "" };
+    // Asked for a rung twice and got the source back both times: the host is
+    // on a build without the ladder. Worth saying, because the stream will
+    // not adapt however bad the connection gets, and the viewer would
+    // otherwise read the stalling as our bug.
+    if (unserved > 1) {
+      return {
+        badge: "source size",
+        badgeTitle:
+          "The presenter is on an older version that cannot reduce quality for you, "
+          + "so this is playing at the file's original size.",
+      };
+    }
+    const text = rungBadge(state);
+    if (!text) return { badge: "", badgeTitle: "" };
+    return {
+      badge: text,
+      badgeTitle: state.ceiling === state.current && text.includes("relayed")
+        ? "This session could not connect directly, so the video is passing through a "
+          + "public relay. Quality is held at the smallest size while that is true."
+        : "Streaming quality. Change it in Settings under Co-review calls.",
+    };
+  }, [active, state, unserved]);
 
   return {
     /** Height to request, or null for passthrough / not a peer stream. */
     rung,
-    /** Short status for the UI; empty when there is nothing worth saying. */
+    /** Short status for the chip; empty when there is nothing worth saying. */
     badge,
-    /** True when we asked for a rung and the host served the source anyway —
-     *  it is running a build without the ladder. Worth telling the user,
-     *  because the stream will not adapt however bad the connection gets. */
-    hostIgnoresRung: active && unserved > 1,
+    /** Tooltip explaining whatever `badge` is currently showing. */
+    badgeTitle,
     pref,
     setPref,
     onStall,

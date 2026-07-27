@@ -76,6 +76,8 @@ type Props = {
   /** Short status for the streaming-quality chip. Empty means nothing worth
    *  saying — auto sitting at the default rung, or not a peer stream at all. */
   streamRungBadge?: string;
+  /** Tooltip for the chip — explains whichever state it is reporting. */
+  streamRungBadgeTitle?: string;
   /** Pipeline/seek diagnostics → the Pipeline log (channel "seek"). */
   onDiag?: (tag: string, message: string) => void;
   /** r75: RAW audio-track CDN URL for DASH-split sources (Reddit, YouTube
@@ -235,7 +237,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     resumeTitle, onResume, onboarding,
     aspect,
     sourceKind, localFilePath, webStreamUrl, webCachedUseMediabunny, streamStartAt, disableScrubPreview, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
-    streamRung, onStreamStall, onStreamInfo, streamRungBadge,
+    streamRung, onStreamStall, onStreamInfo, streamRungBadge, streamRungBadgeTitle,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs, scrubAudio,
     streamLoadingPhase,
     toast, onToastDismiss,
@@ -544,7 +546,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             Macs. Silent when auto is sitting at its default rung, because a
             badge that is always on screen stops being read. */}
         {streamRungBadge && (
-          <div className="cp-stream-rung" title="Streaming quality. Change it in Settings under Co-review calls.">
+          <div className="cp-stream-rung" title={streamRungBadgeTitle}>
             {streamRungBadge}
           </div>
         )}

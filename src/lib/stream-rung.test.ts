@@ -311,6 +311,13 @@ describe("needsRebuild", () => {
 });
 
 describe("the badge", () => {
+  it("stays silent in the one case that is not worth reporting", () => {
+    // Auto sitting at the default is the expected state. Saying so on screen
+    // in perpetuity trains people to stop reading the chip, which costs us
+    // the one message that genuinely matters (relayed).
+    expect(rungBadge(initialRungState(T0))).toBe("");
+  });
+
   it("says nothing when auto is sitting at the default", () => {
     // A badge that is always on screen stops being read.
     expect(rungBadge(initialRungState(T0))).toBe("");

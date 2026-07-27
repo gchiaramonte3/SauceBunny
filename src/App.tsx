@@ -5874,6 +5874,7 @@ export default function App() {
                     onStreamStall={streamRung.onStall}
                     onStreamInfo={streamRung.onStreamInfo}
                     streamRungBadge={streamRung.badge}
+                    streamRungBadgeTitle={streamRung.badgeTitle}
                     onDiag={(tag, msg) => appendLog(asLogTag(tag), "seek", msg)}
                     /* Audio track + codecs are meaningful only while STREAMING (the
                        cached file is already muxed and sample-accurate). */
