@@ -43,6 +43,10 @@ export function SpeakerRosterModal({ roster, onRename, onMerge, colorOf, onPickC
       <div
         className="cp-spk-modal"
         role="dialog"
+        // See ShareDialog: cmd+F / cmd+G are gated on an aria-modal dialog
+        // being present, so without this they reached the transcript behind
+        // the scrim.
+        aria-modal="true"
         aria-label="Manage speakers"
         onMouseDown={(e) => e.stopPropagation()}
       >

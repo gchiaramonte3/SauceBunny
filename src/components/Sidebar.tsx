@@ -1,4 +1,5 @@
 import { useMemo, useEffect, useState, type CSSProperties } from "react";
+import { inertWhen } from "../lib/inert";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { CollapsibleSection } from "./CollapsibleSection";
@@ -295,7 +296,12 @@ export function Sidebar(props: Props) {
   return (
     <aside
       className={"cp-sidebar" + (props.open === false ? " closed" : "")}
+      // aria-hidden HIDES it from a screen reader; inert makes it genuinely
+      // unreachable. Closing animates to width: 0, not display: none, so
+      // without this Tab still walked every control in here — announced by
+      // nothing, because aria-hidden had already silenced them.
       aria-hidden={props.open === false}
+      {...inertWhen(props.open === false)}
       aria-label="Source and export"
     >
       {!hasSource && (

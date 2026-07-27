@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { inertWhen } from "../lib/inert";
 import { invoke } from "@tauri-apps/api/core";
 import {
   IconStack, IconReveal, IconTrash, IconCheck, IconAlert, IconTranscript, IconAiSummary, IconReview,
@@ -547,7 +548,10 @@ export function QueueDrawer({
   return (
     <aside
       className={"cp-queue-drawer" + (open ? " open" : "") + (embedded ? " embedded" : "") + (roomFace ? " room" : "") + (resizing ? " resizing" : "")}
+      // See Sidebar: aria-hidden alone left ~40 controls focusable behind a
+      // zero-width panel, "Export N clips" among them.
       aria-hidden={!open}
+      {...inertWhen(!open)}
       aria-label="Queue and tools"
       // Inline width only when docked + open. In embedded (floating) mode
       // the parent layout dictates size — let it fill the OS window.
