@@ -98,6 +98,17 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 // ── Tier C file transfer (see _design/p2p-media-plan.md §Phase 2) ──────
 /// Concurrent file substreams the host will serve at once.
 const MAX_TRANSFERS: usize = 4;
+
+/// Concurrent live ENCODES the host will run. Passthrough does not count.
+///
+/// MAX_TRANSFERS already bounds substreams, but it counts a cheap `-c copy`
+/// pipe and a VideoToolbox encode the same, and only an encode costs the host
+/// real silicon. Measured aggregate throughput is fine at this number (four
+/// parallel 720p encodes ran at roughly 30x realtime combined), so this is not
+/// a throughput limit — it is a backstop against a guest whose seek teardowns
+/// race its rebuilds and fans out encoders on somebody else's Mac, where that
+/// person cannot see them.
+const MAX_MEDIA_ENCODES: usize = 3;
 /// Read/write chunk for the transfer loops.
 const TRANSFER_CHUNK: usize = 256 * 1024;
 /// Pace the file substream (risk R4): it shares one physical link with the
@@ -399,6 +410,9 @@ struct HostShared {
     /// Concurrent file substreams being served, bounded by MAX_TRANSFERS so
     /// a guest cannot fan requests into an unbounded set of readers.
     active_transfers: Arc<AtomicUsize>,
+    /// Live ENCODES in flight, bounded by MAX_MEDIA_ENCODES. Separate from
+    /// `active_transfers` because only an encode costs the host CPU.
+    active_encodes: Arc<AtomicUsize>,
 }
 
 /// The host-side record of a Tier C offer: where the bytes live and the
@@ -1224,7 +1238,68 @@ async fn serve_media_substream(
     // The rung the guest asked for. Anything unrecognised (including 0, and
     // including a height from a build with a different ladder) is passthrough
     // — the behaviour every host had before the ladder existed.
-    let rung = crate::commands::rung::rung_for(rung_height);
+    let asked = crate::commands::rung::rung_for(rung_height);
+
+    // The host's Mac is not a server, and this is the one place that fact can
+    // be enforced. Whisper and the diarizer saturate the same silicon a
+    // VideoToolbox encode wants, and whoever started them started them FIRST
+    // and is sitting there waiting. A guest arriving afterwards gets a smaller
+    // picture rather than the right to halve someone else's transcription.
+    let host_busy = !app.state::<crate::commands::system::JobRegistry>().active_ids().is_empty();
+    let rung = crate::commands::rung::clamp_for_host_load(asked, host_busy);
+    if host_busy && rung != asked {
+        session_log(
+            &app,
+            "info",
+            format!(
+                "Peer stream capped at {}p while this Mac is transcribing.",
+                rung.map_or(0, |r| r.height)
+            ),
+        );
+    }
+
+    // Concurrent-encode backstop. Passthrough is not counted: `-c copy` costs
+    // almost nothing, and refusing it would break the case that worked before
+    // the ladder existed.
+    let encode_guard = if rung.is_some() {
+        let counter = shared.active_encodes.clone();
+        if counter.fetch_add(1, Ordering::SeqCst) >= MAX_MEDIA_ENCODES {
+            counter.fetch_sub(1, Ordering::SeqCst);
+            session_log(
+                &app,
+                "warn",
+                format!("Refused a {} stream: already encoding for {MAX_MEDIA_ENCODES} viewers.", member),
+            );
+            let _ = send
+                .write_all(b"{\"t\":\"media-response\",\"ok\":false,\"error\":\"busy\"}\n")
+                .await;
+            let _ = send.finish();
+            return;
+        }
+        struct EncodeGuard(Arc<AtomicUsize>);
+        impl Drop for EncodeGuard {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+        // Held for the life of this task, so a panic, a guest disconnect and a
+        // seek teardown all release it. Same ownership rule the ffmpeg child
+        // follows (R12): the task owns it, nothing shared to clobber.
+        Some(EncodeGuard(counter))
+    } else {
+        None
+    };
+    let _encode_guard = encode_guard;
+
+    // The host is the only person who can see what serving costs them.
+    if let Some(r) = rung {
+        let n = shared.active_encodes.load(Ordering::SeqCst);
+        session_log(
+            &app,
+            "info",
+            format!("Streaming to {n} viewer{} at {}p.", if n == 1 { "" } else { "s" }, r.height),
+        );
+    }
 
     // Epoch: which source timestamp the first delivered frame carries.
     //

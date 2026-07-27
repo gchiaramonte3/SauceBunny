@@ -172,6 +172,35 @@ pub(crate) fn rung_output_args(rung: Rung, class: Option<PlaybackColorClass>) ->
     a
 }
 
+/// Ceiling applied while the host is doing something expensive of its own.
+///
+/// The host's Mac is not a server. Whisper and the diarizer saturate the same
+/// CPU and Neural Engine a VideoToolbox encode wants, and the person running
+/// them started that work FIRST and is sitting there watching it. A review
+/// session arriving afterwards should not quietly halve the speed of a
+/// transcription someone is waiting on.
+///
+/// 540 rather than the floor: still perfectly legible for reviewing a cut,
+/// and roughly a fifth of the 1080 rung's pixel rate.
+pub(crate) const BUSY_HOST_MAX_HEIGHT: u32 = 540;
+
+/// Pure (unit-tested): lower a requested rung while the host is busy.
+///
+/// Deliberately one-directional — it can only ever make the encode CHEAPER.
+/// A guest that asked for 360 keeps 360; a guest that asked for 1080 while the
+/// host is transcribing gets 540 rather than a refusal, because a smaller
+/// picture is a far better answer than a dead session.
+///
+/// Passthrough (`None`) is left alone: `-c copy` costs the host almost
+/// nothing, so there is nothing to protect it from.
+pub(crate) fn clamp_for_host_load(rung: Option<Rung>, host_busy: bool) -> Option<Rung> {
+    let r = rung?;
+    if !host_busy || r.height <= BUSY_HOST_MAX_HEIGHT {
+        return Some(r);
+    }
+    rung_for(BUSY_HOST_MAX_HEIGHT).or(Some(r))
+}
+
 /// The `epoch` the guest should apply for a given rung, or `None` to fall back
 /// to probing the source.
 ///
@@ -338,6 +367,40 @@ mod tests {
         assert_eq!(epoch_for_rung(rung_for(720), 11.0), Some(11.0));
         assert_eq!(epoch_for_rung(rung_for(360), 0.0), Some(0.0));
         assert_eq!(epoch_for_rung(None, 11.0), None); // caller must probe
+    }
+
+    #[test]
+    fn a_busy_host_caps_the_rung_without_refusing_the_guest() {
+        // The person running a transcription started it first and is waiting
+        // on it. A review session that arrives afterwards should not halve
+        // their speed — but a smaller picture beats a dead session, so this
+        // lowers rather than refuses.
+        assert_eq!(clamp_for_host_load(rung_for(1080), true), rung_for(540));
+        assert_eq!(clamp_for_host_load(rung_for(720), true), rung_for(540));
+    }
+
+    #[test]
+    fn the_cap_only_ever_makes_the_encode_cheaper() {
+        // A guest already below the ceiling must not be dragged UP to it —
+        // that would spend more host CPU precisely when there is none spare.
+        assert_eq!(clamp_for_host_load(rung_for(360), true), rung_for(360));
+        assert_eq!(clamp_for_host_load(rung_for(540), true), rung_for(540));
+    }
+
+    #[test]
+    fn an_idle_host_serves_whatever_was_asked_for() {
+        for r in RUNGS {
+            assert_eq!(clamp_for_host_load(Some(r), false), Some(r));
+        }
+    }
+
+    #[test]
+    fn passthrough_is_never_capped() {
+        // `-c copy` costs the host almost nothing, so there is nothing to
+        // protect it from — and silently turning a passthrough request into an
+        // ENCODE would spend CPU the cap exists to save.
+        assert_eq!(clamp_for_host_load(None, true), None);
+        assert_eq!(clamp_for_host_load(None, false), None);
     }
 
     #[test]
