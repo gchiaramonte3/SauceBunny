@@ -4867,6 +4867,7 @@ export default function App() {
         bind("toggle_pipeline",     () => setLogsOpen((p) => !p)),
         bind("toggle_queue",        () => setQueueOpenChoice((p) => !p)),
         bind("show_command_palette", () => setPaletteOpen(true)),
+        bind("show_shortcuts",       () => setShortcutsOpen(true)),
       ]);
     })();
     return () => { mounted = false; unlistens.forEach((u) => u()); };

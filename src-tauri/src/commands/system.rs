@@ -1232,3 +1232,104 @@ mod cache_tests {
     }
 }
 
+
+// ── Window geometry ──────────────────────────────────────────────────
+//
+// The main window re-fit itself to ~85%x90% of the monitor and re-centred on
+// EVERY launch, so a window someone had sized and placed came back wrong every
+// morning — while the inner chrome persisted nine different ways. Only the
+// outermost thing forgot.
+//
+// Deliberately NOT a Tauri plugin: `tauri::Window` already exposes everything
+// needed, and CLAUDE.md asks for a reason before adding one. Deliberately not
+// localStorage either: the frame has to be applied before the webview paints,
+// which is Rust's side of the boot.
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy)]
+struct WindowFrame {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+fn window_frame_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    let dir = app.path().app_data_dir().ok()?;
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir.join("window-frame.json"))
+}
+
+/// Restore the saved frame. Returns false when there is nothing to restore, so
+/// the caller can fall back to fitting the screen.
+///
+/// A saved frame is REJECTED when it would land off every current monitor —
+/// unplug the external display the window was on and a blind restore puts it
+/// somewhere unreachable, with no way back short of deleting a file the user
+/// does not know exists.
+pub(crate) fn restore_window_frame(win: &tauri::WebviewWindow) -> bool {
+    let Some(path) = window_frame_path(&win.app_handle().clone()) else { return false };
+    let Ok(text) = std::fs::read_to_string(&path) else { return false };
+    let Ok(f) = serde_json::from_str::<WindowFrame>(&text) else { return false };
+    if f.width < 600 || f.height < 400 {
+        return false; // corrupt or absurd; fall back
+    }
+    if !frame_is_visible(win, &f) {
+        return false;
+    }
+    let _ = win.set_size(tauri::LogicalSize::new(f.width as f64, f.height as f64));
+    let _ = win.set_position(tauri::LogicalPosition::new(f.x as f64, f.y as f64));
+    true
+}
+
+/// True when enough of the frame's title bar lands on some attached monitor to
+/// be draggable. 120x40 of overlap is the smallest patch a person can actually
+/// grab.
+fn frame_is_visible(win: &tauri::WebviewWindow, f: &WindowFrame) -> bool {
+    let Ok(monitors) = win.available_monitors() else { return false };
+    monitors.iter().any(|m| {
+        let s = m.scale_factor();
+        let pos = m.position().to_logical::<f64>(s);
+        let size = m.size().to_logical::<f64>(s);
+        let (mx, my) = (pos.x, pos.y);
+        let (mw, mh) = (size.width, size.height);
+        let ox = (f.x as f64 + f.width as f64).min(mx + mw) - (f.x as f64).max(mx);
+        let oy = (f.y as f64 + f.height as f64).min(my + mh) - (f.y as f64).max(my);
+        ox >= 120.0 && oy >= 40.0
+    })
+}
+
+/// Persist the frame whenever the user finishes moving or resizing.
+///
+/// Written on the event rather than on exit: a crash or a force-quit should
+/// not cost the user their window, and the file is ~60 bytes.
+pub(crate) fn watch_window_frame(win: &tauri::WebviewWindow) {
+    let w = win.clone();
+    win.on_window_event(move |event| {
+        if !matches!(
+            event,
+            tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)
+        ) {
+            return;
+        }
+        // A minimized or fullscreen window reports a frame that would be wrong
+        // to restore into, so skip those rather than record them.
+        if w.is_minimized().unwrap_or(false) || w.is_fullscreen().unwrap_or(false) {
+            return;
+        }
+        let (Ok(pos), Ok(size)) = (w.outer_position(), w.inner_size()) else { return };
+        let scale = w.scale_factor().unwrap_or(1.0);
+        let p = pos.to_logical::<f64>(scale);
+        let s = size.to_logical::<f64>(scale);
+        let frame = WindowFrame {
+            x: p.x as i32,
+            y: p.y as i32,
+            width: s.width as u32,
+            height: s.height as u32,
+        };
+        if let Some(path) = window_frame_path(&w.app_handle().clone()) {
+            if let Ok(text) = serde_json::to_string(&frame) {
+                let _ = std::fs::write(path, text);
+            }
+        }
+    });
+}

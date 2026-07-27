@@ -110,6 +110,10 @@ fn build_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<Men
             &MenuItem::with_id(app, "open_repo",     "Open GitHub Repo…",   true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "show_command_palette", "Command Palette…", true, Some("CmdOrCtrl+K"))?,
+            // The cheat sheet is generated from the live binding table, so it
+            // is always correct — and it was reachable only by already knowing
+            // the chord, which is the one group of users who do not need it.
+            &MenuItem::with_id(app, "show_shortcuts", "Keyboard Shortcuts…", true, Some("CmdOrCtrl+/"))?,
         ],
     )?;
 
@@ -281,19 +285,29 @@ pub fn run() {
             commands::session_cancel_fetch,
         ])
         .setup(|app| {
-            // Fit the main window to the screen at launch. The static conf
-            // default (1400×900) reads cramped on large displays and would
-            // overflow small ones — so size to ~85%×90% of the monitor,
-            // clamped to sane bounds, and center. Best-effort: any failure
-            // leaves the conf default in place.
+            // Window geometry: the user's, if they have expressed one.
+            //
+            // This used to re-fit to ~85%x90% of the monitor and re-center on
+            // EVERY launch, so a window someone had sized and placed came back
+            // wrong every morning — while the inner chrome (drawer width,
+            // sidebar, view, sort, filters, poster choices) persisted nine
+            // different ways. Only the outermost thing forgot.
+            //
+            // The screen-fit is still exactly right for a FIRST launch, where
+            // the conf default reads cramped on a large display and overflows
+            // a small one. So it stays, as the fallback.
             if let Some(win) = app.get_webview_window("main") {
-                if let Ok(Some(monitor)) = win.current_monitor() {
-                    let m = monitor.size().to_logical::<f64>(monitor.scale_factor());
-                    let w = (m.width * 0.85).clamp(1100.0, 2100.0);
-                    let h = (m.height * 0.90).clamp(700.0, 1300.0);
-                    let _ = win.set_size(tauri::LogicalSize::new(w, h));
-                    let _ = win.center();
+                let restored = commands::restore_window_frame(&win);
+                if !restored {
+                    if let Ok(Some(monitor)) = win.current_monitor() {
+                        let m = monitor.size().to_logical::<f64>(monitor.scale_factor());
+                        let w = (m.width * 0.85).clamp(1100.0, 2100.0);
+                        let h = (m.height * 0.90).clamp(700.0, 1300.0);
+                        let _ = win.set_size(tauri::LogicalSize::new(w, h));
+                        let _ = win.center();
+                    }
                 }
+                commands::watch_window_frame(&win);
             }
 
             // Repair sidecar execute bits BEFORE anything can spawn one.
