@@ -2,7 +2,7 @@
 
 > Claude Code reads this file automatically on every session.
 > It is the single source of truth for how this codebase should be maintained, refactored, and extended.
-> Current revision: r86 (2026-06-11)
+> Current revision: r155 (2026-07-26)
 
 ---
 
