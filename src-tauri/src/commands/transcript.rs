@@ -3270,7 +3270,8 @@ mod nightly_transcript_tests {
     #[test]
     #[ignore = "nightly: needs real sidecar binaries"]
     fn nightly_wav_conversion_produces_16k_mono() {
-        let wav = nightly::fixture_speech_wav_16k(); // runs wav_16k_mono_args internally
+        // runs wav_16k_mono_args internally
+        let Some(wav) = nightly::fixture_speech_wav_16k() else { return };
         let probe = nightly::probe_json(&wav);
         let a = nightly::probe_stream(&probe, "audio").expect("wav has an audio stream");
         assert_eq!(a["codec_name"], "pcm_s16le", "whisper wants 16-bit PCM");
@@ -3281,7 +3282,7 @@ mod nightly_transcript_tests {
     #[test]
     #[ignore = "nightly: needs real sidecar binaries"]
     fn nightly_wav_conversion_cut_section() {
-        let aiff = nightly::fixture_speech_aiff();
+        let Some(aiff) = nightly::fixture_speech_aiff() else { return };
         let out = nightly::scratch_dir().join("speech-cut.wav");
         let _ = std::fs::remove_file(&out);
         // The mark-in path: -ss 1.0 -t 2.0 must yield a ~2 s WAV.
@@ -3294,7 +3295,7 @@ mod nightly_transcript_tests {
     #[test]
     #[ignore = "nightly: needs real sidecar binaries"]
     fn nightly_whisper_cli_emits_srt() {
-        let wav = nightly::fixture_speech_wav_16k();
+        let Some(wav) = nightly::fixture_speech_wav_16k() else { return };
         let model = nightly::whisper_model();
         let vad = nightly::vad_model();
         let base = nightly::scratch_dir().join("whisper-out");

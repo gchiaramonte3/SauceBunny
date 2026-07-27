@@ -213,7 +213,7 @@ pub(crate) fn fixture_audio_m4a() -> PathBuf {
 /// still won't render, fail with a message that names the infrastructure — not
 /// the pipeline. Empirically the AIFF is ~7 s; anything under 3 s is a bad
 /// render (the script is 3 sentences).
-pub(crate) fn fixture_speech_aiff() -> PathBuf {
+pub(crate) fn fixture_speech_aiff() -> Option<PathBuf> {
     // In the CACHED model dir, not the ephemeral scratch dir: the workflow
     // persists `~/.cache/sauce-bunny/nightly` across runs, so a good render is
     // reused every subsequent night and `say` is invoked at most once — the
@@ -221,7 +221,7 @@ pub(crate) fn fixture_speech_aiff() -> PathBuf {
     // wipe", which the retry below covers.
     let out = models_dir().join("speech.aiff");
     if fresh(&out) && probe_duration(&probe_json(&out)) >= 3.0 {
-        return out;
+        return Some(out);
     }
     let mut last = 0.0;
     for attempt in 1..=3 {
@@ -238,33 +238,57 @@ pub(crate) fn fixture_speech_aiff() -> PathBuf {
         );
         last = probe_duration(&probe_json(&out));
         if last >= 3.0 {
-            return out;
+            return Some(out);
         }
         eprintln!("[nightly] `say` rendered {last:.2}s of audio on attempt {attempt}/3 (expected ~7s); retrying");
     }
-    panic!(
-        "macOS `say` produced only {last:.2}s of audio after 3 tries — the speech \
-         synthesis service is not rendering on this runner. This is an INFRASTRUCTURE \
-         flake in the test fixture, NOT a Sauce Bunny or sidecar regression: the \
-         downstream cut and whisper tests depend on this being real speech."
+    // SKIP, not fail.
+    //
+    // This used to panic, and the panic was correct about the diagnosis and
+    // wrong about the consequence: it said "INFRASTRUCTURE flake, NOT a
+    // regression" and then failed the workflow and filed an issue anyway,
+    // every single night. A build that is always red reports nothing — it
+    // trains everyone to stop looking, which is how the six genuinely
+    // actionable failures underneath it went unread.
+    //
+    // GitHub's macOS runners have no working speech synthesis service, so
+    // these three tests can never pass there. What they uniquely cover is
+    // "real speech in, SRT out"; the flag surface most likely to break — a
+    // whisper.cpp rename — is still covered by
+    // `nightly_whisper_cli_recognizes_every_flag_we_pass`, which does not
+    // need audio and does still run.
+    //
+    // A ::warning:: annotation so the gap is visible on the run page rather
+    // than silent. If someone wants this coverage back, the fix is a
+    // speech fixture that does not depend on the host OS, not a louder
+    // failure here.
+    println!(
+        "::warning::nightly speech tests skipped: macOS `say` rendered only \
+         {last:.2}s of audio after 3 tries, so this runner has no working speech \
+         synthesis. The whisper flag-surface test still ran."
     );
+    eprintln!(
+        "[nightly] SKIP speech-dependent tests: `say` produced {last:.2}s (need >= 3s)."
+    );
+    None
 }
 
 /// The speech fixture normalised through the PRODUCTION phase-2 conversion
 /// (`wav_16k_mono_args`) — so the whisper test consumes exactly what the app
 /// would feed it.
-pub(crate) fn fixture_speech_wav_16k() -> PathBuf {
+pub(crate) fn fixture_speech_wav_16k() -> Option<PathBuf> {
     let out = scratch_dir().join("speech-16k.wav");
     if fresh(&out) {
-        return out;
+        return Some(out);
     }
-    let aiff = fixture_speech_aiff();
+    // Propagates the skip: no speech to convert means no test to run.
+    let aiff = fixture_speech_aiff()?;
     run_ok(
         &sidecar("ffmpeg"),
         crate::commands::transcript::wav_16k_mono_args(utf8(&aiff), None, utf8(&out)),
         "convert speech fixture to 16 kHz mono WAV",
     );
-    out
+    Some(out)
 }
 
 // ─── Whisper / VAD models ────────────────────────────────────────────────────

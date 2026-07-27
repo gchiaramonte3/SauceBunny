@@ -191,7 +191,53 @@ pub fn start() -> std::io::Result<String> {
 /// machine/LAN), and never credential-bearing URLs. Hostnames that RESOLVE to
 /// private addresses are not caught (that needs DNS resolution here); the
 /// threat this closes is the renderer bouncing through ffmpeg to local ports.
+/// Origins a TEST has explicitly stood up and vouched for.
+///
+/// The nightly proxy tests run a real HTTP server on 127.0.0.1 standing in for
+/// a CDN, and `is_safe_upstream` refuses loopback — correctly, since blocking
+/// the proxy from relaying to local services is the entire point of the gate.
+/// So the tests and the gate are in genuine conflict, and the fix has to
+/// resolve it without hollowing out the gate.
+///
+/// Blanket-allowing loopback under `cfg!(test)` would do exactly that: it
+/// would make `rejects_ssrf_and_local_targets` — which asserts
+/// `http://127.0.0.1:8080/llm` is refused — pass for the wrong reason, so the
+/// one test proving the control works would stop proving anything.
+///
+/// Instead a fixture registers the single origin it is serving, and nothing
+/// else gets through. Tests that register nothing (including the SSRF test)
+/// see the real rule unchanged. The whole mechanism is `#[cfg(test)]`, so it
+/// does not exist in any shipped binary.
+#[cfg(test)]
+fn test_upstream_allowlist() -> &'static std::sync::Mutex<Vec<String>> {
+    static A: OnceLock<std::sync::Mutex<Vec<String>>> = OnceLock::new();
+    A.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+/// Vouch for one origin (e.g. `http://127.0.0.1:52431`) for the rest of the
+/// test process. Test-only; see `test_upstream_allowlist`.
+#[cfg(test)]
+pub(crate) fn allow_test_upstream(origin: &str) {
+    if let Ok(mut a) = test_upstream_allowlist().lock() {
+        a.push(origin.to_string());
+    }
+}
+
+#[cfg(test)]
+fn is_vouched_test_upstream(url: &str) -> bool {
+    test_upstream_allowlist()
+        .lock()
+        .map(|a| a.iter().any(|o| url.starts_with(o.as_str())))
+        .unwrap_or(false)
+}
+
 pub(crate) fn is_safe_upstream(url: &str) -> bool {
+    // Only ever true for an origin a test stood up itself; compiled out of
+    // every real build.
+    #[cfg(test)]
+    if is_vouched_test_upstream(url) {
+        return true;
+    }
     let Ok(parsed) = reqwest::Url::parse(url) else { return false };
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return false;
@@ -1269,6 +1315,31 @@ mod tests {
     }
 
     #[test]
+    fn vouching_for_a_fixture_opens_that_origin_and_nothing_else() {
+        // The nightly proxy tests need a loopback fixture; the SSRF gate
+        // refuses loopback. This is how both stay true. The risk of any such
+        // escape hatch is that it is wider than advertised, so pin the width:
+        // one exact origin, and every neighbour still refused.
+        let origin = "http://127.0.0.1:59999";
+        assert!(!is_safe_upstream(&format!("{origin}/clip.mp4")), "not vouched yet");
+        allow_test_upstream(origin);
+        assert!(is_safe_upstream(&format!("{origin}/clip.mp4")), "vouched origin must pass");
+
+        // A different port is a different server. Vouching for one must not
+        // hand the proxy every local service on the machine, which is the
+        // exact attack the gate exists to stop.
+        for other in [
+            "http://127.0.0.1:59998/x",
+            "http://127.0.0.1:8080/llm",
+            "http://localhost:59999/x",
+            "http://10.0.0.5/x",
+            "file:///etc/passwd",
+        ] {
+            assert!(!is_safe_upstream(other), "must still refuse {other}");
+        }
+    }
+
+    #[test]
     fn start_query_rejects_non_finite_and_clamps() {
         // str::parse::<f64> accepts these spellings — they must never reach -ss.
         assert_eq!(parse_start_query("/fmp4/v1/abc?start=inf"), 0.0);
@@ -1369,6 +1440,9 @@ mod nightly_proxy_tests {
     /// Tiny loopback file server standing in for the CDN. Ignores Range and
     /// always answers 200 with the full body — ffmpeg accepts that, and the
     /// fixtures are faststart so no seeking is needed to demux.
+    /// Stand a local HTTP server in for a CDN, and vouch for its origin so the
+    /// SSRF gate lets the proxy read from it. The vouching is per-origin and
+    /// test-only — see `allow_test_upstream`.
     fn serve_fixtures(files: Vec<(&'static str, PathBuf)>) -> String {
         let server = tiny_http::Server::http("127.0.0.1:0").expect("bind fixture server");
         let port = server
@@ -1398,7 +1472,9 @@ mod nightly_proxy_tests {
                 }
             }
         });
-        format!("http://127.0.0.1:{port}")
+        let origin = format!("http://127.0.0.1:{port}");
+        super::allow_test_upstream(&origin);
+        origin
     }
 
     /// GET a proxy URL and read the (chunked) body to EOF.
