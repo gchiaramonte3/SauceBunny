@@ -860,6 +860,14 @@ fn parse_ffmpeg_duration(stderr: &str) -> Option<f64> {
 }
 
 // Extract the first "Stream #X:Y... Video: <codec> (... <W>x<H> ... <fps> fps"
+/// Scrape width/height/fps/codec out of ffmpeg's stderr banner.
+///
+/// The codec it returns is ffmpeg's NAME for the codec ("h264", "hevc",
+/// "prores"), NOT an RFC 6381 codec string ("avc1.640028"). That distinction
+/// is load-bearing: this value is forwarded verbatim into a peer-media offer,
+/// and MSE will not accept a bare name. See the `OfferFile` doc comment in
+/// session.rs and `src/lib/codec-strings.ts` for the conversion and for what
+/// went wrong when there was none.
 fn parse_ffmpeg_video(stderr: &str) -> (Option<u32>, Option<u32>, Option<f64>, Option<String>) {
     for line in stderr.lines() {
         let line = line.trim_start();
@@ -1329,6 +1337,44 @@ pub async fn generate_local_thumbnail(
         }
     }
     Ok(out_path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod ffmpeg_banner_tests {
+    use super::parse_ffmpeg_video;
+
+    const H264: &str = "  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 1920x1080 [SAR 1:1 DAR 16:9], 8000 kb/s, 29.97 fps, 29.97 tbr, 90k tbn (default)";
+
+    #[test]
+    fn reads_the_geometry() {
+        let (w, h, fps, _) = parse_ffmpeg_video(H264);
+        assert_eq!((w, h), (Some(1920), Some(1080)));
+        assert!((fps.unwrap() - 29.97).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_codec_is_an_ffmpeg_name_not_an_rfc_6381_string() {
+        // Pinned deliberately. This value is forwarded straight into a
+        // peer-media offer, whose field used to be documented as RFC 6381;
+        // MediaSource rejects the bare name, and Tier B streaming failed for
+        // every H.264 file until the guest learned to convert. If someone
+        // later changes this to emit "avc1.…" they must also revisit
+        // src/lib/codec-strings.ts, which is written to accept BOTH because
+        // the old format is already deployed on other people's Macs.
+        let (_, _, _, codec) = parse_ffmpeg_video(H264);
+        assert_eq!(codec.as_deref(), Some("h264"));
+    }
+
+    #[test]
+    fn ignores_a_line_that_is_not_a_video_stream() {
+        let audio = "  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo, fltp, 128 kb/s";
+        assert_eq!(parse_ffmpeg_video(audio), (None, None, None, None));
+    }
+
+    #[test]
+    fn survives_a_banner_with_no_streams_at_all() {
+        assert_eq!(parse_ffmpeg_video("ffmpeg version 7.1\n"), (None, None, None, None));
+    }
 }
 
 #[cfg(test)]

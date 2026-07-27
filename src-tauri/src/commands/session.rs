@@ -227,10 +227,27 @@ pub enum SessionMsg {
         name: String,
         size: f64,
         blake3: String,
-        /// Codec strings (e.g. "avc1.640028" / "mp4a.40.2") so a guest can
-        /// build the MSE MIME for the LIVE stream without probing (the peer
-        /// raw route has no random access). Absent on older builds; the
-        /// guest then only offers the transfer, not the stream.
+        /// Codec identifiers for the source's video and audio tracks, so a
+        /// guest can build the MSE MIME for the LIVE stream without probing
+        /// (the peer raw route has no random access — it answers 405).
+        /// Absent on older builds; the guest then only offers the transfer,
+        /// not the stream.
+        ///
+        /// TWO VOCABULARIES RIDE THIS FIELD, and mixing them up broke Tier B
+        /// for every H.264 file. What a host actually sends is ffmpeg's own
+        /// codec NAME — "h264", "hevc", "aac" — because that is what
+        /// `parse_ffmpeg_video` scrapes out of ffmpeg's stderr and what
+        /// `offerCurrentFile` forwards unchanged. This comment used to
+        /// promise RFC 6381 ("avc1.640028" / "mp4a.40.2"), which is what MSE
+        /// requires and what a WEB source's yt-dlp resolver supplies, and
+        /// nothing converted between them; `MediaSource.isTypeSupported`
+        /// rejects `codecs="h264, aac"` outright, so the guest's fast path
+        /// silently produced no MIME and fell through to the 405.
+        ///
+        /// The guest now accepts EITHER form and converts
+        /// (`src/lib/codec-strings.ts`), which also keeps peers on older
+        /// builds working. Do not "fix" this by normalising here without
+        /// keeping that leniency — the old wire format is already deployed.
         #[serde(default)]
         vcodec: Option<String>,
         #[serde(default)]

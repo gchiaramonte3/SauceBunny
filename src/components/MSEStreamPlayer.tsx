@@ -5,6 +5,7 @@ import { Input, UrlSource, CanvasSink, EncodedPacketSink, ALL_FORMATS } from "me
 import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle } from "./player-handle";
 import { base64UrlEncode } from "../lib/stream-proxy";
+import { peerStreamMime } from "../lib/codec-strings";
 
 /**
  * Streams a web source (YouTube/Vimeo/…) into a NATIVE `<video>` element via
@@ -638,20 +639,34 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
           // the moov over the loopback proxy) is the one fragile pre-check that
           // turned a transient CDN hiccup into an instant "Load failed" + a
           // full-video download. We already know the codecs; the robust ffmpeg
-          // /fmp4 path does the real work. Only H.264 video qualifies (what the
-          // resolver targets + what WKWebView decodes); anything else falls
-          // through to the probe below (which falls through to download).
-          if (!mimeRef.current && videoCodecRef.current && /^(avc1|avc3|h264)/i.test(videoCodecRef.current)) {
-            const aCodec = audioCodecRef.current && /(mp4a|aac)/i.test(audioCodecRef.current)
-              ? audioCodecRef.current
-              : "mp4a.40.2";
-            const candidate = `video/mp4; codecs="${videoCodecRef.current}, ${aCodec}"`;
+          // /fmp4 path does the real work.
+          //
+          // The MIME is built by `peerStreamMime`, which exists because this
+          // block used to interpolate the codec strings straight into the
+          // template and that quietly broke Tier B peer streaming for every
+          // H.264 file. Two vocabularies were being mixed: a WEB source's
+          // resolver hands over RFC 6381 ("avc1.640028"), but a PEER source's
+          // offer carries whatever ffmpeg's stderr called it ("h264"), and the
+          // old `/^(avc1|avc3|h264)/i` test matched BOTH — so a peer offer took
+          // the fast path and produced `codecs="h264, aac"`, which
+          // isTypeSupported rejects. The MIME then stayed unset, control fell
+          // to the probe below, and the probe reads the raw peer route, which
+          // answers 405 by design because "codecs ride the offer". Straight to
+          // onMediaError, and the download fallback has no URL to download
+          // because the file is on the other Mac.
+          if (!mimeRef.current && videoCodecRef.current) {
             const MSx: typeof MediaSource | undefined =
               (typeof MediaSource !== "undefined" ? MediaSource : undefined) ??
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               (window as any).ManagedMediaSource;
-            if (MSx && typeof MSx.isTypeSupported === "function" && MSx.isTypeSupported(candidate)) {
-              mimeRef.current = candidate;
+            const supported = MSx && typeof MSx.isTypeSupported === "function"
+              ? (m: string) => MSx.isTypeSupported(m)
+              : null;
+            const mime = supported
+              ? peerStreamMime(videoCodecRef.current, audioCodecRef.current, supported)
+              : null;
+            if (mime) {
+              mimeRef.current = mime;
               // Metadata duration (0 ⇒ filled when metadata lands via the
               // knownDuration effect; seek clamping uses knownDurationRef too).
               totalDurationRef.current = knownDurationRef.current;
