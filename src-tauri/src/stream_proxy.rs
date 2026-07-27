@@ -319,9 +319,12 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
                 None,
                 true,
             ),
-            Some(PeerMedia::Remote { blake3 }) => {
-                serve_remote_fmp4(request, blake3, parse_start_query(&raw_path))
-            }
+            Some(PeerMedia::Remote { blake3 }) => serve_remote_fmp4(
+                request,
+                blake3,
+                parse_start_query(&raw_path),
+                parse_rung_query(&raw_path),
+            ),
             None => request.respond(
                 tiny_http::Response::from_string("unknown peer media").with_status_code(404),
             ),
@@ -582,6 +585,26 @@ fn parse_stream_epoch(json: &str) -> Option<f64> {
         .iter()
         .find_map(|k| p.get(*k)?.as_str()?.parse::<f64>().ok())?;
     (t.is_finite() && t >= 0.0).then_some(t)
+}
+
+/// Pull the `rung=<height>` query value out of the request path.
+///
+/// `None` means source passthrough (`-c copy`), which is both the absence of
+/// the parameter and the answer for anything not on the ladder.
+///
+/// The filter is an ALLOWLIST, not a range clamp, and that difference matters:
+/// a rung is an enum, not a scalar. Clamping `rung=800` to 720 would silently
+/// serve a stream the guest never asked for, and clamping `rung=99999` to 1080
+/// would let a peer on a different build push the host into its most expensive
+/// encode. Anything unrecognised falls back to passthrough, which is the
+/// behaviour every existing host already has.
+fn parse_rung_query(url_path: &str) -> Option<u32> {
+    url_path
+        .split('?')
+        .nth(1)
+        .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("rung=")))
+        .and_then(|v| v.parse::<u32>().ok())
+        .filter(|h| crate::commands::rung::rung_for(*h).is_some())
 }
 
 /// Pull the `start=<seconds>` query value out of the request path. Returns
@@ -878,7 +901,12 @@ fn peer_media_path_for(raw_path: &str, prefix: &str) -> Option<PeerMedia> {
 /// presenter's ffmpeg end to end (risk R7). A probe failure on the
 /// presenter side arrives as timeline "rebased", exactly like the web
 /// route's fallback — same header contract, same player behaviour.
-fn serve_remote_fmp4(request: tiny_http::Request, blake3: String, start: f64) -> std::io::Result<()> {
+fn serve_remote_fmp4(
+    request: tiny_http::Request,
+    blake3: String,
+    start: f64,
+    rung: Option<u32>,
+) -> std::io::Result<()> {
     if ACTIVE_REMUXES.load(std::sync::atomic::Ordering::Relaxed) >= MAX_ACTIVE_REMUXES {
         return request.respond(
             tiny_http::Response::from_string("too many concurrent streams").with_status_code(503),
@@ -887,7 +915,7 @@ fn serve_remote_fmp4(request: tiny_http::Request, blake3: String, start: f64) ->
     ACTIVE_REMUXES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let _remux_guard = CounterGuard(&ACTIVE_REMUXES);
 
-    let handle = match crate::commands::peer_stream::request_media_stream(blake3, start) {
+    let handle = match crate::commands::peer_stream::request_media_stream(blake3, start, rung) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("[media-proxy] PEER-FMP4 start={start} -> 502 ({e})");
@@ -898,18 +926,30 @@ fn serve_remote_fmp4(request: tiny_http::Request, blake3: String, start: f64) ->
         }
     };
     eprintln!(
-        "[media-proxy] PEER-FMP4 start={start} timeline={} epoch={:?}",
-        handle.timeline, handle.epoch
+        "[media-proxy] PEER-FMP4 start={start} rung={rung:?} served={:?} timeline={} epoch={:?}",
+        handle.rung, handle.timeline, handle.epoch
     );
 
     let cors = cors_origin_for(&request);
+    let rung_served = handle.rung.map_or_else(|| "source".to_string(), |h| h.to_string());
     let mut headers: Vec<tiny_http::Header> = Vec::new();
     for (name, value) in [
         ("Content-Type", "video/mp4"),
         ("Access-Control-Allow-Origin", cors.as_str()),
-        ("Access-Control-Expose-Headers", "X-Timeline, X-Stream-Epoch"),
+        ("Access-Control-Expose-Headers", "X-Timeline, X-Stream-Epoch, X-Rung, X-Relay"),
         ("X-Timeline", handle.timeline.as_str()),
         ("Cache-Control", "no-store"),
+        // What the presenter ACTUALLY encoded, which is not always what we
+        // asked for: a host on an older build ignores `rung` entirely and
+        // serves passthrough. Without this the guest would believe it had
+        // downshifted, keep receiving the same megabits, and downshift again
+        // for the same reason — walking to the floor while nothing changed.
+        ("X-Rung", rung_served.as_str()),
+        // R6: the media is crossing n0's public relay rather than a direct
+        // link. Caps the guest's ladder at its lowest rung and shows a badge —
+        // sending someone's video through third-party infrastructure is not
+        // something to do silently, even end-to-end encrypted.
+        ("X-Relay", if handle.relayed { "1" } else { "0" }),
     ] {
         if let Ok(h) = tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()) {
             headers.push(h);
@@ -1108,6 +1148,58 @@ mod tests {
         let l = parse_share_source("/share/v1?display=2");
         assert_eq!((l.kind.as_str(), l.id, l.audio), ("display", 2, false));
         assert_eq!(parse_share_source("/share/v1").id, 0);
+    }
+
+    // ── parse_rung_query — the Tier B quality ladder ────────────────────
+    #[test]
+    fn rung_query_reads_a_ladder_height() {
+        assert_eq!(parse_rung_query("/peer/fmp4/v1/abc?rung=720"), Some(720));
+        assert_eq!(parse_rung_query("/peer/fmp4/v1/abc?start=3.5&rung=360"), Some(360));
+        assert_eq!(parse_rung_query("/peer/fmp4/v1/abc?rung=1080&start=0"), Some(1080));
+    }
+
+    #[test]
+    fn no_rung_means_source_passthrough() {
+        // Absence is the behaviour every host had before the ladder existed,
+        // so it has to be the default rather than an error.
+        assert_eq!(parse_rung_query("/peer/fmp4/v1/abc"), None);
+        assert_eq!(parse_rung_query("/peer/fmp4/v1/abc?start=3.5"), None);
+        assert_eq!(parse_rung_query("/peer/fmp4/v1/abc?rung="), None);
+    }
+
+    #[test]
+    fn an_off_ladder_rung_is_refused_rather_than_clamped() {
+        // The important difference from parse_start_query, which clamps: a
+        // rung is an ENUM, not a scalar. Clamping 800 to 720 would serve a
+        // stream nobody asked for, and clamping 99999 to 1080 would let any
+        // peer push the host into its most expensive encode. Falling back to
+        // passthrough is the honest answer.
+        for q in ["rung=800", "rung=99999", "rung=0", "rung=-720", "rung=720p", "rung=banana"] {
+            assert_eq!(parse_rung_query(&format!("/peer/fmp4/v1/abc?{q}")), None, "{q}");
+        }
+    }
+
+    #[test]
+    fn rung_and_start_are_parsed_independently() {
+        // They share a query string; a malformed one must not eat the other.
+        let p = "/peer/fmp4/v1/abc?rung=banana&start=12.5";
+        assert_eq!(parse_rung_query(p), None);
+        assert!((parse_start_query(p) - 12.5).abs() < 1e-9);
+        let q = "/peer/fmp4/v1/abc?start=nope&rung=540";
+        assert_eq!(parse_rung_query(q), Some(540));
+        assert_eq!(parse_start_query(q), 0.0);
+    }
+
+    #[test]
+    fn every_ladder_height_round_trips_through_the_query() {
+        // Guards the two tables against drifting apart: if commands::rung
+        // gains or loses a rung, this notices.
+        for r in crate::commands::rung::RUNGS {
+            assert_eq!(
+                parse_rung_query(&format!("/peer/fmp4/v1/abc?rung={}", r.height)),
+                Some(r.height),
+            );
+        }
     }
 
     // ── parse_stream_epoch — RC7 timeline-origin recovery ───────────────

@@ -1029,6 +1029,13 @@ struct SubstreamReq {
     /// media-request only: seconds to start the live remux from.
     #[serde(default)]
     start: f64,
+    /// media-request only: the quality rung the guest wants, as a height
+    /// (1080/720/540/360). 0 or absent means source passthrough, which is
+    /// what every build before the ladder existed asked for implicitly — so
+    /// `serde(default)` is what keeps an older guest working against a newer
+    /// host. See `commands::rung`.
+    #[serde(default)]
+    rung: u32,
 }
 
 /// Accept every bi-stream a registered peer opens after its control stream,
@@ -1092,7 +1099,8 @@ async fn serve_file_substream(
     // Tier B live stream shares the substream shape (risk R5: one explicit
     // discriminator, every unknown type refused with a header).
     if req.t == "media-request" {
-        return serve_media_substream(app, send, shared, member, req.blake3, req.start).await;
+        return serve_media_substream(app, send, shared, member, req.blake3, req.start, req.rung)
+            .await;
     }
     if req.t != "file-request" {
         let _ = send
@@ -1192,6 +1200,7 @@ async fn serve_media_substream(
     member: String,
     blake3: String,
     start: f64,
+    rung_height: u32,
 ) {
     use tokio::io::AsyncReadExt;
 
@@ -1212,25 +1221,53 @@ async fn serve_media_substream(
     };
     let start = if start.is_finite() { start.clamp(0.0, 86_400.0) } else { 0.0 };
 
-    // Epoch probe on OUR OWN file (fast, local; memoized per (path, start)).
-    // Absolute timeline is what makes a guest's far seek land exactly; a
-    // probe failure is VISIBLE as "rebased" in the header (risk R8), which
-    // the player already treats as keyframe-precision landing.
+    // The rung the guest asked for. Anything unrecognised (including 0, and
+    // including a height from a build with a different ladder) is passthrough
+    // — the behaviour every host had before the ladder existed.
+    let rung = crate::commands::rung::rung_for(rung_height);
+
+    // Epoch: which source timestamp the first delivered frame carries.
+    //
+    // The two paths genuinely differ, and using one answer for both is a real
+    // bug rather than a rounding concern. On `-c copy`, input `-ss` hands back
+    // the keyframe AT OR BEFORE the request, so the offset has to be probed
+    // out of the file. On a re-encode, input `-ss` seeks ACCURATELY and drops
+    // everything before the request, so the answer is just `start`.
+    //
+    // Measured on a 1080p30 file with a 2s GOP at start=11.0: the probe says
+    // 10.0, `-c copy` really does begin at 10.0, and the encode begins at
+    // 11.0. The guest assigns this to `SourceBuffer.timestampOffset`, so
+    // handing it the probe's answer for an encoded stream shifts the entire
+    // buffer one GOP early — up to ten seconds on the delivery masters R9
+    // warns about, and invisibly, because a constant offset never trips a
+    // drift check.
+    //
+    // Skipping the probe also removes an ffprobe spawn from the seek path,
+    // which is the hot path while someone is scrubbing.
     let path_str = file_info.path.to_string_lossy().into_owned();
-    let epoch = if start > 0.0 {
-        let p = path_str.clone();
-        tokio::task::spawn_blocking(move || crate::stream_proxy::probe_stream_epoch(&p, start))
-            .await
-            .ok()
-            .flatten()
-    } else {
-        Some(0.0)
+    let epoch = match crate::commands::rung::epoch_for_rung(rung, start) {
+        Some(e) => Some(e),
+        // Passthrough: probe. Absolute timeline is what makes a guest's far
+        // seek land exactly; a probe failure is VISIBLE as "rebased" in the
+        // header (risk R8), which the player already treats as
+        // keyframe-precision landing.
+        None if start > 0.0 => {
+            let p = path_str.clone();
+            tokio::task::spawn_blocking(move || crate::stream_proxy::probe_stream_epoch(&p, start))
+                .await
+                .ok()
+                .flatten()
+        }
+        None => Some(0.0),
     };
+    let served = rung.map_or(0, |r| r.height);
     let header = match epoch {
         Some(e) => format!(
-            "{{\"t\":\"media-response\",\"ok\":true,\"timeline\":\"absolute\",\"epoch\":{e:.6}}}\n"
+            "{{\"t\":\"media-response\",\"ok\":true,\"timeline\":\"absolute\",\"epoch\":{e:.6},\"rung\":{served}}}\n"
         ),
-        None => "{\"t\":\"media-response\",\"ok\":true,\"timeline\":\"rebased\"}\n".to_string(),
+        None => format!(
+            "{{\"t\":\"media-response\",\"ok\":true,\"timeline\":\"rebased\",\"rung\":{served}}}\n"
+        ),
     };
     if send.write_all(header.as_bytes()).await.is_err() {
         return;
@@ -1241,25 +1278,44 @@ async fn serve_media_substream(
     if start > 0.0 {
         cmd.arg("-ss").arg(format!("{start}"));
     }
-    // Mirrors serve_fmp4's local branch: -c copy, absolute timestamps, 90kHz
-    // video timescale, streaming-friendly fragmented MP4.
-    cmd.arg("-i")
-        .arg(&file_info.path)
-        .arg("-c")
-        .arg("copy")
-        .arg("-copyts")
-        .arg("-muxpreload")
-        .arg("0")
-        .arg("-muxdelay")
-        .arg("0")
-        .arg("-video_track_timescale")
-        .arg("90000")
-        .arg("-movflags")
-        .arg("frag_keyframe+empty_moov+default_base_moof")
-        .arg("-f")
-        .arg("mp4")
-        .arg("pipe:1")
-        .stdin(std::process::Stdio::null())
+    cmd.arg("-i").arg(&file_info.path);
+    match rung {
+        // A rung transcodes. Besides capping the bitrate — the point of the
+        // ladder — this is also the only path on which a non-H.264 source
+        // works at all: `-c copy` cannot put ProRes in an MP4 and refuses with
+        // "Could not find tag for codec prores", AFTER the ok-header has
+        // already gone out, so the guest sees success then silence.
+        Some(r) => {
+            // Colour probe drives the filter chain (10-bit dither, HDR
+            // tonemap). A failed probe encodes anyway, as SDR-8; refusing
+            // would turn a probe hiccup into a dead session.
+            let colour = crate::commands::media::probe_playback_color(&app, &path_str)
+                .await
+                .map(|p| crate::commands::media::classify_playback_color(&p));
+            for a in crate::commands::rung::rung_output_args(r, colour) {
+                cmd.arg(a);
+            }
+        }
+        // Passthrough. Mirrors serve_fmp4's local branch: -c copy, absolute
+        // timestamps, 90kHz video timescale, streaming-friendly fMP4.
+        None => {
+            cmd.arg("-c")
+                .arg("copy")
+                .arg("-copyts")
+                .arg("-muxpreload")
+                .arg("0")
+                .arg("-muxdelay")
+                .arg("0")
+                .arg("-video_track_timescale")
+                .arg("90000")
+                .arg("-movflags")
+                .arg("frag_keyframe+empty_moov+default_base_moof")
+                .arg("-f")
+                .arg("mp4")
+                .arg("pipe:1");
+        }
+    }
+    cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         // Risk R12: the serving task OWNS its child; the task ending (guest
@@ -1506,6 +1562,36 @@ async fn fail_peer_to_off(app: AppHandle, generation: u64, error: String) {
 
 /// Abort a session's tasks and close its endpoint. Call with the manager
 /// lock RELEASED — `Endpoint::close` waits on the network.
+/// True when the path this connection is CURRENTLY transmitting on is a relay.
+///
+/// R6: when hole-punching fails, iroh falls back to n0's public relay
+/// infrastructure. That was an accepted cost for the control channel, which
+/// carries kilobytes of JSON. Tier B pushes megabits of somebody's video
+/// through the same path — still end-to-end encrypted, so the relay cannot
+/// read it, but a materially different imposition on infrastructure we do not
+/// own and a different promise to the user about where their file goes. The
+/// guest answers this about its own connection and lets `stream-rung.ts` cap
+/// the ladder to its lowest rung, with a visible "relayed" badge.
+///
+/// `paths()` is a SNAPSHOT, deliberately re-read per request rather than
+/// cached: a connection routinely starts relayed and upgrades to direct once
+/// hole-punching lands, so a value captured at join time would pin an entire
+/// session to 360p over a link that became direct seconds later. (iroh 1.x
+/// also offers `path_events()` for a live subscription; a per-request read is
+/// enough here because a rung change costs a pipeline rebuild anyway, and
+/// requests happen on exactly those rebuilds.)
+///
+/// An empty path list means we cannot tell. Answering `false` there is the
+/// deliberate choice: guessing "relayed" would silently cap quality on a
+/// perfectly good direct link, and the failure we are guarding against is
+/// nobody being told, not the ladder being one rung too high.
+fn is_relay_selected(conn: &Connection) -> bool {
+    conn.paths()
+        .iter()
+        .find(|p| p.is_selected())
+        .is_some_and(|p| p.is_relay())
+}
+
 /// Guest side of Tier B: service the proxy's media-stream requests over this
 /// session's connection. Each request opens a fresh typed substream to the
 /// host, forwards the header metadata, then pumps bytes into the bridge's
@@ -1527,12 +1613,23 @@ async fn peer_media_service(
         timeline: String,
         #[serde(default)]
         epoch: Option<f64>,
+        /// The rung the host really encoded. 0/absent means passthrough — and
+        /// crucially that is ALSO what an older host sends when it silently
+        /// ignores our `rung` field, which is exactly the case the guest has
+        /// to be able to detect.
+        #[serde(default)]
+        rung: u32,
         #[serde(default)]
         error: String,
     }
 
     while let Some(req) = rx.recv().await {
         let conn = conn.clone();
+        // Read per request, not once per session: hole-punching often lands
+        // AFTER the connection is already usable, and each media request is a
+        // pipeline rebuild anyway, so this is exactly when the answer can be
+        // acted on for free.
+        let relayed = is_relay_selected(&conn);
         tokio::spawn(async move {
             let refuse = |msg: String, resp: &std::sync::mpsc::SyncSender<std::io::Result<MediaStreamHandle>>| {
                 let _ = resp.send(Err(std::io::Error::other(msg)));
@@ -1542,8 +1639,10 @@ async fn peer_media_service(
                 Err(e) => return refuse(format!("open substream: {e}"), &req.resp),
             };
             let line = format!(
-                "{{\"t\":\"media-request\",\"blake3\":\"{}\",\"start\":{}}}\n",
-                req.blake3, req.start
+                "{{\"t\":\"media-request\",\"blake3\":\"{}\",\"start\":{},\"rung\":{}}}\n",
+                req.blake3,
+                req.start,
+                req.rung.unwrap_or(0)
             );
             if send.write_all(line.as_bytes()).await.is_err() {
                 return refuse("send request".into(), &req.resp);
@@ -1582,6 +1681,8 @@ async fn peer_media_service(
                 .send(Ok(MediaStreamHandle {
                     timeline: timeline.to_string(),
                     epoch: if timeline == "absolute" { head.epoch } else { None },
+                    rung: crate::commands::rung::rung_for(head.rung).map(|r| r.height),
+                    relayed,
                     rx: brx,
                 }))
                 .is_err()

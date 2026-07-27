@@ -1433,23 +1433,23 @@ mod poster_tests {
 // to bt709 SDR because WKWebView is SDR-only, then dithered to 8-bit.
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum PlaybackColorClass {
+pub(crate) enum PlaybackColorClass {
     Sdr8,
     Sdr10,
     Hdr,
 }
 
 #[derive(Default)]
-struct PlaybackColorProbe {
-    width: u32,
-    height: u32,
-    pix_fmt: Option<String>,
-    color_space: Option<String>,
-    color_transfer: Option<String>,
-    color_primaries: Option<String>,
+pub(crate) struct PlaybackColorProbe {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) pix_fmt: Option<String>,
+    pub(crate) color_space: Option<String>,
+    pub(crate) color_transfer: Option<String>,
+    pub(crate) color_primaries: Option<String>,
 }
 
-fn classify_playback_color(p: &PlaybackColorProbe) -> PlaybackColorClass {
+pub(crate) fn classify_playback_color(p: &PlaybackColorProbe) -> PlaybackColorClass {
     if matches!(p.color_transfer.as_deref(), Some("smpte2084" | "arib-std-b67")) {
         return PlaybackColorClass::Hdr;
     }
@@ -1561,7 +1561,7 @@ fn playback_video_quality_args(probe: Option<&PlaybackColorProbe>) -> (Vec<Strin
 
 /// Best-effort v:0 probe for the prep transcode. `None` on any failure —
 /// the caller falls back to the legacy args rather than failing the prep.
-async fn probe_playback_color(app: &AppHandle, path: &str) -> Option<PlaybackColorProbe> {
+pub(crate) async fn probe_playback_color(app: &AppHandle, path: &str) -> Option<PlaybackColorProbe> {
     let v = ffprobe_json(app, &[
         "-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=width,height,pix_fmt,color_space,color_transfer,color_primaries",

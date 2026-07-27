@@ -26,6 +26,10 @@ pub const BRIDGE_CHANNEL_CHUNKS: usize = 64;
 pub struct MediaStreamRequest {
     pub blake3: String,
     pub start: f64,
+    /// Quality rung height (1080/720/540/360), or `None` for source
+    /// passthrough. Chosen by the guest because starvation is only observable
+    /// where the video plays; see `src/lib/stream-rung.ts`.
+    pub rung: Option<u32>,
     /// Sync sender back into the blocking world. The worker waits on the
     /// paired receiver with a timeout, so a dead session can't park it.
     pub resp: std::sync::mpsc::SyncSender<std::io::Result<MediaStreamHandle>>,
@@ -39,6 +43,17 @@ pub struct MediaStreamHandle {
     pub timeline: String,
     /// Present when timeline is absolute — becomes X-Stream-Epoch.
     pub epoch: Option<f64>,
+    /// The rung the presenter ACTUALLY encoded, which is not necessarily the
+    /// one we asked for: a host on an older build ignores the field entirely
+    /// and serves passthrough. Without echoing it back, a guest would believe
+    /// it had downshifted while the same megabits kept arriving, and would
+    /// then downshift again for the same reason. Becomes X-Rung.
+    pub rung: Option<u32>,
+    /// True when this session's QUIC path is currently a relay rather than a
+    /// direct link (R6). Becomes X-Relay, which caps the guest's ladder at its
+    /// lowest rung and shows a "relayed" badge — the user's media is crossing
+    /// third-party infrastructure and they should be told.
+    pub relayed: bool,
     pub rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
 }
 
@@ -64,14 +79,18 @@ pub fn clear_media_hook() {
 
 /// Blocking-side entry (called from a proxy worker thread): ask the live
 /// session for a media stream and wait bounded for the answer.
-pub fn request_media_stream(blake3: String, start: f64) -> std::io::Result<MediaStreamHandle> {
+pub fn request_media_stream(
+    blake3: String,
+    start: f64,
+    rung: Option<u32>,
+) -> std::io::Result<MediaStreamHandle> {
     let tx = hook()
         .lock()
         .ok()
         .and_then(|h| h.clone())
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotConnected, "no live session"))?;
     let (resp_tx, resp_rx) = std::sync::mpsc::sync_channel(1);
-    tx.send(MediaStreamRequest { blake3, start, resp: resp_tx })
+    tx.send(MediaStreamRequest { blake3, start, rung, resp: resp_tx })
         .map_err(|_| std::io::Error::new(std::io::ErrorKind::NotConnected, "session closing"))?;
     // Generous: covers the presenter's epoch probe + ffmpeg warm-up.
     resp_rx
@@ -180,7 +199,11 @@ mod tests {
     #[test]
     fn request_without_a_session_fails_closed_not_hanging() {
         clear_media_hook();
-        let err = request_media_stream("aa".repeat(32), 0.0).unwrap_err();
+        let err = request_media_stream("aa".repeat(32), 0.0, None).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotConnected);
+        // Asking for a rung must fail the same way. A guest that downshifts
+        // into a dead session should get NotConnected, not a hang.
+        let err = request_media_stream("aa".repeat(32), 0.0, Some(540)).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::NotConnected);
     }
 }
