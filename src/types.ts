@@ -143,3 +143,22 @@ export type ClientLog = {
 export type ReviewRangeDraft =
   | { live: true; anchor: number; color: string }
   | { live: false; start: number; end: number; color: string };
+
+/**
+ * Runtime check for one persisted queue row.
+ *
+ * The queue is restored from JSON a PREVIOUS BUILD wrote, so it is untrusted
+ * input in the same way a wire message is. Only the fields the queue runner
+ * actually depends on are required — an older build that lacked a later
+ * optional field should still have its work resumed, not silently dropped.
+ */
+export function isQueuedClip(x: unknown): x is QueuedClip {
+  if (typeof x !== "object" || x === null) return false;
+  const c = x as Record<string, unknown>;
+  return typeof c.id === "string"
+    && typeof c.fps === "number" && Number.isFinite(c.fps) && c.fps > 0
+    && typeof c.inFrames === "number" && typeof c.outFrames === "number"
+    && typeof c.filename === "string"
+    && typeof c.source === "object" && c.source !== null
+    && c.status === "queued";
+}

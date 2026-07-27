@@ -43,6 +43,7 @@ import type {
   SourceKind, WarmStart, WhisperModel,
   ReviewRangeDraft,
 } from "./types";
+import { isQueuedClip } from "./types";
 import { asLogTag } from "./types";
 import { formatError, humanizeSpawnError, isAppError } from "./lib/error-format";
 import { fmtElapsed, stageLabel } from "./lib/elapsed";
@@ -99,7 +100,7 @@ import { MediaInfoModal } from "./components/MediaInfoModal";
 import { loadReview, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
 import { loadChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
 import { appUndo } from "./lib/undo";
-import { loadJson, saveJson } from "./lib/storage";
+import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./lib/storage";
 import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
 import {
   durationToTc, framesToTc, secondsToTc,
@@ -838,7 +839,12 @@ export default function App() {
   const [snapshotBusy, setSnapshotBusy] = useState(false);
 
   // ====== Clip queue (multi-section export) ======
-  const [clipQueue, setClipQueue] = useState<QueuedClip[]>([]);
+  // Restored from the last session. Only items still "queued" are persisted
+  // (see saveClipQueue): a finished row points at a file on disk and a failed
+  // one at an error from a session that is over, and greeting someone with
+  // yesterday's results in a to-do panel is not resumption.
+  const [clipQueue, setClipQueue] = useState<QueuedClip[]>(() => loadClipQueue(isQueuedClip));
+  useEffect(() => { saveClipQueue(clipQueue); }, [clipQueue]);
   // Right queue/tools drawer visibility — boots OPEN for a fresh profile
   // (both side panels visible, so the Clip view explains itself), and only
   // an explicit user toggle persists a preference (setQueueOpenChoice
@@ -3134,7 +3140,19 @@ export default function App() {
   }, []);
 
   const handleQueueClearAll = useCallback(() => {
-    setClipQueue([]);
+    // Confirmed, like every other destructive action in the app — clearing
+    // recents, deleting cached files and removing a library root all ask. The
+    // queue was the one that did not, and it is the one holding work that
+    // cannot be recreated by pressing a button again: each row is a range
+    // somebody marked by hand.
+    setClipQueue((prev) => {
+      const pending = prev.filter((c) => c.status === "queued").length;
+      if (pending > 0 && !confirm(
+        `Clear ${pending} queued clip${pending === 1 ? "" : "s"}? `
+        + "The marks you set for them are not saved anywhere else.",
+      )) return prev;
+      return [];
+    });
   }, []);
 
   /** Run every "queued" item sequentially — web items through create_clip
@@ -4272,7 +4290,11 @@ export default function App() {
       filename: "clip",
     }));
     setUrl("");
-    setClipQueue([]);
+    // Unloading the source used to silently take the queue with it. The
+    // toolbar button's own tooltip says "Unload the current source" and says
+    // nothing about the queue, and queued items carry their own source and
+    // fps precisely so they do NOT depend on what is loaded — so there is no
+    // reason to drop them, and every reason not to.
     setQueueOpen(false);
   }, [resetForNewSource]);
 
