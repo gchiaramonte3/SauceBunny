@@ -84,7 +84,8 @@ import type { Command } from "./lib/commands";
 import { buildCommands } from "./lib/commands";
 import {
   loadKeybindings, saveKeybindings, buildComboMap, bindingsFor, formatCombo, eventToCombo,
-  KEY_ACTION_BY_ID, type KeyActionId, type KeybindingOverrides,
+  KEY_ACTION_BY_ID, isPlaybackScoped, VIEWS_WITH_A_PLAYER,
+  type KeyActionId, type KeybindingOverrides,
 } from "./lib/keybindings";
 import { migrateLegacyStorageKeys } from "./lib/migrate-storage";
 import { loadActiveTab } from "./lib/tab-state";
@@ -900,7 +901,16 @@ export default function App() {
   // Shared library scan state — owned here so Home's shelves and the Library
   // browser read the SAME scan results (switching views never rescans) and
   // the same thumbnail cache. Both views are keep-alive-mounted below.
-  const lib = useLibraryScan();
+  // Poster warm-up runs only while a poster wall is actually on screen.
+  //
+  // use-lazy-thumbnails states the intent — "booting into Clip costs zero
+  // thumbnail work" — but the sweep itself fired whenever the scans settled,
+  // whatever view was in front, so watching a clip competed with decoding
+  // every poster in every root. Live rather than latched, and safe to flip:
+  // prefetchThumbnails skips anything already cached, failed or in flight and
+  // supersedes its own older sweep, so coming back resumes over the remainder
+  // instead of starting again.
+  const lib = useLibraryScan(activeView === "home" || activeView === "library");
   // Home drill-in → Library handoff: the folder chain to select, plus a tick so
   // the same chain re-applies on repeat drills. One detail browser, not two.
   const [librarySelection, setLibrarySelection] = useState<LibraryCrumb[] | null>(null);
@@ -3988,9 +3998,19 @@ export default function App() {
   // The CLIP drawer's transcript uses the same source-start-TC + Avid export as
   // the reader. Its source key is whatever's loaded in Clip (local path or web
   // url); a tick bump re-reads the stored TC after the setter writes it.
-  const [, setClipSourceTcTick] = useState(0);
+  const [clipSourceTcTick, setClipSourceTcTick] = useState(0);
   const clipSourceKey = localFilePath ?? metadata?.webpage_url ?? activeSourceUrl ?? null;
-  const clipStartTc = clipSourceKey ? sourceTimecodeFor(clipSourceKey) ?? undefined : undefined;
+  // localStorage read, so memoized: this sat bare in the render body and ran
+  // on every App render, which is every playhead-driven re-render anything
+  // else causes. The tick was already here for exactly this purpose and was
+  // write-only — it is the invalidation, so it belongs in the deps.
+  const clipStartTc = useMemo(() => {
+    // Read, not ignored: the tick IS the invalidation. setSourceTimecode
+    // writes localStorage and then bumps this, and without touching it here
+    // the rule would have us drop it from the deps and serve a stale TC.
+    void clipSourceTcTick;
+    return clipSourceKey ? sourceTimecodeFor(clipSourceKey) ?? undefined : undefined;
+  }, [clipSourceKey, clipSourceTcTick]);
   // Why there's no follow-along player, when there isn't one (web / missing file).
   const [readerNote, setReaderNote] = useState<string | null>(null);
   // True while an ffmpeg playback copy is being prepared for an exotic-codec
@@ -4535,6 +4555,23 @@ export default function App() {
     // Run a matched action with the exact behavior of its hand-coded predecessor
     // (the shuttle ladder on back/fwd, the export status gate, etc.).
     function runAction(id: KeyActionId, e: KeyboardEvent) {
+      // Transport and Marking act on the Clip player and ITS in/out marks.
+      // Every one of them was firing from Home and the Library, where that
+      // player is mounted but not on screen — so pressing Space started
+      // playback you could not see, i/o/g moved the export marks on a
+      // different file than the one under the cursor, j/k/l shuttled it,
+      // [ / ] / \ changed its speed and Home/End seeked it. Silent state
+      // corruption from a view that looks inert.
+      //
+      // `global: false` in the binding table only means "not while typing";
+      // there was never a view gate. The `reader` view is already handled
+      // action by action below because it owns a second player; this is the
+      // same idea applied once, to the views that own no player at all.
+      //
+      // Returning WITHOUT preventDefault is deliberate: the key has to stay
+      // available to whatever view IS in front, which is what lets the
+      // Library run arrow-key navigation and type-ahead on the same letters.
+      if (isPlaybackScoped(id) && !VIEWS_WITH_A_PLAYER.has(activeViewRef.current)) return;
       e.preventDefault();
       switch (id) {
         case "app.palette":  setPaletteOpen((p) => !p); break;
@@ -4701,7 +4738,11 @@ export default function App() {
       if (inField || settingsOpen) return;
 
       // ── Bare number opens the TC-entry HUD (seeded with the digit) ──
-      if (e.key >= "0" && e.key <= "9" && durationFrames > 0) {
+      // Same view gate as the transport actions: a digit typed in the Library
+      // was opening a "go to timecode" HUD over a player the user is not
+      // looking at, and eating the keystroke that type-ahead wants.
+      if (!VIEWS_WITH_A_PLAYER.has(activeViewRef.current)) { /* fall through */ }
+      else if (e.key >= "0" && e.key <= "9" && durationFrames > 0) {
         e.preventDefault();
         setTcEntry(e.key);
         return;
@@ -4986,9 +5027,15 @@ export default function App() {
       reviewKey: metadata.webpage_url ?? "",
     };
   }, [sourceKind, metadata, localFilePath, localFileSize, activeSourceUrl]);
-  const reviewSourceKey = (sourceKind === "file" && localFilePath && metadata)
-    ? (resolveByFingerprint(reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize)) ?? localFilePath)
-    : (metadata?.webpage_url ?? null);
+  // Also a localStorage read (resolveByFingerprint), also previously bare in
+  // the render body. Depends only on the identity of the loaded source, which
+  // changes far less often than App renders.
+  const reviewSourceKey = useMemo(
+    () => ((sourceKind === "file" && localFilePath && metadata)
+      ? (resolveByFingerprint(reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize)) ?? localFilePath)
+      : (metadata?.webpage_url ?? null)),
+    [sourceKind, localFilePath, metadata, localFileSize],
+  );
 
   // ── Speaker-rename fingerprint bridge (r134) ──────────────────────────
   // Speaker renames live in localStorage keyed by SRT path, which orphaned

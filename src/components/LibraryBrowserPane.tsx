@@ -2,6 +2,7 @@ import { LibraryCard } from "./LibraryCard";
 import { LibraryListRow } from "./LibraryListRow";
 import type { LibraryViewMode } from "./LibraryBrowserBar";
 import { formatBytes, formatModifiedDate } from "../lib/library";
+import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import type { LibraryItem } from "../types";
 
 type Props = {
@@ -19,6 +20,10 @@ type Props = {
   /** Clears the selection on a click in the empty gutter. */
   onClearSelection: () => void;
   emptyText: string;
+  /** Current sort, so the list headers can show and toggle it. */
+  sort: LibrarySortKey;
+  dir: LibrarySortDir;
+  onSort: (key: LibrarySortKey) => void;
 };
 
 /**
@@ -30,6 +35,7 @@ type Props = {
 export function LibraryBrowserPane({
   items, view, selectedPath, posterVersions, requestThumb,
   onOpen, onReview, onSelectItem, onChoosePoster, onResetPoster, onClearSelection, emptyText,
+  sort, dir, onSort,
 }: Props) {
   const clearOnBlank = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) onClearSelection();
@@ -64,14 +70,19 @@ export function LibraryBrowserPane({
   return (
     <div className="cp-lib-pane" onClick={clearOnBlank}>
       <div className="cp-lib-list" role="list" aria-label="Files">
-        {/* Visual column labels only — the rows below are plain buttons, not a
-            grid widget, so the header is decorative to assistive tech. */}
-        <div className="cp-lib-list-head" aria-hidden="true">
-          <span className="cp-lib-lrow-art" />
-          <span className="cp-lib-lrow-name">Name</span>
+        {/* Column headers that SORT.
+            These were decorative aria-hidden spans that looked exactly like
+            Finder's sortable headers and did nothing when clicked — a control
+            the UI advertised and did not honour. They drive the same persisted
+            pref the bar's picker does, so the two stay in step. "Kind" has no
+            sort key of its own (the bar filters by kind instead), so it stays
+            a plain label rather than pretending. */}
+        <div className="cp-lib-list-head">
+          <span className="cp-lib-lrow-art" aria-hidden="true" />
+          <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort} />
           <span className="cp-lib-lrow-kind">Kind</span>
-          <span className="cp-lib-lrow-size">Size</span>
-          <span className="cp-lib-lrow-date">Modified</span>
+          <SortHeader className="cp-lib-lrow-size" label="Size" col="size" sort={sort} dir={dir} onSort={onSort} />
+          <SortHeader className="cp-lib-lrow-date" label="Modified" col="date" sort={sort} dir={dir} onSort={onSort} />
         </div>
         {items.map((it) => (
           <LibraryListRow
@@ -88,5 +99,35 @@ export function LibraryBrowserPane({
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * One sortable column header. Clicking the active column flips direction,
+ * which is the behaviour every macOS list view has; clicking another column
+ * switches to it without inheriting the previous column's direction, so
+ * "Modified" always starts newest-first the way a user expects.
+ */
+function SortHeader({ className, label, col, sort, dir, onSort }: {
+  className: string;
+  label: string;
+  col: LibrarySortKey;
+  sort: LibrarySortKey;
+  dir: LibrarySortDir;
+  onSort: (key: LibrarySortKey) => void;
+}) {
+  const active = sort === col;
+  return (
+    <button
+      type="button"
+      className={`${className} cp-lib-sorthead` + (active ? " active" : "")}
+      // Screen readers get the state as a real sort contract, not an arrow
+      // glyph they cannot see.
+      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
+      onClick={() => onSort(col)}
+    >
+      {label}
+      {active && <span className="cp-lib-sorthead-caret" aria-hidden="true">{dir === "asc" ? "▲" : "▼"}</span>}
+    </button>
   );
 }

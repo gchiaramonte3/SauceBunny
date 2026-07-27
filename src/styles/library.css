@@ -1156,6 +1156,38 @@
 
 /* ── List mode — a compact table (poster · name · kind · size · modified). ── */
 .cp-lib-list { display: flex; flex-direction: column; }
+/* Sortable column header. Inherits the header row's type so it reads as a
+   label, not a button, until you point at it — the Finder behaviour. */
+.cp-lib-sorthead {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cp-lib-sorthead:hover { color: var(--fg-2); }
+.cp-lib-sorthead.active { color: var(--fg-2); }
+.cp-lib-sorthead-caret { font-size: 7px; opacity: 0.75; }
+
+/* Finder's status bar: quiet, always present, never competing with content. */
+.cp-lib-statusbar {
+  flex: 0 0 auto;
+  padding: var(--s-1) var(--s-3);
+  border-top: 1px solid var(--line-1);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--fg-4);
+  text-align: center;
+  user-select: none;
+}
+
 .cp-lib-list-head,
 .cp-lib-lrow {
   display: grid;

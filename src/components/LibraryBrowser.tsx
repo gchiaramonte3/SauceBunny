@@ -7,7 +7,7 @@ import { ThumbnailPicker } from "./ThumbnailPicker";
 import type { RootScan } from "../hooks/use-library-scan";
 import {
   chosenPosterFor, clearChosenPoster, collectLibraryItems, findLibraryFolder,
-  setChosenPoster, sortLibraryItems,
+  setChosenPoster, sortLibraryItems, formatBytes,
   type LibraryCrumb, type LibraryKindFilter, type LibrarySortDir, type LibrarySortKey,
 } from "../lib/library";
 import { loadJson, saveJson } from "../lib/storage";
@@ -60,6 +60,16 @@ type Props = {
  * on selection. Scan state is shared from useLibraryScan, so switching to/from
  * Home never rescans.
  */
+/**
+ * Most files the browse pane will mount at once.
+ *
+ * Not a performance guess: each card carries an IntersectionObserver and, for
+ * local video, two window listeners for the hover-frame cycle, plus a
+ * focusable ⋯ button. The number matches the cap `searchLibrary` already
+ * applies for the same reason.
+ */
+const BROWSE_CAP = 300;
+
 export function LibraryBrowser({
   roots, scans, scanning, addFolder, rescanAll, requestThumb, invalidateThumb,
   posterVersions, bumpPoster, resetPoster, selection, selectionTick,
@@ -156,7 +166,29 @@ export function LibraryBrowser({
     return sortLibraryItems(bySearch, prefs.sort, prefs.dir);
   }, [selected, selectedNode, trees, prefs, needle]);
 
-  const emptyText = needle.trim() ? `No matches for “${needle.trim()}”.` : "No playable media here.";
+  // The "All" view aggregates every root with no ceiling, and every card is a
+  // real DOM node with its own IntersectionObserver and two window listeners.
+  // A 2000-file drive mounted 2000 of them and put 4000 controls in the tab
+  // order. Home's search already reasoned about exactly this and capped at 120
+  // with a "showing N of M" note (searchLibrary in lib/library.ts); this is the
+  // same answer, in the constitution's spirit — a cap and an honest count, not
+  // a virtualization dependency.
+  const shown = useMemo(() => items.slice(0, BROWSE_CAP), [items]);
+  const overflow = items.length - shown.length;
+  // Finder's status bar. Counts the whole filtered set, not the capped slice,
+  // so the number answers "how much is in here" rather than "how much did we
+  // draw".
+  const totalBytes = useMemo(() => items.reduce((n, i) => n + i.size_bytes, 0), [items]);
+
+  const emptyText = needle.trim()
+    ? `No matches for “${needle.trim()}”.`
+    // Saying "No playable media here." while the walk is still running is
+    // simply false, and on a cold NAS or an external drive it is the first
+    // sentence a new user reads. Home already gets this right; the browser
+    // never got the same treatment.
+    : scanning
+      ? "Scanning…"
+      : "No playable media here.";
 
   // Rootless library — one centered line + the primary action. Nothing else
   // (no panel, no bar): there is nothing to browse, filter, or sort yet.
@@ -210,7 +242,16 @@ export function LibraryBrowser({
         />
         <div className="cp-lib-browse-body">
           <LibraryBrowserPane
-            items={items}
+            items={shown}
+            sort={prefs.sort}
+            dir={prefs.dir}
+            /* Clicking the active column flips it; a different column starts
+               fresh rather than inheriting the last one's direction. */
+            onSort={(key) => patchPrefs(
+              key === prefs.sort
+                ? { dir: prefs.dir === "asc" ? "desc" : "asc" }
+                : { sort: key, dir: key === "name" ? "asc" : "desc" },
+            )}
             view={prefs.view}
             selectedPath={detailItem?.path ?? null}
             posterVersions={posterVersions}
@@ -235,6 +276,19 @@ export function LibraryBrowser({
             />
           )}
         </div>
+        {/* Finder's status bar: pinned to the bottom of the window, OUTSIDE
+            the scroller, so it stays put while the wall scrolls. Says what is
+            in the folder, and — when the render cap bites — says so plainly
+            rather than letting someone believe they are seeing everything.
+            Hidden when there is nothing, so the empty and scanning states get
+            the pane to themselves. */}
+        {items.length > 0 && (
+          <div className="cp-lib-statusbar">
+            {items.length} item{items.length === 1 ? "" : "s"}
+            {totalBytes > 0 ? ` · ${formatBytes(totalBytes)}` : ""}
+            {overflow > 0 ? ` · showing ${shown.length}, ${overflow} more not shown` : ""}
+          </div>
+        )}
       </div>
 
       {pickerPath && (

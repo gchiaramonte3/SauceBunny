@@ -280,3 +280,33 @@ export function shortcutSheetGroups(overrides: KeybindingOverrides): ShortcutShe
   });
   return groups;
 }
+
+/**
+ * The views that have a video player on screen.
+ *
+ * Transport and Marking act on the Clip player and its in/out marks. The Clip
+ * view stays MOUNTED behind Home and the Library — deliberately, so switching
+ * views never interrupts playback or a running job — which meant every one of
+ * those keys kept firing from views where that player is invisible. Space
+ * started playback nobody could see; i/o/g/q/w moved the export marks on a
+ * different file than the one under the cursor; j/k/l shuttled it; [ ] \
+ * changed its speed; Home/End seeked it. Silent state corruption from a
+ * screen that looks inert.
+ *
+ * `global: false` in the table above only means "not while typing". This is
+ * the missing half: not while the thing it acts on is off screen.
+ */
+export const VIEWS_WITH_A_PLAYER: ReadonlySet<string> = new Set([
+  "clip",
+  // The co-review room shows the shared source in the same monitor.
+  "coreview",
+  // The reader owns a SECOND player; the dispatcher routes each transport
+  // action to it action-by-action rather than to the Clip player.
+  "reader",
+]);
+
+/** True when this action drives a video player, so it needs a player on screen. */
+export function isPlaybackScoped(id: KeyActionId): boolean {
+  const g = KEY_ACTION_BY_ID[id]?.group;
+  return g === "Transport" || g === "Marking";
+}

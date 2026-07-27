@@ -8,6 +8,8 @@ import {
   eventToCombo,
   formatCombo,
   formatBindings,
+  isPlaybackScoped,
+  VIEWS_WITH_A_PLAYER,
   type KeybindingOverrides,
 } from "./keybindings";
 
@@ -101,5 +103,53 @@ describe("assignBinding", () => {
     const o: KeybindingOverrides = { "mark.in": ["p"] };
     expect(resetBinding(o, "mark.in")["mark.in"]).toBeUndefined();
     expect(bindingsFor("mark.in", resetBinding(o, "mark.in"))).toEqual(["i"]);
+  });
+});
+
+describe("the view gate on transport and marking", () => {
+  it("covers every key that drives the Clip player", () => {
+    // The bug: the Clip view stays mounted behind Home and the Library, so
+    // these all kept firing from a screen where the player is invisible.
+    // Space started playback nobody could see and i/o/g/q/w moved the export
+    // marks on a different file than the one under the cursor.
+    for (const id of [
+      "play.toggle", "play.back5", "play.fwd5", "play.frameBack", "play.frameFwd",
+      "play.secondBack", "play.secondFwd", "play.toStart", "play.toEnd",
+      "play.rateDown", "play.rateUp", "play.rateReset",
+      "mark.in", "mark.out", "mark.clear", "mark.gotoIn", "mark.gotoOut",
+      "review.rangeIn", "review.rangeOut",
+    ] as const) {
+      expect(isPlaybackScoped(id)).toBe(true);
+    }
+  });
+
+  it("leaves navigation and app-level actions alone", () => {
+    // Gating these would break the app: you must be able to switch views,
+    // open settings and undo from anywhere.
+    for (const id of [
+      "view.home", "view.library", "view.clip", "app.palette", "app.settings",
+      "app.shortcuts", "edit.undo", "edit.redo", "src.fetch", "queue.add",
+    ] as const) {
+      expect(isPlaybackScoped(id)).toBe(false);
+    }
+  });
+
+  it("allows exactly the views that show a player", () => {
+    expect(VIEWS_WITH_A_PLAYER.has("clip")).toBe(true);
+    expect(VIEWS_WITH_A_PLAYER.has("coreview")).toBe(true);
+    // The reader owns a second player and the dispatcher routes to it.
+    expect(VIEWS_WITH_A_PLAYER.has("reader")).toBe(true);
+    // The two that caused the bug.
+    expect(VIEWS_WITH_A_PLAYER.has("home")).toBe(false);
+    expect(VIEWS_WITH_A_PLAYER.has("library")).toBe(false);
+  });
+
+  it("classifies every registry action, so a new one cannot slip the gate", () => {
+    // If someone adds a Transport action tomorrow it is gated automatically,
+    // because the classification reads the group rather than a hand-kept list.
+    for (const a of KEY_ACTIONS) {
+      const scoped = isPlaybackScoped(a.id);
+      expect(scoped).toBe(a.group === "Transport" || a.group === "Marking");
+    }
   });
 });

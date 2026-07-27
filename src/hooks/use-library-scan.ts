@@ -82,7 +82,15 @@ async function withDecodeSlot<T>(job: () => Promise<T>, prefetch = false): Promi
     thumbRunning--;
     // Visible cards ALWAYS jump the warm-up sweep: a scroll must never wait
     // behind background posters.
-    (thumbWaiters.shift() ?? thumbPrefetchWaiters.shift())?.();
+    //
+    // LIFO within each queue, not FIFO. The waiters are enqueued in the order
+    // cards intersected, so a fast scroll through 500 cold cards leaves the
+    // card you actually STOPPED on at the back of a queue of 500 that have
+    // long since left the screen. Taking the newest first means the poster
+    // under the cursor decodes next, which is the whole difference between
+    // "Finder" and "watching a queue drain". Nothing is dropped — the stale
+    // waiters still run, just last.
+    (thumbWaiters.pop() ?? thumbPrefetchWaiters.pop())?.();
   }
 }
 
@@ -527,7 +535,11 @@ export type LibraryScan = {
  * timer. This satisfies the constitution's 3+-consumer hook rule the moment
  * both views consume it.
  */
-export function useLibraryScan(): LibraryScan {
+/**
+ * @param warmPosters Whether the poster warm-up sweep may run — true only
+ *   while a view that shows posters is on screen.
+ */
+export function useLibraryScan(warmPosters = true): LibraryScan {
   const [roots, setRoots] = useState<string[]>(() => loadLibraryRoots());
   const [scans, setScans] = useState<Record<string, RootScan>>({});
   // "Set thumbnail…" per-path poster version. Bumping a path's version changes
@@ -598,6 +610,13 @@ export function useLibraryScan(): LibraryScan {
   // of a decode: the visible-first gate keeps it out of the way, and the
   // disk cache makes every later session's sweep nearly free.
   useEffect(() => {
+    // use-lazy-thumbnails states the intent in as many words — "booting into
+    // Clip costs zero thumbnail work" — and then this sweep fired the moment
+    // the scans settled no matter which view was in front, so watching a clip
+    // competed with decoding every poster in every root. Pausing is cheap and
+    // resuming is cheaper: prefetchThumbnails skips whatever is already
+    // cached, failed or in flight.
+    if (!warmPosters) return;
     const states = Object.values(scans);
     if (states.length === 0 || states.some((s) => s.status === "loading")) return;
     const paths: string[] = [];
@@ -612,7 +631,7 @@ export function useLibraryScan(): LibraryScan {
       if (scan?.status === "ok") walk(scan.tree);
     }
     if (paths.length > 0) prefetchThumbnails(paths);
-  }, [scans, roots]);
+  }, [scans, roots, warmPosters]);
 
   const addFolder = useCallback(async () => {
     const picked = await openDialog({ directory: true, multiple: false });

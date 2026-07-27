@@ -214,6 +214,12 @@ export function LibraryCard({
         title="More actions"
         aria-label="More actions"
         aria-haspopup="menu"
+        /* Out of the tab order on purpose. It is a hover affordance that
+           duplicates the card's own menu, and leaving it focusable made every
+           card TWO tab stops — 800 of them on a 400-file drive. Keyboard users
+           reach the identical menu from the card itself via the ContextMenu
+           key or Shift+F10, so nothing is lost. */
+        tabIndex={-1}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); if (menuAnchor) closeMenu(); else openMenuAtRect(); }}
       >
