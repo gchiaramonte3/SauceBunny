@@ -72,8 +72,11 @@ export function useTransport({
 const shuttleRateRef = useRef(0);
 // Mirrored into state so the Monitor can render the "◀◀ 4×" badge.
 const [shuttleRate, setShuttleRate] = useState(0);
-// Physical K held? Turns the next J/L into a frame-step (set on keydown,
-// cleared on keyup/window-blur in the keyboard effect below).
+// Physical K held? Turns the next J/L into a frame-step. Owned by App's
+// window keydown/keyup/blur handler (grep kHeldRef in App.tsx) and only READ
+// here, inside shuttleStep — which is why it is returned. The comment used to
+// say "the keyboard effect below"; that effect stayed in App when this block
+// moved, so there is nothing below.
 const kHeldRef = useRef(false);
 
 const applyShuttle = useCallback((rate: number) => {
@@ -259,7 +262,14 @@ const onChaseSeek = useCallback((f: number) => {
   return {
     /** 0 = normal · >0 = fast-forward × · <0 = rewind ×. Drives Monitor's badge. */
     shuttleRate,
-    /** True while physical K is down — turns the next J/L into a frame step. */
+    /**
+     * True while physical K is held down, which turns the next J/L press into
+     * a single-frame nudge (the K+J / K+L editor convention).
+     *
+     * Written by App, not here: the window keydown/keyup/blur handler owns it
+     * (`App.tsx`, search `kHeldRef`) and this hook only reads it inside
+     * `shuttleStep`. It is returned for exactly that reason.
+     */
     kHeldRef,
     onPlayToggle,
     onStep,

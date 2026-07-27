@@ -133,8 +133,12 @@ npm run verify:bundle
 
 CI does this too (the `bundle` job), but with stubbed sidecars and no
 signing identity, so it passes `--allow-stub-sidecars` and can only prove
-the parts that do not need real binaries. A release must run it *without*
-that flag, which `npm run check:release` does for you.
+the parts that do not need real binaries.
+
+A release must run it **without** that flag, and `npm run check:release`
+does *not* do it for you: that script is a pre-build gate, so the artifact
+does not exist yet when it runs. It prints the follow-up command; the
+release flow in `docs/DISTRIBUTION.md` is what actually invokes it.
 
 ## Nightly real-sidecar smoke
 

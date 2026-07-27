@@ -94,24 +94,92 @@ describe("seeking", () => {
     expect(getPlayheadFrames()).toBe(900);
   });
 
-  it("arms the co-review latch on a user seek", () => {
-    markUserSeek(0);
-    const before = getLastUserSeekAt();
-    const { result } = setup();
-    act(() => result.current.onSeek(600));
-    expect(getLastUserSeekAt()).toBeGreaterThanOrEqual(before);
-  });
+  // The latch pair, on a FAKE clock.
+  //
+  // Both of these were tautologies on the real one, and a reviewer proved it
+  // by mutation: deleting `markUserSeek(clamped)` from onSeek left 36/36 and
+  // the whole 626-test suite green. `markUserSeek` only ever writes
+  // Date.now(), which never goes backwards, so `toBeGreaterThanOrEqual(before)`
+  // held whether or not the call happened. Its partner's `toBe(before)` was
+  // defeated from the other side: the two statements ran inside the same
+  // millisecond, so an offending markUserSeek would have written the SAME
+  // value and passed too.
+  //
+  // Freezing Date and stepping it by hand makes both directions falsifiable:
+  // the arming case must land on the NEW stamp, the chase case must stay on
+  // the old one even though the clock moved between them.
+  describe("the co-review seek latch", () => {
+    const T0 = 1_700_000_000_000;
+    beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(T0); });
+    afterEach(() => vi.useRealTimers());
 
-  it("does NOT arm the latch on a chase seek", () => {
-    // A chase correction follows the host. If it armed the latch it would be
-    // yielding to itself, and the guest would stop following.
-    const { result, player } = setup();
-    markUserSeek(0);
-    const before = getLastUserSeekAt();
-    act(() => result.current.onChaseSeek(600));
-    expect(getPlayheadFrames()).toBe(600);
-    expect(player.seekTo).toHaveBeenCalledWith(20);
-    expect(getLastUserSeekAt()).toBe(before);
+    it("a user seek arms it", () => {
+      markUserSeek(0);
+      expect(getLastUserSeekAt()).toBe(T0);
+      const { result } = setup();
+      vi.setSystemTime(T0 + 5_000);
+      act(() => result.current.onSeek(600));
+      expect(getLastUserSeekAt()).toBe(T0 + 5_000);
+    });
+
+    it.each([
+      ["a frame step", (t: ReturnType<typeof setup>) => t.result.current.onStep(1)],
+      ["a second jump", (t: ReturnType<typeof setup>) => t.result.current.seekBySeconds(5)],
+      ["jumping to the in mark", (t: ReturnType<typeof setup>) => t.result.current.onGotoIn()],
+      ["jumping to the out mark", (t: ReturnType<typeof setup>) => t.result.current.onGotoOut()],
+    ])("%s arms it too", (_name, fire) => {
+      markUserSeek(0);
+      const t = setup({ inFrames: 300, outFrames: 900 });
+      setPlayheadFrames(600);
+      vi.setSystemTime(T0 + 5_000);
+      act(() => fire(t));
+      expect(getLastUserSeekAt()).toBe(T0 + 5_000);
+    });
+
+    it("a chase seek does NOT arm it", () => {
+      // A chase correction follows the host. If it armed the latch it would be
+      // yielding to itself, and the guest would stop following.
+      const { result, player } = setup();
+      markUserSeek(0);
+      vi.setSystemTime(T0 + 5_000); // the clock moves; the latch must not
+      act(() => result.current.onChaseSeek(600));
+      expect(getPlayheadFrames()).toBe(600);
+      expect(player.seekTo).toHaveBeenCalledWith(20);
+      expect(getLastUserSeekAt()).toBe(T0);
+    });
+  });
+});
+
+// Every handler that moves the playhead has to kill a running shuttle first,
+// or the shuttle immediately drags the playhead back off wherever it was just
+// put. The file header claimed this was the main thing being tested and it was
+// not tested at all: every case above starts from shuttleRate 0, where
+// exitShuttle() is a no-op, so all six calls could have been deleted with the
+// suite still green.
+describe("every playhead move cancels a running shuttle", () => {
+  const playing = () => fakePlayer({ isPlaying: () => true });
+
+  const MOVES: [string, (t: ReturnType<typeof setup>) => void][] = [
+    ["onSeek",        (t) => t.result.current.onSeek(1200)],
+    ["onChaseSeek",   (t) => t.result.current.onChaseSeek(1200)],
+    ["onStep",        (t) => t.result.current.onStep(1)],
+    ["seekBySeconds", (t) => t.result.current.seekBySeconds(5)],
+    ["onGotoIn",      (t) => t.result.current.onGotoIn()],
+    ["onGotoOut",     (t) => t.result.current.onGotoOut()],
+  ];
+
+  it.each(MOVES)("%s", (_name, fire) => {
+    const player = playing();
+    const t = setup({ inFrames: 300, outFrames: 900 }, player);
+    setPlayheadFrames(600);
+    act(() => t.result.current.shuttleStep(1));
+    expect(t.result.current.shuttleRate).toBe(2); // a shuttle really is running
+    player.setShuttle.mockClear();
+
+    act(() => fire(t));
+
+    expect(t.result.current.shuttleRate).toBe(0);
+    expect(player.setShuttle).toHaveBeenCalledWith(0);
   });
 });
 

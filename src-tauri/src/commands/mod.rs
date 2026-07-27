@@ -78,10 +78,16 @@ const SYSTEM_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 ///     than on a clean one. Seven of the ~14 yt-dlp spawn sites passed that
 ///     flag; the rest inherited whatever was first on PATH.
 ///
-///   · Integrity. Both directories are writable by the logged-in user on a
-///     normal Mac. A signed, notarized app that puts them ahead of its own
-///     binaries will execute an attacker-planted `ffmpeg` with its own
-///     entitlements, which is precisely the property the `otool -L`
+///   · Integrity. `/opt/homebrew/bin` is owned by the installing USER
+///     wherever Homebrew is present, which on an Apple Silicon Mac is the
+///     whole of `/opt/homebrew`. (`/usr/local/bin` is the same story on an
+///     Intel or Rosetta Homebrew; on a native arm64 install it is normally
+///     absent or root:wheel, so it is here for completeness rather than
+///     because it is the exposure.) A signed, notarized app that puts a
+///     user-writable directory ahead of its own binaries will execute an
+///     attacker-planted `ffmpeg` with its own entitlements — including the
+///     microphone, camera and screen-recording grants this app holds. That
+///     is precisely the property the `otool -L`
 ///     self-containment guard rails and sidecars.lock.json exist to protect.
 ///
 /// Last place keeps deno reachable and makes shadowing impossible.

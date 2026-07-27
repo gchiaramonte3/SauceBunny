@@ -128,8 +128,10 @@ describe("Timeline playhead — keyboard", () => {
 describe("Timeline playhead — the screen-reader contract", () => {
   it("announces a timecode, not a frame count", () => {
     setPlayheadFrames(1875); // 62.5s at 30fps
+    // No `expect(playhead.role).toBe("slider")` — mount() fetched the element
+    // BY that role, so re-asserting it cannot fail. What is worth pinning is
+    // everything a screen reader reads off it once found.
     const { playhead } = mount();
-    expect(playhead).toHaveProperty("role", "slider");
     expect(playhead.getAttribute("aria-valuetext")).toBe("00:01:02");
     expect(playhead.getAttribute("aria-valuenow")).toBe("1875");
     expect(playhead.getAttribute("aria-valuemin")).toBe("0");

@@ -354,7 +354,35 @@ export function ReviewPanel({
   const historyWrapRef = useRef<HTMLDivElement>(null);
   const searchRowRef = useRef<HTMLDivElement>(null);
   const searchBtnRef = useRef<HTMLButtonElement>(null);
-  const now = Date.now();
+  // Clock for the relative timestamps ("just now", "12m ago") on every
+  // comment, reply and history card.
+  //
+  // This used to be a bare `Date.now()` read during render, and it stayed
+  // honest during playback only by ACCIDENT: the panel's old top-level
+  // playhead subscription re-rendered it 60 times a second, so the value was
+  // never more than a frame stale. Pushing that subscription down into the
+  // composer took the accident away and left every label frozen at whenever
+  // the panel last rendered for some other reason — press play, come back ten
+  // minutes later, and a comment posted at the start still reads "just now".
+  //
+  // So make it deliberate and cheap. `timeAgo` is coarse (it says "just now"
+  // below 45 seconds and whole minutes above), which means a 30s tick can
+  // never be visibly wrong, and it costs one re-render per 30s instead of one
+  // per frame. Paused while the window is hidden — a backgrounded panel has
+  // nobody to be stale for — and resynced the moment it comes back.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    let id = 0;
+    const start = () => {
+      setNow(Date.now());
+      id = window.setInterval(() => setNow(Date.now()), 30_000);
+    };
+    const stop = () => { if (id) { window.clearInterval(id); id = 0; } };
+    const onVisibility = () => (document.hidden ? stop() : start());
+    if (!document.hidden) start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVisibility); };
+  }, []);
 
   // ── Voice dictation (mic → text) ──────────────────────────────────
   // `recording` = mic live; `transcribing` = stopped, ASR running. The

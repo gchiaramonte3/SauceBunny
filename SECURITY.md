@@ -58,9 +58,13 @@ renderer cannot spawn a process directly.
 PATH it is given decides which binaries this app executes. That PATH is
 composed in one place (`compose_spawn_path`) and ordered ours → the OS →
 Homebrew: the app's own sidecar directory first, `/opt/homebrew/bin` and
-`/usr/local/bin` last. Both of those are writable by the logged-in user on a
-normal Mac, and until this ordering they came *first*, which meant a file
-planted there ran with the signed app's identity and entitlements. Homebrew
+`/usr/local/bin` last. `/opt/homebrew` is owned by the installing user on
+every Apple Silicon Homebrew install, so `/opt/homebrew/bin` is
+user-writable whenever Homebrew is present; `/usr/local/bin` is the same on
+an Intel or Rosetta install and normally root-owned otherwise. Until this
+ordering those came *first*, which meant a file planted in one ran with the
+signed app's identity and entitlements — microphone, camera and screen
+recording included. Homebrew
 stays on the PATH at all because yt-dlp needs a JS runtime (`deno`) for
 YouTube's `nsig` deobfuscation and we cannot bundle one; last place keeps it
 reachable without letting it shadow anything. Pinned by tests in

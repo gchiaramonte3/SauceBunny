@@ -92,10 +92,50 @@ fi
 # matches, the writer upstream takes SIGPIPE (exit 141), and pipefail propagates
 # that. Capturing first does not help - it just moves the SIGPIPE to `printf`.
 # So: no pipe. `case` does the match in the shell itself.
+#
+# Two checks, because neither is sufficient alone. This started as one `case`
+# asking whether the token APPCACHE appeared anywhere in the binary, which
+# could not fail for the regression it was named after: widening the scope to
+# ["$APPCACHE/**", "$HOME/**"] leaves $APPCACHE/** in place, so the token is
+# still there and the check still printed green.
+#
+#  (a) the config is the source of truth, so assert the scope set EXACTLY;
+#  (b) the binary must contain the token, which proves the config we just
+#      read is the one generate_context! compiled in rather than an edit made
+#      after the build.
+SCOPE_VERDICT="$(python3 -c '
+import json, sys
+with open(sys.argv[1]) as f:
+    conf = json.load(f)
+sec = conf.get("app", {}).get("security", {})
+ap = sec.get("assetProtocol") or {}
+scope = ap.get("scope")
+if not ap.get("enable"):
+    print("OK\tasset protocol is disabled entirely"); raise SystemExit
+if scope is None:
+    print("FAIL\tassetProtocol.enable is true with NO scope - that is the wide-open default")
+    raise SystemExit
+if isinstance(scope, dict):          # {allow: [...], deny: [...]}
+    entries = list(scope.get("allow") or [])
+else:
+    entries = list(scope)
+extra = [e for e in entries if e != "$APPCACHE/**"]
+if extra:
+    print("FAIL\tscope has widened beyond $APPCACHE/**: " + ", ".join(map(str, extra)))
+elif entries == ["$APPCACHE/**"]:
+    print("OK\tasset-protocol scope is exactly [$APPCACHE/**]")
+else:
+    print("FAIL\tunexpected empty asset-protocol scope")
+' "${ROOT_DIR}/src-tauri/tauri.conf.json" 2>/dev/null || printf 'FAIL\tcould not read assetProtocol out of tauri.conf.json')"
+case "${SCOPE_VERDICT}" in
+  OK*)   pass "${SCOPE_VERDICT#OK	}" ;;
+  *)     fail "${SCOPE_VERDICT#FAIL	}" ;;
+esac
+
 BIN_STRINGS="$(strings "${BIN}" 2>/dev/null || true)"
 case "${BIN_STRINGS}" in
-  *"APPCACHE"*) pass "asset-protocol scope is the narrowed \$APPCACHE/**" ;;
-  *) warn "could not confirm the asset-protocol scope from the binary" ;;
+  *"APPCACHE/**"*) pass "  and that scope is the one baked into this binary" ;;
+  *) fail "  the binary does not contain \$APPCACHE/** - it was built from a different config" ;;
 esac
 
 # ── 4. Licenses ship, and as separate readable files ────────────────
@@ -169,22 +209,38 @@ done
 # NOT piped into grep: `grep -q` exits on first match, codesign gets SIGPIPE,
 # and under pipefail the pipeline reports failure ~half the time. Capture, then
 # match. (Measured: 20 false negatives in 40 runs of the piped form.)
+#
+# The deep verify is gated on the signature CLASS, and that gate is the whole
+# point of this section. `tauri build` with no identity configured emits a
+# linker-signed ad-hoc bundle with `Sealed Resources=none`, and
+# `codesign --verify --deep --strict` can never succeed against one — it
+# reports "code has no resources but signature indicates they must be
+# present". An earlier version of this section called ad-hoc "expected
+# locally" in one breath and hard-failed on it two lines later, so
+# `npm run verify:bundle` — the command CONTRIBUTING.md tells you to run after
+# a local build — exited 1 every single time. A gate that always fails teaches
+# people to ignore it, which is worse than not having it.
 SIGINFO="$(codesign -dvv "${APP}" 2>&1 || true)"
+SIGNED_FOR_REAL=0
 case "${SIGINFO}" in
   *"Signature=adhoc"*) warn "ad-hoc signed (expected locally; a release needs a Developer ID)" ;;
-  *"Signature="*)      pass "signed with an identity" ;;
+  *"Signature="*)      pass "signed with an identity"; SIGNED_FOR_REAL=1 ;;
   *) if [ "${ALLOW_STUBS}" -eq 1 ]; then
        warn "unsigned (CI has no signing identity)"
      else
        fail "the bundle is not signed at all"
      fi ;;
 esac
+
 if codesign --verify --deep --strict "${APP}" 2>/dev/null; then
   pass "signature verifies"
-elif [ "${ALLOW_STUBS}" -eq 1 ]; then
-  warn "signature does not verify (CI: unsigned, and the sidecars are stubs)"
+elif [ "${SIGNED_FOR_REAL}" -eq 1 ]; then
+  # A bundle claiming a real identity that will not verify is a hard failure:
+  # Gatekeeper will reject it on someone else's Mac.
+  fail "signature does not verify — Gatekeeper will refuse this bundle"
+  codesign --verify --deep --strict "${APP}" 2>&1 | sed 's/^/      /'
 else
-  fail "signature does not verify"
+  warn "deep verify skipped — an ad-hoc/unsigned bundle seals no resources, so it cannot pass"
 fi
 
 printf '\n'

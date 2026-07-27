@@ -11,13 +11,15 @@
 // close: every part correct, wired together wrong.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { Profiler } from "react";
+import { act, cleanup, render } from "@testing-library/react";
 import { CaptionOverlay, type CaptionStyle } from "./CaptionOverlay";
 import { setPlayheadFrames } from "../lib/playhead-store";
 
 const invoke = vi.fn();
+const listen = vi.fn(async (..._a: unknown[]) => () => {});
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: (...a: unknown[]) => listen(...a) }));
 
 const SRT = `1
 00:00:01,000 --> 00:00:03,000
@@ -36,6 +38,7 @@ const FPS = 30;
 
 beforeEach(() => {
   invoke.mockReset();
+  listen.mockClear();
   invoke.mockResolvedValue(SRT);
   localStorage.clear();
   setPlayheadFrames(0);
@@ -56,10 +59,14 @@ function seek(seconds: number) {
   act(() => setPlayheadFrames(Math.floor(seconds * FPS)));
 }
 
+// No getByRole here, deliberately. The overlay marks itself `aria-live="polite"`,
+// and aria-live does NOT confer an implicit role — a bare live region has no
+// role at all, so `queryByRole("status")` returns null for it. This helper used
+// to try that first and silently fall through, which made the tests look like
+// they were asserting an accessibility contract they were not. The live-region
+// contract is asserted once, on its own, below.
 function shown(): string | null {
-  return screen.queryByRole("status")?.textContent
-    ?? document.querySelector(".cp-caption-cue")?.textContent
-    ?? null;
+  return document.querySelector(".cp-caption-cue")?.textContent ?? null;
 }
 
 describe("CaptionOverlay — which cue is on screen", () => {
@@ -134,13 +141,64 @@ describe("CaptionOverlay — the sync offset", () => {
 
 describe("CaptionOverlay — when it must render nothing", () => {
   it("stays silent while disabled, and never reads the file", async () => {
-    // Not just hidden: a disabled overlay must not subscribe, poll, or hit
-    // the backend at all. That is what makes toggling captions off actually
-    // cheap rather than merely invisible.
     await mount({ enabled: false });
     seek(2);
     expect(shown()).toBeNull();
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("costs nothing while disabled: no backend, no listener, no timer, no re-render", async () => {
+    // The comment on the test above used to make three claims and assert one.
+    // "Disabled" is supposed to mean genuinely cheap, not merely invisible:
+    // no transcript read, no Tauri listener, no 5s reconciliation poll, and
+    // crucially no re-render on playhead ticks — the overlay is one of the few
+    // 60Hz subscribers in the app, so a gate that only hides it would still
+    // cost a render every frame of playback with nothing to show for it.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+    try {
+      let commits = 0;
+      render(
+        <Profiler id="cap" onRender={() => { commits += 1; }}>
+          <CaptionOverlay path="/tmp/x.srt" fps={FPS} enabled={false} />
+        </Profiler>,
+      );
+      await act(async () => { await Promise.resolve(); });
+
+      expect(invoke).not.toHaveBeenCalled();       // no transcript read
+      expect(listen).not.toHaveBeenCalled();       // no cross-window listener
+      expect(vi.getTimerCount()).toBe(0);          // no reconciliation poll
+
+      const base = commits;
+      for (const f of [30, 60, 90, 120, 150]) act(() => setPlayheadFrames(f));
+      expect(commits).toBe(base);                  // no re-render per tick
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("...and DOES all of those things once enabled — the control group", async () => {
+    // Without this pair the test above passes trivially if CaptionOverlay ever
+    // stops subscribing at all.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+    try {
+      let commits = 0;
+      render(
+        <Profiler id="cap" onRender={() => { commits += 1; }}>
+          <CaptionOverlay path="/tmp/x.srt" fps={FPS} enabled />
+        </Profiler>,
+      );
+      await act(async () => { await Promise.resolve(); });
+
+      expect(invoke).toHaveBeenCalled();
+      expect(listen).toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+      const base = commits;
+      act(() => setPlayheadFrames(60));
+      expect(commits).toBeGreaterThan(base);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stays silent with no transcript path", async () => {
@@ -157,11 +215,35 @@ describe("CaptionOverlay — when it must render nothing", () => {
     expect(shown()).toBeNull();
   });
 
-  it("renders nothing for a cue whose text is only whitespace", async () => {
-    invoke.mockResolvedValue("1\n00:00:01,000 --> 00:00:03,000\n   \n");
+  it("never shows a whitespace-only cue", async () => {
+    // Worth being precise about the mechanism, because it is not the guard it
+    // looks like: parseSrt drops the cue outright (it only pushes cues whose
+    // cleaned text is non-empty), so the overlay returns at its
+    // `cues.length === 0` check and the `if (!text) return null` line further
+    // down is never reached with this input. Asserted anyway, because what
+    // matters to a viewer is that an empty pill never flashes over the video,
+    // whichever layer prevents it.
+    invoke.mockResolvedValue(
+      "1\n00:00:01,000 --> 00:00:03,000\n   \n\n" +
+      "2\n00:00:05,000 --> 00:00:07,000\nReal text.\n",
+    );
     await mount();
     seek(2);
     expect(shown()).toBeNull();
+    expect(document.querySelector(".cp-caption-overlay")).toBeNull();
+    seek(6); // the neighbouring real cue still works, so nothing broke wholesale
+    expect(shown()).toContain("Real text.");
+  });
+});
+
+describe("CaptionOverlay — the live-region contract", () => {
+  it("announces itself politely so a screen reader is not interrupted mid-cue", async () => {
+    // polite, never assertive: captions change every few seconds and an
+    // assertive region would cut off whatever the reader was already saying.
+    await mount();
+    seek(2);
+    const region = document.querySelector(".cp-caption-overlay");
+    expect(region?.getAttribute("aria-live")).toBe("polite");
   });
 });
 
@@ -221,7 +303,15 @@ describe("CaptionOverlay — appearance settings reach the DOM", () => {
     expect(cue.style.background).toBe("rgba(0, 0, 0, 0.25)");
   });
 
-  it("breaks a long cue across at most two lines", async () => {
+  // Counting the rendered lines proves nothing: the JSX is literally
+  // `{lines[0]}` and `{lines[1] && …}`, so the count is structurally in [1,2]
+  // for every possible return value — including one 130-character line that
+  // overflows the video, and including a 5-element array whose tail is
+  // silently dropped. Assert the CONTENT instead.
+  const linesOnScreen = () =>
+    [...document.querySelectorAll(".cp-caption-line")].map((e) => e.textContent ?? "");
+
+  it("keeps every line within the 42-character Latin-script budget", async () => {
     invoke.mockResolvedValue(
       "1\n00:00:01,000 --> 00:00:09,000\n" +
       "This is a deliberately long caption line that has to wrap because it " +
@@ -229,8 +319,38 @@ describe("CaptionOverlay — appearance settings reach the DOM", () => {
     );
     await mount();
     seek(2);
-    const lines = document.querySelectorAll(".cp-caption-line");
-    expect(lines.length).toBeGreaterThan(0);
-    expect(lines.length).toBeLessThanOrEqual(2);
+    const lines = linesOnScreen();
+    expect(lines.length).toBe(2);
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(42);
+  });
+
+  it("loses no words when the cue fits in two lines", async () => {
+    // The failure this catches is silent truncation: a cue that wraps but
+    // drops its tail reads as a complete sentence and nobody notices.
+    const cue = "The quick brown fox jumps over the lazy dog and then keeps running.";
+    invoke.mockResolvedValue(`1\n00:00:01,000 --> 00:00:09,000\n${cue}\n`);
+    await mount();
+    seek(2);
+    expect(linesOnScreen().join(" ")).toBe(cue);
+  });
+
+  it("marks truncation with an ellipsis rather than dropping text silently", async () => {
+    // A cue too long for two clean lines cannot be shown in full. Signalling
+    // that is the difference between "the rest is elsewhere" and a subtitle
+    // that quietly lies.
+    const cue = Array.from({ length: 40 }, (_, i) => `word${i}`).join(" ");
+    invoke.mockResolvedValue(`1\n00:00:01,000 --> 00:00:09,000\n${cue}\n`);
+    await mount();
+    seek(2);
+    const lines = linesOnScreen();
+    expect(lines.length).toBe(2);
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(42);
+    expect(lines[1].endsWith("…")).toBe(true);
+  });
+
+  it("leaves a short cue on one line", async () => {
+    await mount();
+    seek(2);
+    expect(linesOnScreen()).toEqual(["First line."]);
   });
 });
