@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import type { AppStatus } from "../types";
+import type { AppStatus, ReviewRangeDraft } from "../types";
 import { secondsToHms } from "../lib/timecode";
 import { filmstripCount, filmstripTimestamps } from "../lib/filmstrip";
 import { extractFilmstrip } from "../lib/mediabunny-helpers";
@@ -105,6 +105,45 @@ function PlayheadCursor({ durationFrames, fps, onMouseDown, onSeek }: {
   );
 }
 
+/**
+ * The in-progress comment range, drawn on the track.
+ *
+ * A leaf that subscribes to the playhead ITSELF, exactly like PlayheadCursor
+ * above and for exactly the same reason. While one edge is armed the band's
+ * other end is wherever the playhead is, and the previous design computed that
+ * in ReviewPanel and pushed a fresh object into App state every frame — so the
+ * whole App tree re-rendered at source fps during the one gesture where the
+ * editor is scrubbing to find the other end of a comment. The panel now
+ * publishes the anchor once, when a mark actually moves, and the repaint stops
+ * here at this div.
+ */
+function RangeDraftBand({ draft, fps, durationFrames }: {
+  draft: ReviewRangeDraft;
+  fps: number;
+  durationFrames: number;
+}) {
+  const r = Math.max(1, Math.round(fps));
+  // Only a live draft needs the clock; a locked one is two fixed numbers.
+  const playhead = usePlayheadFrames();
+  const [a, b] = draft.live
+    // Clamped against the anchor so the band cannot invert while scrubbing
+    // behind the marked edge — the behaviour the old clamp in ReviewPanel had.
+    ? [Math.min(draft.anchor * r, playhead), Math.max(draft.anchor * r, playhead)]
+    : [Math.min(draft.start, draft.end) * r, Math.max(draft.start, draft.end) * r];
+  const pct = (f: number) => (durationFrames > 0 ? (f / durationFrames) * 100 : 0);
+  return (
+    <div
+      className={"cp-track-range-draft" + (draft.live ? "" : " locked")}
+      style={{
+        left: `${pct(a)}%`,
+        width: `${Math.max(0.4, pct(b - a))}%`,
+        ["--marker-color" as string]: draft.color,
+      }}
+      title="New comment range"
+    />
+  );
+}
+
 type Props = {
   status: AppStatus;
   durationFrames: number;
@@ -126,7 +165,7 @@ type Props = {
    *  distinct from both the orange clip marks and the saved comment ranges.
    *  `live` = an end still follows the playhead; false = both marks locked
    *  (renders solid with a one-shot flash). */
-  reviewRangeDraft?: { start: number; end: number; color: string; live: boolean } | null;
+  reviewRangeDraft?: ReviewRangeDraft | null;
   /** Local file path to build the thumbnail filmstrip from (mediabunny-decoded).
    *  null for web/streaming sources or when there's no decodable local file.
    *  Also feeds the audio waveform lane — same local-files-only scope. */
@@ -463,18 +502,9 @@ export function Timeline({
             })}
             {/* Live preview of the range being set in the composer — dashed +
                 pulsing so it reads as "setting", not a saved range. */}
-            {reviewRangeDraft && (() => {
-              const r = Math.max(1, Math.round(fps));
-              const a = Math.min(reviewRangeDraft.start, reviewRangeDraft.end) * r;
-              const b = Math.max(reviewRangeDraft.start, reviewRangeDraft.end) * r;
-              return (
-                <div
-                  className={"cp-track-range-draft" + (reviewRangeDraft.live ? "" : " locked")}
-                  style={{ left: `${pct(a)}%`, width: `${Math.max(0.4, pct(b - a))}%`, ["--marker-color" as string]: reviewRangeDraft.color }}
-                  title="New comment range"
-                />
-              );
-            })()}
+            {reviewRangeDraft && (
+              <RangeDraftBand draft={reviewRangeDraft} fps={fps} durationFrames={durationFrames} />
+            )}
             {/* Review comment markers — click a dot to jump to that note. */}
             {commentMarkers?.map((m) => {
               const r = Math.max(1, Math.round(fps));

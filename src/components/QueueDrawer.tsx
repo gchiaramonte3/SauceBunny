@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   IconStack, IconReveal, IconTrash, IconCheck, IconAlert, IconTranscript, IconAiSummary, IconReview,
 } from "./Icons";
-import type { QueuedClip } from "../types";
+import type { QueuedClip , ReviewRangeDraft } from "../types";
 import { secondsToHms } from "../lib/timecode";
 import { TranscriptViewer } from "./TranscriptViewer";
 import { AiSummary, type SummaryStyle } from "./AiSummary";
@@ -138,7 +138,7 @@ type Props = {
   onOpenReviewSource?: (path: string) => void;
   /** Live review-comment range being set → previewed on the App's timeline.
    *  `live` = an end still follows the playhead; false = both marks locked. */
-  onReviewRangeDraft?: (r: { start: number; end: number; color: string; live: boolean } | null) => void;
+  onReviewRangeDraft?: (r: ReviewRangeDraft | null) => void;
   /** Co-review: true while a session is active (may precede the doc snapshot
    *  arriving — the panel shows "Connecting…" and blocks posting until then). */
   reviewSessionActive?: boolean;

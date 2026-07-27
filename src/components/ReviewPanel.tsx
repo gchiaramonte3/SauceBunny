@@ -4,7 +4,7 @@ import { ColorSwatches } from "./ColorSwatches";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import type { DictateDoneEvent, DictateLevelEvent, DictatePartialEvent } from "../types";
+import type { DictateDoneEvent, DictateLevelEvent, DictatePartialEvent, ReviewRangeDraft } from "../types";
 import { DictationWave } from "./DictationWave";
 import { EmojiPicker } from "./EmojiPicker";
 import { IconDownload, IconRange } from "./Icons";
@@ -185,7 +185,7 @@ export function ReviewPanel({
   onOpenReview?: (path: string) => void;
   /** Emit the range currently being set in the composer (or null) so App can
    *  preview it on the timeline. `live` = an end still follows the playhead. */
-  onRangeDraft?: (r: { start: number; end: number; color: string; live: boolean } | null) => void;
+  onRangeDraft?: (r: ReviewRangeDraft | null) => void;
   /** Register the ⇧I/⇧O range-mark handlers with App's keyboard dispatch
    *  (null on unmount). The range state stays local to this panel. */
   onRegisterRangeHotkeys?: (h: { markIn: () => void; markOut: () => void } | null) => void;
@@ -306,20 +306,30 @@ export function ReviewPanel({
   // it re-rendered the whole App tree at source-fps. Follow the playhead only
   // while an edge is still armed.
   const rangeArmed = rangeIn == null || rangeOut == null;
-  // Exactly one edge marked — the state in which the OTHER edge tracks the
-  // playhead and the preview band therefore has to repaint per tick. With
-  // neither marked there is no band (the effect below returns early) and with
-  // both marked the band is fixed, so those two states subscribe to nothing.
-  const rangeDrafting = rangeArmed && (rangeIn != null || rangeOut != null);
-  const liveSec = usePlayheadSeconds(fps, playheadActive && rangeDrafting);
+  // Publish the ANCHOR, not the moving edge.
+  //
+  // This effect used to depend on a live playhead value, so while one edge was
+  // armed it pushed a fresh object into App state every frame — and App state
+  // means the whole App tree re-rendered at source fps, during the exact
+  // gesture where the editor is scrubbing to find the other end of a comment.
+  // An earlier fix stopped the BOTH-marks-set case from doing it; the
+  // one-edge-armed case is the gesture itself, so it was the case that
+  // mattered.
+  //
+  // Nothing here needs the playhead. The armed mark is fixed, the band's other
+  // end is wherever the playhead is right now, and the one consumer is a band
+  // on the timeline — so the timeline reads the playhead itself, the same way
+  // its own cursor does. This effect now fires only when a mark actually moves.
   useEffect(() => {
     if (rangeIn == null && rangeOut == null) { onRangeDraft?.(null); return; }
-    const t = liveSec ?? rangeIn ?? rangeOut ?? 0;
-    const start = rangeIn ?? Math.min(t, rangeOut!);
-    const end = rangeOut ?? Math.max(t, rangeIn!);
-    onRangeDraft?.({ start, end, color: authorColor, live: rangeArmed });
+    if (rangeArmed) {
+      // One edge marked: hand over the anchor and let the band follow.
+      onRangeDraft?.({ anchor: (rangeIn ?? rangeOut)!, color: authorColor, live: true });
+      return;
+    }
+    onRangeDraft?.({ start: rangeIn!, end: rangeOut!, color: authorColor, live: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rangeIn, rangeOut, liveSec, rangeArmed, authorColor]);
+  }, [rangeIn, rangeOut, rangeArmed, authorColor]);
   useEffect(() => () => onRangeDraft?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps
   // Hotkey registration — App dispatches ⇧I/⇧O here, gated on the Review tab
   // being active in the docked drawer. No deps: re-registers every render so

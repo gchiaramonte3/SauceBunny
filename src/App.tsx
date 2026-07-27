@@ -41,6 +41,7 @@ import type {
   AppError, AppStatus, ClientLog, DoneEvent, ExportOpts,
   LocalFileMeta, LogEvent, Metadata, ProgressEvent, QueuedClip, QueueSource, RecentClip,
   SourceKind, WarmStart, WhisperModel,
+  ReviewRangeDraft,
 } from "./types";
 import { asLogTag } from "./types";
 import { formatError, humanizeSpawnError, isAppError } from "./lib/error-format";
@@ -5088,7 +5089,7 @@ export default function App() {
   const [reviewAnnotations, setReviewAnnotations] = useState<ReviewAnnotationView[]>([]);
   // Live range being set in the review composer → previewed on the timeline.
   // `live` = an end still follows the playhead (pulsing); false = locked.
-  const [reviewRangeDraft, setReviewRangeDraft] = useState<{ start: number; end: number; color: string; live: boolean } | null>(null);
+  const [reviewRangeDraft, setReviewRangeDraft] = useState<ReviewRangeDraft | null>(null);
   // Latest-value mirror for the keyboard effect's ⇧I/⇧O review-range gate.
   useEffect(() => { reviewRangeGateRef.current = { panelDetached, queueOpen, roomActive, reviewSourceKey, hasSource, clipVisible: activeView === "clip" || roomActive }; });
 

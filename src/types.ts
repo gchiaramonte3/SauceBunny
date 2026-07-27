@@ -130,3 +130,16 @@ export type ClientLog = {
   source: string;      // e.g. "yt-dlp", "ffmpeg", "probe", "ok", "warn"
   message: string;
 };
+
+/**
+ * The in-progress comment range drawn on the timeline.
+ *
+ * Two shapes on purpose. `live` carries only the ANCHOR — the edge the user
+ * has marked — and the band's other end is wherever the playhead is right
+ * now, read by the timeline itself. That is what keeps a scrub from
+ * re-rendering the App tree at source fps while someone hunts the out point.
+ * Once both ends are marked the band is fixed and needs no clock at all.
+ */
+export type ReviewRangeDraft =
+  | { live: true; anchor: number; color: string }
+  | { live: false; start: number; end: number; color: string };
