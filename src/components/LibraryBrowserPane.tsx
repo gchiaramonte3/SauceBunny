@@ -1,8 +1,10 @@
+import { useMemo, useRef } from "react";
 import { LibraryCard } from "./LibraryCard";
 import { LibraryListRow } from "./LibraryListRow";
 import type { LibraryViewMode } from "./LibraryBrowserBar";
 import { formatBytes, formatModifiedDate } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
+import { useRovingGrid } from "../hooks/use-roving-grid";
 import type { LibraryItem } from "../types";
 
 type Props = {
@@ -41,13 +43,33 @@ export function LibraryBrowserPane({
     if (e.target === e.currentTarget) onClearSelection();
   };
 
+  // Finder's keyboard: one Tab stop for the whole wall, arrows to walk it in
+  // two dimensions, Home/End, and type-ahead to jump to a name. The card and
+  // the row are different elements, so the selector follows the view.
+  const paneRef = useRef<HTMLDivElement>(null);
+  const names = useMemo(() => items.map((i) => i.name), [items]);
+  const roving = useRovingGrid({
+    containerRef: paneRef,
+    itemSelector: view === "grid" ? ".cp-lib-card" : ".cp-lib-lrow",
+    names,
+    layout: view,
+  });
+
   if (items.length === 0) {
     return <div className="cp-lib-pane"><p className="cp-lib-note cp-lib-browse-empty">{emptyText}</p></div>;
   }
 
   if (view === "grid") {
     return (
-      <div className="cp-lib-pane cp-lib-browse-grid" role="list" aria-label="Files" onClick={clearOnBlank}>
+      <div
+        ref={paneRef}
+        className="cp-lib-pane cp-lib-browse-grid"
+        role="list"
+        aria-label="Files"
+        onClick={clearOnBlank}
+        onKeyDown={roving.onKeyDown}
+        onFocusCapture={roving.onFocusCapture}
+      >
         {items.map((it) => (
           <LibraryCard
             key={`${it.path}#${posterVersions[it.path] ?? 0}`}
@@ -68,7 +90,13 @@ export function LibraryBrowserPane({
   }
 
   return (
-    <div className="cp-lib-pane" onClick={clearOnBlank}>
+    <div
+      ref={paneRef}
+      className="cp-lib-pane"
+      onClick={clearOnBlank}
+      onKeyDown={roving.onKeyDown}
+      onFocusCapture={roving.onFocusCapture}
+    >
       <div className="cp-lib-list" role="list" aria-label="Files">
         {/* Column headers that SORT.
             These were decorative aria-hidden spans that looked exactly like
