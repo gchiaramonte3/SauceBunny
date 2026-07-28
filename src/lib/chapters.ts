@@ -187,3 +187,38 @@ export function chaptersToYouTube(chapters: Chapter[]): string {
   const long = chapters.some((c) => c.time >= 3600);
   return chapters.map((c) => `${chapterTimestamp(c.time, long)} ${c.title}`).join("\n");
 }
+
+/**
+ * Adopt the chapters a site published, once, without ever clobbering the
+ * user's own.
+ *
+ * WHY REAL BEATS INFERRED. This module's LLM path reads the transcript and
+ * guesses where the boundaries are. yt-dlp hands us the creator's ACTUAL
+ * chapter list in the same `--dump-json` probe the app already runs before
+ * playback - exact times, the creator's own titles, no model call and no
+ * wait. Guessing at something you have been told is the wrong default.
+ *
+ * WHY IT ONLY EVER WRITES INTO AN EMPTY STORE. Chapters are editable, and a
+ * re-fetch of the same source must not silently undo a rename or a deletion.
+ * "Only when there is nothing there" is the one rule that makes this safe to
+ * run on every metadata arrival.
+ *
+ * Returns true when it wrote, so a caller can log or notify.
+ */
+export function adoptSourceChapters(
+  sourceKey: string | null | undefined,
+  sourceChapters: readonly { time: number; title: string }[] | null | undefined,
+): boolean {
+  if (!sourceKey || !sourceChapters || sourceChapters.length === 0) return false;
+  if (loadChapters(sourceKey).length > 0) return false;
+  // Through the same validation everything else goes through: a site is an
+  // untrusted source, and a bad marker on the timeline is worse than none.
+  const clean = sourceChapters
+    .filter((c) => typeof c?.time === "number" && isFinite(c.time) && c.time >= 0
+      && typeof c?.title === "string" && c.title.trim().length > 0)
+    .map((c) => ({ time: c.time, title: c.title.trim() }))
+    .sort((a, b) => a.time - b.time);
+  if (clean.length === 0) return false;
+  saveChapters(sourceKey, clean);
+  return true;
+}

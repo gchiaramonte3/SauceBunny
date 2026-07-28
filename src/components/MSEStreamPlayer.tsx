@@ -107,6 +107,24 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   // tracks real media time. Re-captured on every rebuild (seek).
   const clockOriginRef = useRef(0);
   const clockOriginSetRef = useRef(false);
+  /**
+   * Resume-after-idle forensics.
+   *
+   * "Sometimes I pause, come back later, hit play, and it is not snappy" is a
+   * real report with at least three different causes that look identical from
+   * the outside, so guessing at a fix would be guessing. These two refs make
+   * the next occurrence self-diagnosing: we record how much buffer existed at
+   * the moment of the pause, and compare it on resume.
+   *
+   *   buffer survived     → the stall is downstream (decode, or the source
+   *                         swap), not the pipeline
+   *   buffer gone         → WebKit evicted the SourceBuffer while idle, and
+   *                         the fix is a re-append, not a rebuild
+   *   pipeline gone       → ffmpeg/the fetch died on an idle timeout, and the
+   *                         fix is keeping it warm or rebuilding sooner
+   */
+  const pausedAtRef = useRef(0);
+  const aheadAtPauseRef = useRef(0);
   // Authoritative total from yt-dlp metadata. The mediabunny probe of the
   // fragmented proxy stream can read short, which made `seekTo` clamp far
   // seeks early (e.g. 19:40 landing at 15:12). Metadata wins when present.
@@ -1029,8 +1047,37 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       if (hasRVFC) { if (!rvfcId) rvfcId = rvfc.requestVideoFrameCallback(onFrame); }
       else if (!rafId) rafId = requestAnimationFrame(tick);
     };
-    const onPlay = () => { playingRef.current = true; setIsPlaying(true); onPlayStateChange?.(true); startTick(); };
+    /** Seconds of media buffered ahead of the playhead, or -1 if unknowable. */
+    const aheadNow = (): number => {
+      const sb = sbRef.current;
+      if (!sb || sb.buffered.length === 0) return -1;
+      try { return sb.buffered.end(sb.buffered.length - 1) - el.currentTime; }
+      catch { return -1; }
+    };
+
+    const onPlay = () => {
+      playingRef.current = true; setIsPlaying(true); onPlayStateChange?.(true); startTick();
+      // Only for a real idle. Every ordinary play/pause would drown the log.
+      const idleMs = pausedAtRef.current ? Date.now() - pausedAtRef.current : 0;
+      if (idleMs > 10_000) {
+        const before = aheadAtPauseRef.current;
+        const after = aheadNow();
+        const pipeline = readerRef.current ? "alive" : (endedRef.current ? "ended" : "gone");
+        const verdict = after < 0 ? "NO BUFFER (source buffer empty or detached)"
+          : after < 0.5 ? "BUFFER EVICTED while idle"
+          : before - after > 5 ? "buffer partly evicted"
+          : "buffer survived (stall is downstream, not the pipeline)";
+        onDiagRef.current?.(
+          after >= 0.5 ? "info" : "warn",
+          `resume after ${Math.round(idleMs / 1000)}s idle: ahead ${before.toFixed(1)}s → `
+          + `${after < 0 ? "n/a" : `${after.toFixed(1)}s`} · pipeline ${pipeline} · ${verdict}`,
+        );
+      }
+      pausedAtRef.current = 0;
+    };
     const onPause = () => {
+      pausedAtRef.current = Date.now();
+      aheadAtPauseRef.current = aheadNow();
       playingRef.current = false; setIsPlaying(false); onPlayStateChange?.(false);
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
       if (rvfcId) { try { rvfc.cancelVideoFrameCallback(rvfcId); } catch { /* ignore */ } rvfcId = 0; }

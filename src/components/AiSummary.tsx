@@ -39,6 +39,9 @@ type Props = {
   onSeek?: (seconds: number) => void;
   /** Auto-chapters: source identity to persist under (App's reviewSourceKey). */
   sourceKey?: string | null;
+  /** The source's own description, when the site published one. Context for
+   *  the model: guests' spelled-out names, links, the creator's timestamps. */
+  sourceDescription?: string | null;
   /** Auto-chapters: source duration in seconds (clamps model timestamps). */
   durationSec?: number | null;
   /** Auto-chapters: notify the host after a generate/delete — the popped-out
@@ -57,7 +60,20 @@ const SUGGESTIONS = [
 
 const DEFAULT_STYLE: SummaryStyle = { format: "bullets", length: "standard" };
 
-export function buildSystemPrompt(transcript: string, truncated: boolean, style: SummaryStyle, hasSpeakers: boolean): string {
+/** Roughly a screen of description. Enough for guest names, links and the
+ *  creator's own timestamps; short enough that a link farm cannot crowd the
+ *  transcript out of the context window. */
+const DESCRIPTION_BUDGET = 1_200;
+
+export function buildSystemPrompt(
+  transcript: string,
+  truncated: boolean,
+  style: SummaryStyle,
+  hasSpeakers: boolean,
+  /** The source's own description, when the site published one. */
+  description?: string | null,
+): string {
+  const blurb = description?.trim().slice(0, DESCRIPTION_BUDGET) ?? "";
   const fmt =
     style.format === "numbered"
       ? '- Structure lists as a numbered list using "1. ", "2. " — one item per line.'
@@ -93,6 +109,18 @@ export function buildSystemPrompt(transcript: string, truncated: boolean, style:
     "- The host introduces the topic and why it matters [0:42].",
     "- A demo follows, walking through the core workflow [4:10].",
     "",
+    // The creator's own description, when there is one. Worth the tokens
+    // because it routinely carries the things a transcript cannot: the guests'
+    // spelled-out names, the title of the thing being discussed, links, and
+    // the creator's own chapter timestamps. It is also marketing copy written
+    // before the edit, so it is context, never a source of truth.
+    ...(blurb ? [
+      "",
+      "=== SOURCE DESCRIPTION (context only; the transcript is authoritative) ===",
+      blurb,
+      "=== END DESCRIPTION ===",
+    ] : []),
+    "",
     "=== TRANSCRIPT ===",
     transcript,
     "=== END TRANSCRIPT ===",
@@ -101,7 +129,7 @@ export function buildSystemPrompt(transcript: string, truncated: boolean, style:
 
 export function AiSummary({
   transcriptPath, reloadToken, selectedModelId, style, onOpenSettings, onSeek,
-  sourceKey, durationSec, onChaptersChanged,
+  sourceKey, sourceDescription, durationSec, onChaptersChanged,
 }: Props) {
   // ── Transcript text (timestamped, model-friendly) ────────────────
   const [raw, setRaw] = useState<string | null>(null);
@@ -341,7 +369,7 @@ export function AiSummary({
     setStreaming(true);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    const system = buildSystemPrompt(transcriptForModel.text, transcriptForModel.truncated, style ?? DEFAULT_STYLE, transcriptForModel.hasSpeakers);
+    const system = buildSystemPrompt(transcriptForModel.text, transcriptForModel.truncated, style ?? DEFAULT_STYLE, transcriptForModel.hasSpeakers, sourceDescription);
     try {
       if (provider === "local" && info) {
         await streamChat(info, [{ role: "system", content: system }, ...history], (delta) => {
@@ -377,7 +405,7 @@ export function AiSummary({
       setStreaming(false);
       abortRef.current = null;
     }
-  }, [streaming, chaptersBusy, ensureServer, transcriptForModel, messages, style]);
+  }, [streaming, chaptersBusy, ensureServer, transcriptForModel, messages, style, sourceDescription]);
 
   function stop() {
     abortRef.current?.abort();

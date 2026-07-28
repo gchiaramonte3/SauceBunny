@@ -508,6 +508,28 @@ pub struct Metadata {
     pub acodec: Option<String>,
     pub ext: Option<String>,
     pub has_subs: bool,
+    /// The creator's OWN chapters, when the site publishes them.
+    ///
+    /// This app used to infer chapters from the transcript with a local LLM -
+    /// slow, and a guess - while yt-dlp had the real ones sitting in the same
+    /// `--dump-json` probe we already run. Real beats inferred on both speed
+    /// and accuracy; the LLM stays as the fallback for sources that publish
+    /// none.
+    pub chapters: Vec<SourceChapter>,
+    /// The video description. Free context for the AI summary: creators put
+    /// guest names, timestamps and links here, and none of it was reaching us.
+    /// Capped, because a description can be pathologically long and it rides
+    /// in a struct that gets cached to disk and passed across the IPC boundary.
+    pub description: Option<String>,
+}
+
+/// One chapter as the site published it.
+#[derive(Serialize, Deserialize, Clone, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct SourceChapter {
+    /// Start time in seconds. Named to match the frontend's `Chapter.time`.
+    pub time: f64,
+    pub title: String,
 }
 
 /// One `--dump-json` metadata probe for a given cookie setting, wall-clock
@@ -531,6 +553,37 @@ async fn run_metadata_ytdlp(
     args.extend(cookies_args(cookies_browser));
     args.push(url.to_string());
     output_timed(cmd.args(args), RESOLVE_TIMEOUT_SECS).await
+}
+
+/// A description longer than this is a link farm, not context. Chars, not
+/// bytes, so a multi-byte script is not silently cut mid-character.
+const MAX_DESCRIPTION_CHARS: usize = 8_000;
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max { return s.to_string(); }
+    s.chars().take(max).collect()
+}
+
+/// The creator's own chapters, in order, skipping anything malformed.
+///
+/// yt-dlp emits `chapters: [{start_time, end_time, title}]`. A chapter with no
+/// title or a non-finite start is dropped rather than repaired: a marker in
+/// the wrong place on the timeline is worse than one marker fewer, and the
+/// LLM fallback is right there for a source whose data is unusable.
+fn parse_chapters(v: &serde_json::Value) -> Vec<SourceChapter> {
+    let Some(arr) = v["chapters"].as_array() else { return Vec::new() };
+    let mut out: Vec<SourceChapter> = arr
+        .iter()
+        .filter_map(|c| {
+            let time = c["start_time"].as_f64().filter(|t| t.is_finite() && *t >= 0.0)?;
+            let title = c["title"].as_str().map(str::trim).filter(|t| !t.is_empty())?;
+            Some(SourceChapter { time, title: title.to_string() })
+        })
+        .collect();
+    // Sites are not required to emit these in order, and the timeline draws
+    // them in the order it receives them.
+    out.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap_or(std::cmp::Ordering::Equal));
+    out
 }
 
 /// Choose a poster URL out of yt-dlp's metadata.
@@ -670,6 +723,12 @@ pub async fn fetch_metadata(
         title: v["title"].as_str().unwrap_or("Untitled").to_string(),
         duration: v["duration"].as_f64(),
         thumbnail: pick_thumbnail(&v),
+        chapters: parse_chapters(&v),
+        description: v["description"]
+            .as_str()
+            .map(|d| d.trim())
+            .filter(|d| !d.is_empty())
+            .map(|d| truncate_chars(d, MAX_DESCRIPTION_CHARS)),
         uploader: v["uploader"].as_str().map(String::from),
         upload_date: v["upload_date"].as_str().map(String::from),
         view_count: v["view_count"].as_u64(),
@@ -2379,5 +2438,85 @@ mod thumbnail_tests {
         assert!(pick_thumbnail(&json!({})).is_none());
         assert!(pick_thumbnail(&json!({ "thumbnails": [] })).is_none());
         assert!(pick_thumbnail(&json!({ "thumbnails": [{ "url": "not-a-url" }] })).is_none());
+    }
+}
+
+#[cfg(test)]
+mod chapter_tests {
+    use super::{parse_chapters, truncate_chars, MAX_DESCRIPTION_CHARS};
+    use serde_json::json;
+
+    #[test]
+    fn reads_the_creators_own_chapters() {
+        // The whole point: this app inferred chapters with an LLM while yt-dlp
+        // had the real ones in a probe we already ran.
+        let v = json!({ "chapters": [
+            { "start_time": 0.0, "end_time": 61.0, "title": "Cold open" },
+            { "start_time": 61.0, "end_time": 300.0, "title": "The interview" },
+        ]});
+        let got = parse_chapters(&v);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].time, 0.0);
+        assert_eq!(got[1].title, "The interview");
+    }
+
+    #[test]
+    fn sorts_by_start_time() {
+        // Sites are not required to emit these in order and the timeline draws
+        // them in the order it receives them.
+        let v = json!({ "chapters": [
+            { "start_time": 90.0, "title": "Second" },
+            { "start_time": 10.0, "title": "First" },
+        ]});
+        let got = parse_chapters(&v);
+        assert_eq!(got[0].title, "First");
+        assert_eq!(got[1].title, "Second");
+    }
+
+    #[test]
+    fn drops_a_malformed_chapter_rather_than_repairing_it() {
+        // A marker in the WRONG place is worse than one marker fewer, and the
+        // LLM fallback is right there for a source whose data is unusable.
+        let v = json!({ "chapters": [
+            { "start_time": 10.0, "title": "Good" },
+            { "start_time": 20.0, "title": "   " },
+            { "start_time": 30.0 },
+            { "title": "No start time" },
+            { "start_time": -5.0, "title": "Negative" },
+            { "start_time": "not a number", "title": "Stringly typed" },
+        ]});
+        let got = parse_chapters(&v);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].title, "Good");
+    }
+
+    #[test]
+    fn trims_chapter_titles() {
+        let v = json!({ "chapters": [{ "start_time": 0.0, "title": "  Cold open  " }]});
+        assert_eq!(parse_chapters(&v)[0].title, "Cold open");
+    }
+
+    #[test]
+    fn is_empty_when_the_site_publishes_none() {
+        // The common case for most of the web, and what keeps the LLM path alive.
+        assert!(parse_chapters(&json!({})).is_empty());
+        assert!(parse_chapters(&json!({ "chapters": [] })).is_empty());
+        assert!(parse_chapters(&json!({ "chapters": null })).is_empty());
+        assert!(parse_chapters(&json!({ "chapters": "nope" })).is_empty());
+    }
+
+    #[test]
+    fn truncates_a_description_on_a_char_boundary() {
+        // Bytes would slice a multi-byte character in half and produce a
+        // string that cannot round-trip through JSON.
+        let s = "→".repeat(MAX_DESCRIPTION_CHARS + 100);
+        let cut = truncate_chars(&s, MAX_DESCRIPTION_CHARS);
+        assert_eq!(cut.chars().count(), MAX_DESCRIPTION_CHARS);
+        assert!(cut.chars().all(|c| c == '→'));
+    }
+
+    #[test]
+    fn leaves_a_short_description_untouched() {
+        assert_eq!(truncate_chars("hello", MAX_DESCRIPTION_CHARS), "hello");
     }
 }

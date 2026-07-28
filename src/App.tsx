@@ -97,7 +97,7 @@ import { speakerColor, loadSpeakerOverrides, resolveAliasChain, SPEAKERS_CHANGED
 import { speakerFingerprint, seedSpeakerOverridesFromFingerprint, linkSpeakerOverridesToFingerprint } from "./lib/speaker-identity";
 import { MediaInfoModal } from "./components/MediaInfoModal";
 import { loadReview, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
-import { loadChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
+import { loadChapters, adoptSourceChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
 import { appUndo } from "./lib/undo";
 import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./lib/storage";
 import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
@@ -2142,7 +2142,7 @@ export default function App() {
       vcodec: null,
       acodec: null,
       ext: null,
-      has_subs: false,
+      has_subs: false, chapters: [], description: null,
     };
     setMetadata(stub);
     setSourceKind("youtube");
@@ -2767,7 +2767,7 @@ export default function App() {
         vcodec: lf.vcodec,
         acodec: lf.acodec,
         ext: lf.filename.split(".").pop() ?? null,
-        has_subs: false,
+        has_subs: false, chapters: [], description: null,
       };
       setMetadata(m);
 
@@ -5097,6 +5097,26 @@ export default function App() {
     [sourceKind, localFilePath, metadata, localFileSize],
   );
 
+  /**
+   * Take the creator's own chapters when the site publishes them.
+   *
+   * The AI Summary tab could already detect chapters from the transcript with
+   * the local LLM - slow, and a guess - while yt-dlp had the real list in the
+   * same probe the app runs before playback. This adopts the real ones so the
+   * timeline is populated the moment a source loads, and the LLM stays as the
+   * fallback for the (large) part of the web that publishes none.
+   *
+   * `adoptSourceChapters` only ever writes into an EMPTY store, so re-opening
+   * a source cannot undo a rename or a deletion the user made.
+   */
+  useEffect(() => {
+    const list = metadata?.chapters;
+    if (!reviewSourceKey || !list?.length) return;
+    if (adoptSourceChapters(reviewSourceKey, list)) {
+      appendLog("ok", "chapters", `Using ${list.length} chapters published by the source.`);
+    }
+  }, [reviewSourceKey, metadata, appendLog]);
+
   // ── Speaker-rename fingerprint bridge (r134) ──────────────────────────
   // Speaker renames live in localStorage keyed by SRT path, which orphaned
   // them whenever the path changed (re-transcribe in a new month, rename, or
@@ -5194,7 +5214,7 @@ export default function App() {
       vcodec: offer.vcodec,
       acodec: offer.acodec,
       ext: null,
-      has_subs: false,
+      has_subs: false, chapters: [], description: null,
     });
     setSourceKind("youtube");
     setStatus("loaded");
@@ -6379,6 +6399,7 @@ export default function App() {
                 aiStyle={{ format: defaults.summaryFormat, length: defaults.summaryLength }}
                 onOpenAiSettings={() => { setSettingsInitialTab("ai-summary"); setSettingsOpen(true); }}
                 chapterSourceKey={reviewSourceKey}
+                sourceDescription={metadata?.description ?? null}
                 chapterDurationSec={sourceDurationSec}
                 reviewSourceKey={reviewSourceKey}
                 reviewSourceTitle={metadata?.title ?? null}

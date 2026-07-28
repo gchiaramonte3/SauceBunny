@@ -114,6 +114,8 @@ type Props = {
   /** Auto-chapters: source identity to persist under (main's reviewSourceKey —
    *  the panel receives it through the bus snapshot). */
   chapterSourceKey?: string | null;
+  /** The source's own description, for the AI tab's context. */
+  sourceDescription?: string | null;
   /** Auto-chapters: source duration in seconds (clamps model timestamps). */
   chapterDurationSec?: number | null;
   /** Auto-chapters changed (generate/delete) — the popped-out panel forwards
@@ -237,7 +239,7 @@ export function QueueDrawer({
   onImportTranscript, sourceKind, onFixCaptionTiming,
   transcriptHasSource, onTranscriptEdited,
   aiModelId, aiStyle, onOpenAiSettings,
-  chapterSourceKey, chapterDurationSec, onChaptersChanged,
+  chapterSourceKey, chapterDurationSec, onChaptersChanged, sourceDescription,
   reviewSourceKey, reviewSourceTitle,
   reviewDrawActive, reviewDraft, onToggleReviewDraw, reviewLabelActive, onToggleReviewLabel, onReviewDraftConsumed, onShowAnnotation,
   onOpenReviewSource, onReviewRangeDraft, onRegisterRangeHotkeys, onUndo, onRedo,
@@ -877,6 +879,7 @@ export function QueueDrawer({
           onOpenSettings={onOpenAiSettings}
           onSeek={onTranscriptSeek}
           sourceKey={chapterSourceKey ?? null}
+          sourceDescription={sourceDescription ?? null}
           durationSec={chapterDurationSec ?? null}
           onChaptersChanged={onChaptersChanged}
         />
