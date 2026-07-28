@@ -619,7 +619,9 @@ export function QueueDrawer({
               onPointerUp={onTabPointerUp}
               onPointerCancel={onTabPointerUp}
             >
-              <Icon size={13} stroke={isActive ? "var(--color-accent-green)" : "var(--fg-3)"} />
+              {/* The icon brightens with the label rather than turning green - see
+                  the note on .cp-tab.active. */}
+              <Icon size={13} stroke={isActive ? "var(--fg-1)" : "var(--fg-3)"} />
               <span>{t.label}</span>
               {t.badge != null && t.badge > 0 && (
                 <span className="cp-tab-badge">{t.badge}</span>

@@ -153,14 +153,22 @@
   margin-bottom: -1px; /* lap onto the head border so active tab visually merges */
 }
 .cp-tab:hover { color: var(--fg-1); background: rgba(255,255,255,0.04); }
+/* Active tab: brighter, not greener.
+   The accent used to do double duty here - it marked the selected tab AND it
+   marks the things the accent is actually for (the Post button, a live
+   recording, an armed export). When four tabs each take a turn glowing green,
+   the colour stops meaning "this matters" and starts meaning "this is where
+   you are", which every other cue on the row already says. So the selection
+   is now what selection is everywhere else in this app: a lift in brightness
+   against its neighbours, plus the merge into the body. The outer glow is
+   gone with it - it was the loudest part and it carried no information the
+   border and the fill were not already carrying. */
 .cp-tab.active {
-  color: var(--color-accent-green);
-  background: linear-gradient(180deg, rgba(108,255,141,0.08), rgba(108,255,141,0.02));
-  border-color: rgba(108,255,141,0.20);
+  color: var(--fg-1);
+  background: linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03));
+  border-color: var(--line-2);
   border-bottom-color: var(--bg-1); /* visually merges into the body */
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.06),
-    0 -2px 8px rgba(108,255,141,0.10);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
 }
 .cp-tab.disabled {
   color: var(--fg-5);
@@ -175,16 +183,19 @@
    driven by JS with `transition: none` so it tracks the cursor 1:1. */
 .cp-tab.dragging {
   cursor: grabbing;
-  /* SOLID base under the green tint — the dragged tab must fully OCCLUDE the
+  /* SOLID base under the tint — the dragged tab must fully OCCLUDE the
      tabs/content it sweeps over (a translucent bg let you see through it). The
-     gradient layer is the accent tint; var(--bg-3) is the opaque surface. */
+     gradient layer is the lift; var(--bg-3) is the opaque surface.
+     Neutral, not accent: the tint used to be green, which made a tab being
+     dragged look like a tab being activated now that selection is no longer
+     green. The shadow is what says "lifted"; the colour was never carrying it. */
   background:
-    linear-gradient(rgba(108,255,141,0.12), rgba(108,255,141,0.12)),
+    linear-gradient(rgba(255,255,255,0.10), rgba(255,255,255,0.10)),
     var(--bg-3);
-  border-color: rgba(108,255,141,0.25);
+  border-color: var(--line-3);
   box-shadow:
     0 6px 12px rgba(0,0,0,0.32),
-    0 0 0 1px rgba(108,255,141,0.15);
+    0 0 0 1px rgba(255,255,255,0.12);
   /* No opacity drop — Zoom keeps the dragged thing fully opaque so the
      "this is what's moving" mental model stays crisp. */
   opacity: 1;
