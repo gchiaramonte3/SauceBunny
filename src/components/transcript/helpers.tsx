@@ -76,15 +76,70 @@ export function resolveAliasChain(
 // on-video caption label (solid). Index 0..5 maps a speaker to a hue; the
 // solid base and the gradient at the same index are the same family, so a
 // speaker's caption-label colour matches their sidebar chip.
-const SPEAKER_SOLIDS = ["#6CFF8D", "#6D52ED", "#C54AF7", "#52B5ED", "#F7B84A", "#F7714A"];
-const SPEAKER_GRADIENTS = [
-  "linear-gradient(180deg,#6CFF8D 0%,#3FCB6A 100%)", // green (brand)
-  "linear-gradient(180deg,#6D52ED 0%,#4F3BC7 100%)", // purple (marker)
-  "linear-gradient(180deg,#C54AF7 0%,#9C2EE0 100%)", // pink (brand)
-  "linear-gradient(180deg,#52B5ED 0%,#3B8DC7 100%)", // cyan
-  "linear-gradient(180deg,#F7B84A 0%,#E09B2E 100%)", // amber
-  "linear-gradient(180deg,#F7714A 0%,#E0512E 100%)", // coral
+/**
+ * The speaker palette: twelve hues, plus one tone for "nobody yet".
+ *
+ * WHY TWELVE, AND WHY THESE. The old palette was SIX, so a twenty-six person
+ * cast put four or five people in each colour and the colour stopped meaning
+ * anything. Twelve is not an arbitrary bump — it is roughly where categorical
+ * colour stops working at pip size, which is why d3 dropped schemeCategory20,
+ * Premiere ships sixteen label colours and Avid eight. Past twelve, colour is
+ * not the channel that distinguishes people; the initials in the pip and the
+ * name beside it are.
+ *
+ * These twelve were SEARCHED, not chosen by eye, against three real surfaces
+ * this app renders them on:
+ *
+ *   · the panel background #0E0E10,
+ *   · the on-video caption, worst case a white frame under the default 0.75
+ *     black backing, i.e. #404040 — this is the binding constraint, and it is
+ *     what the previous palette failed,
+ *   · the #0a0a0a initials drawn INSIDE the pip.
+ *
+ * Every member clears 4.5:1 on all three, is at least 15 ΔE00 from the brand
+ * accent so nobody wears it, and the set maximises the minimum pairwise ΔE00,
+ * which lands at 14.5. Not the 15 originally aimed at: 14.5 is the measured
+ * ceiling once all three contrast bars and the accent exclusion are honoured,
+ * and lowering a real constraint to hit a round number would have been the
+ * wrong trade. `speaker-palette.test.ts` pins all of it.
+ *
+ * Do not add a nicer purple here without running that test. The caption
+ * surface is unforgiving and the failure is invisible on a dark frame.
+ */
+const SPEAKER_SOLIDS = [
+  "#FD8A8C", "#FE8F5D", "#EB9A04", "#FBD509",
+  "#ABF201", "#0AF2CD", "#0DE2EB", "#08C0EF",
+  "#75B0FF", "#AAA0FB", "#E887FE", "#F886BB",
 ];
+
+/**
+ * The tone for speech nobody has been assigned to yet.
+ *
+ * Its own entry, because `speakerColorIndex(null)` returned 0 — so "unknown"
+ * wore the first speaker's exact hue and looked like a person. Deliberately
+ * low-chroma so it reads as unassigned, but still a colour rather than the
+ * grey the palette otherwise refuses, and it clears the same three bars.
+ */
+const UNASSIGNED_SOLID = "#AAAD98";
+
+/** Darken a hex for the gradient's bottom stop. */
+function shade(hex: string, factor: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+    .map((c) => Math.max(0, Math.min(255, Math.round(c * factor))));
+  return `#${ch.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Gradients are DERIVED, so a colour can never be updated in one list and
+ *  not the other — which is exactly what two hand-maintained arrays invite. */
+const SPEAKER_GRADIENTS = SPEAKER_SOLIDS.map(
+  (c) => `linear-gradient(180deg,${c} 0%,${shade(c, 0.74)} 100%)`,
+);
+const UNASSIGNED_GRADIENT = `linear-gradient(180deg,${UNASSIGNED_SOLID} 0%,${shade(UNASSIGNED_SOLID, 0.74)} 100%)`;
+
+/** The palette, for the contract test and the colour picker. */
+export const SPEAKER_PALETTE = Object.freeze([...SPEAKER_SOLIDS]);
+export const SPEAKER_UNASSIGNED = UNASSIGNED_SOLID;
 
 /**
  * Stable palette index for a speaker tag. The diarizer's raw tags carry a
@@ -112,6 +167,9 @@ export function speakerColorIndex(speaker: string | null): number {
  * for text. When `null`, returns the brand-green default.
  */
 export function speakerColor(speaker: string | null): string {
+  // Untagged speech gets its own tone rather than sharing the first speaker's
+  // hue, which is what a null index of 0 used to do.
+  if (speaker == null) return UNASSIGNED_GRADIENT;
   return SPEAKER_GRADIENTS[speakerColorIndex(speaker) % SPEAKER_GRADIENTS.length];
 }
 
@@ -121,6 +179,7 @@ export function speakerColor(speaker: string | null): string {
  * matches that speaker's sidebar chip gradient.
  */
 export function speakerTextColor(speaker: string | null): string {
+  if (speaker == null) return UNASSIGNED_SOLID;
   return SPEAKER_SOLIDS[speakerColorIndex(speaker) % SPEAKER_SOLIDS.length];
 }
 

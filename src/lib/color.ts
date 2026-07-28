@@ -72,21 +72,15 @@ export function parseHex(input: string): Rgb | null {
 }
 
 /**
- * Curated 12-swatch palette — even hue spacing, uniform chroma, tuned to read
- * as small pips on a near-black surface (Open Color "5" family). Doubles as the
- * default speaker rotation so manual and auto colours share one vocabulary.
+ * The swatches the speaker colour picker offers.
+ *
+ * These ARE the speaker palette — re-exported rather than restated, which is
+ * the point. The old list was a separate twelve whose comment claimed it
+ * "doubles as the default speaker rotation", and that was never true: the
+ * rotation was a different six in transcript/helpers. Worse, seven of these
+ * twelve failed the on-video caption bar, so the picker actively offered
+ * colours that would be unreadable the moment the speaker said something over
+ * a bright frame. Now the picker cannot offer a colour the palette would not
+ * have chosen, and `speaker-palette.test.ts` covers both.
  */
-export const SPEAKER_PRESETS: readonly string[] = [
-  "#FF6B6B", // coral
-  "#FFA94D", // amber
-  "#FFD43B", // gold
-  "#A9E34B", // lime
-  "#51CF66", // green
-  "#20C997", // teal
-  "#22B8CF", // cyan
-  "#4DABF7", // blue
-  "#748FFC", // indigo
-  "#9775FA", // violet
-  "#DA77F2", // magenta
-  "#F783AC", // pink
-];
+export { SPEAKER_PALETTE as SPEAKER_PRESETS } from "../components/transcript/helpers";
