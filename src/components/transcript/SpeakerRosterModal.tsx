@@ -30,6 +30,9 @@ type Props = {
   onPlaySpeaker: (tag: string) => void;
   /** Write a cast's names and colours in, as one undo step. */
   onApplyCast: (names: Record<string, string>, colors: Record<string, string>, castName: string) => void;
+  /** Capture the frame on screen as a cast member's face. Absent in the panel
+   *  window, which has no player. */
+  onGrabFace?: () => Promise<string | null>;
   /** Resolve a speaker's current pip colour (override-aware). */
   colorOf: (item: RosterItem) => string;
   /** Open the colour picker anchored to this speaker's pip. */
@@ -54,7 +57,7 @@ type Props = {
  * button per row. Backdrop / Escape close.
  */
 export function SpeakerRosterModal({
-  roster, onRename, onMergeMany, colorOf, onPickColor, onPlaySpeaker, onApplyCast, onClose,
+  roster, onRename, onMergeMany, colorOf, onPickColor, onPlaySpeaker, onApplyCast, onGrabFace, onClose,
 }: Props) {
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<"talk" | "name" | "order">("talk");
@@ -155,6 +158,7 @@ export function SpeakerRosterModal({
             roster={roster}
             colorOf={colorOf}
             onApply={setApplying}
+            onGrabFace={onGrabFace}
             onBack={() => setView("roster")}
           />
         ) : (

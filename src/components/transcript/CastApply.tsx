@@ -58,10 +58,22 @@ export function CastApply({
         {targets.length === 0 && <p className="cp-lib-note">This transcript has no named speakers yet.</p>}
         {targets.map((t) => {
           const picked = assignment[t.tag] ?? "";
+          const face = picked ? cast.members.find((m) => m.id === picked)?.avatar : null;
           return (
             <div key={t.tag} className="cp-cast-assign">
               <span className="cp-cast-from" title={t.name}>{t.name}</span>
               <span className="cp-cast-arrow" aria-hidden="true">→</span>
+              {/* A <select> cannot render an image in its options, so the face
+                  of whoever is currently chosen sits beside it. That is the
+                  signal that makes this screen answerable at a glance: you are
+                  matching a voice you just heard to a face you can see. */}
+              {face && (
+                <span
+                  className="cp-cast-optface"
+                  style={{ background: `center/cover url("${face}")` }}
+                  aria-hidden="true"
+                />
+              )}
               <select
                 className="cp-spk-merge cp-cast-select"
                 value={picked}

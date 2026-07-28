@@ -67,6 +67,10 @@ type Props = {
   sourceStartTimecode?: string;
   /** Persist/clear the loaded source's start timecode. */
   onSetSourceTimecode?: (tc: string | null) => void;
+  /** Capture the frame on screen as a cast member's face. Absent in the panel
+   *  window, which has no player — the roster hides the control rather than
+   *  offering one that cannot work. */
+  onGrabFace?: () => Promise<string | null>;
   /** Click-to-seek callback — receives seconds. */
   onTranscriptSeek: (seconds: number) => void;
   /**
@@ -225,7 +229,7 @@ export function QueueDrawer({
   open, viewActive = true, onClose, queue, fps, running, hasFolder,
   onRemove, onClearAll, onExportAll, onStop,
   transcriptPath, transcriptOrigin, playheadAvailable, transcriptFps,
-  sourceStartTimecode, onSetSourceTimecode,
+  sourceStartTimecode, onSetSourceTimecode, onGrabFace,
   onTranscriptSeek, transcriptArrivedTick,
   onClearTranscript, onLoadFromHistory,
   onRegenerateTranscript, regenerateBusy, canRegenerate,
@@ -843,6 +847,7 @@ export function QueueDrawer({
           fps={transcriptFps}
           startTimecode={sourceStartTimecode}
           onSetSourceTimecode={onSetSourceTimecode}
+          onGrabFace={onGrabFace}
           onSeek={onTranscriptSeek}
           origin={transcriptOrigin}
           onClearTranscript={onClearTranscript}

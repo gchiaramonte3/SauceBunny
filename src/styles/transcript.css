@@ -1614,3 +1614,76 @@
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.22);
 }
+
+/* ── Cast member faces (CastShelf expansion) ────────────────────────── */
+.cp-cast-meta {
+  background: transparent;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.cp-cast-meta:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); border-radius: var(--r-sm); }
+.cp-cast-name { display: flex; align-items: center; gap: 3px; }
+.cp-cast-chev {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 9px;
+  color: var(--fg-4);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.cp-cast-chev.open { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .cp-cast-chev { transition: none; } }
+.cp-cast-members {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 0 6px 26px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line-1);
+}
+.cp-cast-member {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.cp-cast-member:hover { background: rgba(255,255,255,0.03); }
+/* 24px rendered, so the stored 96px face is 4x — sharp on any display, and
+   the same asset the apply step shows larger. */
+.cp-cast-face {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.06);
+}
+.cp-cast-mname {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-cast-facefail {
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--fg-4);
+}
+.cp-cast-member .cp-cast-del { opacity: 0; }
+.cp-cast-member:hover .cp-cast-del,
+.cp-cast-member .cp-cast-del:focus-visible { opacity: 1; }
+/* The face in the assign step — bigger, because recognising the person is the
+   entire question being asked there. */
+.cp-cast-optface {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.06);
+}

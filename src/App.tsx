@@ -113,6 +113,7 @@ import { onReviewStoreProblem } from "./lib/review-store";
 import { assetUrl } from "./lib/asset-url";
 import { buildDiagnosticsReport, diagnosticsFilename } from "./lib/diagnostics";
 import { extractFrameAsBlob, extractPosterBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
+import { frameToAvatarDataUrl } from "./lib/avatar";
 import { chosenPosterFor, sourceTimecodeFor, setSourceTimecode, clearSourceTimecode } from "./lib/library";
 import { webPosterFor, setWebPoster } from "./lib/web-poster-store";
 import { exportLocalClipViaMediabunny } from "./lib/mediabunny-export";
@@ -3420,6 +3421,39 @@ export default function App() {
   }, [metadata, sourceKind, localFilePath, snapshotBusy, fps, exportOpts.folder, defaults.useWebCodecsDecoder, appendLog, notify, pushNotification]);
 
   /**
+   * Grab the frame on screen right now as a cast member's face.
+   *
+   * "Sourced from the footage rather than a file picker" — a picker would ask
+   * the user to go and find a photo of someone they are currently looking at.
+   * The flow is: play a speaker's line (the roster's per-speaker play button
+   * jumps straight to one), then take the frame.
+   *
+   * Three ways to get the pixels, in falling order of cheapness, and NONE of
+   * them spawns a subprocess or writes a temp file. handleSnapshot's ffmpeg
+   * fallbacks are deliberately not reused: a snapshot must succeed because the
+   * user asked for a file, whereas a missing face is a shrug and a retry one
+   * frame later. Paying a 200ms cold ffmpeg start for a 96px thumbnail would
+   * be the wrong trade.
+   */
+  const grabFaceFromFrame = useCallback(async (): Promise<string | null> => {
+    const seconds = getPlayheadFrames() / Math.max(1, Math.round(fps));
+    // 1. The active player's own decoder — zero file IO (MediaBunnyPlayer).
+    let blob = (await playerRef.current?.getFrameBlob?.(seconds).catch(() => null)) ?? null;
+    // 2. A fresh mediabunny pass on the original file.
+    if (!blob && sourceKind === "file" && localFilePath && defaults.useWebCodecsDecoder) {
+      blob = await extractFrameAsBlob(localFilePath, seconds).catch(() => null);
+    }
+    // 3. Web sources: the streaming player can paint what is on screen. Its
+    //    MSE source is a same-origin blob: URL, so the canvas is not tainted.
+    if (!blob) {
+      const poster = await playerRef.current?.getPosterDataUrl?.().catch(() => null);
+      if (poster) blob = await fetch(poster).then((r) => r.blob()).catch(() => null);
+    }
+    if (!blob) return null;
+    return frameToAvatarDataUrl(blob);
+  }, [fps, sourceKind, localFilePath, defaults.useWebCodecsDecoder]);
+
+  /**
    * Resolve the per-month subdirectory inside the transcript library
    * (creating it on disk if missing) and return the absolute path.
    * All transcript writers route through this so:
@@ -6287,6 +6321,7 @@ export default function App() {
               {(roomActive || !panelDetached) && <QueueDrawer
                 onUndo={performUndo}
                 onRedo={performRedo}
+                onGrabFace={grabFaceFromFrame}
                 open={roomActive ? true : queueOpen}
                 /* Clip is keep-alive, so this subtree stays mounted on Home /
                    Library. `|| roomActive` is load-bearing: room.css un-hides

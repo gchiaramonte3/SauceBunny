@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const invoke = vi.fn(async (cmd: string) => {
   if (cmd === "default_transcript_library_path") return "/Docs/Sauce Bunny/Transcripts";
@@ -107,5 +107,85 @@ describe("CastShelf", () => {
   it("says what to do when the shelf is bare", () => {
     show();
     expect(screen.getByText(/No saved casts yet/)).toBeTruthy();
+  });
+});
+
+describe("faces from the footage", () => {
+  const FACE = "data:image/jpeg;base64,AAAA";
+
+  function withCast() {
+    const c = newCast("The Show", [newMember("Ada", "#FD8A8C"), newMember("Basil", "#0AF2CD")]);
+    saveCast(c);
+    return c;
+  }
+  const expand = () => fireEvent.click(screen.getByRole("button", { name: "Members of The Show" }));
+
+  it("keeps members collapsed until asked", () => {
+    // A cast of twenty-six expanded by default would bury the shelf.
+    withCast();
+    show();
+    expect(screen.queryByText("Ada")).toBeNull();
+    expand();
+    expect(screen.getByText("Ada")).toBeTruthy();
+  });
+
+  it("offers no face control where there is no player", async () => {
+    // The panel window has no player, so there is nothing to grab. An always-
+    // disabled button that never enables is worse than no button.
+    withCast();
+    show({ onGrabFace: undefined });
+    expand();
+    expect(screen.queryByRole("button", { name: "Grab face" })).toBeNull();
+  });
+
+  it("takes the frame on screen and stores it on the member", async () => {
+    const c = withCast();
+    const onGrabFace = vi.fn(async () => FACE);
+    show({ onGrabFace });
+    expand();
+    fireEvent.click(screen.getAllByRole("button", { name: "Grab face" })[0]);
+    await waitFor(() => expect(getCasts()[0].members[0].avatar).toBe(FACE));
+    expect(onGrabFace).toHaveBeenCalledTimes(1);
+    // …and only that member's.
+    expect(getCasts()[0].members[1].avatar).toBeNull();
+    expect(getCasts()[0].id).toBe(c.id);
+  });
+
+  it("says so, quietly, when there is no frame to take", async () => {
+    withCast();
+    show({ onGrabFace: vi.fn(async () => null) });
+    expand();
+    fireEvent.click(screen.getAllByRole("button", { name: "Grab face" })[0]);
+    await waitFor(() => expect(screen.getByText("No frame on screen")).toBeTruthy());
+    expect(getCasts()[0].members[0].avatar).toBeNull();
+  });
+
+  it("refuses a face that is not a storable inline image", async () => {
+    // A remote URL would turn opening the cast manager into a network fetch,
+    // and an over-cap one would bloat every later write of the whole file.
+    withCast();
+    show({ onGrabFace: vi.fn(async () => "https://example.com/face.jpg") });
+    expand();
+    fireEvent.click(screen.getAllByRole("button", { name: "Grab face" })[0]);
+    await waitFor(() => expect(screen.getByText("No frame on screen")).toBeTruthy());
+    expect(getCasts()[0].members[0].avatar).toBeNull();
+  });
+
+  it("can take a face off again", async () => {
+    withCast();
+    show({ onGrabFace: vi.fn(async () => FACE) });
+    expand();
+    fireEvent.click(screen.getAllByRole("button", { name: "Grab face" })[0]);
+    await waitFor(() => expect(getCasts()[0].members[0].avatar).toBe(FACE));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Ada's face" }));
+    expect(getCasts()[0].members[0].avatar).toBeNull();
+  });
+
+  it("labels the control Replace once a face is set", async () => {
+    withCast();
+    show({ onGrabFace: vi.fn(async () => FACE) });
+    expand();
+    fireEvent.click(screen.getAllByRole("button", { name: "Grab face" })[0]);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Replace face" })).toBeTruthy());
   });
 });

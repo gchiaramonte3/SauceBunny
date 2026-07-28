@@ -122,6 +122,9 @@ type Props = {
   /** Persist the source's start timecode (or clear it with null). When omitted,
    *  the "Set source start timecode…" tool is hidden (no source to key it to). */
   onSetSourceTimecode?: (tc: string | null) => void;
+  /** Capture the frame on screen as a cast member's face. Absent in the panel
+   *  window, which has no player. */
+  onGrabFace?: () => Promise<string | null>;
   /** r84: source kind — the "fix caption timing" banner only applies to web
    *  sources (YouTube auto-caption ASR timing is the loose case). */
   sourceKind?: "youtube" | "file";
@@ -203,7 +206,7 @@ const VTT_DROPPED_RE = /^\s*(?:NOTE\b|STYLE\b|REGION\b)|-->\s*[\d:.,]+[ \t]+\S/m
 export function TranscriptViewer({
   path, reloadToken, playheadActive, onSeek, origin,
   onClearTranscript, onLoadFromHistory, onUndo, onRedo,
-  onRegenerate, regenerateBusy, canRegenerate, fps = 30, startTimecode, onSetSourceTimecode,
+  onRegenerate, regenerateBusy, canRegenerate, fps = 30, startTimecode, onSetSourceTimecode, onGrabFace,
   onRedetectSpeakers, canRedetect,
   onImportTranscript, sourceKind, onFixCaptionTiming,
   hasSource = false, onTranscriptEdited,
@@ -2040,6 +2043,7 @@ export function TranscriptViewer({
           onMergeMany={mergeSpeakers}
           onPlaySpeaker={goToSpeakerTag}
           onApplyCast={applyCast}
+          onGrabFace={onGrabFace}
           colorOf={(item) => speakerDisplayColor(item.colorTag)}
           onPickColor={(item, rect) => setColorPick({ key: item.colorTag ?? "__NULL__", rect })}
           onClose={() => setSpeakerModalOpen(false)}
