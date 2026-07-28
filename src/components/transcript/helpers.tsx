@@ -197,9 +197,32 @@ export type SpeakerOverrides = {
    *  `turn`, so cue-level consumers (the caption overlay) can't apply it —
    *  same documented limitation as per-turn renames. */
   turnTag: Record<string, string>;
+  /**
+   * Per-CUE speaker reassignment: cue start in whole milliseconds → raw tag.
+   *
+   * This is the layer that makes "these two people were merged into one
+   * speaker" fixable, and it is keyed by TIME rather than by index for a
+   * specific reason. Re-detect speakers re-emits every cue with its start and
+   * end unchanged and only rewrites the speaker prefix, so a millisecond key
+   * survives the single most likely follow-up action. Turn indices do not:
+   * grouping keys on `last.speaker === c.speaker`, so changing one speaker
+   * renumbers every turn after it. An index-keyed assignment would not go
+   * inert after a re-detect, it would point at somebody else's words — and
+   * putting dialogue in the wrong person's mouth is the one failure a review
+   * tool must never produce.
+   *
+   * Applied by `retagCues` BEFORE `groupIntoTurns`, which means the turn
+   * boundaries re-derive for free: a run of cues carrying a different speaker
+   * simply becomes its own turn. No turn-splitting code exists or is needed.
+   *
+   * It also reaches every cue-level consumer, which `turnTag` never could —
+   * the on-video captions, the AI summary, the reader analysis and the
+   * timeline speaker lanes.
+   */
+  cueTag: Record<string, string>;
 };
 
-const EMPTY_OVERRIDES: SpeakerOverrides = { global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {} };
+const EMPTY_OVERRIDES: SpeakerOverrides = { global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {}, cueTag: {} };
 
 /** localStorage key the panel persists a transcript's speaker overrides under. */
 export function speakerOverridesKey(path: string): string {
@@ -224,6 +247,46 @@ export function renameSpeakerOverridesPath(oldPath: string, newPath: string): vo
  *  Tauri event (crosses webviews, so panel-window renames reach main). */
 export const SPEAKERS_CHANGED_EVENT = "saucebunny:speakers-changed";
 
+/** The `cueTag` key for a cue: its start time in whole milliseconds. */
+export function cueKey(startSeconds: number): string {
+  return String(Math.round(startSeconds * 1000));
+}
+
+/**
+ * Apply per-cue speaker reassignments, returning a NEW cue array.
+ *
+ * Call this between `parseSrt` and `groupIntoTurns` and the turn structure
+ * re-derives itself: a reassigned run stops matching its neighbours'
+ * speaker, so `groupIntoTurns` starts a new turn at each boundary. That is
+ * the whole splitting mechanism.
+ *
+ * Returns the input array unchanged when there is nothing to apply, so every
+ * consumer can call it unconditionally without paying for a copy.
+ */
+export function retagCues<T extends { start: number; speaker: string | null }>(
+  cues: T[],
+  overrides: Pick<SpeakerOverrides, "cueTag">,
+): T[] {
+  const map = overrides.cueTag;
+  if (!map || Object.keys(map).length === 0) return cues;
+  let touched = false;
+  const out = cues.map((c) => {
+    const raw = map[cueKey(c.start)];
+    if (raw === undefined) return c;
+    // "" is how the UNTAGGED group is written on the wire, because a JSON
+    // object cannot hold `null` as a distinct "assigned to nobody" without
+    // being confusable with "absent". It has to become a real null here: an
+    // empty-string speaker is not the same thing as no speaker, and it would
+    // travel all the way to `humanizeSpeakerTag` and render as a nameless
+    // label rather than falling into the unknown group.
+    const tag = raw === "" ? null : raw;
+    if (tag === c.speaker) return c;
+    touched = true;
+    return { ...c, speaker: tag };
+  });
+  return touched ? out : cues;
+}
+
 /** Read + shape-clamp the persisted overrides for a path. */
 export function loadSpeakerOverrides(path: string | null): SpeakerOverrides {
   if (!path) return EMPTY_OVERRIDES;
@@ -237,6 +300,7 @@ export function loadSpeakerOverrides(path: string | null): SpeakerOverrides {
       aliases: p.aliases && typeof p.aliases === "object" ? p.aliases : {},
       colors: p.colors && typeof p.colors === "object" ? p.colors : {},
       turnTag: p.turnTag && typeof p.turnTag === "object" ? p.turnTag : {},
+      cueTag: p.cueTag && typeof p.cueTag === "object" ? p.cueTag : {},
     };
   } catch {
     return EMPTY_OVERRIDES;

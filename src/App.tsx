@@ -76,7 +76,7 @@ import {
   getHistory as getTranscriptHistory,
   type TranscriptHistoryEntry,
 } from "./lib/transcript-history";
-import { renameSpeakerOverridesPath } from "./components/transcript/helpers";
+import { renameSpeakerOverridesPath, retagCues } from "./components/transcript/helpers";
 import {
   deriveOnboardingSteps, onboardingComplete,
   loadOnboardingDismissed, saveOnboardingDismissed,
@@ -1200,7 +1200,10 @@ export default function App() {
           maxBytes: 8 * 1024 * 1024,
         });
         if (!alive) return;
-        const cues = parseSrt(text);
+        const ovForCues = loadSpeakerOverrides(transcriptPath);
+        // Reassigned cues repaint the timeline's speaker lanes. The old
+        // per-turn layer never reached here either.
+        const cues = retagCues(parseSrt(text), ovForCues);
         if (!cues.some((c) => c.speaker !== null)) { setSpeakerLaneData([]); return; }
         // 3a fix: resolve each lane's color through the SAME override path
         // the transcript uses (alias chain -> user-picked color -> palette).

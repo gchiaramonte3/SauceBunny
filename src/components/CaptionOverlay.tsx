@@ -9,6 +9,7 @@ import {
   resolveSpeakerColor,
   speakerOverridesKey,
   SPEAKERS_CHANGED_EVENT,
+  retagCues,
   type SpeakerOverrides,
 } from "./transcript/helpers";
 
@@ -141,7 +142,6 @@ export function CaptionOverlay({ path, reloadToken, fps, enabled, style }: Props
   const [cues, setCues] = useState<Cue[]>([]);
   // Diarization is a property of the transcript, not of the playhead: compute
   // it once per cue array instead of scanning every cue on every tick.
-  const hasSpeakersMemo = useMemo(() => cues.some((c) => !!c.speaker), [cues]);
   // The path+token the current `cues` belong to. Guards against showing one
   // source's captions over another's video during the async load gap, while
   // the token component forces a re-read when the SAME path is overwritten.
@@ -156,6 +156,14 @@ export function CaptionOverlay({ path, reloadToken, fps, enabled, style }: Props
   // captions off there are no listeners, no poll, no reads at all; toggling
   // them back on re-seeds from storage.
   const [overrides, setOverrides] = useState<SpeakerOverrides>(() => loadSpeakerOverrides(path));
+  // Per-cue reassignments applied HERE, not at parse time. The overlay keeps
+  // the file's cues in state and re-reads overrides on the speakers-changed
+  // event, so retagging at parse would mean a reassignment did not reach the
+  // video until the transcript reloaded. This is the point of moving the
+  // model from per-turn to per-cue: the label on the picture now changes the
+  // moment you split a speaker in the panel.
+  const taggedCues = useMemo(() => retagCues(cues, overrides), [cues, overrides]);
+  const hasSpeakersMemo = useMemo(() => taggedCues.some((c) => !!c.speaker), [taggedCues]);
   // Last raw localStorage string we applied — skip setState when unchanged so
   // the backstop channels below don't re-render on every check.
   const overridesRawRef = useRef<string | null>(null);
@@ -225,14 +233,14 @@ export function CaptionOverlay({ path, reloadToken, fps, enabled, style }: Props
     return () => { cancelled = true; };
   }, [enabled, path, loadKey]);
 
-  if (!enabled || loadedFor.current !== loadKey || cues.length === 0) return null;
+  if (!enabled || loadedFor.current !== loadKey || taggedCues.length === 0) return null;
   // Shift the lookup by the user's sync offset (streaming drift correction).
   const t = currentSec + (style?.syncSec ?? 0);
   // Binary search, not find(): this render body runs on EVERY playhead tick,
   // and a three-hour transcript is tens of thousands of cues. Shared with the
   // transcript reader (lib/srt.ts) so both answer the question the same way.
-  const activeIdx = cueIndexAt(cues, t);
-  const active = activeIdx >= 0 ? cues[activeIdx] : undefined;
+  const activeIdx = cueIndexAt(taggedCues, t);
+  const active = activeIdx >= 0 ? taggedCues[activeIdx] : undefined;
   const text = active?.text?.trim();
   if (!text) return null;
 

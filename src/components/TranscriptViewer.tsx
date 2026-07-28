@@ -36,6 +36,9 @@ import {
   speakerTextColor,
   speakerInitials,
   SPEAKERS_CHANGED_EVENT,
+  loadSpeakerOverrides,
+  retagCues,
+  cueKey,
   type SpeakerOverrides,
 } from "./transcript/helpers";
 
@@ -156,14 +159,15 @@ type Props = {
 // target speaker's name AND colour (and follows later renames of it).
 //
 // All layers persist together in localStorage keyed by path.
-type Overrides = {
-  global: Record<string, string>;
-  turn: Record<string, string>;
-  aliases: Record<string, string>;
-  colors: Record<string, string>; // canonical tag → custom hex pip colour
-  turnTag: Record<string, string>; // ti → canonical tag ("Speaker" = untagged group)
-};
-const EMPTY: Overrides = { global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {} };
+/**
+ * The shape lives in transcript/helpers.tsx and is imported, not restated.
+ *
+ * This file used to declare its own structurally-identical `Overrides` type,
+ * which is precisely how a new key goes missing in one of two copies — and it
+ * did: adding `cueTag` to the shared shape produced four type errors here and
+ * nowhere else. `editOverrides` was already typed against the shared one.
+ */
+const EMPTY: SpeakerOverrides = { global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {}, cueTag: {} };
 
 /** Sibling backup path for a rewrite of a user-supplied transcript:
  *  `/a/b/foo.vtt` → `/a/b/foo.orig.vtt`. */
@@ -216,30 +220,18 @@ export function TranscriptViewer({
   // ── Speaker overrides ───────────────────────────────────────────
   // (Type + layer semantics documented at module scope, above the component.)
   const storageKey = path ? `saucebunny.speakerNames.${path}` : null;
-  const [overrides, setOverrides] = useState<Overrides>(EMPTY);
+  const [overrides, setOverrides] = useState<SpeakerOverrides>(EMPTY);
 
   // Load overrides when the path changes.
   useEffect(() => {
-    if (!storageKey) { setOverrides(EMPTY); return; }
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Overrides;
-        // Defensive: clamp shape so a corrupted entry doesn't crash.
-        setOverrides({
-          global:  typeof parsed.global  === "object" && parsed.global  ? parsed.global  : {},
-          turn:    typeof parsed.turn    === "object" && parsed.turn    ? parsed.turn    : {},
-          aliases: typeof parsed.aliases === "object" && parsed.aliases ? parsed.aliases : {},
-          colors:  typeof parsed.colors  === "object" && parsed.colors  ? parsed.colors  : {},
-          turnTag: typeof parsed.turnTag === "object" && parsed.turnTag ? parsed.turnTag : {},
-        });
-      } else {
-        setOverrides(EMPTY);
-      }
-    } catch {
-      setOverrides(EMPTY);
-    }
-  }, [storageKey]);
+    // One loader, shared with every other consumer. This used to be a
+    // hand-rolled shape-clamp, and a second copy of it lived thirty lines
+    // below — so a new key had to be added in three places and was added in
+    // one. `loadSpeakerOverrides` already does the clamping, already handles
+    // a corrupt entry, and is what the caption overlay and the AI surfaces
+    // read through.
+    setOverrides(loadSpeakerOverrides(path));
+  }, [storageKey, path]);
 
   // Re-read when an EXTERNAL writer changes this path's overrides: the
   // App-level fingerprint bridge seeding names from a prior transcript of the
@@ -251,18 +243,11 @@ export function TranscriptViewer({
     const onExternal = (e: Event) => {
       const p = (e as CustomEvent<{ path?: string }>).detail?.path;
       if (p && p !== path) return;
-      let next: Overrides = EMPTY;
+      let next: SpeakerOverrides = EMPTY;
       try {
         const raw = localStorage.getItem(storageKey);
         if (raw) {
-          const parsed = JSON.parse(raw) as Overrides;
-          next = {
-            global:  typeof parsed.global  === "object" && parsed.global  ? parsed.global  : {},
-            turn:    typeof parsed.turn    === "object" && parsed.turn    ? parsed.turn    : {},
-            aliases: typeof parsed.aliases === "object" && parsed.aliases ? parsed.aliases : {},
-            colors:  typeof parsed.colors  === "object" && parsed.colors  ? parsed.colors  : {},
-            turnTag: typeof parsed.turnTag === "object" && parsed.turnTag ? parsed.turnTag : {},
-          };
+          next = loadSpeakerOverrides(path);
         }
       } catch { return; }
       setOverrides((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
@@ -385,10 +370,14 @@ export function TranscriptViewer({
   }, [path, reloadToken]);
 
   // ── Parse + group whenever the raw text changes ──────────────────
+  // retagCues sits between parse and group, which is the entire splitting
+  // mechanism: a reassigned run of cues stops matching its neighbours'
+  // speaker, so groupIntoTurns starts a new turn at each boundary. There is
+  // no turn-splitting code anywhere, and there does not need to be.
   const turns: Turn[] = useMemo(() => {
     if (!raw) return [];
-    try { return groupIntoTurns(parseSrt(raw)); } catch { return []; }
-  }, [raw]);
+    try { return groupIntoTurns(retagCues(parseSrt(raw), overrides)); } catch { return []; }
+  }, [raw, overrides]);
 
   const flatCues = useMemo(
     () => turns.flatMap((t, ti) => t.cues.map((c, ci) => ({ cue: c, turnIdx: ti, cueIdx: ci }))),
@@ -418,6 +407,21 @@ export function TranscriptViewer({
   // again, so Tab-away-and-back returns to where they were working rather than
   // snapping to wherever playback has drifted.
   const [focusedCue, setFocusedCue] = useState<number | null>(null);
+  // True while a left-button drag is in flight over the transcript body, so
+  // the per-cue hover lift can stand down and let the browser's selection
+  // highlight be the feedback. Cleared on the window, not the element: a drag
+  // routinely ends outside the cue it started in, and often outside the panel.
+  const [selecting, setSelecting] = useState(false);
+  useEffect(() => {
+    if (!selecting) return;
+    const done = () => setSelecting(false);
+    window.addEventListener("pointerup", done);
+    window.addEventListener("pointercancel", done);
+    return () => {
+      window.removeEventListener("pointerup", done);
+      window.removeEventListener("pointercancel", done);
+    };
+  }, [selecting]);
   const activeCueIdx = useSyncExternalStore(
     subscribePlayhead,
     useCallback(() => {
@@ -503,13 +507,44 @@ export function TranscriptViewer({
    * display name AND the chip colour key off this, so a reassigned turn
    * looks exactly like the target speaker.
    */
-  const effectiveTagFor = useCallback((turnIdx: number, originalTag: string | null): string | null => {
-    const reassigned = overrides.turnTag[String(turnIdx)];
-    if (reassigned !== undefined) {
-      return reassigned === "Speaker" ? null : resolveAlias(reassigned);
+  /**
+   * One-time migration of the old per-TURN reassignments into per-cue ones.
+   *
+   * `turnTag` was keyed by turn index, and turn indices are derived — changing
+   * one speaker renumbers every turn after it — so the old data was fragile
+   * even where it worked, and it could never reach the captions, the AI
+   * surfaces or the timeline lanes at all. Cue start times are stable across
+   * a re-detect, so this converts each stored turn index to the start times of
+   * the cues it currently covers.
+   *
+   * Runs only once the transcript is parsed, because the turn-to-cue mapping
+   * only exists then. Written WITHOUT an undo entry on purpose: this is not
+   * something the user did, and offering to undo it would offer to restore a
+   * shape nothing reads any more.
+   *
+   * `turn` (per-turn free-text renames) is deliberately left alone. It sets a
+   * display NAME for one turn, which has no cue-level equivalent, so folding
+   * it in would change its meaning rather than move it.
+   */
+  useEffect(() => {
+    const stale = Object.keys(overrides.turnTag);
+    if (stale.length === 0 || turns.length === 0) return;
+    const cueTag = { ...overrides.cueTag };
+    for (const key of stale) {
+      const turn = turns[Number(key)];
+      if (!turn) continue; // the transcript changed under it; drop rather than guess
+      const tag = overrides.turnTag[key];
+      for (const c of turn.cues) cueTag[cueKey(c.start)] = tag;
     }
+    setOverrides((prev) => ({ ...prev, cueTag, turnTag: {} }));
+  }, [turns, overrides.turnTag, overrides.cueTag]);
+
+  const effectiveTagFor = useCallback((_turnIdx: number, originalTag: string | null): string | null => {
+    // Reassignment now lives on the CUE and is applied by `retagCues` before
+    // grouping, so by the time a turn exists its `speaker` is already the
+    // effective one. This survives only as the alias-resolution step.
     return resolveAlias(originalTag);
-  }, [overrides.turnTag, resolveAlias]);
+  }, [resolveAlias]);
 
   const displayNameFor = useCallback((turnIdx: number, originalTag: string | null): string => {
     const turnOverride = overrides.turn[String(turnIdx)];
@@ -679,12 +714,13 @@ export function TranscriptViewer({
         // dragged onto themselves (transitively).
         return prev;
       }
-      const next: Overrides = {
+      const next: SpeakerOverrides = {
         global:  { ...prev.global },
         turn:    { ...prev.turn },
         aliases: { ...prev.aliases, [sourceTag]: canonicalTarget },
         colors:  { ...prev.colors },
         turnTag: { ...prev.turnTag },
+        cueTag:  { ...prev.cueTag },
       };
       // Drop a now-unused global rename on the source (its tag
       // resolves elsewhere, so the rename would never display anyway).
@@ -701,9 +737,9 @@ export function TranscriptViewer({
     const key = canonicalTag === "Speaker" ? "__NULL__" : canonicalTag;
     const resolved = key === "__NULL__" ? null : key;
     editOverrides("rename speaker", (prev) => {
-      const next: Overrides = {
+      const next: SpeakerOverrides = {
         global: { ...prev.global }, turn: { ...prev.turn }, aliases: { ...prev.aliases },
-        colors: { ...prev.colors }, turnTag: { ...prev.turnTag },
+        colors: { ...prev.colors }, turnTag: { ...prev.turnTag }, cueTag: { ...prev.cueTag },
       };
       if (trimmed && trimmed !== humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers })) {
         next.global[key] = trimmed;
@@ -830,12 +866,13 @@ export function TranscriptViewer({
     if (!rename) return;
     const trimmed = newName.trim();
     editOverrides(scope === "turn" ? "rename this turn" : "rename speaker", (prev) => {
-      const next: Overrides = {
+      const next: SpeakerOverrides = {
         global:  { ...prev.global },
         turn:    { ...prev.turn },
         aliases: { ...prev.aliases },
         colors:  { ...prev.colors },
         turnTag: { ...prev.turnTag },
+        cueTag:  { ...prev.cueTag },
       };
       // Key the GLOBAL rename on the alias-RESOLVED tag — displayNameFor reads
       // overrides under the resolved key, and mergeSpeaker deletes globals
@@ -911,16 +948,30 @@ export function TranscriptViewer({
    */
   const reassignTurn = useCallback((turnIdx: number, targetTag: string) => {
     editOverrides("reassign turn", (prev) => {
-      const next: Overrides = {
+      const next: SpeakerOverrides = {
         global:  { ...prev.global },
         turn:    { ...prev.turn },
         aliases: { ...prev.aliases },
         colors:  { ...prev.colors },
         turnTag: { ...prev.turnTag },
+        cueTag:  { ...prev.cueTag },
       };
-      const original = resolveAliasChain(turns[turnIdx]?.speaker ?? null, prev.aliases) ?? "Speaker";
-      if (targetTag === original) delete next.turnTag[String(turnIdx)];
-      else next.turnTag[String(turnIdx)] = targetTag;
+      // Writes CUE tags, not a turn tag. Reassigning a whole turn is just the
+      // special case of reassigning all of its cues — which means it reaches
+      // the captions, the AI surfaces and the timeline lanes like any other
+      // reassignment, and it cannot be invalidated by the turn renumbering
+      // that a later speaker change causes.
+      const turn = turns[turnIdx];
+      if (!turn) return prev;
+      const original = resolveAliasChain(turn.speaker ?? null, prev.aliases) ?? "Speaker";
+      for (const c of turn.cues) {
+        const k = cueKey(c.start);
+        // Assigning a cue back to the speaker it already had removes the
+        // override rather than storing a no-op, so "put it back" leaves no
+        // trace and the empty-overrides check can still clear the key.
+        if (targetTag === original) delete next.cueTag[k];
+        else next.cueTag[k] = targetTag === "Speaker" ? "" : targetTag;
+      }
       delete next.turn[String(turnIdx)];
       return next;
     });
@@ -928,7 +979,7 @@ export function TranscriptViewer({
   }, [turns, editOverrides]);
 
   function resetAllRenames() {
-    editOverrides("reset all speaker names", () => ({ global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {} }));
+    editOverrides("reset all speaker names", () => ({ ...EMPTY }));
     setRename(null);
   }
 
@@ -1678,7 +1729,15 @@ export function TranscriptViewer({
       )}
 
       {/* Body — one chat-bubble block per turn */}
-      <div className="cp-tx-body" ref={scrollRef} onScroll={onScroll}>
+      <div
+        className={"cp-tx-body" + (selecting ? " selecting" : "")}
+        ref={scrollRef}
+        onScroll={onScroll}
+        // Tracked on the body rather than per cue: a drag that starts on one
+        // cue and ends on another only produces pointer events on the cue it
+        // started in, so a per-cue flag would never clear.
+        onPointerDown={(e) => { if (e.button === 0) setSelecting(true); }}
+      >
         {turns.map((turn, ti) => {
           const cueStartIdx = cueStartIndices[ti];
           const { displayName, resolvedTag } = turnMeta[ti];
@@ -1771,7 +1830,17 @@ export function TranscriptViewer({
                       tabIndex={idx === tabbableCueIdx ? 0 : -1}
                       onFocus={() => setFocusedCue(idx)}
                       aria-label={`${secondsToTc(cue.start, fps)} ${cue.text}`}
-                      onClick={() => { setAutoScroll(true); onSeek(cue.start); }}
+                      onClick={() => {
+                        // A drag-select ENDS in a click on the last cue it
+                        // touched. Without this guard, finishing a selection
+                        // seeks the player and re-arms follow-scroll, which
+                        // then scrolls the very selection you just made out
+                        // from under you. Nothing else in the app selects
+                        // text, so nothing else hit this.
+                        if (!document.getSelection()?.isCollapsed) return;
+                        setAutoScroll(true);
+                        onSeek(cue.start);
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === "F2") {
                           e.preventDefault();

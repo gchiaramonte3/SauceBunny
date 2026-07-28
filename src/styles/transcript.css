@@ -479,6 +479,17 @@
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
   border-radius: 4px;
 }
+/* ...but not while a selection drag is in flight. The lift is a 150ms-delayed
+   background plus a ring, and dragging across a paragraph would strobe it
+   through every cue the pointer crosses — which is both ugly and actively
+   confusing, because the lift is the same affordance that says "this cue is
+   the one you are pointing at". The browser's own selection highlight is the
+   correct feedback during a drag. */
+.cp-tx-body.selecting .cp-tx-cue:hover {
+  transition-delay: 0ms;
+  background: none;
+  box-shadow: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .cp-tx-cue { transition: none; }
 }

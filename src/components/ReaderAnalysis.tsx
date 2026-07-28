@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { streamChat, type ChatMessage } from "../lib/ai-chat";
 import { parseSrt, groupIntoTurns, fmtTime } from "../lib/srt";
-import { loadSpeakerOverrides, resolveSpeakerName } from "./transcript/helpers";
+import { loadSpeakerOverrides, resolveSpeakerName, retagCues } from "./transcript/helpers";
 import { formatError } from "../lib/error-format";
 import { Markdown } from "./Markdown";
 import { IconSparkles, IconSpinnerArc, IconRefresh, IconAlert } from "./Icons";
@@ -18,10 +18,10 @@ const DEFAULT_STYLE: SummaryStyle = { format: "bullets", length: "standard" };
  *  A lean twin of AiSummary's transcriptForModel (pure — kept local per the
  *  "duplicate before a 3rd consumer" rule; the two never share stateful logic). */
 function buildTranscriptForModel(raw: string, ctx: number, srtPath: string) {
-  let turns;
-  try { turns = groupIntoTurns(parseSrt(raw)); } catch { return null; }
-  if (!turns.length) return null;
   const overrides = loadSpeakerOverrides(srtPath);
+  let turns;
+  try { turns = groupIntoTurns(retagCues(parseSrt(raw), overrides)); } catch { return null; }
+  if (!turns.length) return null;
   const hasSpeakers = turns.some((t) => !!t.speaker);
   const text = turns.map((t) => {
     const name = t.speaker ? resolveSpeakerName(t.speaker, overrides) : null;

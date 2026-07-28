@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { parseSrt, groupIntoTurns, fmtTime } from "../lib/srt";
-import { loadSpeakerOverrides, resolveSpeakerName, SPEAKERS_CHANGED_EVENT } from "./transcript/helpers";
+import { loadSpeakerOverrides, resolveSpeakerName, retagCues, SPEAKERS_CHANGED_EVENT } from "./transcript/helpers";
 import { streamChat, type ChatMessage } from "../lib/ai-chat";
 import { loadAiProvider, cloudChat } from "../lib/ai-provider";
 import { formatError } from "../lib/error-format";
@@ -239,10 +239,13 @@ export function AiSummary({
   // attribute points by name — works for any model.
   const transcriptForModel = useMemo(() => {
     if (!raw) return null;
-    let turns;
-    try { turns = groupIntoTurns(parseSrt(raw)); } catch { return null; }
-    if (!turns.length) return null;
     const overrides = loadSpeakerOverrides(transcriptPath);
+    let turns;
+    // Per-cue reassignments reach the model too. Before this they could not:
+    // the old per-TURN layer was invisible to anything that re-parsed the
+    // file, so a summary could attribute a line to the wrong person.
+    try { turns = groupIntoTurns(retagCues(parseSrt(raw), overrides)); } catch { return null; }
+    if (!turns.length) return null;
     const hasSpeakers = turns.some((t) => !!t.speaker);
     const lines = turns.map((t) => {
       const name = t.speaker ? resolveSpeakerName(t.speaker, overrides) : null;
