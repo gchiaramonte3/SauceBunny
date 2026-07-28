@@ -5,6 +5,7 @@ import {
   type ConversionOptions,
 } from "mediabunny";
 import { mediabunnySource } from "./mediabunny-source";
+import { platformSupports } from "./platform-capabilities";
 
 export type LocalExportFormat = "video-mp4" | "audio-mp3";
 
@@ -17,8 +18,8 @@ export type LocalExportOptions = {
   endSeconds: number | null;
   /**
    * Output kind. video-mp4 = full A+V passthrough (lossless) or WebCodecs
-   * re-encode. audio-mp3 = audio-only via Mp3OutputFormat (requires the
-   * @mediabunny/mp3-encoder extension registered at app startup).
+   * re-encode. audio-mp3 = audio-only via Mp3OutputFormat, whose encoder is
+   * loaded on demand by `ensureMp3Encoder` below.
    */
   format: LocalExportFormat;
   /** Called repeatedly with progress 0..1 + the source time we've reached. */
@@ -56,6 +57,38 @@ export type LocalExportResult =
  *                    available for the target container).
  *  • "error"       → real failure; surface it.
  */
+/**
+ * Load and register the LAME-via-WASM MP3 encoder, once, on first use.
+ *
+ * WHY IT IS NOT REGISTERED AT STARTUP ANY MORE. `@mediabunny/mp3-encoder`
+ * inlines its WASM module as a base64 string inside a worker source: measured
+ * in the built bundle, that is a 305,695-character literal wrapping a 297,380-
+ * character blob, decoding to a 223 KB WASM module. It was roughly 15% of the
+ * entire JS bundle, parsed on every single launch, for a format most sessions
+ * never export. Nothing else in the app can pull it in, because
+ * `Mp3OutputFormat` is constructed in exactly one place — the function below.
+ *
+ * THE CAPABILITY GATE IS NOT OPTIONAL (r150). Registering a WASM-backed
+ * extension the platform cannot actually run does not fail loudly, it HANGS:
+ * mediabunny queues work behind an init promise that never settles and the
+ * feature goes silent with no error anywhere. That is exactly how a CSP
+ * missing 'wasm-unsafe-eval' produced a perfect video with no audio in the
+ * packaged app while `tauri dev` was fine. So the gate that used to live in
+ * main.tsx moves here with the import, unchanged. When it fails we simply do
+ * not register, and mediabunny's own "no encoder available" surfaces through
+ * the existing `unsupported` path rather than hanging.
+ */
+let mp3EncoderReady: Promise<void> | null = null;
+function ensureMp3Encoder(): Promise<void> {
+  mp3EncoderReady ??= (async () => {
+    const platform = platformSupports();
+    if (!platform.wasm || !platform.blobWorker) return;
+    const m = await import("@mediabunny/mp3-encoder");
+    m.registerMp3Encoder();
+  })();
+  return mp3EncoderReady;
+}
+
 export async function exportLocalClipViaMediabunny(
   opts: LocalExportOptions,
   cancelToken: { cancelled: boolean } = { cancelled: false },
@@ -63,10 +96,14 @@ export async function exportLocalClipViaMediabunny(
   // Shared range-reader, not asset:// — see the note in waveform.ts: the asset
   // handler is synchronous on the main thread and caps responses at 1 MiB, so
   // reading a whole source through it fragments into a scheme task per MiB.
+  // Before the Output is built, because registration is a global side effect
+  // on mediabunny's encoder registry and Conversion resolves encoders when it
+  // initialises.
+  if (opts.format === "audio-mp3") await ensureMp3Encoder();
+
   const input = new Input({ source: mediabunnySource(opts.inputPath), formats: ALL_FORMATS });
   const target = new BufferTarget();
-  // Output container picks based on requested format. MP3 needs the
-  // mp3-encoder extension registered at app startup (see main.tsx).
+  // Output container picks based on requested format.
   const outputFormat = opts.format === "audio-mp3"
     ? new Mp3OutputFormat()
     : new Mp4OutputFormat({ fastStart: "in-memory" });

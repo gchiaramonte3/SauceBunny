@@ -92,3 +92,39 @@ describe("CSP contract: the shipped policy must permit what startup registers", 
     ).toBe(true);
   });
 });
+
+describe("MP3 encoder loads lazily, and still behind its capability gate", () => {
+  const entry = readFileSync(resolve(ROOT, "src/main.tsx"), "utf8");
+  const exporter = readFileSync(resolve(ROOT, "src/lib/mediabunny-export.ts"), "utf8");
+
+  it("is not pulled into the startup entry chunk", () => {
+    // It inlines a 223 KB WASM module as base64 inside a worker source —
+    // measured at ~15% of the whole JS bundle — for a format most sessions
+    // never export. A static import anywhere main.tsx reaches puts it back.
+    expect(entry).not.toMatch(/mp3-encoder/);
+  });
+
+  it("keeps the r150 capability gate on the lazy path", () => {
+    // THE failure this guards is silent. Registering a WASM-backed extension
+    // the platform cannot run does not throw — mediabunny queues work behind
+    // an init promise that never settles, and MP3 export hangs forever with
+    // no error anywhere. Moving the import must not leave the gate behind.
+    const lazy = exporter.slice(exporter.indexOf("function ensureMp3Encoder"));
+    expect(lazy).toMatch(/platformSupports\(\)/);
+    expect(lazy).toMatch(/platform\.wasm/);
+    expect(lazy).toMatch(/platform\.blobWorker/);
+    expect(lazy).toMatch(/await import\("@mediabunny\/mp3-encoder"\)/);
+  });
+
+  it("registers the encoder BEFORE the Mp3 output format is constructed", () => {
+    // Registration is a global side effect on mediabunny's encoder registry,
+    // and Conversion resolves encoders when it initialises. Awaiting it after
+    // the Output exists is a race that would only ever fail on a cold first
+    // export — the exact case nobody tests by hand.
+    const awaitAt = exporter.indexOf('await ensureMp3Encoder()');
+    const buildAt = exporter.indexOf("new Mp3OutputFormat()");
+    expect(awaitAt).toBeGreaterThan(-1);
+    expect(buildAt).toBeGreaterThan(-1);
+    expect(awaitAt).toBeLessThan(buildAt);
+  });
+});

@@ -15,12 +15,6 @@ import "@fontsource/nunito-sans/600.css";
 import "@fontsource/nunito-sans/700.css";
 import "@fontsource/nunito-sans/800.css";
 
-// Mediabunny's MP3 encoder extension — registers a lame-via-WASM encoder
-// so Mp3OutputFormat can actually produce MP3 bytes in the browser.
-// Without this, audio-MP3 exports for local files would fail at runtime
-// with "no encoder available". Registered once at app startup; tree
-// shaken out of any build that doesn't use Mp3OutputFormat.
-import { registerMp3Encoder } from "@mediabunny/mp3-encoder";
 import { platformSupports } from "./lib/platform-capabilities";
 
 // EVERY registration below is gated on measured capability (r150). Each of
@@ -32,8 +26,11 @@ import { platformSupports } from "./lib/platform-capabilities";
 // while `tauri dev` (which serves with no CSP at all) was fine.
 const platform = platformSupports();
 
-// MP3 encoding is WASM + Worker.
-if (platform.wasm && platform.blobWorker) registerMp3Encoder();
+// NOTE: the MP3 encoder is deliberately NOT registered here. It inlines a
+// 223 KB WASM module as base64 inside a worker source — about 15% of the whole
+// JS bundle — and audio-MP3 export is a feature most sessions never touch, so
+// it loads on first use instead. Its capability gate moved with it, intact:
+// see ensureMp3Encoder in lib/mediabunny-export.ts.
 
 // Custom mediabunny decoders (WASM libopus) so local playback can be
 // mediabunny-first even where WKWebView lacks a WebCodecs AudioDecoder —
