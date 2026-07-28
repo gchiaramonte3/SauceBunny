@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import {
   checkForUpdate, loadLastCheck, type UpdateStatus,
@@ -35,13 +36,9 @@ export function UpdateRow() {
     }
   };
 
-  // The opener plugin's default scope allows http(s), which is all we need
-  // here (the System Settings deep links are the ones that must go through
-  // Rust - see open_privacy_pane).
   const openDownload = (url: string) => {
-    void import("@tauri-apps/plugin-opener")
-      .then((m) => m.openUrl(url))
-      .catch(() => { /* opener unavailable; the release page is in the menu too */ });
+    // Failure is survivable: the release page is in the app menu too.
+    invoke("open_external_url", { url }).catch(() => { /* ignore */ });
   };
 
   return (

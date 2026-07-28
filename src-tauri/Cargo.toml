@@ -26,10 +26,15 @@ tauri = { version = "2", features = ["protocol-asset", "macos-private-api"] }
 # "denied" - AVCaptureDevice.authorizationStatus is the real answer).
 objc2 = "0.6"
 objc2-foundation = "0.3"
+# NSPasteboard, for read_clipboard_text. Already in the tree via muda/tao/tauri
+# (see `cargo tree -i objc2-app-kit`), so naming it directly adds no crate - it
+# only makes a dependency the app already compiles usable from our own code.
+# This replaced tauri-plugin-clipboard-manager, which pulled arboard and, with
+# it, an entire image stack (image, tiff, zune-jpeg, moxcms, fax, weezl...) to
+# support a clipboard write-image the app has never called.
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
-tauri-plugin-opener = "2"
-tauri-plugin-clipboard-manager = "2"
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

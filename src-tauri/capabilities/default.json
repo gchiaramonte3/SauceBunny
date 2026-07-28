@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for Sauce Bunny. Deliberately NO shell permissions: capabilities gate the WEBVIEW's IPC surface only, every sidecar is spawned from Rust via app.shell() (which the ACL does not gate), and the frontend imports no part of the shell plugin - so the old execute/spawn grants were pure unused attack surface for a compromised renderer (arbitrary args to ffmpeg/yt-dlp/whisper). Do not re-add them for a Rust-side need; Rust never needs them.",
+  "description": "Default capabilities for Sauce Bunny. Deliberately NO shell permissions: capabilities gate the WEBVIEW's IPC surface only, every sidecar is spawned from Rust via app.shell() (which the ACL does not gate), and the frontend imports no part of the shell plugin - so the old execute/spawn grants were pure unused attack surface for a compromised renderer (arbitrary args to ffmpeg/yt-dlp/whisper). Do not re-add them for a Rust-side need; Rust never needs them. The opener and clipboard-manager plugins were ejected in r152 and replaced by open_external_url / read_clipboard_text / navigator.clipboard - clipboard-manager alone was compiling an entire image and colour-management stack (arboard, image, tiff, zune-jpeg, moxcms, fax...) so the app could copy a join code, and opener:default carried an unscoped reveal-any-path-in-Finder the app never called.",
   "windows": [
     "main"
   ],
@@ -11,10 +11,6 @@
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",
-    "opener:default",
-    "clipboard-manager:default",
-    "clipboard-manager:allow-read-text",
-    "clipboard-manager:allow-write-text",
     "notification:default",
     "notification:allow-notify",
     "notification:allow-is-permission-granted",

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { loadJson, saveJson } from "../lib/storage";
 import { ColorSwatches } from "./ColorSwatches";
 import { IconChevronRight, IconCrown, IconLink, IconPlay } from "./Icons";
@@ -100,7 +99,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   const copyCode = async () => {
     if (!session.code) return;
     try {
-      await writeText(session.code);
+      await navigator.clipboard.writeText(session.code);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch { /* clipboard unavailable */ }

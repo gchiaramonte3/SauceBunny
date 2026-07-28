@@ -29,7 +29,6 @@ import { Transport } from "./components/Transport";
 import { Timeline } from "./components/Timeline";
 import { ViewOptions } from "./components/ViewOptions";
 import { LogsPanel } from "./components/LogsPanel";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { RoomControlBar } from "./components/RoomControlBar";
 import { reactionGlyph } from "./lib/reactions";
 import { ReviewStatusChip } from "./components/ReviewStatusChip";
@@ -5812,7 +5811,7 @@ export default function App() {
                           type="button"
                           className="btn btn-ghost btn-compact cp-room-code"
                           title="Copy the join code"
-                          onClick={() => { if (coSession.code) void writeText(coSession.code).then(() => pushNotification("success", "Join code copied", "")); }}
+                          onClick={() => { if (coSession.code) void navigator.clipboard.writeText(coSession.code).then(() => pushNotification("success", "Join code copied", "")); }}
                         >
                           Copy join code
                         </button>

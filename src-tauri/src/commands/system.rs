@@ -813,6 +813,79 @@ pub fn open_privacy_pane(anchor: String) -> Result<(), crate::AppError> {
     Ok(())
 }
 
+/// Read plain text off the system clipboard.
+///
+/// WHY THIS IS RUST AND NOT `navigator.clipboard.readText()`. The web API
+/// raises macOS's "Paste from clipboard?" system modal on every call - a
+/// second confirmation for a button the user just pressed on purpose. Reading
+/// through the OS from the app's own process does not. That property is the
+/// entire reason this command exists, and it is the thing to check first if
+/// anyone is ever tempted to "simplify" the paste button back to the web API.
+///
+/// Replaces `tauri-plugin-clipboard-manager`, which brought `arboard` and with
+/// it an entire image and colour-management stack - `image`, `tiff`,
+/// `zune-jpeg`, `moxcms`, `fax`, `weezl` and more, fourteen crates in total -
+/// because arboard's `image-data` feature is on by default and the plugin does
+/// not disable it. All of that was compiled so the app could copy a join code.
+/// The three `writeText` call sites moved to `navigator.clipboard.writeText`,
+/// which three other places in this codebase were already using; only this
+/// read had a reason to stay native.
+///
+/// Returns an empty string when the clipboard holds no text (an image, a file
+/// promise, or nothing) - "nothing to paste" is a normal state, not an error.
+#[tauri::command]
+pub fn read_clipboard_text() -> Result<String, crate::AppError> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+        // SAFETY: generalPasteboard() and stringForType: are both documented
+        // as callable from any thread; nothing here is retained past the call.
+        let text = unsafe {
+            NSPasteboard::generalPasteboard().stringForType(NSPasteboardTypeString)
+        };
+        Ok(text.map(|s| s.to_string()).unwrap_or_default())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(String::new())
+    }
+}
+
+/// Open an http(s) URL in the user's default browser.
+///
+/// Replaces `tauri-plugin-opener`, which the app used for exactly two links
+/// (the update download and the AI provider key pages) while its `default`
+/// permission set granted three commands. One of those, `reveal_item_in_dir`,
+/// takes a `Vec<PathBuf>` and - unlike its two siblings - performs NO scope
+/// check whatsoever, so granting `opener:default` handed the renderer an
+/// unscoped "reveal any path on disk in Finder" it never once called. The app
+/// already reveals paths through `reveal_in_finder` below, which checks that
+/// the path exists, and already opens four URLs through `std::process` because
+/// the plugin's own scope could not express what those links needed.
+///
+/// The only thing the plugin was buying was scheme validation, and that is the
+/// three lines below. Everything else it brought was surface.
+///
+/// The scheme allowlist is the security boundary and is not optional: `open`
+/// will happily launch `file:///`, `x-apple.systempreferences:`, or any
+/// registered custom scheme, which would turn a compromised webview into an
+/// arbitrary-application launcher. System Settings deep links keep going
+/// through `open_privacy_pane`, where the anchor is allowlisted.
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), crate::AppError> {
+    let parsed = url::Url::parse(&url).map_err(|_| crate::AppError::invalid("Not a URL"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(crate::AppError::invalid("Only http and https links can be opened"));
+    }
+    // Pass the REPARSED url, not the caller's string: parsing normalises the
+    // input, so what gets handed to `open` is exactly what was validated.
+    std::process::Command::new("open")
+        .arg(parsed.as_str())
+        .spawn()
+        .map_err(|e| crate::AppError::internal(format!("open url: {e}")))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn reveal_in_finder(path: String) -> Result<(), crate::AppError> {
     let p = PathBuf::from(&path);
@@ -1002,7 +1075,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-07-26-r151-audit-batch-e";
+pub const BACKEND_BUILD_ID: &str = "2026-07-28-r152-eject-opener-clipboard";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

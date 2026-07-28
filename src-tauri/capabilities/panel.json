@@ -1,15 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "panel",
-  "description": "Floating side-panel window (r44.B). Without its own capability the panel webview gets ZERO permissions under Tauri 2's ACL — it can't listen for panel:state, emit panel:action:*, or invoke close_panel_window, leaving the pop-out inert. Scope: events + app invokes via core:default, plus exactly what the panel's own tree reaches — save-file dialogs (TranscriptViewer, AiSummary, ReviewPanel) and clipboard WRITE (AiChapters). Deliberately NO shell — the panel never spawns sidecars; main owns all jobs. Also deliberately no opener, no notifications and no clipboard READ: the only callers of those live under Toolbar and SettingsModal, which App.tsx mounts and the panel does not, so granting them here was reach the panel could never use. Guarded by capability-scope.test.ts.",
+  "description": "Floating side-panel window (r44.B). Without its own capability the panel webview gets ZERO permissions under Tauri 2's ACL — it can't listen for panel:state, emit panel:action:*, or invoke close_panel_window, leaving the pop-out inert. Scope: events + app invokes via core:default, plus exactly what the panel's own tree reaches — save-file dialogs (TranscriptViewer, AiSummary, ReviewPanel). Clipboard writes go through navigator.clipboard, which needs no grant. Deliberately NO shell — the panel never spawns sidecars; main owns all jobs. Also deliberately no opener and no notifications: the only callers of those live under Toolbar and SettingsModal, which App.tsx mounts and the panel does not, so granting them here was reach the panel could never use. Guarded by capability-scope.test.ts.",
   "windows": ["panel"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
     "dialog:default",
     "dialog:allow-open",
-    "dialog:allow-save",
-    "clipboard-manager:default",
-    "clipboard-manager:allow-write-text"
+    "dialog:allow-save"
   ]
 }

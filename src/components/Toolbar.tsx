@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { readText } from "@tauri-apps/plugin-clipboard-manager";
+import { invoke } from "@tauri-apps/api/core";
 import { IconLink, IconClipboard, IconImport, IconPanelRight, IconPanelLeft } from "./Icons";
 import { NotificationBell, type Notif } from "./NotificationBell";
 import { RecentSources } from "./RecentSources";
@@ -58,9 +58,13 @@ export function Toolbar({
 
   async function pasteFromClipboard() {
     try {
-      // Tauri's clipboard-manager plugin reads via the OS through Rust,
-      // so macOS won't show the browser's "Paste from clipboard?" modal.
-      const text = await readText();
+      // Read through Rust, NOT navigator.clipboard.readText(): the web API
+      // raises macOS's "Paste from clipboard?" system modal every time, which
+      // is a second confirmation for a button the user just pressed. Reading
+      // from the app's own process does not. (r152 replaced the
+      // clipboard-manager plugin with read_clipboard_text; the property is
+      // the same and this is still the reason for it.)
+      const text = await invoke<string>("read_clipboard_text");
       if (text) {
         const cleaned = stripScheme(text.trim());
         onChange(cleaned);

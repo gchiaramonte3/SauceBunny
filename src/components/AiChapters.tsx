@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { streamChat } from "../lib/ai-chat";
 import { formatError } from "../lib/error-format";
 import {
@@ -109,7 +108,7 @@ export function AiChapters({
 
   async function copyForYouTube() {
     try {
-      await writeText(chaptersToYouTube(chapters));
+      await navigator.clipboard.writeText(chaptersToYouTube(chapters));
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch { /* clipboard unavailable */ }

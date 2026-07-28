@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import { IconCheck, IconAlert } from "./Icons";
 import {
@@ -7,8 +8,10 @@ import {
   DEFAULT_CLOUD_MODEL, type AiProvider, type CloudProvider,
 } from "../lib/ai-provider";
 
+/** Open a key-management page in the default browser. Rust validates the
+ *  scheme; a failure here is not worth interrupting a settings pane for. */
 function openExternal(url: string) {
-  void import("@tauri-apps/plugin-opener").then((m) => m.openUrl(url)).catch(() => { /* ignore */ });
+  invoke("open_external_url", { url }).catch(() => { /* ignore */ });
 }
 
 const CLOUD: { id: CloudProvider; label: string; keyHint: string; keyUrl: string; modelHint: string }[] = [
