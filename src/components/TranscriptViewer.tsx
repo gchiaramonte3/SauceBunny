@@ -2065,7 +2065,13 @@ export function TranscriptViewer({
         <NewSpeakerSheet
           suggestions={roster
             .filter((r) => r.tag !== naming.tag)
-            .map((r) => ({ tag: r.tag, name: r.name, color: speakerDisplayColor(r.colorTag) }))}
+            .map((r) => ({
+              tag: r.tag,
+              name: r.name,
+              color: speakerDisplayColor(r.colorTag),
+              talkSeconds: r.talkSeconds,
+              untagged: r.colorTag === null,
+            }))}
           initialColor={speakerDisplayColor(naming.tag)}
           onName={(name, color) => {
             editOverrides("name new speaker", (prev) => ({

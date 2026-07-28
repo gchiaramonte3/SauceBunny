@@ -1551,7 +1551,7 @@
    name, one list to hand the lines to somebody who already exists. It
    reuses the roster's backdrop so the two read as the same family. */
 .cp-newspk {
-  width: min(380px, calc(100vw - 48px));
+  width: min(420px, calc(100vw - 48px));
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
@@ -1582,19 +1582,50 @@
 }
 .cp-newspk-pip.sm { width: 13px; height: 13px; cursor: default; }
 .cp-newspk-or {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-family: var(--font-ui);
   font-size: 10px;
   color: var(--fg-4);
   padding-top: var(--s-1);
 }
-/* Wraps rather than scrolls: a cast big enough to need scrolling here is a
-   cast that should be picked from the roster, not from a split sheet. */
-.cp-newspk-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.cp-newspk-count {
+  font-weight: 700;
+  color: var(--fg-3);
+  background: rgba(255,255,255,0.07);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+/* SCROLLS, and this reverses an earlier decision.
+   The note that stood here said a cast big enough to need scrolling should be
+   picked from the roster instead. That premise is wrong: the roster renames
+   and merges speakers, it cannot give THESE PARTICULAR LINES to somebody, so
+   this sheet is the only place the action exists. Wrapping meant a
+   twenty-six person cast rendered an eight-row cloud that ran off the bottom
+   of the screen, in first-heard order. Four rows, scrolled, ordered by talk
+   time. */
+.cp-newspk-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 4px;
+  max-height: 152px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Recessed, so the region reads as a container with more inside it rather
+     than as a list that happens to stop. */
+  padding: 6px;
+  border-radius: 8px;
+  background: rgba(0,0,0,0.22);
+  border: 1px solid var(--line-1);
+}
 .cp-newspk-suggest {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 8px;
+  padding: 3px 4px 3px 8px;
   border-radius: 999px;
   border: 1px solid var(--line-2);
   background: var(--bg-3);
@@ -1602,8 +1633,37 @@
   font-family: var(--font-ui);
   font-size: 11px;
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 .cp-newspk-suggest:hover { background: var(--bg-4); }
+.cp-newspk-suggest:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+/* Promoted by what is being typed.
+   The reorder is the main signal, but when eleven of twenty-six names match
+   "speaker 1" the boundary between promoted and not has to be visible or the
+   new order looks arbitrary. A left rule reads as a group marker at chip size
+   where a border tint does not — and it is deliberately white, not the accent,
+   because the accent means "selected control" everywhere else in the app. */
+.cp-newspk-suggest.hit {
+  border-color: var(--line-3);
+  background: var(--bg-4);
+  color: var(--fg-1);
+  box-shadow: inset 2px 0 0 rgba(255,255,255,0.5);
+}
+.cp-newspk-sname {
+  max-width: 148px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-newspk-talk {
+  flex-shrink: 0;
+  font-size: 9.5px;
+  color: var(--fg-4);
+  background: rgba(255,255,255,0.05);
+  border-radius: 999px;
+  padding: 1px 5px;
+  font-variant-numeric: tabular-nums;
+}
 
 /* Colour pip inside the cue context menu, so "Assign to X" shows whose
    colour X wears rather than making the user remember. */
