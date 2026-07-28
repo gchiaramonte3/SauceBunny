@@ -76,3 +76,40 @@ describe("TranscriptViewer undo/redo", () => {
     expect(undo().getAttribute("title")).toBe("Undo merge speakers");
   });
 });
+
+describe("cue editing is reachable without a mouse", () => {
+  it("exposes each cue as a real control, not a bare span", async () => {
+    // Fixing a Whisper mis-transcription is the most common thing anyone does
+    // in this panel, and the only way in was a double-click on a <span> with
+    // no role, no tab stop and no key handler. A mouse was mandatory to
+    // correct a word.
+    await mount();
+    const cues = document.querySelectorAll(".cp-tx-cue");
+    expect(cues.length).toBeGreaterThan(0);
+    for (const c of cues) {
+      expect(c.getAttribute("role")).toBe("button");
+      expect(c.getAttribute("aria-label")).toBeTruthy();
+    }
+  });
+
+  it("gives the panel exactly ONE tab stop, not one per cue", async () => {
+    // A two-hour interview is thousands of cues. Making each one tabbable
+    // would be the same explosion the Library grid had; the stop belongs on
+    // the line being heard, which is the line you want to fix.
+    await mount();
+    const tabbable = [...document.querySelectorAll(".cp-tx-cue")]
+      .filter((c) => c.getAttribute("tabindex") === "0");
+    expect(tabbable).toHaveLength(1);
+  });
+
+  it("opens the editor on F2, the rename convention", async () => {
+    await mount();
+    const cue = document.querySelector('.cp-tx-cue[tabindex="0"]') as HTMLElement;
+    act(() => cue.focus());
+    act(() => {
+      cue.dispatchEvent(new KeyboardEvent("keydown", { key: "F2", bubbles: true }));
+    });
+    // The editor replaces the cue with a textarea in place.
+    await waitFor(() => expect(document.querySelector("textarea")).toBeTruthy());
+  });
+});

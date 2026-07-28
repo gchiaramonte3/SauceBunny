@@ -410,6 +410,14 @@ export function TranscriptViewer({
   // unvirtualized turn/cue tree tens of times a second to produce a value that
   // was identical almost every time. useSyncExternalStore compares the snapshot,
   // so an unchanged index now re-renders nothing at all.
+  // Which cue owns the panel's single tab stop.
+  //
+  // The one at the playhead by default, so Tab lands on the line being heard —
+  // the line someone reaching for the keyboard wants to correct. Clicking or
+  // focusing another cue moves it there, and it stays until the user moves it
+  // again, so Tab-away-and-back returns to where they were working rather than
+  // snapping to wherever playback has drifted.
+  const [focusedCue, setFocusedCue] = useState<number | null>(null);
   const activeCueIdx = useSyncExternalStore(
     subscribePlayhead,
     useCallback(() => {
@@ -427,6 +435,7 @@ export function TranscriptViewer({
       return Math.max(-1, hi);
     }, [playheadActive, flatCues, fps]),
   );
+  const tabbableCueIdx = focusedCue ?? (activeCueIdx >= 0 ? activeCueIdx : 0);
 
   useEffect(() => {
     if (!autoScroll || activeCueIdx < 0 || !scrollRef.current) return;
@@ -1741,7 +1750,42 @@ export function TranscriptViewer({
                         (isMatch ? " match" : "") +
                         (isActiveMatch ? " match-active" : "")
                       }
+                      // Editing a cue is the most common thing anyone does in
+                      // this panel — a Whisper mis-transcription is fixed here
+                      // — and the ONLY way in was a double-click on a bare
+                      // <span> with no role, no tab stop and no key handler.
+                      // A mouse was mandatory to correct a word.
+                      //
+                      // Now a real button-shaped control: Enter or Space jumps
+                      // (matching the click), and F2 opens the editor, which is
+                      // the rename convention every file manager and
+                      // spreadsheet has trained people on. Double-click still
+                      // works and is still the fastest way with a mouse.
+                      role="button"
+                      // EXACTLY ONE cue is a tab stop, and it is the one at the
+                      // playhead — so Tab lands you on the line you are
+                      // currently hearing, which is the line you want to fix.
+                      // Making every cue tabbable would put thousands of stops
+                      // in a two-hour interview, the same explosion the Library
+                      // grid had. Clicking any cue moves the stop to it.
+                      tabIndex={idx === tabbableCueIdx ? 0 : -1}
+                      onFocus={() => setFocusedCue(idx)}
+                      aria-label={`${secondsToTc(cue.start, fps)} ${cue.text}`}
                       onClick={() => { setAutoScroll(true); onSeek(cue.start); }}
+                      onKeyDown={(e) => {
+                        if (e.key === "F2") {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setAutoScroll(false);
+                          setEditingCue(idx);
+                          return;
+                        }
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setAutoScroll(true);
+                          onSeek(cue.start);
+                        }
+                      }}
                       onDoubleClick={(e) => {
                         e.stopPropagation();
                         // Freeze follow-mode so the karaoke autoscroll can't
@@ -1749,7 +1793,7 @@ export function TranscriptViewer({
                         setAutoScroll(false);
                         setEditingCue(idx);
                       }}
-                      title={`${secondsToTc(cue.start, fps)} · click to jump · double-click to edit`}
+                      title={`${secondsToTc(cue.start, fps)} · click to jump · double-click or F2 to edit`}
                     >
                       {/* In speaker mode, don't highlight the body —
                           the query targets the speaker name, not the

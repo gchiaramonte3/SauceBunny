@@ -76,7 +76,11 @@ body {
 /* ============================================================
    FOCUS
    ============================================================ */
-button:focus-visible, input:focus-visible {
+button:focus-visible, input:focus-visible,
+/* Custom widgets that carry a real ARIA role need the ring too — the selector
+   used to name only <button> and <input>, so a div-based slider or a
+   role="button" cue could take focus with nothing to show for it. */
+[role="slider"]:focus-visible, [role="button"]:focus-visible {
   outline: none;
   box-shadow: 0 0 0 1px var(--focus-ring);
 }

@@ -6,6 +6,7 @@ import {
   IconPlay, IconPause, IconSkipBack, IconSkipForward, IconPanelRight, IconFilm, IconSpinnerArc,
 } from "./Icons";
 import { usePlayheadSeconds } from "../lib/playhead-store";
+import { secondsToHms } from "../lib/timecode";
 
 /**
  * The reader's follow-along source — a local file resolved for playback the
@@ -148,7 +149,40 @@ export function ReaderPlayerStage({
               : <LocalMediaPlayer key={"lm:" + source.path} ref={playerRef} {...playerProps} />}
           </div>
           <div className="cp-reader-transport">
-            <div className="cp-reader-scrub" onClick={seekToFraction} role="presentation" title="Click to jump">
+            {/* role="presentation" ACTIVELY DELETED this from the
+                accessibility tree — a seek bar announced as nothing, with no
+                tab stop and no keys. It is the only way to move around a
+                recording in the reader. Same slider contract the Timeline's
+                playhead already carries: a real role, the position as a
+                timecode rather than a raw number, and the arrow keys an editor
+                expects. Reading is a keyboard activity; needing a mouse to
+                skip back ten seconds is the whole problem. */}
+            <div
+              className="cp-reader-scrub"
+              onClick={seekToFraction}
+              role="slider"
+              tabIndex={0}
+              aria-label="Playback position"
+              aria-valuemin={0}
+              aria-valuemax={Math.max(0, Math.round(duration))}
+              aria-valuenow={Math.round(cur)}
+              aria-valuetext={secondsToHms(cur)}
+              onKeyDown={(e) => {
+                // Deliberately the same map as the transport: arrows step,
+                // shift steps further, Home/End go to the ends.
+                const step =
+                  e.key === "ArrowLeft" ? (e.shiftKey ? -10 : -5)
+                  : e.key === "ArrowRight" ? (e.shiftKey ? 10 : 5)
+                  : null;
+                if (step != null) { e.preventDefault(); skip(step); return; }
+                if (e.key === "Home") { e.preventDefault(); playerRef.current?.seekTo(0); return; }
+                if (e.key === "End" && duration) {
+                  e.preventDefault();
+                  playerRef.current?.seekTo(Math.max(0, duration - 0.1));
+                }
+              }}
+              title="Click to jump, or focus and use the arrow keys"
+            >
               <div className="cp-reader-scrub-fill" style={{ width: `${pct}%` }} />
             </div>
             <div className="cp-reader-transport-row">
