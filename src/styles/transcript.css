@@ -1747,3 +1747,133 @@
   border-radius: 50%;
   box-shadow: 0 0 0 2px rgba(255,255,255,0.06);
 }
+
+/* ── Speakers view (SpeakerGroups) — the transcript by person ─────────── */
+.cp-tx-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 16px;
+}
+.cp-tx-group {
+  border-radius: 10px;
+  border: 1px solid transparent;
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+/* Dimmed rather than hidden while filtering: a speaker that vanishes reads as
+   deleted, and the counts around it stop making sense. */
+.cp-tx-group.dim { opacity: 0.32; }
+/* Whoever is talking right now. The one thing that keeps this view tied to
+   playback instead of being a static index. */
+.cp-tx-group.speaking {
+  border-color: var(--line-2);
+  background: rgba(255,255,255,0.03);
+}
+.cp-tx-group-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+}
+.cp-tx-group-head:hover { background: rgba(255,255,255,0.04); }
+.cp-tx-group-head:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+.cp-tx-group-chev {
+  flex-shrink: 0;
+  width: 9px;
+  color: var(--fg-4);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.cp-tx-group-chev.open { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+  .cp-tx-group-chev { transition: none; }
+  .cp-tx-group { transition: none; }
+}
+.cp-tx-group-chip {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  /* Same near-black the transcript bubbles use behind initials — the palette's
+     contrast test is measured against this exact value. */
+  color: #0a0a0a;
+}
+.cp-tx-group-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-tx-group-talk {
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
+.cp-tx-group-turns {
+  flex-shrink: 0;
+  min-width: 62px;
+  text-align: right;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+}
+.cp-tx-group-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 8px 30px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line-1);
+}
+.cp-tx-group-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 5px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.cp-tx-group-line:hover { background: rgba(255,255,255,0.04); }
+.cp-tx-group-line:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+.cp-tx-group-line.live { background: rgba(255,255,255,0.07); }
+.cp-tx-group-tc {
+  flex-shrink: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+}
+.cp-tx-group-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg-2);
+}
+.cp-tx-group-line.live .cp-tx-group-text { color: var(--fg-1); }

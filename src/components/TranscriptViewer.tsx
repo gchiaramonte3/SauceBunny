@@ -29,6 +29,7 @@ import { TranscriptSearchBar, type SearchMode } from "./transcript/SearchBar";
 import { CueEditor } from "./transcript/CueEditor";
 import { CueSelectionMenu } from "./transcript/CueSelectionMenu";
 import { NewSpeakerSheet } from "./transcript/NewSpeakerSheet";
+import { SpeakerGroups } from "./transcript/SpeakerGroups";
 import { newSpeakerTag, paintCueRange, selectionToCueRange } from "./transcript/cue-selection";
 import {
   escapeHtml,
@@ -737,6 +738,9 @@ export function TranscriptViewer({
     name: string;
     /** Number of turns assigned to this canonical tag. */
     turnCount: number;
+    /** Indices into `turns`, in chronological order. What the Speakers view
+     *  expands to show, so it never has to re-walk the transcript. */
+    turnIdxs: number[];
     /** Seconds of speech. The axis a cast is actually ordered by: turn count
      *  says how often someone was interrupted, talk time says who the lead
      *  is. Computed here because the turns are already in hand. */
@@ -767,6 +771,7 @@ export function TranscriptViewer({
           name: overrides.global[resolved ?? "__NULL__"]
             ?? humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers }),
           turnCount: 0,
+          turnIdxs: [],
           talkSeconds: 0,
           sourceTags: [],
         };
@@ -774,6 +779,7 @@ export function TranscriptViewer({
         orderMap.set(canonical, order++);
       }
       entry.turnCount += 1;
+      entry.turnIdxs.push(ti);
       for (const c of t.cues) entry.talkSeconds += Math.max(0, c.end - c.start);
       if (t.speaker && !entry.sourceTags.includes(t.speaker)) {
         entry.sourceTags.push(t.speaker);
@@ -810,6 +816,29 @@ export function TranscriptViewer({
       overrides.colors[colorTag ?? "__NULL__"] || speakerColor(colorTag),
     [overrides.colors],
   );
+
+  /**
+   * The Speakers view's data, loudest first.
+   *
+   * Sorted here rather than in the component so the ORDER is a decision this
+   * file owns alongside every other roster decision — and so the component
+   * stays a renderer. The roster's own order is first appearance, which is
+   * deliberately not reused: chronological is what the Text view is for.
+   */
+  const speakerGroups = useMemo(
+    () => roster
+      .map((r) => ({
+        tag: r.tag,
+        name: r.name,
+        color: speakerDisplayColor(r.colorTag),
+        talkSeconds: r.talkSeconds,
+        turnCount: r.turnCount,
+        turnIdxs: r.turnIdxs,
+      }))
+      .sort((a, b) => b.talkSeconds - a.talkSeconds),
+    [roster, speakerDisplayColor],
+  );
+
   const setSpeakerColor = useCallback((key: string, hex: string) => {
     editOverrides("speaker colour", (p) => ({ ...p, colors: { ...p.colors, [key]: hex } }));
   }, [editOverrides]);
@@ -1835,7 +1864,17 @@ export function TranscriptViewer({
         // started in, so a per-cue flag would never clear.
         onPointerDown={(e) => { if (e.button === 0) setSelecting(true); }}
       >
-        {turns.map((turn, ti) => {
+        {searchMode === "speakers" ? (
+          <SpeakerGroups
+            groups={speakerGroups}
+            turns={turns}
+            cueStartIndices={cueStartIndices}
+            activeCueIdx={activeCueIdx}
+            query={query}
+            formatTime={(sec) => secondsToTc(sec, fps)}
+            onSeek={(sec) => { setAutoScroll(true); onSeek(sec); }}
+          />
+        ) : turns.map((turn, ti) => {
           const cueStartIdx = cueStartIndices[ti];
           const { displayName, resolvedTag } = turnMeta[ti];
           const hasOverride =
