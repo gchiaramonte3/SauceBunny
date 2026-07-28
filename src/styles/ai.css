@@ -197,6 +197,7 @@
 .cp-ai-composer {
   display: flex;
   gap: 8px;
+  position: relative; /* anchor for the slash-command menu */
   padding: 10px 12px;
   border-top: 1px solid var(--line-1);
   background: var(--bg-0);
@@ -423,3 +424,63 @@
   cursor: pointer;
 }
 .cp-ai-chapter-del:hover { color: var(--danger); background: rgba(232, 38, 38, 0.10); }
+
+/* ── Slash commands in the composer (lib/transcript-prompts.ts) ───────── */
+/* Anchored to the composer (which is position:relative above), opening
+   UPWARD: the composer sits at the bottom of the panel, so a downward menu
+   would open off-screen. */
+.cp-ai-slash {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 40;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+}
+.cp-ai-slash-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+/* Hover and keyboard share ONE highlight, driven by the cursor state — two
+   competing highlights is the classic way a typeahead starts lying about
+   what Enter will do. */
+.cp-ai-slash-item.on { background: rgba(255,255,255,0.08); }
+.cp-ai-slash-label {
+  flex-shrink: 0;
+  min-width: 88px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.cp-ai-slash-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  color: var(--fg-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-ai-slash-none {
+  padding: 8px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  color: var(--fg-4);
+}

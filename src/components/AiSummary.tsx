@@ -46,6 +46,8 @@ type Props = {
   onChaptersChanged?: () => void;
 };
 
+import { matchPrompts, slashQuery } from "../lib/transcript-prompts";
+
 const SUGGESTIONS = [
   "Summarize this transcript in a few bullet points.",
   "What are the key takeaways, with timestamps?",
@@ -216,11 +218,52 @@ export function AiSummary({
   // ── Chat ─────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
+
   const [streaming, setStreaming] = useState(false);
   // Mutual exclusion with the chapters run, both directions: AiChapters gates
   // on `chatBusy`, and this mirrors its busy state back so the composer can't
   // fire a second request at the single llama-server mid-detection.
   const [chaptersBusy, setChaptersBusy] = useState(false);
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  /** Which slash suggestion the keyboard is on. */
+  const [slashCursor, setSlashCursor] = useState(0);
+
+  // Command mode is a leading slash and nothing before it — see slashQuery.
+  const slashQ = slashQuery(input);
+  const slashHits = useMemo(() => (slashQ === null ? [] : matchPrompts(slashQ)), [slashQ]);
+  const slashOpen = slashQ !== null && !streaming && !chaptersBusy;
+
+  /** Put a command's wording in the box, ready to edit or send. */
+  const pickPrompt = useCallback((i: number) => {
+    const p = slashHits[i];
+    if (!p) return;
+    setInput(p.prompt);
+    setSlashCursor(0);
+    inputRef.current?.focus();
+  }, [slashHits]);
+
+  /**
+   * The menu owns the arrow keys, Enter and Tab only while it is open.
+   *
+   * Enter is the one that matters: with the menu open it must PICK, not send,
+   * or typing "/quotes" and pressing Enter would fire the literal string
+   * "/quotes" at the model. Escape closes by clearing the slash rather than by
+   * a separate open flag, so there is one source of truth for "is the menu up".
+   */
+  const onComposerKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!slashOpen) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setSlashCursor((c) => Math.min(slashHits.length - 1, c + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setSlashCursor((c) => Math.max(0, c - 1)); }
+    else if (e.key === "Enter" || e.key === "Tab") {
+      if (slashHits.length === 0) return;
+      e.preventDefault();
+      pickPrompt(slashCursor);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setInput("");
+    }
+  }, [slashOpen, slashHits.length, slashCursor, pickPrompt]);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -599,13 +642,41 @@ export function AiSummary({
 
       <form
         className="cp-ai-composer"
-        onSubmit={(e) => { e.preventDefault(); send(input); }}
+        onSubmit={(e) => { e.preventDefault(); if (!slashOpen) send(input); }}
       >
+        {/* Slash commands. These are PROMPTS, not features - each is a
+            sentence somebody would otherwise have had to write well, written
+            once. Picking one FILLS the box rather than sending: the wording is
+            visible before it costs a model call, it stays editable, and seeing
+            it teaches the user to ask better questions of their own. */}
+        {slashOpen && (
+          <div className="cp-ai-slash" role="listbox" aria-label="Transcript commands">
+            {slashHits.length === 0 && <div className="cp-ai-slash-none">No command matches</div>}
+            {slashHits.map((p, i) => (
+              <button
+                key={p.id}
+                type="button"
+                role="option"
+                aria-selected={i === slashCursor}
+                className={"cp-ai-slash-item" + (i === slashCursor ? " on" : "")}
+                // Mouse DOWN, not click: the input blurs first otherwise and
+                // the menu unmounts before the click ever lands.
+                onMouseDown={(e) => { e.preventDefault(); pickPrompt(i); }}
+                onMouseEnter={() => setSlashCursor(i)}
+              >
+                <span className="cp-ai-slash-label">/{p.id}</span>
+                <span className="cp-ai-slash-hint">{p.hint}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <input
+          ref={inputRef}
           className="cp-ai-input"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={chaptersBusy ? "Detecting chapters…" : 'Ask about the transcript… e.g. "pull quotes about pricing"'}
+          onChange={(e) => { setInput(e.target.value); setSlashCursor(0); }}
+          onKeyDown={onComposerKeyDown}
+          placeholder={chaptersBusy ? "Detecting chapters…" : 'Ask about the transcript, or press / for a command'}
           disabled={streaming || chaptersBusy}
           title={chaptersBusy ? "Detecting chapters. Chat resumes when it finishes" : undefined}
         />
