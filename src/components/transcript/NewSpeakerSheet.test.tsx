@@ -23,6 +23,7 @@ function show(over: Partial<React.ComponentProps<typeof NewSpeakerSheet>> = {}) 
     initialColor: SPEAKER_PALETTE[3],
     onName: vi.fn(),
     onPickExisting: vi.fn(),
+    onPickKind: vi.fn(),
     onCancel: vi.fn(),
   };
   render(<NewSpeakerSheet {...props} {...over} />);
@@ -172,6 +173,41 @@ describe("committing", () => {
     expect(submit.disabled).toBe(true);
     fireEvent.change(nameField(), { target: { value: "   " } });
     expect(submit.disabled).toBe(true);
+  });
+});
+
+describe("the non-speech presets", () => {
+  it("offers all four kinds", () => {
+    // Not everything in a transcript is a person. Before this the only way to
+    // say "these lines are a music bed" was to type "Music" and hope.
+    show();
+    for (const label of ["Music", "Lyrics", "Sound effects", "Inaudible"]) {
+      expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
+    }
+  });
+
+  it("hands back the kind, not a typed name", () => {
+    const props = show();
+    fireEvent.click(screen.getByRole("button", { name: /Sound effects/ }));
+    expect(props.onPickKind).toHaveBeenCalledWith("sfx");
+    // NOT onName — a preset must fold into the shared built-in group rather
+    // than minting a fresh speaker called "Sound effects" every time.
+    expect(props.onName).not.toHaveBeenCalled();
+    expect(props.onPickExisting).not.toHaveBeenCalled();
+  });
+
+  it("shows an icon on each preset rather than initials", () => {
+    show();
+    const chips = document.querySelectorAll(".cp-newspk-kindchip svg");
+    expect(chips).toHaveLength(4);
+  });
+
+  it("keeps the presets separate from the people", () => {
+    // Mixing them into the existing-speaker row would make "Music" look like
+    // somebody in the cast.
+    show();
+    const kinds = document.querySelector(".cp-newspk-kinds")!;
+    expect(kinds.querySelectorAll(".cp-newspk-suggest")).toHaveLength(0);
   });
 });
 

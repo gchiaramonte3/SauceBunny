@@ -1877,3 +1877,38 @@
   color: var(--fg-2);
 }
 .cp-tx-group-line.live .cp-tx-group-text { color: var(--fg-1); }
+
+/* Built-in non-speech presets in the split sheet. Deliberately a separate row
+   from the existing-speaker chips: those are people, these are categories, and
+   mixing them would make "Music" look like somebody in the cast. */
+.cp-newspk-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: 2px;
+}
+.cp-newspk-kind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 3px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-3);
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.cp-newspk-kind:hover { background: var(--bg-4); color: var(--fg-1); }
+.cp-newspk-kind:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+.cp-newspk-kindchip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}

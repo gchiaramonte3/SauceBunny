@@ -30,6 +30,8 @@ import { CueEditor } from "./transcript/CueEditor";
 import { CueSelectionMenu } from "./transcript/CueSelectionMenu";
 import { NewSpeakerSheet } from "./transcript/NewSpeakerSheet";
 import { SpeakerGroups } from "./transcript/SpeakerGroups";
+import { KindGlyph } from "./transcript/KindGlyph";
+import { KIND_LABEL, kindTag, NON_SPEECH_COLOR, speakerKind, type SpeechKind } from "../lib/speech-kind";
 import { newSpeakerTag, paintCueRange, selectionToCueRange } from "./transcript/cue-selection";
 import {
   escapeHtml,
@@ -38,7 +40,6 @@ import {
   resolveAliasChain,
   speakerColor,
   speakerTextColor,
-  speakerInitials,
   SPEAKERS_CHANGED_EVENT,
   loadSpeakerOverrides,
   retagCues,
@@ -812,9 +813,19 @@ export function TranscriptViewer({
   // the same key the caption overlay reads — so a custom colour shows in the
   // transcript bubbles, the Speakers modal, AND on-video captions.
   const speakerDisplayColor = useCallback(
-    (colorTag: string | null) =>
-      overrides.colors[colorTag ?? "__NULL__"] || speakerColor(colorTag),
-    [overrides.colors],
+    (colorTag: string | null) => {
+      // A user's explicit pick always wins, even on a non-speech group.
+      const chosen = overrides.colors[colorTag ?? "__NULL__"];
+      if (chosen) return chosen;
+      // Music, lyrics, SFX and inaudible take ONE neutral tone rather than a
+      // cast hue. The twelve palette colours exist to tell people apart and
+      // were searched to stay mutually distinguishable; a music bed eating a
+      // slot makes a big cast harder to read for nothing in return.
+      const name = overrides.global[colorTag ?? "__NULL__"];
+      if (speakerKind(colorTag, name)) return NON_SPEECH_COLOR;
+      return speakerColor(colorTag);
+    },
+    [overrides.colors, overrides.global],
   );
 
   /**
@@ -1089,6 +1100,35 @@ export function TranscriptViewer({
         else cueTag[k] = tag;
       }
       return { ...prev, cueTag };
+    });
+  }, [flatCues, editOverrides]);
+
+  /**
+   * Put a selection into one of the built-in non-speech groups.
+   *
+   * ONE edit, so it is ONE undo step: the cue reassignment and the group's
+   * name land together. Doing them as two calls would make the first use of
+   * "Music" cost two presses of cmd+Z and every later use cost one, which is
+   * the kind of inconsistency that stops people trusting undo.
+   *
+   * All music in a transcript folds into the SAME group rather than minting a
+   * new tag each time. That is the point of a built-in: twelve separate
+   * one-cue "Music" speakers would be worse than no feature.
+   */
+  const assignCueRangeToKind = useCallback((from: number, to: number, kind: Exclude<SpeechKind, "speech">) => {
+    const picked = flatCues.slice(from, to + 1);
+    if (picked.length === 0) return;
+    const tag = kindTag(kind);
+    editOverrides(`tag as ${KIND_LABEL[kind].toLowerCase()}`, (prev) => {
+      const cueTag = { ...prev.cueTag };
+      for (const { cue } of picked) cueTag[cueKey(cue.start)] = tag;
+      return {
+        ...prev,
+        cueTag,
+        // Name it so the bubble reads "Music" rather than a raw tag. Never
+        // overwrite a name the user has already given the group.
+        global: prev.global[tag] ? prev.global : { ...prev.global, [tag]: KIND_LABEL[kind] },
+      };
     });
   }, [flatCues, editOverrides]);
 
@@ -1898,7 +1938,7 @@ export function TranscriptViewer({
                   onContextMenu={(e) => openRename(e, ti, turn.speaker)}
                   title="Click or right-click to rename · use Manage speakers to recolour or merge"
                 >
-                  {speakerInitials(displayName)}
+                  <KindGlyph tag={resolvedTag} name={displayName} size={13} />
                 </span>
                 <button
                   type="button"
@@ -2118,6 +2158,10 @@ export function TranscriptViewer({
               global: { ...prev.global, [naming.tag]: name },
               colors: { ...prev.colors, [naming.tag]: color },
             }));
+            setNaming(null);
+          }}
+          onPickKind={(kind) => {
+            assignCueRangeToKind(naming.from, naming.to, kind);
             setNaming(null);
           }}
           onPickExisting={(tag) => {

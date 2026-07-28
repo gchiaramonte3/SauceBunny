@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { SPEAKER_PALETTE } from "./helpers";
+import { KindGlyph } from "./KindGlyph";
+import { KIND_LABEL, kindTag, NON_SPEECH_COLOR, NON_SPEECH_KINDS, type SpeechKind } from "../../lib/speech-kind";
 
 /** One speaker already in this transcript, offered as an alternative target. */
 export type SpeakerSuggestion = {
@@ -44,11 +46,13 @@ export type SpeakerSuggestion = {
  * a second search box for a twelve-chip list would be more chrome than the
  * decision deserves.
  */
-export function NewSpeakerSheet({ suggestions, initialColor, onName, onPickExisting, onCancel }: {
+export function NewSpeakerSheet({ suggestions, initialColor, onName, onPickExisting, onPickKind, onCancel }: {
   suggestions: SpeakerSuggestion[];
   initialColor: string;
   onName: (name: string, color: string) => void;
   onPickExisting: (tag: string) => void;
+  /** Put the selection in a built-in non-speech group. */
+  onPickKind: (kind: Exclude<SpeechKind, "speech">) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState("");
@@ -114,6 +118,28 @@ export function NewSpeakerSheet({ suggestions, initialColor, onName, onPickExist
             Name them
           </button>
         </form>
+
+        {/* The preloaded defaults. Not everything in a transcript is a person:
+            a music bed, a sung line, a door slam and a hole in the audio are
+            all things you want OUT of the dialogue, and before this the only
+            way to say so was to type "Music" and hope. One press each, and
+            all music in the transcript folds into one group. */}
+        <div className="cp-newspk-kinds">
+          {NON_SPEECH_KINDS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              className="cp-newspk-kind"
+              onClick={() => onPickKind(k)}
+              title={`These lines are ${KIND_LABEL[k].toLowerCase()}, not dialogue`}
+            >
+              <span className="cp-newspk-kindchip" style={{ background: NON_SPEECH_COLOR }}>
+                <KindGlyph tag={kindTag(k)} name={KIND_LABEL[k]} size={12} />
+              </span>
+              {KIND_LABEL[k]}
+            </button>
+          ))}
+        </div>
 
         {ordered.length > 0 && (
           <>

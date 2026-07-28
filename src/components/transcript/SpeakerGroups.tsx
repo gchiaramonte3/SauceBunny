@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { speakerInitials } from "./helpers";
+import { KindGlyph } from "./KindGlyph";
 import type { Turn } from "../../lib/srt";
 
 export type SpeakerGroup = {
@@ -86,7 +86,7 @@ export function SpeakerGroups({
             >
               <span className={"cp-tx-group-chev" + (expanded ? " open" : "")} aria-hidden="true">›</span>
               <span className="cp-tx-group-chip" style={{ background: g.color }} aria-hidden="true">
-                {speakerInitials(g.name)}
+                <KindGlyph tag={g.tag} name={g.name} />
               </span>
               <span className="cp-tx-group-name">{g.name}</span>
               {/* Talk time is the sort key, so it has to be on screen — an

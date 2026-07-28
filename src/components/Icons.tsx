@@ -485,3 +485,50 @@ export const IconFolderSolid = (p: IconProps) => (
     />
   </Icon>
 );
+
+/* ── Non-speech kinds (see lib/speech-kind.ts) ────────────────────────────
+   These replace a speaker's initials on the chip, so they are read at 26px
+   and smaller. Each one is a single unmistakable silhouette rather than a
+   detailed glyph: at that size "two initials vs an icon" is the whole
+   distinction being made, and detail just turns to mud. */
+
+/** Music bed — a beamed pair, the shape everyone reads as "music". */
+export const IconMusic = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 18V5l12-2v13" />
+    <circle cx="6" cy="18" r="3" />
+    <circle cx="18" cy="16" r="3" />
+  </Icon>
+);
+
+/** Sung words — ONE note, deliberately distinct from the beamed pair above,
+ *  because "music playing" and "somebody singing words" are the two things a
+ *  user most needs to tell apart here. */
+export const IconLyric = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 18V6l10-3v12" />
+    <circle cx="6" cy="18" r="3" />
+  </Icon>
+);
+
+/** Sound effect — radiating arcs. Not a speaker cone: a cone reads as
+ *  "audio output" (a volume control), which is a different idea. */
+export const IconSfx = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 10v4" />
+    <path d="M8 7v10" />
+    <path d="M12 4v16" />
+    <path d="M16 8v8" />
+    <path d="M20 11v2" />
+  </Icon>
+);
+
+/** Inaudible — a struck-through ear-shape reduced to its essentials: a
+ *  listening arc that has been cancelled. */
+export const IconInaudible = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M8 9a4 4 0 0 1 7-2.6" />
+    <path d="M12 13v2" />
+    <path d="M4 4l16 16" />
+  </Icon>
+);
