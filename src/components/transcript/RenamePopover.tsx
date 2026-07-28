@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SpeakerColorPicker } from "../SpeakerColorPicker";
 import { createPortal } from "react-dom";
+import { KindGlyph } from "./KindGlyph";
 
 /**
  * Inline rename UI for a speaker chip. Anchored to the chip's bounding
@@ -34,6 +35,9 @@ export type ReassignChoice = {
   name: string;
   /** Pip background (gradient or custom hex) — matches the roster chip. */
   color: string;
+  /** Seconds of speech. The list is ordered by it, like every other speaker
+   *  list in the app. */
+  talkSeconds: number;
 };
 
 type Props = {
@@ -162,6 +166,12 @@ export function RenamePopover({
       {showReassign && (
         <div className="cp-tx-rename-assign">
           <div className="cp-tx-rename-assign-label">…or this turn is actually</div>
+          {/* Rows in a scroll box, not a wrapped cloud of pills.
+              The cloud was fine at four speakers and at twenty-six it ran off
+              the bottom of the popover with its last row sliced in half, in
+              first-appearance order. Rows also let this list carry the same
+              badge and talk time as the Speakers view and the roster, so the
+              four places that list speakers finally look like one app. */}
           <div className="cp-tx-rename-assign-list" role="listbox" aria-label="Reassign this turn to a known speaker">
             {reassignChoices!.map((c) => (
               <button
@@ -172,8 +182,11 @@ export function RenamePopover({
                 onClick={() => onReassign!(c.tag)}
                 title={`Reassign only this turn to ${c.name}`}
               >
-                <span className="cp-tx-rename-assign-pip" style={{ background: c.color }} aria-hidden />
+                <span className="cp-tx-rename-assign-pip" style={{ background: c.color }} aria-hidden>
+                  <KindGlyph tag={c.tag === "Speaker" ? null : c.tag} name={c.name} size={11} />
+                </span>
                 <span className="cp-tx-rename-assign-name">{c.name}</span>
+                <span className="cp-tx-rename-assign-talk">{formatTalk(c.talkSeconds)}</span>
               </button>
             ))}
           </div>
@@ -199,4 +212,12 @@ export function RenamePopover({
     </div>,
     document.body,
   );
+}
+
+/** Talk time, short enough to sit at the end of a narrow row. */
+function formatTalk(seconds: number): string {
+  if (seconds < 60) return `${Math.max(0, Math.round(seconds))}s`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
 }

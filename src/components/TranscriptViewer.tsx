@@ -2111,7 +2111,12 @@ export function TranscriptViewer({
               tag: r.tag,
               name: r.name,
               color: speakerDisplayColor(r.colorTag),
-            }))}
+              talkSeconds: r.talkSeconds,
+            }))
+            // Loudest first, like the Speakers view, the roster and the split
+            // sheet. First-appearance order put the lead wherever they
+            // happened to start talking.
+            .sort((a, b) => b.talkSeconds - a.talkSeconds)}
           onReassign={(tag) => reassignTurn(rename.turnIdx, tag)}
         />
       )}

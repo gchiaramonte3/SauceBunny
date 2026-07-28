@@ -207,6 +207,22 @@ export function humanizeSpeakerTag(tag: string | null, opts?: { unknownWhenNull?
     const n = parseInt(m[1], 10);
     if (Number.isFinite(n)) return `Speaker ${n + 1}`;
   }
+  // Tags this app MINTS, which a user should never be shown raw.
+  //
+  // A speaker split out of somebody else's dialogue gets a CAST_* tag, and if
+  // the naming sheet is cancelled that tag was rendered verbatim - a roster
+  // reading "CAST_A" next to "Harry Jowsey" looks like a bug, because from
+  // the outside it is one. The letter is kept so two unnamed splits stay
+  // distinguishable.
+  const cast = tag.match(/^CAST_([A-Z]+)$/);
+  if (cast) return `New speaker ${cast[1]}`;
+  // Built-in non-speech groups. Normally carrying an explicit name override,
+  // but a doc hand-edited on disk or written by an older build may not.
+  const kind = tag.match(/^KIND_([A-Z]+)$/);
+  if (kind) {
+    const label = { MUSIC: "Music", LYRIC: "Lyrics", SFX: "Sound effects", INAUDIBLE: "Inaudible" }[kind[1]];
+    if (label) return label;
+  }
   return tag;
 }
 
