@@ -27,6 +27,9 @@ import { HistoryPopover } from "./transcript/HistoryPopover";
 import { InsightsPopover } from "./transcript/InsightsPopover";
 import { TranscriptSearchBar, type SearchMode } from "./transcript/SearchBar";
 import { CueEditor } from "./transcript/CueEditor";
+import { CueSelectionMenu } from "./transcript/CueSelectionMenu";
+import { NewSpeakerSheet } from "./transcript/NewSpeakerSheet";
+import { newSpeakerTag, paintCueRange, selectionToCueRange } from "./transcript/cue-selection";
 import {
   escapeHtml,
   highlightMatch,
@@ -849,6 +852,11 @@ export function TranscriptViewer({
   // where the user clicked. Component + type live in
   // ./transcript/RenamePopover.tsx.
   const [rename, setRename] = useState<RenameState | null>(null);
+  /** The freshly-split speaker awaiting a name, plus the range it owns (so
+   *  picking an existing person instead can re-point those cues). */
+  const [naming, setNaming] = useState<{ tag: string; from: number; to: number } | null>(null);
+  /** The live cue selection the context menu is acting on. */
+  const [cueMenu, setCueMenu] = useState<{ x: number; y: number; from: number; to: number } | null>(null);
 
   const openRename = useCallback((e: React.MouseEvent, turnIdx: number, originalTag: string | null) => {
     e.preventDefault();
@@ -977,6 +985,47 @@ export function TranscriptViewer({
     });
     setRename(null);
   }, [turns, editOverrides]);
+
+  /**
+   * Assign a run of cues to a speaker. `""` clears them back to untagged.
+   *
+   * This is the whole split action. It writes cue tags and nothing else — the
+   * turn structure re-derives from them, so a range picked out of the middle
+   * of a turn becomes its own turn with no splitting code involved.
+   *
+   * Routed through editOverrides, so a split is one ⌘Z like every other
+   * speaker edit, and so the undo button names it.
+   */
+  const assignCueRange = useCallback((from: number, to: number, tag: string) => {
+    const picked = flatCues.slice(from, to + 1);
+    if (picked.length === 0) return;
+    const label = tag === "" ? "clear speaker" : "reassign dialogue";
+    editOverrides(label, (prev) => {
+      const cueTag = { ...prev.cueTag };
+      for (const { cue } of picked) {
+        const original = cue.speaker ?? "";
+        const k = cueKey(cue.start);
+        // Assigning a cue back to what it already was removes the override
+        // rather than storing a no-op, so "put it back" leaves no trace and
+        // the empty-overrides check can still clear the whole key.
+        if (tag === original) delete cueTag[k];
+        else cueTag[k] = tag;
+      }
+      return { ...prev, cueTag };
+    });
+  }, [flatCues, editOverrides]);
+
+  /** Pull a selection out into a brand-new speaker, then offer to name it. */
+  const splitToNewSpeaker = useCallback((from: number, to: number) => {
+    const taken = new Set<string>();
+    for (const { cue } of flatCues) if (cue.speaker) taken.add(cue.speaker);
+    for (const t of Object.values(overrides.cueTag)) if (t) taken.add(t);
+    const tag = newSpeakerTag(taken);
+    assignCueRange(from, to, tag);
+    // The naming sheet follows immediately, because splitting and naming are
+    // one intention: nobody lassoes dialogue in order to create "CAST_A".
+    setNaming({ tag, from, to });
+  }, [flatCues, overrides.cueTag, assignCueRange]);
 
   function resetAllRenames() {
     editOverrides("reset all speaker names", () => ({ ...EMPTY }));
@@ -1855,6 +1904,23 @@ export function TranscriptViewer({
                           onSeek(cue.start);
                         }
                       }}
+                      onContextMenu={(e) => {
+                        const range = selectionToCueRange(document.getSelection(), scrollRef.current);
+                        // No selection means this is an ordinary right-click
+                        // on one cue, which is still a useful thing to act on:
+                        // treat that cue as the range.
+                        const r = range ?? { from: idx, to: idx };
+                        e.preventDefault();
+                        e.stopPropagation();
+                        // Repaint the highlight to the SNAPPED range before
+                        // the menu opens, so what is highlighted is exactly
+                        // what will change. Without this the user lassos half
+                        // a sentence, the action quietly widens to whole cues,
+                        // and the result does not match what they saw.
+                        paintCueRange(r, scrollRef.current);
+                        setAutoScroll(false);
+                        setCueMenu({ x: e.clientX, y: e.clientY, ...r });
+                      }}
                       onDoubleClick={(e) => {
                         e.stopPropagation();
                         // Freeze follow-mode so the karaoke autoscroll can't
@@ -1930,6 +1996,41 @@ export function TranscriptViewer({
           colorOf={(item) => speakerDisplayColor(item.colorTag)}
           onPickColor={(item, rect) => setColorPick({ key: item.colorTag ?? "__NULL__", rect })}
           onClose={() => setSpeakerModalOpen(false)}
+        />
+      )}
+      {cueMenu && (
+        <CueSelectionMenu
+          anchor={{ x: cueMenu.x, y: cueMenu.y }}
+          cueCount={cueMenu.to - cueMenu.from + 1}
+          speakers={roster.map((r) => ({ tag: r.tag, name: r.name, color: speakerDisplayColor(r.colorTag) }))}
+          currentTag={resolveAlias(flatCues[cueMenu.from]?.cue.speaker ?? null) ?? "Speaker"}
+          onAssign={(tag) => assignCueRange(cueMenu.from, cueMenu.to, tag === "Speaker" ? "" : tag)}
+          onNewSpeaker={() => splitToNewSpeaker(cueMenu.from, cueMenu.to)}
+          onPlay={() => { const c = flatCues[cueMenu.from]?.cue; if (c) onSeek(c.start); }}
+          onClose={() => setCueMenu(null)}
+        />
+      )}
+      {naming && (
+        <NewSpeakerSheet
+          suggestions={roster
+            .filter((r) => r.tag !== naming.tag)
+            .map((r) => ({ tag: r.tag, name: r.name, color: speakerDisplayColor(r.colorTag) }))}
+          initialColor={speakerDisplayColor(naming.tag)}
+          onName={(name, color) => {
+            editOverrides("name new speaker", (prev) => ({
+              ...prev,
+              global: { ...prev.global, [naming.tag]: name },
+              colors: { ...prev.colors, [naming.tag]: color },
+            }));
+            setNaming(null);
+          }}
+          onPickExisting={(tag) => {
+            // Re-point the same cues at somebody who already exists. One more
+            // undo step than the split, which is right: they are two decisions.
+            assignCueRange(naming.from, naming.to, tag === "Speaker" ? "" : tag);
+            setNaming(null);
+          }}
+          onCancel={() => setNaming(null)}
         />
       )}
       {colorPick && (

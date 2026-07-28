@@ -113,3 +113,70 @@ describe("cue editing is reachable without a mouse", () => {
     await waitFor(() => expect(document.querySelector("textarea")).toBeTruthy());
   });
 });
+
+describe("splitting a speaker by selecting their dialogue", () => {
+  /** Lasso across two cue spans, the way a drag does. */
+  function lasso(from: number, to: number) {
+    const a = document.querySelector(`[data-cue-idx="${from}"]`)!.firstChild!;
+    const b = document.querySelector(`[data-cue-idx="${to}"]`)!.firstChild!;
+    document.getSelection()!.setBaseAndExtent(a, 1, b, 2);
+  }
+
+  function rightClick(idx: number) {
+    const cue = document.querySelector(`[data-cue-idx="${idx}"]`) as HTMLElement;
+    act(() => {
+      cue.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    });
+  }
+
+  it("offers the split on a selection, sized in lines", async () => {
+    await mount();
+    lasso(0, 1);
+    rightClick(1);
+    // Named by what it will do to what you highlighted, not "Split".
+    expect(screen.getByRole("menuitem", { name: /Make 2 lines a new speaker/ })).toBeTruthy();
+  });
+
+  it("acts on the clicked cue when nothing is selected", async () => {
+    // An ordinary right-click is still useful; refusing it would make the
+    // feature feel arbitrary.
+    await mount();
+    document.getSelection()?.removeAllRanges();
+    rightClick(0);
+    expect(screen.getByRole("menuitem", { name: /Make 1 line a new speaker/ })).toBeTruthy();
+  });
+
+  it("splits, then asks who it is", async () => {
+    await mount();
+    lasso(0, 0);
+    rightClick(0);
+    act(() => { screen.getByRole("menuitem", { name: /Make 1 line a new speaker/ }).click(); });
+    // Splitting and naming are one intention — nobody lassoes dialogue in
+    // order to create "CAST_A".
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Name the new speaker" })).toBeTruthy());
+  });
+
+  it("puts the split on the undo stack, named", async () => {
+    await mount();
+    const undo = () => screen.getByRole("button", { name: /^Undo/ }) as HTMLButtonElement;
+    expect(undo().disabled).toBe(true);
+    lasso(0, 0);
+    rightClick(0);
+    act(() => { screen.getByRole("menuitem", { name: /a new speaker/ }).click(); });
+    expect(undo().disabled).toBe(false);
+    expect(undo().getAttribute("title")).toBe("Undo reassign dialogue");
+  });
+
+  it("offers the OTHER speakers to reassign to, and not the current one", async () => {
+    // The diarizer splits one person as readily as it merges two, so handing
+    // the lines to somebody who already exists is the other half of the fix.
+    await mount();
+    lasso(1, 1);
+    rightClick(1);
+    const items = screen.getAllByRole("menuitem").map((b) => b.textContent ?? "");
+    expect(items.some((t) => /Assign to/.test(t))).toBe(true);
+    // Cue 1 belongs to SPEAKER_01 in the fixture; it must not be offered
+    // itself, which would be a no-op dressed as an action.
+    expect(items.filter((t) => /Assign to Speaker 2/.test(t))).toHaveLength(0);
+  });
+});

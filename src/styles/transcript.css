@@ -1325,3 +1325,72 @@
   cursor: pointer;
 }
 .cp-tx-history-clear:hover { background: rgba(255,255,255,0.07); color: var(--fg-1); }
+
+/* ── Name-the-new-speaker sheet ──────────────────────────────────────
+   Opens straight after a split, so it is deliberately small: one row to
+   name, one list to hand the lines to somebody who already exists. It
+   reuses the roster's backdrop so the two read as the same family. */
+.cp-newspk {
+  width: min(380px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-4);
+  border-radius: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+.cp-newspk-head {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.cp-newspk-row { display: flex; align-items: center; gap: var(--s-2); }
+.cp-newspk-input { flex: 1; min-width: 0; }
+.cp-newspk-pip {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  padding: 0;
+}
+.cp-newspk-pip.sm { width: 13px; height: 13px; cursor: default; }
+.cp-newspk-or {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--fg-4);
+  padding-top: var(--s-1);
+}
+/* Wraps rather than scrolls: a cast big enough to need scrolling here is a
+   cast that should be picked from the roster, not from a split sheet. */
+.cp-newspk-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.cp-newspk-suggest {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-3);
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  cursor: pointer;
+}
+.cp-newspk-suggest:hover { background: var(--bg-4); }
+
+/* Colour pip inside the cue context menu, so "Assign to X" shows whose
+   colour X wears rather than making the user remember. */
+.cp-cuemenu-pip {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
