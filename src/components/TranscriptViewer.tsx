@@ -696,41 +696,6 @@ export function TranscriptViewer({
     return () => window.removeEventListener("keydown", onKey);
   }, [matches, jumpToMatch]);
 
-  /**
-   * Merge sourceTag into targetTag — i.e. "these are actually the
-   * same person." Implemented as an alias entry rather than rewriting
-   * every turn, so the merge is fully reversible (delete the alias)
-   * and any future rename on the target propagates correctly.
-   *
-   * Cycle prevention: if targetTag (after its own alias resolution)
-   * would land back on sourceTag, refuse. Also no-op when source ==
-   * target.
-   */
-  const mergeSpeaker = useCallback((sourceTag: string, targetTag: string) => {
-    if (sourceTag === targetTag) return;
-    editOverrides("merge speakers", (prev) => {
-      // Resolve target's own alias chain so the alias always points
-      // at the canonical tag (compacts chains, avoids deep walks).
-      const canonicalTarget = resolveAliasChain(targetTag, prev.aliases) ?? targetTag;
-      if (canonicalTarget === sourceTag) {
-        // Would create a cycle. Refuse silently — the user just
-        // dragged onto themselves (transitively).
-        return prev;
-      }
-      const next: SpeakerOverrides = {
-        global:  { ...prev.global },
-        turn:    { ...prev.turn },
-        aliases: { ...prev.aliases, [sourceTag]: canonicalTarget },
-        colors:  { ...prev.colors },
-        turnTag: { ...prev.turnTag },
-        cueTag:  { ...prev.cueTag },
-      };
-      // Drop a now-unused global rename on the source (its tag
-      // resolves elsewhere, so the rename would never display anyway).
-      delete next.global[sourceTag];
-      return next;
-    });
-  }, [editOverrides]);
 
   // Global rename keyed on the canonical (alias-resolved) tag — the form the
   // roster already exposes as `tag`. Used by the Speakers modal. ("Speaker"
@@ -769,6 +734,10 @@ export function TranscriptViewer({
     name: string;
     /** Number of turns assigned to this canonical tag. */
     turnCount: number;
+    /** Seconds of speech. The axis a cast is actually ordered by: turn count
+     *  says how often someone was interrupted, talk time says who the lead
+     *  is. Computed here because the turns are already in hand. */
+    talkSeconds: number;
     /** Original tags that resolve to this canonical (incl. itself). */
     sourceTags: string[];
   };
@@ -795,12 +764,14 @@ export function TranscriptViewer({
           name: overrides.global[resolved ?? "__NULL__"]
             ?? humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers }),
           turnCount: 0,
+          talkSeconds: 0,
           sourceTags: [],
         };
         byCanonical.set(canonical, entry);
         orderMap.set(canonical, order++);
       }
       entry.turnCount += 1;
+      for (const c of t.cues) entry.talkSeconds += Math.max(0, c.end - c.start);
       if (t.speaker && !entry.sourceTags.includes(t.speaker)) {
         entry.sourceTags.push(t.speaker);
       }
@@ -883,7 +854,7 @@ export function TranscriptViewer({
         cueTag:  { ...prev.cueTag },
       };
       // Key the GLOBAL rename on the alias-RESOLVED tag — displayNameFor reads
-      // overrides under the resolved key, and mergeSpeaker deletes globals
+      // overrides under the resolved key, and merging deletes globals
       // keyed under merged-away tags. Without resolving, renaming a turn whose
       // original tag was merged into another speaker writes a key nobody reads:
       // the popover closes and nothing changes on screen.
@@ -929,6 +900,50 @@ export function TranscriptViewer({
   // seeks + scrolls to that turn's first cue, and closes the popover. Reuses
   // the same seek/scroll idiom as cue-click (unlike search-jump, this one
   // DOES seek — "go to speaker" is an explicit take-me-there action).
+  /**
+   * Fold several speakers into one, as ONE undo step.
+   *
+   * De-duplicating a cast is a bulk job — the diarizer splits one person into
+   * four as readily as it merges two — and the old per-row "Merge into…"
+   * select meant four separate actions and four separate ⌘Zs to take a
+   * mistake back. Supersedes the single-pair merge, which was the same code
+   * with a list of one.
+   */
+  const mergeSpeakers = useCallback((sourceTags: string[], targetTag: string) => {
+    const sources = sourceTags.filter((t) => t !== targetTag);
+    if (sources.length === 0) return;
+    editOverrides(sources.length === 1 ? "merge speakers" : `merge ${sources.length} speakers`, (prev) => {
+      const aliases = { ...prev.aliases };
+      const globals = { ...prev.global };
+      const canonicalTarget = resolveAliasChain(targetTag, prev.aliases) ?? targetTag;
+      for (const src of sources) {
+        // The same cycle guard the single merge had: aliasing a speaker to
+        // someone who already resolves back to them would spin the chain.
+        if ((resolveAliasChain(src, aliases) ?? src) === canonicalTarget) continue;
+        aliases[src] = canonicalTarget;
+        // The source's own name would otherwise shadow the target's, since
+        // names are keyed by tag and the merged tag still resolves.
+        delete globals[src];
+      }
+      return { ...prev, aliases, global: globals };
+    });
+  }, [editOverrides]);
+
+  /** Jump to a speaker's first turn BY TAG. goToSpeaker reads the open rename
+   *  popover; the roster needs the same jump without one. */
+  const goToSpeakerTag = useCallback((tag: string) => {
+    const key = tag === "Speaker" ? "__NULL__" : tag;
+    const turnIdx = turns.findIndex((t) => (resolveAlias(t.speaker) ?? "__NULL__") === key);
+    if (turnIdx < 0) return;
+    const cueIdx = flatCues.findIndex((f) => f.turnIdx === turnIdx && f.cueIdx === 0);
+    if (cueIdx < 0) return;
+    setAutoScroll(false);
+    onSeek(flatCues[cueIdx].cue.start);
+    scrollRef.current
+      ?.querySelector<HTMLElement>(`[data-cue-idx="${cueIdx}"]`)
+      ?.scrollIntoView({ block: "center", behavior: scrollBehavior() });
+  }, [turns, flatCues, resolveAlias, onSeek]);
+
   const goToSpeaker = useCallback(() => {
     if (!rename) return;
     const targetKey = resolveAlias(rename.originalTag) ?? "__NULL__";
@@ -1992,7 +2007,8 @@ export function TranscriptViewer({
         <SpeakerRosterModal
           roster={roster}
           onRename={renameSpeaker}
-          onMerge={mergeSpeaker}
+          onMergeMany={mergeSpeakers}
+          onPlaySpeaker={goToSpeakerTag}
           colorOf={(item) => speakerDisplayColor(item.colorTag)}
           onPickColor={(item, rect) => setColorPick({ key: item.colorTag ?? "__NULL__", rect })}
           onClose={() => setSpeakerModalOpen(false)}

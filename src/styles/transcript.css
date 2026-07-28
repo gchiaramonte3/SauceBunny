@@ -1024,8 +1024,11 @@
   animation: cp-fade-in var(--dur-fast) var(--ease-out);
 }
 .cp-spk-modal {
-  width: min(460px, calc(100vw - 48px));
-  max-height: min(70vh, 640px);
+  /* Wider and taller than it was, because the row grew a checkbox, a talk-time
+     column and a play button, and because a 26-name cast in a 640px box is
+     four screens of scrolling. */
+  width: min(520px, calc(100vw - 48px));
+  max-height: min(80vh, 760px);
   display: flex;
   flex-direction: column;
   background: #15151a;
@@ -1075,12 +1078,47 @@
   cursor: pointer;
 }
 .cp-spk-x:hover { background: rgba(255,255,255,0.07); color: var(--fg-1); }
-.cp-spk-sub {
-  padding: 0 16px 12px;
+/* Filter + sort. Sticky under the header so a long cast keeps its controls. */
+.cp-spk-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 10px;
+}
+.cp-spk-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  padding: 5px 9px;
+}
+.cp-spk-sort {
+  display: flex;
+  flex-shrink: 0;
+  gap: 1px;
+  padding: 2px;
+  background: rgba(255,255,255,0.04);
+  border-radius: var(--r-sm);
+}
+.cp-spk-sortbtn {
   font-family: var(--font-ui);
-  font-size: 11.5px;
-  line-height: 1.5;
+  font-size: 10.5px;
+  font-weight: 600;
   color: var(--fg-4);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.cp-spk-sortbtn:hover { color: var(--fg-2); }
+.cp-spk-sortbtn.on {
+  color: var(--fg-1);
+  background: rgba(255,255,255,0.09);
+}
+.cp-spk-sortbtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 .cp-spk-list {
   overflow-y: auto;
@@ -1097,6 +1135,37 @@
   border-radius: 8px;
 }
 .cp-spk-row:hover { background: rgba(255,255,255,0.03); }
+.cp-spk-row.picked { background: rgba(255,255,255,0.07); }
+.cp-spk-check {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--fg-2);
+  cursor: pointer;
+}
+.cp-spk-check:disabled { cursor: default; opacity: 0.3; }
+/* Reveal-on-hover, so a 26-row list is not 26 competing play buttons — but
+   always visible once focused, or the keyboard path disappears. */
+.cp-spk-play {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--fg-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.cp-spk-row:hover .cp-spk-play,
+.cp-spk-play:focus-visible { opacity: 1; }
+.cp-spk-play:hover { background: rgba(255,255,255,0.09); color: var(--fg-1); }
+.cp-spk-play:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
 .cp-spk-pip {
   width: 14px;
   height: 14px;
@@ -1147,6 +1216,25 @@
   transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 .cp-spk-merge:hover { background-color: rgba(255,255,255,0.09); }
+
+/* Merge bar. Only mounted while a selection is live, so it can be loud. */
+.cp-spk-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line-1);
+  background: rgba(255,255,255,0.02);
+}
+.cp-spk-footcount {
+  flex: 1 1 auto;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
 
 /* Clickable colour pip in the Speakers modal — the trigger for the picker. */
 .cp-spk-pip-btn {
