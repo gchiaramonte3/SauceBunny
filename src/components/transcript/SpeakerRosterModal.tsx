@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { UndoRedoButtons } from "../UndoRedoButtons";
 import { SpeakerRosterRow } from "./SpeakerRosterRow";
+import { CastShelf } from "./CastShelf";
+import { CastApply } from "./CastApply";
+import type { Cast } from "../../lib/cast";
 
 /** One canonical speaker, as computed by the viewer's roster useMemo. */
 export type RosterItem = {
@@ -25,6 +28,8 @@ type Props = {
   onMergeMany: (sourceTags: string[], targetTag: string) => void;
   /** Jump the transcript and player to this speaker's first line. */
   onPlaySpeaker: (tag: string) => void;
+  /** Write a cast's names and colours in, as one undo step. */
+  onApplyCast: (names: Record<string, string>, colors: Record<string, string>, castName: string) => void;
   /** Resolve a speaker's current pip colour (override-aware). */
   colorOf: (item: RosterItem) => string;
   /** Open the colour picker anchored to this speaker's pip. */
@@ -49,22 +54,38 @@ type Props = {
  * button per row. Backdrop / Escape close.
  */
 export function SpeakerRosterModal({
-  roster, onRename, onMergeMany, colorOf, onPickColor, onPlaySpeaker, onClose,
+  roster, onRename, onMergeMany, colorOf, onPickColor, onPlaySpeaker, onApplyCast, onClose,
 }: Props) {
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<"talk" | "name" | "order">("talk");
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  /**
+   * One modal, three steps — not three modals. Stacking a cast manager over
+   * the roster over the transcript would mean two scrims, two Escape handlers
+   * racing, and a focus trap inside a focus trap. All three views answer the
+   * same question and share the same header, so they share the same box.
+   */
+  const [view, setView] = useState<"roster" | "casts">("roster");
+  const [applying, setApplying] = useState<Cast | null>(null);
   const filterRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      // Back out one step rather than closing from three levels deep: losing
+      // a half-finished assignment to a stray Escape is the kind of thing
+      // that stops people using a feature.
+      if (applying) setApplying(null);
+      else if (view === "casts") setView("roster");
+      else onClose();
+    }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, applying, view]);
 
   // Autofocused, so the modal opens ready to be typed at. With a cast this
   // size, "type three letters" beats any amount of scrolling.
-  useEffect(() => { filterRef.current?.focus(); }, []);
+  useEffect(() => { if (view === "roster" && !applying) filterRef.current?.focus(); }, [view, applying]);
 
   const togglePicked = (tag: string) => setPicked((prev) => {
     const next = new Set(prev);
@@ -96,8 +117,21 @@ export function SpeakerRosterModal({
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="cp-spk-head">
-          <span className="cp-spk-title">Speakers</span>
+          <span className="cp-spk-title">
+            {applying ? "Assign cast" : view === "casts" ? "Casts" : "Speakers"}
+          </span>
           <span className="cp-spk-badge">{roster.length}</span>
+          {!applying && (
+            <button
+              type="button"
+              className={"cp-spk-sortbtn cp-spk-casts" + (view === "casts" ? " on" : "")}
+              onClick={() => setView(view === "casts" ? "roster" : "casts")}
+              aria-pressed={view === "casts"}
+              title="Reuse a saved set of speakers across episodes"
+            >
+              Casts
+            </button>
+          )}
           {/* Its own pair, because this modal is a scrim over the transcript
               toolbar and merge — the edit most likely to be a mistake — is
               made from right here. */}
@@ -105,87 +139,109 @@ export function SpeakerRosterModal({
           <button className="cp-spk-x" onClick={onClose} aria-label="Close">×</button>
         </div>
 
-        {/* Filter first, because at twenty-six names a three-keystroke lookup
-            is the whole difference, and it doubles as the keyboard path into
-            the list without needing a roving tabindex. */}
-        <div className="cp-spk-tools">
-          <input
-            ref={filterRef}
-            className="cp-input cp-spk-filter"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder={`Filter ${roster.length} speakers`}
-            spellCheck={false}
-            aria-label="Filter speakers"
+        {applying ? (
+          <CastApply
+            cast={applying}
+            roster={roster}
+            onBack={() => setApplying(null)}
+            onCommit={(names, colors, castName) => {
+              onApplyCast(names, colors, castName);
+              setApplying(null);
+              setView("roster");
+            }}
           />
-          <div className="cp-spk-sort" role="tablist" aria-label="Sort speakers">
-            {(["talk", "name", "order"] as const).map((k) => (
-              <button
-                key={k}
-                type="button"
-                role="tab"
-                aria-selected={sort === k}
-                className={"cp-spk-sortbtn" + (sort === k ? " on" : "")}
-                onClick={() => setSort(k)}
-              >
-                {k === "talk" ? "Talk time" : k === "name" ? "Name" : "Order"}
-              </button>
+        ) : view === "casts" ? (
+          <CastShelf
+            roster={roster}
+            colorOf={colorOf}
+            onApply={setApplying}
+            onBack={() => setView("roster")}
+          />
+        ) : (
+          <>
+          {/* Filter first, because at twenty-six names a three-keystroke lookup
+              is the whole difference, and it doubles as the keyboard path into
+              the list without needing a roving tabindex. */}
+          <div className="cp-spk-tools">
+            <input
+              ref={filterRef}
+              className="cp-input cp-spk-filter"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder={`Filter ${roster.length} speakers`}
+              spellCheck={false}
+              aria-label="Filter speakers"
+            />
+            <div className="cp-spk-sort" role="tablist" aria-label="Sort speakers">
+              {(["talk", "name", "order"] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  role="tab"
+                  aria-selected={sort === k}
+                  className={"cp-spk-sortbtn" + (sort === k ? " on" : "")}
+                  onClick={() => setSort(k)}
+                >
+                  {k === "talk" ? "Talk time" : k === "name" ? "Name" : "Order"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="cp-spk-list">
+            {shown.length === 0 && (
+              <p className="cp-lib-note">No speaker matches “{filter.trim()}”.</p>
+            )}
+            {shown.map((r) => (
+              <SpeakerRosterRow
+                key={r.tag}
+                item={r}
+                color={colorOf(r)}
+                selected={picked.has(r.tag)}
+                onToggle={() => togglePicked(r.tag)}
+                onRename={onRename}
+                onPickColor={onPickColor}
+                onPlay={() => onPlaySpeaker(r.tag)}
+              />
             ))}
           </div>
-        </div>
 
-        <div className="cp-spk-list">
-          {shown.length === 0 && (
-            <p className="cp-lib-note">No speaker matches “{filter.trim()}”.</p>
+          {/* The merge bar appears only when there is a merge to make. A footer
+              that is always there is a footer nobody reads. */}
+          {picked.size > 0 && (
+            <div className="cp-spk-foot">
+              <span className="cp-spk-footcount">
+                {picked.size} selected
+              </span>
+              <select
+                className="cp-spk-merge"
+                value=""
+                onChange={(e) => {
+                  if (!e.target.value) return;
+                  onMergeMany([...picked], e.target.value);
+                  setPicked(new Set());
+                }}
+                aria-label="Merge the selected speakers into one"
+              >
+                <option value="">Merge into…</option>
+                {/* Only ONE select exists now, and only while a selection is
+                    live. There used to be one per row, each listing every other
+                    speaker: twenty-six arrays and six hundred and fifty option
+                    nodes rebuilt on every render, to merge one pair at a time. */}
+                {roster
+                  .filter((o) => o.colorTag !== null && !picked.has(o.tag))
+                  .map((o) => <option key={o.tag} value={o.tag}>{o.name}</option>)}
+              </select>
+              <button
+                type="button"
+                className="btn btn-ghost btn-compact"
+                onClick={() => setPicked(new Set())}
+              >
+                Clear
+              </button>
+            </div>
           )}
-          {shown.map((r) => (
-            <SpeakerRosterRow
-              key={r.tag}
-              item={r}
-              color={colorOf(r)}
-              selected={picked.has(r.tag)}
-              onToggle={() => togglePicked(r.tag)}
-              onRename={onRename}
-              onPickColor={onPickColor}
-              onPlay={() => onPlaySpeaker(r.tag)}
-            />
-          ))}
-        </div>
-
-        {/* The merge bar appears only when there is a merge to make. A footer
-            that is always there is a footer nobody reads. */}
-        {picked.size > 0 && (
-          <div className="cp-spk-foot">
-            <span className="cp-spk-footcount">
-              {picked.size} selected
-            </span>
-            <select
-              className="cp-spk-merge"
-              value=""
-              onChange={(e) => {
-                if (!e.target.value) return;
-                onMergeMany([...picked], e.target.value);
-                setPicked(new Set());
-              }}
-              aria-label="Merge the selected speakers into one"
-            >
-              <option value="">Merge into…</option>
-              {/* Only ONE select exists now, and only while a selection is
-                  live. There used to be one per row, each listing every other
-                  speaker: twenty-six arrays and six hundred and fifty option
-                  nodes rebuilt on every render, to merge one pair at a time. */}
-              {roster
-                .filter((o) => o.colorTag !== null && !picked.has(o.tag))
-                .map((o) => <option key={o.tag} value={o.tag}>{o.name}</option>)}
-            </select>
-            <button
-              type="button"
-              className="btn btn-ghost btn-compact"
-              onClick={() => setPicked(new Set())}
-            >
-              Clear
-            </button>
-          </div>
+          </>
         )}
       </div>
     </div>

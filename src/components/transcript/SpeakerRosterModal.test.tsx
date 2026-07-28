@@ -32,16 +32,16 @@ function show(over: Partial<React.ComponentProps<typeof SpeakerRosterModal>> = {
     onRename: vi.fn(),
     onMergeMany: vi.fn(),
     onPlaySpeaker: vi.fn(),
+    onApplyCast: vi.fn(),
     colorOf: () => "#FD8A8C",
     onPickColor: vi.fn(),
     onClose: vi.fn(),
-    ...over,
   };
-  render(<SpeakerRosterModal {...props} />);
+  render(<SpeakerRosterModal {...props} {...over} />);
   return props;
 }
 
-const rows = () => Array.from(document.querySelectorAll(".cp-spk-row"));
+const rows = () => Array.from(document.querySelectorAll<HTMLElement>(".cp-spk-row"));
 const namesShown = () =>
   rows().map((r) => (r.querySelector(".cp-spk-name") as HTMLInputElement).value);
 const checkboxOf = (name: string) =>

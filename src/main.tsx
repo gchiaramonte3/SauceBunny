@@ -50,6 +50,7 @@ if (platform.wasm) registerLocalDecoders(platform.blobWorker);
 import "./styles/app.css";
 
 import { hydrateReviewStore } from "./lib/review-store";
+import { hydrateCastStore } from "./lib/cast-store";
 
 // Single-bundle multi-window: the floating side-panel window loads the
 // same `index.html?window=panel` URL, and we route here based on the
@@ -73,6 +74,15 @@ function renderApp(): void {
 // to render while hydration keeps filling the store in the background. Only
 // the main window migrates legacy localStorage docs (single library writer).
 const hydrateDeadline = new Promise<void>((resolve) => setTimeout(resolve, 2000));
+// Casts hydrate alongside. They are NOT raced for the first render — nothing
+// on screen at boot reads them (the shelf lives behind the speakers modal), so
+// blocking paint on a second file read would buy nothing. The store's own
+// pre-hydration write guard is what keeps an early save from clobbering the
+// file while this is still in flight.
+void hydrateCastStore().catch((err) => {
+  console.warn("cast-store hydration failed; starting empty:", err);
+});
+
 void Promise.race([
   hydrateReviewStore({ migrate: !isPanelWindow }).catch((err) => {
     console.warn("review-store hydration failed; starting empty:", err);

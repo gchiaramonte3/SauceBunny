@@ -929,6 +929,36 @@ export function TranscriptViewer({
     });
   }, [editOverrides]);
 
+  /**
+   * Write a cast's names and colours into this transcript, as ONE undo step.
+   *
+   * A COPY, deliberately: after this the cast is out of the loop entirely.
+   * Nothing links the transcript back to it, so a later edit to the cast can
+   * never silently change a name in an SRT that has already been delivered.
+   * Colours travel with names because a cast whose colours drift between
+   * episodes is only half a cast.
+   *
+   * Written under the CANONICAL tag, so a speaker that has been merged into
+   * another gets named once, on the survivor.
+   */
+  const applyCast = useCallback((
+    names: Record<string, string>,
+    colors: Record<string, string>,
+    castName: string,
+  ) => {
+    if (Object.keys(names).length === 0) return;
+    editOverrides(`apply cast ${castName}`, (prev) => {
+      const global = { ...prev.global };
+      const nextColors = { ...prev.colors };
+      for (const [tag, name] of Object.entries(names)) {
+        const key = tag === "Speaker" ? "__NULL__" : (resolveAliasChain(tag, prev.aliases) ?? tag);
+        global[key] = name;
+        if (colors[tag]) nextColors[key] = colors[tag];
+      }
+      return { ...prev, global, colors: nextColors };
+    });
+  }, [editOverrides]);
+
   /** Jump to a speaker's first turn BY TAG. goToSpeaker reads the open rename
    *  popover; the roster needs the same jump without one. */
   const goToSpeakerTag = useCallback((tag: string) => {
@@ -2009,6 +2039,7 @@ export function TranscriptViewer({
           onRename={renameSpeaker}
           onMergeMany={mergeSpeakers}
           onPlaySpeaker={goToSpeakerTag}
+          onApplyCast={applyCast}
           colorOf={(item) => speakerDisplayColor(item.colorTag)}
           onPickColor={(item, rect) => setColorPick({ key: item.colorTag ?? "__NULL__", rect })}
           onClose={() => setSpeakerModalOpen(false)}
