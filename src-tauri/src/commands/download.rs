@@ -533,6 +533,56 @@ async fn run_metadata_ytdlp(
     output_timed(cmd.args(args), RESOLVE_TIMEOUT_SECS).await
 }
 
+/// Choose a poster URL out of yt-dlp's metadata.
+///
+/// The singular `thumbnail` field is a CONVENIENCE that many extractors never
+/// populate - it was the only field read here, which is why a Reddit post came
+/// back with an empty poster box while yt-dlp had perfectly good images all
+/// along. The canonical field is `thumbnails[]`, an array each extractor fills
+/// with every image it found.
+///
+/// Selection: the extractor's own `preference` first, because it knows which
+/// of its images is the real poster and which is an avatar or a sprite sheet.
+/// Then the largest image that is not absurd for a card - a 4K still is a slow
+/// fetch to render at 300px - falling back to the smallest when everything on
+/// offer is huge.
+fn pick_thumbnail(v: &serde_json::Value) -> Option<String> {
+    if let Some(t) = v["thumbnail"].as_str().filter(|t| is_http_url(t)) {
+        return Some(t.to_string());
+    }
+    let arr = v["thumbnails"].as_array()?;
+    let mut best: Option<(i64, i64, String)> = None;
+    for t in arr {
+        // Reddit and friends put tokens like "default", "self", "nsfw" and
+        // "spoiler" where a URL belongs, so requiring http(s) is what filters
+        // those out - not a list of magic words that would go stale.
+        let Some(url) = t["url"].as_str().filter(|u| is_http_url(u)) else { continue };
+        let pref = t["preference"].as_i64().unwrap_or(0);
+        let w = t["width"].as_i64().unwrap_or(0);
+        let h = t["height"].as_i64().unwrap_or(0);
+        // Unknown dimensions sort as mid-sized AND as sane. An entry with no
+        // width is usually the extractor's primary image; treating it as
+        // zero-area, or as oversized, both reliably pick the worst option.
+        let known = w > 0 && h > 0;
+        let area = if known { w * h } else { 640 * 360 };
+        // Oversized images sort BELOW every reasonable one but still above
+        // nothing, so a source offering only a 4K still gets a poster.
+        let score = if known && w > 1920 { -area } else { area };
+        let cand = (pref, score, url.to_string());
+        if best.as_ref().is_none_or(|b| (b.0, b.1) < (cand.0, cand.1)) {
+            best = Some(cand);
+        }
+    }
+    best.map(|(_, _, url)| url)
+}
+
+/// A real fetchable image, not a placeholder token.
+fn is_http_url(s: &str) -> bool {
+    let t = s.trim();
+    t.starts_with("http://") || t.starts_with("https://")
+}
+
+
 #[tauri::command]
 pub async fn fetch_metadata(
     app: AppHandle,
@@ -619,7 +669,7 @@ pub async fn fetch_metadata(
     let m = Metadata {
         title: v["title"].as_str().unwrap_or("Untitled").to_string(),
         duration: v["duration"].as_f64(),
-        thumbnail: v["thumbnail"].as_str().map(String::from),
+        thumbnail: pick_thumbnail(&v),
         uploader: v["uploader"].as_str().map(String::from),
         upload_date: v["upload_date"].as_str().map(String::from),
         view_count: v["view_count"].as_u64(),
@@ -2236,5 +2286,98 @@ mod cache_url_tests {
         // A non-YouTube URL whose params we don't understand keeps only what
         // we recognise; the base still identifies the source.
         assert_eq!(canonical_cache_url("https://x.com/i/status/9?s=20"), "https://x.com/i/status/9");
+    }
+}
+
+#[cfg(test)]
+mod thumbnail_tests {
+    use super::pick_thumbnail;
+    use serde_json::json;
+
+    #[test]
+    fn prefers_the_singular_field_when_it_is_a_real_url() {
+        let v = json!({ "thumbnail": "https://x/a.jpg", "thumbnails": [{ "url": "https://x/b.jpg" }] });
+        assert_eq!(pick_thumbnail(&v).unwrap(), "https://x/a.jpg");
+    }
+
+    #[test]
+    fn falls_back_to_the_array_when_the_singular_field_is_missing() {
+        // THE bug. Reddit and many other extractors fill thumbnails[] and
+        // leave `thumbnail` unset, so the card rendered an empty grey box
+        // while yt-dlp had good images all along.
+        let v = json!({ "thumbnails": [{ "url": "https://x/b.jpg", "width": 1280, "height": 720 }] });
+        assert_eq!(pick_thumbnail(&v).unwrap(), "https://x/b.jpg");
+    }
+
+    #[test]
+    fn rejects_placeholder_tokens_that_are_not_urls() {
+        // Reddit puts "default"/"self"/"nsfw"/"spoiler" where a URL belongs.
+        for token in ["default", "self", "nsfw", "spoiler", "", "   "] {
+            let v = json!({ "thumbnail": token });
+            assert!(pick_thumbnail(&v).is_none(), "{token} should not be a poster");
+        }
+    }
+
+    #[test]
+    fn a_placeholder_singular_still_falls_through_to_the_array() {
+        let v = json!({
+            "thumbnail": "nsfw",
+            "thumbnails": [{ "url": "https://x/real.jpg", "width": 640, "height": 360 }],
+        });
+        assert_eq!(pick_thumbnail(&v).unwrap(), "https://x/real.jpg");
+    }
+
+    #[test]
+    fn honours_the_extractors_own_preference_over_raw_size() {
+        // The extractor knows which image is the poster and which is an avatar.
+        let v = json!({ "thumbnails": [
+            { "url": "https://x/huge.jpg", "width": 1920, "height": 1080, "preference": -1 },
+            { "url": "https://x/right.jpg", "width": 640, "height": 360, "preference": 0 },
+        ]});
+        assert_eq!(pick_thumbnail(&v).unwrap(), "https://x/right.jpg");
+    }
+
+    #[test]
+    fn picks_the_largest_sane_image_at_equal_preference() {
+        let v = json!({ "thumbnails": [
+            { "url": "https://x/small.jpg", "width": 320, "height": 180 },
+            { "url": "https://x/big.jpg", "width": 1280, "height": 720 },
+        ]});
+        assert_eq!(pick_thumbnail(&v).unwrap(), "https://x/big.jpg");
+    }
+
+    #[test]
+    fn avoids_an_absurd_still_when_a_reasonable_one_exists() {
+        // A 4K JPEG is a slow fetch to render at 300px.
+        let v = json!({ "thumbnails": [
+            { "url": "https://x/4k.jpg", "width": 3840, "height": 2160 },
+            { "url": "https://x/hd.jpg", "width": 1280, "height": 720 },
+        ]});
+        assert_eq!(pick_thumbnail(&v).unwrap(), "https://x/hd.jpg");
+    }
+
+    #[test]
+    fn still_returns_something_when_every_option_is_huge() {
+        // Better an oversized poster than none at all.
+        let v = json!({ "thumbnails": [{ "url": "https://x/4k.jpg", "width": 3840, "height": 2160 }]});
+        assert_eq!(pick_thumbnail(&v).unwrap(), "https://x/4k.jpg");
+    }
+
+    #[test]
+    fn treats_an_entry_with_no_dimensions_as_mid_sized_rather_than_worst() {
+        // An entry with no width is usually the extractor's primary image;
+        // scoring it as zero-area would reliably pick the wrong one.
+        let v = json!({ "thumbnails": [
+            { "url": "https://x/primary.jpg" },
+            { "url": "https://x/tiny.jpg", "width": 48, "height": 48 },
+        ]});
+        assert_eq!(pick_thumbnail(&v).unwrap(), "https://x/primary.jpg");
+    }
+
+    #[test]
+    fn is_none_when_there_is_genuinely_nothing() {
+        assert!(pick_thumbnail(&json!({})).is_none());
+        assert!(pick_thumbnail(&json!({ "thumbnails": [] })).is_none());
+        assert!(pick_thumbnail(&json!({ "thumbnails": [{ "url": "not-a-url" }] })).is_none());
     }
 }

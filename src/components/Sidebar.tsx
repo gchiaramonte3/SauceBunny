@@ -1,4 +1,5 @@
-import { useMemo, useEffect, useState, type CSSProperties } from "react";
+import { useMemo, useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { WEB_POSTERS_CHANGED_EVENT, webPosterFor } from "../lib/web-poster-store";
 import { inertWhen } from "../lib/inert";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
@@ -246,6 +247,21 @@ export function Sidebar(props: Props) {
     }
     return groups;
   }, [recents]);
+  /**
+   * Re-render when a web source's poster is captured.
+   *
+   * The capture happens seconds after the source loads (App polls the player
+   * until a non-black frame is up), so without this the card that was empty at
+   * fetch time would STAY empty until something else happened to re-render it.
+   */
+  const posterTick = useSyncExternalStore(
+    (cb) => {
+      window.addEventListener(WEB_POSTERS_CHANGED_EVENT, cb);
+      return () => window.removeEventListener(WEB_POSTERS_CHANGED_EVENT, cb);
+    },
+    () => localStorage.getItem("saucebunny.webPosters") ?? "",
+  );
+
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const toggleGroup = (title: string) =>
     setOpenGroups((prev) => {
@@ -333,6 +349,11 @@ export function Sidebar(props: Props) {
         // for non-YouTube web sources. Local files keep their kind label.
         const isLocalSource = metadata.webpage_url.startsWith("file://");
         const sourceLabel = isLocalSource ? "local file" : hostnameOf(metadata.webpage_url);
+        // The site's poster wins; a frame captured off the player is the
+        // fallback. posterTick is read so the memo of this render is tied to
+        // the store changing.
+        void posterTick;
+        const posterUrl = metadata.thumbnail || webPosterFor(metadata.webpage_url);
         // All four format pills are now valid for both source types —
         // local-file MP3 export went live once @mediabunny/mp3-encoder
         // was registered. (Re-encode toggle is still source-conditional
@@ -349,11 +370,18 @@ export function Sidebar(props: Props) {
             onToggle={() => toggle("source")}
           >
             <div className="cp-thumb">
-              {metadata.thumbnail && <img src={metadata.thumbnail} alt="" referrerPolicy="no-referrer" />}
+              {/* The site's own poster if yt-dlp found one, otherwise a frame
+                  grabbed off the loaded player. The capture already existed for
+                  the transcript and library rows; this card was the one place
+                  still rendering an empty grey box for a source whose site
+                  publishes no thumbnail. */}
+              {posterUrl && <img src={posterUrl} alt="" referrerPolicy="no-referrer" />}
               <div className="cp-thumb-actions br">
                 <button
                   type="button"
                   onClick={downloadThumbnail}
+                  // A captured frame is a data: URL that save_thumbnail cannot
+                  // fetch, so Save stays tied to a real remote thumbnail.
                   disabled={!metadata.thumbnail}
                   title="Save thumbnail…"
                   aria-label="Save thumbnail"
