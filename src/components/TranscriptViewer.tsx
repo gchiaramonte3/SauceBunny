@@ -10,6 +10,8 @@ import { secondsToTc } from "../lib/timecode";
 import { transcriptToAvidTxt } from "../lib/markers";
 import { fpsToRateKey, DEFAULT_MARKER_SETTINGS } from "../lib/marker-time";
 import { isValidSourceTc } from "../lib/library";
+import { appUndo } from "../lib/undo";
+import { UndoRedoButtons } from "./UndoRedoButtons";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
 import {
@@ -34,6 +36,7 @@ import {
   speakerTextColor,
   speakerInitials,
   SPEAKERS_CHANGED_EVENT,
+  type SpeakerOverrides,
 } from "./transcript/helpers";
 
 type Props = {
@@ -67,6 +70,11 @@ type Props = {
   origin: "captions" | "whisper" | "unknown";
   /** Dismiss the current transcript view (App clears activeTranscript). */
   onClearTranscript: () => void;
+  /** App's undo/redo, so the toolbar buttons behave exactly like ⌘Z — same
+   *  toast, same draft-first fallback. Omitted (in the popped-out panel, which
+   *  has no App around it) the buttons drive the shared stack directly. */
+  onUndo?: () => void;
+  onRedo?: () => void;
   /** Open a past transcript from history. */
   onLoadFromHistory: (entry: TranscriptHistoryEntry) => void;
   /**
@@ -187,7 +195,7 @@ const VTT_DROPPED_RE = /^\s*(?:NOTE\b|STYLE\b|REGION\b)|-->\s*[\d:.,]+[ \t]+\S/m
  */
 export function TranscriptViewer({
   path, reloadToken, playheadActive, onSeek, origin,
-  onClearTranscript, onLoadFromHistory,
+  onClearTranscript, onLoadFromHistory, onUndo, onRedo,
   onRegenerate, regenerateBusy, canRegenerate, fps = 30, startTimecode, onSetSourceTimecode,
   onRedetectSpeakers, canRedetect,
   onImportTranscript, sourceKind, onFixCaptionTiming,
@@ -308,6 +316,42 @@ export function TranscriptViewer({
   const resolveAlias = useCallback((tag: string | null): string | null => {
     return resolveAliasChain(tag, overrides.aliases);
   }, [overrides.aliases]);
+
+  // ── The undoable seam for every speaker edit ─────────────────────
+  //
+  // Renaming, merging, recolouring, reassigning a turn and "reset all" were
+  // all bare setOverrides calls with no way back. Merge was the worst of them:
+  // its own comment called it "fully reversible (delete the alias)", which is
+  // true of the DATA MODEL and false of the UI — nothing in the tree ever
+  // deleted an alias, and it fired from a bare <select> onChange, so one
+  // mis-click silently welded two speakers together for good. "Reset all"
+  // discarded every name in one press.
+  //
+  // Everything now goes through here, which computes the next value, skips a
+  // no-op, and records the before/after pair on the app-wide stack the marks
+  // and review comments already use. Undo restores a whole snapshot rather
+  // than inverting each operation: these maps are small, and a snapshot cannot
+  // drift out of sync with the operation the way a hand-written inverse can.
+  const overridesRef = useRef(overrides);
+  useEffect(() => { overridesRef.current = overrides; }, [overrides]);
+  const editOverrides = useCallback(
+    (label: string, update: (prev: SpeakerOverrides) => SpeakerOverrides) => {
+      // Computed OUTSIDE the state updater on purpose. Pushing an undo entry
+      // from inside one would double-push under StrictMode's deliberate
+      // double-invoke — the same trap that once made a seek fire twice.
+      const prev = overridesRef.current;
+      const next = update(prev);
+      if (next === prev) return;
+      overridesRef.current = next;
+      setOverrides(next);
+      appUndo.push({
+        label,
+        undo: () => { overridesRef.current = prev; setOverrides(prev); },
+        redo: () => { overridesRef.current = next; setOverrides(next); },
+      });
+    },
+    [],
+  );
 
   // ── Load the file whenever the path changes ──────────────────────
   // `reloadToken` is also a dep: Regenerate / Fix-timing overwrite the SAME
@@ -617,7 +661,7 @@ export function TranscriptViewer({
    */
   const mergeSpeaker = useCallback((sourceTag: string, targetTag: string) => {
     if (sourceTag === targetTag) return;
-    setOverrides((prev) => {
+    editOverrides("merge speakers", (prev) => {
       // Resolve target's own alias chain so the alias always points
       // at the canonical tag (compacts chains, avoids deep walks).
       const canonicalTarget = resolveAliasChain(targetTag, prev.aliases) ?? targetTag;
@@ -638,7 +682,7 @@ export function TranscriptViewer({
       delete next.global[sourceTag];
       return next;
     });
-  }, []);
+  }, [editOverrides]);
 
   // Global rename keyed on the canonical (alias-resolved) tag — the form the
   // roster already exposes as `tag`. Used by the Speakers modal. ("Speaker"
@@ -647,7 +691,7 @@ export function TranscriptViewer({
     const trimmed = name.trim();
     const key = canonicalTag === "Speaker" ? "__NULL__" : canonicalTag;
     const resolved = key === "__NULL__" ? null : key;
-    setOverrides((prev) => {
+    editOverrides("rename speaker", (prev) => {
       const next: Overrides = {
         global: { ...prev.global }, turn: { ...prev.turn }, aliases: { ...prev.aliases },
         colors: { ...prev.colors }, turnTag: { ...prev.turnTag },
@@ -659,7 +703,7 @@ export function TranscriptViewer({
       }
       return next;
     });
-  }, [hasIdentifiedSpeakers]);
+  }, [hasIdentifiedSpeakers, editOverrides]);
 
   // ── Roster: unique speakers (post-alias) + their stats ──────────
   // Used by the roster panel above the transcript body AND drives the
@@ -745,15 +789,15 @@ export function TranscriptViewer({
     [overrides.colors],
   );
   const setSpeakerColor = useCallback((key: string, hex: string) => {
-    setOverrides((p) => ({ ...p, colors: { ...p.colors, [key]: hex } }));
-  }, []);
+    editOverrides("speaker colour", (p) => ({ ...p, colors: { ...p.colors, [key]: hex } }));
+  }, [editOverrides]);
   const resetSpeakerColor = useCallback((key: string) => {
-    setOverrides((p) => {
+    editOverrides("reset speaker colour", (p) => {
       const colors = { ...p.colors };
       delete colors[key];
       return { ...p, colors };
     });
-  }, []);
+  }, [editOverrides]);
 
   // Rename popover state — tracks which turn the user is editing.
   // Anchored to the speaker chip rect so the popover appears next to
@@ -776,7 +820,7 @@ export function TranscriptViewer({
   function applyRename(newName: string, scope: "all" | "turn") {
     if (!rename) return;
     const trimmed = newName.trim();
-    setOverrides((prev) => {
+    editOverrides(scope === "turn" ? "rename this turn" : "rename speaker", (prev) => {
       const next: Overrides = {
         global:  { ...prev.global },
         turn:    { ...prev.turn },
@@ -857,7 +901,7 @@ export function TranscriptViewer({
    * per-turn free-text rename is dropped — it would shadow the target name.
    */
   const reassignTurn = useCallback((turnIdx: number, targetTag: string) => {
-    setOverrides((prev) => {
+    editOverrides("reassign turn", (prev) => {
       const next: Overrides = {
         global:  { ...prev.global },
         turn:    { ...prev.turn },
@@ -872,10 +916,10 @@ export function TranscriptViewer({
       return next;
     });
     setRename(null);
-  }, [turns]);
+  }, [turns, editOverrides]);
 
   function resetAllRenames() {
-    setOverrides({ global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {} });
+    editOverrides("reset all speaker names", () => ({ global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {} }));
     setRename(null);
   }
 
@@ -1336,6 +1380,14 @@ export function TranscriptViewer({
           context (telling apart prior transcripts). */}
       <div className="cp-tx-head">
         <div className="cp-tx-head-actions cp-tx-head-left">
+          {/* Undo/redo lives in the transcript toolbar because this is where
+              the app's fiddliest edits happen — renaming a speaker across a
+              two-hour interview, merging two the diarizer split, reassigning a
+              single turn — and where "Reset all names" sits a click away. The
+              stack itself is app-wide and has existed since marks and review
+              comments; it was simply invisible unless you already knew ⌘Z
+              worked here. */}
+          <UndoRedoButtons onUndo={onUndo} onRedo={onRedo} compact />
           <button
             className="btn btn-ghost cp-tx-iconbtn"
             onClick={onClearTranscript}

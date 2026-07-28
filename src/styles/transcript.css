@@ -33,6 +33,22 @@
    icons; bump font-size + line-height to match. Replaces an inline
    style block on the dismiss button (r46). */
 .cp-tx-glyph-x { font-size: 13px; line-height: 1; }
+
+/* Undo / redo pair. Grouped tight so they read as one control, and separated
+   from the rest of the toolbar by a hairline — the same way a toolbar
+   separates a "history" cluster from destructive actions like Clear. */
+.cp-undoredo {
+  display: flex;
+  gap: 1px;
+  align-items: center;
+  padding-right: 5px;
+  margin-right: 3px;
+  border-right: 1px solid var(--line-1);
+}
+.cp-undoredo-btn { padding-inline: 5px; }
+/* A disabled undo is the normal resting state, so it must not read as an
+   error or as clutter — just quietly unavailable. */
+.cp-undoredo-btn:disabled { opacity: 0.32; cursor: default; }
 .cp-tx-iconbtn {
   height: 24px;
   padding: 0 8px;

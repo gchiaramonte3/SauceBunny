@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { UndoRedoButtons } from "../UndoRedoButtons";
 
 /** One canonical speaker, as computed by the viewer's roster useMemo. */
 export type RosterItem = {
@@ -53,11 +54,16 @@ export function SpeakerRosterModal({ roster, onRename, onMerge, colorOf, onPickC
         <div className="cp-spk-head">
           <span className="cp-spk-title">Speakers</span>
           <span className="cp-spk-badge">{roster.length}</span>
+          {/* Its own pair, because this modal is a scrim over the transcript
+              toolbar and merge — the edit most likely to be a mistake — is
+              made from right here, off a <select>. */}
+          <UndoRedoButtons compact />
           <button className="cp-spk-x" onClick={onClose} aria-label="Close">×</button>
         </div>
         <div className="cp-spk-sub">
           Rename a speaker, recolour their dot, or merge two that are the same
-          person. Changes apply to the transcript and the on-video captions instantly.
+          person. Changes apply to the transcript and the on-video captions instantly,
+          and every one of them can be undone.
         </div>
         <div className="cp-spk-list">
           {roster.map((r) => (

@@ -5605,6 +5605,8 @@ export default function App() {
               }
             >
               <TranscriptViewer
+                onUndo={performUndo}
+                onRedo={performRedo}
                 path={transcriptPath}
                 reloadToken={transcriptArrivedTick}
                 playheadActive={activeView === "reader" && readerDocTab === "document"}
@@ -6281,6 +6283,8 @@ export default function App() {
               {/* The room's review rail overrides detachment - a session
                   with no review panel is a session you can't comment in. */}
               {(roomActive || !panelDetached) && <QueueDrawer
+                onUndo={performUndo}
+                onRedo={performRedo}
                 open={roomActive ? true : queueOpen}
                 /* Clip is keep-alive, so this subtree stays mounted on Home /
                    Library. `|| roomActive` is load-bearing: room.css un-hides

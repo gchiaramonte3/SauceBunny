@@ -130,6 +130,21 @@ export const IconReveal = (p: IconProps) => (
     <path d="M9 14l3 3 3-3" />
   </Icon>
 );
+/* Undo / redo — a curved arrow doubling back on itself, mirrored. Drawn as a
+   pair so the two read as opposites at 14px, where a subtler difference
+   disappears. */
+export const IconUndo = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 9h10a5 5 0 0 1 0 10h-4" />
+    <path d="M8 5L4 9l4 4" />
+  </Icon>
+);
+export const IconRedo = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M20 9H10a5 5 0 0 0 0 10h4" />
+    <path d="M16 5l4 4-4 4" />
+  </Icon>
+);
 export const IconDownload = (p: IconProps) => (
   <Icon {...p}>
     <path d="M12 3v12" />

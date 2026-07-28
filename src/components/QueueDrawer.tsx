@@ -140,6 +140,10 @@ type Props = {
   /** Live review-comment range being set → previewed on the App's timeline.
    *  `live` = an end still follows the playhead; false = both marks locked. */
   onReviewRangeDraft?: (r: ReviewRangeDraft | null) => void;
+  /** App's undo/redo, forwarded to the transcript toolbar so its buttons and
+   *  ⌘Z are the same action. */
+  onUndo?: () => void;
+  onRedo?: () => void;
   /** Co-review: true while a session is active (may precede the doc snapshot
    *  arriving — the panel shows "Connecting…" and blocks posting until then). */
   reviewSessionActive?: boolean;
@@ -232,7 +236,7 @@ export function QueueDrawer({
   chapterSourceKey, chapterDurationSec, onChaptersChanged,
   reviewSourceKey, reviewSourceTitle,
   reviewDrawActive, reviewDraft, onToggleReviewDraw, reviewLabelActive, onToggleReviewLabel, onReviewDraftConsumed, onShowAnnotation,
-  onOpenReviewSource, onReviewRangeDraft, onRegisterRangeHotkeys,
+  onOpenReviewSource, onReviewRangeDraft, onRegisterRangeHotkeys, onUndo, onRedo,
   reviewSessionActive, reviewSessionDoc, onReviewSessionOp,
   onRenameClip, onRenameAll,
   onPopOut, embedded = false, roomFace = false, focusItem = null,
@@ -827,6 +831,8 @@ export function QueueDrawer({
       {visited.has("transcript") && (
         <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-transcript" aria-labelledby="cp-tab-transcript" hidden={shownTab !== "transcript"}>
         <TranscriptViewer
+          onUndo={onUndo}
+          onRedo={onRedo}
           path={transcriptPath}
           /* Same-path overwrites (Regenerate / Fix-timing) re-read via the tick. */
           reloadToken={transcriptArrivedTick}
