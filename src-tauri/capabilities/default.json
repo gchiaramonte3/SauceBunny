@@ -15,7 +15,6 @@
     "clipboard-manager:default",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",
-    "clipboard-manager:allow-write-image",
     "notification:default",
     "notification:allow-notify",
     "notification:allow-is-permission-granted",

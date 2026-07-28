@@ -215,10 +215,3 @@ export async function saveScreening(doc: ScreeningDoc): Promise<void> {
     console.warn("screening-store: save failed:", err);
   }
 }
-
-/** Test seam: forget the cached dir + index. */
-export function resetScreeningStore(): void {
-  screeningsDir = null;
-  index = new Map();
-  hydrated = false;
-}

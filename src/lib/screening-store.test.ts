@@ -5,7 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 import { invoke } from "@tauri-apps/api/core";
 import {
   parseScreeningIndex, screeningFileName, indexEntryFor,
-  saveScreening, resetScreeningStoreForTests,
+  saveScreening, listScreenings, loadScreening, resetScreeningStoreForTests,
 } from "./screening-store";
 
 const LIB = "/docs/Sauce Bunny/Transcripts";
@@ -123,5 +123,77 @@ describe("saveScreening does not erase earlier screenings (r148)", () => {
     // Both rows must be present: the new one AND the one from the last launch.
     expect(Object.keys(written.screenings).sort()).toEqual(["old", doc.id].sort());
     expect(written.screenings.old.title).toBe("Yesterday's cut");
+  });
+});
+
+describe("the read path", () => {
+  /**
+   * `listScreenings` and `loadScreening` have no UI consumer yet — the screening
+   * recorder landed before the browser that will show what it recorded. That
+   * makes them exactly the kind of code a dead-symbol sweep deletes, which
+   * would leave a store writing files nothing on earth could read back.
+   *
+   * So they get proven here instead. A round trip is what makes them
+   * groundwork rather than rot: if the write format and the read format ever
+   * drift apart, this fails, and the eventual browser starts from something
+   * known to work rather than something that merely compiles.
+   */
+  function diskBackedInvoke() {
+    const files = new Map<string, string>();
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
+      const a = args as { path?: string; text?: string } | undefined;
+      if (cmd === "default_transcript_library_path") return LIB;
+      if (cmd === "ensure_dir_exists") return null;
+      if (cmd === "read_text_file_capped") {
+        const hit = files.get(a?.path ?? "");
+        if (hit === undefined) throw new Error("ENOENT");
+        return hit;
+      }
+      if (cmd === "write_text_to_path") { files.set(a?.path ?? "", a?.text ?? ""); return null; }
+      return null;
+    });
+    return files;
+  }
+
+  it("reads back what it wrote, newest first", async () => {
+    resetScreeningStoreForTests();
+    diskBackedInvoke();
+
+    const older = newScreening("code-1", "Monday pass", "host");
+    older.startedAt = 1000;
+    await saveScreening(older);
+
+    const newer = newScreening("code-2", "Tuesday pass", "host");
+    newer.startedAt = 2000;
+    await saveScreening(newer);
+
+    const listed = listScreenings();
+    expect(listed.map((r) => r.title)).toEqual(["Tuesday pass", "Monday pass"]);
+
+    const round = await loadScreening(newer.id);
+    expect(round).not.toBeNull();
+    expect(round!.id).toBe(newer.id);
+    expect(round!.title).toBe("Tuesday pass");
+  });
+
+  it("returns null for an id it has never seen, rather than throwing", async () => {
+    resetScreeningStoreForTests();
+    diskBackedInvoke();
+    expect(await loadScreening("no-such-id")).toBeNull();
+  });
+
+  it("returns null when the index knows a file the disk has lost", async () => {
+    // Documents live in the user's Documents folder, where they can be moved,
+    // renamed or deleted between sessions. A missing file is a normal state,
+    // not an exception to propagate into a render.
+    resetScreeningStoreForTests();
+    const files = diskBackedInvoke();
+    const doc = newScreening("code-1", "Deleted later", "host");
+    await saveScreening(doc);
+    for (const key of [...files.keys()]) if (!key.endsWith("index.json")) files.delete(key);
+    expect(await loadScreening(doc.id)).toBeNull();
+    // …and the row stays listed, so a browser can show it as missing rather
+    // than silently pretending the screening never happened.
+    expect(listScreenings().map((r) => r.id)).toContain(doc.id);
   });
 });

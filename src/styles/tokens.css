@@ -1,10 +1,10 @@
 /* Ella design tokens — slimmed for Sauce Bunny.
    Typography: self-hosted Nunito Sans via @fontsource/nunito-sans
-   (imported in src/main.tsx). The manual @font-face block that lived
-   here previously is gone — the fontsource package now provides the
-   @font-face declarations with WOFF2 (much smaller than the .ttf files
-   in public/fonts/, which can be deleted once we confirm everything
-   renders). */
+   (imported in src/main.tsx), which supplies the @font-face
+   declarations in WOFF2. The seven .ttf files that used to sit in
+   public/fonts/ were the pre-fontsource copies; nothing ever loaded
+   them and Vite was copying all 668 KB of them into every build, so
+   they are gone. */
 
 :root {
   --ella-green:      #6CFF8D;

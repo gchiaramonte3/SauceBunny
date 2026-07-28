@@ -220,15 +220,20 @@ Smart selection, tried in order:
 2. **mediabunny / WebCodecs → canvas** (`MediaBunnyPlayer`) — decode any codec WKWebView's `<video>` can't, render to canvas. Toggle in Settings.
 3. **ffmpeg transcode** — sidecar prep to a WKWebView-compatible MP4 when WebCodecs can't decode either.
 
-**ProRes / 10-bit caveat (`d1da322`):** turbores (via `@mediabunny/prores`)
-decodes ProRes fine — but mediabunny can only *paint* a sample by wrapping it in
-a WebCodecs `VideoFrame`, and WKWebView has no 10-bit `VideoFrame` support, so
-`getCanvas()` silently yields a BLACK canvas with no error. 10-bit sources
-(ProRes 422/HQ etc.) are therefore routed to path 3 (ffmpeg 8-bit H.264 playback
-copy; the original stays untouched for export), and `MediaBunnyPlayer` guards its
-first-frame paint so any future unpaintable sample falls back instead of
-rendering black. Don't "fix" ProRes by pointing it back at MediaBunnyPlayer
-without verifying WKWebView can actually paint 10-bit frames.
+**ProRes / 10-bit (`d1da322`, revised in r148):** mediabunny can only *paint* a
+sample by wrapping it in a WebCodecs `VideoFrame`, and WKWebView has no 10-bit
+`VideoFrame` support, so an unpaintable sample used to yield a BLACK canvas
+with no error. The original fix routed all 10-bit sources to path 3.
+
+**That blanket route is gone, and must not come back.** `@mediabunny/prores`
+now probes which `VideoFrame` formats the platform can actually construct and
+passes them to turbores as `allowedOutputFormats`, so it never hands WKWebView
+a sample it cannot wrap — and turbores is roughly 3x FASTER than ffmpeg on
+ProRes (~310 fps vs ~107 at 4K 422 HQ). Bailing to a subprocess on sight of
+ProRes traded that away for a hazard the decoder already handles. There is
+therefore deliberately NO ProRes short-circuit in `mediabunny-helpers.ts`; the
+empirical `canvasLooksBlank` guard is the backstop, on ANY codec, rather than
+a blanket ban on one. Re-adding a codec-name check here is a regression.
 
 ### Web sources (YouTube/Vimeo/… — the r53–r66 saga)
 WKWebView makes the obvious paths impossible, all VERIFIED dead ends:
@@ -419,7 +424,15 @@ npm run tauri build      # produces signed + notarized .dmg
 
 - **License:** MIT. All new source files should be compatible.
 - **No secrets.** No API keys, tokens, credentials, or personal paths in any committed file.
-- **Dependencies:** Must be MIT, Apache-2.0, or BSD compatible. Check before adding.
+- **Dependencies:** must carry a licence compatible with shipping inside an
+  MIT-licensed app. Permissive (MIT / Apache-2.0 / BSD / ISC / OFL) is the
+  default, and **weak-copyleft is fine when the dependency stays a separate
+  library or binary** — the app already ships MPL-2.0 (mediabunny, its
+  extensions, turbores), LGPL (the ffmpeg build; LAME inside the MP3 encoder)
+  and OFL-1.1 (Nunito Sans), all recorded in `THIRD-PARTY-LICENSES.md`. What
+  is genuinely out is strong copyleft that would reach the whole app (GPL,
+  AGPL). This rule previously said "MIT, Apache-2.0, or BSD" and so forbade
+  five things the app already shipped; it was the rule that was wrong.
 - **Docs:** Update `docs/ARCHITECTURE.md` when structural changes are made. Keep `CONTRIBUTING.md` accurate.
 - **Commits:** Imperative mood, max 72 chars first line. Format: `area: change` (e.g., `diarizer: switch to SpeakerKit primary backend`, `ui: add volume slider to player controls`).
 

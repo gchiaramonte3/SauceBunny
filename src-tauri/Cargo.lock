@@ -5163,7 +5163,6 @@ dependencies = [
 name = "sauce-bunny"
 version = "0.2.0"
 dependencies = [
- "anyhow",
  "base64 0.22.1",
  "blake3",
  "iroh",
@@ -5172,7 +5171,6 @@ dependencies = [
  "log",
  "objc2",
  "objc2-foundation",
- "once_cell",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

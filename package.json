@@ -36,7 +36,6 @@
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-opener": "^2.2.6",
-    "@tauri-apps/plugin-shell": "^2.2.0",
     "mediabunny": "^1.50.3",
     "opus-decoder": "^0.7.11",
     "perfect-freehand": "^1.2.3",

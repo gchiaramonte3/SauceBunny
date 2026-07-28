@@ -21,11 +21,6 @@ export const DEFAULT_CLOUD_MODEL: Record<CloudProvider, string> = {
   openai: "gpt-4o",
 };
 
-export const PROVIDER_LABEL: Record<AiProvider, string> = {
-  local: "Local · Qwen",
-  anthropic: "Claude",
-  openai: "ChatGPT",
-};
 
 export function loadAiProvider(): AiProvider {
   try {
