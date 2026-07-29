@@ -150,14 +150,20 @@ button:focus-visible, input:focus-visible,
   gap: 5px;
 }
 .cp-swatches.one-row .cp-swatch {
-  /* A FIXED small size, not flex-shrink. `flex: 1 1 0` looks right until the
-     container is narrower than expected, at which point the swatches shrink
-     to nothing rather than overflowing - an invisible control instead of an
-     ugly one. Thirteen at 17px plus twelve 5px gaps is 281px, which fits the
-     rename popover with room to spare. */
-  flex: 0 0 auto;
-  width: 17px;
-  height: 17px;
+  /* BOUNDED flex, which is the only version of this that survives contact.
+     Two earlier attempts failed in opposite directions: `flex: 1 1 0` let the
+     swatches collapse to one pixel in a narrow container (an invisible control
+     is worse than an ugly one), and a fixed 17px overflowed the rename popover
+     because 17 was a guess at a width nobody had measured.
+     Shrinking with a FLOOR and a CEILING does both jobs: the row fits whatever
+     width it is given, never disappears, and never grows into dinner plates. */
+  flex: 1 1 auto;
+  min-width: 11px;
+  max-width: 20px;
+  width: auto;
+  /* Keeps them circles rather than ovals at every size in that range. */
+  aspect-ratio: 1;
+  height: auto;
 }
 .cp-swatch {
   width: var(--swatch-size, 22px);

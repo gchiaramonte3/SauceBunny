@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { SpeakerColorPicker } from "../SpeakerColorPicker";
 import { createPortal } from "react-dom";
 import { KindGlyph } from "./KindGlyph";
+import { KIND_LABEL, kindTag, NON_SPEECH_KINDS } from "../../lib/speech-kind";
 
 /**
  * Inline rename UI for a speaker chip. Anchored to the chip's bounding
@@ -49,6 +50,10 @@ type Props = {
    *  speakers-changed, recoloring the timeline lane too). */
   colorValue?: string;
   onPickColor?: (hex: string) => void;
+  /** Explicit badge icon for this speaker ("none" = initials), or undefined
+   *  to leave it derived from the tag/name. */
+  iconValue?: string | null;
+  onPickIcon?: (kind: string | null) => void;
   /** Jump the transcript to where this speaker first appears, then close.
    *  Optional so any caller without a viewport stays valid. */
   onGoToSpeaker?: () => void;
@@ -63,7 +68,7 @@ type Props = {
 
 export function RenamePopover({
   state, onCancel, onApply, onGoToSpeaker, reassignChoices, onReassign,
-  colorValue, onPickColor,
+  colorValue, onPickColor, iconValue, onPickIcon,
 }: Props) {
   const [name, setName] = useState(state.currentName);
   const [scope, setScope] = useState<"all" | "turn">("all");
@@ -141,6 +146,40 @@ export function RenamePopover({
       />
       {colorValue && onPickColor && (
         <SpeakerColorPicker compact value={colorValue} anchorRect={null} onCommit={onPickColor} onClose={() => {}} />
+      )}
+      {/* Badge icon, directly under the colour row it rhymes with.
+          A DISPLAY choice only: it changes what this speaker's badge shows,
+          never who their lines belong to. So the show's band can wear a music
+          note without their dialogue being folded into the shared Music group.
+          "Initials" is first because it is the default and the way back. */}
+      {onPickIcon && (
+        <div className="cp-tx-rename-icons" role="radiogroup" aria-label="Speaker icon">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={!iconValue || iconValue === "none"}
+            className={"cp-tx-rename-icon" + (!iconValue || iconValue === "none" ? " picked" : "")}
+            title="Initials"
+            aria-label="Initials"
+            onClick={() => onPickIcon(null)}
+          >
+            <span className="cp-tx-rename-icon-initials">Aa</span>
+          </button>
+          {NON_SPEECH_KINDS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              role="radio"
+              aria-checked={iconValue === k}
+              className={"cp-tx-rename-icon" + (iconValue === k ? " picked" : "")}
+              title={KIND_LABEL[k]}
+              aria-label={KIND_LABEL[k]}
+              onClick={() => onPickIcon(k)}
+            >
+              <KindGlyph tag={kindTag(k)} name={KIND_LABEL[k]} size={14} />
+            </button>
+          ))}
+        </div>
       )}
       <div className="cp-tx-rename-scope">
         <label>

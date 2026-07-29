@@ -55,4 +55,26 @@ describe("KindGlyph", () => {
     expect(svgs()).toHaveLength(0);
     expect(text()).toBe("MS");
   });
+
+  it("lets an explicit choice beat the name and the tag", () => {
+    // A DISPLAY choice: the show's band can wear a music note without their
+    // lines being folded into the shared Music group.
+    render(<KindGlyph tag="SPEAKER_02" name="Harry Jowsey" override="music" />);
+    expect(svgs()).toHaveLength(1);
+    expect(text()).toBe("");
+  });
+
+  it("forces initials back with the none option, even on a built-in group", () => {
+    // The way back. Without it a speaker named "Music" could never show
+    // initials again.
+    render(<KindGlyph tag={kindTag("music")} name="Music" override="none" />);
+    expect(svgs()).toHaveLength(0);
+    expect(text()).toBe("M");
+  });
+
+  it("ignores an override that is not a real kind", () => {
+    // A hand-edited or stale localStorage value must not blank the badge.
+    render(<KindGlyph tag="SPEAKER_02" name="Harry Jowsey" override="banana" />);
+    expect(text()).toBe("HJ");
+  });
 });

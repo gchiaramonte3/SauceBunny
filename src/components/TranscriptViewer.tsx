@@ -175,7 +175,7 @@ type Props = {
  * did: adding `cueTag` to the shared shape produced four type errors here and
  * nowhere else. `editOverrides` was already typed against the shared one.
  */
-const EMPTY: SpeakerOverrides = { global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {}, cueTag: {} };
+const EMPTY: SpeakerOverrides = { global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {}, cueTag: {}, icons: {} };
 
 /** Sibling backup path for a rewrite of a user-supplied transcript:
  *  `/a/b/foo.vtt` → `/a/b/foo.orig.vtt`. */
@@ -713,6 +713,7 @@ export function TranscriptViewer({
       const next: SpeakerOverrides = {
         global: { ...prev.global }, turn: { ...prev.turn }, aliases: { ...prev.aliases },
         colors: { ...prev.colors }, turnTag: { ...prev.turnTag }, cueTag: { ...prev.cueTag },
+        icons: { ...prev.icons },
       };
       if (trimmed && trimmed !== humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers })) {
         next.global[key] = trimmed;
@@ -842,13 +843,30 @@ export function TranscriptViewer({
         tag: r.tag,
         name: r.name,
         color: speakerDisplayColor(r.colorTag),
+        icon: overrides.icons[r.colorTag ?? "__NULL__"] ?? null,
         talkSeconds: r.talkSeconds,
         turnCount: r.turnCount,
         turnIdxs: r.turnIdxs,
       }))
       .sort((a, b) => b.talkSeconds - a.talkSeconds),
-    [roster, speakerDisplayColor],
+    [roster, speakerDisplayColor, overrides.icons],
   );
+
+  /**
+   * Explicit badge icon for a speaker, or null to go back to initials.
+   *
+   * Keyed on the alias-resolved tag, exactly like colours, so a merged speaker
+   * carries one icon rather than one per source tag. Null DELETES the key
+   * instead of storing a sentinel, so "back to initials" leaves no trace and
+   * the empty-overrides check can still clear the whole record.
+   */
+  const setSpeakerIcon = useCallback((key: string, kind: string | null) => {
+    editOverrides("speaker icon", (p) => {
+      const icons = { ...p.icons };
+      if (kind) icons[key] = kind; else delete icons[key];
+      return { ...p, icons };
+    });
+  }, [editOverrides]);
 
   const setSpeakerColor = useCallback((key: string, hex: string) => {
     editOverrides("speaker colour", (p) => ({ ...p, colors: { ...p.colors, [key]: hex } }));
@@ -895,6 +913,7 @@ export function TranscriptViewer({
         colors:  { ...prev.colors },
         turnTag: { ...prev.turnTag },
         cueTag:  { ...prev.cueTag },
+        icons:   { ...prev.icons },
       };
       // Key the GLOBAL rename on the alias-RESOLVED tag — displayNameFor reads
       // overrides under the resolved key, and merging deletes globals
@@ -1051,6 +1070,7 @@ export function TranscriptViewer({
         colors:  { ...prev.colors },
         turnTag: { ...prev.turnTag },
         cueTag:  { ...prev.cueTag },
+        icons:   { ...prev.icons },
       };
       // Writes CUE tags, not a turn tag. Reassigning a whole turn is just the
       // special case of reassigning all of its cues — which means it reaches
@@ -1938,7 +1958,7 @@ export function TranscriptViewer({
                   onContextMenu={(e) => openRename(e, ti, turn.speaker)}
                   title="Click or right-click to rename · use Manage speakers to recolour or merge"
                 >
-                  <KindGlyph tag={resolvedTag} name={displayName} size={13} />
+                  <KindGlyph tag={resolvedTag} name={displayName} size={13} override={overrides.icons[resolvedTag ?? "__NULL__"]} />
                 </span>
                 <button
                   type="button"
@@ -2100,6 +2120,13 @@ export function TranscriptViewer({
           onCancel={() => setRename(null)}
           onApply={applyRename}
           colorValue={speakerDisplayColor(effectiveTagFor(rename.turnIdx, rename.originalTag))}
+          iconValue={overrides.icons[
+            resolveAliasChain(effectiveTagFor(rename.turnIdx, rename.originalTag), overrides.aliases) ?? "__NULL__"
+          ] ?? null}
+          onPickIcon={(kind) => {
+            const resolved = resolveAliasChain(effectiveTagFor(rename.turnIdx, rename.originalTag), overrides.aliases);
+            setSpeakerIcon(resolved ?? "__NULL__", kind);
+          }}
           onPickColor={(hex) => {
             const resolved = resolveAliasChain(effectiveTagFor(rename.turnIdx, rename.originalTag), overrides.aliases);
             setSpeakerColor(resolved ?? "__NULL__", hex);

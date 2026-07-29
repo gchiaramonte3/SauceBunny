@@ -295,9 +295,20 @@ export type SpeakerOverrides = {
    * timeline speaker lanes.
    */
   cueTag: Record<string, string>;
+  /**
+   * Explicit per-speaker icon (canonical tag → kind), overriding initials.
+   *
+   * A DISPLAY choice, deliberately separate from the built-in KIND_* groups.
+   * Those change WHO a stretch of dialogue belongs to; this changes only what
+   * their badge shows. So a real person can carry a music note (the show's
+   * band, a jingle singer) without their lines being folded into the shared
+   * Music group, and the two ideas stay independent instead of one silently
+   * implying the other.
+   */
+  icons: Record<string, string>;
 };
 
-const EMPTY_OVERRIDES: SpeakerOverrides = { global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {}, cueTag: {} };
+const EMPTY_OVERRIDES: SpeakerOverrides = { global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {}, cueTag: {}, icons: {} };
 
 /** localStorage key the panel persists a transcript's speaker overrides under. */
 export function speakerOverridesKey(path: string): string {
@@ -376,6 +387,7 @@ export function loadSpeakerOverrides(path: string | null): SpeakerOverrides {
       colors: p.colors && typeof p.colors === "object" ? p.colors : {},
       turnTag: p.turnTag && typeof p.turnTag === "object" ? p.turnTag : {},
       cueTag: p.cueTag && typeof p.cueTag === "object" ? p.cueTag : {},
+      icons: p.icons && typeof p.icons === "object" ? p.icons : {},
     };
   } catch {
     return EMPTY_OVERRIDES;

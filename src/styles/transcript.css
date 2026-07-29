@@ -1946,3 +1946,41 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
+
+/* Badge-icon row in the rename popover. Rhymes with the colour row above it:
+   same rhythm, same white selection ring, never the accent. */
+.cp-tx-rename-icons {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px 4px;
+}
+.cp-tx-rename-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  background: rgba(255,255,255,0.05);
+  color: var(--fg-3);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.cp-tx-rename-icon:hover { background: rgba(255,255,255,0.10); color: var(--fg-1); }
+.cp-tx-rename-icon.picked {
+  color: var(--fg-1);
+  background: rgba(255,255,255,0.12);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.85);
+}
+.cp-tx-rename-icon:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+.cp-tx-rename-icon-initials {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+}
+/* The glyph inside this row is drawn on a DARK chip, unlike the speaker badge
+   where it sits on a bright palette colour, so it inherits currentColor. */
+.cp-tx-rename-icon svg { stroke: currentColor; }

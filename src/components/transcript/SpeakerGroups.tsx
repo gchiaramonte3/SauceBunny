@@ -9,6 +9,8 @@ export type SpeakerGroup = {
   talkSeconds: number;
   turnCount: number;
   turnIdxs: number[];
+  /** Explicit badge icon, if the user picked one. */
+  icon?: string | null;
 };
 
 /**
@@ -86,7 +88,7 @@ export function SpeakerGroups({
             >
               <span className={"cp-tx-group-chev" + (expanded ? " open" : "")} aria-hidden="true">›</span>
               <span className="cp-tx-group-chip" style={{ background: g.color }} aria-hidden="true">
-                <KindGlyph tag={g.tag} name={g.name} />
+                <KindGlyph tag={g.tag} name={g.name} override={g.icon} />
               </span>
               <span className="cp-tx-group-name">{g.name}</span>
               {/* Talk time is the sort key, so it has to be on screen — an

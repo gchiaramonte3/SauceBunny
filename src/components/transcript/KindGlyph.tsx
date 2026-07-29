@@ -28,15 +28,21 @@ const KIND_ICON = {
  * and the split sheet — four chances to forget the else.
  */
 export function KindGlyph({
-  tag, name, size = 13,
+  tag, name, size = 13, override,
 }: {
   /** Canonical tag, so a built-in group is recognised even after a rename. */
   tag: string | null;
   name: string;
   /** Icon size in px. Roughly half the badge diameter reads best. */
   size?: number;
+  /** An explicit choice from the rename popover. Beats anything derived from
+   *  the tag or the name, because the user saying so outranks a heuristic.
+   *  "none" means initials even where the name would imply an icon. */
+  override?: string | null;
 }) {
-  const kind = speakerKind(tag, name);
+  const kind = override === "none" ? null
+    : (override && override in KIND_ICON ? override as Exclude<SpeechKind, "speech">
+      : speakerKind(tag, name));
   if (!kind) return <>{speakerInitials(name)}</>;
   const Glyph = KIND_ICON[kind];
   // Stroked in the same near-black the initials sit in, so the palette's
