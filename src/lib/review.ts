@@ -203,8 +203,18 @@ const HISTORY_KEY = "saucebunny.review.history";
 
 /**
  * Location-independent fingerprint for a clip. Built from intrinsic properties
- * (name stem + duration + dimensions + byte size) so a moved/renamed copy still
- * matches, while two genuinely different clips don't collide. Duration is kept
+ * (name stem + duration + dimensions + byte size) so a MOVED copy still
+ * matches, while two genuinely different clips don't collide.
+ *
+ * NOT rename-safe, and this comment used to claim it was. The name stem is IN
+ * the hash, so renaming a file produces a different fingerprint and detaches
+ * its review doc, its comments and its speaker names. That is fine today
+ * because nothing renames media — but a rename feature MUST call
+ * `linkFingerprint(newFp, existingKey)` at rename time, while it still holds
+ * both identities, or a bulk rename silently discards every review in the
+ * batch. Do not "fix" this by dropping the name from the hash: duration +
+ * dimensions + size alone is exactly the collision the name was added to
+ * prevent. Duration is kept
  * to tenths and byte size is included (when known) precisely to avoid the
  * collision where two distinct same-length, same-dimension clips would otherwise
  * share a key and load/overwrite each other's review.

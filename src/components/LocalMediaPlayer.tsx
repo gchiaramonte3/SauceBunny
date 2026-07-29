@@ -33,6 +33,24 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
   const mediaRef = useRef<HTMLMediaElement | null>(null);
   const readyRef = useRef(false);
   const playingRef = useRef(false);
+  /**
+   * Resume-after-idle forensics, LOCAL half.
+   *
+   * "Rest the app twenty minutes, come back, scrub, and it holds a long time
+   * on the frame it was parked on." The streaming player already reports this
+   * (MSEStreamPlayer's pausedAt/aheadAtPause), but that only covers web
+   * sources and the local path has entirely different suspects: a WebKit
+   * <video> whose decoder went cold, a dropped read cache, or App Nap
+   * throttling the loop. Guessing between three causes that look identical
+   * from the outside is how you optimise the wrong one, so measure instead.
+   *
+   * `readyState` is the discriminator. 4 (HAVE_ENOUGH_DATA) surviving the idle
+   * means the element kept its buffer and the delay is elsewhere; a drop to
+   * 0-2 means WebKit tore the decode pipeline down and the first seek after
+   * resume is paying to rebuild it.
+   */
+  const pausedAtRef = useRef(0);
+  const readyAtPauseRef = useRef(-1);
   const onDiagRef = useRef<Props["onDiag"]>(undefined);
   useEffect(() => { onDiagRef.current = onDiag; }, [onDiag]);
   // Latest-callback ref: the media effects below run on [path] only, so they
@@ -260,8 +278,31 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     const startTick = () => { if (!rafId) rafId = requestAnimationFrame(tick); };
     // While scrubbing we pause/resume the element internally — don't surface
     // those transitions to App, or the transport play/pause icon would flicker.
-    const onPlay  = () => { playingRef.current = true;  setIsPlaying(true);  if (!scrubbingRef.current) onPlayStateChange?.(true); startTick(); };
+    const onPlay  = () => {
+      playingRef.current = true;  setIsPlaying(true);
+      if (!scrubbingRef.current) onPlayStateChange?.(true);
+      startTick();
+      // Only a real idle. Ordinary play/pause would drown the log.
+      const idleMs = pausedAtRef.current ? Date.now() - pausedAtRef.current : 0;
+      if (idleMs > 10_000) {
+        const before = readyAtPauseRef.current;
+        const after = el.readyState;
+        const verdict = after >= 3
+          ? "decoder warm (stall is elsewhere)"
+          : before >= 3
+            ? "DECODER TORN DOWN while idle. First seek rebuilds it"
+            : "decoder was already cold at pause";
+        onDiagRef.current?.(
+          after >= 3 ? "info" : "warn",
+          `resume after ${Math.round(idleMs / 1000)}s idle: readyState ${before} → ${after}`
+          + ` · buffered ${el.buffered.length} range(s) · ${verdict}`,
+        );
+      }
+      pausedAtRef.current = 0;
+    };
     const onPause = () => {
+      pausedAtRef.current = Date.now();
+      readyAtPauseRef.current = el.readyState;
       playingRef.current = false; setIsPlaying(false);
       if (!scrubbingRef.current) onPlayStateChange?.(false);
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
