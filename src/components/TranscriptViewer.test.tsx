@@ -49,8 +49,17 @@ async function mount() {
       canRegenerate={false}
     />,
   );
-  // Let the async SRT read land.
-  await waitFor(() => expect(screen.queryByRole("group", { name: "Undo and redo" })).toBeTruthy());
+  // Wait for the SRT read to LAND, not merely for the toolbar to exist.
+  //
+  // This used to wait on the undo/redo group, which renders as soon as the
+  // panel does - whether or not the transcript has parsed. So mount() returned
+  // early and the async read resolved partway through the test body, and any
+  // state it settled (the overrides load, the turnTag migration) could land
+  // between an assertion being set up and being read. That is what made
+  // "lights up, and names the edit" fail about one run in five.
+  //
+  // Cues only exist once the file is parsed, so they are the real signal.
+  await waitFor(() => expect(document.querySelectorAll(".cp-tx-cue").length).toBeGreaterThan(0));
 }
 
 describe("TranscriptViewer undo/redo", () => {
