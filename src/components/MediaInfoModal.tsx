@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+// The ONE byte formatter. The local copy this replaces had no KB tier, so a
+// 4 KB sidecar rendered as "0.0 MB" - a real size shown as nothing at all.
+import { formatBytes } from "../lib/library";
 import { invoke } from "@tauri-apps/api/core";
 import { useModalFocus } from "../hooks/use-modal-focus";
 import type { MediaInfo } from "../bindings/MediaInfo";
@@ -29,13 +32,6 @@ function fmtDuration(s: number): string {
   const m = Math.floor((total % 3600) / 60);
   const sec = total % 60;
   return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-}
-
-/** bytes → human MB/GB */
-function fmtSize(bytes: number): string {
-  const gb = bytes / 1024 ** 3;
-  if (gb >= 1) return `${gb.toFixed(2)} GB`;
-  return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 }
 
 const fmtMbps = (bps: number) => `${(bps / 1_000_000).toFixed(1)} Mb/s`;
@@ -365,7 +361,7 @@ export function MediaInfoModal({ path, onClose }: Props) {
                         hint: HINTS.duration,
                       }
                     : null,
-                  { label: "Size", value: fmtSize(info.size_bytes), hint: HINTS.size },
+                  { label: "Size", value: formatBytes(info.size_bytes), hint: HINTS.size },
                   info.overall_bitrate_bps != null
                     ? {
                         label: "Overall bitrate",
