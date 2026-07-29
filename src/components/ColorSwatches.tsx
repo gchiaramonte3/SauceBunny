@@ -6,18 +6,21 @@
  * so every surface can take an exact custom value. Single choice, so the
  * group is a radiogroup.
  */
-export function ColorSwatches({ colors, value, onPick, size = 22, ariaLabel }: {
+export function ColorSwatches({ colors, value, onPick, size = 22, ariaLabel, oneRow = false }: {
   colors: readonly string[];
   value: string;
   onPick: (hex: string) => void;
   size?: number;
   ariaLabel: string;
+  /** Keep every swatch on ONE line, shrinking them to fit. For narrow
+   *  popovers, where wrapping reads as two unrelated groups. */
+  oneRow?: boolean;
 }) {
   const picked = (c: string) => c.toLowerCase() === value.toLowerCase();
   const isPreset = colors.some(picked);
   return (
     <div
-      className="cp-swatches"
+      className={"cp-swatches" + (oneRow ? " one-row" : "")}
       role="radiogroup"
       aria-label={ariaLabel}
       style={{ ["--swatch-size" as string]: `${size}px` }}

@@ -139,6 +139,26 @@ button:focus-visible, input:focus-visible,
      ring is clipped by the container or an overflow-hidden card around it. */
   padding: 4px;
 }
+/* ONE ROW variant.
+   Thirteen swatches (twelve palette hues plus the trailing custom well) wrap
+   to two ragged rows in a narrow popover, which reads as two unrelated groups
+   rather than one choice. Here they shrink to fit instead: the row stays a
+   single line and each swatch takes an equal share of whatever width there is.
+   The custom well keeps its place at the end, where it has always been. */
+.cp-swatches.one-row {
+  flex-wrap: nowrap;
+  gap: 5px;
+}
+.cp-swatches.one-row .cp-swatch {
+  /* A FIXED small size, not flex-shrink. `flex: 1 1 0` looks right until the
+     container is narrower than expected, at which point the swatches shrink
+     to nothing rather than overflowing - an invisible control instead of an
+     ugly one. Thirteen at 17px plus twelve 5px gaps is 281px, which fits the
+     rename popover with room to spare. */
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+}
 .cp-swatch {
   width: var(--swatch-size, 22px);
   height: var(--swatch-size, 22px);

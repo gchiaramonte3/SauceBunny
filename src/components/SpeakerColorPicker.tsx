@@ -128,7 +128,7 @@ export function SpeakerColorPicker({
   if (compact) {
     return (
       <div className="cp-colorpick-compact">
-        <ColorSwatches colors={SPEAKER_PRESETS} value={value} onPick={onCommit} size={20} ariaLabel="Speaker color" />
+        <ColorSwatches colors={SPEAKER_PRESETS} value={value} onPick={onCommit} size={17} ariaLabel="Speaker color" oneRow />
       </div>
     );
   }
