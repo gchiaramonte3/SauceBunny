@@ -4531,9 +4531,23 @@ export default function App() {
     }
   }, [logs, pushNotification]);
 
+  /**
+   * Clicking a recent export LOADS it.
+   *
+   * It used to reveal the file in Finder and nothing else, which made the
+   * whole list a file browser with extra steps: the one thing you want from
+   * "here is the clip you just made" is to watch it, and the row that looked
+   * most like a play button sent you to the Finder instead. Reveal is still
+   * there as its own button on each row, which is where a Finder action
+   * belongs.
+   *
+   * A recent is a clip this app exported, so the file is local by
+   * construction and loadLocalPath is the whole implementation - it imports,
+   * probes and navigates to Clip exactly as opening any local file does.
+   */
   const handlePickRecent = useCallback((r: RecentClip) => {
-    invoke("reveal_in_finder", { path: r.path }).catch(() => { /* ignore */ });
-  }, []);
+    void loadLocalPath(r.path);
+  }, [loadLocalPath]);
 
   /** Wipes the sidebar's Recent list. Files on disk are not touched. */
   const handleClearRecents = useCallback(() => {

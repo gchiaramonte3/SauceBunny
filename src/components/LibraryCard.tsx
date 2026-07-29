@@ -75,11 +75,15 @@ export function LibraryCard({
   onSelect, selected,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
+  /** The ⋯ trigger. Separate from btnRef, which is the whole CARD: anchoring
+   *  the menu to the card put it at the card's bottom-left corner, nowhere
+   *  near the button that opened it. */
+  const moreRef = useRef<HTMLButtonElement>(null);
   const [broken, setBroken] = useState(false);
   // Remote candidate cursor — onError advances through art.urls; past the end
   // the placeholder takes over (url resolves undefined → showImg false).
   const [remoteIdx, setRemoteIdx] = useState(0);
-  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number; align?: "left" | "right" } | null>(null);
   const isVideo = art.kind === "local" && art.media === "video";
   const lazyPaths = isVideo ? [art.path] : [];
   // Featured (`large`) cards display ~432px wide (864 on Retina) — the 480px
@@ -115,9 +119,17 @@ export function LibraryCard({
   const [portrait, setPortrait] = useState(false);
 
   const closeMenu = () => { setMenuAnchor(null); btnRef.current?.focus(); };
-  const openMenuAtRect = () => {
+  /** Keyboard path (ContextMenu / Shift+F10): focus is on the CARD, so the
+   *  card is the right thing to point at. */
+  const openMenuAtCard = () => {
     const r = btnRef.current?.getBoundingClientRect();
     if (r) setMenuAnchor({ x: r.left + 12, y: r.bottom - 24 });
+  };
+  /** The ⋯ button: drop from just under it, right-aligned, so the menu appears
+   *  where the user actually clicked. */
+  const openMenuAtMore = () => {
+    const r = moreRef.current?.getBoundingClientRect();
+    if (r) setMenuAnchor({ x: r.right, y: r.bottom + 4, align: "right" });
   };
 
   return (
@@ -149,7 +161,7 @@ export function LibraryCard({
         title={title}
         onContextMenu={(e) => { e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY }); }}
         onKeyDown={(e) => {
-          if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); openMenuAtRect(); return; }
+          if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); openMenuAtCard(); return; }
           // In selection mode Enter opens (preventDefault stops the synthesized
           // click that would otherwise just re-select). Space still selects.
           if (onSelect && e.key === "Enter") { e.preventDefault(); onOpen(); }
@@ -209,6 +221,7 @@ export function LibraryCard({
           the art's top-right corner, revealed with the card. Opens the SAME
           menu as right-click, giving mouse + keyboard users one path. */}
       <button
+        ref={moreRef}
         type="button"
         className="cp-lib-more"
         title="More actions"
@@ -221,13 +234,14 @@ export function LibraryCard({
            key or Shift+F10, so nothing is lost. */
         tabIndex={-1}
         onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => { e.stopPropagation(); if (menuAnchor) closeMenu(); else openMenuAtRect(); }}
+        onClick={(e) => { e.stopPropagation(); if (menuAnchor) closeMenu(); else openMenuAtMore(); }}
       >
         <IconMore size={15} />
       </button>
       {menuAnchor && (
         <LibraryCardMenu
           anchor={menuAnchor}
+          align={menuAnchor.align}
           canPickThumbnail={canPick}
           hasChosenThumbnail={!!posterPath && chosenPosterFor(posterPath) != null}
           revealPath={revealPath}

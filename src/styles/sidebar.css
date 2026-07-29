@@ -517,6 +517,11 @@
   transform: translateY(-1px);
 }
 .cp-recent:active { transform: translateY(0); }
+/* The row is now a real action (it loads the clip), so it takes focus. */
+.cp-recent:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
 .cp-recent .thumb {
   width: 56px;
   aspect-ratio: 16/9;

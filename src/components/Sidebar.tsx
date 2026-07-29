@@ -217,6 +217,26 @@ export function Sidebar(props: Props) {
       <span>{formatRelative(r.when)}</span>
     </div>
   );
+  /**
+   * A recent row is now a real action - it loads the clip - so it has to be
+   * reachable and announced as one. It cannot BE a <button> because it
+   * contains two (expand, reveal), so this is the standard equivalent.
+   */
+  const recentRowProps = (r: RecentClip) => ({
+    role: "button" as const,
+    tabIndex: 0,
+    title: r.path,
+    onClick: () => onPickRecent(r),
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      // Only when the row ITSELF has focus - Enter on the nested expand or
+      // reveal button must do that button's job, not load the clip.
+      if (e.target !== e.currentTarget) return;
+      e.preventDefault();
+      onPickRecent(r);
+    },
+  });
+
   const recentReveal = (path: string) => (
     <button
       className="btn-icon cp-recent-reveal"
@@ -827,7 +847,7 @@ export function Sidebar(props: Props) {
                 flat — grouping is purely presentational. */}
             {groupedRecents.map((g) => (
               <div className="cp-recent-group" key={g.lead.id}>
-                <div className="cp-recent" onClick={() => onPickRecent(g.lead)} title={g.lead.path}>
+                <div className="cp-recent" {...recentRowProps(g.lead)}>
                   <div className="thumb">
                     {g.lead.thumbnail && (
                       <img
@@ -860,7 +880,7 @@ export function Sidebar(props: Props) {
                   {recentReveal(g.lead.path)}
                 </div>
                 {openGroups.has(groupKey(g.lead)) && g.rest.map((r) => (
-                  <div className="cp-recent nested" key={r.id} onClick={() => onPickRecent(r)} title={r.path}>
+                  <div className="cp-recent nested" key={r.id} {...recentRowProps(r)}>
                     <div className="body">{recentMeta(r)}</div>
                     {recentReveal(r.path)}
                   </div>

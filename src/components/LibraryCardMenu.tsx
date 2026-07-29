@@ -19,6 +19,16 @@ import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview } from "./Ico
 type Props = {
   /** Viewport coords to anchor at (cursor, or the ⋯ button's corner). */
   anchor: { x: number; y: number };
+  /**
+   * Which of the menu's own corners sits at `anchor`.
+   *
+   * "left" is right for a cursor and for the card's own keyboard menu: the
+   * menu grows away from the point you asked at. The ⋯ trigger lives in the
+   * card's TOP-RIGHT, so left-aligning there throws the menu rightward off the
+   * card and the viewport clamp then yanks it somewhere unrelated. Anchoring
+   * its right edge instead keeps it under the button it came from.
+   */
+  align?: "left" | "right";
   /** Local video → the two thumbnail items appear. */
   canPickThumbnail: boolean;
   /** A user-chosen thumbnail already exists → "Reset thumbnail" is enabled. */
@@ -36,7 +46,7 @@ type Props = {
 type Item = { icon: ReactNode; label: string; disabled?: boolean; onSelect: () => void };
 
 export function LibraryCardMenu({
-  anchor, canPickThumbnail, hasChosenThumbnail, revealPath,
+  anchor, align = "left", canPickThumbnail, hasChosenThumbnail, revealPath,
   onChooseThumbnail, onResetThumbnail, onOpen, onReview, onClose,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -66,12 +76,13 @@ export function LibraryCardMenu({
     if (!el) return;
     const { width, height } = el.getBoundingClientRect();
     const pad = 8;
-    let left = anchor.x;
+    let left = align === "right" ? anchor.x - width : anchor.x;
     let top = anchor.y;
     if (left + width > window.innerWidth - pad) left = Math.max(pad, window.innerWidth - pad - width);
+    if (left < pad) left = pad;
     if (top + height > window.innerHeight - pad) top = Math.max(pad, anchor.y - height);
     setPos({ left, top });
-  }, [anchor.x, anchor.y]);
+  }, [anchor.x, anchor.y, align]);
 
   // Focus the first enabled item on open (keyboard entry point).
   useEffect(() => {
