@@ -295,7 +295,24 @@ pub async fn start_llm_server(
         ]);
 
     let (mut rx, child) = cmd.spawn().map_err(|e| crate::AppError::internal(format!("spawn llama-server: {e}")))?;
-    *state.child.lock().unwrap() = Some(child);
+    // `.lock()` returns Err only when the mutex is POISONED, i.e. some thread
+    // panicked while holding it. `.unwrap()` there turns a one-off panic into a
+    // permanent one: every later call to this command panics too, and the AI
+    // features stay dead for the rest of the session. Every other lock in this
+    // file (205, 210, 215, 326) and the whole of JobRegistry already guard with
+    // `if let Ok` / `.ok()` for exactly that reason; these two were the
+    // outliers. A poisoned lock now costs one failed start, not the feature.
+    match state.child.lock() {
+        Ok(mut g) => *g = Some(child),
+        // The child is already spawned. Kill it rather than leaking an
+        // untracked llama-server that nothing can ever stop.
+        Err(_) => {
+            let _ = child.kill();
+            return Err(crate::AppError::internal(
+                "the local model state was left inconsistent by an earlier failure. Restart the app and try again.",
+            ));
+        }
+    }
 
     // Drain the server's stderr to the Pipeline log (load progress, errors).
     let app_log = app.clone();
@@ -341,6 +358,14 @@ pub async fn start_llm_server(
     }
 
     let info = LlmServerInfo { base_url, api_key, model_id, ctx: s.ctx };
-    *state.info.lock().unwrap() = Some(info.clone());
+    // Same reasoning as the child lock above. The server IS up at this point,
+    // so a poisoned lock here loses the handle rather than the process - report
+    // it instead of panicking and leaving the caller with neither.
+    match state.info.lock() {
+        Ok(mut g) => *g = Some(info.clone()),
+        Err(_) => return Err(crate::AppError::internal(
+            "the local model started but its state could not be recorded. Restart the app and try again.",
+        )),
+    }
     Ok(info)
 }
