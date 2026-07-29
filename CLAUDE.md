@@ -2,7 +2,7 @@
 
 > Claude Code reads this file automatically on every session.
 > It is the single source of truth for how this codebase should be maintained, refactored, and extended.
-> Current revision: r155 (2026-07-26)
+> Current revision: r156 (2026-07-28)
 
 ---
 
@@ -99,7 +99,22 @@ scripts/                      # Build/maintenance scripts
 | Media processing | ffmpeg | Sidecar, clip cutting + transcode fallback |
 
 ### Plugins (Tauri)
-`tauri-plugin-shell`, `tauri-plugin-dialog`, `tauri-plugin-opener`, `tauri-plugin-clipboard-manager`, `tauri-plugin-notification`
+`tauri-plugin-shell`, `tauri-plugin-dialog`, `tauri-plugin-notification`
+
+**Ejected in r152, and not to be re-added.** `tauri-plugin-clipboard-manager`
+pulled `arboard`, which declares the `image-data` feature and cannot be turned
+off from here — so the app compiled an entire image and colour stack (`image`,
+`tiff`, `zune-jpeg`, `moxcms`, `fax`, `weezl` …) in order to copy a join code.
+Writes went to `navigator.clipboard.writeText`, which three other call sites
+already used; the one READ stayed native as `read_clipboard_text`
+(`NSPasteboard` via `objc2-app-kit`, already in the graph via `muda`) because
+`navigator.clipboard.readText()` raises macOS's "Paste from clipboard?" modal
+and reading from our own process does not. `tauri-plugin-opener` went for its
+capability, not its size: `opener:default` bundles `reveal_item_in_dir`, which
+takes a `Vec<PathBuf>` and — unlike its two siblings — performs NO scope check,
+so the renderer held an unscoped reveal-any-path-in-Finder for a command the
+app never called. Replaced by `open_external_url`, which validates the scheme
+in three lines. Together: 34 packages out of `Cargo.lock`.
 
 Do not add new Tauri plugins without explaining what existing capability is insufficient.
 
@@ -193,6 +208,7 @@ When adding a new cross-window interaction, use this event pattern. Do not intro
 | Whisper models | `app_data_dir()/whisper-models/` |
 | Diarizer models | Bundled or downloaded on first run, cached locally |
 | Transcript library | `~/Documents/Sauce Bunny/Transcripts/YYYY-MM/` |
+| Casts | `~/Documents/Sauce Bunny/Casts/casts.json` — ONE file, not sharded like Reviews: a shelf of casts is a few hundred KB and the picker needs all of them at once. Debounced atomic write-through (`src/lib/cast-store.ts`); writes are refused until hydration has accounted for the disk copy, or a save made during boot would erase the file with a subset of itself |
 | Review docs | `~/Documents/Sauce Bunny/Reviews/` — one `<slug>-<hash>.json` per source + `index.json`; hydrated at boot, debounced write-through (`src/lib/review-store.ts`); legacy localStorage docs migrated out on first boot |
 | User prefs | `localStorage` namespaced `saucebunny.*` (incl. review history/fingerprint index/reviewer identity — only review DOCS moved to files) |
 
@@ -392,6 +408,12 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ```bash
 npm run check:release    # audits sidecars + entitlements + signing env
+npm run verify:packaged  # checks that ONLY hold in a packaged build — the lazy
+                         # MP3 chunk shipped, read_clipboard_text is in the
+                         # binary, the CSP permits WASM, no ejected plugin
+                         # grant survived, sidecars are self-contained. Prints
+                         # the two that need a human (the paste modal, and a
+                         # COLD first MP3 export).
 npm run tauri build      # produces signed + notarized .dmg
 ```
 
