@@ -14,7 +14,7 @@ import {
 import { ReviewStatusChip } from "./ReviewStatusChip";
 import type { AppStatus, ExportOpts, FormatId, Metadata, RecentClip } from "../types";
 import type { StatefulPhase } from "../lib/stateful-phase";
-import { isValidTc, normalizeTc, tcToFrames } from "../lib/timecode";
+import { framesToTc, isValidTc, normalizeTc, tcToFrames } from "../lib/timecode";
 import { formatUploadDate, formatViewCount } from "../lib/upload-date";
 import { formatTimeAgo } from "../lib/transcript-history";
 import { middleEllipsize, sanitizeFilename } from "../lib/filename";
@@ -191,15 +191,11 @@ export function Sidebar(props: Props) {
   const outFrames = exportOpts.outTc === "" ? null : tcToFrames(exportOpts.outTc, fps);
   const hasMarks = inFrames != null && outFrames != null;
   const selFrames = hasMarks ? Math.max(0, (outFrames as number) - (inFrames as number)) : null;
-  const selectionTc = selFrames != null ? (() => {
-    const r = Math.max(1, Math.round(fps));
-    const total = Math.floor(selFrames / r);
-    const hh = Math.floor(total / 3600);
-    const mm = Math.floor((total % 3600) / 60);
-    const ss = total % 60;
-    const ff = selFrames % r;
-    return `${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}:${String(ss).padStart(2,"0")}:${String(ff).padStart(2,"0")}`;
-  })() : "Full clip";
+  // framesToTc, from the module this file already imports. The eight lines
+  // that stood here reimplemented it exactly - same clamp, same order, same
+  // padding - which is how the two drift the day one of them learns about
+  // drop-frame.
+  const selectionTc = selFrames != null ? framesToTc(selFrames, fps) : "Full clip";
 
   // Valid means either empty (no mark) or parses as a TC.
   // All resolution pills are *ceilings* fed to yt-dlp's `bv*[height<=N]+ba`
