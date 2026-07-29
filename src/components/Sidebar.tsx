@@ -15,7 +15,8 @@ import { ReviewStatusChip } from "./ReviewStatusChip";
 import type { AppStatus, ExportOpts, FormatId, Metadata, RecentClip } from "../types";
 import type { StatefulPhase } from "../lib/stateful-phase";
 import { isValidTc, normalizeTc, tcToFrames } from "../lib/timecode";
-import { formatRelative, formatUploadDate, formatViewCount } from "../lib/upload-date";
+import { formatUploadDate, formatViewCount } from "../lib/upload-date";
+import { formatTimeAgo } from "../lib/transcript-history";
 import { middleEllipsize, sanitizeFilename } from "../lib/filename";
 import { formatError } from "../lib/error-format";
 import { hostnameOf } from "../lib/validation";
@@ -214,7 +215,7 @@ export function Sidebar(props: Props) {
     <div className="meta">
       <span className="tc">{r.dur}</span>
       <span className="sep" />
-      <span>{formatRelative(r.when)}</span>
+      <span>{formatTimeAgo(r.when)}</span>
     </div>
   );
   /**

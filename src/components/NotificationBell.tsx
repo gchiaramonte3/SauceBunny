@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { IconBell, IconReveal, IconCheck, IconAlert, IconInfo } from "./Icons";
-import { formatRelative } from "../lib/upload-date";
+import { formatTimeAgo } from "../lib/transcript-history";
 
 export type Notif = {
   id: string;
@@ -126,7 +126,7 @@ export function NotificationBell({ notifications, onMarkAllRead, onClearAll, onD
                     <div className="cp-notif-title">{n.title}</div>
                     <div className="cp-notif-text">{n.body}</div>
                     <div className="cp-notif-meta">
-                      <span className="when">{formatRelative(n.timestamp)}</span>
+                      <span className="when">{formatTimeAgo(n.timestamp)}</span>
                       {n.path && (
                         <button className="reveal" onClick={() => reveal(n.path!)}>
                           <IconReveal size={11} /> Reveal

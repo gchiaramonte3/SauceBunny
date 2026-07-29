@@ -39,7 +39,9 @@ type DirectStream = {
   acodec: string | null;
 };
 
-type ToastKind = "success" | "error" | "info";
+// Imported, not restated. Four other call sites import it from CanvasToast;
+// this was the lone copy, and a copy of a union is a copy that drifts.
+import type { ToastKind } from "../components/CanvasToast";
 
 type Helpers = {
   appendLog: (tag: LogTag, channel: string, line: string) => void;
