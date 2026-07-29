@@ -2219,12 +2219,20 @@ export default function App() {
     } else {
       const warmStream = defaults.streamPreview ? warm?.stream ?? null : null;
       if (!warmStream) {
+        // The cookie source is stated on EVERY yt-dlp line that can hit a
+        // bot-check. Proven necessary: a user hit "Sign in to confirm you're
+        // not a bot" with a browser configured, and from the log alone there
+        // was no way to tell whether cookies had been sent - the same command
+        // run by hand with --cookies-from-browser worked first time. An
+        // unfalsifiable report is worth less than one noisy word per fetch.
+        const ck = cookiesBrowserOrNone();
         appendLog(
           "info",
           "yt-dlp",
-          defaults.streamPreview
+          (defaults.streamPreview
             ? `Resolving stream URL for ${hostnameOf(full)}…`
-            : `Downloading ${hostnameOf(full)} for in-app playback…`,
+            : `Downloading ${hostnameOf(full)} for in-app playback…`)
+          + (ck ? ` (cookies: ${ck})` : " (no cookies)"),
         );
       }
       loadWebPlayback(full, defaults.streamPreview ? "stream-first" : "download-first", seq, warmStream);

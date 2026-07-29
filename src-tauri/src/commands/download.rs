@@ -436,8 +436,9 @@ fn ytdlp_extractor_tag(stderr: &str) -> Option<String> {
 /// branch so the user sees the same text whether the failure was caught at
 /// the one-shot `output()` boundary or in a streaming loop.
 pub(crate) const YT_AUTH_HINT: &str = "YouTube is asking for sign-in to confirm you're not a bot. \
-    Open Settings → YouTube auth and pick the browser you're already logged into YouTube on \
-    (Chrome/Safari/etc.) so yt-dlp can reuse those cookies.";
+    Check the yt-dlp line just above: if it says \"(no cookies)\", open Settings → YouTube auth \
+    and pick the browser you're already logged into YouTube on. If it names a browser, the \
+    cookies were sent but YouTube rejected them - sign in again in that browser, then retry.";
 
 /// Map common yt-dlp failure modes into actionable error messages.
 /// YouTube's bot-detection error is the headline case — the raw stderr
@@ -449,11 +450,10 @@ pub(crate) fn humanize_ytdlp_error(stderr: &str) -> String {
         || trimmed.contains("LOGIN_REQUIRED")
         || trimmed.contains("not a bot")
     {
-        return "YouTube is asking for sign-in to confirm you're not a bot. \
-                Open Settings → YouTube auth and pick the browser you're \
-                already logged into YouTube on (Chrome/Safari/etc.) so \
-                yt-dlp can reuse those cookies."
-            .into();
+        // The const, not a second copy of the prose. The comment on YT_AUTH_HINT
+        // claimed these were "kept identical" while they were two literals that
+        // had to be edited in lockstep - which is how they drift.
+        return YT_AUTH_HINT.into();
     }
     // Login-gated, non-YouTube sources (Reddit requires this as of late 2025).
     // yt-dlp can't even read the metadata without the user's cookies.
