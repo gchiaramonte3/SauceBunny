@@ -337,11 +337,22 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     return (
       <div className="cp-monitor-area">
         <div className="cp-monitor" ref={monitorRef} style={monitorStyle}>
+          {/* The copy has to match the source.
+              This block was hardcoded to "RESOLVING SOURCE STREAM… yt-dlp ·
+              probing manifests" for EVERY fetching state, including opening a
+              local file - which never goes near yt-dlp. A local open runs
+              probe_local_file (ffmpeg reading headers), so on a long file the
+              user watched a yt-dlp message sit there and reasonably concluded
+              the app was hanging on yt-dlp. It was not: the label was lying.
+              A progress message that names the wrong subsystem does not just
+              fail to inform, it actively sends you to debug the wrong thing. */}
           <div className="cp-fetching">
             <div className="cp-scanline" />
-            <div className="status">RESOLVING SOURCE STREAM…</div>
+            <div className="status">
+              {sourceKind === "file" ? "READING FILE…" : "RESOLVING SOURCE STREAM…"}
+            </div>
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-5)", letterSpacing: "0.06em" }}>
-              yt-dlp · probing manifests
+              {sourceKind === "file" ? "ffmpeg · reading headers" : "yt-dlp · probing manifests"}
             </div>
           </div>
           {toastEl}
