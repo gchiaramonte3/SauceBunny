@@ -96,7 +96,7 @@ import { speakerLanes } from "./lib/speaker-stats";
 import { speakerColor, loadSpeakerOverrides, resolveAliasChain, SPEAKERS_CHANGED_EVENT } from "./components/transcript/helpers";
 import { speakerFingerprint, seedSpeakerOverridesFromFingerprint, linkSpeakerOverridesToFingerprint } from "./lib/speaker-identity";
 import { MediaInfoModal } from "./components/MediaInfoModal";
-import { loadReview, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
+import { loadReview, saveReview, ensureVersion, setActiveVersion, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
 import { loadChapters, adoptSourceChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
 import { appUndo } from "./lib/undo";
 import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./lib/storage";
@@ -5111,13 +5111,40 @@ export default function App() {
   }, [sourceKind, metadata, localFilePath, localFileSize, activeSourceUrl]);
   // Also a localStorage read (resolveByFingerprint), also previously bare in
   // the render body. Depends only on the identity of the loaded source, which
-  // changes far less often than App renders.
+  // changes far less often than App renders. `fpIndexBump` re-runs it when
+  // the index is edited UNDER a loaded source — linking the open file into an
+  // older cut's version stack rewrites where this key should resolve.
+  const [fpIndexBump, setFpIndexBump] = useState(0);
   const reviewSourceKey = useMemo(
     () => ((sourceKind === "file" && localFilePath && metadata)
       ? (resolveByFingerprint(reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize)) ?? localFilePath)
       : (metadata?.webpage_url ?? null)),
-    [sourceKind, localFilePath, metadata, localFileSize],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fpIndexBump tracks the localStorage index the linter can't see
+    [sourceKind, localFilePath, metadata, localFileSize, fpIndexBump],
   );
+
+  /**
+   * Version stacks: absorb the OPEN file into `oldKey`'s review doc as its
+   * next version.
+   *
+   * Three writes, one identity change: the old doc gains a version for this
+   * path (active, so the panel lands on the new cut), the file's fingerprint
+   * now resolves to the old doc's key, and the bump makes reviewSourceKey
+   * re-resolve — the panel's load effect then re-reads and shows the stack,
+   * old notes carried. Rides the exact machinery that survives moved files;
+   * see _design/review-versioning.md.
+   */
+  const linkAsReviewVersion = useCallback((oldKey: string) => {
+    if (!(sourceKind === "file" && localFilePath && metadata)) return;
+    const old = loadReview(oldKey);
+    const { doc, versionId } = ensureVersion(old, localFilePath, `V${old.versions.length + 1}`);
+    saveReview(setActiveVersion(doc, versionId));
+    linkFingerprint(
+      reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize),
+      oldKey,
+    );
+    setFpIndexBump((n) => n + 1);
+  }, [sourceKind, localFilePath, metadata, localFileSize]);
 
   /**
    * Take the creator's own chapters when the site publishes them.
@@ -6446,6 +6473,7 @@ export default function App() {
                 onReviewDraftConsumed={() => { setReviewDraft(null); clearDraftHistory(); setReviewDrawActive(false); setReviewLabelMode(false); }}
                 onShowAnnotation={(a, color) => { setReviewDrawActive(false); setReviewLabelMode(false); setReviewDraft(null); clearDraftHistory(); setAnnotationDisplay(a); setAnnotationDisplayColor(color ?? null); }}
                 onOpenReviewSource={handleOpenReviewSource}
+                onReviewLinkAsVersion={sourceKind === "file" ? linkAsReviewVersion : undefined}
                 onReviewRangeDraft={setReviewRangeDraft}
                 onRegisterRangeHotkeys={registerReviewRangeKeys}
                 reviewSessionActive={coSessionActive}

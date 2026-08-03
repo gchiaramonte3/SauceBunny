@@ -10,6 +10,7 @@ import {
   buildComment, insertComment, setResolved, setLike, applyReviewOp, mergeReviewDoc,
   inverseReviewOps, restampReviewOp,
   annotationHasContent, annotationsOf, labelSuffix, sanitizeDocForWire,
+  setActiveVersion, carriedComments, versionStem, versionCandidates,
   type ReviewDoc, type ReviewComment, type AnnotationStrokes, attributeReviewOp,
 } from "./review";
 
@@ -116,6 +117,77 @@ describe("versions", () => {
     expect(next.doc.versions).toHaveLength(2);
     expect(next.versionId).not.toBe(v);
     expect(next.doc.activeVersionId).toBe(v); // active stays on the first
+  });
+});
+
+describe("version stacks", () => {
+  /** A two-version doc with notes on both: the shape a real stack has after
+   *  one round of producer notes and one new render. */
+  function stack() {
+    const s = seed();
+    const v2 = ensureVersion(s.doc, "/clip_v2.mp4", "V2", 2000);
+    let doc = setActiveVersion(v2.doc, v2.versionId);
+    doc = addComment(doc, { versionId: s.v, timeStart: 30, body: "old open", author: "Nika" }, 10);
+    doc = addComment(doc, { versionId: s.v, timeStart: 10, body: "old resolved", author: "Nika" }, 11);
+    doc = addComment(doc, { versionId: v2.versionId, timeStart: 5, body: "new note", author: "Nika" }, 12);
+    const resolved = doc.comments.find((c) => c.body === "old resolved")!;
+    doc = setResolved(doc, resolved.id, true);
+    return { doc, v1: s.v, v2: v2.versionId };
+  }
+
+  it("setActiveVersion switches, and refuses an id the doc does not have", () => {
+    const { doc, v1 } = stack();
+    expect(setActiveVersion(doc, v1).activeVersionId).toBe(v1);
+    expect(setActiveVersion(doc, "nope").activeVersionId).toBe(doc.activeVersionId);
+  });
+
+  it("carries UNRESOLVED notes from other versions, tagged with their origin", () => {
+    // The point of the whole stack: v1's open notes stay visible over v2.
+    const { doc } = stack();
+    const carried = carriedComments(doc, doc.activeVersionId);
+    expect(carried).toHaveLength(1);
+    expect(carried[0].comment.body).toBe("old open");
+    expect(carried[0].versionLabel).toBe("V1");
+  });
+
+  it("carries nothing for a single-version doc, whatever its comments", () => {
+    const s = seed();
+    const doc = addComment(s.doc, { versionId: s.v, timeStart: 1, body: "x", author: "N" });
+    expect(carriedComments(doc, s.v)).toHaveLength(0);
+  });
+
+  it("does not carry the active version's own comments", () => {
+    const { doc, v1 } = stack();
+    // Viewed from v1, the carried list is v2's open notes, not v1's.
+    const carried = carriedComments(doc, v1);
+    expect(carried.map((c) => c.comment.body)).toEqual(["new note"]);
+  });
+});
+
+describe("version identity (stem + candidates)", () => {
+  it("reduces render decorations to the cut's name", () => {
+    expect(versionStem("LMH_Reunion_v2_FINAL (1).mp4")).toBe("lmh reunion");
+    expect(versionStem("LMH Reunion v3")).toBe("lmh reunion");
+    expect(versionStem("LMH Reunion")).toBe("lmh reunion");
+    expect(versionStem("Reunion FINAL final2 copy.mov")).toBe("reunion");
+    expect(versionStem("interview 2026-08-03.mp4")).toBe("interview");
+  });
+
+  it("does not reduce different cuts to the same stem", () => {
+    expect(versionStem("LMH Reunion Part 2")).not.toBe(versionStem("LMH Reunion"));
+    expect(versionStem("Harry Interview")).not.toBe(versionStem("Amber Interview"));
+  });
+
+  it("offers only same-stem history, newest first, never the file itself", () => {
+    const history = [
+      { key: "/a/reunion_v1.mp4", title: "Reunion v1", path: "/a/reunion_v1.mp4", updatedAt: 100, count: 9 },
+      { key: "/a/reunion_v2.mp4", title: "Reunion v2", path: "/a/reunion_v2.mp4", updatedAt: 200, count: 3 },
+      { key: "/a/other.mp4", title: "Something else", path: "/a/other.mp4", updatedAt: 300, count: 1 },
+    ];
+    const got = versionCandidates("Reunion_v3.mp4", "/a/reunion_v3.mp4", history);
+    expect(got.map((h) => h.key)).toEqual(["/a/reunion_v2.mp4", "/a/reunion_v1.mp4"]);
+    // And a title with an empty stem can never match the world.
+    expect(versionCandidates("v2.mp4", null, history)).toHaveLength(0);
   });
 });
 

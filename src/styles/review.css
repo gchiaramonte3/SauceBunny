@@ -1081,3 +1081,170 @@
 }
 .cp-pastenotes-author input:focus { outline: none; border-color: var(--focus-ring); }
 .cp-pastenotes-actions { display: flex; gap: 8px; }
+
+/* ── Version stacks ──────────────────────────────────────────────────────────
+   The pill row appears only once a doc holds two or more versions; the offer
+   appears only while a fresh file's doc is still blank. Both are quiet rows,
+   not banners: they sit in the review flow, they do not shout over it. */
+.cp-review-verrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 0;
+}
+.cp-review-verwrap { position: relative; }
+.cp-review-verpill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg-1);
+  background: rgba(255,255,255,0.07);
+  border: 1px solid var(--line-2);
+  border-radius: 11px;
+  cursor: pointer;
+}
+.cp-review-verpill:hover { background: rgba(255,255,255,0.12); }
+.cp-review-verpill:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+.cp-review-verpop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bg-1, #161616);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: var(--shadow-card);
+}
+.cp-review-veritem {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+.cp-review-veritem:hover { background: rgba(255,255,255,0.08); }
+.cp-review-veritem.current { background: rgba(255,255,255,0.10); }
+.cp-review-verlabel {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+.cp-review-vermeta { font-size: 10.5px; color: var(--fg-3); white-space: nowrap; }
+.cp-review-vercarry { font-size: 11px; color: var(--fg-3); }
+
+.cp-review-linkoffer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 10px 0;
+  padding: 6px 8px 6px 10px;
+  border: 1px dashed var(--line-2);
+  border-radius: 8px;
+}
+.cp-review-linkoffer-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-review-linkoffer-text strong { color: var(--fg-1); }
+.cp-review-linkoffer-x {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: none;
+  color: var(--fg-3);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.cp-review-linkoffer-x:hover { background: rgba(255,255,255,0.08); color: var(--fg-1); }
+
+/* Carry-forward: old cuts' unresolved notes, below the live list. Visually
+   quieter than a CommentRow because they are context here, not the cut's own
+   thread, but the timecode still seeks and Resolve is one press. */
+.cp-review-carried-head {
+  margin-top: 10px;
+  padding: 6px 4px 4px;
+  border-top: 1px solid var(--line-2);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.cp-review-carried {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 5px 4px;
+  border-radius: 6px;
+}
+.cp-review-carried:hover { background: rgba(255,255,255,0.04); }
+.cp-review-carried-tc {
+  flex-shrink: 0;
+  border: none;
+  padding: 1px 6px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--fg-2);
+  background: rgba(255,255,255,0.07);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.cp-review-carried-tc:hover { background: rgba(255,255,255,0.14); color: var(--fg-1); }
+.cp-review-carried-ver {
+  flex-shrink: 0;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--fg-3);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.cp-review-carried-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--fg-2);
+}
+.cp-review-carried-author { font-weight: 700; color: var(--fg-1); }
+.cp-review-carried-resolve {
+  flex-shrink: 0;
+  align-self: center;
+  border: 1px solid var(--line-2);
+  background: none;
+  color: var(--fg-2);
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  /* Hidden until the row is under the pointer: thirty carried notes each
+     shouting Resolve would out-weigh the actual comment list. */
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.cp-review-carried:hover .cp-review-carried-resolve,
+.cp-review-carried-resolve:focus-visible { opacity: 1; }
+.cp-review-carried-resolve:hover { background: rgba(255,255,255,0.10); color: var(--fg-1); }
+.cp-review-carried-resolve:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }

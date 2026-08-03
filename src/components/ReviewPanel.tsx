@@ -17,6 +17,7 @@ import {
   loadReview, saveReview, ensureVersion,
   buildComment, insertComment, editComment, deleteComment, editReply, removeReply,
   setResolved, setLike, reactionsOf, rootComments, openCount,
+  setActiveVersion, carriedComments, versionCandidates,
   applyReviewOp, inverseReviewOps, restampReviewOp,
   reviewToMarkdown,
   avatarColor, initialsOf, loadReviewer, AVATAR_COLORS, AUTHOR_KEY, AUTHOR_COLOR_KEY, REVIEW_CHANGED_EVENT,
@@ -149,6 +150,7 @@ export function ReviewPanel({
   onDraftConsumed,
   onShowAnnotation,
   onOpenReview,
+  onLinkAsVersion,
   onRangeDraft,
   onRegisterRangeHotkeys,
   sessionActive = false,
@@ -188,6 +190,10 @@ export function ReviewPanel({
   onShowAnnotation?: (a: AnnotationStrokes | null, color?: string) => void;
   /** Re-open a past-review source (local path / URL) from the history popover. */
   onOpenReview?: (path: string) => void;
+  /** Version stacks: absorb the CURRENT source into `oldKey`'s review doc as
+   *  its next version (App owns the fingerprint + key re-resolution). Absent
+   *  for sources that cannot stack (web URLs, co-review). */
+  onLinkAsVersion?: (oldKey: string) => void;
   /** Emit the range currently being set in the composer (or null) so App can
    *  preview it on the timeline. `live` = an end still follows the playhead. */
   onRangeDraft?: (r: ReviewRangeDraft | null) => void;
@@ -623,6 +629,7 @@ export function ReviewPanel({
     setDictError(null);
     setDictNote(null);
     setCollapsedThreads(new Set()); // new source → all threads back to expanded
+    setLinkDismissed(false); // the "new cut of X?" offer is per-source
     clearRange(); // an armed range from the previous clip would be nonsense here
     if (!sourceKey) { setDoc(null); return; }
     const { doc: d } = ensureVersion(loadReview(sourceKey), sourceKey, sourceTitle ?? undefined);
@@ -767,6 +774,42 @@ export function ReviewPanel({
   );
   const open = viewDoc ? openCount(viewDoc, versionId) : 0;
   const resolved = roots.length - open;
+
+  // ── Version stacks (solo only — a session shares one doc, one view) ──
+  const versions = viewDoc?.versions ?? [];
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const versionsWrapRef = useRef<HTMLDivElement>(null);
+  /** Unresolved notes from the stack's OTHER versions — the carry-forward
+   *  list this whole feature exists for. */
+  const carried = useMemo(
+    () => (viewDoc && !inSession ? carriedComments(viewDoc, versionId) : []),
+    [viewDoc, versionId, inSession],
+  );
+  /** "New cut of X?" — offered only while this doc is a blank slate, because
+   *  once comments exist here, absorbing the doc elsewhere would strand them. */
+  const [linkDismissed, setLinkDismissed] = useState(false);
+  const linkCandidate = useMemo(() => {
+    if (inSession || !onLinkAsVersion || !sourceKey || !viewDoc) return null;
+    if (viewDoc.comments.length > 0 || viewDoc.versions.length > 1) return null;
+    return versionCandidates(sourceTitle ?? "", sourceKey, loadReviewHistory())[0] ?? null;
+  }, [inSession, onLinkAsVersion, sourceKey, viewDoc, sourceTitle]);
+
+  const switchVersion = (id: string) => {
+    // View state, not an edit: persisted so the stack re-opens where you left
+    // it, but deliberately NOT an undo entry.
+    mutate((d) => setActiveVersion(d, id));
+    setVersionsOpen(false);
+  };
+
+  // Same deferred-a-tick outside-click dismissal as the other popovers.
+  useEffect(() => {
+    if (!versionsOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (!versionsWrapRef.current?.contains(e.target as Node)) setVersionsOpen(false);
+    }
+    const t = setTimeout(() => document.addEventListener("mousedown", onDoc), 0);
+    return () => { clearTimeout(t); document.removeEventListener("mousedown", onDoc); };
+  }, [versionsOpen]);
 
   // Replies, bucketed by parent, once per document.
   //
@@ -919,9 +962,75 @@ export function ReviewPanel({
       )}
       {exportMsg && <div className="cp-review-export-msg" onClick={() => setExportMsg(null)} title="Dismiss">{exportMsg}</div>}
 
+      {/* Version stack row — only once the doc actually IS a stack. */}
+      {!inSession && versions.length > 1 && (
+        <div className="cp-review-verrow">
+          <div className="cp-review-verwrap" ref={versionsWrapRef}>
+            <button
+              className="cp-review-verpill"
+              onClick={() => setVersionsOpen((v) => !v)}
+              aria-expanded={versionsOpen}
+              title="Switch version"
+            >
+              {versions.find((v) => v.id === versionId)?.label ?? "V?"}
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            {versionsOpen && (
+              <div className="cp-review-verpop" role="listbox" aria-label="Versions">
+                {[...versions].reverse().map((v) => (
+                  <button
+                    key={v.id}
+                    role="option"
+                    aria-selected={v.id === versionId}
+                    className={"cp-review-veritem" + (v.id === versionId ? " current" : "")}
+                    onClick={() => switchVersion(v.id)}
+                    title={v.path}
+                  >
+                    <span className="cp-review-verlabel">{v.label}</span>
+                    <span className="cp-review-vermeta">
+                      {openCount(viewDoc, v.id)} open · {timeAgo(v.addedAt, now)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {carried.length > 0 && (
+            <span className="cp-review-vercarry">
+              {carried.length} still open from earlier {carried.length === 1 ? "cut" : "cuts"}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* "New cut of X?" — the one-click stack link. Offered, never guessed:
+          name similarity surfaces the candidate, the person confirms it. */}
+      {linkCandidate && !linkDismissed && (
+        <div className="cp-review-linkoffer">
+          <span className="cp-review-linkoffer-text">
+            New cut of <strong>{linkCandidate.title}</strong>?
+          </span>
+          <button
+            className="btn btn-ghost btn-compact"
+            onClick={() => onLinkAsVersion!(linkCandidate.key)}
+            title={`Carry ${linkCandidate.count} ${linkCandidate.count === 1 ? "note" : "notes"} forward from ${linkCandidate.title}`}
+          >
+            Link as new version
+          </button>
+          <button
+            className="cp-review-linkoffer-x"
+            onClick={() => setLinkDismissed(true)}
+            title="Not a new cut, dismiss"
+            aria-label="Dismiss"
+          >✕</button>
+        </div>
+      )}
+
       {/* Comment list */}
       <div className="cp-review-list">
-        {roots.length === 0 && (
+        {roots.length === 0 && carried.length === 0 && (
           <div className="cp-review-hint">No comments yet. Scrub to a spot and add one below.</div>
         )}
         {roots.length > 0 && visible.length === 0 && (
@@ -956,6 +1065,43 @@ export function ReviewPanel({
             onSubmitReply={() => submitReply(c.id, c.timeStart)}
           />
         ))}
+
+        {/* Carry-forward: unresolved notes from the stack's other versions,
+            LIVE while the new cut plays. This is the divergence from
+            Frame.io, where old comments stay behind on the old asset and the
+            documented workaround is copy-paste. A notes pass on v2 is exactly
+            "check the new cut against the old notes", so the old notes sit
+            here, seekable and resolvable, until they are dealt with. */}
+        {carried.length > 0 && (
+          <>
+            <div className="cp-review-carried-head">Still open from earlier cuts</div>
+            {carried.map(({ comment: c, versionLabel }) => (
+              <div key={c.id} className="cp-review-carried">
+                <button
+                  className="cp-review-carried-tc"
+                  onClick={() => onSeek(c.timeStart)}
+                  title="Jump to this spot"
+                >
+                  {secondsToHms(c.timeStart).replace(/^00:/, "")}
+                </button>
+                <span className="cp-review-carried-ver" title={`Noted on ${versionLabel}`}>{versionLabel}</span>
+                <span className="cp-review-carried-body">
+                  <span className="cp-review-carried-author">{c.author}</span> {c.body}
+                </span>
+                <button
+                  className="cp-review-carried-resolve"
+                  onClick={() => {
+                    const at = Date.now();
+                    dispatchUndoable("resolve comment", { t: "resolve", id: c.id, resolved: true, at }, (d) => setResolved(d, c.id, true, at));
+                  }}
+                  title="Resolve: dealt with in this cut"
+                >
+                  Resolve
+                </button>
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       <ReviewComposer

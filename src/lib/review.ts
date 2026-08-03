@@ -679,6 +679,87 @@ export function openCount(doc: ReviewDoc, versionId: string | null): number {
   return doc.comments.filter((c) => c.versionId === versionId && c.parentId === null && !c.resolved).length;
 }
 
+// ── Version stacks ───────────────────────────────────────────────────────────
+// A stack IS a ReviewDoc: the doc was born with versions[] and per-version
+// comments, and every doc simply had one version because a new render is a
+// new file, a new key, a fresh empty doc. Stacking = adding the new render as
+// a version of the OLD doc and pointing the new file's fingerprint at it, so
+// the existing moved-file resolution machinery routes every future open to
+// the shared doc. See _design/review-versioning.md for the Frame.io
+// comparison this is modeled against (and where it deliberately diverges:
+// carry-forward of unresolved notes, which Frame.io cannot do).
+
+/** Switch which version the panel views. Persisted in the doc, so a stack
+ *  re-opens where you left it. */
+export function setActiveVersion(doc: ReviewDoc, versionId: string): ReviewDoc {
+  if (!doc.versions.some((v) => v.id === versionId)) return doc;
+  return { ...doc, activeVersionId: versionId };
+}
+
+/**
+ * Unresolved root comments from every OTHER version — the carry-forward list.
+ *
+ * THE reason the stack is one doc. A notes pass on v2 is exactly "check the
+ * new cut against the old notes", so the old notes must be visible and LIVE
+ * (resolvable) while v2 plays. Time sort, because the reviewer walks the cut
+ * forward; each entry keeps enough version identity for an origin tag.
+ */
+export function carriedComments(
+  doc: ReviewDoc, activeVersionId: string | null,
+): { comment: ReviewComment; versionLabel: string }[] {
+  if (doc.versions.length < 2) return [];
+  const labels = new Map(doc.versions.map((v) => [v.id, v.label]));
+  return doc.comments
+    .filter((c) => c.versionId !== activeVersionId && c.parentId === null && !c.resolved)
+    .filter((c) => labels.has(c.versionId)) // orphaned versionIds stay out
+    .sort((a, b) => a.timeStart - b.timeStart || a.createdAt - b.createdAt)
+    .map((c) => ({ comment: c, versionLabel: labels.get(c.versionId)! }));
+}
+
+/**
+ * The title stem used to spot "the same cut, next render".
+ *
+ * Strips the decorations a render pass adds — version markers (v2, V03,
+ * FINAL, final2), copy suffixes ("(2)", "copy"), trailing dates, cut/export
+ * words — then collapses separators. "LMH_Reunion_v2_FINAL (1)" and
+ * "LMH Reunion v3" both reduce to "lmh reunion", which is the identity a
+ * human would give either file.
+ */
+export function versionStem(title: string): string {
+  let s = (title || "").toLowerCase().replace(/\.[^.]+$/, "");
+  s = s.replace(/[_\-.]+/g, " ");
+  let prev = "";
+  while (prev !== s) {
+    prev = s;
+    s = s
+      .replace(/\s*\((\d+)\)\s*$/, " ")               // "(2)"
+      .replace(/\s+(v|ver|version)\s*\d+\s*$/i, " ")  // v2, ver 03
+      .replace(/\s+(final|fin|approved|locked|master|export|cut|render|copy|new)\s*\d*\s*$/i, " ")
+      .replace(/\s+\d{4} \d{2} \d{2}\s*$/, " ")       // 2026 08 03 (separators already spaces)
+      .replace(/\s+\d{1,2} \d{1,2} \d{2,4}\s*$/, " ") // 8 3 26
+      .trim();
+  }
+  return s.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Review-history entries that look like earlier cuts of `title`.
+ *
+ * An OFFER, never an auto-link: two genuinely different clips can share a
+ * series name, and misfiling a review is worse than asking. Excludes the
+ * file's own key (already its own doc) and anything with an empty stem.
+ */
+export function versionCandidates(
+  title: string, ownKey: string | null, history: ReviewHistoryEntry[],
+): ReviewHistoryEntry[] {
+  const stem = versionStem(title);
+  if (!stem) return [];
+  return history
+    .filter((h) => h.key !== ownKey)
+    .filter((h) => versionStem(h.title) === stem)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
 /** Saved drawings for a version (time + strokes/labels) — drives the on-frame
  *  proximity fade: the overlay shows a drawing as the playhead nears its time.
  *  Carries the author so label chips can be tinted to that reviewer's colour. */

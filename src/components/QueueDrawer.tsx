@@ -143,6 +143,8 @@ type Props = {
   onShowAnnotation?: (a: AnnotationStrokes | null, color?: string) => void;
   /** Re-open a past-review source (local path or URL) from the history popover. */
   onOpenReviewSource?: (path: string) => void;
+  /** Version stacks: absorb the open source into an older cut's review doc. */
+  onReviewLinkAsVersion?: (oldKey: string) => void;
   /** Live review-comment range being set → previewed on the App's timeline.
    *  `live` = an end still follows the playhead; false = both marks locked. */
   onReviewRangeDraft?: (r: ReviewRangeDraft | null) => void;
@@ -242,7 +244,7 @@ export function QueueDrawer({
   chapterSourceKey, chapterDurationSec, onChaptersChanged, sourceDescription,
   reviewSourceKey, reviewSourceTitle,
   reviewDrawActive, reviewDraft, onToggleReviewDraw, reviewLabelActive, onToggleReviewLabel, onReviewDraftConsumed, onShowAnnotation,
-  onOpenReviewSource, onReviewRangeDraft, onRegisterRangeHotkeys, onUndo, onRedo,
+  onOpenReviewSource, onReviewLinkAsVersion, onReviewRangeDraft, onRegisterRangeHotkeys, onUndo, onRedo,
   reviewSessionActive, reviewSessionDoc, onReviewSessionOp,
   onRenameClip, onRenameAll,
   onPopOut, embedded = false, roomFace = false, focusItem = null,
@@ -903,6 +905,7 @@ export function QueueDrawer({
           onDraftConsumed={onReviewDraftConsumed}
           onShowAnnotation={onShowAnnotation}
           onOpenReview={onOpenReviewSource}
+          onLinkAsVersion={onReviewLinkAsVersion}
           onRangeDraft={onReviewRangeDraft}
           onRegisterRangeHotkeys={onRegisterRangeHotkeys}
           sessionActive={!!reviewSessionActive}
