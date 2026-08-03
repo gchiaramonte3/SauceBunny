@@ -9,7 +9,10 @@ type IconProps = {
   children?: ReactNode;
 };
 
-const Icon = ({ size = 16, stroke = "currentColor", strokeWidth = 1.6, style, className, children }: IconProps) => (
+/** Exported so the badge-icon set can be drawn on the same geometry rather
+ *  than re-declaring the svg attributes and drifting from it. */
+export type { IconProps };
+export const Icon = ({ size = 16, stroke = "currentColor", strokeWidth = 1.6, style, className, children }: IconProps) => (
   <svg
     width={size}
     height={size}

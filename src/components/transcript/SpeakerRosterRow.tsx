@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { IconPlay } from "../Icons";
+import { KindGlyph } from "./KindGlyph";
 import type { RosterItem } from "./SpeakerRosterModal";
 
 /**
@@ -16,10 +17,12 @@ import type { RosterItem } from "./SpeakerRosterModal";
  * and it could still only merge one pair at a time.
  */
 export function SpeakerRosterRow({
-  item, color, selected, onToggle, onRename, onPickColor, onPlay,
+  item, color, icon, selected, onToggle, onRename, onPickColor, onPlay,
 }: {
   item: RosterItem;
   color: string;
+  /** Explicit badge-icon id, or null to let the tag and name decide. */
+  icon?: string | null;
   selected: boolean;
   onToggle: () => void;
   onRename: (canonicalTag: string, name: string) => void;
@@ -50,6 +53,12 @@ export function SpeakerRosterRow({
         aria-label={`Select ${item.name}`}
         title={item.colorTag === null ? "Unassigned speech cannot be merged" : `Select ${item.name}`}
       />
+      {/* A badge, not a bare dot. The roster is the one screen that shows the
+          WHOLE cast, and it was the only one of the four speaker lists whose
+          circles carried nothing — so at twenty-six speakers it was twenty-six
+          coloured dots and a column of names, and the colour was doing all the
+          identifying on its own. Same glyph rule as the transcript bubbles, so
+          a music bed reads as one here too. */}
       <button
         type="button"
         className="cp-spk-pip cp-spk-pip-btn"
@@ -57,7 +66,9 @@ export function SpeakerRosterRow({
         title="Change colour"
         aria-label={`Change ${item.name} colour`}
         onClick={(e) => onPickColor(item, e.currentTarget.getBoundingClientRect())}
-      />
+      >
+        <KindGlyph tag={item.colorTag} name={item.name} size={11} override={icon} />
+      </button>
       <input
         className="cp-spk-name"
         value={name}

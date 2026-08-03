@@ -35,6 +35,9 @@ type Props = {
   onGrabFace?: () => Promise<string | null>;
   /** Resolve a speaker's current pip colour (override-aware). */
   colorOf: (item: RosterItem) => string;
+  /** Resolve a speaker's explicit badge icon, if they have one. Optional so a
+   *  caller with no override store still renders derived badges. */
+  iconOf?: (item: RosterItem) => string | null;
   /** Open the colour picker anchored to this speaker's pip. */
   onPickColor: (item: RosterItem, rect: DOMRect) => void;
   onClose: () => void;
@@ -57,7 +60,7 @@ type Props = {
  * button per row. Backdrop / Escape close.
  */
 export function SpeakerRosterModal({
-  roster, onRename, onMergeMany, colorOf, onPickColor, onPlaySpeaker, onApplyCast, onGrabFace, onClose,
+  roster, onRename, onMergeMany, colorOf, iconOf, onPickColor, onPlaySpeaker, onApplyCast, onGrabFace, onClose,
 }: Props) {
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<"talk" | "name" | "order">("talk");
@@ -201,6 +204,7 @@ export function SpeakerRosterModal({
                 key={r.tag}
                 item={r}
                 color={colorOf(r)}
+                icon={iconOf?.(r) ?? null}
                 selected={picked.has(r.tag)}
                 onToggle={() => togglePicked(r.tag)}
                 onRename={onRename}

@@ -49,6 +49,42 @@ const checkboxOf = (name: string) =>
     (r.querySelector(".cp-spk-name") as HTMLInputElement).value === name,
   )!).getByRole("checkbox") as HTMLInputElement;
 
+const pipOf = (name: string) =>
+  rows().find((r) =>
+    (r.querySelector(".cp-spk-name") as HTMLInputElement).value === name,
+  )!.querySelector(".cp-spk-pip") as HTMLElement;
+
+describe("the pip carries an identity, not just a colour", () => {
+  it("shows initials", () => {
+    // Twenty-six bare coloured dots and a column of names made colour do all
+    // the identifying on its own, on the one screen that shows the whole cast.
+    show();
+    expect(pipOf("Ada").textContent).toBe("A");
+    expect(pipOf("Extra 1").textContent).toBe("E1");
+  });
+
+  it("shows the chosen icon instead, when there is one", () => {
+    show({ iconOf: (item) => (item.name === "Basil" ? "crown" : null) });
+    expect(pipOf("Basil").querySelector("svg")).toBeTruthy();
+    expect(pipOf("Basil").textContent).toBe("");
+    expect(pipOf("Ada").querySelector("svg")).toBeNull();
+  });
+
+  it("still renders when the caller supplies no icon resolver at all", () => {
+    // iconOf is optional; a missing one must mean "derive", not "crash".
+    show({ iconOf: undefined });
+    expect(pipOf("Cleo").textContent).toBe("C");
+  });
+
+  it("is still the button that opens the colour picker", () => {
+    // The glyph went INSIDE the existing control rather than beside it, so the
+    // click target has to survive.
+    const props = show();
+    fireEvent.click(pipOf("Ada"));
+    expect(props.onPickColor).toHaveBeenCalled();
+  });
+});
+
 describe("SpeakerRosterModal at cast scale", () => {
   it("mounts no merge control until something is selected", () => {
     // THE regression this guards. Every row used to own a <select> listing

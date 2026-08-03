@@ -2156,6 +2156,7 @@ export function TranscriptViewer({
           onApplyCast={applyCast}
           onGrabFace={onGrabFace}
           colorOf={(item) => speakerDisplayColor(item.colorTag)}
+          iconOf={(item) => overrides.icons[item.colorTag ?? "__NULL__"] ?? null}
           onPickColor={(item, rect) => setColorPick({ key: item.colorTag ?? "__NULL__", rect })}
           onClose={() => setSpeakerModalOpen(false)}
         />
