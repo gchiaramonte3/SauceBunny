@@ -501,6 +501,17 @@
 .cp-track-comment:hover .cp-track-comment-ini { font-size: 10px; opacity: 1; }
 .cp-track-comment.resolved { opacity: 0.45; filter: saturate(0.6); }
 .cp-track-comment.resolved:hover { opacity: 1; filter: none; }
+/* An open note carried from an EARLIER cut: present but not this cut's own —
+   hollow (tinted ring, dark fill) where a live note is a solid dot, so the
+   two read apart at a glance. Hover restores full presence for reading. */
+.cp-track-comment.carried {
+  background: var(--bg-1, #131316);
+  border: 1.5px solid var(--marker-color, var(--accent));
+  box-shadow: none;
+  opacity: 0.75;
+}
+.cp-track-comment.carried .cp-track-comment-ini { color: var(--marker-color, var(--accent)); }
+.cp-track-comment.carried:hover { opacity: 1; }
 
 /* Review comment RANGE (timeStart→timeEnd) — a reviewer-tinted band hugging
    the bottom of the track. The tint paints OVER a near-black scrim so the band

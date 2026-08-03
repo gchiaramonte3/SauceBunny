@@ -55,6 +55,10 @@ import type { ShareSourceArg } from "../bindings/ShareSourceArg";
 export type ReviewMarkerView = {
   id: string; time: number; timeEnd: number | null; resolved: boolean;
   color: string; initials: string;
+  /** True for an unresolved note carried from an EARLIER version of the cut —
+   *  rendered dimmed, so scrubbing the new cut shows where the old notes sit
+   *  without them reading as this cut's own thread. */
+  carried?: boolean;
 };
 /** Same read-model for drawn annotations (author-tinted). */
 export type ReviewAnnotationView = {

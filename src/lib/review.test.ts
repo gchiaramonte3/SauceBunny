@@ -11,6 +11,7 @@ import {
   inverseReviewOps, restampReviewOp,
   annotationHasContent, annotationsOf, labelSuffix, sanitizeDocForWire,
   setActiveVersion, carriedComments, versionStem, versionCandidates,
+  removeVersion, unlinkFingerprint,
   type ReviewDoc, type ReviewComment, type AnnotationStrokes, attributeReviewOp,
 } from "./review";
 
@@ -162,6 +163,38 @@ describe("version stacks", () => {
     const carried = carriedComments(doc, v1);
     expect(carried.map((c) => c.comment.body)).toEqual(["new note"]);
   });
+
+  it("removeVersion takes a comment-free version back out, repointing active", () => {
+    // The wrong-link escape hatch: v2 was linked by mistake, nothing written.
+    const s = seed();
+    const v2 = ensureVersion(s.doc, "/wrong_v2.mp4", "V2", 2000);
+    const doc = setActiveVersion(v2.doc, v2.versionId);
+    const out = removeVersion(doc, v2.versionId);
+    expect(out.versions.map((v) => v.label)).toEqual(["V1"]);
+    expect(out.activeVersionId).toBe(s.v);
+  });
+
+  it("removeVersion refuses when the version holds comments", () => {
+    // Comments carry only a versionId; removing their version orphans them.
+    const { doc, v2 } = stack();
+    expect(removeVersion(doc, v2)).toBe(doc);
+  });
+
+  it("removeVersion refuses on the last version and on an unknown id", () => {
+    const s = seed();
+    expect(removeVersion(s.doc, s.v)).toBe(s.doc);
+    const { doc } = stack();
+    expect(removeVersion(doc, "nope")).toBe(doc);
+  });
+
+  it("removeVersion drops the removed version's approval status with it", () => {
+    const s = seed();
+    const v2 = ensureVersion(s.doc, "/v2.mp4", "V2", 2000);
+    let doc = setStatus(v2.doc, v2.versionId, "approved", "", 3000, "Nika");
+    doc = removeVersion(doc, v2.versionId);
+    expect(doc.status[v2.versionId]).toBeUndefined();
+  });
+
 });
 
 describe("version identity (stem + candidates)", () => {
@@ -506,6 +539,14 @@ describe("fingerprint index + history", () => {
     const a = reviewFingerprint("intro.mp4", 10, 1920, 1080, 5_000_000);
     const b = reviewFingerprint("intro.mp4", 10, 1920, 1080, 7_000_000);
     expect(a).not.toBe(b); // different content → different review, no collision
+  });
+  it("unlinkFingerprint forgets a mapping; unknown fingerprints are a no-op", () => {
+    // The index half of taking a wrongly-linked version back out of a stack.
+    linkFingerprint("fp-a", "/old.mp4");
+    expect(resolveByFingerprint("fp-a")).toBe("/old.mp4");
+    unlinkFingerprint("fp-a");
+    expect(resolveByFingerprint("fp-a")).toBeNull();
+    unlinkFingerprint("fp-never-linked"); // must not throw
   });
   it("resolves a clip to its prior review key once linked", () => {
     const fp = reviewFingerprint("clip.mp4", 60, 1280, 720);

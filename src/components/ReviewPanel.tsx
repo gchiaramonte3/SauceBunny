@@ -151,6 +151,7 @@ export function ReviewPanel({
   onShowAnnotation,
   onOpenReview,
   onLinkAsVersion,
+  onUnlinkVersion,
   onRangeDraft,
   onRegisterRangeHotkeys,
   sessionActive = false,
@@ -194,6 +195,10 @@ export function ReviewPanel({
    *  its next version (App owns the fingerprint + key re-resolution). Absent
    *  for sources that cannot stack (web URLs, co-review). */
   onLinkAsVersion?: (oldKey: string) => void;
+  /** Version stacks: take the CURRENT source back out of its stack — the
+   *  escape hatch for a wrong link. Only ever invoked for a comment-free
+   *  active version; the lib refuses anything else regardless. */
+  onUnlinkVersion?: () => void;
   /** Emit the range currently being set in the composer (or null) so App can
    *  preview it on the timeline. `live` = an end still follows the playhead. */
   onRangeDraft?: (r: ReviewRangeDraft | null) => void;
@@ -994,6 +999,21 @@ export function ReviewPanel({
                     </span>
                   </button>
                 ))}
+                {/* The wrong-link escape hatch. Shown only while it is still
+                    safe: the viewed version has no comments, so unlinking
+                    cannot strand anything. Once notes exist, this cut has a
+                    history and belongs where it is. */}
+                {onUnlinkVersion
+                  && viewDoc.comments.every((c) => c.versionId !== versionId)
+                  && (
+                  <button
+                    className="cp-review-verunlink"
+                    onClick={() => { onUnlinkVersion(); setVersionsOpen(false); }}
+                    title="Not actually a new cut of this review? Take it back out of the stack."
+                  >
+                    Unlink this cut
+                  </button>
+                )}
               </div>
             )}
           </div>

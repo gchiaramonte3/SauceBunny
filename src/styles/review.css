@@ -1248,3 +1248,27 @@
 .cp-review-carried-resolve:focus-visible { opacity: 1; }
 .cp-review-carried-resolve:hover { background: rgba(255,255,255,0.10); color: var(--fg-1); }
 .cp-review-carried-resolve:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+
+/* Clipboard-prefill note: names where the text came from, because a modal
+   that opens already full without saying why reads as haunted. */
+.cp-pastenotes-prefill {
+  font-size: 11px;
+  color: var(--fg-3);
+  padding: 0 2px;
+}
+
+/* The unlink escape hatch, at the foot of the version popover. Quiet text,
+   not a button chrome: it is a rare correction, not a peer of the versions. */
+.cp-review-verunlink {
+  margin-top: 2px;
+  padding: 6px 8px;
+  border: none;
+  border-top: 1px solid var(--line-2);
+  background: none;
+  text-align: left;
+  font-size: 11px;
+  color: var(--fg-3);
+  cursor: pointer;
+  border-radius: 0 0 6px 6px;
+}
+.cp-review-verunlink:hover { background: rgba(255,255,255,0.07); color: var(--fg-1); }

@@ -96,7 +96,7 @@ import { speakerLanes } from "./lib/speaker-stats";
 import { speakerColor, loadSpeakerOverrides, resolveAliasChain, SPEAKERS_CHANGED_EVENT } from "./components/transcript/helpers";
 import { speakerFingerprint, seedSpeakerOverridesFromFingerprint, linkSpeakerOverridesToFingerprint } from "./lib/speaker-identity";
 import { MediaInfoModal } from "./components/MediaInfoModal";
-import { loadReview, saveReview, ensureVersion, setActiveVersion, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
+import { loadReview, saveReview, ensureVersion, setActiveVersion, removeVersion, unlinkFingerprint, carriedComments, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
 import { loadChapters, adoptSourceChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
 import { appUndo } from "./lib/undo";
 import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./lib/storage";
@@ -5146,6 +5146,24 @@ export default function App() {
     setFpIndexBump((n) => n + 1);
   }, [sourceKind, localFilePath, metadata, localFileSize]);
 
+  /** The reverse of linkAsReviewVersion: take the open file back out of the
+   *  stack it was wrongly linked into. removeVersion refuses if the version
+   *  holds comments, in which case the fingerprint entry must stay too —
+   *  half-unlinking would strand those comments behind an unreachable key. */
+  const unlinkReviewVersion = useCallback(() => {
+    if (!(sourceKind === "file" && localFilePath && metadata) || !reviewSourceKey) return;
+    const doc = loadReview(reviewSourceKey);
+    const mine = doc.versions.find((v) => v.path === localFilePath);
+    if (!mine) return;
+    const next = removeVersion(doc, mine.id);
+    if (next === doc) return; // refused (comments exist, or last version)
+    saveReview(next);
+    unlinkFingerprint(
+      reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize),
+    );
+    setFpIndexBump((n) => n + 1);
+  }, [sourceKind, localFilePath, metadata, localFileSize, reviewSourceKey]);
+
   /**
    * Take the creator's own chapters when the site publishes them.
    *
@@ -5424,10 +5442,20 @@ export default function App() {
       const d = loadReview(reviewSourceKey);
       const me = loadReviewer();
       const markers = reviewMarkersOf(d, d.activeVersionId);
-      setReviewMarkers(markers.map((m) => ({
-        id: m.id, time: m.time, timeEnd: m.timeEnd, resolved: m.resolved,
-        color: reviewerColorFor(m.author, me), initials: initialsOf(m.author),
-      })));
+      // Earlier cuts' unresolved notes ride along dimmed: a notes pass on v2
+      // is a scrubbing activity, and the old notes are where the stops are.
+      const carriedM = carriedComments(d, d.activeVersionId);
+      setReviewMarkers([
+        ...markers.map((m) => ({
+          id: m.id, time: m.time, timeEnd: m.timeEnd, resolved: m.resolved,
+          color: reviewerColorFor(m.author, me), initials: initialsOf(m.author),
+        })),
+        ...carriedM.map(({ comment: c }) => ({
+          id: c.id, time: c.timeStart, timeEnd: c.timeEnd, resolved: false,
+          color: reviewerColorFor(c.author, me), initials: initialsOf(c.author),
+          carried: true,
+        })),
+      ]);
       setReviewAnnotations(annotationsOf(d, d.activeVersionId)
         .map((a) => ({ id: a.id, time: a.time, strokes: a.strokes, color: reviewerColorFor(a.author, me) })));
       // Once a clip has notes, record it in history + link its fingerprint so
@@ -6474,6 +6502,7 @@ export default function App() {
                 onShowAnnotation={(a, color) => { setReviewDrawActive(false); setReviewLabelMode(false); setReviewDraft(null); clearDraftHistory(); setAnnotationDisplay(a); setAnnotationDisplayColor(color ?? null); }}
                 onOpenReviewSource={handleOpenReviewSource}
                 onReviewLinkAsVersion={sourceKind === "file" ? linkAsReviewVersion : undefined}
+                onReviewUnlinkVersion={sourceKind === "file" ? unlinkReviewVersion : undefined}
                 onReviewRangeDraft={setReviewRangeDraft}
                 onRegisterRangeHotkeys={registerReviewRangeKeys}
                 reviewSessionActive={coSessionActive}

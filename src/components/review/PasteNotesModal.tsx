@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { invoke } from "@tauri-apps/api/core";
 import { parseProducerNotes } from "../../lib/note-import";
 import { secondsToClock } from "../../lib/timecode";
 
@@ -43,6 +44,38 @@ export function PasteNotesModal({
   /** Explicit per-row overrides of the default tick. Cleared when the text
    *  changes, because row indexes mean nothing across a re-paste. */
   const [overrides, setOverrides] = useState<Record<number, boolean>>({});
+  /** True when the box was seeded from the clipboard, so the modal can say
+   *  where the text came from instead of it just being mysteriously there. */
+  const [prefilled, setPrefilled] = useState(false);
+  const typedRef = useRef(false);
+
+  // The user pressed "paste notes" moments after copying them, so the paste
+  // itself is a step the modal can usually skip. Read through Rust, not
+  // navigator.clipboard — the web API raises macOS's confirmation modal (see
+  // Toolbar's paste button, where this was learned). Gated on the clipboard
+  // actually PARSING like notes: at least one timecoded line. Prefilling a
+  // copied URL or a stray paragraph would read as the modal malfunctioning.
+  useEffect(() => {
+    let stale = false;
+    (async () => {
+      try {
+        const clip = await invoke<string>("read_clipboard_text");
+        if (stale || typedRef.current || !clip?.trim()) return;
+        const rows = parseProducerNotes(clip, { durationSec: durationSec ?? undefined, fps });
+        if (rows.some((r) => r.startSec != null)) {
+          setText(clip);
+          setPrefilled(true);
+        }
+      } catch {
+        // No clipboard access (tests, or an empty clipboard) → an empty box,
+        // which is just the modal's normal starting state.
+      }
+    })();
+    return () => { stale = true; };
+    // Mount-only: re-reading the clipboard after the user has interacted
+    // would fight their editing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const rows = useMemo(
     () => parseProducerNotes(text, { durationSec: durationSec ?? undefined, fps }),
@@ -78,11 +111,16 @@ export function PasteNotesModal({
           <button className="cp-modal-close" onClick={onClose} title="Close (Esc)" aria-label="Close">✕</button>
         </div>
 
+        {prefilled && (
+          <div className="cp-pastenotes-prefill">
+            Filled from your clipboard. Not the right text? Just paste over it.
+          </div>
+        )}
         <textarea
           className="cp-pastenotes-input"
           autoFocus
           value={text}
-          onChange={(e) => { setText(e.target.value); setOverrides({}); }}
+          onChange={(e) => { typedRef.current = true; setPrefilled(false); setText(e.target.value); setOverrides({}); }}
           placeholder={"Paste from a Google Doc or Sheet, one note per line.\n\n00:05 - do we have a fuller shot here?\n0:21 - 0:43 - this section drags\nAt the end, were we adding the bites?"}
           spellCheck={false}
         />

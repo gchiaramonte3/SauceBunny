@@ -1,9 +1,28 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PasteNotesModal } from "./PasteNotesModal";
 
-afterEach(cleanup);
+/**
+ * The clipboard, controllable per test. Default is "nothing there", so every
+ * test below that is NOT about prefill runs against the modal's ordinary
+ * empty starting state. `delayMs` lets the race tests order the user's typing
+ * against the clipboard read deterministically.
+ */
+const clipboard: { text: string | null; delayMs: number } = { text: null, delayMs: 0 };
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: async () => {
+    if (clipboard.delayMs) await new Promise((r) => setTimeout(r, clipboard.delayMs));
+    if (clipboard.text == null) throw new Error("clipboard empty");
+    return clipboard.text;
+  },
+}));
+
+afterEach(() => {
+  cleanup();
+  clipboard.text = null;
+  clipboard.delayMs = 0;
+});
 
 function show(over: Partial<React.ComponentProps<typeof PasteNotesModal>> = {}) {
   const onImport = vi.fn();
@@ -105,5 +124,46 @@ describe("PasteNotesModal", () => {
     const props = show();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(props.onClose).toHaveBeenCalled();
+  });
+});
+
+describe("clipboard prefill", () => {
+  it("opens already filled when the clipboard parses as notes, and says so", async () => {
+    // The user copied the doc seconds ago; making them paste is a step the
+    // modal can skip.
+    clipboard.text = "00:05 - too sparse\n00:21 - 00:43 - drags";
+    show();
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(screen.getByText(/Filled from your clipboard/)).toBeTruthy();
+    expect(importBtn().textContent).toBe("Import 2 notes");
+  });
+
+  it("leaves the box alone when the clipboard is not notes", async () => {
+    // Prefilling a copied URL or a stray paragraph would read as the modal
+    // malfunctioning; only timecoded text qualifies.
+    clipboard.text = "https://youtube.com/watch?v=abc — check this out";
+    show();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(rows()).toHaveLength(0);
+    expect(screen.queryByText(/Filled from your clipboard/)).toBeNull();
+  });
+
+  it("never stomps text the user typed while the read was in flight", async () => {
+    clipboard.text = "00:05 - from the clipboard";
+    clipboard.delayMs = 30;
+    show();
+    paste("00:10 - typed by hand");
+    await new Promise((r) => setTimeout(r, 60));
+    const box = screen.getByPlaceholderText(/Paste from a Google Doc/) as HTMLTextAreaElement;
+    expect(box.value).toBe("00:10 - typed by hand");
+  });
+
+  it("drops the provenance note as soon as the user edits", async () => {
+    // Once edited it is THEIR text; the label would be a false claim.
+    clipboard.text = "00:05 - note";
+    show();
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    paste("00:05 - note, edited");
+    expect(screen.queryByText(/Filled from your clipboard/)).toBeNull();
   });
 });

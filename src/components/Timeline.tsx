@@ -159,7 +159,7 @@ type Props = {
    *  tinted to the reviewer's colour, expanding to their initials on hover.
    *  When `timeEnd` is set the marker also draws a reviewer-tinted RANGE bar in
    *  the comment lane — deliberately unlike the orange clip in/out selection. */
-  commentMarkers?: { id: string; time: number; timeEnd?: number | null; resolved: boolean; color: string; initials: string }[];
+  commentMarkers?: { id: string; time: number; timeEnd?: number | null; resolved: boolean; color: string; initials: string; carried?: boolean }[];
   /** Live preview of the range being set in the review composer — a dashed,
    *  pulsing reviewer-tinted bracket so it reads as "setting a comment range",
    *  distinct from both the orange clip marks and the saved comment ranges.
@@ -511,9 +511,9 @@ export function Timeline({
               return (
                 <div
                   key={m.id}
-                  className={"cp-track-comment" + (m.resolved ? " resolved" : "")}
+                  className={"cp-track-comment" + (m.resolved ? " resolved" : "") + (m.carried ? " carried" : "")}
                   style={{ left: `${pct(m.time * r)}%`, ["--marker-color" as string]: m.color }}
-                  title="Review comment · click to jump"
+                  title={m.carried ? "Open note from an earlier cut · click to jump" : "Review comment · click to jump"}
                   onMouseDown={(e) => { e.stopPropagation(); onSeek(Math.floor(m.time * r)); }}
                 >
                   <span className="cp-track-comment-ini">{m.initials}</span>

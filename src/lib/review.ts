@@ -697,6 +697,37 @@ export function setActiveVersion(doc: ReviewDoc, versionId: string): ReviewDoc {
 }
 
 /**
+ * Take a version back out of a stack — the escape hatch for a wrong link.
+ *
+ * REFUSES when the version holds comments (they would be orphaned: comments
+ * carry only a versionId) or when it is the last version (a doc with zero
+ * versions cannot hold anything). Both refusals return the doc unchanged, so
+ * a caller cannot half-apply. The active pointer moves to the newest
+ * remaining version when it pointed at the removed one.
+ */
+export function removeVersion(doc: ReviewDoc, versionId: string): ReviewDoc {
+  if (doc.versions.length < 2) return doc;
+  if (!doc.versions.some((v) => v.id === versionId)) return doc;
+  if (doc.comments.some((c) => c.versionId === versionId)) return doc;
+  const versions = doc.versions.filter((v) => v.id !== versionId);
+  const status = { ...doc.status };
+  delete status[versionId];
+  const activeVersionId = doc.activeVersionId === versionId
+    ? versions[versions.length - 1].id
+    : doc.activeVersionId;
+  return { ...doc, versions, status, activeVersionId };
+}
+
+/** Forget that a fingerprint resolves to a review key — the index half of
+ *  unlinking a version. A no-op for an unknown fingerprint. */
+export function unlinkFingerprint(fp: string): void {
+  const idx = loadJson<Record<string, string>>(FP_INDEX_KEY, {});
+  if (!(fp in idx)) return;
+  delete idx[fp];
+  saveJson(FP_INDEX_KEY, idx);
+}
+
+/**
  * Unresolved root comments from every OTHER version — the carry-forward list.
  *
  * THE reason the stack is one doc. A notes pass on v2 is exactly "check the
