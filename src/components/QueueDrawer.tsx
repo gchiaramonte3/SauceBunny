@@ -893,6 +893,7 @@ export function QueueDrawer({
           /* Playhead only while ACTIVE — see the transcript note above. */
           playheadActive={playheadAvailable && viewActive && shownTab === "review"}
           fps={fps}
+          durationSec={chapterDurationSec ?? null}
           onSeek={onTranscriptSeek}
           drawActive={!!reviewDrawActive}
           draft={reviewDraft ?? null}

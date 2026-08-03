@@ -26,6 +26,7 @@ import {
 import {
   markersToAvidTxt, markersToPremiereXml, markersToResolveEdl, markersToFcpxml, markersToCsv,
 } from "../lib/markers";
+import { PasteNotesModal, type ImportedNote } from "./review/PasteNotesModal";
 import {
   RATE_TABLE, DEFAULT_MARKER_SETTINGS, tcToFrames, FRAME_RATE_KEYS, fpsToRateKey,
   type FrameRateKey, type MarkerExportSettings,
@@ -138,6 +139,7 @@ export function ReviewPanel({
   sourceTitle,
   playheadActive,
   fps,
+  durationSec = null,
   onSeek,
   drawActive = false,
   draft = null,
@@ -164,6 +166,9 @@ export function ReviewPanel({
   playheadActive: boolean;
   /** Source frame rate — for SMPTE timecodes in CSV/EDL export. */
   fps: number;
+  /** Duration of the loaded cut, when known. Used only to disambiguate pasted
+   *  three-part timecodes ("00:08:10" cannot be 490s into a 3-minute cut). */
+  durationSec?: number | null;
   /** Click-to-seek — receives seconds. */
   onSeek: (seconds: number) => void;
   /** True while drawing on the frame (the monitor overlay is capturing). */
@@ -221,6 +226,8 @@ export function ReviewPanel({
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
+  /** The paste-producer-notes modal. */
+  const [pasteOpen, setPasteOpen] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
   // NLE marker-export settings (frame rate / Start TC / drop-frame), persisted
   // and seeded from the source fps on first open. Drives every marker format.
@@ -689,6 +696,47 @@ export function ReviewPanel({
       redo: () => replayOps([restampReviewOp(op, Date.now())]),
     });
   };
+
+  /**
+   * Import a batch of pasted producer notes as comments — ONE undo step.
+   *
+   * Routing thirteen notes through dispatchUndoable would work, but undoing a
+   * mis-parsed paste would then take thirteen ⌘Z presses, each silently
+   * deleting a comment the user can't see from the composer. One entry whose
+   * inverse deletes the whole batch matches what the user did: one paste.
+   * In co-review the adds still relay as individual ops — that is the wire
+   * format peers converge on — but the undo entry is local and batched.
+   */
+  const importNotes = (rows: ImportedNote[], noteAuthor: string) => {
+    if (!viewDoc || !versionId || rows.length === 0) return;
+    const base = Date.now();
+    const comments = rows.map((r, i) => buildComment({
+      versionId,
+      // A general note anchors at 0: it has no spot, and the head of the cut
+      // is where an untimed "big picture" note reads naturally in a time sort.
+      timeStart: r.startSec ?? 0,
+      timeEnd: r.endSec,
+      body: r.body,
+      author: noteAuthor,
+    // base + i keeps the pasted order stable under "newest" sort, which
+    // ties on identical createdAt values otherwise.
+    }, base + i));
+    const ops: ReviewOp[] = comments.map((c) => ({ t: "add", comment: c }));
+    let before = viewDoc;
+    const inverse: ReviewOp[] = [];
+    for (const op of ops) {
+      inverse.push(...inverseReviewOps(before, op));
+      before = applyReviewOp(before, op);
+    }
+    if (inSession) { for (const op of ops) onSessionOp?.(op); }
+    else mutate((d) => ops.reduce((acc, op) => applyReviewOp(acc, op), d));
+    appUndo.push({
+      label: `import ${comments.length} ${comments.length === 1 ? "note" : "notes"}`,
+      undo: () => { const at = Date.now(); replayOps(inverse.map((o) => restampReviewOp(o, at))); },
+      redo: () => { const at = Date.now(); replayOps(ops.map((o) => restampReviewOp(o, at))); },
+    });
+    setPasteOpen(false);
+  };
   // Fold external solo-mode writes (an undo/redo replay, possibly from a
   // closure that outlived a previous panel instance) back into local state.
   // Echoes of our own saves are harmless — same data re-read.
@@ -931,7 +979,18 @@ export function ReviewPanel({
         playheadActive={playheadActive} fps={fps}
         rangeIn={rangeIn} rangeOut={rangeOut} onRangeTap={tapRange} onRangeClear={clearRange}
         rangeColor={authorColor}
+        onPasteNotes={() => setPasteOpen(true)}
       />
+
+      {pasteOpen && (
+        <PasteNotesModal
+          durationSec={durationSec}
+          fps={fps}
+          defaultAuthor={author}
+          onImport={importNotes}
+          onClose={() => setPasteOpen(false)}
+        />
+      )}
 
       {nameModal && (
         <NameGateModal
@@ -1169,6 +1228,7 @@ function ReviewComposer({
   onResizeStart, resizing, onResizeReset,
   submit, hasDraft, playheadActive, fps,
   rangeIn, rangeOut, onRangeTap, onRangeClear, rangeColor,
+  onPasteNotes,
 }: {
   drawActive: boolean;
   onToggleDraw?: () => void;
@@ -1202,6 +1262,8 @@ function ReviewComposer({
   onRangeTap: () => void;
   onRangeClear: () => void;
   rangeColor: string;
+  /** Open the paste-producer-notes modal (owned by ReviewPanel). */
+  onPasteNotes: () => void;
 }) {
   // The composer subscribes to the playhead itself rather than taking it as a
   // prop from ReviewPanel. Same value, same cadence, but the re-render it
@@ -1326,6 +1388,14 @@ function ReviewComposer({
           <MicGlyph />
         </button>
         <EmojiPicker onPick={insertEmoji} />
+        <button
+          className="cp-review-tool"
+          onClick={() => { if (ensureNamed()) onPasteNotes(); }}
+          title="Paste producer notes as comments"
+          aria-label="Paste producer notes"
+        >
+          <NotesGlyph />
+        </button>
         <button
           className={"cp-review-tool" + (rangeIn != null || rangeOut != null ? " active" : "")}
           onClick={() => { if (ensureNamed()) onRangeTap(); }}
@@ -1630,6 +1700,19 @@ function ClockGlyph() {
       strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="9" />
       <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+/** A page of lines with a leading timecode tick — the paste-notes tool. */
+function NotesGlyph() {
+  return (
+    <svg className="cp-review-glyph" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M8 8h.01" /><path d="M11.5 8H16" />
+      <path d="M8 12h.01" /><path d="M11.5 12H16" />
+      <path d="M8 16h.01" /><path d="M11.5 16H14" />
     </svg>
   );
 }
