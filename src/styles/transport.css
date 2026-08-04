@@ -501,6 +501,20 @@
 .cp-track-comment:hover .cp-track-comment-ini { font-size: 10px; opacity: 1; }
 .cp-track-comment.resolved { opacity: 0.45; filter: saturate(0.6); }
 .cp-track-comment.resolved:hover { opacity: 1; filter: none; }
+/* The RANGE twin of the hollow dot below. Same idea, same reason: drop the
+   tinted fill for the dark scrim alone and keep only the outline, so a carried
+   range reads as an outline of a band rather than a band. Without this the
+   dot went hollow while its band stayed solid — and the band, being the wider
+   shape, is what the eye actually reads. */
+.cp-track-comment-range.carried {
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--marker-color, var(--accent)) 70%, transparent);
+  opacity: 0.8;
+}
+.cp-track-comment-range.carried::before,
+.cp-track-comment-range.carried::after { width: 1.5px; opacity: 0.85; }
+.cp-track-comment-range.carried:hover { opacity: 1; }
+
 /* An open note carried from an EARLIER cut: present but not this cut's own —
    hollow (tinted ring, dark fill) where a live note is a solid dot, so the
    two read apart at a glance. Hover restores full presence for reading. */

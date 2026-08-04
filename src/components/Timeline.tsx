@@ -493,9 +493,9 @@ export function Timeline({
               return (
                 <div
                   key={"rng-" + m.id}
-                  className={"cp-track-comment-range" + (m.resolved ? " resolved" : "")}
+                  className={"cp-track-comment-range" + (m.resolved ? " resolved" : "") + (m.carried ? " carried" : "")}
                   style={{ left: `${pct(m.time * r)}%`, width: `${Math.max(0.4, pct((m.timeEnd - m.time) * r))}%`, ["--marker-color" as string]: m.color }}
-                  title="Review range · click to jump to its start"
+                  title={m.carried ? "Range note from an earlier cut · click to jump to its start" : "Review range · click to jump to its start"}
                   onMouseDown={(e) => { e.stopPropagation(); onSeek(Math.floor(m.time * r)); }}
                 />
               );

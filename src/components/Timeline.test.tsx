@@ -52,6 +52,45 @@ function mount(over: Partial<Parameters<typeof Timeline>[0]> = {}) {
   return { onSeek, playhead: screen.getByRole("slider", { name: "Playhead" }) };
 }
 
+describe("Timeline review markers — live vs carried", () => {
+  /** One point note and one RANGE note, each in both flavours. */
+  const MARKERS = [
+    { id: "live-dot", time: 10, timeEnd: null, resolved: false, color: "#75B0FF", initials: "GC" },
+    { id: "live-rng", time: 20, timeEnd: 25, resolved: false, color: "#75B0FF", initials: "GC" },
+    { id: "car-dot", time: 30, timeEnd: null, resolved: false, color: "#EB9A04", initials: "NP", carried: true },
+    { id: "car-rng", time: 40, timeEnd: 45, resolved: false, color: "#EB9A04", initials: "NP", carried: true },
+  ];
+  const dots = () => [...document.querySelectorAll(".cp-track-comment")] as HTMLElement[];
+  const bands = () => [...document.querySelectorAll(".cp-track-comment-range")] as HTMLElement[];
+
+  it("marks a carried DOT as carried and leaves a live one alone", () => {
+    mount({ commentMarkers: MARKERS });
+    expect(dots()).toHaveLength(4);
+    expect(dots()[0].className).not.toContain("carried");
+    expect(dots()[2].className).toContain("carried");
+  });
+
+  it("marks a carried RANGE BAND as carried too", () => {
+    // The bug this catches: only the dot took the flag, so a carried note that
+    // had a range drew a hollow dot sitting on a full-strength solid band —
+    // the same band a note on THIS cut draws. The two states were meant to be
+    // told apart at a glance and the wider of the two shapes said "live".
+    mount({ commentMarkers: MARKERS });
+    const b = bands();
+    expect(b).toHaveLength(2);
+    expect(b[0].className).not.toContain("carried"); // live-rng
+    expect(b[1].className).toContain("carried");     // car-rng
+  });
+
+  it("says in the tooltip that a carried note came from an earlier cut", () => {
+    mount({ commentMarkers: MARKERS });
+    const b = bands();
+    expect(b[1].getAttribute("title")).toMatch(/earlier cut/i);
+    expect(dots()[2].getAttribute("title")).toMatch(/earlier cut/i);
+    expect(dots()[0].getAttribute("title")).not.toMatch(/earlier cut/i);
+  });
+});
+
 describe("Timeline playhead — keyboard", () => {
   // One case per binding. An editor's hands know these; a regression in any
   // one of them is the kind that gets reported as "the arrow keys feel wrong"

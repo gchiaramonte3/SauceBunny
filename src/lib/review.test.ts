@@ -11,7 +11,7 @@ import {
   inverseReviewOps, restampReviewOp,
   annotationHasContent, annotationsOf, labelSuffix, sanitizeDocForWire,
   setActiveVersion, carriedComments, versionStem, versionCandidates,
-  removeVersion, unlinkFingerprint,
+  removeVersion, unlinkFingerprint, canUnlinkVersion,
   type ReviewDoc, type ReviewComment, type AnnotationStrokes, attributeReviewOp,
 } from "./review";
 
@@ -185,6 +185,68 @@ describe("version stacks", () => {
     expect(removeVersion(s.doc, s.v)).toBe(s.doc);
     const { doc } = stack();
     expect(removeVersion(doc, "nope")).toBe(doc);
+  });
+
+  it("canUnlinkVersion says yes only for the OPEN file's comment-free version", () => {
+    // The bug this rule exists to kill. The control and the handler each had
+    // their own condition: the panel asked about the version being VIEWED, the
+    // handler acted on the version whose file was OPEN. Viewing an older cut
+    // made those two different versions, so pressing the button either removed
+    // something else or silently did nothing.
+    const s = seed(); // V1 at /v1.mp4
+    const v2 = ensureVersion(s.doc, "/v2.mp4", "V2", 2000);
+    const doc = setActiveVersion(v2.doc, v2.versionId);
+
+    // Viewing v2 with v2 open: the one honest case.
+    expect(canUnlinkVersion(doc, v2.versionId, "/v2.mp4")).toBe(true);
+    // Viewing V1 while v2 is the open file — "this cut" would be a lie.
+    expect(canUnlinkVersion(doc, s.v, "/v2.mp4")).toBe(false);
+    // Viewing v2 while V1 is somehow the open file: same lie, other way round.
+    expect(canUnlinkVersion(doc, v2.versionId, "/v1.mp4")).toBe(false);
+  });
+
+  it("canUnlinkVersion says no once that version carries comments", () => {
+    const s = seed();
+    const v2 = ensureVersion(s.doc, "/v2.mp4", "V2", 2000);
+    const clean = setActiveVersion(v2.doc, v2.versionId);
+    expect(canUnlinkVersion(clean, v2.versionId, "/v2.mp4")).toBe(true);
+    const withNote = addComment(clean, { versionId: v2.versionId, timeStart: 4, body: "x", author: "Me" }, 3);
+    expect(canUnlinkVersion(withNote, v2.versionId, "/v2.mp4")).toBe(false);
+  });
+
+  it("canUnlinkVersion refuses to let the BASE of a stack unlink from itself", () => {
+    // Reachable by ordinary use: stack v2 onto v1, then open v1. The doc is
+    // KEYED on v1, so removing v1's version leaves a review keyed on a file it
+    // no longer contains — and v1 re-opens into a stack with no entry for it.
+    const s = seed();                                   // doc.sourceKey === "/clip.mp4"
+    const v2 = ensureVersion(s.doc, "/clip_v2.mp4", "V2", 2000);
+    const doc = setActiveVersion(v2.doc, s.v);          // viewing the base, base is open
+    expect(doc.sourceKey).toBe("/clip.mp4");
+    expect(canUnlinkVersion(doc, s.v, "/clip.mp4")).toBe(false);
+    // The newer cut, from the same doc, is still fine to unlink.
+    expect(canUnlinkVersion(doc, v2.versionId, "/clip_v2.mp4")).toBe(true);
+  });
+
+  it("canUnlinkVersion says no for a lone version, a web source, or no version", () => {
+    const s = seed();
+    expect(canUnlinkVersion(s.doc, s.v, "/v1.mp4")).toBe(false); // last one standing
+    const { doc, v2 } = stack();
+    expect(canUnlinkVersion(doc, v2, null)).toBe(false);         // web: no path
+    expect(canUnlinkVersion(doc, null, "/v2.mp4")).toBe(false);  // nothing viewed
+    expect(canUnlinkVersion(doc, "ghost", "/v2.mp4")).toBe(false);
+  });
+
+  it("canUnlinkVersion agrees with removeVersion wherever it says yes", () => {
+    // The two must never disagree: a green control that the lib then refuses is
+    // exactly the silent no-op this replaced.
+    const s = seed();
+    const v2 = ensureVersion(s.doc, "/v2.mp4", "V2", 2000);
+    const doc = setActiveVersion(v2.doc, v2.versionId);
+    for (const [vid, path] of [[v2.versionId, "/v2.mp4"], [s.v, "/v1.mp4"], [s.v, "/v2.mp4"]] as const) {
+      if (canUnlinkVersion(doc, vid, path)) {
+        expect(removeVersion(doc, vid)).not.toBe(doc); // it really goes through
+      }
+    }
   });
 
   it("removeVersion drops the removed version's approval status with it", () => {

@@ -96,7 +96,7 @@ import { speakerLanes } from "./lib/speaker-stats";
 import { speakerColor, loadSpeakerOverrides, resolveAliasChain, SPEAKERS_CHANGED_EVENT } from "./components/transcript/helpers";
 import { speakerFingerprint, seedSpeakerOverridesFromFingerprint, linkSpeakerOverridesToFingerprint } from "./lib/speaker-identity";
 import { MediaInfoModal } from "./components/MediaInfoModal";
-import { loadReview, saveReview, ensureVersion, setActiveVersion, removeVersion, unlinkFingerprint, carriedComments, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
+import { loadReview, saveReview, ensureVersion, setActiveVersion, removeVersion, unlinkFingerprint, canUnlinkVersion, carriedComments, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
 import { loadChapters, adoptSourceChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
 import { appUndo } from "./lib/undo";
 import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./lib/storage";
@@ -5154,9 +5154,11 @@ export default function App() {
     if (!(sourceKind === "file" && localFilePath && metadata) || !reviewSourceKey) return;
     const doc = loadReview(reviewSourceKey);
     const mine = doc.versions.find((v) => v.path === localFilePath);
-    if (!mine) return;
+    // Same predicate the control is gated on, so the button and the action can
+    // never disagree about which version "this cut" means.
+    if (!mine || !canUnlinkVersion(doc, mine.id, localFilePath)) return;
     const next = removeVersion(doc, mine.id);
-    if (next === doc) return; // refused (comments exist, or last version)
+    if (next === doc) return; // belt-and-braces; canUnlinkVersion agreed above
     saveReview(next);
     unlinkFingerprint(
       reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize),
@@ -6503,6 +6505,7 @@ export default function App() {
                 onOpenReviewSource={handleOpenReviewSource}
                 onReviewLinkAsVersion={sourceKind === "file" ? linkAsReviewVersion : undefined}
                 onReviewUnlinkVersion={sourceKind === "file" ? unlinkReviewVersion : undefined}
+                reviewSourcePath={sourceKind === "file" ? localFilePath : null}
                 onReviewRangeDraft={setReviewRangeDraft}
                 onRegisterRangeHotkeys={registerReviewRangeKeys}
                 reviewSessionActive={coSessionActive}

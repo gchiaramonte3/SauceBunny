@@ -718,6 +718,38 @@ export function removeVersion(doc: ReviewDoc, versionId: string): ReviewDoc {
   return { ...doc, versions, status, activeVersionId };
 }
 
+/**
+ * Whether unlinking is both offerable and safe — ONE rule, used by the control
+ * that offers it and the handler that performs it.
+ *
+ * These were two separately-written conditions and they drifted: the panel
+ * asked "does the version I am VIEWING have comments", while the handler acted
+ * on "the version whose path is the file that is OPEN". Viewing an older cut
+ * while a newer one is loaded made those different versions, so the control
+ * either removed a version other than the one "this cut" pointed at, or hit
+ * the lib's refusal and silently did nothing.
+ *
+ * `sourcePath` is the file actually open in the player. Requiring the viewed
+ * version to be that file is what makes the word "this" true.
+ */
+export function canUnlinkVersion(
+  doc: ReviewDoc, versionId: string | null, sourcePath: string | null,
+): boolean {
+  if (!versionId || !sourcePath) return false;
+  // A doc must keep at least one version; the last one cannot leave.
+  if (doc.versions.length < 2) return false;
+  // The BASE of a stack cannot unlink from itself. Linking always folds the
+  // newer cut into the older cut's doc, so the doc is KEYED on the base file —
+  // remove that version and the review is keyed on a file it no longer
+  // contains, and the base re-opens into a stack with no entry for itself.
+  // Reachable by opening v1 after stacking v2 onto it, which is ordinary.
+  if (doc.sourceKey === sourcePath) return false;
+  const v = doc.versions.find((x) => x.id === versionId);
+  if (!v || v.path !== sourcePath) return false;
+  // Comments carry only a versionId, so removing their version orphans them.
+  return doc.comments.every((c) => c.versionId !== versionId);
+}
+
 /** Forget that a fingerprint resolves to a review key — the index half of
  *  unlinking a version. A no-op for an unknown fingerprint. */
 export function unlinkFingerprint(fp: string): void {

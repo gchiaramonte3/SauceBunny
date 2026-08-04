@@ -147,6 +147,9 @@ type Props = {
   onReviewLinkAsVersion?: (oldKey: string) => void;
   /** Version stacks: take the open source back out of a wrongly-linked stack. */
   onReviewUnlinkVersion?: () => void;
+  /** Path of the file open in the player, so the panel can tell which version
+   *  in a stack is the one unlink would actually act on. */
+  reviewSourcePath?: string | null;
   /** Live review-comment range being set → previewed on the App's timeline.
    *  `live` = an end still follows the playhead; false = both marks locked. */
   onReviewRangeDraft?: (r: ReviewRangeDraft | null) => void;
@@ -246,7 +249,7 @@ export function QueueDrawer({
   chapterSourceKey, chapterDurationSec, onChaptersChanged, sourceDescription,
   reviewSourceKey, reviewSourceTitle,
   reviewDrawActive, reviewDraft, onToggleReviewDraw, reviewLabelActive, onToggleReviewLabel, onReviewDraftConsumed, onShowAnnotation,
-  onOpenReviewSource, onReviewLinkAsVersion, onReviewUnlinkVersion, onReviewRangeDraft, onRegisterRangeHotkeys, onUndo, onRedo,
+  onOpenReviewSource, onReviewLinkAsVersion, onReviewUnlinkVersion, reviewSourcePath, onReviewRangeDraft, onRegisterRangeHotkeys, onUndo, onRedo,
   reviewSessionActive, reviewSessionDoc, onReviewSessionOp,
   onRenameClip, onRenameAll,
   onPopOut, embedded = false, roomFace = false, focusItem = null,
@@ -909,6 +912,7 @@ export function QueueDrawer({
           onOpenReview={onOpenReviewSource}
           onLinkAsVersion={onReviewLinkAsVersion}
           onUnlinkVersion={onReviewUnlinkVersion}
+          sourcePath={reviewSourcePath ?? null}
           onRangeDraft={onReviewRangeDraft}
           onRegisterRangeHotkeys={onRegisterRangeHotkeys}
           sessionActive={!!reviewSessionActive}

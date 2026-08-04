@@ -17,7 +17,7 @@ import {
   loadReview, saveReview, ensureVersion,
   buildComment, insertComment, editComment, deleteComment, editReply, removeReply,
   setResolved, setLike, reactionsOf, rootComments, openCount,
-  setActiveVersion, carriedComments, versionCandidates,
+  setActiveVersion, carriedComments, versionCandidates, canUnlinkVersion,
   applyReviewOp, inverseReviewOps, restampReviewOp,
   reviewToMarkdown,
   avatarColor, initialsOf, loadReviewer, AVATAR_COLORS, AUTHOR_KEY, AUTHOR_COLOR_KEY, REVIEW_CHANGED_EVENT,
@@ -152,6 +152,7 @@ export function ReviewPanel({
   onOpenReview,
   onLinkAsVersion,
   onUnlinkVersion,
+  sourcePath,
   onRangeDraft,
   onRegisterRangeHotkeys,
   sessionActive = false,
@@ -199,6 +200,12 @@ export function ReviewPanel({
    *  escape hatch for a wrong link. Only ever invoked for a comment-free
    *  active version; the lib refuses anything else regardless. */
   onUnlinkVersion?: () => void;
+  /** Absolute path of the file actually OPEN in the player, or null for web
+   *  sources. Distinct from `sourceKey`, which is the review's key and points
+   *  at the OLDEST cut once this file has been stacked onto it. Unlink needs
+   *  this: it acts on the open file, so the control may only be offered while
+   *  the version being viewed is that file's. */
+  sourcePath?: string | null;
   /** Emit the range currently being set in the composer (or null) so App can
    *  preview it on the timeline. `live` = an end still follows the playhead. */
   onRangeDraft?: (r: ReviewRangeDraft | null) => void;
@@ -999,13 +1006,14 @@ export function ReviewPanel({
                     </span>
                   </button>
                 ))}
-                {/* The wrong-link escape hatch. Shown only while it is still
-                    safe: the viewed version has no comments, so unlinking
-                    cannot strand anything. Once notes exist, this cut has a
-                    history and belongs where it is. */}
-                {onUnlinkVersion
-                  && viewDoc.comments.every((c) => c.versionId !== versionId)
-                  && (
+                {/* The wrong-link escape hatch. Two conditions, both load-bearing.
+                    The viewed version must have no comments, so unlinking cannot
+                    strand anything. And it must be the version of the file that
+                    is actually OPEN: unlink acts on the open file, so offering
+                    it while you are viewing an older cut would remove a
+                    different version than the one the word "this" points at —
+                    or, if the open file had comments, silently do nothing. */}
+                {onUnlinkVersion && canUnlinkVersion(viewDoc, versionId, sourcePath ?? null) && (
                   <button
                     className="cp-review-verunlink"
                     onClick={() => { onUnlinkVersion(); setVersionsOpen(false); }}
