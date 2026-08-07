@@ -29,6 +29,10 @@ import {
 } from "../lib/markers";
 import { PasteNotesModal, type ImportedNote } from "./review/PasteNotesModal";
 import {
+  markRangeIn as markRangeInAt, markRangeOut as markRangeOutAt, tapRange as tapRangeAt,
+  rangeToPost, type MarkRange,
+} from "../lib/review-range";
+import {
   RATE_TABLE, DEFAULT_MARKER_SETTINGS, tcToFrames, FRAME_RATE_KEYS, fpsToRateKey,
   type FrameRateKey, type MarkerExportSettings,
 } from "../lib/marker-time";
@@ -281,47 +285,20 @@ export function ReviewPanel({
   //   ⇧O: the exact mirror. Sub-MIN completions are ignored (stay armed).
   const [rangeIn, setRangeIn] = useState<number | null>(null);
   const [rangeOut, setRangeOut] = useState<number | null>(null);
-  const MIN_RANGE_SPAN = 0.05; // s — below this a "span" is really a point
   const clearRange = () => { setRangeIn(null); setRangeOut(null); };
-  const markRangeIn = () => {
+  /** Apply a pure transition, keeping the two state slots in step. */
+  const applyRange = (fn: (cur: MarkRange, t: number) => MarkRange) => {
     if (!ensureNamed()) return;
     const t = playheadAt();
     if (t == null) return; // no playable playhead — a mark at 0:00 would be a lie
-    if (rangeOut == null) { setRangeIn(t); return; }          // IDLE / IN-ARMED: (re)arm IN
-    if (rangeIn == null) {                                    // OUT-ARMED: complete
-      const a = Math.min(t, rangeOut), b = Math.max(t, rangeOut);
-      if (b - a < MIN_RANGE_SPAN) return;                     // no real span — stay armed
-      setRangeIn(a); setRangeOut(b);
-    } else if (rangeOut - t < MIN_RANGE_SPAN) {               // SET: IN at/after OUT collapses
-      setRangeIn(t); setRangeOut(null);
-    } else {
-      setRangeIn(t);                                          // SET: move IN
-    }
+    const next = fn({ in: rangeIn, out: rangeOut }, t);
+    setRangeIn(next.in);
+    setRangeOut(next.out);
   };
-  const markRangeOut = () => {
-    if (!ensureNamed()) return;
-    const t = playheadAt();
-    if (t == null) return; // no playable playhead — a mark at 0:00 would be a lie
-    if (rangeIn == null) { setRangeOut(t); return; }          // IDLE / OUT-ARMED: (re)arm OUT
-    if (rangeOut == null) {                                   // IN-ARMED: complete
-      const a = Math.min(rangeIn, t), b = Math.max(rangeIn, t);
-      if (b - a < MIN_RANGE_SPAN) return;                     // no real span — stay armed
-      setRangeIn(a); setRangeOut(b);
-    } else if (t - rangeIn < MIN_RANGE_SPAN) {                // SET: OUT at/before IN collapses
-      setRangeOut(t); setRangeIn(null);
-    } else {
-      setRangeOut(t);                                         // SET: move OUT
-    }
-  };
+  const markRangeIn = () => applyRange(markRangeInAt);
+  const markRangeOut = () => applyRange(markRangeOutAt);
   // Composer button keeps its tap cycle: arm IN → complete → re-arm.
-  const tapRange = () => {
-    if (rangeIn != null && rangeOut != null) {                // SET → re-arm
-      const t = playheadAt();
-      if (!ensureNamed() || t == null) return;
-      setRangeIn(t); setRangeOut(null);
-    } else if (rangeIn != null) markRangeOut();               // IN-ARMED → complete
-    else markRangeIn();                                       // IDLE / OUT-ARMED
-  };
+  const tapRange = () => applyRange(tapRangeAt);
   // Preview the in-progress range on the App timeline; clear on unmount. The
   // playhead-following end is clamped against the armed mark so the band
   // never inverts while scrubbing behind it.
@@ -878,20 +855,7 @@ export function ReviewPanel({
     // range commits the live span the pill is showing — the SAME clamped
     // values the preview computes (scrubbing behind an armed IN / ahead of
     // an armed OUT collapses to the mark), degrading to a point comment.
-    const t = playheadAt() ?? 0;
-    let timeStart = t;
-    let timeEnd: number | null = null;
-    if (rangeIn != null && rangeOut != null) {
-      timeStart = rangeIn; timeEnd = rangeOut;
-    } else if (rangeIn != null) {
-      const end = Math.max(t, rangeIn); // clamped like the pill/draft
-      if (end - rangeIn >= MIN_RANGE_SPAN) { timeStart = rangeIn; timeEnd = end; }
-      else timeStart = rangeIn;
-    } else if (rangeOut != null) {
-      const start = Math.min(t, rangeOut); // clamped like the pill/draft
-      if (rangeOut - start >= MIN_RANGE_SPAN) { timeStart = start; timeEnd = rangeOut; }
-      else timeStart = rangeOut;
-    }
+    const { timeStart, timeEnd } = rangeToPost({ in: rangeIn, out: rangeOut }, playheadAt() ?? 0);
     const comment = buildComment({
       versionId,
       timeStart,

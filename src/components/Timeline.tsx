@@ -6,6 +6,7 @@ import { extractFilmstrip } from "../lib/mediabunny-helpers";
 import { extractWaveformPeaks, lruSet, type WaveformPeaks } from "../lib/waveform";
 import { TimelineWaveform } from "./TimelineWaveform";
 import { usePlayheadFrames } from "../lib/playhead-store";
+import { isRealSpan } from "../lib/review-range";
 
 /** Scrub-track height (px) when a filmstrip is shown — matches
  *  `.cp-track.has-filmstrip` in transport.css; also sizes the decoded thumbs. */
@@ -125,6 +126,11 @@ function RangeDraftBand({ draft, fps, durationFrames }: {
   const r = Math.max(1, Math.round(fps));
   // Only a live draft needs the clock; a locked one is two fixed numbers.
   const playhead = usePlayheadFrames();
+  // A live draft too short to be a span will POST as a point comment, so it
+  // must not draw as a band. Without this the preview showed a range — the
+  // band has a minimum rendered width, so it was plainly visible — and then
+  // the comment landed as a dot. Same rule as rangeToPost, from one place.
+  if (draft.live && !isRealSpan(draft.anchor, playhead / r)) return null;
   const [a, b] = draft.live
     // Clamped against the anchor so the band cannot invert while scrubbing
     // behind the marked edge — the behaviour the old clamp in ReviewPanel had.

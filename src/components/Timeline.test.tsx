@@ -19,6 +19,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach } from "vitest";
 import { Timeline } from "./Timeline";
 import { setPlayheadFrames } from "../lib/playhead-store";
+import { rangeToPost } from "../lib/review-range";
 
 // Decoding is not what this file is about. Both of these reach for WebCodecs
 // and a real media file; stub them so the component mounts in jsdom.
@@ -88,6 +89,58 @@ describe("Timeline review markers — live vs carried", () => {
     expect(b[1].getAttribute("title")).toMatch(/earlier cut/i);
     expect(dots()[2].getAttribute("title")).toMatch(/earlier cut/i);
     expect(dots()[0].getAttribute("title")).not.toMatch(/earlier cut/i);
+  });
+});
+
+describe("Timeline range draft — the preview must not promise a range the post won't make", () => {
+  const band = () => document.querySelector(".cp-track-range-draft");
+  const live = { anchor: 10, color: "#75B0FF", live: true } as const;
+
+  it("draws a band once the playhead is a real span from the anchor", () => {
+    setPlayheadFrames(10 * FPS + FPS); // 1s past the mark
+    mount({ reviewRangeDraft: live });
+    expect(band()).toBeTruthy();
+  });
+
+  it("draws NOTHING while the playhead is within the minimum span", () => {
+    // The mismatch this closes. rangeToPost degrades a sub-threshold span to a
+    // POINT comment, but the band has a minimum rendered width, so the user
+    // was shown a visible range and then got a dot.
+    setPlayheadFrames(10 * FPS + 1); // one frame past the mark, well under 0.05s
+    mount({ reviewRangeDraft: live });
+    expect(band()).toBeNull();
+  });
+
+  it("draws nothing when the playhead sits exactly on the anchor", () => {
+    setPlayheadFrames(10 * FPS);
+    mount({ reviewRangeDraft: live });
+    expect(band()).toBeNull();
+  });
+
+  it("still draws when scrubbing BEHIND the anchor, clamped, once it is a real span", () => {
+    setPlayheadFrames(10 * FPS - FPS);
+    mount({ reviewRangeDraft: live });
+    expect(band()).toBeTruthy();
+  });
+
+  it("always draws a LOCKED draft — both marks are set, the playhead is irrelevant", () => {
+    setPlayheadFrames(0);
+    mount({ reviewRangeDraft: { start: 10, end: 30, color: "#75B0FF", live: false } });
+    expect(band()).toBeTruthy();
+  });
+
+  it("agrees with rangeToPost at every playhead around the anchor", () => {
+    // The contract, stated directly: a band is on screen if and only if the
+    // comment that posts right now would carry a timeEnd.
+    for (const offsetFrames of [-45, -2, -1, 0, 1, 2, 45]) {
+      cleanup();
+      const frames = 10 * FPS + offsetFrames;
+      setPlayheadFrames(frames);
+      mount({ reviewRangeDraft: live });
+      const posts = rangeToPost({ in: 10, out: null }, frames / FPS).timeEnd != null
+        || rangeToPost({ in: null, out: 10 }, frames / FPS).timeEnd != null;
+      expect(!!band(), `offset ${offsetFrames}f`).toBe(posts);
+    }
   });
 });
 
