@@ -719,6 +719,32 @@ export function removeVersion(doc: ReviewDoc, versionId: string): ReviewDoc {
 }
 
 /**
+ * Inverses for a whole BATCH, in the order they must be replayed to undo it.
+ *
+ * ORDER IS THE WHOLE POINT, and it is not the order you write. Undoing
+ * [A, B, C] means running C⁻¹, then B⁻¹, then A⁻¹ — each inverse assumes the
+ * document state its own op produced, so replaying them forwards walks the
+ * doc through states that never existed. Two edits to one comment show it:
+ * inverses computed eagerly are ["back to orig", "back to a"], and replaying
+ * those in order lands on "a" — the intermediate value — instead of "orig".
+ *
+ * The batch import that motivated this is all independent adds, where the
+ * order genuinely does not matter, which is exactly why a hand-rolled forward
+ * loop looked correct and would have stayed correct until the first batch
+ * containing an edit or a status change. Deciding it here, once, in a tested
+ * function, is cheaper than discovering it from a corrupted review doc.
+ */
+export function inverseReviewOpsBatch(doc: ReviewDoc, ops: readonly ReviewOp[]): ReviewOp[] {
+  const perOp: ReviewOp[][] = [];
+  let cur = doc;
+  for (const op of ops) {
+    perOp.push(inverseReviewOps(cur, op));
+    cur = applyReviewOp(cur, op);
+  }
+  return perOp.reverse().flat();
+}
+
+/**
  * Whether unlinking is both offerable and safe — ONE rule, used by the control
  * that offers it and the handler that performs it.
  *

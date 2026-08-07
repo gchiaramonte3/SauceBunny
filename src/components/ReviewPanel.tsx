@@ -18,7 +18,7 @@ import {
   buildComment, insertComment, editComment, deleteComment, editReply, removeReply,
   setResolved, setLike, reactionsOf, rootComments, openCount,
   setActiveVersion, carriedComments, versionCandidates, canUnlinkVersion,
-  applyReviewOp, inverseReviewOps, restampReviewOp,
+  applyReviewOp, inverseReviewOps, inverseReviewOpsBatch, restampReviewOp,
   reviewToMarkdown,
   avatarColor, initialsOf, loadReviewer, AVATAR_COLORS, AUTHOR_KEY, AUTHOR_COLOR_KEY, REVIEW_CHANGED_EVENT,
   loadReviewHistory, removeReviewHistory, clearReviewHistory, annotationHasContent,
@@ -741,12 +741,10 @@ export function ReviewPanel({
     // ties on identical createdAt values otherwise.
     }, base + i));
     const ops: ReviewOp[] = comments.map((c) => ({ t: "add", comment: c }));
-    let before = viewDoc;
-    const inverse: ReviewOp[] = [];
-    for (const op of ops) {
-      inverse.push(...inverseReviewOps(before, op));
-      before = applyReviewOp(before, op);
-    }
+    // Batch inverses come from the lib, in replay order. This loop used to be
+    // written out here and accumulated its inverses FORWARDS, which is only
+    // correct because a paste is all-adds; see inverseReviewOpsBatch.
+    const inverse = inverseReviewOpsBatch(viewDoc, ops);
     if (inSession) { for (const op of ops) onSessionOp?.(op); }
     else mutate((d) => ops.reduce((acc, op) => applyReviewOp(acc, op), d));
     appUndo.push({

@@ -11,8 +11,8 @@ import {
   inverseReviewOps, restampReviewOp,
   annotationHasContent, annotationsOf, labelSuffix, sanitizeDocForWire,
   setActiveVersion, carriedComments, versionStem, versionCandidates,
-  removeVersion, unlinkFingerprint, canUnlinkVersion,
-  type ReviewDoc, type ReviewComment, type AnnotationStrokes, attributeReviewOp,
+  removeVersion, unlinkFingerprint, canUnlinkVersion, inverseReviewOpsBatch,
+  type ReviewDoc, type ReviewComment, type ReviewOp, type AnnotationStrokes, attributeReviewOp,
 } from "./review";
 
 // Fixture shims over the live primitives - the one-shot legacy wrappers
@@ -118,6 +118,59 @@ describe("versions", () => {
     expect(next.doc.versions).toHaveLength(2);
     expect(next.versionId).not.toBe(v);
     expect(next.doc.activeVersionId).toBe(v); // active stays on the first
+  });
+});
+
+describe("inverseReviewOpsBatch", () => {
+  /** Replay helper: undo is "apply these inverses to the post-batch doc". */
+  const applyAll = (d: ReviewDoc, ops: readonly ReviewOp[]) =>
+    ops.reduce((acc, op) => applyReviewOp(acc, op), d);
+
+  it("undoes a batch of independent adds back to the starting doc", () => {
+    // The paste-import case. Order does not matter here, which is exactly why
+    // the hand-rolled forward loop looked correct.
+    const { doc, v } = seed();
+    const ops: ReviewOp[] = ["a", "b", "c"].map((id) => ({
+      t: "add" as const,
+      comment: { ...buildComment({ versionId: v, timeStart: 1, body: id, author: "Me" }, 1000), id },
+    }));
+    const after = applyAll(doc, ops);
+    expect(after.comments).toHaveLength(3);
+    expect(applyAll(after, inverseReviewOpsBatch(doc, ops)).comments).toHaveLength(0);
+  });
+
+  it("returns inverses in REVERSE order, which is what makes a dependent batch undo", () => {
+    // Two edits to one comment. Inverses computed eagerly are
+    // ["back to orig", "back to first"] — replaying THOSE forwards lands on
+    // the intermediate value, not the original. This is the corruption the
+    // old inline loop would have shipped the first time a batch contained
+    // anything other than an add.
+    const { doc, v } = seed();
+    const base = insertComment(doc, {
+      ...buildComment({ versionId: v, timeStart: 1, body: "orig", author: "Me" }, 1000),
+      id: "x1",
+    });
+    const ops: ReviewOp[] = [
+      { t: "edit", id: "x1", body: "first", at: 2000 },
+      { t: "edit", id: "x1", body: "second", at: 3000 },
+    ];
+    const after = applyAll(base, ops);
+    expect(after.comments[0].body).toBe("second");
+
+    const inverse = inverseReviewOpsBatch(base, ops);
+    // The LAST op's inverse must come FIRST.
+    expect((inverse[0] as { body: string }).body).toBe("first");
+    expect((inverse[1] as { body: string }).body).toBe("orig");
+
+    // And replaying them in that order really does restore the original.
+    // Timestamps ascend so each replay wins the LWW guard of what it reverses.
+    const restored = applyAll(after, inverse.map((o, i) => restampReviewOp(o, 4000 + i)));
+    expect(restored.comments[0].body).toBe("orig");
+  });
+
+  it("is a no-op for an empty batch", () => {
+    const { doc } = seed();
+    expect(inverseReviewOpsBatch(doc, [])).toEqual([]);
   });
 });
 
