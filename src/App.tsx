@@ -83,6 +83,8 @@ import {
 } from "./lib/onboarding";
 import type { Command } from "./lib/commands";
 import { buildCommands } from "./lib/commands";
+import { useBatchTranscribe } from "./hooks/use-batch-transcribe";
+import { batchSummary } from "./lib/batch-queue";
 import {
   loadKeybindings, saveKeybindings, buildComboMap, bindingsFor, formatCombo, eventToCombo,
   KEY_ACTION_BY_ID, isPlaybackScoped, VIEWS_WITH_A_PLAYER,
@@ -918,6 +920,9 @@ export default function App() {
   // supersedes its own older sweep, so coming back resumes over the remainder
   // instead of starting again.
   const lib = useLibraryScan(activeView === "home" || activeView === "library");
+  // Batch transcription runs OUTSIDE the single-source pipeline (see the hook),
+  // so a folder can transcribe in the background while the user keeps working.
+
   // Home drill-in → Library handoff: the folder chain to select, plus a tick so
   // the same chain re-applies on repeat drills. One detail browser, not two.
   const [librarySelection, setLibrarySelection] = useState<LibraryCrumb[] | null>(null);
@@ -5134,6 +5139,35 @@ export default function App() {
    * old notes carried. Rides the exact machinery that survives moved files;
    * see _design/review-versioning.md.
    */
+  // Batch transcription runs OUTSIDE the single-source pipeline (see the hook),
+  // so a folder can transcribe in the background while the user keeps working.
+  const batch = useBatchTranscribe(
+    useCallback((level: "info" | "err", msg: string) => appendLog(level, "whisper", msg), [appendLog]),
+  );
+
+  /**
+   * Kick off a batch transcription from a Library selection.
+   *
+   * Resolves output folder, model and language exactly the way the single-file
+   * path does, so a batched transcript is indistinguishable from one made by
+   * opening the file and pressing Transcribe.
+   */
+  const startBatchTranscribe = useCallback(async (files: { path: string; name: string }[]) => {
+    const outDir = await resolveTranscriptOutDir() ?? exportOpts.folder;
+    if (!outDir) {
+      appendLog("err", "whisper", "Choose a transcript folder in Settings first.");
+      return;
+    }
+    void batch.start(files, {
+      outDir,
+      modelId: defaults.whisperModel,
+      engine: defaults.transcriptionEngine,
+      language: defaults.transcriptionLanguage,
+      detectSpeakers: defaults.detectSpeakers,
+      expectedSpeakers: defaults.expectedSpeakers,
+    });
+  }, [batch, defaults, exportOpts.folder, appendLog, resolveTranscriptOutDir]);
+
   const linkAsReviewVersion = useCallback((oldKey: string) => {
     if (!(sourceKind === "file" && localFilePath && metadata)) return;
     const old = loadReview(oldKey);
@@ -5686,6 +5720,9 @@ export default function App() {
               selectionTick={librarySelectTick}
               onOpenLocalPath={handleLibraryOpenLocalPath}
               onOpenTranscriptHistory={handleLibraryOpenTranscript}
+              onBatchTranscribe={startBatchTranscribe}
+              batchLine={batch.progress.running ? batchSummary(batch.progress) : null}
+              onBatchCancel={batch.cancel}
             />
           </div>
           {/* Transcripts reader — a reading-first workspace over every

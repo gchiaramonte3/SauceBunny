@@ -56,6 +56,12 @@ type Props = {
   /** "Review this clip": open the source and land in Review. */
   onReviewLocalPath?: (path: string) => void;
   onOpenTranscriptHistory: (entry: TranscriptHistoryEntry) => void;
+  /** Transcribe a set of files in the background. Absent in contexts with no
+   *  transcription settings resolved (the panel window). */
+  onBatchTranscribe?: (files: { path: string; name: string }[]) => void;
+  /** Live batch status for the bar, when a run is going. */
+  batchLine?: string | null;
+  onBatchCancel?: () => void;
 };
 
 /**
@@ -80,6 +86,7 @@ export function LibraryBrowser({
   roots, scans, scanning, addFolder, rescanAll, requestThumb, invalidateThumb,
   posterVersions, bumpPoster, resetPoster, selection, selectionTick,
   onOpenLocalPath, onReviewLocalPath, onOpenTranscriptHistory,
+  onBatchTranscribe, batchLine, onBatchCancel,
 }: Props) {
   const [selected, setSelected] = useState<LibraryCrumb[] | null>(selection);
   const [prefs, setPrefs] = useState<BrowserPrefs>(() => normalizePrefs(loadJson<unknown>(BROWSER_KEY, {})));
@@ -281,6 +288,14 @@ export function LibraryBrowser({
         <div className="cp-lib-browse-body">
           <LibrarySelectionBar
             count={selectedPaths.length}
+            batchLine={batchLine}
+            onBatchCancel={onBatchCancel}
+            onTranscribe={onBatchTranscribe ? () => onBatchTranscribe(
+              selectedPaths.map((path) => ({
+                path,
+                name: items.find((i) => i.path === path)?.name ?? path.split("/").pop() ?? path,
+              })),
+            ) : undefined}
             onReveal={() => {
               // Reveal the FIRST only. Finder opens a window per call, so
               // revealing twelve files buries the screen in twelve windows —

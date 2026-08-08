@@ -14,15 +14,32 @@ import { IconReveal, IconStack, IconTranscript, IconCircleX } from "./Icons";
  * a second, competing set of actions on screen for every single click.
  */
 export function LibrarySelectionBar({
-  count, onTranscribe, onQueue, onReveal, onClear,
+  count, onTranscribe, onQueue, onReveal, onClear, batchLine, onBatchCancel,
 }: {
   count: number;
+  /** Live batch status. Rendered even at zero selection: clearing the
+   *  selection must not hide a job that is still running. */
+  batchLine?: string | null;
+  onBatchCancel?: () => void;
   /** Transcribe every selected file, queued. Absent while one is already running. */
   onTranscribe?: () => void;
   onQueue?: () => void;
   onReveal?: () => void;
   onClear: () => void;
 }) {
+  if (batchLine) {
+    return (
+      <div className="cp-lib-selbar" role="status" aria-live="polite">
+        <span className="cp-lib-selbar-count">{batchLine}</span>
+        <span className="cp-lib-selbar-spacer" />
+        {onBatchCancel && (
+          <button className="btn btn-ghost" onClick={onBatchCancel} title="Stop after the current file">
+            <IconCircleX size={14} /> Stop
+          </button>
+        )}
+      </div>
+    );
+  }
   if (count < 2) return null;
   return (
     <div className="cp-lib-selbar" role="toolbar" aria-label={`${count} files selected`}>
