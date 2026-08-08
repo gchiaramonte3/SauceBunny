@@ -9,7 +9,8 @@ type Props = {
   item: LibraryItem;
   selected: boolean;
   /** Single click / Space → show the detail panel. */
-  onSelect: () => void;
+  /** Receives the event so ⌘/⇧ reach the selection rule. */
+  onSelect: (e: React.MouseEvent) => void;
   /** Double click / Enter → open in Clip. */
   onOpen: () => void;
   /** "Review this clip": open the source and land in Review. */
@@ -50,7 +51,7 @@ export function LibraryListRow({
         aria-current={selected ? "true" : undefined}
         className={"cp-lib-lrow" + (selected ? " selected" : "")}
         title={item.name}
-        onClick={onSelect}
+        onClick={(e) => onSelect(e)}
         onDoubleClick={onOpen}
         onContextMenu={(e) => { e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY }); }}
         onKeyDown={(e) => {

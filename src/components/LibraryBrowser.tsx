@@ -1,7 +1,13 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LibraryTree } from "./LibraryTree";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
 import { LibraryBrowserPane } from "./LibraryBrowserPane";
+import { LibrarySelectionBar } from "./LibrarySelectionBar";
+import {
+  clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, selectedInOrder,
+  type SelectionState,
+} from "../lib/library-selection";
 import { LibraryDetail } from "./LibraryDetail";
 import { ThumbnailPicker } from "./ThumbnailPicker";
 import type { RootScan } from "../hooks/use-library-scan";
@@ -80,6 +86,9 @@ export function LibraryBrowser({
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
   const [detailItem, setDetailItem] = useState<LibraryItem | null>(null);
+  /** Multi-selection for batch actions. The DETAIL panel still follows a single
+   *  item (detailItem); this is the set the toolbar acts on. */
+  const [sel, setSel] = useState<SelectionState>(EMPTY_SELECTION);
   const [pickerPath, setPickerPath] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(true);
 
@@ -90,12 +99,18 @@ export function LibraryBrowser({
   // focus back to the card/row that opened it — otherwise a focus-in-panel
   // dismiss (Esc or ✕) drops focus to <body> and Tab restarts at the top.
   const lastFocusRef = useRef<HTMLElement | null>(null);
-  const openDetail = useCallback((item: LibraryItem) => {
+  const openDetail = useCallback((item: LibraryItem, e?: React.MouseEvent) => {
     lastFocusRef.current = document.activeElement as HTMLElement | null;
-    setDetailItem(item);
+    const mods = { shift: !!e?.shiftKey, meta: !!(e?.metaKey || e?.ctrlKey) };
+    setSel((cur) => clickSelect(cur, itemPathsRef.current, item.path, mods));
+    // A modified click is a SELECTION gesture, not a "show me this one"
+    // gesture: opening the detail panel on ⌘-click would fight the batch the
+    // user is assembling. Plain clicks still open it, as before.
+    setDetailItem(mods.shift || mods.meta ? null : item);
   }, []);
   const closeDetail = useCallback(() => {
     setDetailItem(null);
+    setSel(EMPTY_SELECTION);
     const el = lastFocusRef.current;
     // rAF defers focus() until after React commits the panel unmount.
     if (el && document.contains(el)) requestAnimationFrame(() => el.focus());
@@ -105,6 +120,7 @@ export function LibraryBrowser({
   useEffect(() => {
     setSelected(selection);
     setDetailItem(null);
+    setSel(EMPTY_SELECTION);
     setQuery("");
     setNeedle("");
     // Re-apply on every handoff even if the chain object is identical.
@@ -153,6 +169,9 @@ export function LibraryBrowser({
     if (detailItem && !allPaths.has(detailItem.path)) setDetailItem(null);
   }, [allPaths, detailItem]);
 
+  // Display order, mirrored into a ref so the (stable) click handler can range
+  // over exactly what is on screen without re-creating itself on every scan.
+  const itemPathsRef = useRef<string[]>([]);
   const items = useMemo(() => {
     // Only the real "All" view (selected === null) aggregates every root. A
     // concrete selection whose node is momentarily absent (its root mid-rescan)
@@ -165,6 +184,13 @@ export function LibraryBrowser({
     const bySearch = q ? byKind.filter((i) => i.name.toLowerCase().includes(q)) : byKind;
     return sortLibraryItems(bySearch, prefs.sort, prefs.dir);
   }, [selected, selectedNode, trees, prefs, needle]);
+
+  const itemPaths = useMemo(() => items.map((i) => i.path), [items]);
+  itemPathsRef.current = itemPaths;
+  // A rescan, filter or sort can remove selected files. Dropping them keeps a
+  // batch action from ever running over something the user cannot see.
+  useEffect(() => { setSel((cur) => pruneSelection(cur, itemPaths)); }, [itemPaths]);
+  const selectedPaths = useMemo(() => selectedInOrder(sel, itemPaths), [sel, itemPaths]);
 
   // The "All" view aggregates every root with no ceiling, and every card is a
   // real DOM node with its own IntersectionObserver and two window listeners.
@@ -209,8 +235,20 @@ export function LibraryBrowser({
     <div
       className="cp-lib-browse"
       onKeyDown={(e) => {
+        // ⌘A selects every file ON SCREEN — the filtered, sorted list, not the
+        // whole library. Selecting things the user has filtered away is how a
+        // batch action ends up touching files they cannot see.
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a"
+            && !(e.target instanceof HTMLInputElement)) {
+          e.preventDefault();
+          e.stopPropagation();
+          setSel(selectAll(itemPathsRef.current));
+          return;
+        }
         if (e.key !== "Escape") return;
-        if (detailItem) { e.stopPropagation(); closeDetail(); }
+        // Esc unwinds one layer at a time, most transient first.
+        if (sel.selected.size > 1) { e.stopPropagation(); setSel(EMPTY_SELECTION); }
+        else if (detailItem) { e.stopPropagation(); closeDetail(); }
         else if (query !== "") { e.stopPropagation(); setQuery(""); setNeedle(""); }
       }}
     >
@@ -241,6 +279,17 @@ export function LibraryBrowser({
           onShowTree={() => setTreeOpen(true)}
         />
         <div className="cp-lib-browse-body">
+          <LibrarySelectionBar
+            count={selectedPaths.length}
+            onReveal={() => {
+              // Reveal the FIRST only. Finder opens a window per call, so
+              // revealing twelve files buries the screen in twelve windows —
+              // the batch equivalent of a popup storm.
+              const first = selectedPaths[0];
+              if (first) invoke("reveal_in_finder", { path: first }).catch(() => { /* ignore */ });
+            }}
+            onClear={() => setSel(EMPTY_SELECTION)}
+          />
           <LibraryBrowserPane
             items={shown}
             sort={prefs.sort}
@@ -254,6 +303,7 @@ export function LibraryBrowser({
             )}
             view={prefs.view}
             selectedPath={detailItem?.path ?? null}
+            selectedPaths={sel.selected}
             posterVersions={posterVersions}
             requestThumb={requestThumb}
             onOpen={onOpenLocalPath}
@@ -261,7 +311,7 @@ export function LibraryBrowser({
             onSelectItem={openDetail}
             onChoosePoster={setPickerPath}
             onResetPoster={resetPoster}
-            onClearSelection={() => setDetailItem(null)}
+            onClearSelection={() => { setDetailItem(null); setSel(EMPTY_SELECTION); }}
             emptyText={emptyText}
           />
           {detailItem && (

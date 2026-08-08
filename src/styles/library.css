@@ -1377,3 +1377,27 @@
   object-fit: contain;
   background: var(--bg-2);
 }
+
+/* ── Multi-select batch bar ──────────────────────────────────────────────────
+   Appears only at two or more. One selected file is ordinary browsing and
+   already has the detail panel; a batch bar for it would put a second,
+   competing set of actions on screen for every single click. */
+.cp-lib-selbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin: 0 0 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+}
+.cp-lib-selbar-count {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--fg-1);
+  font-variant-numeric: tabular-nums;
+}
+.cp-lib-selbar-spacer { flex: 1 1 auto; }
+.cp-lib-selbar .btn { display: inline-flex; align-items: center; gap: 5px; }

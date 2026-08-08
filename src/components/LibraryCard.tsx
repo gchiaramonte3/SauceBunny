@@ -48,7 +48,8 @@ type Props = {
    * SELECTS (shows the detail panel) and double-click / Enter OPENS in Clip.
    * Absent (Home shelves) → the card opens on a single click, as before.
    */
-  onSelect?: () => void;
+  /** Receives the event so ⌘/⇧ reach the selection rule. */
+  onSelect?: (e: React.MouseEvent) => void;
   /** Highlights the card as the current browser selection. */
   selected?: boolean;
 };
@@ -155,7 +156,7 @@ export function LibraryCard({
         onBlur={isVideo ? () => stopCycle("focus") : undefined}
         // Selection mode: single click selects, double-click opens. Home shelves
         // (no onSelect) keep the single-click-opens behavior.
-        onClick={onSelect ?? onOpen}
+        onClick={onSelect ? (e) => onSelect(e) : onOpen}
         onDoubleClick={onSelect ? onOpen : undefined}
         aria-current={onSelect ? (selected ? "true" : undefined) : undefined}
         title={title}

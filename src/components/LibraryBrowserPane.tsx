@@ -10,13 +10,15 @@ import type { LibraryItem } from "../types";
 type Props = {
   items: LibraryItem[];
   view: LibraryViewMode;
-  /** Path of the current detail selection, for the highlight. */
+  /** Path of the current DETAIL selection — the one whose info panel shows. */
   selectedPath: string | null;
+  /** Every selected path, for the highlight. Superset of selectedPath. */
+  selectedPaths?: ReadonlySet<string>;
   posterVersions: Record<string, number>;
   requestThumb: (path: string) => Promise<string | null>;
   onOpen: (path: string) => void;
   onReview?: (path: string) => void;
-  onSelectItem: (item: LibraryItem) => void;
+  onSelectItem: (item: LibraryItem, e: React.MouseEvent) => void;
   onChoosePoster: (path: string) => void;
   onResetPoster: (path: string) => void;
   /** Clears the selection on a click in the empty gutter. */
@@ -35,7 +37,7 @@ type Props = {
  * A click on the blank gutter clears the detail selection.
  */
 export function LibraryBrowserPane({
-  items, view, selectedPath, posterVersions, requestThumb,
+  items, view, selectedPath, selectedPaths, posterVersions, requestThumb,
   onOpen, onReview, onSelectItem, onChoosePoster, onResetPoster, onClearSelection, emptyText,
   sort, dir, onSort,
 }: Props) {
@@ -78,8 +80,8 @@ export function LibraryBrowserPane({
             art={{ kind: "local", path: it.path, media: it.kind }}
             onOpen={() => onOpen(it.path)}
             onReview={onReview ? () => onReview(it.path) : undefined}
-            onSelect={() => onSelectItem(it)}
-            selected={selectedPath === it.path}
+            onSelect={(e) => onSelectItem(it, e)}
+            selected={selectedPaths ? selectedPaths.has(it.path) : selectedPath === it.path}
             onChoosePoster={onChoosePoster}
             onResetPoster={onResetPoster}
             requestThumb={requestThumb}
@@ -116,8 +118,8 @@ export function LibraryBrowserPane({
           <LibraryListRow
             key={`${it.path}#${posterVersions[it.path] ?? 0}`}
             item={it}
-            selected={selectedPath === it.path}
-            onSelect={() => onSelectItem(it)}
+            selected={selectedPaths ? selectedPaths.has(it.path) : selectedPath === it.path}
+            onSelect={(e) => onSelectItem(it, e)}
             onOpen={() => onOpen(it.path)}
             onReview={onReview ? () => onReview(it.path) : undefined}
             requestThumb={requestThumb}
