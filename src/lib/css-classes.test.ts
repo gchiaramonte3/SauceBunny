@@ -60,6 +60,32 @@ describe("CSS class contract", () => {
     expect(orphans, `styled but never rendered: ${orphans.join(", ")}`).toEqual([]);
   });
 
+  it("never sizes a bordered pseudo-element without box-sizing", () => {
+    // The global reset is `*`, which does NOT match ::before / ::after. So a
+    // pseudo-element that sets a calc()/% width AND a border silently defaults
+    // to content-box, and its border lands OUTSIDE the width it was given.
+    //
+    // That shipped. The segmented control's sliding pill was 2px wider than a
+    // column, and because translateX(%) resolves against the element's own
+    // border box it also stepped 2px too far per index — an error that
+    // accumulated until, at the sixth option, the pill sat entirely outside
+    // the track. Nothing failed; it just looked broken.
+    const rule = /([^{}]*::(?:before|after)[^{}]*)\{([^}]*)\}/gs;
+    const offenders: string[] = [];
+    for (const file of readdirSync(STYLES).filter((f) => f.endsWith(".css"))) {
+      const css = readFileSync(join(STYLES, file), "utf8");
+      for (const m of css.matchAll(rule)) {
+        const body = m[2];
+        const sized = /\b(width|height)\s*:\s*[^;]*(calc|%)/.test(body);
+        const bordered = /\bborder\s*:\s*[^;]*\d/.test(body);
+        if (sized && bordered && !body.includes("box-sizing")) {
+          offenders.push(`${file}: ${m[1].trim().split("\n").pop()!.trim()}`);
+        }
+      }
+    }
+    expect(offenders, offenders.join(" | ")).toEqual([]);
+  });
+
   it("is actually capable of failing", () => {
     // The guard against this becoming a tautology. If the scan ever stops
     // finding classes — a moved directory, a changed prefix — the assertion
