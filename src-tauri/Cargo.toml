@@ -37,6 +37,13 @@ tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
+# Finder tags. macOS stores them as com.apple.metadata:_kMDItemUserTags, a
+# BINARY plist of "Name\nColourIndex" strings, so reading or writing them needs
+# both an xattr accessor and a plist codec. Both crates are tiny and MIT/Apache.
+# Using the real xattr (rather than a private colour store) is what makes a
+# colour set here show up in Finder, and a colour set in Finder show up here.
+xattr = "1"
+plist = "1"
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 url = "2"

@@ -14,6 +14,10 @@ type Props = {
   selectedPath: string | null;
   /** Every selected path, for the highlight. Superset of selectedPath. */
   selectedPaths?: ReadonlySet<string>;
+  /** Finder tags by path, for the colour dot and the menu's colour row. */
+  tagsByPath?: ReadonlyMap<string, readonly import("../bindings/FinderTag").FinderTag[]>;
+  onToggleTagColor?: (path: string, index: import("../lib/finder-tags").TagColorIndex) => void;
+  onClearTagColors?: (path: string) => void;
   posterVersions: Record<string, number>;
   requestThumb: (path: string) => Promise<string | null>;
   onOpen: (path: string) => void;
@@ -37,7 +41,7 @@ type Props = {
  * A click on the blank gutter clears the detail selection.
  */
 export function LibraryBrowserPane({
-  items, view, selectedPath, selectedPaths, posterVersions, requestThumb,
+  items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
   onOpen, onReview, onSelectItem, onChoosePoster, onResetPoster, onClearSelection, emptyText,
   sort, dir, onSort,
 }: Props) {
@@ -80,6 +84,9 @@ export function LibraryBrowserPane({
             art={{ kind: "local", path: it.path, media: it.kind }}
             onOpen={() => onOpen(it.path)}
             onReview={onReview ? () => onReview(it.path) : undefined}
+            tags={tagsByPath?.get(it.path)}
+            onToggleTagColor={onToggleTagColor ? (i) => onToggleTagColor(it.path, i) : undefined}
+            onClearTagColors={onClearTagColors ? () => onClearTagColors(it.path) : undefined}
             onSelect={(e) => onSelectItem(it, e)}
             selected={selectedPaths ? selectedPaths.has(it.path) : selectedPath === it.path}
             onChoosePoster={onChoosePoster}
@@ -119,6 +126,9 @@ export function LibraryBrowserPane({
             key={`${it.path}#${posterVersions[it.path] ?? 0}`}
             item={it}
             selected={selectedPaths ? selectedPaths.has(it.path) : selectedPath === it.path}
+            tags={tagsByPath?.get(it.path)}
+            onToggleTagColor={onToggleTagColor ? (i) => onToggleTagColor(it.path, i) : undefined}
+            onClearTagColors={onClearTagColors ? () => onClearTagColors(it.path) : undefined}
             onSelect={(e) => onSelectItem(it, e)}
             onOpen={() => onOpen(it.path)}
             onReview={onReview ? () => onReview(it.path) : undefined}

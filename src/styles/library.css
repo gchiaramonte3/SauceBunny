@@ -1401,3 +1401,54 @@
 }
 .cp-lib-selbar-spacer { flex: 1 1 auto; }
 .cp-lib-selbar .btn { display: inline-flex; align-items: center; gap: 5px; }
+
+/* ── Finder tag colours ──────────────────────────────────────────────────────
+   Real macOS tags: a colour set here is written to the file's own xattr, so it
+   shows on the icon in Finder too. Seven slots because the format has seven. */
+.cp-tagrow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--line-2);
+}
+.cp-tagrow-dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.cp-tagrow-dot:hover { transform: scale(1.18); }
+/* The ring is WHITE, never the accent: a lit tag dot must not read as a
+   selected control, and the swatch under it is already coloured. */
+.cp-tagrow-dot.on { box-shadow: 0 0 0 2px var(--bg-1, #161616), 0 0 0 3.5px rgba(255,255,255,0.92); }
+.cp-tagrow-dot:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+.cp-tagrow-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  margin-left: auto;
+  border: none;
+  background: none;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.cp-tagrow-clear:hover:not(:disabled) { color: var(--fg-1); }
+.cp-tagrow-clear:disabled { opacity: 0.3; cursor: default; }
+
+/* The colour column in list view. A dot, not a tinted row: a full-row tint at
+   seven hues fights the selection highlight, and Finder does not do it either. */
+.cp-lib-lrow-tag {
+  flex: 0 0 auto;
+  width: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cp-lib-lrow-dot { width: 8px; height: 8px; border-radius: 50%; }

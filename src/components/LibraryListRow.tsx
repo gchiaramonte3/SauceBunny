@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import { primarySwatch, type TagColorIndex } from "../lib/finder-tags";
+import type { FinderTag } from "../bindings/FinderTag";
 import { IconFilm, IconVolume } from "./Icons";
 import { LibraryCardMenu } from "./LibraryCardMenu";
 import { chosenPosterFor, formatBytes, formatModifiedDate } from "../lib/library";
@@ -11,6 +13,10 @@ type Props = {
   /** Single click / Space → show the detail panel. */
   /** Receives the event so ⌘/⇧ reach the selection rule. */
   onSelect: (e: React.MouseEvent) => void;
+  /** Finder tags: the colour dot in the row, and the menu's colour row. */
+  tags?: readonly FinderTag[];
+  onToggleTagColor?: (index: TagColorIndex) => void;
+  onClearTagColors?: () => void;
   /** Double click / Enter → open in Clip. */
   onOpen: () => void;
   /** "Review this clip": open the source and land in Review. */
@@ -29,7 +35,9 @@ type Props = {
  */
 export function LibraryListRow({
   item, selected, onSelect, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
+  tags, onToggleTagColor, onClearTagColors,
 }: Props) {
+  const swatch = primarySwatch(tags ?? []);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [broken, setBroken] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -64,6 +72,12 @@ export function LibraryListRow({
             ? <img src={thumb} alt="" draggable={false} onError={() => setBroken(true)} />
             : (item.kind === "audio" ? <IconVolume size={13} /> : <IconFilm size={13} />)}
         </span>
+        {/* The colour column. A dot rather than a tinted row: a full-row tint
+            at seven hues fights the selection highlight, and Finder does not
+            do it either. */}
+        <span className="cp-lib-lrow-tag" aria-hidden="true">
+          {swatch && <span className="cp-lib-lrow-dot" style={{ background: swatch.hex }} />}
+        </span>
         <span className="cp-lib-lrow-name">{item.name}</span>
         <span className="cp-lib-lrow-kind">{item.kind}</span>
         <span className="cp-lib-lrow-size">{formatBytes(item.size_bytes)}</span>
@@ -71,6 +85,9 @@ export function LibraryListRow({
       </button>
       {menuAnchor && (
         <LibraryCardMenu
+          tags={tags}
+          onToggleTagColor={onToggleTagColor}
+          onClearTagColors={onClearTagColors}
           anchor={menuAnchor}
           canPickThumbnail={isVideo}
           hasChosenThumbnail={isVideo && chosenPosterFor(item.path) != null}

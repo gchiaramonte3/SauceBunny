@@ -50,6 +50,10 @@ type Props = {
    */
   /** Receives the event so ⌘/⇧ reach the selection rule. */
   onSelect?: (e: React.MouseEvent) => void;
+  /** Finder tags for this file, and the two ways to change them. */
+  tags?: readonly import("../bindings/FinderTag").FinderTag[];
+  onToggleTagColor?: (index: import("../lib/finder-tags").TagColorIndex) => void;
+  onClearTagColors?: () => void;
   /** Highlights the card as the current browser selection. */
   selected?: boolean;
 };
@@ -73,7 +77,7 @@ type Props = {
  */
 export function LibraryCard({
   title, detail, art, badge, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
-  onSelect, selected,
+  onSelect, selected, tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
   /** The ⋯ trigger. Separate from btnRef, which is the whole CARD: anchoring
@@ -248,6 +252,9 @@ export function LibraryCard({
           revealPath={revealPath}
           onChooseThumbnail={() => { if (posterPath) onChoosePoster?.(posterPath); }}
           onResetThumbnail={() => { if (posterPath) onResetPoster?.(posterPath); }}
+          tags={tags}
+          onToggleTagColor={onToggleTagColor}
+          onClearTagColors={onClearTagColors}
           onOpen={onOpen}
           onReview={onReview}
           onClose={closeMenu}

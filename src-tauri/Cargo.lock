@@ -5026,6 +5026,7 @@ dependencies = [
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
+ "plist",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -5040,6 +5041,7 @@ dependencies = [
  "ts-rs",
  "url",
  "uuid",
+ "xattr",
 ]
 
 [[package]]
@@ -7887,6 +7889,16 @@ dependencies = [
  "libc",
  "once_cell",
  "pkg-config",
+]
+
+[[package]]
+name = "xattr"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
+dependencies = [
+ "libc",
+ "rustix 1.1.4",
 ]
 
 [[package]]

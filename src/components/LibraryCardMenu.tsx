@@ -2,6 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview } from "./Icons";
+import { TagColorRow } from "./TagColorRow";
+import type { TagColorIndex } from "../lib/finder-tags";
+import type { FinderTag } from "../bindings/FinderTag";
 
 /**
  * Right-click / ⋯ context menu for a LibraryCard. PORTALED to document.body
@@ -35,6 +38,11 @@ type Props = {
   hasChosenThumbnail: boolean;
   /** Filesystem path when the source is local → "Reveal in Finder" appears. */
   revealPath: string | null;
+  /** Finder tags on this file, and the two ways to change them. Absent for
+   *  sources with no path on disk (web), which cannot carry an xattr. */
+  tags?: readonly FinderTag[];
+  onToggleTagColor?: (index: TagColorIndex) => void;
+  onClearTagColors?: () => void;
   onChooseThumbnail: () => void;
   onResetThumbnail: () => void;
   onOpen: () => void;
@@ -48,6 +56,7 @@ type Item = { icon: ReactNode; label: string; disabled?: boolean; onSelect: () =
 export function LibraryCardMenu({
   anchor, align = "left", canPickThumbnail, hasChosenThumbnail, revealPath,
   onChooseThumbnail, onResetThumbnail, onOpen, onReview, onClose,
+  tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const btnRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -127,6 +136,15 @@ export function LibraryCardMenu({
       style={{ position: "fixed", left: pos.left, top: pos.top }}
       onKeyDown={onKeyDown}
     >
+      {/* Colour first, above the verbs — where Finder puts it, and one click
+          from right-click, which is the whole reason tags get used. */}
+      {onToggleTagColor && onClearTagColors && (
+        <TagColorRow
+          tags={tags ?? []}
+          onToggle={(i) => onToggleTagColor(i)}
+          onClear={onClearTagColors}
+        />
+      )}
       {items.map((it, i) => (
         <button
           key={it.label}

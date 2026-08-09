@@ -4,6 +4,7 @@ import { LibraryTree } from "./LibraryTree";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
 import { LibraryBrowserPane } from "./LibraryBrowserPane";
 import { LibrarySelectionBar } from "./LibrarySelectionBar";
+import { useFinderTags } from "../hooks/use-finder-tags";
 import {
   clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, selectedInOrder,
   type SelectionState,
@@ -198,6 +199,10 @@ export function LibraryBrowser({
   // batch action from ever running over something the user cannot see.
   useEffect(() => { setSel((cur) => pruneSelection(cur, itemPaths)); }, [itemPaths]);
   const selectedPaths = useMemo(() => selectedInOrder(sel, itemPaths), [sel, itemPaths]);
+  // Real Finder tags for what is listed. A colour set here lands on the file's
+  // own xattr, so it shows in Finder too, and folders already tagged in Finder
+  // arrive wearing their colour.
+  const finderTags = useFinderTags(itemPaths);
 
   // The "All" view aggregates every root with no ceiling, and every card is a
   // real DOM node with its own IntersectionObserver and two window listeners.
@@ -319,6 +324,9 @@ export function LibraryBrowser({
             view={prefs.view}
             selectedPath={detailItem?.path ?? null}
             selectedPaths={sel.selected}
+            tagsByPath={finderTags.tags}
+            onToggleTagColor={finderTags.toggle}
+            onClearTagColors={finderTags.clear}
             posterVersions={posterVersions}
             requestThumb={requestThumb}
             onOpen={onOpenLocalPath}

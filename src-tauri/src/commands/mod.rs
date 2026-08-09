@@ -25,7 +25,9 @@ use tauri_plugin_shell::{
 };
 use tokio::io::AsyncWriteExt;
 
+pub mod tags;
 pub mod system;
+pub use tags::*;
 pub use system::*;
 pub mod download;
 pub use download::*;
