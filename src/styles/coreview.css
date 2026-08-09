@@ -73,6 +73,10 @@
 .cp-colobby-sub {
   margin: 0;
   max-width: 44ch;
+  /* Each sentence is its own block, so the line break lands on the full stop
+     instead of wherever the measure runs out. */
+  display: flex;
+  flex-direction: column;
   font-family: var(--font-ui);
   font-size: 12.5px;
   line-height: 1.55;

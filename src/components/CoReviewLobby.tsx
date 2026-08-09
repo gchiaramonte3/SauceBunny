@@ -117,8 +117,14 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
           <>
             <header className="cp-colobby-head">
               <h1 className="cp-colobby-title">Review together</h1>
+              {/* One sentence per line. As a single run it wrapped wherever the
+                  44ch measure fell, which was mid-sentence, so the break read as
+                  a mistake rather than as structure. Separate blocks put the
+                  break where the meaning already is, and each sentence still
+                  wraps on its own if the window gets narrow. */}
               <p className="cp-colobby-sub">
-                Watch the same source and comment in sync. Media never leaves each machine.
+                <span>Watch the same source and comment in sync.</span>
+                <span>Media never leaves each machine.</span>
               </p>
             </header>
 
