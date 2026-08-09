@@ -251,6 +251,7 @@ pub fn run() {
             commands::stop_screen_share,
             commands::new_job_id,
             commands::read_text_file_capped,
+            commands::read_transcripts_bulk,
             commands::probe_diarizer,
             commands::prepare_diarizer_models,
             commands::ensure_dir_exists,

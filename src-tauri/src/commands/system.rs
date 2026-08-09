@@ -986,6 +986,57 @@ pub async fn latest_release() -> Result<LatestRelease, crate::AppError> {
     Ok(LatestRelease { version, url, notes })
 }
 
+/// One transcript's text, for the cross-transcript search index.
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct TranscriptText {
+    pub path: String,
+    pub text: String,
+    /// Mtime in ms, so the frontend can drop a re-transcribed file from its
+    /// in-memory index without stat-ing every file itself.
+    pub modified_ms: f64,
+}
+
+/// Read many transcripts in ONE round trip.
+///
+/// The search index needs every .srt in the library. Doing that as one invoke
+/// per file is ~200 IPC hops on a real library, which is slow enough to be felt
+/// on the first search; this makes it one. Unreadable files are SKIPPED rather
+/// than failing the batch, because a single permission error should not cost
+/// the user their whole search.
+#[tauri::command]
+pub async fn read_transcripts_bulk(
+    paths: Vec<String>,
+    max_total_bytes: Option<u64>,
+) -> Result<Vec<TranscriptText>, crate::AppError> {
+    // A cap so a pathological library cannot balloon the webview's heap. At the
+    // default, a transcript averages well under 100 KB, so this is thousands of
+    // files before it bites.
+    let cap = max_total_bytes.unwrap_or(256 * 1024 * 1024);
+    let mut total: u64 = 0;
+    let mut out = Vec::with_capacity(paths.len());
+    for path in paths {
+        let p = PathBuf::from(&path);
+        let Ok(meta) = std::fs::metadata(&p) else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        if total.saturating_add(meta.len()) > cap {
+            break;
+        }
+        let Ok(text) = std::fs::read_to_string(&p) else { continue };
+        total = total.saturating_add(meta.len());
+        let modified_ms = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as f64)
+            .unwrap_or(0.0);
+        out.push(TranscriptText { path, text, modified_ms });
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 pub fn new_job_id() -> String {
     uuid::Uuid::new_v4().to_string()

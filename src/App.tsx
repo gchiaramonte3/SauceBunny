@@ -84,6 +84,7 @@ import {
 import type { Command } from "./lib/commands";
 import { buildCommands } from "./lib/commands";
 import { useBatchTranscribe } from "./hooks/use-batch-transcribe";
+import { TranscriptSearchModal } from "./components/TranscriptSearchModal";
 import { batchSummary } from "./lib/batch-queue";
 import {
   loadKeybindings, saveKeybindings, buildComboMap, bindingsFor, formatCombo, eventToCombo,
@@ -4983,6 +4984,7 @@ export default function App() {
     activeTranscriptPath: activeTranscript?.path ?? null,
     exportFolder: exportOpts.folder, sourceKind, status, transcriptState, playbackPrepBusy,
     handleFetch, handleImportFile, handleClear, onPlayToggle, seekBySeconds, shuttleStep,
+    onOpenTranscriptSearch: () => setTxSearchOpen(true),
     onPlaybackRateStep: handlePlaybackRateStep,
     onPlaybackRateReset: () => handlePlaybackRateChange(1),
     onStep, onSeek, onMarkIn, onMarkOut, onClearMarks, onGotoIn, onGotoOut,
@@ -5120,6 +5122,7 @@ export default function App() {
   // the index is edited UNDER a loaded source — linking the open file into an
   // older cut's version stack rewrites where this key should resolve.
   const [fpIndexBump, setFpIndexBump] = useState(0);
+  const [txSearchOpen, setTxSearchOpen] = useState(false);
   const reviewSourceKey = useMemo(
     () => ((sourceKind === "file" && localFilePath && metadata)
       ? (resolveByFingerprint(reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize)) ?? localFilePath)
@@ -6598,6 +6601,45 @@ export default function App() {
           setExportOpts((prev) => ({ ...prev, ...patch }));
         }}
       />
+      {txSearchOpen && (
+        <TranscriptSearchModal
+          onClose={() => setTxSearchOpen(false)}
+          onOpenAt={(path, seconds) => {
+            // Reuse the history-open path: it loads the source, navigates and
+            // gates exactly the way opening a transcript anywhere else does, so
+            // arriving from search is not a second, subtly different flow.
+            // Reuse the history entry when there is one, so the transcript
+            // arrives with its source attached. A transcript found on disk but
+            // absent from history (older than the 50-entry cap, or history
+            // cleared) still opens, detached — the same graceful path the
+            // library browser already relies on.
+            const entry: TranscriptHistoryEntry = getTranscriptHistory().find((e) => e.srtPath === path)
+              ?? {
+                // Same synthesized shape the library scan uses for a transcript
+                // history has forgotten (older than the 50-entry cap, or after a
+                // clear). It opens detached rather than not at all.
+                id: `search:${path}`,
+                srtPath: path,
+                sourcePath: null,
+                sourceUrl: null,
+                title: (path.split("/").pop() ?? path).replace(/\.[^.]+$/, ""),
+                origin: "unknown",
+                createdAt: 0,
+                lastOpenedAt: 0,
+              };
+            void handleLoadFromHistory(entry).then(() => {
+              // Seek AFTER the source has had a chance to attach; a seek issued
+              // before load lands on a player that is about to be replaced.
+              // Same clamp path a cue click uses: onSeek owns the duration
+              // clamp, so no inline math here.
+              setTimeout(() => {
+                const r = Math.max(1, Math.round(fps));
+                onSeek(Math.max(0, Math.floor(seconds * r)));
+              }, 350);
+            });
+          }}
+        />
+      )}
 
       <YouTubeAuthModal
         open={ytAuthOpen}

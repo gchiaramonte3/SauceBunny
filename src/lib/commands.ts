@@ -110,6 +110,9 @@ export type CommandDeps = {
   handleExportQueue: () => void;
   handleQueueClearAll: () => void;
   handleImportTranscript: () => void;
+  /** Open the library-wide transcript search. Optional so the panel window,
+   *  which has no library, simply does not offer it. */
+  onOpenTranscriptSearch?: () => void;
   handleGenerateTranscript: () => void;
   handleDownloadCaptions: () => void;
   handleStop: () => void;
@@ -235,6 +238,10 @@ export function buildCommands(d: CommandDeps): Command[] {
       disabled: d.clipQueueLength === 0 || d.queueRunning,
       run: () => d.handleQueueClearAll() },
     // ── Transcript ──────────────────────────────────────────────
+    { id: "tx.search", label: "Search all transcripts…", group: "Transcript",
+      description: "Find a line across every transcript in the library",
+      keywords: ["find", "quote", "said", "grep", "library", "everything"],
+      run: () => d.onOpenTranscriptSearch?.() },
     { id: "tx.import", label: "Import transcript from disk…", group: "Transcript",
       description: "Open a .srt or .vtt file from anywhere on disk",
       keywords: ["load", "open", "subtitle", "captions"],
