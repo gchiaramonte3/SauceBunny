@@ -1118,6 +1118,10 @@
   min-height: 0;
   overflow-y: auto;
   padding: var(--s-4) var(--s-5) var(--s-10);
+  /* The rubber-band is absolutely positioned in the pane's CONTENT box, which
+     is why this needs a positioning context. Content coords (not viewport)
+     also mean the band stays glued to the rows when the pane scrolls. */
+  position: relative;
 }
 .cp-lib-browse-empty { padding: var(--s-8) var(--s-5); }
 /* Rootless library — one centered line + the primary button, nothing else. */
@@ -1452,3 +1456,15 @@
   justify-content: center;
 }
 .cp-lib-lrow-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+/* Rubber-band selection. Deliberately quiet: it is a transient gesture, not a
+   thing to look at, and the rows it covers are already lighting up. Never the
+   accent — that means "selected" and the BAND is not what is selected. */
+.cp-lib-marquee {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  border: 1px solid rgba(255,255,255,0.55);
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+}

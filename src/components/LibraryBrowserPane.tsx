@@ -5,6 +5,7 @@ import type { LibraryViewMode } from "./LibraryBrowserBar";
 import { formatBytes, formatModifiedDate } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { useRovingGrid } from "../hooks/use-roving-grid";
+import { useMarquee } from "../hooks/use-marquee";
 import type { LibraryItem } from "../types";
 
 type Props = {
@@ -27,6 +28,9 @@ type Props = {
   onResetPoster: (path: string) => void;
   /** Clears the selection on a click in the empty gutter. */
   onClearSelection: () => void;
+  /** Live rubber-band result: the paths the band covers, plus its modifiers. */
+  onMarquee?: (paths: string[], mods: { shift: boolean; meta: boolean }) => void;
+  onMarqueeEnd?: () => void;
   emptyText: string;
   /** Current sort, so the list headers can show and toggle it. */
   sort: LibrarySortKey;
@@ -42,12 +46,10 @@ type Props = {
  */
 export function LibraryBrowserPane({
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
-  onOpen, onReview, onSelectItem, onChoosePoster, onResetPoster, onClearSelection, emptyText,
+  onOpen, onReview, onSelectItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, emptyText,
   sort, dir, onSort,
 }: Props) {
-  const clearOnBlank = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) onClearSelection();
-  };
+
 
   // Finder's keyboard: one Tab stop for the whole wall, arrows to walk it in
   // two dimensions, Home/End, and type-ahead to jump to a name. The card and
@@ -60,6 +62,34 @@ export function LibraryBrowserPane({
     names,
     layout: view,
   });
+
+  const marquee = useMarquee({
+    containerRef: paneRef,
+    itemSelector: view === "grid" ? ".cp-lib-card" : ".cp-lib-lrow",
+    onSelect: (paths, mods) => onMarquee?.(paths, mods),
+    onEnd: () => onMarqueeEnd?.(),
+  });
+
+  /** The band itself, painted in the pane's own content coordinates. */
+  const bandEl = marquee.band && (
+    <div
+      className="cp-lib-marquee"
+      aria-hidden="true"
+      style={{
+        left: marquee.band.left,
+        top: marquee.band.top,
+        width: marquee.band.right - marquee.band.left,
+        height: marquee.band.bottom - marquee.band.top,
+      }}
+    />
+  );
+
+  const clearOnBlank = (e: React.MouseEvent) => {
+    // A band that ended on the gutter still fires a click there. Clearing on it
+    // would wipe the selection the drag just made.
+    if (marquee.dragging()) return;
+    if (e.target === e.currentTarget) onClearSelection();
+  };
 
   if (items.length === 0) {
     return <div className="cp-lib-pane"><p className="cp-lib-note cp-lib-browse-empty">{emptyText}</p></div>;
@@ -75,7 +105,9 @@ export function LibraryBrowserPane({
         onClick={clearOnBlank}
         onKeyDown={roving.onKeyDown}
         onFocusCapture={roving.onFocusCapture}
+        {...marquee.handlers}
       >
+        {bandEl}
         {items.map((it) => (
           <LibraryCard
             key={`${it.path}#${posterVersions[it.path] ?? 0}`}
@@ -105,7 +137,9 @@ export function LibraryBrowserPane({
       onClick={clearOnBlank}
       onKeyDown={roving.onKeyDown}
       onFocusCapture={roving.onFocusCapture}
+      {...marquee.handlers}
     >
+      {bandEl}
       <div className="cp-lib-list" role="list" aria-label="Files">
         {/* Column headers that SORT.
             These were decorative aria-hidden spans that looked exactly like

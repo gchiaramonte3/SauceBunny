@@ -58,6 +58,7 @@ export function LibraryListRow({
         type="button"
         aria-current={selected ? "true" : undefined}
         className={"cp-lib-lrow" + (selected ? " selected" : "")}
+        data-path={item.path}
         title={item.name}
         onClick={(e) => onSelect(e)}
         onDoubleClick={onOpen}

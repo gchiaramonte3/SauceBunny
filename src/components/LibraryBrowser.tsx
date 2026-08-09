@@ -5,6 +5,7 @@ import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
 import { LibraryBrowserPane } from "./LibraryBrowserPane";
 import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { useFinderTags } from "../hooks/use-finder-tags";
+import { marqueeSelection } from "../lib/marquee";
 import {
   clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, selectedInOrder,
   type SelectionState,
@@ -97,6 +98,8 @@ export function LibraryBrowser({
   /** Multi-selection for batch actions. The DETAIL panel still follows a single
    *  item (detailItem); this is the set the toolbar acts on. */
   const [sel, setSel] = useState<SelectionState>(EMPTY_SELECTION);
+  /** The selection when the current band started; null when no drag is live. */
+  const dragBaseRef = useRef<ReadonlySet<string> | null>(null);
   const [pickerPath, setPickerPath] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(true);
 
@@ -335,6 +338,18 @@ export function LibraryBrowser({
             onChoosePoster={setPickerPath}
             onResetPoster={resetPoster}
             onClearSelection={() => { setDetailItem(null); setSel(EMPTY_SELECTION); }}
+            onMarqueeEnd={() => { dragBaseRef.current = null; }}
+            onMarquee={(paths, mods) => {
+              // The band is computed against the selection as it was when the
+              // drag STARTED, so sweeping back and forth keeps answering the
+              // same thing instead of accumulating everything it crossed.
+              setSel((cur) => {
+                const base = dragBaseRef.current ?? cur.selected;
+                if (dragBaseRef.current == null) dragBaseRef.current = cur.selected;
+                return { selected: marqueeSelection(base, paths, mods), anchor: paths[0] ?? cur.anchor };
+              });
+              setDetailItem(null);
+            }}
             emptyText={emptyText}
           />
           {detailItem && (

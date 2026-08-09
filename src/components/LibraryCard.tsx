@@ -156,6 +156,7 @@ export function LibraryCard({
         ref={btnRef}
         type="button"
         className={"cp-lib-card" + (selected ? " selected" : "")}
+        data-path={art.kind === "local" ? art.path : undefined}
         onFocus={isVideo ? () => startCycle("focus") : undefined}
         onBlur={isVideo ? () => stopCycle("focus") : undefined}
         // Selection mode: single click selects, double-click opens. Home shelves
