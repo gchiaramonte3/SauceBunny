@@ -50,6 +50,8 @@ type Props = {
    */
   /** Receives the event so ⌘/⇧ reach the selection rule. */
   onSelect?: (e: React.MouseEvent) => void;
+  /** Fired on right-click before the menu opens; see LibraryListRow. */
+  onContextSelect?: () => void;
   /** Finder tags for this file, and the two ways to change them. */
   tags?: readonly import("../bindings/FinderTag").FinderTag[];
   onToggleTagColor?: (index: import("../lib/finder-tags").TagColorIndex) => void;
@@ -77,7 +79,7 @@ type Props = {
  */
 export function LibraryCard({
   title, detail, art, badge, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
-  onSelect, selected, tags, onToggleTagColor, onClearTagColors,
+  onSelect, onContextSelect, selected, tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
   /** The ⋯ trigger. Separate from btnRef, which is the whole CARD: anchoring
@@ -165,7 +167,14 @@ export function LibraryCard({
         onDoubleClick={onSelect ? onOpen : undefined}
         aria-current={onSelect ? (selected ? "true" : undefined) : undefined}
         title={title}
-        onContextMenu={(e) => { e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY }); }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          // Select FIRST, so the menu acts on what is under the cursor. Finder's
+          // rule: an unselected item becomes the selection; one already in the
+          // selection leaves it intact so the menu can act on the whole set.
+          onContextSelect?.();
+          setMenuAnchor({ x: e.clientX, y: e.clientY });
+        }}
         onKeyDown={(e) => {
           if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); openMenuAtCard(); return; }
           // In selection mode Enter opens (preventDefault stops the synthesized

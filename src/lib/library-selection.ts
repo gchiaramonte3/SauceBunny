@@ -81,6 +81,28 @@ export function clickSelect(
 }
 
 /**
+ * What a RIGHT-click does before the menu opens.
+ *
+ * Finder's rule, and it is a correctness rule rather than a nicety once a
+ * selection can hold more than one file. Right-clicking something that is NOT
+ * selected selects it, replacing the selection, so the menu acts on the thing
+ * under the cursor. Right-clicking something that IS already selected leaves
+ * the selection alone, so a menu action can apply to the whole set.
+ *
+ * Without the first half, right-clicking file Z while A, B and C are
+ * highlighted opens a menu for Z while the screen says A, B and C — and
+ * whichever the action then hits, it is wrong for half the users who tried it.
+ */
+export function contextMenuSelect(
+  cur: SelectionState, paths: readonly string[], path: string,
+): SelectionState {
+  if (paths.indexOf(path) < 0) return cur;
+  // Already part of the set: keep it, so the menu can act on all of them.
+  if (cur.selected.has(path)) return cur;
+  return { selected: new Set([path]), anchor: path };
+}
+
+/**
  * Drop anything no longer on screen, after a rescan, filter or sort.
  *
  * Without this a selection silently keeps paths the user cannot see, and a

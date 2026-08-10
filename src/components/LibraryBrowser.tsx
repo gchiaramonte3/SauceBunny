@@ -7,7 +7,7 @@ import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { useFinderTags } from "../hooks/use-finder-tags";
 import { marqueeSelection } from "../lib/marquee";
 import {
-  clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, selectedInOrder,
+  clickSelect, contextMenuSelect, EMPTY_SELECTION, pruneSelection, selectAll, selectedInOrder,
   type SelectionState,
 } from "../lib/library-selection";
 import { LibraryDetail } from "./LibraryDetail";
@@ -328,13 +328,29 @@ export function LibraryBrowser({
             selectedPath={detailItem?.path ?? null}
             selectedPaths={sel.selected}
             tagsByPath={finderTags.tags}
-            onToggleTagColor={finderTags.toggle}
-            onClearTagColors={finderTags.clear}
+            onToggleTagColor={(path, index) => {
+              // A colour picked from the menu of a file that is PART of a
+              // multi-selection applies to the whole set — the menu belongs to
+              // the selection at that point, not to the one file under the
+              // cursor. Right-clicking outside the selection has already
+              // narrowed it to that file (contextMenuSelect), so this is only
+              // ever the set the user is looking at.
+              const target = sel.selected.has(path) && sel.selected.size > 1
+                ? selectedPaths : [path];
+              if (target.length > 1) finderTags.toggleMany(target, index);
+              else finderTags.toggle(path, index);
+            }}
+            onClearTagColors={(path) => {
+              const target = sel.selected.has(path) && sel.selected.size > 1
+                ? selectedPaths : [path];
+              for (const p of target) finderTags.clear(p);
+            }}
             posterVersions={posterVersions}
             requestThumb={requestThumb}
             onOpen={onOpenLocalPath}
             onReview={onReviewLocalPath}
             onSelectItem={openDetail}
+            onContextSelectItem={(item) => setSel((cur) => contextMenuSelect(cur, itemPathsRef.current, item.path))}
             onChoosePoster={setPickerPath}
             onResetPoster={resetPoster}
             onClearSelection={() => { setDetailItem(null); setSel(EMPTY_SELECTION); }}

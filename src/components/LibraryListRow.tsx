@@ -13,6 +13,9 @@ type Props = {
   /** Single click / Space → show the detail panel. */
   /** Receives the event so ⌘/⇧ reach the selection rule. */
   onSelect: (e: React.MouseEvent) => void;
+  /** Fired on right-click before the menu opens, so the parent can apply
+   *  Finder's select-then-menu rule. */
+  onContextSelect?: () => void;
   /** Finder tags: the colour dot in the row, and the menu's colour row. */
   tags?: readonly FinderTag[];
   onToggleTagColor?: (index: TagColorIndex) => void;
@@ -34,7 +37,7 @@ type Props = {
  * ContextMenu/Shift+F10 open the same LibraryCardMenu.
  */
 export function LibraryListRow({
-  item, selected, onSelect, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
+  item, selected, onSelect, onContextSelect, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const swatch = primarySwatch(tags ?? []);
@@ -62,7 +65,14 @@ export function LibraryListRow({
         title={item.name}
         onClick={(e) => onSelect(e)}
         onDoubleClick={onOpen}
-        onContextMenu={(e) => { e.preventDefault(); setMenuAnchor({ x: e.clientX, y: e.clientY }); }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          // Select FIRST, so the menu acts on what is under the cursor. Finder's
+          // rule: an unselected item becomes the selection; one already in the
+          // selection leaves it intact so the menu can act on the whole set.
+          onContextSelect?.();
+          setMenuAnchor({ x: e.clientX, y: e.clientY });
+        }}
         onKeyDown={(e) => {
           if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); openMenuAtRect(); return; }
           if (e.key === "Enter") { e.preventDefault(); onOpen(); }

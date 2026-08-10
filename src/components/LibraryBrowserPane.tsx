@@ -24,6 +24,8 @@ type Props = {
   onOpen: (path: string) => void;
   onReview?: (path: string) => void;
   onSelectItem: (item: LibraryItem, e: React.MouseEvent) => void;
+  /** Right-click landed on this item; apply Finder's select-then-menu rule. */
+  onContextSelectItem?: (item: LibraryItem) => void;
   onChoosePoster: (path: string) => void;
   onResetPoster: (path: string) => void;
   /** Clears the selection on a click in the empty gutter. */
@@ -46,7 +48,7 @@ type Props = {
  */
 export function LibraryBrowserPane({
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
-  onOpen, onReview, onSelectItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, emptyText,
+  onOpen, onReview, onSelectItem, onContextSelectItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, emptyText,
   sort, dir, onSort,
 }: Props) {
 
@@ -120,6 +122,7 @@ export function LibraryBrowserPane({
             onToggleTagColor={onToggleTagColor ? (i) => onToggleTagColor(it.path, i) : undefined}
             onClearTagColors={onClearTagColors ? () => onClearTagColors(it.path) : undefined}
             onSelect={(e) => onSelectItem(it, e)}
+            onContextSelect={() => onContextSelectItem?.(it)}
             selected={selectedPaths ? selectedPaths.has(it.path) : selectedPath === it.path}
             onChoosePoster={onChoosePoster}
             onResetPoster={onResetPoster}
@@ -164,6 +167,7 @@ export function LibraryBrowserPane({
             onToggleTagColor={onToggleTagColor ? (i) => onToggleTagColor(it.path, i) : undefined}
             onClearTagColors={onClearTagColors ? () => onClearTagColors(it.path) : undefined}
             onSelect={(e) => onSelectItem(it, e)}
+            onContextSelect={() => onContextSelectItem?.(it)}
             onOpen={() => onOpen(it.path)}
             onReview={onReview ? () => onReview(it.path) : undefined}
             requestThumb={requestThumb}

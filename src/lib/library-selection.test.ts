@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  clickSelect, EMPTY_SELECTION, pruneSelection, selectAll, selectedInOrder,
+  clickSelect, contextMenuSelect, EMPTY_SELECTION, pruneSelection, selectAll, selectedInOrder,
   type SelectionState,
 } from "./library-selection";
 
@@ -129,6 +129,37 @@ describe("a click on something not on screen", () => {
     // A stale card clicked mid-rescan must not wipe the selection.
     const s = at(P, ["b", plain], ["c", meta]);
     expect(clickSelect(s, P, "zzz", plain)).toBe(s);
+  });
+});
+
+describe("right-click", () => {
+  it("selects an unselected item, so the menu acts on what was clicked", () => {
+    // The correctness half. Without this, right-clicking Z while A, B and C are
+    // highlighted opens a menu for Z over a screen that says A, B, C.
+    const s = at(P, ["a", plain], ["c", shift]); // a b c
+    const out = contextMenuSelect(s, P, "e");
+    expect(sel(out)).toBe("e");
+    expect(out.anchor).toBe("e");
+  });
+
+  it("LEAVES a multi-selection alone when the click is inside it", () => {
+    // So a menu action can apply to the whole set rather than collapsing it.
+    const s = at(P, ["a", plain], ["c", shift]);
+    expect(contextMenuSelect(s, P, "b")).toBe(s);
+  });
+
+  it("leaves a single selection alone when it is the thing clicked", () => {
+    const s = at(P, ["d", plain]);
+    expect(contextMenuSelect(s, P, "d")).toBe(s);
+  });
+
+  it("changes nothing for an item that is not on screen", () => {
+    const s = at(P, ["a", plain]);
+    expect(contextMenuSelect(s, P, "zzz")).toBe(s);
+  });
+
+  it("selects into an empty selection", () => {
+    expect(sel(contextMenuSelect(EMPTY_SELECTION, P, "c"))).toBe("c");
   });
 });
 
