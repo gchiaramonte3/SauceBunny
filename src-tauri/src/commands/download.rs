@@ -42,10 +42,57 @@ pub(crate) fn cookies_args(browser: Option<&str>) -> Vec<String> {
                 eprintln!("[cookies] Safari cookies need Full Disk Access — proceeding without cookies");
                 return vec![];
             }
+            // Same degrade for a browser that has no cookie database at all
+            // (not installed, or never run). Passing the flag anyway makes
+            // yt-dlp hard-error — "could not find firefox cookies database" —
+            // and that error repeats on every resolve and every transcribe,
+            // which reads as the app being broken rather than a setting being
+            // stale. No cookies beats no anything.
+            if !b.eq_ignore_ascii_case("safari") && !cookie_db_present(b) {
+                eprintln!("[cookies] {b} has no cookie database on this Mac — proceeding without cookies");
+                return vec![];
+            }
             vec!["--cookies-from-browser".into(), b.into()]
         }
         _ => vec![],
     }
+}
+
+/// Does this browser have a cookie database where yt-dlp will look for one?
+///
+/// Mirrors yt-dlp's own search paths on macOS. A missing database means the
+/// browser is not installed or has never run, and passing
+/// `--cookies-from-browser` for it is a guaranteed hard error.
+pub(crate) fn cookie_db_present(browser: &str) -> bool {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let app_support = format!("{home}/Library/Application Support");
+    let chromium_like = |dir: &str| -> bool {
+        // Default profile or any numbered profile; both hold a `Cookies` file.
+        let base = format!("{app_support}/{dir}");
+        let Ok(entries) = std::fs::read_dir(&base) else { return false };
+        entries.flatten().any(|e| e.path().join("Cookies").is_file())
+    };
+    match browser.to_ascii_lowercase().as_str() {
+        "chrome" => chromium_like("Google/Chrome"),
+        "brave" => chromium_like("BraveSoftware/Brave-Browser"),
+        "edge" => chromium_like("Microsoft Edge"),
+        "firefox" => {
+            let profiles = format!("{app_support}/Firefox/Profiles");
+            let Ok(entries) = std::fs::read_dir(&profiles) else { return false };
+            entries.flatten().any(|e| e.path().join("cookies.sqlite").is_file())
+        }
+        "safari" => safari_cookies_readable(),
+        _ => false,
+    }
+}
+
+/// Frontend probe: would picking this browser actually send cookies? Drives
+/// the Settings note the moment a browser with no database is selected, so the
+/// user learns at the click rather than from a failed fetch later.
+#[tauri::command]
+pub fn cookie_browser_ready(browser: String) -> bool {
+    if browser == "none" || browser.is_empty() { return true; }
+    cookie_db_present(&browser)
 }
 
 /// True if we can open Safari's cookie store — i.e. the app has Full Disk

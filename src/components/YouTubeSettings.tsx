@@ -114,6 +114,19 @@ export function YouTubeSettings({
     return () => window.removeEventListener("focus", check);
   }, [browser]);
 
+  // Does the picked browser actually HAVE a cookie database on this Mac?
+  // Learned at the click, not from a failed fetch later: a browser that was
+  // never installed used to sit in this control looking as valid as the rest,
+  // and every resolve then paid a hard yt-dlp error — repeated on every
+  // transcribe — that read as the app being broken.
+  const [dbReady, setDbReady] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (browser === "none" || browser === "safari") { setDbReady(null); return; }
+    void invoke<boolean>("cookie_browser_ready", { browser })
+      .then(setDbReady)
+      .catch(() => setDbReady(null));
+  }, [browser]);
+
   // Contextual hint under the browser picker — collapses the old standalone
   // "Full Disk Access" row + the per-browser permission caveats into one line
   // that changes with the selection (progressive disclosure).
@@ -122,11 +135,13 @@ export function YouTubeSettings({
       ? safariFda
         ? { text: "Full Disk Access is on. Safari sign-ins are picked up automatically." }
         : { text: "Safari needs Full Disk Access. Grant it, then sign-ins are picked up automatically.", action: { label: "Grant access ↗", fn: openFda } }
-      : browser === "firefox"
-        ? { text: "Firefox needs no extra permission." }
-        : browser === "none"
-          ? { text: "Public videos only. Pick a browser to load age-gated or members-only sources." }
-          : { text: `${browser[0].toUpperCase() + browser.slice(1)} asks for your Mac password once to read its cookies.` };
+      : browser === "none"
+        ? { text: "Public videos only. Pick a browser to load age-gated or members-only sources." }
+        : dbReady === false
+          ? { text: `${browser[0].toUpperCase() + browser.slice(1)} has no cookie database on this Mac (not installed, or never run). No cookies will be sent. Pick the browser you actually use.` }
+          : browser === "firefox"
+            ? { text: "Firefox needs no extra permission." }
+            : { text: `${browser[0].toUpperCase() + browser.slice(1)} asks for your Mac password once to read its cookies.` };
 
   return (
     <section>
