@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconChevronRight, IconPanelLeft, IconPlus, IconRefresh, IconStack, IconFolderSolid } from "./Icons";
 import type { LibraryFolder } from "../types";
 import { libraryPosterPaths, type LibraryCrumb, type LibraryKindFilter } from "../lib/library";
+import { FolderTagMenu } from "./FolderTagMenu";
+import { useFinderTags } from "../hooks/use-finder-tags";
+import { primarySwatch } from "../lib/finder-tags";
 
 type Props = {
   trees: LibraryFolder[];
@@ -134,8 +137,58 @@ export function LibraryTree({
     }
   };
 
+  // Drag-to-resize, sharing the app-wide handle design (resize.css) and the
+  // drawer's persistence pattern. Width lives on a CSS variable set on the
+  // tree element so no other component needs to know about it.
+  const TREE_W_KEY = "saucebunny.libraryTreeWidth";
+  const TREE_W_MIN = 168;
+  const TREE_W_MAX = 420;
+  const TREE_W_DEFAULT = 224;
+  const [treeWidth, setTreeWidth] = useState<number>(() => {
+    const raw = Number(localStorage.getItem(TREE_W_KEY));
+    return Number.isFinite(raw) && raw >= TREE_W_MIN && raw <= TREE_W_MAX ? raw : TREE_W_DEFAULT;
+  });
+  const [resizing, setResizing] = useState(false);
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  useEffect(() => {
+    try { localStorage.setItem(TREE_W_KEY, String(treeWidth)); } catch { /* quota */ }
+  }, [treeWidth]);
+  const onResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragRef.current = { startX: e.clientX, startWidth: treeWidth };
+    setResizing(true);
+    document.body.classList.add("cp-resizing-ew");
+    function onMove(ev: MouseEvent) {
+      const st = dragRef.current;
+      if (!st) return;
+      // The tree sits on the LEFT, so dragging right grows it — the plain
+      // cursor delta, unlike the right-docked drawer's inverted one.
+      const next = Math.max(TREE_W_MIN, Math.min(TREE_W_MAX, st.startWidth + (ev.clientX - st.startX)));
+      setTreeWidth(next);
+    }
+    function onUp() {
+      dragRef.current = null;
+      setResizing(false);
+      document.body.classList.remove("cp-resizing-ew");
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [treeWidth]);
+
+  /** Right-click target: a real folder row (never the "All" aggregate). */
+  const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+  // Tags for every visible folder, one bulk read — this is what makes a colour
+  // VISIBLE in the tree rather than only inside the menu that set it.
+  const folderPaths = useMemo(
+    () => rows.filter((r) => r.key !== "all").map((r) => r.key),
+    [rows],
+  );
+  const finderTags = useFinderTags(folderPaths);
+
   return (
-    <div className="cp-lib-tree">
+    <div className="cp-lib-tree" style={{ flexBasis: treeWidth }}>
       <div className="cp-lib-tree-head">
         <h2 className="cp-lib-tree-title">Library</h2>
         <button
@@ -177,6 +230,13 @@ export function LibraryTree({
               className={"cp-lib-tree-row" + (isSel ? " selected" : "")}
               style={{ ["--depth" as string]: String(row.depth) }}
               onClick={() => { setActiveKey(row.key); onSelect(row.chain); }}
+              onContextMenu={(e) => {
+                // "All" is an aggregate, not a folder on disk — nothing to tag
+                // or reveal.
+                if (row.key === "all") return;
+                e.preventDefault();
+                setMenu({ path: row.key, x: e.clientX, y: e.clientY });
+              }}
             >
               {row.hasChildren ? (
                 <span
@@ -192,7 +252,17 @@ export function LibraryTree({
                 </span>
               )}
               {row.key !== "all" && (
-                <IconFolderSolid size={15} className="cp-lib-tree-folder" />
+                <IconFolderSolid
+                  size={15}
+                  className="cp-lib-tree-folder"
+                  // The tag colour, worn by the folder itself. The glyph is
+                  // already a filled folder shape, so tinting it IS the Finder
+                  // treatment, with no extra dot competing for row space.
+                  style={(() => {
+                    const sw = primarySwatch(finderTags.tags.get(row.key) ?? []);
+                    return sw ? { color: sw.hex } : undefined;
+                  })()}
+                />
               )}
               <span className="cp-lib-tree-name">{row.name}</span>
             </button>
@@ -214,6 +284,23 @@ export function LibraryTree({
           <IconRefresh size={13} />
         </button>
       </div>
+      <div
+        className={"cp-lib-tree-resize cp-resize-handle vertical" + (resizing ? " dragging" : "")}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize folder panel"
+        onMouseDown={onResizeMouseDown}
+        onDoubleClick={() => setTreeWidth(TREE_W_DEFAULT)}
+        title="Drag to resize · double-click to reset"
+      />
+      {menu && (
+        <FolderTagMenu
+          path={menu.path}
+          anchor={{ x: menu.x, y: menu.y }}
+          onClose={() => setMenu(null)}
+          onChanged={() => finderTags.refresh()}
+        />
+      )}
     </div>
   );
 }

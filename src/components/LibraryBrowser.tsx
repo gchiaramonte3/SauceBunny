@@ -7,6 +7,7 @@ import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { useFinderTags } from "../hooks/use-finder-tags";
 import { marqueeSelection } from "../lib/marquee";
 import { RenameDialog } from "./RenameDialog";
+import { LibraryQuickLook } from "./LibraryQuickLook";
 import { applyRenamePlan } from "../lib/rename-apply";
 import {
   clickSelect, contextMenuSelect, EMPTY_SELECTION, pruneSelection, selectAll, selectedInOrder,
@@ -104,6 +105,8 @@ export function LibraryBrowser({
   const dragBaseRef = useRef<ReadonlySet<string> | null>(null);
   /** Files the rename dialog is open for, or null. */
   const [renaming, setRenaming] = useState<LibraryItem[] | null>(null);
+  /** Quick Look target, or null. */
+  const [quickLook, setQuickLook] = useState<LibraryItem | null>(null);
   const [pickerPath, setPickerPath] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(true);
 
@@ -264,6 +267,19 @@ export function LibraryBrowser({
           setSel(selectAll(itemPathsRef.current));
           return;
         }
+        // Space = Quick Look, Finder's muscle memory. Only with exactly one
+        // file in hand: previewing "a selection" is not a meaningful act, and
+        // never while typing in the filter box.
+        if (e.key === " " && !(e.target instanceof HTMLInputElement)) {
+          const one = detailItem
+            ?? (sel.selected.size === 1 ? items.find((i) => sel.selected.has(i.path)) : undefined);
+          if (one) {
+            e.preventDefault();
+            e.stopPropagation();
+            setQuickLook(one);
+            return;
+          }
+        }
         if (e.key !== "Escape") return;
         // Esc unwinds one layer at a time, most transient first.
         if (sel.selected.size > 1) { e.stopPropagation(); setSel(EMPTY_SELECTION); }
@@ -407,6 +423,14 @@ export function LibraryBrowser({
         )}
       </div>
 
+      {quickLook && (
+        <LibraryQuickLook
+          path={quickLook.path}
+          name={quickLook.name}
+          onClose={() => setQuickLook(null)}
+          onOpenInClip={() => onOpenLocalPath(quickLook.path)}
+        />
+      )}
       {renaming && (
         <RenameDialog
           items={renaming.map((it) => ({
