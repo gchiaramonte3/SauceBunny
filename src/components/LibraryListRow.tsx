@@ -85,13 +85,21 @@ export function LibraryListRow({
             ? <img src={thumb} alt="" draggable={false} onError={() => setBroken(true)} />
             : (item.kind === "audio" ? <IconVolume size={13} /> : <IconFilm size={13} />)}
         </span>
-        {/* The colour column. A dot rather than a tinted row: a full-row tint
-            at seven hues fights the selection highlight, and Finder does not
-            do it either. */}
-        <span className="cp-lib-lrow-tag" aria-hidden="true">
-          {swatch && <span className="cp-lib-lrow-dot" style={{ background: swatch.hex }} />}
+        {/* The tag dot lives INSIDE the name cell, like Finder's, and not as
+            its own grid column: the row is a five-track grid shared with the
+            header, and a sixth child shifted every cell one track over — names
+            vanished into the 64px Kind track and dates wrapped onto their own
+            line. A dot needs no track; it needs to sit beside the name. */}
+        <span className="cp-lib-lrow-name">
+          {swatch && (
+            <span
+              className="cp-lib-lrow-dot"
+              style={{ background: swatch.hex }}
+              aria-hidden="true"
+            />
+          )}
+          {item.name}
         </span>
-        <span className="cp-lib-lrow-name">{item.name}</span>
         <span className="cp-lib-lrow-kind">{item.kind}</span>
         <span className="cp-lib-lrow-size">{formatBytes(item.size_bytes)}</span>
         <span className="cp-lib-lrow-date">{formatModifiedDate(item.modified_ms)}</span>
