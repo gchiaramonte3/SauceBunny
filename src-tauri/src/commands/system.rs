@@ -986,6 +986,65 @@ pub async fn latest_release() -> Result<LatestRelease, crate::AppError> {
     Ok(LatestRelease { version, url, notes })
 }
 
+/// Is `name` in the parent directory with EXACTLY this casing? `Path::exists`
+/// cannot answer that on a case-insensitive volume, so the directory entries
+/// are compared byte for byte.
+fn name_present_exactly(path: &std::path::Path, name: &str) -> bool {
+    let Some(dir) = path.parent() else { return false };
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    entries.flatten().any(|e| e.file_name().to_str() == Some(name))
+}
+
+/// Rename ONE file in place, within its own folder.
+///
+/// Refuses anything that is not a plain in-folder rename: the destination must
+/// sit in the same directory and must not already exist. Both are guards
+/// against the same catastrophe — a bulk rename silently overwriting a file the
+/// user did not have selected. The frontend's plan checks collisions too, but
+/// it checks them against a listing that may be seconds old, and this is the
+/// check that happens at the moment of the write.
+///
+/// A case-only rename is allowed, and is VERIFIED rather than assumed. Measured
+/// on APFS, renaming "clip.mp4" to "Clip.mp4" directly does take effect — but
+/// that is not true of every volume an editor works from (SMB shares and some
+/// HFS+ externals silently no-op it, leaving the old casing while reporting
+/// success, after which the app's records point at a name not on disk). So the
+/// direct rename is attempted, the result is checked against the directory, and
+/// only a volume that ignored it falls back to a two-hop rename through a
+/// temporary. That way the common path stays a single atomic rename and the
+/// awkward filesystems still end up correct.
+#[tauri::command]
+pub async fn rename_path(from: String, to: String) -> Result<String, crate::AppError> {
+    let src = PathBuf::from(&from);
+    if !src.exists() {
+        return Err(format!("Not found: {from}").into());
+    }
+    let dst = PathBuf::from(&to);
+    if src.parent() != dst.parent() {
+        return Err("A rename may not move a file to another folder".to_string().into());
+    }
+    let Some(name) = dst.file_name().and_then(|n| n.to_str()) else {
+        return Err("Invalid destination name".to_string().into());
+    };
+    if name.is_empty() || name.contains('/') || name.contains(':') {
+        return Err("Name contains / or :".to_string().into());
+    }
+
+    let case_only = from != to && from.to_lowercase() == to.to_lowercase();
+    if !case_only && dst.exists() {
+        return Err(format!("A file named \"{name}\" already exists").into());
+    }
+    std::fs::rename(&src, &dst).map_err(|e| crate::AppError::Io(format!("rename: {e}")))?;
+
+    // Only a case-only rename can have "succeeded" without changing anything.
+    if case_only && !name_present_exactly(&dst, name) {
+        let tmp = dst.with_file_name(format!(".sb-rename-{}", std::process::id()));
+        std::fs::rename(&dst, &tmp).map_err(|e| crate::AppError::Io(format!("rename: {e}")))?;
+        std::fs::rename(&tmp, &dst).map_err(|e| crate::AppError::Io(format!("rename: {e}")))?;
+    }
+    Ok(to)
+}
+
 /// One transcript's text, for the cross-transcript search index.
 #[derive(serde::Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../src/bindings/")]

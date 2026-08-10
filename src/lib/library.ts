@@ -259,6 +259,18 @@ export function setChosenPoster(path: string, seconds: number): void {
   posterCache = map;
 }
 
+/**
+ * Replace the whole chosen-poster map.
+ *
+ * Exists for the rename path, which has to MOVE a key rather than set or clear
+ * one — doing that as clear-then-set would lose the value if anything failed
+ * between the two writes.
+ */
+export function saveChosenPosters(map: Record<string, number>): void {
+  saveJson(THUMB_TIMES_KEY, map);
+  posterCache = map;
+}
+
 /** Forget a chosen poster so `path` reverts to the auto/representative frame. */
 export function clearChosenPoster(path: string): void {
   const map = loadChosenPosters();
@@ -287,6 +299,12 @@ export function loadSourceTimecodes(): Record<string, string> {
     }
   }
   return out;
+}
+
+/** Replace the whole source-timecode map. See saveChosenPosters — same reason:
+ *  a rename moves a key, and clear-then-set can lose the value in between. */
+export function saveSourceTimecodes(map: Record<string, string>): void {
+  saveJson(SOURCE_TC_KEY, map);
 }
 
 /** The source start timecode for one path, or null when it starts at zero. */

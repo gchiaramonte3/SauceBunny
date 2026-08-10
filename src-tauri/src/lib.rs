@@ -252,6 +252,7 @@ pub fn run() {
             commands::new_job_id,
             commands::read_text_file_capped,
             commands::read_transcripts_bulk,
+            commands::rename_path,
             commands::read_finder_tags,
             commands::set_finder_tags,
             commands::probe_diarizer,
