@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview } from "./Icons";
+import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview, IconPencil } from "./Icons";
 import { TagColorRow } from "./TagColorRow";
 import type { TagColorIndex } from "../lib/finder-tags";
 import type { FinderTag } from "../bindings/FinderTag";
@@ -43,6 +43,9 @@ type Props = {
   tags?: readonly FinderTag[];
   onToggleTagColor?: (index: TagColorIndex) => void;
   onClearTagColors?: () => void;
+  /** Rename this file (or the whole selection it belongs to). Absent for
+   *  sources with no path on disk. */
+  onRename?: () => void;
   onChooseThumbnail: () => void;
   onResetThumbnail: () => void;
   onOpen: () => void;
@@ -56,7 +59,7 @@ type Item = { icon: ReactNode; label: string; disabled?: boolean; onSelect: () =
 export function LibraryCardMenu({
   anchor, align = "left", canPickThumbnail, hasChosenThumbnail, revealPath,
   onChooseThumbnail, onResetThumbnail, onOpen, onReview, onClose,
-  tags, onToggleTagColor, onClearTagColors,
+  tags, onToggleTagColor, onClearTagColors, onRename,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const btnRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -74,6 +77,7 @@ export function LibraryCardMenu({
       onSelect: () => { invoke("reveal_in_finder", { path: revealPath }).catch(() => { /* ignore */ }); },
     });
   }
+  if (onRename) items.push({ icon: <IconPencil size={14} />, label: "Rename…", onSelect: onRename });
   items.push({ icon: <IconPlay size={13} />, label: "Open in Clip", onSelect: onOpen });
   if (onReview) {
     items.push({ icon: <IconReview size={13} />, label: "Review this clip", onSelect: onReview });

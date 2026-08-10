@@ -6,6 +6,8 @@ import { LibraryBrowserPane } from "./LibraryBrowserPane";
 import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { useFinderTags } from "../hooks/use-finder-tags";
 import { marqueeSelection } from "../lib/marquee";
+import { RenameDialog } from "./RenameDialog";
+import { applyRenamePlan } from "../lib/rename-apply";
 import {
   clickSelect, contextMenuSelect, EMPTY_SELECTION, pruneSelection, selectAll, selectedInOrder,
   type SelectionState,
@@ -100,6 +102,8 @@ export function LibraryBrowser({
   const [sel, setSel] = useState<SelectionState>(EMPTY_SELECTION);
   /** The selection when the current band started; null when no drag is live. */
   const dragBaseRef = useRef<ReadonlySet<string> | null>(null);
+  /** Files the rename dialog is open for, or null. */
+  const [renaming, setRenaming] = useState<LibraryItem[] | null>(null);
   const [pickerPath, setPickerPath] = useState<string | null>(null);
   const [treeOpen, setTreeOpen] = useState(true);
 
@@ -351,6 +355,14 @@ export function LibraryBrowser({
             onReview={onReviewLocalPath}
             onSelectItem={openDetail}
             onContextSelectItem={(item) => setSel((cur) => contextMenuSelect(cur, itemPathsRef.current, item.path))}
+            onRenameItem={(item) => {
+              // Rename the SELECTION when the clicked file is part of one, so
+              // the menu means the same thing as the colour row above it.
+              const many = sel.selected.has(item.path) && sel.selected.size > 1
+                ? items.filter((i) => sel.selected.has(i.path))
+                : [item];
+              setRenaming(many);
+            }}
             onChoosePoster={setPickerPath}
             onResetPoster={resetPoster}
             onClearSelection={() => { setDetailItem(null); setSel(EMPTY_SELECTION); }}
@@ -395,6 +407,41 @@ export function LibraryBrowser({
         )}
       </div>
 
+      {renaming && (
+        <RenameDialog
+          items={renaming.map((it) => ({
+            path: it.path,
+            modifiedMs: it.modified_ms,
+            // The scan has no duration; the dialog only uses it for the
+            // {duration} token, which renders empty when unknown.
+            durationSec: null,
+          }))}
+          // Every OTHER file in the same folders, so a rename colliding with a
+          // file that was never selected is caught in the preview rather than
+          // at the write.
+          existingNames={items
+            .filter((i) => !renaming.some((r) => r.path === i.path))
+            .map((i) => i.path)}
+          onCancel={() => setRenaming(null)}
+          onApply={async (rows) => {
+            const results = await applyRenamePlan(
+              rows.map((r) => ({ path: r.path, from: r.path.split("/").pop() ?? r.path, to: r.to, problem: null })),
+            );
+            const failed = results.filter((r) => !r.ok);
+            if (failed.length) {
+              // Kept on screen rather than dismissed: a rename that did not
+              // happen is exactly the case the user must not be able to walk
+              // away from believing it did. The rescan below re-lists what is
+              // actually on disk, so the rows that DID rename disappear from
+              // the selection and the ones that failed stay visible.
+              console.warn("rename failures", failed);
+            }
+            setRenaming(null);
+            setSel(EMPTY_SELECTION);
+            rescanAll();
+          }}
+        />
+      )}
       {pickerPath && (
         <ThumbnailPicker
           path={pickerPath}

@@ -26,6 +26,8 @@ type Props = {
   onSelectItem: (item: LibraryItem, e: React.MouseEvent) => void;
   /** Right-click landed on this item; apply Finder's select-then-menu rule. */
   onContextSelectItem?: (item: LibraryItem) => void;
+  /** Rename: the pane hands back the item the menu was opened on. */
+  onRenameItem?: (item: LibraryItem) => void;
   onChoosePoster: (path: string) => void;
   onResetPoster: (path: string) => void;
   /** Clears the selection on a click in the empty gutter. */
@@ -48,7 +50,7 @@ type Props = {
  */
 export function LibraryBrowserPane({
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
-  onOpen, onReview, onSelectItem, onContextSelectItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, emptyText,
+  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, emptyText,
   sort, dir, onSort,
 }: Props) {
 
@@ -123,6 +125,7 @@ export function LibraryBrowserPane({
             onClearTagColors={onClearTagColors ? () => onClearTagColors(it.path) : undefined}
             onSelect={(e) => onSelectItem(it, e)}
             onContextSelect={() => onContextSelectItem?.(it)}
+            onRename={onRenameItem ? () => onRenameItem(it) : undefined}
             selected={selectedPaths ? selectedPaths.has(it.path) : selectedPath === it.path}
             onChoosePoster={onChoosePoster}
             onResetPoster={onResetPoster}
@@ -168,6 +171,7 @@ export function LibraryBrowserPane({
             onClearTagColors={onClearTagColors ? () => onClearTagColors(it.path) : undefined}
             onSelect={(e) => onSelectItem(it, e)}
             onContextSelect={() => onContextSelectItem?.(it)}
+            onRename={onRenameItem ? () => onRenameItem(it) : undefined}
             onOpen={() => onOpen(it.path)}
             onReview={onReview ? () => onReview(it.path) : undefined}
             requestThumb={requestThumb}

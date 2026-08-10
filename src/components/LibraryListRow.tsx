@@ -16,6 +16,8 @@ type Props = {
   /** Fired on right-click before the menu opens, so the parent can apply
    *  Finder's select-then-menu rule. */
   onContextSelect?: () => void;
+  /** Rename this file (or the selection it is part of). */
+  onRename?: () => void;
   /** Finder tags: the colour dot in the row, and the menu's colour row. */
   tags?: readonly FinderTag[];
   onToggleTagColor?: (index: TagColorIndex) => void;
@@ -37,7 +39,7 @@ type Props = {
  * ContextMenu/Shift+F10 open the same LibraryCardMenu.
  */
 export function LibraryListRow({
-  item, selected, onSelect, onContextSelect, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
+  item, selected, onSelect, onContextSelect, onRename, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const swatch = primarySwatch(tags ?? []);
@@ -96,6 +98,7 @@ export function LibraryListRow({
       </button>
       {menuAnchor && (
         <LibraryCardMenu
+          onRename={onRename}
           tags={tags}
           onToggleTagColor={onToggleTagColor}
           onClearTagColors={onClearTagColors}

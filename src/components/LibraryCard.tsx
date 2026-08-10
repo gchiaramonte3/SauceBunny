@@ -52,6 +52,8 @@ type Props = {
   onSelect?: (e: React.MouseEvent) => void;
   /** Fired on right-click before the menu opens; see LibraryListRow. */
   onContextSelect?: () => void;
+  /** Rename this file (or the selection it is part of). */
+  onRename?: () => void;
   /** Finder tags for this file, and the two ways to change them. */
   tags?: readonly import("../bindings/FinderTag").FinderTag[];
   onToggleTagColor?: (index: import("../lib/finder-tags").TagColorIndex) => void;
@@ -79,7 +81,7 @@ type Props = {
  */
 export function LibraryCard({
   title, detail, art, badge, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
-  onSelect, onContextSelect, selected, tags, onToggleTagColor, onClearTagColors,
+  onSelect, onContextSelect, onRename, selected, tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
   /** The ⋯ trigger. Separate from btnRef, which is the whole CARD: anchoring
@@ -262,6 +264,7 @@ export function LibraryCard({
           revealPath={revealPath}
           onChooseThumbnail={() => { if (posterPath) onChoosePoster?.(posterPath); }}
           onResetThumbnail={() => { if (posterPath) onResetPoster?.(posterPath); }}
+          onRename={onRename}
           tags={tags}
           onToggleTagColor={onToggleTagColor}
           onClearTagColors={onClearTagColors}

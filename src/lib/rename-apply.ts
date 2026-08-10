@@ -37,6 +37,35 @@ export type RenameOutcome = {
   error?: string;
 };
 
+/**
+ * Read the numbers the review fingerprint is built from.
+ *
+ * The library scan deliberately does not carry duration or dimensions (it is
+ * a directory walk, not a probe), but the fingerprint needs both — so a rename
+ * driven from the Library has to fetch them or it would silently skip the
+ * review link and orphan the notes, which is the exact failure this module
+ * exists to prevent. A probe is ~0.1s per file against ffprobe.
+ *
+ * A file that cannot be probed returns empty, and repathIdentity then skips
+ * the review link rather than guessing: a fingerprint from wrong numbers would
+ * point the new name at somebody else's review.
+ */
+export async function probeIdentity(path: string): Promise<RenameIdentity> {
+  try {
+    const m = await invoke<{
+      size_bytes: number; duration: number | null; width: number | null; height: number | null;
+    }>("probe_local_file", { path });
+    return {
+      durationSec: m.duration,
+      width: m.width,
+      height: m.height,
+      sizeBytes: m.size_bytes,
+    };
+  } catch {
+    return {};
+  }
+}
+
 /** Metadata needed to rebuild the review fingerprint. Absent for a file we
  *  never probed, in which case the review link is skipped rather than guessed
  *  at with wrong numbers. */
@@ -106,7 +135,6 @@ export async function applyRename(
  */
 export async function applyRenamePlan(
   rows: readonly RenamePlanRow[],
-  identityOf: (path: string) => RenameIdentity,
 ): Promise<RenameOutcome[]> {
   const out: RenameOutcome[] = [];
   for (const row of rows) {
@@ -114,7 +142,9 @@ export async function applyRenamePlan(
       out.push({ from: row.path, to: row.to, ok: false, error: row.problem });
       continue;
     }
-    out.push(await applyRename(row.path, row.to, identityOf(row.path)));
+    // Probed BEFORE the rename, while the old path still exists.
+    const id = await probeIdentity(row.path);
+    out.push(await applyRename(row.path, row.to, id));
   }
   return out;
 }

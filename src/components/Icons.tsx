@@ -299,6 +299,11 @@ export const IconPlus = (p: IconProps) => (
     <line x1="5" y1="12" x2="19" y2="12" />
   </Icon>
 );
+export const IconPencil = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 20l4.5-1.2L19.5 7.8a2.2 2.2 0 0 0-3.1-3.1L5.2 15.5 4 20z" />
+  </Icon>
+);
 export const IconTrash = (p: IconProps) => (
   <Icon {...p}>
     <polyline points="3 6 5 6 21 6" />

@@ -1468,3 +1468,71 @@
   background: rgba(255,255,255,0.08);
   border-radius: 2px;
 }
+
+/* ── Rename dialog ───────────────────────────────────────────────────────────
+   The preview IS the feature: bulk rename is the one Library action that can
+   destroy a day's work in a press, so every row shows its result and its own
+   reason for being refused, and Rename stays disabled until all are clean. */
+.cp-rename {
+  width: min(620px, 92vw);
+  max-height: 76vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--bg-1, #161616);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+}
+.cp-rename-head { font-family: var(--font-ui); font-size: 13px; font-weight: 700; color: var(--fg-1); }
+.cp-rename-input {
+  height: 32px;
+  padding: 0 10px;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  color: var(--fg-1);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+}
+.cp-rename-input:focus { outline: none; border-color: var(--focus-ring); }
+.cp-rename-tokens { display: flex; flex-wrap: wrap; gap: 5px; }
+.cp-rename-token {
+  padding: 3px 7px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--fg-3);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.cp-rename-token:hover { color: var(--fg-1); background: rgba(255,255,255,0.1); }
+.cp-rename-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  padding: 4px;
+}
+.cp-rename-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 4px 6px;
+  font-size: 11.5px;
+  color: var(--fg-2);
+  border-radius: 5px;
+}
+.cp-rename-from { color: var(--fg-4); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-rename-arrow { color: var(--fg-4); flex: 0 0 auto; }
+.cp-rename-to { flex: 1 1 auto; min-width: 0; color: var(--fg-1); overflow-wrap: anywhere; }
+/* A refused row states its own reason inline. A single count at the bottom
+   would make the user hunt for which of forty is the problem. */
+.cp-rename-row.bad { background: rgba(255,90,90,0.08); }
+.cp-rename-row.bad .cp-rename-to { color: var(--fg-3); text-decoration: none; }
+.cp-rename-why { flex: 0 0 auto; font-size: 10.5px; color: #ff8f8a; }
+.cp-rename-foot { display: flex; align-items: center; gap: 8px; }
+.cp-rename-summary { flex: 1 1 auto; font-size: 11.5px; color: var(--fg-3); }

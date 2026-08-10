@@ -1,0 +1,140 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { buildRenamePlan, type RenameItem } from "../lib/rename-pattern";
+
+/**
+ * Rename one file, or a hundred, with the result visible before anything is
+ * written.
+ *
+ * THE PREVIEW IS THE FEATURE. Bulk rename is the one Library action that can
+ * destroy a day's work in a single press, so every row shows its new name and
+ * its own reason for being unacceptable, and Apply is disabled until every row
+ * is clean. All-or-nothing rather than "rename the good ones": a half-applied
+ * batch leaves the user to work out which half, in a folder whose names just
+ * changed under them.
+ *
+ * ONE DIALOG FOR ONE FILE AND FOR MANY. A single rename is a batch of one, and
+ * giving it a separate inline-edit path would mean two implementations of the
+ * collision rules, which is exactly how one of them ends up wrong.
+ */
+export function RenameDialog({
+  items, existingNames, onCancel, onApply,
+}: {
+  /** Files to rename, in display order. */
+  items: RenameItem[];
+  /** Every filename ALREADY in the same folders, so a collision with a file
+   *  that was never selected is caught before the write. */
+  existingNames: string[];
+  onCancel: () => void;
+  onApply: (rows: { path: string; to: string }[]) => void;
+}) {
+  const single = items.length === 1;
+  const [pattern, setPattern] = useState(
+    // One file starts from its own name, because the common single rename is a
+    // small edit. A batch starts from a token, because typing a literal name
+    // for many files would give them all the same one.
+    single ? (items[0].path.split("/").pop() ?? "") : "{name}",
+  );
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      // Select the STEM only, so typing replaces the name and keeps the
+      // extension, the way Finder's rename field does.
+      const dot = el.value.lastIndexOf(".");
+      if (single && dot > 0) el.setSelectionRange(0, dot);
+      else el.select();
+    });
+  }, [single]);
+
+  const plan = useMemo(
+    () => buildRenamePlan(items, pattern, existingNames),
+    [items, pattern, existingNames],
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  const commit = () => {
+    if (!plan.ok || plan.changed === 0) return;
+    onApply(plan.rows.map((r) => ({ path: r.path, to: r.to })));
+  };
+
+  return createPortal(
+    <div className="cp-modal-scrim" onMouseDown={onCancel}>
+      <div
+        className="cp-rename"
+        role="dialog"
+        aria-label={single ? "Rename file" : `Rename ${items.length} files`}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="cp-rename-head">
+          {single ? "Rename" : `Rename ${items.length} files`}
+        </div>
+
+        <input
+          ref={inputRef}
+          className="cp-rename-input"
+          value={pattern}
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(e) => setPattern(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); commit(); }
+          }}
+        />
+
+        {!single && (
+          <div className="cp-rename-tokens">
+            {/* Pressed, not just documented: reading that {counter:03} exists
+                and typing it correctly are different acts. */}
+            {["{name}", "{counter:03}", "{date}", "{duration}", "{ext}"].map((t) => (
+              <button
+                key={t}
+                className="cp-rename-token"
+                title={`Insert ${t}`}
+                onClick={() => setPattern((p) => p + t)}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="cp-rename-rows">
+          {plan.rows.map((r) => (
+            <div key={r.path} className={"cp-rename-row" + (r.problem ? " bad" : "")}>
+              <span className="cp-rename-from">{r.from}</span>
+              <span className="cp-rename-arrow" aria-hidden="true">›</span>
+              <span className="cp-rename-to">{r.to}</span>
+              {r.problem && <span className="cp-rename-why">{r.problem}</span>}
+            </div>
+          ))}
+        </div>
+
+        <div className="cp-rename-foot">
+          <span className="cp-rename-summary">
+            {plan.ok
+              ? (plan.changed === 0 ? "No change" : `${plan.changed} will be renamed`)
+              : `${plan.rows.filter((r) => r.problem).length} cannot be renamed`}
+          </span>
+          <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+          <button
+            className="btn btn-primary"
+            disabled={!plan.ok || plan.changed === 0}
+            onClick={commit}
+          >
+            Rename
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
