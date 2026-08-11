@@ -18,7 +18,7 @@ import { buildRenamePlan, type RenameItem } from "../lib/rename-pattern";
  * collision rules, which is exactly how one of them ends up wrong.
  */
 export function RenameDialog({
-  items, existingNames, onCancel, onApply,
+  items, existingNames, onCancel, onApply, failures,
 }: {
   /** Files to rename, in display order. */
   items: RenameItem[];
@@ -27,6 +27,10 @@ export function RenameDialog({
   existingNames: string[];
   onCancel: () => void;
   onApply: (rows: { path: string; to: string }[]) => void;
+  /** Failures from the last attempt, by path. Keeps the dialog OPEN and shows
+   *  each reason on its own row: a destructive action that did not happen must
+   *  never be something the user can walk away from believing it did. */
+  failures?: ReadonlyMap<string, string>;
 }) {
   const single = items.length === 1;
   const [pattern, setPattern] = useState(
@@ -109,20 +113,27 @@ export function RenameDialog({
 
         <div className="cp-rename-rows">
           {plan.rows.map((r) => (
-            <div key={r.path} className={"cp-rename-row" + (r.problem ? " bad" : "")}>
+            <div
+              key={r.path}
+              className={"cp-rename-row" + (r.problem || failures?.has(r.path) ? " bad" : "")}
+            >
               <span className="cp-rename-from">{r.from}</span>
               <span className="cp-rename-arrow" aria-hidden="true">›</span>
               <span className="cp-rename-to">{r.to}</span>
-              {r.problem && <span className="cp-rename-why">{r.problem}</span>}
+              {(r.problem ?? failures?.get(r.path)) && (
+                <span className="cp-rename-why">{r.problem ?? failures?.get(r.path)}</span>
+              )}
             </div>
           ))}
         </div>
 
         <div className="cp-rename-foot">
           <span className="cp-rename-summary">
-            {plan.ok
+            {failures?.size
+              ? `${failures.size} could not be renamed`
+              : plan.ok
               ? (plan.changed === 0 ? "No change" : `${plan.changed} will be renamed`)
-              : `${plan.rows.filter((r) => r.problem).length} cannot be renamed`}
+                : `${plan.rows.filter((r) => r.problem).length} cannot be renamed`}
           </span>
           <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
           <button

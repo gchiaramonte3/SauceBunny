@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { LibraryCard } from "./LibraryCard";
 import { LibraryListRow } from "./LibraryListRow";
 import type { LibraryViewMode } from "./LibraryBrowserBar";
@@ -66,6 +66,55 @@ export function LibraryBrowserPane({
     names,
     layout: view,
   });
+
+  // Column widths, persisted. Applied on the list CONTAINER so the header and
+  // every row inherit the same variables — resizing one element and not the
+  // other is how a table goes crooked.
+  const COLS_KEY = "saucebunny.libraryListCols";
+  const COL_MIN = 48;
+  const COL_MAX = 240;
+  const COL_DEFAULT = { kind: 64, size: 84, date: 96 };
+  const [cols, setCols] = useState<{ kind: number; size: number; date: number }>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(COLS_KEY) ?? "null");
+      if (raw && typeof raw === "object") {
+        const pick = (v: unknown, d: number) =>
+          typeof v === "number" && v >= COL_MIN && v <= COL_MAX ? v : d;
+        return {
+          kind: pick(raw.kind, COL_DEFAULT.kind),
+          size: pick(raw.size, COL_DEFAULT.size),
+          date: pick(raw.date, COL_DEFAULT.date),
+        };
+      }
+    } catch { /* mangled value costs the defaults, not a crash */ }
+    return COL_DEFAULT;
+  });
+  useEffect(() => {
+    try { localStorage.setItem(COLS_KEY, JSON.stringify(cols)); } catch { /* quota */ }
+  }, [cols]);
+  const [dragCol, setDragCol] = useState<null | keyof typeof COL_DEFAULT>(null);
+  const startColDrag = (key: keyof typeof COL_DEFAULT) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation(); // never let the divider press also sort the column
+    const startX = e.clientX;
+    const startW = cols[key];
+    setDragCol(key);
+    document.body.classList.add("cp-resizing-ew");
+    const onMove = (ev: MouseEvent) => {
+      // Dragging RIGHT widens the column to the divider's left, which is the
+      // one the handle belongs to.
+      const next = Math.max(COL_MIN, Math.min(COL_MAX, startW + (ev.clientX - startX)));
+      setCols((c: { kind: number; size: number; date: number }) => ({ ...c, [key]: next }));
+    };
+    const onUp = () => {
+      setDragCol(null);
+      document.body.classList.remove("cp-resizing-ew");
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
 
   const marquee = useMarquee({
     containerRef: paneRef,
@@ -146,7 +195,16 @@ export function LibraryBrowserPane({
       {...marquee.handlers}
     >
       {bandEl}
-      <div className="cp-lib-list" role="list" aria-label="Files">
+      <div
+        className="cp-lib-list"
+        role="list"
+        aria-label="Files"
+        style={{
+          ["--col-kind" as string]: `${cols.kind}px`,
+          ["--col-size" as string]: `${cols.size}px`,
+          ["--col-date" as string]: `${cols.date}px`,
+        }}
+      >
         {/* Column headers that SORT.
             These were decorative aria-hidden spans that looked exactly like
             Finder's sortable headers and did nothing when clicked — a control
@@ -156,9 +214,19 @@ export function LibraryBrowserPane({
             a plain label rather than pretending. */}
         <div className="cp-lib-list-head">
           <span className="cp-lib-lrow-art" aria-hidden="true" />
-          <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort} />
-          <span className="cp-lib-lrow-kind">Kind</span>
-          <SortHeader className="cp-lib-lrow-size" label="Size" col="size" sort={sort} dir={dir} onSort={onSort} />
+          <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort}>
+            {/* Each divider sits on the header cell to its RIGHT and widens the
+                column it borders. stopPropagation on the press is what keeps a
+                resize from also firing that column's sort. */}
+            <ColDivider onDown={startColDrag("kind")} active={dragCol === "kind"} />
+          </SortHeader>
+          <span className="cp-lib-lrow-kind">
+            Kind
+            <ColDivider onDown={startColDrag("size")} active={dragCol === "size"} />
+          </span>
+          <SortHeader className="cp-lib-lrow-size" label="Size" col="size" sort={sort} dir={dir} onSort={onSort}>
+            <ColDivider onDown={startColDrag("date")} active={dragCol === "date"} />
+          </SortHeader>
           <SortHeader className="cp-lib-lrow-date" label="Modified" col="date" sort={sort} dir={dir} onSort={onSort} />
         </div>
         {items.map((it) => (
@@ -190,13 +258,31 @@ export function LibraryBrowserPane({
  * switches to it without inheriting the previous column's direction, so
  * "Modified" always starts newest-first the way a user expects.
  */
-function SortHeader({ className, label, col, sort, dir, onSort }: {
+/** The 6px grab strip between two header cells. */
+function ColDivider({ onDown, active }: { onDown: (e: React.MouseEvent) => void; active: boolean }) {
+  return (
+    <span
+      className={"cp-lib-coldiv" + (active ? " dragging" : "")}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize column"
+      onMouseDown={onDown}
+      // The header cell is a sort BUTTON; without this the divider's click
+      // bubbles into it and every resize also re-sorts the table.
+      onClick={(e) => e.stopPropagation()}
+    />
+  );
+}
+
+function SortHeader({ className, label, col, sort, dir, onSort, children }: {
   className: string;
   label: string;
   col: LibrarySortKey;
   sort: LibrarySortKey;
   dir: LibrarySortDir;
   onSort: (key: LibrarySortKey) => void;
+  /** The resize divider on this cell's right edge, if it has one. */
+  children?: React.ReactNode;
 }) {
   const active = sort === col;
   return (
@@ -210,6 +296,7 @@ function SortHeader({ className, label, col, sort, dir, onSort }: {
     >
       {label}
       {active && <span className="cp-lib-sorthead-caret" aria-hidden="true">{dir === "asc" ? "▲" : "▼"}</span>}
+      {children}
     </button>
   );
 }

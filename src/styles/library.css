@@ -1195,7 +1195,15 @@
 .cp-lib-list-head,
 .cp-lib-lrow {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 64px 84px 96px;
+  /* Driven by variables so the header and every row share ONE definition:
+     a resize that moved only one of them would misalign the whole table, and
+     the header is a separate element from the rows. */
+  grid-template-columns:
+    34px
+    minmax(0, 1fr)
+    var(--col-kind, 64px)
+    var(--col-size, 84px)
+    var(--col-date, 96px);
   align-items: center;
   gap: var(--s-3);
 }
@@ -1601,3 +1609,29 @@
 .cp-ql-audio { display: block; width: min(560px, 80vw); margin: 26px auto 30px; }
 .cp-ql-fallback { padding: 40px 24px; text-align: center; color: var(--fg-3); font-size: 12.5px; }
 .cp-ql-fallback .btn { margin-top: 12px; }
+
+/* Column resize dividers. A generous grab strip on the header cell's right
+   edge; the rail only shows on hover or while dragging, so the header stays
+   quiet at rest. */
+.cp-lib-sorthead, .cp-lib-list-head .cp-lib-lrow-kind { position: relative; }
+.cp-lib-coldiv {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  right: -5px;
+  width: 10px;
+  cursor: ew-resize;
+  z-index: 2;
+}
+.cp-lib-coldiv::after {
+  content: "";
+  position: absolute;
+  top: 2px; bottom: 2px; left: 4px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--fg-4);
+  opacity: 0;
+  transition: opacity 140ms var(--ease-out);
+}
+.cp-lib-coldiv:hover::after { opacity: 0.55; }
+.cp-lib-coldiv.dragging::after { opacity: 1; background: var(--fg-1); }

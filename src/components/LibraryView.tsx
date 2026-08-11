@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AmbientBackdrop } from "./AmbientBackdrop";
 import { LibraryHero } from "./LibraryHero";
 import { LibraryRow } from "./LibraryRow";
 import { LibraryCard, type LibraryCardArt } from "./LibraryCard";
+import {
+  clickSelect, contextMenuSelect, EMPTY_SELECTION, pruneSelection,
+  type SelectionState,
+} from "../lib/library-selection";
 import { LibraryFolderCard } from "./LibraryFolderCard";
 import { ThumbnailPicker } from "./ThumbnailPicker";
 import { IconSearch } from "./Icons";
@@ -156,6 +160,31 @@ export function LibraryView({
   // poster from the source it was named after (KT-#776 transcript → KT-#776 web).
   const recentIndex = useMemo(() => buildRecentIndex(recentSources), [recentSources]);
 
+  // Home had NO selection model at all: its cards were pure launchers, so a
+  // click opened immediately and shift-click did nothing. Home is the DEFAULT
+  // view, which is why "shift click is missing" kept getting reported while
+  // the Library browser's selection worked perfectly — they are two different
+  // screens and only one of them had it.
+  const [sel, setSel] = useState<SelectionState>(EMPTY_SELECTION);
+  /** Every item on screen, in display order — shelves then the search grid.
+   *  A range has to run over what the user SEES. */
+  const shownPathsRef = useRef<string[]>([]);
+  // Every item Home can show right now: the search grid when searching, else
+  // every shelf in shelf order. Published to a ref so the (stable) click
+  // handler ranges over exactly what is rendered.
+  const shownPaths = useMemo(() => {
+    const out: string[] = [];
+    for (const t of trees) for (const it of t.items) out.push(it.path);
+    return out;
+  }, [trees]);
+  shownPathsRef.current = shownPaths;
+  useEffect(() => { setSel((cur) => pruneSelection(cur, shownPaths)); }, [shownPaths]);
+
+  const selectItem = useCallback((it: LibraryItem, e?: React.MouseEvent) => {
+    const mods = { shift: !!e?.shiftKey, meta: !!(e?.metaKey || e?.ctrlKey) };
+    setSel((cur) => clickSelect(cur, shownPathsRef.current, it.path, mods));
+  }, []);
+
   // ── Card builders (shared by shelves and the search grid) ─────────────
   const itemCard = (it: LibraryItem) => (
     <LibraryCard
@@ -165,6 +194,16 @@ export function LibraryView({
         .filter(Boolean).join(" · ")}
       art={{ kind: "local", path: it.path, media: it.kind }}
       onOpen={() => onOpenLocalPath(it.path)}
+      // A MODIFIED click is a selection gesture; a plain click still opens,
+      // because Home is a launcher first and single-click-to-open is what
+      // every shelf here has always done.
+      onSelect={(e) => {
+        if (e.shiftKey || e.metaKey || e.ctrlKey) { selectItem(it, e); return; }
+        setSel(EMPTY_SELECTION);
+        onOpenLocalPath(it.path);
+      }}
+      selected={sel.selected.has(it.path)}
+      onContextSelect={() => setSel((cur) => contextMenuSelect(cur, shownPathsRef.current, it.path))}
       onReview={() => onReviewLocalPath(it.path)}
       onChoosePoster={setPickerPath}
       onResetPoster={resetPoster}

@@ -105,6 +105,8 @@ export function LibraryBrowser({
   const dragBaseRef = useRef<ReadonlySet<string> | null>(null);
   /** Files the rename dialog is open for, or null. */
   const [renaming, setRenaming] = useState<LibraryItem[] | null>(null);
+  /** Per-path reasons from the last rename attempt. */
+  const [renameFailures, setRenameFailures] = useState<Map<string, string>>(new Map());
   /** Quick Look target, or null. */
   const [quickLook, setQuickLook] = useState<LibraryItem | null>(null);
   const [pickerPath, setPickerPath] = useState<string | null>(null);
@@ -446,23 +448,27 @@ export function LibraryBrowser({
           existingNames={items
             .filter((i) => !renaming.some((r) => r.path === i.path))
             .map((i) => i.path)}
-          onCancel={() => setRenaming(null)}
+          failures={renameFailures}
+          onCancel={() => { setRenaming(null); setRenameFailures(new Map()); }}
           onApply={async (rows) => {
             const results = await applyRenamePlan(
               rows.map((r) => ({ path: r.path, from: r.path.split("/").pop() ?? r.path, to: r.to, problem: null })),
             );
             const failed = results.filter((r) => !r.ok);
+            // The rescan re-lists what is actually on disk, so rows that DID
+            // rename leave the dialog on their own.
+            rescanAll();
             if (failed.length) {
-              // Kept on screen rather than dismissed: a rename that did not
-              // happen is exactly the case the user must not be able to walk
-              // away from believing it did. The rescan below re-lists what is
-              // actually on disk, so the rows that DID rename disappear from
-              // the selection and the ones that failed stay visible.
-              console.warn("rename failures", failed);
+              // Held open with a reason on each bad row. A destructive action
+              // that did not happen must never be something the user can walk
+              // away from believing it did — which is exactly what a
+              // console.warn and a closed dialog amounted to.
+              setRenameFailures(new Map(failed.map((f) => [f.from, f.error ?? "Could not rename"])));
+              return;
             }
+            setRenameFailures(new Map());
             setRenaming(null);
             setSel(EMPTY_SELECTION);
-            rescanAll();
           }}
         />
       )}

@@ -90,7 +90,20 @@ export function LibraryListRow({
             header, and a sixth child shifted every cell one track over — names
             vanished into the 64px Kind track and dates wrapped onto their own
             line. A dot needs no track; it needs to sit beside the name. */}
-        <span className="cp-lib-lrow-name">
+        <span
+          className="cp-lib-lrow-name"
+          // Finder's slow double-click: a second click on the NAME of a file
+          // that is already selected opens rename. Guarded on `selected` and on
+          // the name cell specifically, so it can never fire as the second half
+          // of an ordinary double-click-to-open (that click lands while the row
+          // was NOT yet selected, or lands outside this cell).
+          onClick={(e) => {
+            if (!selected || !onRename) return;
+            if (e.shiftKey || e.metaKey || e.ctrlKey || e.detail > 1) return;
+            e.stopPropagation();
+            onRename();
+          }}
+        >
           {swatch && (
             <span
               className="cp-lib-lrow-dot"
