@@ -50,6 +50,8 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
    * resume is paying to rebuild it.
    */
   const pausedAtRef = useRef(0);
+  /** One idle report per idle, not one per seek event inside a scrub. */
+  const reportedIdleRef = useRef(false);
   const readyAtPauseRef = useRef(-1);
   const onDiagRef = useRef<Props["onDiag"]>(undefined);
   useEffect(() => { onDiagRef.current = onDiag; }, [onDiag]);
@@ -283,30 +285,43 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       if (!scrubbingRef.current) onPlayStateChange?.(true);
       startTick();
       // Only a real idle. Ordinary play/pause would drown the log.
-      const idleMs = pausedAtRef.current ? Date.now() - pausedAtRef.current : 0;
-      if (idleMs > 10_000) {
-        const before = readyAtPauseRef.current;
-        const after = el.readyState;
-        const verdict = after >= 3
-          ? "decoder warm (stall is elsewhere)"
-          : before >= 3
-            ? "DECODER TORN DOWN while idle. First seek rebuilds it"
-            : "decoder was already cold at pause";
-        onDiagRef.current?.(
-          after >= 3 ? "info" : "warn",
-          `resume after ${Math.round(idleMs / 1000)}s idle: readyState ${before} → ${after}`
-          + ` · buffered ${el.buffered.length} range(s) · ${verdict}`,
-        );
-      }
+      reportIdleResume("resume");
       pausedAtRef.current = 0;
     };
     const onPause = () => {
       pausedAtRef.current = Date.now();
+      reportedIdleRef.current = false;
       readyAtPauseRef.current = el.readyState;
       playingRef.current = false; setIsPlaying(false);
       if (!scrubbingRef.current) onPlayStateChange?.(false);
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     };
+    /**
+     * The idle report, on the gesture that was actually reported.
+     *
+     * This used to fire only from onPlay, which measured the wrong thing: the
+     * complaint is "I scrub twenty minutes later and it holds on the parked
+     * frame", and a scrub does not start with a play. Firing it from the first
+     * SEEK after an idle measures what the user feels.
+     */
+    const reportIdleResume = (gesture: string) => {
+      const idleMs = pausedAtRef.current ? Date.now() - pausedAtRef.current : 0;
+      if (idleMs <= 10_000 || reportedIdleRef.current) return;
+      reportedIdleRef.current = true; // once per idle, not once per seek event
+      const before = readyAtPauseRef.current;
+      const after = el.readyState;
+      const verdict = after >= 3
+        ? "decoder warm (stall is elsewhere)"
+        : before >= 3
+          ? "DECODER TORN DOWN while idle. First seek rebuilds it"
+          : "decoder was already cold at pause";
+      onDiagRef.current?.(
+        after >= 3 ? "info" : "warn",
+        `${gesture} after ${Math.round(idleMs / 1000)}s idle: readyState ${before} → ${after}`
+        + ` · buffered ${el.buffered.length} range(s) · ${verdict}`,
+      );
+    };
+    const onSeeking = () => reportIdleResume("seek");
     const onTime  = () => reportTime(); // backstop while paused / on seek landing
     const onErr   = () => {
       const me = el.error;
@@ -322,6 +337,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     };
     el.addEventListener("loadedmetadata", onLoaded);
     el.addEventListener("play",  onPlay);
+    el.addEventListener("seeking", onSeeking);
     el.addEventListener("pause", onPause);
     el.addEventListener("timeupdate", onTime);
     el.addEventListener("error", onErr);
@@ -339,6 +355,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       retriedLoadRef.current = false;
       el.removeEventListener("loadedmetadata", onLoaded);
       el.removeEventListener("play",  onPlay);
+      el.removeEventListener("seeking", onSeeking);
       el.removeEventListener("pause", onPause);
       el.removeEventListener("timeupdate", onTime);
       el.removeEventListener("error", onErr);
@@ -375,6 +392,40 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
     readyRef.current = false;
     try { el.load(); } catch { /* ignore — happens on torn-down element */ }
   }, [path]);
+
+  /**
+   * Pay the decoder rebuild while the user is away, not on their first scrub.
+   *
+   * THE MEASUREMENT DRIVES THIS. If the diagnostic above reports "DECODER TORN
+   * DOWN while idle", the cost the user feels is WebKit re-establishing the
+   * decode pipeline, and that cost is paid by whatever gesture happens first —
+   * which is the scrub they are watching. Doing it on window focus moves the
+   * same work to a moment nobody is waiting on.
+   *
+   * A ZERO-DISTANCE SEEK, not .load(). load() resets the resource selection
+   * algorithm and takes currentTime back to zero, which would throw away the
+   * frame the user parked on — the exact thing they are trying to scrub away
+   * from. Re-assigning currentTime to itself asks WebKit for a seek to where
+   * we already are: the pipeline rebuilds, the position does not move.
+   *
+   * Guarded on being PAUSED and actually cold. Warming a warm decoder is a
+   * pointless seek, and doing this mid-playback would stutter the thing it is
+   * meant to help.
+   */
+  useEffect(() => {
+    const warm = () => {
+      const el = mediaRef.current;
+      if (!el || !el.paused || el.readyState >= 3) return;
+      if (!pausedAtRef.current || Date.now() - pausedAtRef.current < 10_000) return;
+      try {
+        const t = el.currentTime;
+        el.currentTime = t;
+        onDiagRef.current?.("info", `warmed the decoder on focus at ${t.toFixed(1)}s`);
+      } catch { /* torn-down element */ }
+    };
+    window.addEventListener("focus", warm);
+    return () => window.removeEventListener("focus", warm);
+  }, []);
 
   // True-unmount cleanup — prevents an "imported MP3 keeps playing in
   // the background after the user pastes a YouTube URL" bug. Empty deps
