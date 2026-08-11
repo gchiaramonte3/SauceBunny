@@ -7,6 +7,7 @@ import { rememberAspect } from "../lib/art-aspect";
 import { reviewStatusForKey } from "../lib/review-store";
 import { ReviewStatusChip } from "./ReviewStatusChip";
 import { IconFilm, IconMore, IconPlay, IconVolume } from "./Icons";
+import { WaveformArt } from "./WaveformArt";
 import { LibraryCardMenu } from "./LibraryCardMenu";
 import { chosenPosterFor } from "../lib/library";
 import { useHoverFrames } from "../hooks/use-hover-frames";
@@ -222,7 +223,12 @@ export function LibraryCard({
             </>
           ) : (
             <span className="cp-lib-card-ph">
-              {isAudio ? <IconVolume size={22} /> : <IconFilm size={22} />}
+              {/* Audio draws its OWN waveform instead of the shared speaker
+                  glyph: a shelf of audio files was a wall of identical cards
+                  whose only distinguishing feature was a hashed filename. */}
+              {isAudio && art.kind === "local"
+                ? <WaveformArt path={art.path} />
+                : isAudio ? <IconVolume size={22} /> : <IconFilm size={22} />}
               <span className="cp-lib-card-ph-name">{title}</span>
             </span>
           )}

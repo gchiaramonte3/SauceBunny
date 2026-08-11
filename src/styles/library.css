@@ -1635,3 +1635,20 @@
 }
 .cp-lib-coldiv:hover::after { opacity: 0.55; }
 .cp-lib-coldiv.dragging::after { opacity: 1; background: var(--fg-1); }
+
+/* Audio card art: the file's own waveform, in place of the shared glyph.
+   Quiet by design — it is an identifying mark, not a display of level, and it
+   sits under the card title which stays the primary label. */
+.cp-wave-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 22px;
+  color: var(--fg-4);
+}
+.cp-wave-svg {
+  width: 78%;
+  height: 34px;
+  opacity: 0.72;
+}
