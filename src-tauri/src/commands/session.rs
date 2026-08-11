@@ -14,6 +14,16 @@
 //!     (`serve_media_substream`). Each serves only the one explicitly
 //!     offered file, matched by BLAKE3, and no filesystem path is ever on
 //!     the wire.
+//!   - PLAYBACK IS ALWAYS FROM A LOCAL COPY OR A FIXED-QUALITY STREAM, never
+//!     a real-time encode that degrades to fit the link. The rung ladder
+//!     picks ONE known height and tells the guest which it got; it does not
+//!     collapse the bitrate under a grade review. And "watch it now" now also
+//!     KEEPS it: a Tier C transfer runs underneath the live stream, so the
+//!     stream converges to a local copy rather than evaporating with the
+//!     session (`src/lib/stream-keep.ts` owns the policy). That copy is a
+//!     multi-GB write, so it is named in the button the guest clicks — not
+//!     buried in a tooltip — and it is skipped entirely on a relayed path,
+//!     where the bytes would cross n0's public infrastructure.
 //!   - Connections are iroh QUIC — dialed by endpoint public key, end-to-end
 //!     encrypted. n0's public discovery + relays are connect-assist only.
 //!     NOTE: with the media paths above, a relay-only connection can now

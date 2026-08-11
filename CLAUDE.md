@@ -15,6 +15,19 @@ Sauce Bunny is a **local-first macOS desktop app** for transcribing, diarizing, 
 - **License:** MIT
 - **Distribution:** self-hosted notarized `.dmg` (NOT Mac App Store). See `docs/DISTRIBUTION.md` for the full reasoning and release flow. The app intentionally cannot pass App Store review (bundled yt-dlp + arbitrary subprocess spawning + cookie reads across apps), and we have decided that's the right tradeoff. Do NOT add MAS-compliance code (App Sandbox entitlements, security-scoped bookmarks, helper-app refactor of sidecars) — it would cost product features without unlocking any distribution channel we want.
 
+## Co-review: what may cross the wire
+
+Sauce Bunny is local-first, and a live session is the one place bytes leave the Mac. The rule:
+
+> **Playback is always from a local copy or a fixed, known-quality stream — never a real-time encode that degrades to fit the link.** Media may be transferred to a peer ahead of or during playback. Every transfer needs a click on BOTH sides: the host offers one file (`session_offer_file`), the guest chooses to receive it or to watch it live. Only that file is servable, matched by BLAKE3, and no filesystem path is ever on the wire.
+
+What that rules in and out:
+
+- **Fixed quality, not adaptive bitrate.** The rung ladder (`src/lib/stream-rung.ts`) picks ONE known height and reports which the guest actually got. It must never collapse the bitrate mid-shot — a reviewer judging a grade has to see compression that is in the source, not in the transport.
+- **Streaming converges to a copy.** "Watch it now" runs a Tier C transfer underneath the live stream (`src/lib/stream-keep.ts`), so a stream becomes a local file rather than evaporating with the session. That copy is a multi-GB write, so it is named in the button the guest clicks — never only in a tooltip.
+- **A relayed path is a different bargain.** Kilobytes of control traffic through n0's public relay was an accepted cost; someone's media is not. A relayed session is capped at the lowest rung and keeps no copy at all.
+- **No second transport.** iroh QUIC already gives NAT traversal, encryption and P2P delivery, and the connection is open and authenticated before media starts. Do not add WebRTC or GStreamer for file streaming. (WebRTC IS used, over iroh signalling, for the live webcam/mic mesh — a different problem with different latency rules.)
+
 ## What this app is NOT
 
 Do **not** add any of the following. If you think the app needs one, stop and explain why before writing code.

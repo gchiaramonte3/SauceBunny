@@ -78,6 +78,11 @@ type Props = {
   streamRungBadge?: string;
   /** Tooltip for the chip — explains whichever state it is reporting. */
   streamRungBadgeTitle?: string;
+  /** S.5: one quiet line about the copy being kept under a live stream. Its
+   *  own chip rather than folded into the quality one: they answer different
+   *  questions ("how good is this picture" vs "will I still have this after"),
+   *  and a chip that means two things gets read as neither. */
+  streamKeepBadge?: string | null;
   /** Pipeline/seek diagnostics → the Pipeline log (channel "seek"). */
   onDiag?: (tag: string, message: string) => void;
   /** r75: RAW audio-track CDN URL for DASH-split sources (Reddit, YouTube
@@ -237,7 +242,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     resumeTitle, onResume, onboarding,
     aspect,
     sourceKind, localFilePath, webStreamUrl, webCachedUseMediabunny, streamStartAt, disableScrubPreview, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
-    streamRung, onStreamStall, onStreamInfo, streamRungBadge, streamRungBadgeTitle,
+    streamRung, onStreamStall, onStreamInfo, streamRungBadge, streamRungBadgeTitle, streamKeepBadge,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs, scrubAudio,
     streamLoadingPhase,
     toast, onToastDismiss,
@@ -559,6 +564,18 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
         {streamRungBadge && (
           <div className="cp-stream-rung" title={streamRungBadgeTitle}>
             {streamRungBadge}
+          </div>
+        )}
+
+        {/* The background copy. Same chip language as the quality one, stacked
+            under it, and deliberately understated: nobody asked for this, so it
+            reports and never interrupts. */}
+        {streamKeepBadge && (
+          <div
+            className="cp-stream-rung cp-stream-keep"
+            title="While you watch, the host's file is being saved to this Mac. When it finishes, playback switches to your own copy and you can scrub the whole thing."
+          >
+            {streamKeepBadge}
           </div>
         )}
 

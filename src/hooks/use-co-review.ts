@@ -28,6 +28,7 @@ import {
 } from "../lib/screening";
 import { saveScreening } from "../lib/screening-store";
 import { getLastUserSeekAt, getPlayheadFrames } from "../lib/playhead-store";
+import { useStreamKeep } from "./use-stream-keep";
 import { acceptTransport, createClockEstimator, expectedPosition } from "../lib/session-clock";
 import {
   loadReview, saveReview, ensureVersion, applyReviewOp, attributeReviewOp, mergeReviewDoc,
@@ -212,6 +213,13 @@ export type CoReview = {
   /** Why the last offer failed, for the host to see. Null once it succeeds. */
   offerError: string | null;
   clearOfferError: () => void;
+  /** S.5: one quiet line about the copy running under a live stream, or null. */
+  keepBadge: string | null;
+  /** Forward the player's stall to the keep policy, so a background copy gets
+   *  out of the way rather than starving the picture it is riding under. */
+  onKeepStall: () => void;
+  /** Forward what the presenter served; only `relayed` matters to the copy. */
+  onKeepStreamInfo: (info: { rung: number | null; relayed: boolean }) => void;
   fetchOfferedFile: () => Promise<void>;
   watchOfferedStream: () => Promise<void>;
   cancelFetch: () => void;
@@ -322,6 +330,9 @@ export function useCoReview({
   } | null>(null);
   const offeredFileRef = useRef(offeredFile);
   offeredFileRef.current = offeredFile;
+  // Read inside the handoff callback, which must see the target as it is at
+  // completion rather than as it was when the callback was created.
+  const keepTargetRef = useRef<{ blake3: string; name: string; total: number; fingerprint: string | null } | null>(null);
   const [transfer, setTransfer] = useState<TransferProgress | null>(null);
 
   // Send a session message the right way for our role: the host broadcasts to
@@ -381,6 +392,7 @@ export function useCoReview({
           setPendingSource(null);
           setSourceStatus(new Map());
           setOfferedFile(null); // the offer was for the outgoing source
+          setKeepTarget(null); // and so was any copy running underneath it
           return;
         }
         slog("info",
@@ -393,6 +405,7 @@ export function useCoReview({
         };
         setSourceStatus(new Map());
         setOfferedFile(null); // a new source invalidates the old offer
+        setKeepTarget(null); // and the copy running underneath the old one
         if (src.kind === "web" && m.url) {
           if (activeSourceUrlRef.current === m.url) {
             slog("info", "Already on that URL; ignoring.");
@@ -1126,6 +1139,12 @@ export function useCoReview({
         { name: offer.name, blake3: offer.blake3, vcodec: offer.vcodec, acodec: offer.acodec },
         { title: pending?.title ?? offer.name, duration: pending?.duration ?? null },
       );
+      // Captured BEFORE pendingSource is cleared — it is the only place the
+      // fingerprint still exists, and without it the landed copy is un-indexed.
+      setKeepTarget({
+        blake3: offer.blake3, name: offer.name, total: offer.size,
+        fingerprint: pending?.fingerprint ?? null,
+      });
       setPendingSource(null);
       sendSessionMsg({ kind: "sourceStatus", from: "", state: "ready", detail: null });
       slog("ok", `Streaming "${offer.name}" from the host.`);
@@ -1134,6 +1153,43 @@ export function useCoReview({
       sendSessionMsg({ kind: "sourceStatus", from: "", state: "failed", detail: null });
     }
   }, [loadPeerStream, sendSessionMsg, slog]);
+
+  /**
+   * S.5 — watching also keeps it.
+   *
+   * Set when a Tier B watch starts and cleared by anything that ends it, so a
+   * copy finishing late can never be handed off after the room moved on. The
+   * fingerprint is captured HERE because `watchOfferedStream` clears
+   * `pendingSource` on success, and without it the landed copy would be
+   * un-indexed — the next session would re-stream a file already on disk,
+   * which is the whole thing Tier A exists to prevent.
+   */
+  const [keepTarget, setKeepTarget] = useState<
+    { blake3: string; name: string; total: number; fingerprint: string | null } | null
+  >(null);
+  keepTargetRef.current = keepTarget;
+
+  const onKeepHandOff = useCallback(async (path: string) => {
+    const target = keepTargetRef.current;
+    if (target?.fingerprint) linkFingerprint(target.fingerprint, path);
+    // Carry the playhead across, the way the RC4 download-fallback handoff
+    // does: a local player boots at 0 and this swap is meant to be invisible.
+    // `onChaseSeek`, not a user seek — the user did not ask to move, and
+    // arming the seek latch here would make the room think they had. If the
+    // seek lands before the player is ready, the session's own chase corrects
+    // it on the next heartbeat, so this is a head start rather than the only
+    // thing holding the position.
+    const at = getPlayheadFrames();
+    await loadLocalPath(path);
+    onChaseSeek(at);
+    setKeepTarget(null);
+  }, [loadLocalPath, onChaseSeek]);
+
+  const streamKeep = useStreamKeep({
+    watching: keepTarget,
+    onHandOff: (path) => { void onKeepHandOff(path); },
+    log: slog,
+  });
 
   /** Guest: stop the in-flight fetch. The partial stays; fetching resumes. */
   const cancelFetch = useCallback(() => {
@@ -1188,6 +1244,9 @@ export function useCoReview({
     offerCurrentFile,
     offerError,
     clearOfferError: useCallback(() => setOfferError(null), []),
+    keepBadge: streamKeep.badge,
+    onKeepStall: streamKeep.onStall,
+    onKeepStreamInfo: streamKeep.onStreamInfo,
     fetchOfferedFile,
     watchOfferedStream,
     cancelFetch,

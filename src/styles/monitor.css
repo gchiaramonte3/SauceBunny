@@ -127,6 +127,14 @@
   z-index: 8;
 }
 
+/* The background-copy chip sits UNDER the quality one and shares its language.
+   Offset by that chip's own height plus the same 10px gutter, so the two read
+   as one stack rather than two unrelated overlays. `pointer-events` stays off
+   with its sibling: neither is a control. */
+.cp-stream-keep {
+  top: 40px;
+}
+
 .cp-tc-hud {
   position: absolute;
   left: 50%;

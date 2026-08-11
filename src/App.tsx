@@ -5341,6 +5341,7 @@ export default function App() {
     shareState, shareStream, sharingMembers, startShare, stopShare,
     isPresenter, pendingSource, sourceStatus, makePresenter, adoptPendingSource,
     offeredFile, transfer, offerCurrentFile, offerError, fetchOfferedFile, watchOfferedStream, cancelFetch,
+    keepBadge, onKeepStall, onKeepStreamInfo,
     startCoReview, joinCoReview, leaveCoReview,
   } = useCoReview({
     isPlaying, fps, playbackRate,
@@ -5352,6 +5353,25 @@ export default function App() {
     turn: { url: defaults.turnUrl, username: defaults.turnUsername, password: defaults.turnPassword },
     appendLog,
   });
+
+  // Two subsystems read the same two signals off the peer player: the quality
+  // ladder (which rung to ask for) and the background copy (whether to get out
+  // of the way). Composed here rather than fanned out from the player, so the
+  // player keeps one prop each and neither subsystem can be wired to a stall
+  // the other one sees — the exact drift that would make the copy starve a
+  // picture it is supposed to be yielding to.
+  // Destructured so the deps are the callbacks themselves rather than the
+  // object holding them: both are stable, and depending on `streamRung` would
+  // rebuild these on every rung state change for no reason.
+  const { onStall: onRungStall, onStreamInfo: onRungStreamInfo } = streamRung;
+  const onStreamStallAll = useCallback(() => {
+    onRungStall();
+    onKeepStall();
+  }, [onRungStall, onKeepStall]);
+  const onStreamInfoAll = useCallback((info: { rung: number | null; relayed: boolean }) => {
+    onRungStreamInfo(info);
+    onKeepStreamInfo(info);
+  }, [onRungStreamInfo, onKeepStreamInfo]);
   // The SESSION ROOM: Review owns live sessions end to end. When a session
   // is live and the Review view is active, the room class reflows the Clip
   // stage into the room dressing (CSS only; the player subtree is untouched
@@ -6040,10 +6060,20 @@ export default function App() {
                           <button
                             type="button"
                             className="btn btn-ghost btn-compact"
-                            title="Streams live over the session. Nothing is saved on this Mac."
+                            title={
+                              "Starts playing straight away, streamed over the session. "
+                              + "A copy is saved to this Mac while you watch, so when it finishes "
+                              + "you can scrub the whole file and you keep it afterwards. "
+                              + "On a relayed connection nothing is saved."
+                            }
                             onClick={() => { void watchOfferedStream(); }}
                           >
-                            {`Watch now (streams from ${presenterName})`}
+                            {/* The label says "saves a copy" because the tooltip
+                                used to promise the opposite, and the sibling
+                                Get chip treats naming the write as the consent.
+                                A multi-GB write must be in the thing you click,
+                                not only in the thing you hover. */}
+                            {`Watch now (streams from ${presenterName}, saves a copy)`}
                           </button>
                         )}
                         {pendingSource.kind === "file" && offeredFile && (
@@ -6128,10 +6158,11 @@ export default function App() {
                        the ladder only means anything when another Mac is
                        encoding for us. */
                     streamRung={streamRung.rung}
-                    onStreamStall={streamRung.onStall}
-                    onStreamInfo={streamRung.onStreamInfo}
+                    onStreamStall={onStreamStallAll}
+                    onStreamInfo={onStreamInfoAll}
                     streamRungBadge={streamRung.badge}
                     streamRungBadgeTitle={streamRung.badgeTitle}
+                    streamKeepBadge={keepBadge}
                     onDiag={(tag, msg) => appendLog(asLogTag(tag), "seek", msg)}
                     /* Audio track + codecs are meaningful only while STREAMING (the
                        cached file is already muxed and sample-accurate). */
