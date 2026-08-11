@@ -12,6 +12,8 @@
  */
 
 import type React from "react";
+import { applySplits, type CueSplits } from "../../lib/cue-splits";
+import type { Cue } from "../../lib/srt";
 
 /**
  * Wrap every case-insensitive occurrence of `query` inside `text` in a
@@ -306,9 +308,48 @@ export type SpeakerOverrides = {
    * implying the other.
    */
   icons: Record<string, string>;
+  /**
+   * Sub-cue divisions: cue start in whole ms → character offsets to cut at.
+   *
+   * Whisper's `-ml 84` breaks lines on a character budget, so one cue routinely
+   * holds the end of one person's sentence and the start of another's, and
+   * `cueTag` above can only address a WHOLE cue. Cutting the cue first is what
+   * gives the phrase its own start, and therefore its own `cueTag` key.
+   *
+   * Applied by `applySplits` BEFORE `retagCues` — see `lib/cue-splits.ts` for
+   * why the offsets are characters rather than times, and for the one real cost
+   * (the fragment's timecode is interpolated).
+   */
+  splits: CueSplits;
 };
 
-const EMPTY_OVERRIDES: SpeakerOverrides = { global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {}, cueTag: {}, icons: {} };
+export const EMPTY_OVERRIDES: SpeakerOverrides = Object.freeze({
+  global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {}, cueTag: {}, icons: {}, splits: {},
+});
+
+/**
+ * A shallow copy with every sub-map cloned, so an editor can mutate one branch
+ * without writing through to the previous state.
+ *
+ * THIS EXISTS BECAUSE HAND-WRITTEN CLONES ROTTED TWICE. Three call sites in the
+ * viewer spelled the shape out key by key, and each time a key was added to
+ * `SpeakerOverrides` — `cueTag`, then `splits` — every one of them silently
+ * stopped carrying it. The type caught it both times, which is luck: it only
+ * fires because the literal is annotated. One clone, next to the type it
+ * clones, makes the next key free.
+ */
+export function cloneOverrides(prev: SpeakerOverrides): SpeakerOverrides {
+  return {
+    global: { ...prev.global },
+    turn: { ...prev.turn },
+    aliases: { ...prev.aliases },
+    colors: { ...prev.colors },
+    turnTag: { ...prev.turnTag },
+    cueTag: { ...prev.cueTag },
+    icons: { ...prev.icons },
+    splits: { ...prev.splits },
+  };
+}
 
 /** localStorage key the panel persists a transcript's speaker overrides under. */
 export function speakerOverridesKey(path: string): string {
@@ -373,6 +414,26 @@ export function retagCues<T extends { start: number; speaker: string | null }>(
   return touched ? out : cues;
 }
 
+/**
+ * The whole cue pipeline between parsing a transcript and grouping it: cut,
+ * then reassign.
+ *
+ * ONE SEAM, ON PURPOSE. Five places assemble cues — the transcript panel, the
+ * on-video captions, the AI summary, the reader analysis and App's caption
+ * load — and each of them has to apply the same two layers in the same order or
+ * the picture and the panel disagree about who said what. Splitting that
+ * knowledge across five call sites is how four of them get it right.
+ *
+ * The order is not interchangeable. Splitting must come FIRST, because a
+ * fragment has no millisecond key to be reassigned by until it is a cue.
+ *
+ * Returns the input array unchanged when neither layer applies, so callers can
+ * run it unconditionally on every frame.
+ */
+export function prepareCues(cues: Cue[], overrides: Pick<SpeakerOverrides, "cueTag" | "splits">): Cue[] {
+  return retagCues(applySplits(cues, overrides.splits), overrides);
+}
+
 /** Read + shape-clamp the persisted overrides for a path. */
 export function loadSpeakerOverrides(path: string | null): SpeakerOverrides {
   if (!path) return EMPTY_OVERRIDES;
@@ -388,6 +449,7 @@ export function loadSpeakerOverrides(path: string | null): SpeakerOverrides {
       turnTag: p.turnTag && typeof p.turnTag === "object" ? p.turnTag : {},
       cueTag: p.cueTag && typeof p.cueTag === "object" ? p.cueTag : {},
       icons: p.icons && typeof p.icons === "object" ? p.icons : {},
+      splits: p.splits && typeof p.splits === "object" ? p.splits : {},
     };
   } catch {
     return EMPTY_OVERRIDES;

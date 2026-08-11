@@ -9,7 +9,7 @@ import {
   resolveSpeakerColor,
   speakerOverridesKey,
   SPEAKERS_CHANGED_EVENT,
-  retagCues,
+  prepareCues,
   type SpeakerOverrides,
 } from "./transcript/helpers";
 
@@ -162,7 +162,7 @@ export function CaptionOverlay({ path, reloadToken, fps, enabled, style }: Props
   // video until the transcript reloaded. This is the point of moving the
   // model from per-turn to per-cue: the label on the picture now changes the
   // moment you split a speaker in the panel.
-  const taggedCues = useMemo(() => retagCues(cues, overrides), [cues, overrides]);
+  const taggedCues = useMemo(() => prepareCues(cues, overrides), [cues, overrides]);
   const hasSpeakersMemo = useMemo(() => taggedCues.some((c) => !!c.speaker), [taggedCues]);
   // Last raw localStorage string we applied — skip setState when unchanged so
   // the backstop channels below don't re-render on every check.

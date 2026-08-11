@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import { cueIndexOfNode, newSpeakerTag, paintCueRange, selectionToCueRange } from "./cue-selection";
+import { cueIndexOfNode, newSpeakerTag, paintCueRange, selectionCharRange, selectionToCueRange } from "./cue-selection";
 
 /** A stand-in for the rendered transcript: cue spans with text nodes inside. */
 function makeTranscript(n: number): HTMLElement {
@@ -154,5 +154,78 @@ describe("newSpeakerTag", () => {
       const taken = Array.from({ length: i }, (_, k) => newSpeakerTag(Array.from({ length: k }, (_, j) => `CAST_${j}`)));
       expect(newSpeakerTag(taken)).toMatch(/^CAST_[A-Z]+$/);
     }
+  });
+});
+
+describe("selectionCharRange", () => {
+  /** One cue whose text is exactly what a Whisper -ml 84 line looks like:
+   *  two people's words in one box. */
+  function oneCue(text: string): HTMLElement {
+    const root = document.createElement("div");
+    const span = document.createElement("span");
+    span.dataset.cueIdx = "0";
+    span.append(document.createTextNode(text));
+    root.append(span);
+    document.body.append(root);
+    return root;
+  }
+
+  const TEXT = "I agree completely no I do not";
+
+  it("reads the offsets of a phrase inside one cue", () => {
+    const root = oneCue(TEXT);
+    const t = root.querySelector('[data-cue-idx="0"]')!.firstChild!;
+    document.getSelection()!.setBaseAndExtent(t, 19, t, 30);
+    expect(selectionCharRange(document.getSelection(), root))
+      .toEqual({ cueIdx: 0, from: 19, to: 30 });
+  });
+
+  it("normalises a backwards drag", () => {
+    const root = oneCue(TEXT);
+    const t = root.querySelector('[data-cue-idx="0"]')!.firstChild!;
+    document.getSelection()!.setBaseAndExtent(t, 30, t, 19);
+    expect(selectionCharRange(document.getSelection(), root))
+      .toEqual({ cueIdx: 0, from: 19, to: 30 });
+  });
+
+  it("counts through search highlighting rather than around it", () => {
+    // highlightMatch wraps a hit in <mark>, splitting one text node into
+    // three. Summing node lengths would read the offset relative to whichever
+    // fragment the selection landed in, and the cut would land somewhere else
+    // entirely — visible only when a search happens to be active.
+    const root = document.createElement("div");
+    const span = document.createElement("span");
+    span.dataset.cueIdx = "0";
+    span.innerHTML = 'I agree <mark>completely</mark> no I do not';
+    root.append(span);
+    document.body.append(root);
+    const tail = span.lastChild!; // " no I do not"
+    document.getSelection()!.setBaseAndExtent(tail, 1, tail, 12);
+    expect(selectionCharRange(document.getSelection(), root))
+      .toEqual({ cueIdx: 0, from: 19, to: 30 });
+  });
+
+  it("refuses a selection that crosses cues — that is the whole-cue case", () => {
+    const root = makeTranscript(3);
+    selectAcross(root, 0, 2);
+    expect(selectionCharRange(document.getSelection(), root)).toBeNull();
+    // …and the whole-cue reader still handles it.
+    expect(selectionToCueRange(document.getSelection(), root)).toEqual({ from: 0, to: 2 });
+  });
+
+  it("refuses a whole-cue selection, which needs no cut", () => {
+    const root = oneCue(TEXT);
+    const t = root.querySelector('[data-cue-idx="0"]')!.firstChild!;
+    document.getSelection()!.setBaseAndExtent(t, 0, t, TEXT.length);
+    expect(selectionCharRange(document.getSelection(), root)).toBeNull();
+  });
+
+  it("refuses a collapsed selection or no root", () => {
+    const root = oneCue(TEXT);
+    const t = root.querySelector('[data-cue-idx="0"]')!.firstChild!;
+    document.getSelection()!.setBaseAndExtent(t, 5, t, 5);
+    expect(selectionCharRange(document.getSelection(), root)).toBeNull();
+    expect(selectionCharRange(null, root)).toBeNull();
+    expect(selectionCharRange(document.getSelection(), null)).toBeNull();
   });
 });

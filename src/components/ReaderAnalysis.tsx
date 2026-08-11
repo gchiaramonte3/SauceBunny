@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { streamChat, type ChatMessage } from "../lib/ai-chat";
 import { parseSrt, groupIntoTurns, fmtTime } from "../lib/srt";
-import { loadSpeakerOverrides, resolveSpeakerName, retagCues } from "./transcript/helpers";
+import { loadSpeakerOverrides, prepareCues, resolveSpeakerName } from "./transcript/helpers";
 import { formatError } from "../lib/error-format";
 import { Markdown } from "./Markdown";
 import { IconSparkles, IconSpinnerArc, IconRefresh, IconAlert } from "./Icons";
@@ -20,7 +20,7 @@ const DEFAULT_STYLE: SummaryStyle = { format: "bullets", length: "standard" };
 function buildTranscriptForModel(raw: string, ctx: number, srtPath: string) {
   const overrides = loadSpeakerOverrides(srtPath);
   let turns;
-  try { turns = groupIntoTurns(retagCues(parseSrt(raw), overrides)); } catch { return null; }
+  try { turns = groupIntoTurns(prepareCues(parseSrt(raw), overrides)); } catch { return null; }
   if (!turns.length) return null;
   const hasSpeakers = turns.some((t) => !!t.speaker);
   const text = turns.map((t) => {

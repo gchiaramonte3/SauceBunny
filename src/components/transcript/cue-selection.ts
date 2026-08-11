@@ -5,19 +5,29 @@
  * to one person, right-click, and split it out. The lasso is a DOM Selection;
  * the thing that can actually be reassigned is a cue. This is the bridge.
  *
- * IT SNAPS TO WHOLE CUES, ALWAYS. A cue is the atom that carries a timestamp,
- * and there is no sub-cue timing to split on: word-level timings are stripped
- * at parse (`stripCaptionMarkup`) and Whisper SRT never had them. Splitting
- * mid-cue would mean inventing a boundary from a character count and rendering
- * the guess as a timecode. The Rust pipeline already faced this exact choice at
- * the layer that DID have the diarization timeline — `merge_diarization_into_srt`
- * assigns each cue to its max-overlap speaker turn and never splits one — so
- * snapping is also the consistent answer.
+ * TWO READINGS OF ONE SELECTION, and which one applies depends on whether the
+ * lasso crossed a cue boundary.
  *
- * The consequence a user sees is that a half-highlighted cue comes fully into
- * the range. The caller re-applies the snapped range to the live selection
- * before opening the menu, so the highlight shows exactly what will change
- * rather than leaving the user to guess.
+ *   · `selectionToCueRange`  — across cues: snaps OUTWARD to whole cues.
+ *   · `selectionCharRange`   — inside one cue: character offsets, for a cut.
+ *
+ * Snapping outward is right for the crossing case. A cue is the atom that
+ * carries a timestamp, and the Rust pipeline made the same call at the layer
+ * that DID have the diarization timeline: `merge_diarization_into_srt` assigns
+ * each cue to its max-overlap speaker turn and never splits one. The user sees
+ * a half-highlighted cue come fully into the range, and the caller re-applies
+ * the snapped range to the live selection before the menu opens so the
+ * highlight shows exactly what will change.
+ *
+ * But snapping was a dead end for a phrase INSIDE a cue, and that case is
+ * routine rather than exotic: whisper runs with `-ml 84`, which breaks lines on
+ * a character budget and not on meaning, so one cue regularly holds the end of
+ * one person's sentence and the start of another's. There was no way to say so.
+ * `selectionCharRange` reads the same selection as offsets, and
+ * `lib/cue-splits.ts` cuts the cue into real cues at those offsets — after
+ * which the phrase is an ordinary cue and the whole-cue machinery above applies
+ * to it unchanged. The cost, paid there and documented there, is that the
+ * fragment's timecode is interpolated from where the cut falls in the text.
  */
 
 /** Inclusive cue index range. */
@@ -68,6 +78,56 @@ export function selectionToCueRange(
   const from = Math.min(a ?? b!, b ?? a!);
   const to = Math.max(a ?? b!, b ?? a!);
   return { from, to };
+}
+
+/**
+ * Where a selection starts and ends INSIDE one cue, in characters.
+ *
+ * The counterpart to `selectionToCueRange`, and the thing that lifts this
+ * module's oldest limitation. Snapping outward to whole cues is right when the
+ * lasso crosses cues; it is a dead end when the phrase the user wants lives
+ * inside one, which is routine because whisper breaks lines on a character
+ * budget rather than on meaning. Character offsets let `lib/cue-splits.ts` cut
+ * the cue first, after which the phrase is an ordinary cue that the existing
+ * reassignment path can address.
+ *
+ * `null` unless the selection begins and ends in the SAME cue and covers less
+ * than all of it — a cross-cue lasso is the whole-cue case, and a whole-cue
+ * selection needs no cut.
+ *
+ * Offsets are measured with a Range against the cue element's own text rather
+ * than by summing node lengths, so search highlighting (which wraps matches in
+ * `<mark>`, splitting one text node into three) cannot skew the count.
+ */
+export function selectionCharRange(
+  sel: Selection | null,
+  root: HTMLElement | null,
+): { cueIdx: number; from: number; to: number } | null {
+  if (!sel || !root || sel.isCollapsed || sel.rangeCount === 0) return null;
+  const a = cueIndexOfNode(sel.anchorNode, root);
+  const b = cueIndexOfNode(sel.focusNode, root);
+  if (a == null || b == null || a !== b) return null;
+  const cueEl = root.querySelector<HTMLElement>(`[data-cue-idx="${a}"]`);
+  if (!cueEl) return null;
+
+  const offsetOf = (node: Node | null, off: number): number | null => {
+    if (!node || !cueEl.contains(node)) return null;
+    const r = document.createRange();
+    r.selectNodeContents(cueEl);
+    try { r.setEnd(node, off); } catch { return null; }
+    return r.toString().length;
+  };
+  const from = offsetOf(sel.anchorNode, sel.anchorOffset);
+  const to = offsetOf(sel.focusNode, sel.focusOffset);
+  if (from == null || to == null) return null;
+
+  const lo = Math.min(from, to);
+  const hi = Math.max(from, to);
+  // Selecting the entire cue is not a cut; it is the whole-cue case, and
+  // returning it would ask cue-splits for two offsets it must discard anyway.
+  if (lo <= 0 && hi >= cueEl.textContent!.length) return null;
+  if (lo === hi) return null;
+  return { cueIdx: a, from: lo, to: hi };
 }
 
 /**

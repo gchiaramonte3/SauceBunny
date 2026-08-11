@@ -32,7 +32,10 @@ import { NewSpeakerSheet } from "./transcript/NewSpeakerSheet";
 import { SpeakerGroups } from "./transcript/SpeakerGroups";
 import { KindGlyph } from "./transcript/KindGlyph";
 import { KIND_LABEL, kindTag, NON_SPEECH_COLOR, speakerKind, type SpeechKind } from "../lib/speech-kind";
-import { newSpeakerTag, paintCueRange, selectionToCueRange } from "./transcript/cue-selection";
+import { newSpeakerTag, paintCueRange, selectionCharRange, selectionToCueRange } from "./transcript/cue-selection";
+import {
+  applySplits, clearSplits, fragmentAt, splitKey, splitOrigins, splitsForRange,
+} from "../lib/cue-splits";
 import {
   escapeHtml,
   highlightMatch,
@@ -42,7 +45,9 @@ import {
   speakerTextColor,
   SPEAKERS_CHANGED_EVENT,
   loadSpeakerOverrides,
-  retagCues,
+  prepareCues,
+  cloneOverrides,
+  EMPTY_OVERRIDES,
   cueKey,
   type SpeakerOverrides,
 } from "./transcript/helpers";
@@ -174,8 +179,12 @@ type Props = {
  * which is precisely how a new key goes missing in one of two copies — and it
  * did: adding `cueTag` to the shared shape produced four type errors here and
  * nowhere else. `editOverrides` was already typed against the shared one.
+ *
+ * The empty value and the clone now come from the same module as the type, for
+ * the same reason one step further: adding `splits` broke all three restated
+ * clones here exactly as `cueTag` had.
  */
-const EMPTY: SpeakerOverrides = { global: {}, turn: {}, aliases: {}, colors: {}, turnTag: {}, cueTag: {}, icons: {} };
+const EMPTY = EMPTY_OVERRIDES;
 
 /** Sibling backup path for a rewrite of a user-supplied transcript:
  *  `/a/b/foo.vtt` → `/a/b/foo.orig.vtt`. */
@@ -378,18 +387,35 @@ export function TranscriptViewer({
   }, [path, reloadToken]);
 
   // ── Parse + group whenever the raw text changes ──────────────────
-  // retagCues sits between parse and group, which is the entire splitting
-  // mechanism: a reassigned run of cues stops matching its neighbours'
-  // speaker, so groupIntoTurns starts a new turn at each boundary. There is
-  // no turn-splitting code anywhere, and there does not need to be.
-  const turns: Turn[] = useMemo(() => {
+  // prepareCues sits between parse and group, and it is the entire splitting
+  // mechanism at both scales: a cut divides one cue into several, and a
+  // reassigned run stops matching its neighbours' speaker, so groupIntoTurns
+  // starts a new turn at each boundary. There is no turn-splitting code
+  // anywhere, and there does not need to be.
+  //
+  // The parse is its own memo because the editing paths need the PRE-split
+  // cues: a fragment on screen has an interpolated start and a sliced text, so
+  // recording a cut against it would key on a cue no parse ever produced.
+  const parsedCues = useMemo(() => {
     if (!raw) return [];
-    try { return groupIntoTurns(retagCues(parseSrt(raw), overrides)); } catch { return []; }
-  }, [raw, overrides]);
+    try { return parseSrt(raw); } catch { return []; }
+  }, [raw]);
+
+  const turns: Turn[] = useMemo(
+    () => groupIntoTurns(prepareCues(parsedCues, overrides)),
+    [parsedCues, overrides],
+  );
 
   const flatCues = useMemo(
     () => turns.flatMap((t, ti) => t.cues.map((c, ci) => ({ cue: c, turnIdx: ti, cueIdx: ci }))),
     [turns],
+  );
+
+  // Index-aligned with flatCues: entry i says which parse-time cue the i-th
+  // rendered cue came from, and where in its text it starts.
+  const origins = useMemo(
+    () => splitOrigins(parsedCues, overrides.splits),
+    [parsedCues, overrides.splits],
   );
 
   // ── Active row from playhead ─────────────────────────────────────
@@ -710,11 +736,7 @@ export function TranscriptViewer({
     const key = canonicalTag === "Speaker" ? "__NULL__" : canonicalTag;
     const resolved = key === "__NULL__" ? null : key;
     editOverrides("rename speaker", (prev) => {
-      const next: SpeakerOverrides = {
-        global: { ...prev.global }, turn: { ...prev.turn }, aliases: { ...prev.aliases },
-        colors: { ...prev.colors }, turnTag: { ...prev.turnTag }, cueTag: { ...prev.cueTag },
-        icons: { ...prev.icons },
-      };
+      const next = cloneOverrides(prev);
       if (trimmed && trimmed !== humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers })) {
         next.global[key] = trimmed;
       } else {
@@ -888,7 +910,12 @@ export function TranscriptViewer({
    *  picking an existing person instead can re-point those cues). */
   const [naming, setNaming] = useState<{ tag: string; from: number; to: number } | null>(null);
   /** The live cue selection the context menu is acting on. */
-  const [cueMenu, setCueMenu] = useState<{ x: number; y: number; from: number; to: number } | null>(null);
+  const [cueMenu, setCueMenu] = useState<{
+    x: number; y: number; from: number; to: number;
+    /** Set only when the lasso stayed inside ONE cue and covered part of it —
+     *  the sub-cue case, which offers a cut the whole-cue actions cannot. */
+    phrase?: { cueIdx: number; from: number; to: number; text: string };
+  } | null>(null);
 
   const openRename = useCallback((e: React.MouseEvent, turnIdx: number, originalTag: string | null) => {
     e.preventDefault();
@@ -906,15 +933,7 @@ export function TranscriptViewer({
     if (!rename) return;
     const trimmed = newName.trim();
     editOverrides(scope === "turn" ? "rename this turn" : "rename speaker", (prev) => {
-      const next: SpeakerOverrides = {
-        global:  { ...prev.global },
-        turn:    { ...prev.turn },
-        aliases: { ...prev.aliases },
-        colors:  { ...prev.colors },
-        turnTag: { ...prev.turnTag },
-        cueTag:  { ...prev.cueTag },
-        icons:   { ...prev.icons },
-      };
+      const next = cloneOverrides(prev);
       // Key the GLOBAL rename on the alias-RESOLVED tag — displayNameFor reads
       // overrides under the resolved key, and merging deletes globals
       // keyed under merged-away tags. Without resolving, renaming a turn whose
@@ -1063,15 +1082,7 @@ export function TranscriptViewer({
    */
   const reassignTurn = useCallback((turnIdx: number, targetTag: string) => {
     editOverrides("reassign turn", (prev) => {
-      const next: SpeakerOverrides = {
-        global:  { ...prev.global },
-        turn:    { ...prev.turn },
-        aliases: { ...prev.aliases },
-        colors:  { ...prev.colors },
-        turnTag: { ...prev.turnTag },
-        cueTag:  { ...prev.cueTag },
-        icons:   { ...prev.icons },
-      };
+      const next = cloneOverrides(prev);
       // Writes CUE tags, not a turn tag. Reassigning a whole turn is just the
       // special case of reassigning all of its cues — which means it reaches
       // the captions, the AI surfaces and the timeline lanes like any other
@@ -1152,17 +1163,87 @@ export function TranscriptViewer({
     });
   }, [flatCues, editOverrides]);
 
-  /** Pull a selection out into a brand-new speaker, then offer to name it. */
-  const splitToNewSpeaker = useCallback((from: number, to: number) => {
+  /** Every tag already spoken for, so a minted one cannot collide. */
+  const takenTags = useCallback(() => {
     const taken = new Set<string>();
     for (const { cue } of flatCues) if (cue.speaker) taken.add(cue.speaker);
     for (const t of Object.values(overrides.cueTag)) if (t) taken.add(t);
-    const tag = newSpeakerTag(taken);
+    return taken;
+  }, [flatCues, overrides.cueTag]);
+
+  /**
+   * Cut a phrase out of the middle of ONE cue and give it to a new speaker.
+   *
+   * The case whisper's `-ml 84` creates constantly: a line break falls on a
+   * character budget, so the end of one person's sentence and the start of
+   * another's share a cue, and reassigning the cue moves both.
+   *
+   * ONE edit for both halves — the cut and the reassignment land in a single
+   * `editOverrides`, so it is one undo. Two calls would leave ⌘Z restoring a
+   * split cue that nobody asked for, still divided but back to one speaker,
+   * which is a state the user never created and cannot name.
+   *
+   * The fragment's key is read back from `fragmentAt` rather than recomputed
+   * from the offsets, because the cut may drop one for leaving a sub-frame
+   * fragment — and a reassignment aimed at a cue that was never minted would
+   * silently do nothing.
+   */
+  const splitPhraseToNewSpeaker = useCallback((cueIdx: number, from: number, to: number) => {
+    // The cue on screen may itself be a fragment of an earlier cut, whose start
+    // is interpolated and whose text is a slice. Everything is recorded against
+    // the PARENT, or a second cut on the same line keys on a cue that no parse
+    // ever produced and quietly does nothing.
+    const origin = origins[cueIdx];
+    if (!origin) return;
+    const { parent, from: base } = origin;
+    const key = splitKey(parent.start);
+    const offsets = splitsForRange(parent.text, overrides.splits[key], base + from, base + to);
+    const frag = fragmentAt(parent, offsets, base + from);
+    if (!frag) return;
+    const tag = newSpeakerTag(takenTags());
+    const nextSplits = { ...overrides.splits, [key]: offsets };
+    editOverrides("split a phrase out", (prev) => ({
+      ...prev,
+      splits: { ...prev.splits, [key]: offsets },
+      cueTag: { ...prev.cueTag, [cueKey(frag.start)]: tag },
+    }));
+    // Named immediately, same as a whole-cue split: nobody pulls a phrase out
+    // in order to create "CAST_A".
+    //
+    // The sheet is addressed by the fragment's index AFTER the cut, not the
+    // index that was right-clicked. The cut grows the cue list, so the clicked
+    // index now names whichever fragment happens to sit there — usually the
+    // half that STAYED with the old speaker. The sheet's "actually, that's
+    // Sarah" would then reassign the wrong words, and only sometimes, which is
+    // the worst way for it to be wrong.
+    const after = applySplits(parsedCues, nextSplits);
+    const fragIdx = after.findIndex((c) => cueKey(c.start) === cueKey(frag.start));
+    if (fragIdx >= 0) setNaming({ tag, from: fragIdx, to: fragIdx });
+  }, [origins, overrides.splits, parsedCues, takenTags, editOverrides]);
+
+  /** Put a cut line back together. Whole-cue on purpose: someone who wants the
+   *  sentence back wants the sentence, not one of three boundaries — and it is
+   *  reachable from ANY fragment, since they all resolve to the same parent. */
+  const unsplitCue = useCallback((cueIdx: number) => {
+    const parent = origins[cueIdx]?.parent;
+    if (!parent) return;
+    editOverrides("rejoin line", (prev) => ({ ...prev, splits: clearSplits(prev.splits, parent.start) }));
+  }, [origins, editOverrides]);
+
+  /** True when the cue on screen is part of a line that has been cut. */
+  const isSplit = useCallback((cueIdx: number) => {
+    const parent = origins[cueIdx]?.parent;
+    return !!parent && (overrides.splits[splitKey(parent.start)]?.length ?? 0) > 0;
+  }, [origins, overrides.splits]);
+
+  /** Pull a selection out into a brand-new speaker, then offer to name it. */
+  const splitToNewSpeaker = useCallback((from: number, to: number) => {
+    const tag = newSpeakerTag(takenTags());
     assignCueRange(from, to, tag);
     // The naming sheet follows immediately, because splitting and naming are
     // one intention: nobody lassoes dialogue in order to create "CAST_A".
     setNaming({ tag, from, to });
-  }, [flatCues, overrides.cueTag, assignCueRange]);
+  }, [takenTags, assignCueRange]);
 
   function resetAllRenames() {
     editOverrides("reset all speaker names", () => ({ ...EMPTY }));
@@ -2052,20 +2133,37 @@ export function TranscriptViewer({
                         }
                       }}
                       onContextMenu={(e) => {
-                        const range = selectionToCueRange(document.getSelection(), scrollRef.current);
+                        const sel = document.getSelection();
+                        // A lasso INSIDE one cue is the sub-cue case, and it is
+                        // read first: snapping it outward would throw away the
+                        // only information that distinguishes it, and offering
+                        // just the whole-cue actions is exactly the dead end
+                        // this feature exists to remove.
+                        const phrase = selectionCharRange(sel, scrollRef.current);
+                        const range = selectionToCueRange(sel, scrollRef.current);
                         // No selection means this is an ordinary right-click
                         // on one cue, which is still a useful thing to act on:
                         // treat that cue as the range.
                         const r = range ?? { from: idx, to: idx };
                         e.preventDefault();
                         e.stopPropagation();
+                        setAutoScroll(false);
+                        if (phrase) {
+                          // The highlight is left exactly where the user drew
+                          // it: for a cut, what they selected IS what changes,
+                          // so widening it here would misdescribe the action.
+                          setCueMenu({
+                            x: e.clientX, y: e.clientY, ...r,
+                            phrase: { ...phrase, text: flatCues[phrase.cueIdx]?.cue.text.slice(phrase.from, phrase.to) ?? "" },
+                          });
+                          return;
+                        }
                         // Repaint the highlight to the SNAPPED range before
                         // the menu opens, so what is highlighted is exactly
                         // what will change. Without this the user lassos half
                         // a sentence, the action quietly widens to whole cues,
                         // and the result does not match what they saw.
                         paintCueRange(r, scrollRef.current);
-                        setAutoScroll(false);
                         setCueMenu({ x: e.clientX, y: e.clientY, ...r });
                       }}
                       onDoubleClick={(e) => {
@@ -2170,6 +2268,19 @@ export function TranscriptViewer({
           onAssign={(tag) => assignCueRange(cueMenu.from, cueMenu.to, tag === "Speaker" ? "" : tag)}
           onNewSpeaker={() => splitToNewSpeaker(cueMenu.from, cueMenu.to)}
           onPlay={() => { const c = flatCues[cueMenu.from]?.cue; if (c) onSeek(c.start); }}
+          phrase={cueMenu.phrase && {
+            text: cueMenu.phrase.text,
+            onSplitOut: () => splitPhraseToNewSpeaker(
+              cueMenu.phrase!.cueIdx, cueMenu.phrase!.from, cueMenu.phrase!.to,
+            ),
+          }}
+          onUnsplit={
+            // `flatCues` already holds the POST-split cues, so a fragment's own
+            // start is not the key its cuts are stored under. The parent's is,
+            // and every fragment of one cue shares it — which is what makes
+            // "rejoin" reachable from any piece of a divided line.
+            isSplit(cueMenu.from) ? () => unsplitCue(cueMenu.from) : undefined
+          }
           onClose={() => setCueMenu(null)}
         />
       )}

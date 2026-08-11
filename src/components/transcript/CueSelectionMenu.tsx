@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { IconPlay, IconTranscript, IconUndo } from "../Icons";
+import { IconPlay, IconScissors, IconTranscript, IconUndo } from "../Icons";
 
 /**
  * Right-click menu for a RANGE OF SELECTED CUES in the transcript.
@@ -32,12 +32,32 @@ type Props = {
   onNewSpeaker: () => void;
   onPlay: () => void;
   onClose: () => void;
+  /**
+   * Present only when the lasso stayed inside ONE cue and covered part of it.
+   *
+   * The sub-cue case gets its own verb rather than reusing "Make 1 line a new
+   * speaker", because the two do visibly different things to the transcript —
+   * one moves an existing line, the other divides it — and a menu that used one
+   * label for both would be lying about the more destructive of them.
+   */
+  phrase?: { text: string; onSplitOut: () => void };
+  /** Present when this cue is ALREADY divided, so the cut can be undone from
+   *  the same place it was made. */
+  onUnsplit?: () => void;
 };
+
+/** Enough of the phrase to recognise it in a menu label, without the label
+ *  growing to the width of a cue. */
+function shorten(s: string, max = 28): string {
+  const t = s.trim().replace(/\s+/g, " ");
+  return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
+}
 
 type Item = { icon: ReactNode; label: string; disabled?: boolean; onSelect: () => void };
 
 export function CueSelectionMenu({
   anchor, cueCount, speakers, currentTag, onAssign, onNewSpeaker, onPlay, onClose,
+  phrase, onUnsplit,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const btnRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -45,6 +65,17 @@ export function CueSelectionMenu({
 
   const lines = cueCount === 1 ? "1 line" : `${cueCount} lines`;
   const items: Item[] = [
+    // The cut leads when there is one, because it is what the user's selection
+    // actually described. Quoting the phrase back is the confirmation: this
+    // action divides a line, and the only way to be sure it divides it in the
+    // right place is to see the words that are moving.
+    ...(phrase
+      ? [{
+          icon: <IconScissors size={13} />,
+          label: `Split out "${shorten(phrase.text)}"`,
+          onSelect: phrase.onSplitOut,
+        }]
+      : []),
     {
       icon: <IconTranscript size={13} />,
       label: `Make ${lines} a new speaker`,
@@ -69,6 +100,11 @@ export function CueSelectionMenu({
           label: "Clear speaker",
           onSelect: () => onAssign(""),
         }]
+      : []),
+    // Offered from the same menu the cut was made in, because that is where a
+    // user will look for it. Last, since it undoes the most.
+    ...(onUnsplit
+      ? [{ icon: <IconUndo size={13} />, label: "Rejoin this line", onSelect: onUnsplit }]
       : []),
   ];
 
