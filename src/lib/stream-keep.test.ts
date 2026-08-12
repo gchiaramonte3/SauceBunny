@@ -163,7 +163,7 @@ describe("progress and copy", () => {
     s = reduceKeep(s, { t: "progress", received: 500, total: 1000 });
     expect(keepBadge(s)).toBe("Saving a copy · 50%");
     expect(keepBadge(reduceKeep(s, { t: "stall", at: 1 }))).toMatch(/paused/);
-    expect(keepBadge(reduceKeep(s, { t: "done", path: "/p", at: 1 }))).toMatch(/own copy/);
+    expect(keepBadge(reduceKeep(s, { t: "done", path: "/p", at: 1 }))).toMatch(/Saved/);
   });
 });
 
@@ -263,5 +263,35 @@ describe("keepAction", () => {
       expect(keepAction(s)).not.toBeNull();
       expect(keepBadge(s)).toBeTruthy();
     }
+  });
+});
+
+describe("when the explicit Get button is already fetching this file", () => {
+  it("stands down silently instead of claiming it failed", () => {
+    // Both buttons render at once, so pressing Get and then Watch is one
+    // ordinary sequence. The keep's own fetch is then refused by the backend
+    // ("already being received"), and reporting THAT as a failure would put
+    // "Could not save a copy" on screen beside a copy that is visibly
+    // downloading.
+    const s = reduceKeep(running(0), { t: "superseded", at: 50 });
+    expect(s.phase).toBe("off");
+    expect(s.reason).toBe("elsewhere");
+    expect(shouldTransfer(s)).toBe(false);
+    // Silent, and not a button: that transfer has its own progress UI, and two
+    // accounts of one download is worse than one.
+    expect(keepBadge(s)).toBeNull();
+    expect(keepAction(s)).toBeNull();
+  });
+
+  it("does not undo a copy that already finished", () => {
+    const done = reduceKeep(running(0), { t: "done", path: "/c/abc.mp4", at: 99 });
+    expect(reduceKeep(done, { t: "superseded", at: 100 })).toBe(done);
+  });
+
+  it("reads differently from a real failure", () => {
+    const failed = reduceKeep(running(0), { t: "failed", at: 5 });
+    const superseded = reduceKeep(running(0), { t: "superseded", at: 5 });
+    expect(keepBadge(failed)).toBeTruthy();
+    expect(keepBadge(superseded)).toBeNull();
   });
 });

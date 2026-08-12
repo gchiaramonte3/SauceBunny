@@ -96,8 +96,12 @@ export type KeepState = {
    *   · "cancelled" — they stopped THIS copy. Offer to resume it, because the
    *                   partial is still on disk and the next file should not
    *                   inherit the decision.
+   *   · "elsewhere"  — an explicit "Get the file" is ALREADY fetching this, so
+   *                   there is nothing left for us to do. Silent: that
+   *                   transfer has its own progress UI, and two accounts of
+   *                   one download is worse than one.
    */
-  reason: "relayed" | "declined" | "cancelled" | null;
+  reason: "relayed" | "declined" | "cancelled" | "elsewhere" | null;
 };
 
 export const IDLE_KEEP: KeepState = Object.freeze({
@@ -122,7 +126,10 @@ export type KeepEvent =
   /** The user stopped THIS copy, without changing their standing preference. */
   | { t: "cancel"; at: number }
   /** ...and changed their mind. The partial is still on disk. */
-  | { t: "resume"; at: number };
+  | { t: "resume"; at: number }
+  /** The explicit "Get the file" button is already fetching this exact file.
+   *  Not a failure: the user is getting what we were going to give them. */
+  | { t: "superseded"; at: number };
 
 /**
  * Advance the policy. Returns a NEW state; the caller compares `phase` with the
@@ -191,6 +198,10 @@ export function reduceKeep(s: KeepState, e: KeepEvent): KeepState {
       // rather than to the session: watching something else starts fresh.
       return { ...s, phase: "off", reason: "cancelled", since: e.at };
     }
+    case "superseded": {
+      if (s.phase === "done") return s;
+      return { ...s, phase: "off", reason: "elsewhere", since: e.at };
+    }
     case "resume": {
       if (s.phase !== "off" || s.reason !== "cancelled") return s;
       // Straight to `keeping`, not back through `waiting`. The start delay
@@ -244,7 +255,7 @@ export function keepBadge(s: KeepState): string | null {
       // An invitation rather than a status: the partial is on disk, so this is
       // one click from where they left it.
       if (s.reason === "cancelled") return "Save a copy";
-      // "declined" says nothing on purpose — see the reducer.
+      // "declined" and "elsewhere" say nothing on purpose — see the reducer.
       return null;
     case "waiting":
       return "Saving a copy shortly";
@@ -255,7 +266,11 @@ export function keepBadge(s: KeepState): string | null {
     case "yielded":
       return "Saving a copy · paused for playback";
     case "done":
-      return "Saved · playing your own copy";
+      // Says only what verification proves. The playback swap is a separate
+      // step that can fail on its own (a copy that lands but will not open),
+      // and a badge claiming both would then be half wrong with no way to tell
+      // which half.
+      return "Saved to this Mac";
     case "failed":
       return "Could not save a copy";
   }

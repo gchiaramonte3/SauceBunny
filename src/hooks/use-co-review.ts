@@ -1187,10 +1187,21 @@ export function useCoReview({
     // it on the next heartbeat, so this is a head start rather than the only
     // thing holding the position.
     const at = getPlayheadFrames();
-    await loadLocalPath(path);
+    // loadLocalPath CATCHES internally and RETURNS the error; null is success.
+    // Awaiting it and ignoring the result meant a copy that verified but would
+    // not open still announced "playing your own copy" while the peer stream
+    // was what remained on screen. The hook's prop types it as Promise<unknown>
+    // (which is how this got past the compiler), so the shape is narrowed here.
+    const failure = await loadLocalPath(path) as { message?: string } | null;
+    if (failure && typeof failure === "object" && failure.message) {
+      slog("err", `Saved the copy, but could not open it: ${failure.message}`);
+      // Deliberately keep watching. The stream is still good, and the copy is
+      // on disk for the next session even though this handoff did not land.
+      return;
+    }
     onChaseSeek(at);
     setKeepTarget(null);
-  }, [loadLocalPath, onChaseSeek]);
+  }, [loadLocalPath, onChaseSeek, slog]);
 
   const streamKeep = useStreamKeep({
     watching: keepTarget,

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { formatError } from "../lib/error-format";
 import {
   IDLE_KEEP, keepAction, keepBadge, reduceKeep, shouldHandOff, shouldTransfer,
   type KeepEvent, type KeepState,
@@ -55,7 +56,11 @@ export function useStreamKeep({
   /** Set while WE are tearing the fetch down (yielding, or the user stopping
    *  it), so the resulting rejection is not reported as a failure. */
   const yieldingRef = useRef(false);
-  /** Handed off already; the swap must happen exactly once. */
+  /** The file we have already swapped to. Cleared when the watch target
+   *  changes, because "handed off once" must mean once PER WATCH — holding it
+   *  for the app's lifetime meant re-watching the same file (its local copy
+   *  deleted, the host re-offering) completed the copy and then silently
+   *  refused to play it. */
   const handedRef = useRef<string | null>(null);
 
   /** The `<video>` ran dry. Raw signal; the policy decides what it means. */
@@ -76,6 +81,7 @@ export function useStreamKeep({
       dispatch((at) => ({ t: "stop", at }));
       return;
     }
+    if (handedRef.current !== watching.blake3) handedRef.current = null;
     dispatch((at) => ({
       t: "watch", blake3: watching.blake3, total: watching.total,
       relayed: relayedRef.current, enabled: enabledRef.current, at,
@@ -124,11 +130,19 @@ export function useStreamKeep({
           inFlightRef.current = null;
           dispatch((at) => ({ t: "done", path, at }));
         })
-        .catch(() => {
+        .catch((err) => {
           inFlightRef.current = null;
           // A rejection we caused by yielding is the mechanism working, not a
           // failure — the partial is kept and the next tick resumes it.
           if (yieldingRef.current) { yieldingRef.current = false; return; }
+          // The user pressed "Get the file" as well as "Watch now", so an
+          // explicit transfer of this exact file is already running. Reporting
+          // "could not save a copy" while the copy is visibly downloading in
+          // the panel next to it is the chip contradicting the truth.
+          if (/already being received/i.test(formatError(err))) {
+            dispatch((at) => ({ t: "superseded", at }));
+            return;
+          }
           dispatch((at) => ({ t: "failed", at }));
         });
       return;
