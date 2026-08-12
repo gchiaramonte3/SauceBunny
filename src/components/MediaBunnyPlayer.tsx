@@ -231,17 +231,54 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     lastDrawnRef.current = src;
   };
 
-  /** Cut the current scrub blip off (start of the next blip, or any path
-   *  that takes over the transport). Ref-only, safe from render scope. */
+  /**
+   * Cut the current scrub blip off (start of the next blip, or any path that
+   * takes over the transport). Ref-only, safe from render scope.
+   *
+   * IT FADES, IT DOES NOT STOP. Calling `stop()` on a source severs the
+   * waveform at whatever amplitude it happened to be at, and a discontinuity
+   * that steep is a click. The envelope already has a fade at each end, but it
+   * only ever ran when a blip played all the way through — and during a real
+   * drag almost NO blip does, because the pump is latest-wins and the next
+   * target cuts this one off. So the fade was in place for the quiet case and
+   * absent for every case anyone would hear, which is why scrubbing sounded
+   * like a machine gun of attack transients rather than like audio.
+   *
+   * Ramping to zero over the same 5ms instead means a cutover crossfades into
+   * the incoming blip (which starts after exactly that much scheduling
+   * headroom) rather than colliding with it.
+   */
   const stopScrubBlip = () => {
     const blip = scrubBlipRef.current;
     if (!blip) return;
     scrubBlipRef.current = null;
-    for (const n of blip.nodes) {
-      try { n.stop(); } catch { /* already stopped */ }
-      try { n.disconnect(); } catch { /* ignore */ }
+    const ctx = audioCtxRef.current;
+    const release = (nodes: AudioBufferSourceNode[], env: GainNode) => {
+      for (const n of nodes) {
+        try { n.stop(); } catch { /* already stopped */ }
+        try { n.disconnect(); } catch { /* ignore */ }
+      }
+      try { env.disconnect(); } catch { /* ignore */ }
+    };
+    // No context (teardown) means nothing is sounding anyway; drop the graph.
+    if (!ctx || ctx.state === "closed") { release(blip.nodes, blip.env); return; }
+    const now = ctx.currentTime;
+    const end = now + SCRUB_BLIP_FADE_S;
+    try {
+      const g = blip.env.gain;
+      // cancelAndHoldAtTime pins the CURRENT automated value before ramping;
+      // without it, cancelScheduledValues alone can snap the gain back to the
+      // last explicitly-set value and produce the very click being avoided.
+      if (typeof g.cancelAndHoldAtTime === "function") g.cancelAndHoldAtTime(now);
+      else { g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); }
+      g.linearRampToValueAtTime(0, end);
+      for (const n of blip.nodes) { try { n.stop(end); } catch { /* already stopped */ } }
+    } catch {
+      release(blip.nodes, blip.env);
+      return;
     }
-    try { blip.env.disconnect(); } catch { /* ignore */ }
+    // Disconnect only after the ramp has actually run.
+    window.setTimeout(() => release(blip.nodes, blip.env), (SCRUB_BLIP_FADE_S + 0.05) * 1000);
   };
 
   // Latest-wins scrub pump, created once. Its drain closes over refs only
