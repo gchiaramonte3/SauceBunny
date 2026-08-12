@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  clearTagColors, primarySwatch, tagColor, TAG_COLORS, tagSummary, tagSwatches, toggleTagColor,
+  clearTagColors, primarySwatch, swatchForTag, tagColor, TAG_COLORS, tagSummary, tagSwatches,
+  toggleTagColor,
 } from "./finder-tags";
 import type { FinderTag } from "../bindings/FinderTag";
 
@@ -104,5 +105,43 @@ describe("tagSummary", () => {
 
   it("is null when there is nothing to say", () => {
     expect(tagSummary([])).toBeNull();
+  });
+});
+
+describe("Finder writes the name, not the index", () => {
+  const tag = (name: string, color: number) => ({ name, color }) as FinderTag;
+
+  it("colours a real Finder tag by NAME, because its index is a lie", () => {
+    // Measured on disk. Four different colours in Finder, every one of them
+    // claiming index 1 — which is Grey in the table. Trusting the index painted
+    // every Finder-tagged folder grey.
+    expect(swatchForTag(tag("Purple", 1))?.label).toBe("Purple");
+    expect(swatchForTag(tag("Red", 1))?.label).toBe("Red");
+    expect(swatchForTag(tag("Green", 1))?.label).toBe("Green");
+    expect(swatchForTag(tag("Blue", 1))?.label).toBe("Blue");
+    expect(swatchForTag(tag("Yellow", 1))?.label).toBe("Yellow");
+  });
+
+  it("still honours a real Grey tag", () => {
+    // The fallback must not swallow the one case where index 1 is the truth.
+    expect(swatchForTag(tag("Grey", 1))?.label).toBe("Grey");
+  });
+
+  it("falls back to the index for a tag named something else", () => {
+    // "Archive" with index 6 is a red tag whose name means something other
+    // than its colour; the index is the only thing that can answer.
+    expect(swatchForTag(tag("Archive", 6))?.label).toBe("Red");
+    expect(swatchForTag(tag("Archive", 0))).toBeNull();
+  });
+
+  it("matches the name case- and space-insensitively", () => {
+    expect(swatchForTag(tag("  red  ", 1))?.label).toBe("Red");
+    expect(swatchForTag(tag("PURPLE", 1))?.label).toBe("Purple");
+  });
+
+  it("carries through to the swatch a row actually draws", () => {
+    expect(primarySwatch([tag("Purple", 1)])?.hex).toBe("#CB6BD9");
+    expect(tagSwatches([tag("Red", 1), tag("Blue", 1)]).map((c) => c.label))
+      .toEqual(["Red", "Blue"]);
   });
 });

@@ -42,10 +42,35 @@ export const TAG_COLORS: readonly TagColor[] = [
 ];
 
 const BY_INDEX = new Map(TAG_COLORS.map((c) => [c.index, c]));
+const BY_LABEL = new Map(TAG_COLORS.map((c) => [c.label.toLowerCase(), c]));
 
 /** The colour for an index, or null for 0 / anything out of range. */
 export function tagColor(index: number): TagColor | null {
   return BY_INDEX.get(index as TagColorIndex) ?? null;
+}
+
+/**
+ * The colour ONE tag should draw as.
+ *
+ * THE NAME WINS, AND IT HAS TO. The index in the xattr is not authoritative:
+ * Finder keeps its own tag list and resolves a named tag's colour from there,
+ * so what it writes to disk is routinely index 1 for every colour. Real folders
+ * on this machine read back as "Purple\n1", "Red\n1", "Green\n1",
+ * "Blue\n1" — four different colours in Finder, all claiming index 1, which is
+ * Grey in the table above.
+ *
+ * Trusting the index therefore painted every Finder-tagged folder grey while
+ * folders tagged from inside this app (which writes a correct index) coloured
+ * fine. It looked like we could not read Finder's tags at all; in fact we read
+ * them and then discarded the only field that carried the answer.
+ *
+ * The index remains the fallback, and it is the one that matters for a CUSTOM
+ * tag: "Archive" with index 6 is a red tag whose name means something else.
+ */
+export function swatchForTag(tag: FinderTag): TagColor | null {
+  const byName = BY_LABEL.get(tag.name.trim().toLowerCase());
+  if (byName) return byName;
+  return tagColor(tag.color);
 }
 
 /**
@@ -56,7 +81,7 @@ export function tagColor(index: number): TagColor | null {
  * but no dot, so they are dropped here rather than drawn as an empty hole.
  */
 export function tagSwatches(tags: readonly FinderTag[]): TagColor[] {
-  const colored = tags.map((t) => tagColor(t.color)).filter((c): c is TagColor => c !== null);
+  const colored = tags.map(swatchForTag).filter((c): c is TagColor => c !== null);
   return colored.slice(-3);
 }
 
