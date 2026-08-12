@@ -896,7 +896,12 @@
   letter-spacing: -0.01em;
   color: var(--fg-1);
 }
-.cp-lib-tree-collapse {
+/* Header actions: add, rescan, collapse. One quiet vocabulary for all three,
+   inherited from what the collapse toggle already was. Add folder used to be a
+   full-width accent button pinned to the bottom of the panel, which made the
+   loudest element in the Library a step you take once per drive — and the
+   accent is reserved for live state, not for invitations. */
+.cp-lib-tree-act {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -911,7 +916,18 @@
   transition: color var(--dur-fast) var(--ease-out),
               background var(--dur-fast) var(--ease-out);
 }
-.cp-lib-tree-collapse:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.06); }
+.cp-lib-tree-act:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.06); }
+.cp-lib-tree-act:disabled { cursor: default; }
+.cp-lib-tree-act:disabled:hover { background: none; color: var(--fg-4); }
+/* Focus brightens toward white, never the accent (base.css focus contract). */
+.cp-lib-tree-act:focus-visible {
+  outline: none;
+  color: var(--fg-1);
+  box-shadow: inset 0 0 0 1px var(--focus-ring);
+}
+/* The one green live state in the panel: a scan in progress. */
+.cp-lib-tree-act.scanning { color: var(--ella-green); }
+.cp-lib-tree-act.scanning svg { animation: cp-lib-scan-spin 900ms linear infinite; }
 /* Kind chips — neutral per the color contract: bg-3 fill + fg-1 when active,
    quiet outline at rest. They patch the same persisted prefs key the bar's
    kind select used to. */
@@ -994,19 +1010,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cp-lib-tree-foot {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-2);
-  border-top: 1px solid var(--line-1);
-}
-.cp-lib-tree-foot .btn-compact { flex: 1; }
-.cp-lib-tree-rescan { width: 28px; height: 28px; flex: 0 0 auto; }
-/* Live scan — the one green live state in the browser: the rescan glyph goes
-   accent and spins while a scan runs. */
-.cp-lib-tree-rescan.scanning { color: var(--ella-green); border-color: var(--stroke-green); }
-.cp-lib-tree-rescan.scanning svg { animation: cp-lib-scan-spin 900ms linear infinite; }
 @keyframes cp-lib-scan-spin { to { transform: rotate(360deg); } }
 
 /* ── Main pane: bar over the grid/list, next to the detail panel. ── */
@@ -1356,13 +1359,13 @@
 @media (prefers-reduced-motion: reduce) {
   .cp-lib-tree-row,
   .cp-lib-tree-tw,
-  .cp-lib-tree-collapse,
+  .cp-lib-tree-act,
   .cp-lib-chip,
   .cp-lib-lrow,
   .cp-lib-bar-search,
   .cp-lib-detail-chip { transition: none; }
   /* Live scan stays green, just doesn't spin. */
-  .cp-lib-tree-rescan.scanning svg { animation: none; }
+  .cp-lib-tree-act.scanning svg { animation: none; }
 }
 
 /* ── Portrait art (12a): contained frame over a blurred fill ────────

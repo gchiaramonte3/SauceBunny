@@ -20,6 +20,9 @@ type Props = {
   addFolder: () => Promise<void>;
   rescanAll: () => void;
   scanning: boolean;
+  /** Drop a ROOT from the library. Subfolders are not library entries, so
+   *  the menu only offers this on depth-0 rows. */
+  removeRoot: (root: string) => void;
 };
 
 type Row = {
@@ -76,7 +79,7 @@ function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
  */
 export function LibraryTree({
   trees, selection, onSelect, kind, onKind, onCollapse,
-  addFolder, rescanAll, scanning,
+  addFolder, rescanAll, scanning, removeRoot,
 }: Props) {
   // Roots open by default; ancestors of the current selection are auto-revealed.
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -178,7 +181,7 @@ export function LibraryTree({
   }, [treeWidth]);
 
   /** Right-click target: a real folder row (never the "All" aggregate). */
-  const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ path: string; x: number; y: number; isRoot: boolean } | null>(null);
   // Tags for every visible folder, one bulk read — this is what makes a colour
   // VISIBLE in the tree rather than only inside the menu that set it.
   const folderPaths = useMemo(
@@ -186,14 +189,48 @@ export function LibraryTree({
     [rows],
   );
   const finderTags = useFinderTags(folderPaths);
+  // Finder owns these colours, and it can change them while we are in the
+  // background. Without this the tree keeps showing whatever was true when the
+  // rows were built, so "we read Finder colours" would only be true once.
+  const refreshTags = finderTags.refresh;
+  useEffect(() => {
+    const onFocus = () => refreshTags();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refreshTags]);
 
   return (
     <div className="cp-lib-tree" style={{ flexBasis: treeWidth }}>
+      {/* One row of quiet icon actions beside the title. Add folder used to be
+          a full-width green button pinned to the bottom, which made the loudest
+          thing in the panel a setup step you perform once per drive — and the
+          accent is supposed to mean "playing", not "you may click me". These
+          read as tools: dim until hovered, same weight as the collapse toggle
+          that already lived here. */}
       <div className="cp-lib-tree-head">
         <h2 className="cp-lib-tree-title">Library</h2>
         <button
           type="button"
-          className="cp-lib-tree-collapse"
+          className="cp-lib-tree-act"
+          title="Add a folder to the library"
+          aria-label="Add folder"
+          onClick={() => void addFolder()}
+        >
+          <IconPlus size={14} />
+        </button>
+        <button
+          type="button"
+          className={"cp-lib-tree-act" + (scanning ? " scanning" : "")}
+          title={scanning ? "Scanning…" : "Rescan library"}
+          aria-label="Rescan library"
+          onClick={rescanAll}
+          disabled={scanning}
+        >
+          <IconRefresh size={14} />
+        </button>
+        <button
+          type="button"
+          className="cp-lib-tree-act"
           title="Hide folders"
           aria-label="Hide folder tree"
           onClick={onCollapse}
@@ -235,7 +272,7 @@ export function LibraryTree({
                 // or reveal.
                 if (row.key === "all") return;
                 e.preventDefault();
-                setMenu({ path: row.key, x: e.clientX, y: e.clientY });
+                setMenu({ path: row.key, x: e.clientX, y: e.clientY, isRoot: row.depth === 0 });
               }}
             >
               {row.hasChildren ? (
@@ -269,21 +306,6 @@ export function LibraryTree({
           );
         })}
       </div>
-      <div className="cp-lib-tree-foot">
-        <button type="button" className="btn btn-primary btn-compact" onClick={() => void addFolder()}>
-          <IconPlus size={12} /> Add folder
-        </button>
-        <button
-          type="button"
-          className={"btn-icon cp-lib-tree-rescan" + (scanning ? " scanning" : "")}
-          title={scanning ? "Scanning…" : "Rescan library"}
-          aria-label="Rescan library"
-          onClick={rescanAll}
-          disabled={scanning}
-        >
-          <IconRefresh size={13} />
-        </button>
-      </div>
       <div
         className={"cp-lib-tree-resize cp-resize-handle vertical" + (resizing ? " dragging" : "")}
         role="separator"
@@ -299,6 +321,9 @@ export function LibraryTree({
           anchor={{ x: menu.x, y: menu.y }}
           onClose={() => setMenu(null)}
           onChanged={() => finderTags.refresh()}
+          // Roots only: a subfolder is part of a root's scan, not a library
+          // entry of its own, so "remove" there would have nothing to remove.
+          onRemove={menu.isRoot ? () => removeRoot(menu.path) : undefined}
         />
       )}
     </div>

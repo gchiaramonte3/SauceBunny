@@ -5734,6 +5734,7 @@ export default function App() {
               scans={lib.scans}
               scanning={lib.scanning}
               addFolder={lib.addFolder}
+              removeRoot={lib.removeRoot}
               rescanAll={lib.rescanAll}
               requestThumb={lib.requestThumb}
               invalidateThumb={lib.invalidateThumb}

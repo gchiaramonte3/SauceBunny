@@ -47,6 +47,7 @@ type Props = {
   scans: Record<string, RootScan>;
   scanning: boolean;
   addFolder: () => Promise<void>;
+  removeRoot: (root: string) => void;
   rescanAll: () => void;
   requestThumb: (path: string) => Promise<string | null>;
   invalidateThumb: (path: string) => void;
@@ -88,7 +89,7 @@ type Props = {
 const BROWSE_CAP = 300;
 
 export function LibraryBrowser({
-  roots, scans, scanning, addFolder, rescanAll, requestThumb, invalidateThumb,
+  roots, scans, scanning, addFolder, removeRoot, rescanAll, requestThumb, invalidateThumb,
   posterVersions, bumpPoster, resetPoster, selection, selectionTick,
   onOpenLocalPath, onReviewLocalPath, onOpenTranscriptHistory,
   onBatchTranscribe, batchLine, onBatchCancel,
@@ -300,6 +301,7 @@ export function LibraryBrowser({
           addFolder={addFolder}
           rescanAll={rescanAll}
           scanning={scanning}
+          removeRoot={removeRoot}
         />
       )}
       <div className="cp-lib-main">

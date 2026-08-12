@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { TagColorRow } from "./TagColorRow";
 import { clearTagColors, toggleTagColor, type TagColorIndex } from "../lib/finder-tags";
-import { IconReveal } from "./Icons";
+import { IconCircleX, IconReveal } from "./Icons";
 import type { FinderTag } from "../bindings/FinderTag";
 import type { TaggedPath } from "../bindings/TaggedPath";
 
@@ -22,13 +22,18 @@ import type { TaggedPath } from "../bindings/TaggedPath";
  * except the thing that was asked for.
  */
 export function FolderTagMenu({
-  path, anchor, onClose, onChanged,
+  path, anchor, onClose, onChanged, onRemove,
 }: {
   path: string;
   anchor: { x: number; y: number };
   onClose: () => void;
   /** Tags changed on disk — callers refresh whatever shows the colour. */
   onChanged?: (tags: FinderTag[]) => void;
+  /** Drop this folder from the library. Present only for ROOTS: a subfolder
+   *  comes in as part of its root's scan, so there is nothing to remove. The
+   *  folder itself is never touched on disk, which is why this is worded as
+   *  leaving rather than deleting. */
+  onRemove?: () => void;
 }) {
   const [tags, setTags] = useState<FinderTag[]>([]);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -102,6 +107,18 @@ export function FolderTagMenu({
         <span className="cp-lib-menu-icon" aria-hidden="true"><IconReveal size={14} /></span>
         Reveal in Finder
       </button>
+      {onRemove && (
+        <button
+          type="button"
+          role="menuitem"
+          className="cp-lib-menu-item"
+          title="The folder and its files stay exactly where they are on disk."
+          onClick={() => { onRemove(); onClose(); }}
+        >
+          <span className="cp-lib-menu-icon" aria-hidden="true"><IconCircleX size={13} /></span>
+          Remove from library
+        </button>
+      )}
     </div>,
     document.body,
   );
