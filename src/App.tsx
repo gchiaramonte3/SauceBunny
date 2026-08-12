@@ -52,6 +52,7 @@ import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playhead
 import { endSeekFrames } from "./lib/playhead-clock";
 import { usePanelBus } from "./hooks/use-panel-bus";
 import { useStreamRung } from "./hooks/use-stream-rung";
+import { clipTranscriptPath, type ActiveTranscript } from "./lib/transcript-owner";
 import { useTransport } from "./hooks/use-transport";
 import { useWebPlayback } from "./hooks/use-web-playback";
 import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView, type SessionSource } from "./hooks/use-co-review";
@@ -1163,10 +1164,7 @@ export default function App() {
   // file on disk + which producer made it (yt-dlp captions vs Whisper)
   // so the viewer can render an "origin" badge. `arrivedTick` bumps on
   // every successful generation so the drawer can pulse / auto-switch.
-  const [activeTranscript, setActiveTranscript] = useState<{
-    path: string;
-    origin: "captions" | "whisper" | "unknown";
-  } | null>(null);
+  const [activeTranscript, setActiveTranscript] = useState<ActiveTranscript | null>(null);
   // Fresh mirror so the (deps-[]) Clear handler can forget the exact transcript
   // it's showing without going stale.
   const activeTranscriptRef = useRef(activeTranscript);
@@ -1195,18 +1193,34 @@ export default function App() {
   const [speakerLaneData, setSpeakerLaneData] = useState<
     { startMs: number; endMs: number; color: string; speaker: string | null }[]
   >([]);
+  /** The Clip's current subject. Declared here because the transcript-owner
+   *  gate below needs it, and a second derivation of the same idea is how the
+   *  two drift apart. */
+  const clipSourceKey = localFilePath ?? metadata?.webpage_url ?? activeSourceUrl ?? null;
   const transcriptPath = activeTranscript?.path ?? null;
+  /**
+   * What the CLIP may render. The reader and the Clip share `activeTranscript`,
+   * so opening a transcript in the reader used to retarget the Clip's captions,
+   * transcript panel, AI summary and speaker lanes onto a file the Clip was not
+   * playing — one film's dialogue burned over another film's picture, with
+   * nothing erroring. The rule lives in lib/transcript-owner.ts.
+   */
+  const clipTxPath = clipTranscriptPath(activeTranscript, clipSourceKey);
+  const clipSourceKeyRef = useRef(clipSourceKey);
+  clipSourceKeyRef.current = clipSourceKey;
   useEffect(() => {
-    if (!transcriptPath) { setSpeakerLaneData([]); return; }
+    // The Clip's OWN transcript: timeline speaker lanes drawn from a
+    // transcript of a different file are the same lie the captions were.
+    if (!clipTxPath) { setSpeakerLaneData([]); return; }
     let alive = true;
     void (async () => {
       try {
         const text = await invoke<string>("read_text_file_capped", {
-          path: transcriptPath,
+          path: clipTxPath,
           maxBytes: 8 * 1024 * 1024,
         });
         if (!alive) return;
-        const ovForCues = loadSpeakerOverrides(transcriptPath);
+        const ovForCues = loadSpeakerOverrides(clipTxPath);
         // Reassigned cues repaint the timeline's speaker lanes. The old
         // per-turn layer never reached here either.
         const cues = prepareCues(parseSrt(text), ovForCues);
@@ -1215,7 +1229,7 @@ export default function App() {
         // the transcript uses (alias chain -> user-picked color -> palette).
         // Reading overrides here + the speakers-changed dep below is what
         // makes a recolor in Manage speakers repaint the lane instantly.
-        const ov = loadSpeakerOverrides(transcriptPath);
+        const ov = loadSpeakerOverrides(clipTxPath);
         const laneColor = (tag: string | null) => {
           const resolved = resolveAliasChain(tag, ov.aliases);
           return ov.colors[resolved ?? "__NULL__"] || speakerColor(resolved);
@@ -1228,7 +1242,7 @@ export default function App() {
       }
     })();
     return () => { alive = false; };
-  }, [transcriptPath, transcriptArrivedTick, speakersChangedTick]);
+  }, [clipTxPath, transcriptArrivedTick, speakersChangedTick]);
   // Recolor signal: the transcript fires saucebunny:speakers-changed as a
   // window CustomEvent (same window) AND a Tauri event (panel window).
   useEffect(() => {
@@ -1654,7 +1668,7 @@ export default function App() {
           // Load into the Transcript tab. Bumping arrivedTick triggers
           // the drawer to pulse / auto-switch tabs so the user sees the
           // result of the action they just took without having to hunt.
-          setActiveTranscript({ path: e.payload.path, origin: "captions" });
+          setActiveTranscript({ path: e.payload.path, origin: "captions", sourceKey: clipSourceKeyRef.current });
           setTranscriptArrivedTick((n) => n + 1);
           // Append to history so the Transcript-tab popover lists it
           // and a future import of the same URL auto-loads it.
@@ -1695,7 +1709,7 @@ export default function App() {
           appendLog("ok", txChannelRef.current, `Transcript saved → ${e.payload.path}`);
           // Load into the Transcript tab (same pulse-and-switch behavior
           // as the captions path above).
-          setActiveTranscript({ path: e.payload.path, origin: "whisper" });
+          setActiveTranscript({ path: e.payload.path, origin: "whisper", sourceKey: clipSourceKeyRef.current });
           setTranscriptArrivedTick((n) => n + 1);
           // Append to history (per-source) so the Transcript-tab popover
           // surfaces it and a re-import auto-loads it.
@@ -3878,6 +3892,7 @@ export default function App() {
         origin: entry.origin === "captions" ? "captions"
               : entry.origin === "whisper"  ? "whisper"
               : "unknown",
+        sourceKey: entry.sourcePath ?? entry.sourceUrl ?? null,
       });
       setTranscriptArrivedTick((n) => n + 1);
       touchEntry(entry.id);
@@ -3934,7 +3949,7 @@ export default function App() {
         title,
         origin: "unknown",
       });
-      setActiveTranscript({ path: picked, origin: "unknown" });
+      setActiveTranscript({ path: picked, origin: "unknown", sourceKey: clipSourceKeyRef.current });
       setTranscriptArrivedTick((n) => n + 1);
       appendLog("ok", "transcripts", `Imported transcript from ${picked}`);
     } catch (e) {
@@ -4007,6 +4022,7 @@ export default function App() {
         origin: entry.origin === "captions" ? "captions"
               : entry.origin === "whisper"  ? "whisper"
               : "unknown",
+        sourceKey: entry.sourcePath ?? entry.sourceUrl ?? null,
       });
       setTranscriptArrivedTick((n) => n + 1);
       touchEntry(entry.id);
@@ -4068,7 +4084,6 @@ export default function App() {
   // the reader. Its source key is whatever's loaded in Clip (local path or web
   // url); a tick bump re-reads the stored TC after the setter writes it.
   const [clipSourceTcTick, setClipSourceTcTick] = useState(0);
-  const clipSourceKey = localFilePath ?? metadata?.webpage_url ?? activeSourceUrl ?? null;
   // localStorage read, so memoized: this sat bare in the render body and ran
   // on every App render, which is every playhead-driven re-render anything
   // else causes. The tick was already here for exactly this purpose and was
@@ -4154,6 +4169,7 @@ export default function App() {
     setActiveTranscript({
       path: entry.srtPath,
       origin: entry.origin === "captions" ? "captions" : entry.origin === "whisper" ? "whisper" : "unknown",
+      sourceKey: entry.sourcePath ?? entry.sourceUrl ?? null,
     });
     setTranscriptArrivedTick((n) => n + 1);
     navigateView("reader");
@@ -6311,7 +6327,7 @@ export default function App() {
                     onSurfaceClick={onPlayToggle}
                     /* On-video captions (the transport CC toggle). Driven by the
                        active transcript + playhead so they work for any source. */
-                    transcriptPath={activeTranscript?.path ?? null}
+                    transcriptPath={clipTxPath}
                     transcriptReloadToken={transcriptArrivedTick}
                     fps={fps}
                     captionsOn={captionsOn}
@@ -6516,7 +6532,7 @@ export default function App() {
                 onStop={handleStop}
                 onRenameClip={handleQueueRename}
                 onRenameAll={handleQueueRenameAll}
-                transcriptPath={activeTranscript?.path ?? null}
+                transcriptPath={clipTxPath}
                 transcriptOrigin={activeTranscript?.origin ?? "unknown"}
                 playheadAvailable={hasSource}
                 transcriptFps={fps}
