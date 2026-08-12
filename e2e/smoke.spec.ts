@@ -434,12 +434,14 @@ test("library browser: tree + grid render, selection shows detail, list toggle s
   const tree = page.getByRole("tree", { name: "Library folders" });
   await expect(tree.getByRole("treeitem", { name: "All" })).toBeVisible();
   await expect(tree.getByRole("treeitem", { name: "Footage" })).toBeVisible();
-  // Add folder + Rescan moved OFF Home and live in the panel footer — positive
+  // Add folder + Rescan moved OFF Home and live in the panel HEADER — positive
   // coverage that the affordances actually landed here (Home only asserts
-  // their absence).
-  const foot = page.locator(".cp-lib-tree-foot");
-  await expect(foot.getByRole("button", { name: "Add folder" })).toBeVisible();
-  await expect(foot.getByRole("button", { name: "Rescan library" })).toBeVisible();
+  // their absence). Asserted by accessible name inside the panel rather than
+  // by the container class they happened to sit in, so moving them again is a
+  // design change rather than a test failure.
+  const panel = page.locator(".cp-lib-tree");
+  await expect(panel.getByRole("button", { name: "Add folder" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Rescan library" })).toBeVisible();
   // Main pane: "All" flattens every item across the tree into the poster wall.
   const grid = page.getByRole("list", { name: "Files" });
   await expect(grid.getByRole("button", { name: /clip-a\.mp4/ })).toBeVisible();
