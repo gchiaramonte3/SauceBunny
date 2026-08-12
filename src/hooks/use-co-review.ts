@@ -215,6 +215,10 @@ export type CoReview = {
   clearOfferError: () => void;
   /** S.5: one quiet line about the copy running under a live stream, or null. */
   keepBadge: string | null;
+  /** What the chip does when clicked, or null when it is only a label. */
+  keepAction: { kind: "cancel" | "resume"; title: string } | null;
+  onKeepCancel: () => void;
+  onKeepResume: () => void;
   /** Whether watching also saves a copy on this Mac (Settings, per machine). */
   keepEnabled: boolean;
   setKeepEnabled: (on: boolean) => void;
@@ -1248,6 +1252,9 @@ export function useCoReview({
     offerError,
     clearOfferError: useCallback(() => setOfferError(null), []),
     keepBadge: streamKeep.badge,
+    keepAction: streamKeep.action,
+    onKeepCancel: streamKeep.onCancel,
+    onKeepResume: streamKeep.onResume,
     keepEnabled: streamKeep.enabled,
     setKeepEnabled: streamKeep.setEnabled,
     onKeepStall: streamKeep.onStall,

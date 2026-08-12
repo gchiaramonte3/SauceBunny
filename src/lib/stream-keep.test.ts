@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   IDLE_KEEP, KEEP_START_DELAY_MS, KEEP_YIELD_MS, keepBadge, keepProgress,
-  reduceKeep, shouldHandOff, shouldTransfer, type KeepState,
+  keepAction, reduceKeep, shouldHandOff, shouldTransfer, type KeepState,
 } from "./stream-keep";
 import { DOWNSHIFT_STALLS, DOWNSHIFT_WINDOW_MS } from "./stream-rung";
 
@@ -186,5 +186,82 @@ describe("the off switch", () => {
     expect(keepBadge(reduceKeep(IDLE_KEEP, {
       t: "watch", blake3: "abc", total: 1, relayed: true, enabled: true, at: 0,
     }))).toBeTruthy();
+  });
+});
+
+describe("stopping this copy, without changing the setting", () => {
+  it("stops, and a tick does NOT quietly restart it", () => {
+    // The trap: `yielded` resumes on a tick, so a cancel that reused it would
+    // undo itself thirty seconds later and the user would watch the copy they
+    // stopped come back.
+    const s = reduceKeep(running(0), { t: "cancel", at: 100 });
+    expect(s.phase).toBe("off");
+    expect(s.reason).toBe("cancelled");
+    expect(shouldTransfer(s)).toBe(false);
+    expect(reduceKeep(s, { t: "tick", at: 100 + 10 * KEEP_YIELD_MS }).phase).toBe("off");
+    // And a stall must not wake it either.
+    expect(reduceKeep(s, { t: "stall", at: 200 }).phase).toBe("off");
+  });
+
+  it("can be cancelled before it has started", () => {
+    const s = reduceKeep(watch(0), { t: "cancel", at: 5 });
+    expect(s.phase).toBe("off");
+    expect(reduceKeep(s, { t: "tick", at: KEEP_START_DELAY_MS * 5 }).phase).toBe("off");
+  });
+
+  it("is about THIS file, not the session: watching another starts fresh", () => {
+    const cancelled = reduceKeep(running(0), { t: "cancel", at: 100 });
+    const next = reduceKeep(cancelled, {
+      t: "watch", blake3: "xyz", total: 500, relayed: false, enabled: true, at: 200,
+    });
+    expect(next.phase).toBe("waiting");
+    expect(next.reason).toBeNull();
+  });
+
+  it("resumes straight into copying rather than waiting all over again", () => {
+    // The start delay is there to leave a FRESH stream alone. This one has been
+    // playing for a while, and the user just asked.
+    const s = reduceKeep(reduceKeep(running(0), { t: "cancel", at: 100 }), { t: "resume", at: 150 });
+    expect(s.phase).toBe("keeping");
+    expect(s.reason).toBeNull();
+    expect(shouldTransfer(s)).toBe(true);
+  });
+
+  it("never cancels a copy that already finished", () => {
+    // It has earned its handoff; throwing it away here would strand a file
+    // that is on disk and verified.
+    const done = reduceKeep(running(0), { t: "done", path: "/c/abc.mp4", at: 99 });
+    expect(reduceKeep(done, { t: "cancel", at: 100 })).toBe(done);
+    expect(shouldHandOff(reduceKeep(done, { t: "cancel", at: 100 }), "abc")).toBe(true);
+  });
+
+  it("resume only applies to a cancel, not to a refusal or a failure", () => {
+    const relayed = watch(0, true);
+    expect(reduceKeep(relayed, { t: "resume", at: 5 })).toBe(relayed);
+    const failed = reduceKeep(running(0), { t: "failed", at: 5 });
+    expect(reduceKeep(failed, { t: "resume", at: 10 })).toBe(failed);
+  });
+});
+
+describe("keepAction", () => {
+  it("offers to stop whenever a copy is live, in any of its three phases", () => {
+    expect(keepAction(watch(0))?.kind).toBe("cancel");
+    expect(keepAction(running(0))?.kind).toBe("cancel");
+    expect(keepAction(reduceKeep(running(0), { t: "stall", at: 5 }))?.kind).toBe("cancel");
+  });
+
+  it("offers to resume only after a cancel", () => {
+    expect(keepAction(reduceKeep(running(0), { t: "cancel", at: 5 }))?.kind).toBe("resume");
+    expect(keepAction(watch(0, true))).toBeNull(); // relayed: a label, not a button
+    expect(keepAction(IDLE_KEEP)).toBeNull();
+    expect(keepAction(reduceKeep(running(0), { t: "done", path: "/p", at: 5 }))).toBeNull();
+  });
+
+  it("is a button exactly when the chip has something to say back", () => {
+    // A chip that looks clickable and does nothing is worse than a label.
+    for (const s of [watch(0), running(0), reduceKeep(running(0), { t: "cancel", at: 5 })]) {
+      expect(keepAction(s)).not.toBeNull();
+      expect(keepBadge(s)).toBeTruthy();
+    }
   });
 });

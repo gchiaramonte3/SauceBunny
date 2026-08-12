@@ -5341,7 +5341,8 @@ export default function App() {
     shareState, shareStream, sharingMembers, startShare, stopShare,
     isPresenter, pendingSource, sourceStatus, makePresenter, adoptPendingSource,
     offeredFile, transfer, offerCurrentFile, offerError, fetchOfferedFile, watchOfferedStream, cancelFetch,
-    keepBadge, keepEnabled, setKeepEnabled, onKeepStall, onKeepStreamInfo,
+    keepBadge, keepAction, onKeepCancel, onKeepResume, keepEnabled, setKeepEnabled,
+    onKeepStall, onKeepStreamInfo,
     startCoReview, joinCoReview, leaveCoReview,
   } = useCoReview({
     isPlaying, fps, playbackRate,
@@ -6163,6 +6164,8 @@ export default function App() {
                     streamRungBadge={streamRung.badge}
                     streamRungBadgeTitle={streamRung.badgeTitle}
                     streamKeepBadge={keepBadge}
+                    streamKeepAction={keepAction}
+                    onStreamKeepAction={keepAction?.kind === "resume" ? onKeepResume : onKeepCancel}
                     onDiag={(tag, msg) => appendLog(asLogTag(tag), "seek", msg)}
                     /* Audio track + codecs are meaningful only while STREAMING (the
                        cached file is already muxed and sample-accurate). */

@@ -83,6 +83,11 @@ type Props = {
    *  questions ("how good is this picture" vs "will I still have this after"),
    *  and a chip that means two things gets read as neither. */
   streamKeepBadge?: string | null;
+  /** What the keep chip does when clicked, or null when it is only a label.
+   *  Drives whether it renders as a button at all — a chip that looks
+   *  clickable and does nothing is worse than a plain label. */
+  streamKeepAction?: { kind: "cancel" | "resume"; title: string } | null;
+  onStreamKeepAction?: () => void;
   /** Pipeline/seek diagnostics → the Pipeline log (channel "seek"). */
   onDiag?: (tag: string, message: string) => void;
   /** r75: RAW audio-track CDN URL for DASH-split sources (Reddit, YouTube
@@ -242,7 +247,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     resumeTitle, onResume, onboarding,
     aspect,
     sourceKind, localFilePath, webStreamUrl, webCachedUseMediabunny, streamStartAt, disableScrubPreview, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
-    streamRung, onStreamStall, onStreamInfo, streamRungBadge, streamRungBadgeTitle, streamKeepBadge,
+    streamRung, onStreamStall, onStreamInfo, streamRungBadge, streamRungBadgeTitle, streamKeepBadge, streamKeepAction, onStreamKeepAction,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs, scrubAudio,
     streamLoadingPhase,
     toast, onToastDismiss,
@@ -571,12 +576,28 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             under it, and deliberately understated: nobody asked for this, so it
             reports and never interrupts. */}
         {streamKeepBadge && (
-          <div
-            className="cp-stream-rung cp-stream-keep"
-            title="While you watch, the host's file is being saved to this Mac. When it finishes, playback switches to your own copy and you can scrub the whole thing."
-          >
-            {streamKeepBadge}
-          </div>
+          streamKeepAction ? (
+            /* The chip is the only place the copy is visible, so it is also
+               the only sane place to stop one. Stopping is NOT the Settings
+               toggle: that is a standing preference, and making it stand in
+               for "not this file" would force someone with one huge file to
+               disable the feature and remember to turn it back on. */
+            <button
+              type="button"
+              className="cp-stream-rung cp-stream-keep is-action"
+              title={streamKeepAction.title}
+              onClick={onStreamKeepAction}
+            >
+              {streamKeepBadge}
+            </button>
+          ) : (
+            <div
+              className="cp-stream-rung cp-stream-keep"
+              title="While you watch, the host's file is being saved to this Mac. When it finishes, playback switches to your own copy and you can scrub the whole thing."
+            >
+              {streamKeepBadge}
+            </div>
+          )
         )}
 
         {/* Type-a-timecode HUD — appears the moment the user types a digit

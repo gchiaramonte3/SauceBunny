@@ -88,8 +88,16 @@ export type KeepState = {
   since: number;
   /** Set only in `done`. */
   path: string | null;
-  /** Why keeping is off, when it is off for a reason worth saying out loud. */
-  reason: "relayed" | "declined" | null;
+  /**
+   * Why keeping is off. Three different things, and collapsing any two of them
+   * would make the UI wrong:
+   *   · "relayed"   — we refused, and should explain ourselves.
+   *   · "declined"  — a standing preference. Say nothing; they know.
+   *   · "cancelled" — they stopped THIS copy. Offer to resume it, because the
+   *                   partial is still on disk and the next file should not
+   *                   inherit the decision.
+   */
+  reason: "relayed" | "declined" | "cancelled" | null;
 };
 
 export const IDLE_KEEP: KeepState = Object.freeze({
@@ -110,7 +118,11 @@ export type KeepEvent =
   /** A failure retrying will not fix (verification, host withdrew the offer). */
   | { t: "failed"; at: number }
   /** Watching stopped, the source changed, or the session ended. */
-  | { t: "stop"; at: number };
+  | { t: "stop"; at: number }
+  /** The user stopped THIS copy, without changing their standing preference. */
+  | { t: "cancel"; at: number }
+  /** ...and changed their mind. The partial is still on disk. */
+  | { t: "resume"; at: number };
 
 /**
  * Advance the policy. Returns a NEW state; the caller compares `phase` with the
@@ -171,6 +183,22 @@ export function reduceKeep(s: KeepState, e: KeepEvent): KeepState {
     }
     case "stop":
       return { ...IDLE_KEEP, since: e.at };
+    case "cancel": {
+      // Only a live copy can be cancelled; cancelling a finished one would
+      // throw away a handoff that has already been earned.
+      if (s.phase !== "waiting" && s.phase !== "keeping" && s.phase !== "yielded") return s;
+      // blake3 is KEPT, which is what makes the decision specific to this file
+      // rather than to the session: watching something else starts fresh.
+      return { ...s, phase: "off", reason: "cancelled", since: e.at };
+    }
+    case "resume": {
+      if (s.phase !== "off" || s.reason !== "cancelled") return s;
+      // Straight to `keeping`, not back through `waiting`. The start delay
+      // exists to leave a FRESH stream alone while it settles, and this one has
+      // been playing for a while; making the user wait another ten seconds
+      // after they asked would just look broken.
+      return { ...s, phase: "keeping", reason: null, since: e.at };
+    }
   }
 }
 
@@ -212,8 +240,12 @@ export function keepProgress(s: KeepState): number | null {
 export function keepBadge(s: KeepState): string | null {
   switch (s.phase) {
     case "off":
+      if (s.reason === "relayed") return "Not saving a copy on a relayed connection";
+      // An invitation rather than a status: the partial is on disk, so this is
+      // one click from where they left it.
+      if (s.reason === "cancelled") return "Save a copy";
       // "declined" says nothing on purpose — see the reducer.
-      return s.reason === "relayed" ? "Not saving a copy on a relayed connection" : null;
+      return null;
     case "waiting":
       return "Saving a copy shortly";
     case "keeping": {
@@ -227,4 +259,27 @@ export function keepBadge(s: KeepState): string | null {
     case "failed":
       return "Could not save a copy";
   }
+}
+
+/**
+ * What the status chip does when clicked, or null when it is only a label.
+ *
+ * The chip is the only place a copy is visible, so it is also the only sane
+ * place to stop one. Exposing this as a single derived value keeps the button's
+ * label, its action, and whether it is a button at all from being three
+ * independent opinions in the component.
+ */
+export type KeepAction = { kind: "cancel" | "resume"; title: string } | null;
+
+export function keepAction(s: KeepState): KeepAction {
+  if (s.phase === "waiting" || s.phase === "keeping" || s.phase === "yielded") {
+    return {
+      kind: "cancel",
+      title: "Stop saving this copy. What has arrived is kept, so resuming picks up where it stopped.",
+    };
+  }
+  if (s.phase === "off" && s.reason === "cancelled") {
+    return { kind: "resume", title: "Resume saving this copy, from where it stopped." };
+  }
+  return null;
 }

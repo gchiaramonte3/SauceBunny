@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
-  IDLE_KEEP, keepBadge, reduceKeep, shouldHandOff, shouldTransfer,
+  IDLE_KEEP, keepAction, keepBadge, reduceKeep, shouldHandOff, shouldTransfer,
   type KeepEvent, type KeepState,
 } from "../lib/stream-keep";
 import { loadJson, saveJson } from "../lib/storage";
@@ -52,7 +52,8 @@ export function useStreamKeep({
   const relayedRef = useRef(false);
   /** The blake3 whose fetch we currently have in flight, so it starts once. */
   const inFlightRef = useRef<string | null>(null);
-  /** Set while WE are cancelling, so the resulting rejection stays quiet. */
+  /** Set while WE are tearing the fetch down (yielding, or the user stopping
+   *  it), so the resulting rejection is not reported as a failure. */
   const yieldingRef = useRef(false);
   /** Handed off already; the swap must happen exactly once. */
   const handedRef = useRef<string | null>(null);
@@ -149,11 +150,24 @@ export function useStreamKeep({
   }, [state, watching, onHandOff, log]);
 
   const badge = useMemo(() => keepBadge(state), [state]);
+  const action = useMemo(() => keepAction(state), [state]);
+
+  /** Stop THIS copy. Deliberately separate from the setting: "not this file"
+   *  and "never on this Mac" are different decisions, and making one stand in
+   *  for the other would force a user with one huge file to disable the
+   *  feature and remember to turn it back on. */
+  const onCancel = useCallback(() => {
+    dispatch((at) => ({ t: "cancel", at }));
+  }, [dispatch]);
+
+  const onResume = useCallback(() => {
+    dispatch((at) => ({ t: "resume", at }));
+  }, [dispatch]);
 
   const setEnabled = useCallback((next: boolean) => {
     setEnabledState(next);
     saveJson(PREF_KEY, next);
   }, []);
 
-  return { state, badge, enabled, setEnabled, onStall, onStreamInfo };
+  return { state, badge, action, enabled, setEnabled, onCancel, onResume, onStall, onStreamInfo };
 }

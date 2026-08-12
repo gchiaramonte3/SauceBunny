@@ -135,6 +135,34 @@
   top: 40px;
 }
 
+/* The actionable variant. Its sibling is deliberately inert, so this one has
+   to opt back into being clickable AND look like it means it — a chip that
+   takes a click while looking exactly like the label next to it is how people
+   stop trusting either. Inherits the chip's own font: a <button> would
+   otherwise fall back to the UA's. */
+.cp-stream-keep.is-action {
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.cp-stream-keep.is-action:hover {
+  color: var(--text-1);
+  border-color: var(--line-1);
+}
+
+/* Focus brightens toward white, never the green accent — the focus contract
+   in base.css, guarded by src/lib/focus-contract.test.ts. */
+.cp-stream-keep.is-action:focus-visible {
+  outline: none;
+  color: var(--text-1);
+  border-color: var(--focus-ring);
+}
+
 .cp-tc-hud {
   position: absolute;
   left: 50%;
