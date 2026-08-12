@@ -98,8 +98,9 @@ export const IDLE_KEEP: KeepState = Object.freeze({
 });
 
 export type KeepEvent =
-  /** A Tier B watch started. `relayed` comes from the transport's X-Relay. */
-  | { t: "watch"; blake3: string; total: number; relayed: boolean; at: number }
+  /** A Tier B watch started. `relayed` comes from the transport's X-Relay;
+   *  `enabled` is the user's standing preference for this machine. */
+  | { t: "watch"; blake3: string; total: number; relayed: boolean; enabled: boolean; at: number }
   /** The `<video>` ran out of buffered media — the signal to back off. */
   | { t: "stall"; at: number }
   /** Periodic poll: the only thing that starts or resumes a copy. */
@@ -118,6 +119,13 @@ export type KeepEvent =
 export function reduceKeep(s: KeepState, e: KeepEvent): KeepState {
   switch (e.t) {
     case "watch": {
+      // Turned off in Settings. Recorded as a reason rather than a bare `off`
+      // so the UI can stay SILENT about it: a machine that has opted out of
+      // background copies should not be told about the one it just declined,
+      // every single time it watches something.
+      if (!e.enabled) {
+        return { ...IDLE_KEEP, phase: "off", blake3: e.blake3, reason: "declined", since: e.at };
+      }
       // A relayed path carries the media across n0's public infrastructure
       // rather than between the two Macs. The ladder already refuses to spend
       // more than its lowest rung there; quietly pulling the entire file
@@ -204,6 +212,7 @@ export function keepProgress(s: KeepState): number | null {
 export function keepBadge(s: KeepState): string | null {
   switch (s.phase) {
     case "off":
+      // "declined" says nothing on purpose — see the reducer.
       return s.reason === "relayed" ? "Not saving a copy on a relayed connection" : null;
     case "waiting":
       return "Saving a copy shortly";

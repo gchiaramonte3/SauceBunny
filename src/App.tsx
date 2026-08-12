@@ -5341,7 +5341,7 @@ export default function App() {
     shareState, shareStream, sharingMembers, startShare, stopShare,
     isPresenter, pendingSource, sourceStatus, makePresenter, adoptPendingSource,
     offeredFile, transfer, offerCurrentFile, offerError, fetchOfferedFile, watchOfferedStream, cancelFetch,
-    keepBadge, onKeepStall, onKeepStreamInfo,
+    keepBadge, keepEnabled, setKeepEnabled, onKeepStall, onKeepStreamInfo,
     startCoReview, joinCoReview, leaveCoReview,
   } = useCoReview({
     isPlaying, fps, playbackRate,
@@ -6619,6 +6619,8 @@ export default function App() {
         setDefaults={setDefaults}
         streamRungPref={streamRung.pref}
         setStreamRungPref={streamRung.setPref}
+        keepEnabled={keepEnabled}
+        setKeepEnabled={setKeepEnabled}
         keybindings={keybindings}
         setKeybindings={setKeybindings}
         initialTab={settingsInitialTab}

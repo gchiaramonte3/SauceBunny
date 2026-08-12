@@ -5,6 +5,11 @@ import {
   IDLE_KEEP, keepBadge, reduceKeep, shouldHandOff, shouldTransfer,
   type KeepEvent, type KeepState,
 } from "../lib/stream-keep";
+import { loadJson, saveJson } from "../lib/storage";
+
+/** Standing per-machine preference. Default ON: the guest already consented at
+ *  the moment it matters, because the Watch button names the write. */
+const PREF_KEY = "saucebunny.streamKeep";
 
 /**
  * "Watch it now" also keeps it: the React shell around the pure policy in
@@ -31,6 +36,11 @@ export function useStreamKeep({
   onHandOff: (path: string, name: string) => void;
   log?: (level: "ok" | "info" | "err", msg: string) => void;
 }) {
+  const [enabled, setEnabledState] = useState<boolean>(
+    () => loadJson<unknown>(PREF_KEY, true) !== false,
+  );
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
   const [state, setState] = useState<KeepState>(IDLE_KEEP);
   const dispatch = useCallback((make: (now: number) => KeepEvent) => {
     setState((s) => reduceKeep(s, make(Date.now())));
@@ -67,9 +77,12 @@ export function useStreamKeep({
     }
     dispatch((at) => ({
       t: "watch", blake3: watching.blake3, total: watching.total,
-      relayed: relayedRef.current, at,
+      relayed: relayedRef.current, enabled: enabledRef.current, at,
     }));
-  }, [watching, dispatch]);
+    // `enabled` is a dep so flipping the setting mid-watch re-decides rather
+    // than waiting for the next source: turning it off should stop the copy
+    // that is running, which is the only reason someone reaches for it.
+  }, [watching, enabled, dispatch]);
 
   // The delays are 10s and 30s, so 5s granularity is invisible against them
   // and costs one comparison in a pure function. Only runs while a copy is
@@ -137,5 +150,10 @@ export function useStreamKeep({
 
   const badge = useMemo(() => keepBadge(state), [state]);
 
-  return { state, badge, onStall, onStreamInfo };
+  const setEnabled = useCallback((next: boolean) => {
+    setEnabledState(next);
+    saveJson(PREF_KEY, next);
+  }, []);
+
+  return { state, badge, enabled, setEnabled, onStall, onStreamInfo };
 }

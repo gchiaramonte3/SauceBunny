@@ -6,7 +6,7 @@ import {
 import { DOWNSHIFT_STALLS, DOWNSHIFT_WINDOW_MS } from "./stream-rung";
 
 const watch = (at = 0, relayed = false): KeepState =>
-  reduceKeep(IDLE_KEEP, { t: "watch", blake3: "abc", total: 1000, relayed, at });
+  reduceKeep(IDLE_KEEP, { t: "watch", blake3: "abc", total: 1000, relayed, enabled: true, at });
 
 /** Advance to a running copy the way real time does: watch, then tick past
  *  the start delay. */
@@ -135,7 +135,7 @@ describe("abandoning", () => {
   });
 
   it("watching a different file replaces the copy rather than merging", () => {
-    const s = reduceKeep(running(0), { t: "watch", blake3: "xyz", total: 55, relayed: false, at: 200 });
+    const s = reduceKeep(running(0), { t: "watch", blake3: "xyz", total: 55, relayed: false, enabled: true, at: 200 });
     expect(s.blake3).toBe("xyz");
     expect(s.received).toBe(0);
     expect(s.total).toBe(55);
@@ -164,5 +164,27 @@ describe("progress and copy", () => {
     expect(keepBadge(s)).toBe("Saving a copy · 50%");
     expect(keepBadge(reduceKeep(s, { t: "stall", at: 1 }))).toMatch(/paused/);
     expect(keepBadge(reduceKeep(s, { t: "done", path: "/p", at: 1 }))).toMatch(/own copy/);
+  });
+});
+
+describe("the off switch", () => {
+  const declined = reduceKeep(IDLE_KEEP, {
+    t: "watch", blake3: "abc", total: 1000, relayed: false, enabled: false, at: 0,
+  });
+
+  it("does not copy when the user has turned it off", () => {
+    expect(declined.phase).toBe("off");
+    expect(declined.reason).toBe("declined");
+    expect(shouldTransfer(declined)).toBe(false);
+    expect(reduceKeep(declined, { t: "tick", at: 10 * KEEP_START_DELAY_MS }).phase).toBe("off");
+  });
+
+  it("says NOTHING about it, unlike the relay case", () => {
+    // Being told about the copy you switched off, every time you watch
+    // anything, is how a setting becomes a nag.
+    expect(keepBadge(declined)).toBeNull();
+    expect(keepBadge(reduceKeep(IDLE_KEEP, {
+      t: "watch", blake3: "abc", total: 1, relayed: true, enabled: true, at: 0,
+    }))).toBeTruthy();
   });
 });

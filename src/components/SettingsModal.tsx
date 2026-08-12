@@ -194,6 +194,9 @@ type Props = {
    *  — a downshift happens while the user is watching, not when Settings is
    *  saved. */
   streamRungPref: "auto" | 1080 | 720 | 540 | 360;
+  /** S.5: whether watching a peer stream also saves a copy on this Mac. */
+  keepEnabled: boolean;
+  setKeepEnabled: (on: boolean) => void;
   setStreamRungPref: (p: "auto" | 1080 | 720 | 540 | 360) => void;
   /** User keyboard-shortcut overrides + setter (Settings → Commands). */
   keybindings: KeybindingOverrides;
@@ -386,7 +389,7 @@ function ModelInfoPopover({ id }: { id: string }) {
 export function SettingsModal(props: Props) {
   const {
     open, onClose, defaults, setDefaults, keybindings, setKeybindings,
-    streamRungPref, setStreamRungPref,
+    streamRungPref, setStreamRungPref, keepEnabled, setKeepEnabled,
     onApplyToCurrent, initialTab, commands,
     diarizerReady, diarizerPrepareState, diarizerPrepareError,
     onPrepareDiarizerModels, onCancelDiarizerPrepare,
@@ -864,6 +867,27 @@ export function SettingsModal(props: Props) {
                         <option value="540">540p</option>
                         <option value="360">360p</option>
                       </select>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Save a copy while watching
+                      <span className="desc">
+                        When you watch a file streamed from someone else&rsquo;s Mac, it is also copied here in
+                        the background. When the copy finishes, playback switches to it, you can scrub the whole
+                        file, and you keep it afterwards. The copy always gives way to the picture, so it never
+                        costs you quality. Turn this off if you are short of disk space. Nothing is ever saved
+                        over a relayed connection.
+                      </span>
+                    </div>
+                    <div className="v">
+                      <button
+                        className={"cp-toggle-switch" + (keepEnabled ? " on" : "")}
+                        role="switch"
+                        aria-checked={keepEnabled}
+                        aria-label="Save a copy while watching"
+                        onClick={() => setKeepEnabled(!keepEnabled)}
+                      />
                     </div>
                   </div>
                   <div className="cp-pane-row">
