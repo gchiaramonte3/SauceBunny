@@ -257,6 +257,42 @@
     transform 0.12s var(--ease-out);
 }
 .cp-gen-btn:disabled { cursor: default; }
+
+/* Violet bloom on the trailing edge.
+ *
+ * The CTA language is green, and green here means "this runs the machine" —
+ * the same accent the app uses for live state. The bloom does not replace it;
+ * it warms the far end so the button reads as a gradient rather than a slab,
+ * and it borrows --novella-violet, which is the brand purple already carrying
+ * the welcome hero and the transcript drop-target. Reached through color-mix
+ * rather than a new token or a raw hex, the same way welcome.css does it.
+ *
+ * Anchored at 40% so the sparkle and the first words stay on clean ground:
+ * a gradient that starts at the left edge tints the label and costs contrast
+ * on the one string the button exists to say.
+ *
+ * z-index 0 puts it under the progress fill (also 0, but later in paint order
+ * as a real child), so a running job still reads its own percentage clearly.
+ */
+.cp-gen-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.6;
+  background: linear-gradient(
+    100deg,
+    transparent 40%,
+    color-mix(in srgb, var(--novella-violet) 16%, transparent) 76%,
+    color-mix(in srgb, var(--novella-violet) 32%, transparent) 100%
+  );
+  transition: opacity 0.35s var(--ease-out);
+}
+.cp-gen-btn:hover:not(:disabled)::before { opacity: 1; }
+.cp-gen-btn:disabled:not(.loading)::before { opacity: 0.25; }
+
 /* Top highlight glow — hidden at rest, blooms on hover / while loading. */
 .cp-gen-btn::after {
   content: "";
@@ -289,13 +325,58 @@
 }
 .cp-gen-btn.loading::after { opacity: 0.6; }
 
-/* Green progress underfill (loading only). */
+/* Running: a sheen travels the button, left to right, and dies into the
+ * violet edge.
+ *
+ * WHY A SWEEP AND NOT A PULSE. Whisper on a long file is minutes of the same
+ * percentage, and a pulse in place reads as a heartbeat — alive, but saying
+ * nothing about direction. A sweep that always runs the same way says "still
+ * moving through it", which is the one thing a stalled-looking progress bar
+ * needs to communicate. It also runs independently of the percentage, so the
+ * diarize phase (where the bar is pinned by design) still looks like work
+ * rather than like a hang.
+ *
+ * Two layers on one pseudo-element: the standing bloom keeps its position,
+ * the sheen is the only thing that moves.
+ */
+.cp-gen-btn.loading::before {
+  opacity: 1;
+  background:
+    linear-gradient(
+      100deg,
+      transparent 48%,
+      color-mix(in srgb, var(--novella-violet) 20%, transparent) 100%
+    ),
+    linear-gradient(
+      100deg,
+      transparent 38%,
+      rgba(255, 255, 255, 0.06) 48%,
+      color-mix(in srgb, var(--novella-violet) 26%, transparent) 54%,
+      transparent 66%
+    );
+  background-size: 100% 100%, 240% 100%;
+  background-repeat: no-repeat;
+  background-position: 0 0, -140% 0;
+  animation: cp-gen-sweep 2.1s var(--ease-out) infinite;
+}
+@keyframes cp-gen-sweep {
+  to { background-position: 0 0, 240% 0; }
+}
+
+/* Progress underfill (loading only). Green at the start, resolving into the
+ * violet at the leading edge, so the fill and the bloom are one idea rather
+ * than two colours meeting in the middle. */
 .cp-gen-fill {
   position: absolute;
   inset: 0 auto 0 0;
   z-index: 0;
   border-radius: inherit;
-  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.05), rgba(var(--accent-rgb), 0.16));
+  background: linear-gradient(
+    90deg,
+    rgba(var(--accent-rgb), 0.05),
+    rgba(var(--accent-rgb), 0.16) 72%,
+    color-mix(in srgb, var(--novella-violet) 14%, transparent) 100%
+  );
   box-shadow: inset -1px 0 8px rgba(var(--accent-rgb), 0.35);
   transition: width 0.35s var(--ease-out);
 }
@@ -350,6 +431,9 @@
 @media (prefers-reduced-motion: reduce) {
   .cp-gen-svg, .cp-gen-letter { animation: none; }
   .cp-gen-btn:hover:not(:disabled) { transform: none; }
+  /* The sweep stops; the colour it sweeps through stays, so a running job
+     still looks different from a resting one. */
+  .cp-gen-btn.loading::before { animation: none; background-position: 0 0, 60% 0; }
 }
 
 /* ──────────────────────────────────────────────────────────────────
