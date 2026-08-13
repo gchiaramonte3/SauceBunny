@@ -332,6 +332,42 @@
 }
 .cp-gen-btn.loading::after { opacity: 0.6; }
 
+/* A light travels the rim while it runs.
+ *
+ * Two backgrounds on one box: an opaque fill clipped to padding-box, and a
+ * conic gradient clipped to border-box. The border becomes a window onto the
+ * gradient, and rotating the gradient's angle walks a highlight around the
+ * perimeter — with the border-radius honoured, which border-image cannot do.
+ *
+ * The angle is a registered custom property because a plain one is a string:
+ * the browser would step it from 0deg to 360deg in one frame rather than
+ * interpolate. `@property` gives it a type, and only then does it animate.
+ *
+ * The arc is short (about 70 degrees of the 360) so it reads as one travelling
+ * highlight rather than a spinning barber pole, and it runs green→violet, the
+ * same journey the button makes left to right.
+ */
+@property --cp-rim {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+.cp-gen-btn.loading {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--bg-2), var(--bg-2)) padding-box,
+    conic-gradient(
+      from var(--cp-rim),
+      transparent 0deg,
+      rgba(var(--accent-rgb), 0.75) 26deg,
+      color-mix(in srgb, var(--novella-violet) 90%, transparent) 58deg,
+      transparent 82deg,
+      transparent 360deg
+    ) border-box;
+  animation: cp-gen-rim 2.6s linear infinite;
+}
+@keyframes cp-gen-rim { to { --cp-rim: 360deg; } }
+
 /* Running: a sheen travels the button, left to right, and dies into the
  * violet edge.
  *
@@ -463,6 +499,9 @@
   /* The sweep stops; the colour it sweeps through stays, so a running job
      still looks different from a resting one. */
   .cp-gen-btn.loading::before { animation: none; background-position: 0 0, 60% 0; }
+  /* The rim stops travelling; the lit border stays, so a running job still
+     announces itself. */
+  .cp-gen-btn.loading { animation: none; }
 }
 
 /* ──────────────────────────────────────────────────────────────────
