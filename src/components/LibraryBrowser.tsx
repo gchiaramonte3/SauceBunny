@@ -5,6 +5,7 @@ import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
 import { LibraryBrowserPane } from "./LibraryBrowserPane";
 import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { useFinderTags } from "../hooks/use-finder-tags";
+import { CachedWebPane } from "./CachedWebPane";
 import { marqueeSelection } from "../lib/marquee";
 import { RenameDialog } from "./RenameDialog";
 import { LibraryQuickLook } from "./LibraryQuickLook";
@@ -48,6 +49,9 @@ type Props = {
   scanning: boolean;
   addFolder: () => Promise<void>;
   removeRoot: (root: string) => void;
+  /** Re-open a cached web source. The URL goes back through the normal fetch
+   *  path, which finds the warm cache and skips extraction. */
+  onOpenWebUrl: (url: string) => void;
   rescanAll: () => void;
   requestThumb: (path: string) => Promise<string | null>;
   invalidateThumb: (path: string) => void;
@@ -89,12 +93,17 @@ type Props = {
 const BROWSE_CAP = 300;
 
 export function LibraryBrowser({
-  roots, scans, scanning, addFolder, removeRoot, rescanAll, requestThumb, invalidateThumb,
+  roots, scans, scanning, addFolder, removeRoot, onOpenWebUrl, rescanAll, requestThumb, invalidateThumb,
   posterVersions, bumpPoster, resetPoster, selection, selectionTick,
   onOpenLocalPath, onReviewLocalPath, onOpenTranscriptHistory,
   onBatchTranscribe, batchLine, onBatchCancel,
 }: Props) {
   const [selected, setSelected] = useState<LibraryCrumb[] | null>(selection);
+  /** The cached-web shelf replaces the file pane when chosen. Separate state
+   *  rather than a third value of `selected`, because every folder verb below
+   *  is typed against a crumb chain and would need widening for a view that
+   *  has no folder at all. */
+  const [webView, setWebView] = useState(false);
   const [prefs, setPrefs] = useState<BrowserPrefs>(() => normalizePrefs(loadJson<unknown>(BROWSER_KEY, {})));
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
@@ -294,7 +303,7 @@ export function LibraryBrowser({
         <LibraryTree
           trees={trees}
           selection={selected}
-          onSelect={(chain) => { setSelected(chain); setDetailItem(null); }}
+          onSelect={(chain) => { setSelected(chain); setDetailItem(null); setWebView(false); }}
           kind={prefs.kind}
           onKind={(kind) => patchPrefs({ kind })}
           onCollapse={() => setTreeOpen(false)}
@@ -302,9 +311,18 @@ export function LibraryBrowser({
           rescanAll={rescanAll}
           scanning={scanning}
           removeRoot={removeRoot}
+          webSelected={webView}
+          onSelectWeb={() => { setWebView(true); setDetailItem(null); }}
         />
       )}
       <div className="cp-lib-main">
+        {webView ? (
+          /* The web shelf owns the whole pane. The bar's crumbs, sort and
+             search are folder concepts; showing them over a list of URLs
+             would offer controls that do nothing. */
+          <CachedWebPane onOpenUrl={onOpenWebUrl} />
+        ) : (
+        <>
         <LibraryBrowserBar
           chain={selected}
           onCrumb={(chain) => { setSelected(chain); setDetailItem(null); }}
@@ -424,6 +442,8 @@ export function LibraryBrowser({
             {totalBytes > 0 ? ` · ${formatBytes(totalBytes)}` : ""}
             {overflow > 0 ? ` · showing ${shown.length}, ${overflow} more not shown` : ""}
           </div>
+        )}
+        </>
         )}
       </div>
 

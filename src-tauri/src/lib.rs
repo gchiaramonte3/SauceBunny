@@ -264,6 +264,8 @@ pub fn run() {
             commands::clear_all_cache,
             commands::clear_cache_category,
             commands::get_warm_start,
+            commands::list_cached_web,
+            commands::forget_cached_web,
             commands::get_backend_build_id,
             commands::get_stream_proxy_base,
             commands::peer_media_register,

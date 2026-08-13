@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { IconChevronRight, IconPanelLeft, IconPlus, IconRefresh, IconStack, IconFolderSolid } from "./Icons";
+import { IconChevronRight, IconLink, IconPanelLeft, IconPlus, IconRefresh, IconStack, IconFolderSolid } from "./Icons";
 import type { LibraryFolder } from "../types";
 import { libraryPosterPaths, type LibraryCrumb, type LibraryKindFilter } from "../lib/library";
 import { FolderTagMenu } from "./FolderTagMenu";
@@ -23,6 +23,10 @@ type Props = {
   /** Drop a ROOT from the library. Subfolders are not library entries, so
    *  the menu only offers this on depth-0 rows. */
   removeRoot: (root: string) => void;
+  /** The cached-web shelf, which is a peer of "All" rather than a folder:
+   *  it lists URLs this Mac has resolved, not files in a directory. */
+  webSelected: boolean;
+  onSelectWeb: () => void;
 };
 
 type Row = {
@@ -79,7 +83,7 @@ function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
  */
 export function LibraryTree({
   trees, selection, onSelect, kind, onKind, onCollapse,
-  addFolder, rescanAll, scanning, removeRoot,
+  addFolder, rescanAll, scanning, removeRoot, webSelected, onSelectWeb,
 }: Props) {
   // Roots open by default; ancestors of the current selection are auto-revealed.
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -252,6 +256,23 @@ export function LibraryTree({
         ))}
       </div>
       <div className="cp-lib-tree-scroll" role="tree" aria-label="Library folders" onKeyDown={onKeyDown}>
+        {/* Sits directly under "All" because it is the same KIND of thing —
+            a view over everything of a category — rather than a folder that
+            happens to live somewhere. Below the roots it would read as one
+            more drive. */}
+        <button
+          type="button"
+          role="treeitem"
+          aria-level={1}
+          aria-selected={webSelected}
+          tabIndex={-1}
+          className={"cp-lib-tree-row cp-lib-tree-web" + (webSelected ? " selected" : "")}
+          style={{ ["--depth" as string]: "0" }}
+          onClick={onSelectWeb}
+        >
+          <span className="cp-lib-tree-tw empty" aria-hidden="true"><IconLink size={13} /></span>
+          <span className="cp-lib-tree-name">From the web</span>
+        </button>
         {rows.map((row) => {
           const isSel = row.key === selKey;
           return (
@@ -264,7 +285,7 @@ export function LibraryTree({
               aria-selected={isSel}
               aria-expanded={row.hasChildren ? row.expanded : undefined}
               tabIndex={row.key === active ? 0 : -1}
-              className={"cp-lib-tree-row" + (isSel ? " selected" : "")}
+              className={"cp-lib-tree-row" + (isSel && !webSelected ? " selected" : "")}
               style={{ ["--depth" as string]: String(row.depth) }}
               onClick={() => { setActiveKey(row.key); onSelect(row.chain); }}
               onContextMenu={(e) => {

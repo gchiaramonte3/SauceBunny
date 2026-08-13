@@ -5746,6 +5746,7 @@ export default function App() {
           <div ref={libraryViewRef} tabIndex={-1} className="cp-view cp-view-library" hidden={activeView !== "library"}>
             <LibraryBrowser
               onReviewLocalPath={handleReviewLocalPath}
+              onOpenWebUrl={(u: string) => { setUrl(u); void handleFetch(u); }}
               roots={lib.roots}
               scans={lib.scans}
               scanning={lib.scanning}

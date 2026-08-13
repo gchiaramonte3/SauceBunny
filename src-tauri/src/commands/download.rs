@@ -2567,3 +2567,95 @@ mod chapter_tests {
         assert_eq!(truncate_chars("hello", MAX_DESCRIPTION_CHARS), "hello");
     }
 }
+
+/// One cached web source, as the Library's web shelf needs it.
+///
+/// Built from the warm-start metadata the resolver already writes, so this
+/// adds no new bookkeeping — it reads what "download once, reuse forever"
+/// has been recording all along.
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
+pub struct CachedWebItem {
+    pub url: String,
+    pub title: Option<String>,
+    pub thumbnail: Option<String>,
+    pub uploader: Option<String>,
+    pub duration_seconds: Option<f64>,
+    /// Unix seconds when the page was last resolved.
+    #[ts(type = "number")]
+    pub fetched_at: u64,
+    /// The downloaded copy on disk, when there is one.
+    pub path: Option<String>,
+    #[ts(type = "number | null")]
+    pub size_bytes: Option<u64>,
+}
+
+/// Every web source this machine has cached, newest metadata first.
+///
+/// METADATA-ONLY ENTRIES ARE INCLUDED ON PURPOSE. Most cached sources have no
+/// downloaded copy — the app streams them and keeps only the resolve. Those
+/// are still worth listing: re-opening one skips yt-dlp's extraction, which is
+/// the ten-to-fifteen seconds the user actually feels. A shelf that showed
+/// only the fully-downloaded ones would hide almost everything and would look
+/// broken to someone who has watched forty clips.
+///
+/// A meta file that will not parse is SKIPPED rather than failing the batch:
+/// one bad entry must not empty the shelf.
+#[tauri::command]
+pub async fn list_cached_web(app: AppHandle) -> Result<Vec<CachedWebItem>, crate::AppError> {
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| crate::AppError::internal(format!("app_cache_dir: {e}")))?;
+    let dir = media_cache_dir(&cache, "meta");
+    let Ok(entries) = std::fs::read_dir(&dir) else { return Ok(Vec::new()) };
+
+    let mut out: Vec<CachedWebItem> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let Ok(meta) = serde_json::from_slice::<SourceMeta>(&bytes) else { continue };
+        let md = meta.metadata.as_ref();
+        let copy = find_cached_download(&cache, &meta.url);
+        let size = copy
+            .as_ref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .map(|m| m.len());
+        out.push(CachedWebItem {
+            // `title` is a plain String on Metadata, not an Option: map, not and_then.
+            title: md.map(|m| m.title.clone()),
+            thumbnail: md.and_then(|m| m.thumbnail.clone()),
+            uploader: md.and_then(|m| m.uploader.clone()),
+            duration_seconds: md.and_then(|m| m.duration),
+            fetched_at: meta.fetched_at.unwrap_or(0),
+            path: copy.and_then(|p| p.to_str().map(String::from)),
+            size_bytes: size,
+            url: meta.url,
+        });
+    }
+    out.sort_by(|a, b| b.fetched_at.cmp(&a.fetched_at));
+    Ok(out)
+}
+
+/// Forget one cached web source: its metadata and its downloaded copy.
+///
+/// Named "forget" rather than "delete" because the source itself is a URL on
+/// the internet and is entirely unaffected — this reclaims disk and nothing
+/// more. A missing file is success, not an error: the end state the caller
+/// asked for is "this is not on my disk".
+#[tauri::command]
+pub async fn forget_cached_web(app: AppHandle, url: String) -> Result<(), crate::AppError> {
+    validate_source_url(&url)?;
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| crate::AppError::internal(format!("app_cache_dir: {e}")))?;
+    if let Some(p) = find_cached_download(&cache, &url) {
+        let _ = std::fs::remove_file(p);
+    }
+    let _ = std::fs::remove_file(meta_path(&cache, &url));
+    Ok(())
+}
