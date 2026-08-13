@@ -173,6 +173,24 @@ mod tests {
     }
 
     #[test]
+    fn finder_writes_index_1_for_every_colour() {
+        // Measured on a real Tahoe machine, from folders Finder renders in four
+        // DIFFERENT colours. The index is not the colour: Finder resolves a
+        // named tag from its own tag list and writes 1 regardless. Trusting it
+        // painted every Finder-tagged folder grey, so the frontend resolves by
+        // NAME first (see swatchForTag in src/lib/finder-tags.ts) and this test
+        // pins the encoding that makes that necessary.
+        for name in ["Purple", "Red", "Green", "Blue"] {
+            // What Finder actually leaves on disk: the colour NAME, then 1.
+            let on_disk = vec![FinderTag { name: name.into(), color: 1 }];
+            let back = decode(&encode(&on_disk).unwrap());
+            assert_eq!(back.len(), 1, "{name}");
+            assert_eq!(back[0].name, name);
+            assert_eq!(back[0].color, 1, "Finder really does write 1 for {name}");
+        }
+    }
+
+    #[test]
     fn garbage_decodes_to_nothing_rather_than_panicking() {
         assert!(decode(b"not a plist at all").is_empty());
         assert!(decode(&[]).is_empty());
