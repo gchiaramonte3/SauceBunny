@@ -16,6 +16,41 @@ import { IconCircleCheck, IconCircleX } from "./Icons";
  * `.cp-draw` keyframe as StatefulButton), then `onResolved` fires `resolveMs`
  * later so the parent can clear it back to idle.
  */
+
+/**
+ * One four-point sparkle: a diamond whose sides are pulled inward, which is
+ * what separates a sparkle from a star.
+ *
+ * `k` is how hard the curve is drawn toward the centre. At 0.5 the waist is
+ * thin enough to read as a glint at 14px, where a five-point star just fills
+ * in and becomes a blob.
+ */
+function sparkPath(cx: number, cy: number, r: number): string {
+  const k = r * 0.5;
+  return `M${cx} ${cy - r}`
+    + `C${cx} ${cy - k} ${cx + k} ${cy} ${cx + r} ${cy}`
+    + `C${cx + k} ${cy} ${cx} ${cy + k} ${cx} ${cy + r}`
+    + `C${cx} ${cy + k} ${cx - k} ${cy} ${cx - r} ${cy}`
+    + `C${cx - k} ${cy} ${cx} ${cy - k} ${cx} ${cy - r}Z`;
+}
+
+/**
+ * THREE sparkles, not one. A lone star reads as "favourite" or "rating"; the
+ * cluster of one large and two small is the shape that has come to mean
+ * generated, and getting that wrong makes the button's most important promise
+ * in the wrong language.
+ *
+ * Sized and placed so they do not merge at 14px: the big one owns the left,
+ * the two small ones sit off its upper-right and lower-right diagonals with
+ * clear gaps. Drawn as SEPARATE paths so each can twinkle on its own clock —
+ * one glyph twinkling as a unit looks like a blinking icon, three on offset
+ * timers look like something thinking.
+ */
+const SPARKS: ReadonlyArray<readonly [number, number, number]> = [
+  [9.2, 13.4, 7.4],
+  [18.1, 6.6, 4.3],
+  [19.4, 16.2, 2.9],
+];
 export function GenerateButton({
   idleLabel,
   loadingLabel = "Generating…",
@@ -72,7 +107,9 @@ export function GenerateButton({
         <span className="cp-gen-fill" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} aria-hidden />
       )}
       <svg className="cp-gen-svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-        <path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
+        {SPARKS.map((s, i) => (
+          <path key={i} className="cp-gen-star" d={sparkPath(s[0], s[1], s[2])} />
+        ))}
       </svg>
       <span className="cp-gen-txt">
         <span className="cp-gen-idle" aria-hidden={loading}>

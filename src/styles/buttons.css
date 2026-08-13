@@ -313,6 +313,13 @@
 .cp-gen-btn:hover:not(:disabled) {
   border-color: rgba(var(--accent-rgb), 0.45);
   transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.10),
+    inset 0 2px 6px rgba(255, 255, 255, 0.04),
+    0 1px 2px rgba(0, 0, 0, 0.45),
+    /* The halo is offset RIGHT, so it reads as the violet edge glowing rather
+       than a ring around the whole button. */
+    6px 0 18px -6px color-mix(in srgb, var(--novella-violet) 55%, transparent);
 }
 .cp-gen-btn:hover:not(:disabled)::after { opacity: 0.5; }
 .cp-gen-btn:active:not(:disabled) { transform: translateY(0); }
@@ -381,22 +388,44 @@
   transition: width 0.35s var(--ease-out);
 }
 
-/* Sparkle — flickers at rest, brightens to accent on hover / loading. */
+/* Sparkles — three of them, each on its own clock. */
 .cp-gen-svg {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   flex-shrink: 0;
   z-index: 2;
+  overflow: visible;
   color: var(--fg-2);
-  animation: cp-gen-flicker 2.4s linear infinite;
   transition: color 0.35s var(--ease-out);
 }
 .cp-gen-btn:hover:not(:disabled) .cp-gen-svg,
 .cp-gen-btn.loading .cp-gen-svg {
   color: var(--accent);
 }
-.cp-gen-btn.loading .cp-gen-svg { animation-duration: 1s; }
-@keyframes cp-gen-flicker { 48%, 52% { opacity: 0.4; } }
+
+/* transform-box: fill-box is what makes this work at all. Without it a
+   transform-origin of `center` resolves against the SVG's viewBox, so all
+   three stars would scale and rotate about one shared point and swing around
+   each other instead of twinkling in place. */
+.cp-gen-star {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: cp-gen-twinkle 2.9s var(--ease-out) infinite;
+}
+/* Deliberately co-prime-ish durations as well as offset delays: equal
+   durations re-sync into a pulse after one cycle however the delays are set,
+   and a pulse is the thing this is trying not to be. */
+.cp-gen-star:nth-child(2) { animation-duration: 2.3s; animation-delay: 0.5s; }
+.cp-gen-star:nth-child(3) { animation-duration: 3.7s; animation-delay: 1.1s; }
+@keyframes cp-gen-twinkle {
+  0%, 100% { opacity: 0.5; transform: scale(0.82) rotate(-8deg); }
+  50%      { opacity: 1;   transform: scale(1.08) rotate(10deg); }
+}
+/* Working: brighter floor, quicker, and the cluster leans into the label. */
+.cp-gen-btn.loading .cp-gen-star { animation-duration: 1.15s; }
+.cp-gen-btn.loading .cp-gen-star:nth-child(2) { animation-duration: 0.95s; }
+.cp-gen-btn.loading .cp-gen-star:nth-child(3) { animation-duration: 1.45s; }
+.cp-gen-btn.loading .cp-gen-svg { filter: drop-shadow(0 0 3px rgba(var(--accent-rgb), 0.5)); }
 
 /* Text layers — idle (per-letter shimmer) crossfades to the loading label. */
 .cp-gen-txt {
@@ -429,7 +458,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cp-gen-svg, .cp-gen-letter { animation: none; }
+  .cp-gen-star, .cp-gen-letter { animation: none; }
   .cp-gen-btn:hover:not(:disabled) { transform: none; }
   /* The sweep stops; the colour it sweeps through stays, so a running job
      still looks different from a resting one. */
