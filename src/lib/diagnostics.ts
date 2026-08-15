@@ -83,6 +83,30 @@ export function diagnosticsFilename(now: Date): string {
  */
 const SECRET_KEY_PATTERNS = ["password", "secret", "token", "apikey", "api_key", "credential"];
 
+/**
+ * Strip the query string off any URL in a log line.
+ *
+ * The settings block is scrubbed key by key. The log block was not scrubbed at
+ * all, and it is the half carrying output from processes this app does not
+ * write: yt-dlp's stdout and stderr are forwarded verbatim through
+ * `playback-prep-log`. A signed CDN URL puts its credential in the QUERY
+ * (`sig`, `expire`, and friends), and such a URL is a working, time-limited
+ * grant to fetch that media for anyone holding it — in a file the app tells
+ * the user to attach to a bug report.
+ *
+ * Scheme, host and path survive, because "it was fetching from
+ * rr3---sn-x.googlevideo.com/videoplayback and got a 403" is the whole
+ * diagnostic value of the line and none of the risk.
+ *
+ * What this does NOT do: find a secret that is not in a URL query. A header
+ * dump or a printed cookie would still go through. Stated here rather than
+ * implied, because the honest scope of a scrubber is the thing people get
+ * wrong about scrubbers.
+ */
+export function redactLogLine(message: string): string {
+  return message.replace(/(https?:\/\/[^\s"'<>]+?)\?[^\s"'<>]*/g, "$1?<redacted>");
+}
+
 function redactSetting(key: string, value: unknown): string {
   const k = key.toLowerCase();
   if (SECRET_KEY_PATTERNS.some((p) => k.includes(p))) {
@@ -154,7 +178,7 @@ export function buildDiagnosticsReport(d: DiagnosticsInput): string {
     push("(empty)");
   } else {
     for (const l of tail) {
-      push(`${l.ts} ${l.tag.padEnd(5)} ${l.source.padEnd(10)} ${l.message}`);
+      push(`${l.ts} ${l.tag.padEnd(5)} ${l.source.padEnd(10)} ${redactLogLine(l.message)}`);
     }
   }
   push();

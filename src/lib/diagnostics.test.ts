@@ -150,6 +150,34 @@ describe("secret redaction (r148)", () => {
     expect(out).toContain("nested = {\"safe\":1}");
   });
 
+  it("strips the query off a signed URL in the pipeline log", () => {
+    // The settings block was scrubbed key by key; the LOG block was not
+    // scrubbed at all, and it is the half carrying yt-dlp's stdout verbatim.
+    // A signed CDN URL is a working grant to fetch that media for as long as
+    // it lives, sitting in a file the app tells the user to email.
+    const out = buildDiagnosticsReport(baseInput({
+      logLines: [{
+        ts: "12:00:00", tag: "err", source: "yt-dlp",
+        message: "HTTP 403 for https://rr3---sn-x.googlevideo.com/videoplayback?expire=1&sig=SECRETSIG&ei=z",
+      }],
+    }));
+    expect(out).not.toContain("SECRETSIG");
+    expect(out).not.toContain("expire=1");
+    // The useful half survives: which host, which path, what happened.
+    expect(out).toContain("rr3---sn-x.googlevideo.com/videoplayback?<redacted>");
+    expect(out).toContain("HTTP 403");
+  });
+
+  it("leaves a log line without a URL query completely alone", () => {
+    const out = buildDiagnosticsReport(baseInput({
+      logLines: [{
+        ts: "12:00:00", tag: "info", source: "media",
+        message: "Opened https://example.com/a.mp4 — is that right? yes",
+      }],
+    }));
+    expect(out).toContain("Opened https://example.com/a.mp4 — is that right? yes");
+  });
+
   it("reports an empty secret as empty rather than claiming redaction", () => {
     const out = buildDiagnosticsReport(baseInput({ settings: { turnPassword: "" } }));
     expect(out).toContain('turnPassword = ""');
