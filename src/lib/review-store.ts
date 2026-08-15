@@ -299,7 +299,22 @@ async function flushDirtyDocs(): Promise<void> {
         // always iCloud evicted the file (present as a placeholder, not
         // downloaded), not that it's gone. Overwriting now destroys real notes
         // with a near-empty doc. Never overwrite a file you couldn't first read
-        // back: defer, keep the key dirty, retry once it's downloadable again.
+        // back: defer and keep the key dirty.
+        //
+        // THE RETRY IS NOT AUTOMATIC, and that is deliberate rather than an
+        // oversight — every other deferral in this function re-arms, this one
+        // does not. The debounce is 500ms, so re-arming here would re-read an
+        // evicted placeholder twice a second for as long as it stays evicted,
+        // which for an offline machine is forever. The key stays dirty, so the
+        // write lands on the user's NEXT save.
+        //
+        // What that costs: the deferred write is by definition one that would
+        // shrink or empty the file, so the copy on disk stays the richer one.
+        // A user who deletes their comments and quits without touching
+        // anything else will see them again on reopen. Preferring stale notes
+        // to destroyed notes is the right way round, but it is a real
+        // behaviour and it is pinned by a test rather than left to be
+        // rediscovered.
         console.warn(`review-store: ${file} is unreadable (likely iCloud-evicted); deferring a destructive write rather than clobbering it.`);
         dirty.add(key);
         continue;

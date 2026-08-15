@@ -300,6 +300,41 @@ describe("write-through (debounced save)", () => {
     expect(fs.get(`${DIR}/${file}.bak`)).toBe(realText); // now recoverable
   });
 
+  it("does NOT retry an eviction-deferred write on its own, only on the next save", async () => {
+    // Pins a real limitation rather than a feature. Every other deferral in
+    // flushDirtyDocs re-arms; this one cannot, because the debounce is 500ms
+    // and re-arming would re-read an evicted placeholder twice a second for as
+    // long as it stays evicted.
+    //
+    // The consequence is user-visible: the deferred write is always one that
+    // shrinks or empties the file, so someone who deletes their comments and
+    // quits without touching anything else sees them again on reopen. That is
+    // the safe direction to fail in, and it is still a behaviour someone
+    // should have decided on rather than inherited.
+    const real = mkDoc("/offline.mp4", { comments: [mkComment("v1", "c1", "important note")] });
+    seedLibrary(real);
+    await hydrateReviewStore();
+    const file = reviewFileName("/offline.mp4");
+    const realText = fs.get(`${DIR}/${file}`)!;
+    fs.delete(`${DIR}/${file}`); // evicted
+
+    saveReview(mkDoc("/offline.mp4")); // the user deletes everything
+    await vi.runAllTimersAsync();
+    expect(fs.has(`${DIR}/${file}`)).toBe(false); // correctly refused
+
+    // The file comes back, and NOTHING else happens: no further edit, no
+    // further save. Time alone does not land the deferred write.
+    fs.set(`${DIR}/${file}`, realText);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(fs.get(`${DIR}/${file}`)).toBe(realText); // still the pre-deletion copy
+    expect(fs.has(`${DIR}/${file}.bak`)).toBe(false); // nothing was rewritten
+
+    // One more save is what lands it. This is the whole recovery path.
+    saveReview(mkDoc("/offline.mp4"));
+    await vi.runAllTimersAsync();
+    expect(fs.get(`${DIR}/${file}.bak`)).toBe(realText);
+  });
+
   it("does NOT overwrite a SMALL real review with an empty doc (below the shrink floor)", async () => {
     // Many real reviews are under the 2 KB shrink threshold, so the half-size
     // rule alone never fired — an emptyDoc could silently erase them. The
