@@ -1923,6 +1923,13 @@ fn sanitize_name(raw: &str) -> String {
 
 /// A received filename becomes a path segment on the GUEST's disk: strip
 /// separators and control chars, cap the length, never yield empty.
+/// Whether accepting this chunk would take the transfer past the size its
+/// sender offered. Saturating, so a hostile `received` near u64::MAX cannot
+/// wrap the sum back under `total` and slip the guard.
+fn transfer_would_overflow(received: u64, chunk: usize, total: u64) -> bool {
+    received.saturating_add(chunk as u64) > total
+}
+
 fn sanitize_transfer_filename(raw: &str) -> String {
     let cleaned: String = raw
         .trim()
@@ -2211,6 +2218,26 @@ pub async fn session_fetch_file(
                 ));
             }
         };
+        // The offered `size` is the contract, and until now it was checked
+        // only AFTER the loop had already written everything that arrived.
+        // Every other read from a peer on this connection is bounded -
+        // MAX_HELLO_BYTES for the hello, MAX_MSG_BYTES per control line, both
+        // through read_line_bounded - and the file body was the one that ran
+        // to EOF. A sender that kept sending, whether by malice or by a
+        // mis-sized offer, wrote into the receiver's cache until the disk ran
+        // out, and `received != total` reported it afterwards.
+        //
+        // Checked BEFORE the write, so the partial left on disk is exactly the
+        // bytes that were agreed and a later resume is still valid.
+        if transfer_would_overflow(received, n, total) {
+            let _ = app.emit("session:transfer", serde_json::json!({
+                "phase": "failed", "name": display,
+                "received": received as f64, "total": total as f64,
+            }));
+            return Err(crate::AppError::invalid(
+                "The sender sent more than it offered; the transfer was stopped.",
+            ));
+        }
         hasher.update(&buf[..n]);
         out.write_all(&buf[..n])
             .await
@@ -2703,6 +2730,25 @@ mod transfer_tests {
         assert_eq!(sanitize_transfer_filename("a/b\\c:d.mov"), "abcd.mov");
         assert_eq!(sanitize_transfer_filename("  .hidden  "), "hidden");
         assert_eq!(sanitize_transfer_filename(""), "transfer");
+    }
+
+    /// The file body is the only read from a peer that is not length-prefixed,
+    /// so the offered size is the only thing standing between a sender and the
+    /// receiver's free space.
+    #[test]
+    fn transfer_stops_at_the_size_that_was_offered() {
+        // Room for the whole chunk, and the exact final chunk, both fine.
+        assert!(!transfer_would_overflow(0, 1024, 1024));
+        assert!(!transfer_would_overflow(1000, 24, 1024));
+        // One byte past the contract is refused, not trimmed: a sender that
+        // disagrees about the size is one whose bytes cannot be trusted to
+        // hash, and the BLAKE3 check only runs after everything is written.
+        assert!(transfer_would_overflow(1000, 25, 1024));
+        assert!(transfer_would_overflow(1024, 1, 1024));
+        // A zero-byte offer accepts nothing.
+        assert!(transfer_would_overflow(0, 1, 0));
+        // Saturating: a wrapped sum must not come back under `total` and pass.
+        assert!(transfer_would_overflow(u64::MAX, 4096, 1024));
         assert_eq!(sanitize_transfer_filename("\u{7}\u{8}"), "transfer");
         let long = "x".repeat(400);
         assert!(sanitize_transfer_filename(&long).len() <= 120);
