@@ -673,7 +673,6 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       window.clearInterval(t);
       if (shuttleRafRef.current) { cancelAnimationFrame(shuttleRafRef.current); shuttleRafRef.current = 0; }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ─── Public handle ──────────────────────────────────────────────────

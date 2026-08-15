@@ -443,7 +443,6 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       readyRef.current = false;
       playingRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Two source modes:

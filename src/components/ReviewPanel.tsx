@@ -447,7 +447,6 @@ export function ReviewPanel({
       if (e.payload.job_id === dictJobRef.current) micLevelRef.current = e.payload.level;
     });
     return () => { unDone.then((f) => f()); unPartial.then((f) => f()); unLevel.then((f) => f()); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Safety net: the panel is conditionally mounted (drawer tab switch / source
@@ -586,7 +585,6 @@ export function ReviewPanel({
       if (composerHeight == null) localStorage.removeItem(COMPOSER_HEIGHT_KEY);
       else localStorage.setItem(COMPOSER_HEIGHT_KEY, String(composerHeight));
     } catch { /* quota */ }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [composerHeight]);
   const onComposerResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -751,7 +749,6 @@ export function ReviewPanel({
     const was = wasInSessionRef.current;
     wasInSessionRef.current = inSession;
     if (was && !inSession && sourceKey) setDoc(loadReview(sourceKey));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inSession, sourceKey]);
 
   const versionId = viewDoc?.activeVersionId ?? null;
