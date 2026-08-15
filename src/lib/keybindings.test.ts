@@ -74,13 +74,24 @@ describe("override resolution", () => {
     expect(m.get("shift+left")).toBe("play.secondBack");
   });
   it("every action's defaults are unique (no collisions out of the box)", () => {
-    const seen = new Map<string, string>();
+    // buildComboMap is first-wins, so a duplicate default does not error - the
+    // second action just never fires, while the editor and the shortcut sheet
+    // both still show the key beside it. Collect ALL the clashes and name them:
+    // asserting per-iteration reported "expected true to be false", which says
+    // nothing about which combo or which pair, and this is the failure someone
+    // meets while adding an action rather than while reading this file.
+    const owner = new Map<string, string>();
+    const clashes: string[] = [];
     for (const a of KEY_ACTIONS) {
       for (const c of a.defaults) {
-        expect(seen.has(c)).toBe(false);
-        seen.set(c, a.id);
+        const prev = owner.get(c);
+        if (prev) clashes.push(`"${c}" is the default for both ${prev} and ${a.id}`);
+        else owner.set(c, a.id);
       }
     }
+    expect(clashes).toEqual([]);
+    // And the consumer agrees: nothing was silently swallowed on the way in.
+    expect(buildComboMap({}).size).toBe(KEY_ACTIONS.reduce((n, a) => n + a.defaults.length, 0));
   });
 });
 
