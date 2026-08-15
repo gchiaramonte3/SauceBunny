@@ -149,6 +149,19 @@ Do not add new Tauri plugins without explaining what existing capability is insu
 - Event handlers: define inline if ≤2 lines, extract to a named function if longer.
 - Avoid `useEffect` for derived state — compute it during render.
 - Use `React.memo` only after profiling confirms a re-render problem, never preemptively.
+- **Arm the cancel handle BEFORE the await it is meant to cover.** A start path
+  that does `const id = await invoke("new_job_id")` and only THEN records the
+  handle has a window where Stop finds nothing to stop. What the user sees is
+  not "Stop was slow": handleStop resets the UI, the run carries on, and the
+  result lands on a screen that says it was cancelled. Three separate instances
+  of this shipped (`use-stream-keep` yield/resume, `use-batch-transcribe` where
+  the file finished and reported SUCCESS after Stop, and all three transcription
+  entry points). The fix is always the same shape — create the AbortController
+  or token first, assign it, then await, then re-check `aborted` before
+  spawning. Re-check again after any expensive marshalling between the check and
+  the invoke; `Array.from(new Uint8Array(buf))` over tens of MB is seconds wide.
+  Note that `handleStop` reads job ids out of a `useCallback` closure, so a
+  `setJobId(id)` is not visible to it until the next render either.
 
 ### CSS
 - All styles live in `src/styles/app.css`, organized by component name in comment blocks.
