@@ -222,7 +222,15 @@ const HISTORY_KEY = "saucebunny.review.history";
 export function reviewFingerprint(
   title: string, durationSec: number, w?: number | null, h?: number | null, sizeBytes?: number | null,
 ): string {
-  const name = (title || "").toLowerCase().replace(/\.[^.]+$/, "").replace(/\s+/g, " ").trim();
+  // NFC first. macOS stores filenames DECOMPOSED and a rename dialog returns
+  // what the keyboard sent, which is COMPOSED, so the same file yields two
+  // different fingerprints depending on which side asked. What that costs is
+  // not a cache miss: the review index stops resolving, the app falls back to
+  // the path, and the user opens a file they have annotated for a week and
+  // finds an empty review. The notes are still on disk under the old key,
+  // which makes it worse rather than better - nothing looks broken.
+  const name = (title || "").normalize("NFC")
+    .toLowerCase().replace(/\.[^.]+$/, "").replace(/\s+/g, " ").trim();
   const dur = Math.round((durationSec || 0) * 10); // tenths of a second
   const size = sizeBytes ? `|${sizeBytes}` : "";
   return `${name}|${dur}|${w ?? 0}x${h ?? 0}${size}`;
@@ -230,7 +238,17 @@ export function reviewFingerprint(
 
 /** The review key a fingerprint maps to (null if this clip hasn't been reviewed). */
 export function resolveByFingerprint(fp: string): string | null {
-  return loadJson<Record<string, string>>(FP_INDEX_KEY, {})[fp] ?? null;
+  const idx = loadJson<Record<string, string>>(FP_INDEX_KEY, {});
+  const hit = idx[fp];
+  if (hit !== undefined) return hit;
+  // Miss: an entry written before fingerprints were normalised may be stored
+  // under the decomposed spelling. Scanning is fine here - the index holds one
+  // entry per reviewed file, and this only runs when the fast path failed.
+  const want = fp.normalize("NFC");
+  for (const [k, v] of Object.entries(idx)) {
+    if (k.normalize("NFC") === want) return v;
+  }
+  return null;
 }
 
 /** Remember that this fingerprint belongs to this review key. */

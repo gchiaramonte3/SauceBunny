@@ -85,3 +85,45 @@ describe("the poster and timecode follow too", () => {
     expect(chosenPosterFor("/m/Interview Final.mp4")).toBe(9);
   });
 });
+
+describe("review identity survives macOS filename encoding", () => {
+  // The highest-stakes member of this family. macOS stores filenames
+  // DECOMPOSED; a rename dialog returns what the keyboard sent, which is
+  // COMPOSED. Unnormalised, the same file fingerprints two different ways, so
+  // renaming a video to an accented name meant opening it later and finding no
+  // review. The notes were never destroyed - they sat on disk under the old
+  // key, which is exactly why nothing looked broken.
+  const NFC = "Café Interview.mov";
+  const NFD = NFC.normalize("NFD");
+
+  it("the two spellings really are different strings", () => {
+    expect(NFC).not.toBe(NFD);
+  });
+
+  it("fingerprints a file the same whichever spelling asks", () => {
+    expect(reviewFingerprint(NFC, 237.9, 1920, 1080, 12_345_678))
+      .toBe(reviewFingerprint(NFD, 237.9, 1920, 1080, 12_345_678));
+  });
+
+  it("resolves a review linked under one spelling when asked with the other", () => {
+    const fp = reviewFingerprint(NFD, 237.9, 1920, 1080, 12_345_678);
+    linkFingerprint(fp, "/reviews/interview");
+    expect(resolveByFingerprint(reviewFingerprint(NFC, 237.9, 1920, 1080, 12_345_678)))
+      .toBe("/reviews/interview");
+  });
+
+  it("recovers an index entry written before fingerprints were normalised", () => {
+    // The legacy shape: a raw decomposed key, straight into the index.
+    const legacy = `${NFD.toLowerCase().replace(/\.[^.]+$/, "")}|2379|1920x1080|12345678`;
+    linkFingerprint(legacy, "/reviews/old");
+    expect(resolveByFingerprint(reviewFingerprint(NFC, 237.9, 1920, 1080, 12_345_678)))
+      .toBe("/reviews/old");
+  });
+
+  it("still tells genuinely different files apart", () => {
+    const a = reviewFingerprint("Interview A.mov", 237.9, 1920, 1080, 1);
+    const b = reviewFingerprint("Interview B.mov", 237.9, 1920, 1080, 1);
+    expect(a).not.toBe(b);
+  });
+});
+
