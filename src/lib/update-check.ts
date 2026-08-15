@@ -1,3 +1,4 @@
+import type { LatestRelease } from "../bindings/LatestRelease";
 /**
  * In-app update CHECK (r128).
  *
@@ -82,7 +83,7 @@ export function saveLastCheck(status: UpdateStatus): void {
 export async function checkForUpdate(currentVersion: string): Promise<UpdateStatus> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    const latest = await invoke<{ version: string; url: string; notes: string }>("latest_release");
+    const latest = await invoke<LatestRelease>("latest_release");
     const status: UpdateStatus = isNewer(latest.version, currentVersion)
       ? { kind: "available", version: latest.version, url: latest.url, notes: latest.notes }
       : { kind: "current", version: currentVersion };
