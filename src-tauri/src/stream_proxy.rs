@@ -162,13 +162,12 @@ pub fn start() -> std::io::Result<String> {
             for request in server.incoming_requests() {
                 // Bound the fan-out before spawning: each request holds a
                 // thread + an upstream socket for its whole life.
-                if ACTIVE_REQUESTS.load(std::sync::atomic::Ordering::Relaxed) >= MAX_ACTIVE_REQUESTS {
+                if !try_claim(&ACTIVE_REQUESTS, MAX_ACTIVE_REQUESTS) {
                     let _ = request.respond(
                         tiny_http::Response::from_string("busy").with_status_code(503),
                     );
                     continue;
                 }
-                ACTIVE_REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let client = client.clone();
                 // Thread-per-request: a slow/stalled stream can't block
                 // the accept loop or sibling requests.
@@ -296,6 +295,26 @@ static ACTIVE_REQUESTS: std::sync::atomic::AtomicUsize = std::sync::atomic::Atom
 static ACTIVE_REMUXES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 const MAX_ACTIVE_REQUESTS: usize = 16;
 const MAX_ACTIVE_REMUXES: usize = 4;
+
+/// Claim one slot if the counter is below `max`. `true` means the caller now
+/// OWNS a slot and must release it (`CounterGuard` does, on every exit path).
+///
+/// One atomic operation, not a load and then an add. Check-then-act on a
+/// counter is not a limiter: every thread arriving while the count sits one
+/// under the cap reads the same under-cap value, and every one of them
+/// proceeds. Concurrent arrival is the normal case for both callers here -
+/// seek-anywhere rebuilds the whole stream, so a scrub is a burst of requests -
+/// and the cap it was overshooting bounds ffmpeg processes.
+///
+/// session.rs has bounded its transfers this way all along
+/// (`fetch_add(..) >= MAX_TRANSFERS`, then hand the slot back). Same shape.
+fn try_claim(counter: &std::sync::atomic::AtomicUsize, max: usize) -> bool {
+    if counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= max {
+        counter.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        return false;
+    }
+    true
+}
 
 /// RAII decrement for the counters above (early returns abound in serve_*).
 struct CounterGuard(&'static std::sync::atomic::AtomicUsize);
@@ -709,12 +728,11 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
     // Each remux is a whole ffmpeg process; MSE teardown/seek churn can pile
     // them up faster than they die. Beyond the cap the player's onMediaError
     // path takes over (download fallback), same as any other stream failure.
-    if ACTIVE_REMUXES.load(std::sync::atomic::Ordering::Relaxed) >= MAX_ACTIVE_REMUXES {
+    if !try_claim(&ACTIVE_REMUXES, MAX_ACTIVE_REMUXES) {
         return request.respond(
             tiny_http::Response::from_string("too many concurrent streams").with_status_code(503),
         );
     }
-    ACTIVE_REMUXES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let _remux_guard = CounterGuard(&ACTIVE_REMUXES);
     let ff = match ffmpeg_path() {
         Some(p) => p,
@@ -953,12 +971,11 @@ fn serve_remote_fmp4(
     start: f64,
     rung: Option<u32>,
 ) -> std::io::Result<()> {
-    if ACTIVE_REMUXES.load(std::sync::atomic::Ordering::Relaxed) >= MAX_ACTIVE_REMUXES {
+    if !try_claim(&ACTIVE_REMUXES, MAX_ACTIVE_REMUXES) {
         return request.respond(
             tiny_http::Response::from_string("too many concurrent streams").with_status_code(503),
         );
     }
-    ACTIVE_REMUXES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let _remux_guard = CounterGuard(&ACTIVE_REMUXES);
 
     let handle = match crate::commands::peer_stream::request_media_stream(blake3, start, rung) {
@@ -1173,6 +1190,52 @@ fn decode_upstream(url_path: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The functional contract of `try_claim`: never hand out more than `max`,
+    /// and give the slot back when refusing.
+    ///
+    /// THIS TEST DOES NOT REPRODUCE THE RACE IT WAS WRITTEN FOR, and saying so
+    /// is the point of the comment. The bug was a load followed by a separate
+    /// fetch_add; the window between them is nanoseconds, and neither spawning
+    /// 64 threads nor releasing them together through a Barrier lands one
+    /// inside it. Measured against the broken shape: 0 failures in 5 runs
+    /// without the barrier, 0 in 5 with it. A test that passes against the
+    /// code it is supposed to catch is worse than no test, so it does not
+    /// claim to be a regression test.
+    ///
+    /// The race is real by inspection - check-then-act on a counter is not
+    /// atomic, whatever the memory ordering - and the fix is the shape
+    /// session.rs has always used. What this guards is the cruder way to break
+    /// try_claim later: dropping the fetch_sub on the refusal path, which
+    /// leaks a slot per rejection until the proxy answers 503 forever.
+    #[test]
+    fn claiming_never_exceeds_the_cap_under_contention() {
+        use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+        use std::sync::Barrier;
+        static SLOTS: AtomicUsize = AtomicUsize::new(0);
+        const MAX: usize = 4;
+        const THREADS: usize = 64;
+        let granted = AtomicUsize::new(0);
+        // The barrier at least makes the threads arrive together rather than
+        // finishing one by one as they spawn. It is not enough to expose the
+        // original race (see above), but it is the right shape for the
+        // contract being checked.
+        let gate = Barrier::new(THREADS);
+        // Nobody releases, so the correct answer is exactly MAX grants however
+        // the threads interleave.
+        std::thread::scope(|sc| {
+            for _ in 0..THREADS {
+                sc.spawn(|| {
+                    gate.wait();
+                    if super::try_claim(&SLOTS, MAX) {
+                        granted.fetch_add(1, SeqCst);
+                    }
+                });
+            }
+        });
+        assert_eq!(granted.load(SeqCst), MAX, "handed out more slots than the cap");
+        assert_eq!(SLOTS.load(SeqCst), MAX, "a refused claim did not give its slot back");
+    }
     use super::*;
 
     fn b64(url: &str) -> String {
