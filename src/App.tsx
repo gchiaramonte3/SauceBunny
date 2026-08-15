@@ -3545,14 +3545,23 @@ export default function App() {
     const srcLabel = sourceKind === "file" ? metadata.title : `${exportOpts.inTc || "00:00:00:00"} → ${exportOpts.outTc || "end"}`;
     appendLog("info", txChannel, `Transcribing ${srcLabel} with ${engineLabel}…`);
     try {
-      const id = await invoke<string>("new_job_id");
-      setTranscriptJobId(id);
       // Fresh abort scope for this run. The mediabunny audio extraction below
       // runs entirely in the browser before any cancelable backend job exists,
       // so Stop pivots on this controller to interrupt it (and to skip the
       // backend invoke if the user bailed mid-extraction).
+      //
+      // ARMED BEFORE the round trip, not after. new_job_id is quick but it is
+      // still an await, and a Stop landing inside it used to abort the
+      // PREVIOUS run's controller (or nothing at all) and null the ref - after
+      // which this run installed a fresh, un-aborted controller and carried on
+      // transcribing. handleStop had already reset the UI to idle, so the run
+      // finished, matched on job id, and loaded its transcript over a screen
+      // that said it had been cancelled.
       const abort = new AbortController();
       transcriptAbortRef.current = abort;
+      const id = await invoke<string>("new_job_id");
+      if (abort.signal.aborted) return; // Stop arrived while the id was in flight
+      setTranscriptJobId(id);
       if (sourceKind === "file" && localFilePath) {
         // Two paths, mediabunny preferred:
         //   • mediabunny: in-browser audio decode → OfflineAudioContext
@@ -3733,7 +3742,14 @@ export default function App() {
     setTranscriptPhase(null);
     appendLog("info", "diarize", "Re-detecting speakers (reusing the existing transcript)…");
     try {
+      // Armed before the round trip for the same reason as the main
+      // transcription path: a Stop landing inside new_job_id reset the UI to
+      // idle, and this run then spawned the backend job anyway and loaded its
+      // result over a screen that said it had been cancelled.
+      const abort = new AbortController();
+      transcriptAbortRef.current = abort;
       const id = await invoke<string>("new_job_id");
+      if (abort.signal.aborted) return;
       setTranscriptJobId(id);
       await invoke<string>("re_diarize_transcript", {
         args: {
@@ -3810,7 +3826,14 @@ export default function App() {
     const txChannel = engine === "parakeet" ? "parakeet" : "whisper";
     appendLog("info", txChannel, `Re-transcribing for accurate caption timing with ${engineLabel} (reusing the cached audio)…`);
     try {
+      // Armed before the round trip for the same reason as the main
+      // transcription path: a Stop landing inside new_job_id reset the UI to
+      // idle, and this run then spawned the backend job anyway and loaded its
+      // result over a screen that said it had been cancelled.
+      const abort = new AbortController();
+      transcriptAbortRef.current = abort;
       const id = await invoke<string>("new_job_id");
+      if (abort.signal.aborted) return;
       setTranscriptJobId(id);
       const dur = durationFrames > 0 ? durationFrames - 1 : 0;
       await invoke<string>("generate_transcript", {
