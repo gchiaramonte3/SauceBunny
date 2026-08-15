@@ -53,9 +53,10 @@ export function useStreamKeep({
   const relayedRef = useRef(false);
   /** The blake3 whose fetch we currently have in flight, so it starts once. */
   const inFlightRef = useRef<string | null>(null);
-  /** Set while WE are tearing the fetch down (yielding, or the user stopping
-   *  it), so the resulting rejection is not reported as a failure. */
-  const yieldingRef = useRef(false);
+  /** Bumped whenever we abandon an in-flight fetch. A rejection carrying an
+   *  older generation is our OWN cancel arriving late: it must not be reported
+   *  as a failure, and it must not clear a slot a newer fetch already owns. */
+  const genRef = useRef(0);
   /** The file we have already swapped to. Cleared when the watch target
    *  changes, because "handed off once" must mean once PER WATCH — holding it
    *  for the app's lifetime meant re-watching the same file (its local copy
@@ -124,17 +125,21 @@ export function useStreamKeep({
   useEffect(() => {
     if (wanted && blake3 && inFlightRef.current !== blake3) {
       inFlightRef.current = blake3;
-      yieldingRef.current = false;
+      const gen = ++genRef.current;
       void invoke<string>("session_fetch_file", { blake3Hex: blake3, name })
         .then((path) => {
+          if (genRef.current !== gen) return;
           inFlightRef.current = null;
           dispatch((at) => ({ t: "done", path, at }));
         })
         .catch((err) => {
-          inFlightRef.current = null;
           // A rejection we caused by yielding is the mechanism working, not a
-          // failure — the partial is kept and the next tick resumes it.
-          if (yieldingRef.current) { yieldingRef.current = false; return; }
+          // failure — the partial is kept and the next tick resumes it. It is
+          // recognised by generation rather than by a flag, because a flag
+          // cannot tell "the fetch I just cancelled" from "the fetch I started
+          // to replace it".
+          if (genRef.current !== gen) return;
+          inFlightRef.current = null;
           // The user pressed "Get the file" as well as "Watch now", so an
           // explicit transfer of this exact file is already running. Reporting
           // "could not save a copy" while the copy is visibly downloading in
@@ -148,8 +153,16 @@ export function useStreamKeep({
       return;
     }
     if (!wanted && inFlightRef.current) {
-      yieldingRef.current = true;
-      void invoke("session_cancel_fetch", { blake3Hex: inFlightRef.current }).catch(() => {});
+      // Release the slot NOW instead of waiting for the rejection to land.
+      // The yield window is 30s and a cancel rejects in milliseconds, so the
+      // two nearly always arrive in the comfortable order — but if the resume
+      // ever beat the rejection, the restart saw its own hash still in flight
+      // and skipped, the late rejection then cleared the slot with nothing
+      // watching, and the copy stopped for good without saying so.
+      const hash = inFlightRef.current;
+      inFlightRef.current = null;
+      genRef.current++;
+      void invoke("session_cancel_fetch", { blake3Hex: hash }).catch(() => {});
     }
   }, [wanted, blake3, name, dispatch]);
 
