@@ -156,6 +156,24 @@ Do not add new Tauri plugins without explaining what existing capability is insu
 - No inline styles. No CSS-in-JS. No CSS modules.
 - Class names: kebab-case, all prefixed with the stable project namespace `cp-` (carryover from the original ClipPull name — kept intentionally because renaming ~600 classes touches every file and adds no user-visible value). Within that prefix, group by component context (e.g. `cp-player-controls-volume`, `cp-tx-speaker`, `cp-queue-foot-row`). New code MUST use the `cp-` prefix; do not introduce a new prefix.
 - No `!important` unless overriding a third-party style you can't control.
+- **The spacing scale does not describe this UI, and that is measured, not felt.**
+  `--s-*` is a 4px grid (4/8/12/16/20/24/28/32/40/48). Of 737 raw `gap` /
+  `padding` / `margin` values in the stylesheets, **460 are off that grid** —
+  and 297 of those sit on even 2px steps. The three most-used spacing values
+  after 8px are 6px (99), 4px (97) and 2px (81): the interface was built on a
+  **2px rhythm**, not a 4px one. 6px alone is the second most common spacing
+  value in the app and has no token at all.
+  So the low token adoption here (160 token uses vs 737 raw) is not
+  carelessness — the scale never fitted, and reaching for `var(--s-2)` when you
+  need 6px is not an option anyone declined, it is one nobody had.
+  **Do not mass-convert spacing to the current scale**: rounding 6px to 4 or 8
+  moves nearly every dense control in the app. The decision worth making is
+  whether to give the scale its real 2px base or to re-space the UI onto 4px,
+  and that wants someone looking at it. Radii have the same split, smaller:
+  ~56 of 272 off-scale, with 10px appearing 14 times between `--r-md` and
+  `--r-lg`. (1px `padding`/`gap` is excluded from all of this — 44 uses, and it
+  is hairline work rather than spacing.)
+
 - **Focus styles: never the green accent.** A focused control brightens its existing outline toward white (`--focus-ring`, defined in `base.css`); composed fields (wrapper + borderless inner input, e.g. `.cp-url`) brighten the wrapper via `:focus-within` and suppress the inner input's ring. Guarded by `src/lib/focus-contract.test.ts` — do not allowlist around it.
 
 ### Rust
