@@ -21,6 +21,21 @@ const row = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => localStorage.clear());
 
 describe("clip queue persistence", () => {
+  it("brings back the row that was mid-export when the app went away", () => {
+    // Only "queued" used to persist, so quitting during an export dropped the
+    // row being exported: everything else in the queue survived and the range
+    // the user was actually working on did not. It returns as "queued"
+    // because nothing starts the queue on boot, so that is both the safe
+    // state and the true one.
+    saveClipQueue([
+      row({ id: "waiting", status: "queued" }),
+      row({ id: "in-flight", status: "running" }),
+    ]);
+    const back = loadClipQueue(isQueuedClip);
+    expect(back.map((c) => c.id).sort()).toEqual(["in-flight", "waiting"]);
+    expect(back.every((c) => c.status === "queued")).toBe(true);
+  });
+
   it("survives a round trip", () => {
     saveClipQueue([row({ id: "a" }), row({ id: "b" })]);
     expect(loadClipQueue(isQueuedClip).map((c) => c.id)).toEqual(["a", "b"]);
@@ -40,11 +55,15 @@ describe("clip queue persistence", () => {
     // A done row points at a file on disk and a failed one at an error from a
     // session that is over. Restoring them would greet the user with
     // yesterday's results in a panel that is meant to be a to-do list.
+    //
+    // A "running" row used to be listed here too, and that was the mistake:
+    // the reasoning above is about RESULTS, and an export that was still going
+    // when the app went away is not a result, it is unfinished work. It has
+    // its own test below.
     saveClipQueue([
       row({ id: "keep" }),
       row({ id: "done", status: "done" }),
       row({ id: "failed", status: "failed" }),
-      row({ id: "running", status: "running" }),
     ]);
     expect(loadClipQueue(isQueuedClip).map((c) => c.id)).toEqual(["keep"]);
   });

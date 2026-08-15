@@ -49,7 +49,25 @@ const QUEUE_KEY = "saucebunny.clipQueue";
  * supposed to be a to-do list. Only work still to do survives.
  */
 export function saveClipQueue<T extends { status: string }>(queue: readonly T[]): void {
-  const pending = queue.filter((c) => c.status === "queued");
+  // A row that was MID-EXPORT when the app went away comes back as pending.
+  //
+  // Only "queued" used to survive, enforced twice over (here, and again by
+  // isQueuedClip on the way back in), so quitting during an export dropped the
+  // row being exported — the one the user was most actively working on, and by
+  // this file's own reckoning the one thing in the workspace that "cannot be
+  // recreated by pressing a button again". Everything else in the queue
+  // survived; the in-flight range did not.
+  //
+  // Restored as "queued", not "running": nothing starts the queue on boot, so
+  // it comes back as a row waiting for the user to press Run, which is also
+  // the honest description of its state. Re-exporting overwrites a partial
+  // output, which is what anyone would want from it.
+  //
+  // The cost of being wrong here is one row to delete, against the cost of
+  // being wrong the other way, which is a range to mark out again by hand.
+  const pending = queue
+    .filter((c) => c.status === "queued" || c.status === "running")
+    .map((c) => (c.status === "running" ? { ...c, status: "queued" } : c));
   if (pending.length === 0) {
     try { localStorage.removeItem(QUEUE_KEY); } catch { /* quota/private mode */ }
     return;
