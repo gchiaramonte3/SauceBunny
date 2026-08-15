@@ -1798,4 +1798,17 @@
 .cp-web-card:hover .cp-web-forget,
 .cp-web-forget:focus-visible { opacity: 1; }
 .cp-web-forget:hover { color: var(--fg-1); }
+/* An armed delete names what it removes and STAYS visible while armed: a
+   confirm that vanishes when the pointer drifts off the card is a confirm the
+   user cannot finish. */
+.cp-web-forget.armed {
+  opacity: 1;
+  width: auto;
+  padding: 0 8px;
+  background: var(--danger);
+  color: var(--fg-0);
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
 .cp-web-forget:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--focus-ring); }

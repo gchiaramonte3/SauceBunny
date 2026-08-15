@@ -85,6 +85,18 @@ describe("groupBySite", () => {
     expect(a.map((g) => g.site)).toEqual(["Reddit", "Vimeo"]);
   });
 
+  it("preserves the order it was handed, within a shelf", () => {
+    // The backend sorts newest-first and this is the only thing carrying that
+    // through to the grid. Re-sorting here, or losing the order in the Map,
+    // would silently scramble every card on the shelf.
+    const groups = groupBySite([
+      item("https://youtube.com/c", 300),
+      item("https://youtube.com/a", 100),
+      item("https://youtube.com/b", 200),
+    ]);
+    expect(groups[0].items.map((i) => i.fetched_at)).toEqual([300, 100, 200]);
+  });
+
   it("survives an empty shelf", () => {
     expect(groupBySite([])).toEqual([]);
   });

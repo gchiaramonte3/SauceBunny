@@ -95,6 +95,14 @@ export type { CachedWebItem };
  *
  * Ties break alphabetically so the order is stable between launches — a shelf
  * that reshuffles because two sites have the same count reads as a bug.
+ *
+ * WITHIN a shelf the input order is preserved, and that is load-bearing rather
+ * than incidental: `list_cached_web` sorts newest-first in Rust, and this
+ * function is what carries that ordering through to the grid. Nothing here
+ * re-sorts, so a caller handing over an unsorted list gets an unsorted shelf.
+ * The group ordering was pinned against reshuffling from the start and the
+ * item ordering was not, which left the visible order of every card resting on
+ * an agreement no test made anyone keep.
  */
 export function groupBySite(items: readonly CachedWebItem[]): Array<{ site: string; items: CachedWebItem[] }> {
   const byKey = new Map<string, { site: string; items: CachedWebItem[] }>();

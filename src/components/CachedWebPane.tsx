@@ -32,6 +32,23 @@ export function CachedWebPane({ onOpenUrl }: { onOpenUrl: (url: string) => void 
   }, []);
   useEffect(load, [load]);
 
+  // A confirm step, but only where there is something to lose. CLAUDE.md's
+  // co-review rule is that a multi-GB consequence gets named in the control
+  // the user clicks and never only in a tooltip; deleting one is the same
+  // bargain in reverse, and this button was breaking the rule it was written
+  // under. Resolve-only rows keep their single click: the whole cost of
+  // forgetting one is the ten seconds of extraction it was saving.
+  const [armed, setArmed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!armed) return;
+    // An armed row disarms itself. A confirm that stays hot is a mine: the
+    // next ordinary click on this card would be the destructive one.
+    const t = setTimeout(() => setArmed(null), 4000);
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setArmed(null); };
+    window.addEventListener("keydown", esc);
+    return () => { clearTimeout(t); window.removeEventListener("keydown", esc); };
+  }, [armed]);
+
   const forget = useCallback((url: string) => {
     // Optimistic: the row goes now, because the disk work is a file delete and
     // waiting on it makes a instant action feel broken.
@@ -66,7 +83,10 @@ export function CachedWebPane({ onOpenUrl }: { onOpenUrl: (url: string) => void 
             <span className="cp-web-count">{g.items.length}</span>
           </h3>
           <ul className="cp-web-grid">
-            {g.items.map((it) => (
+            {g.items.map((it) => {
+              const isArmed = armed === it.url;
+              const size = it.size_bytes ? formatBytes(it.size_bytes) : "the copy";
+              return (
               <li key={it.url} className="cp-web-card">
                 <button
                   type="button"
@@ -98,15 +118,28 @@ export function CachedWebPane({ onOpenUrl }: { onOpenUrl: (url: string) => void 
                 </button>
                 <button
                   type="button"
-                  className="cp-web-forget"
-                  title="Forget this cached copy. The source stays online; this only reclaims disk."
-                  aria-label={`Forget ${it.title ?? it.url}`}
-                  onClick={() => forget(it.url)}
+                  className={"cp-web-forget" + (isArmed ? " armed" : "")}
+                  title={it.path
+                    ? "Delete the downloaded copy from this Mac. The source stays online."
+                    : "Forget this resolve. Nothing is on disk; re-opening extracts again."}
+                  aria-label={isArmed
+                    ? `Confirm deleting the ${size} copy of ${it.title ?? it.url}`
+                    : it.path
+                      ? `Delete the ${size} copy of ${it.title ?? it.url}`
+                      : `Forget ${it.title ?? it.url}`}
+                  onClick={() => {
+                    if (!it.path) { forget(it.url); return; }
+                    if (isArmed) { setArmed(null); forget(it.url); return; }
+                    setArmed(it.url);
+                  }}
                 >
-                  <IconCircleX size={13} />
+                  {isArmed
+                    ? <span className="cp-web-forget-label">Delete {size}</span>
+                    : <IconCircleX size={13} />}
                 </button>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </section>
       ))}
