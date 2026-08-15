@@ -60,8 +60,19 @@ export function saveClipQueue<T extends { status: string }>(queue: readonly T[])
   //
   // Restored as "queued", not "running": nothing starts the queue on boot, so
   // it comes back as a row waiting for the user to press Run, which is also
-  // the honest description of its state. Re-exporting overwrites a partial
-  // output, which is what anyone would want from it.
+  // the honest description of its state.
+  //
+  // What re-running actually does, corrected after checking rather than
+  // assuming: it does NOT overwrite the partial. Both export paths pick a
+  // free name before writing (`x-unique` on the local route,
+  // unique_output_path for create_clip), and the local write is not atomic,
+  // so a crash mid-export leaves a truncated file holding the name the user
+  // chose and the re-run lands beside it as "clip-2.mov". That behaviour
+  // predates this rescue; what the rescue changes is that re-running is now
+  // one click instead of re-marking the range by hand, so it is met more
+  // often. Making the write atomic would remove the truncated file entirely
+  // and is the better fix, but it is a change to a multi-GB write path that
+  // wants exercising on a real export.
   //
   // The cost of being wrong here is one row to delete, against the cost of
   // being wrong the other way, which is a range to mark out again by hand.
