@@ -234,11 +234,33 @@ export function saveLibraryRoots(roots: readonly string[]): void {
  * Load the chosen-poster map, tolerating junk: only string→finite-number
  * entries survive (a corrupt blob yields {} rather than crashing the Library).
  */
+/**
+ * The canonical form of a path used as a STORE KEY.
+ *
+ * macOS stores filenames decomposed; a rename dialog hands back what the
+ * keyboard sent, which is composed. So renaming a file to "café.mov" writes
+ * the poster and timecode under a composed key, the next library scan asks for
+ * the decomposed one, and the answer is null - the user's chosen poster frame
+ * is silently gone, on that file only, for a reason nothing on screen explains.
+ *
+ * Normalising on both read and write makes the key space canonical, and load
+ * normalises what is already stored, so a map written by an older build
+ * migrates the first time it is read rather than needing a migration step.
+ *
+ * Case is deliberately NOT touched. The stores are case-SENSITIVE on purpose -
+ * repath.ts turns on that, so a case-only rename does the identity work - and
+ * folding case here would quietly undo it.
+ */
+function pathKey(path: string): string {
+  return path.normalize("NFC");
+}
+
 export function loadChosenPosters(): Record<string, number> {
   const raw = loadJson<unknown>(THUMB_TIMES_KEY, {});
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
   const out: Record<string, number> = {};
-  for (const [k, v] of Object.entries(raw)) {
+  for (const [rawKey, v] of Object.entries(raw)) {
+    const k = pathKey(rawKey);
     if (typeof k === "string" && k !== "" && typeof v === "number" && Number.isFinite(v) && v >= 0) {
       out[k] = v;
     }
@@ -265,12 +287,14 @@ let posterCache: Record<string, number> | null = null;
 /** The chosen poster timestamp for one path, or null when it uses the auto frame. */
 export function chosenPosterFor(path: string): number | null {
   const map = (posterCache ??= loadChosenPosters());
-  return Object.prototype.hasOwnProperty.call(map, path) ? map[path] : null;
+  const key = pathKey(path);
+  return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null;
 }
 
 /** Persist a user-chosen poster timestamp for `path`. */
 export function setChosenPoster(path: string, seconds: number): void {
   if (!Number.isFinite(seconds) || seconds < 0) return;
+  path = pathKey(path);
   const map = loadChosenPosters();
   map[path] = seconds;
   saveJson(THUMB_TIMES_KEY, map);
@@ -291,6 +315,7 @@ export function saveChosenPosters(map: Record<string, number>): void {
 
 /** Forget a chosen poster so `path` reverts to the auto/representative frame. */
 export function clearChosenPoster(path: string): void {
+  path = pathKey(path);
   const map = loadChosenPosters();
   if (!Object.prototype.hasOwnProperty.call(map, path)) return;
   delete map[path];
@@ -311,7 +336,8 @@ export function loadSourceTimecodes(): Record<string, string> {
   const raw = loadJson<unknown>(SOURCE_TC_KEY, {});
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
   const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(raw)) {
+  for (const [rawKey, v] of Object.entries(raw)) {
+    const k = pathKey(rawKey);
     if (typeof k === "string" && k !== "" && typeof v === "string" && SOURCE_TC_RE.test(v)) {
       out[k] = v;
     }
@@ -328,7 +354,8 @@ export function saveSourceTimecodes(map: Record<string, string>): void {
 /** The source start timecode for one path, or null when it starts at zero. */
 export function sourceTimecodeFor(path: string): string | null {
   const map = loadSourceTimecodes();
-  return Object.prototype.hasOwnProperty.call(map, path) ? map[path] : null;
+  const key = pathKey(path);
+  return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null;
 }
 
 /** Persist a file's source start timecode. Ignores a malformed TC (the dialog
@@ -346,6 +373,7 @@ export function isValidSourceTc(tc: string): boolean {
 
 export function setSourceTimecode(path: string, tc: string): void {
   if (!isValidSourceTc(tc)) return;
+  path = pathKey(path);
   const map = loadSourceTimecodes();
   map[path] = tc.trim();
   saveJson(SOURCE_TC_KEY, map);
@@ -353,6 +381,7 @@ export function setSourceTimecode(path: string, tc: string): void {
 
 /** Forget a file's source timecode so it reverts to starting at zero. */
 export function clearSourceTimecode(path: string): void {
+  path = pathKey(path);
   const map = loadSourceTimecodes();
   if (!Object.prototype.hasOwnProperty.call(map, path)) return;
   delete map[path];
