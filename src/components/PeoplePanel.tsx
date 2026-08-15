@@ -18,6 +18,22 @@ export type Participant = { id: string; name: string; color: string; isHost: boo
  * the old participant rail's roster duties; leave/end lives in the room
  * control bar.
  */
+/**
+ * Roster changes, phrased for a live region. Empty string means say nothing.
+ *
+ * Coalesced into ONE sentence per change because a polite live region only
+ * ever announces its latest value: two setState calls in a tick would drop
+ * the first arrival on the floor rather than reading both.
+ */
+function rosterAnnouncement(joined: readonly string[], left: readonly string[]): string {
+  const phrase = (names: readonly string[], verb: string) =>
+    names.length === 0 ? ""
+      : names.length === 1 ? `${names[0]} ${verb} the session`
+        : names.length === 2 ? `${names[0]} and ${names[1]} ${verb} the session`
+          : `${names.length} people ${verb} the session`;
+  return [phrase(joined, "joined"), phrase(left, "left")].filter(Boolean).join(". ");
+}
+
 export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream, raisedHands, reactionFlashes, strip = false, presenter = "m0", canGrantPresenter = false, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic, mutedForMe, onToggleMuteForMe }: {
   active: boolean;
   participants: Participant[];
@@ -51,11 +67,45 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
   const [selfStream, setSelfStream] = useState<MediaStream | null>(() => getSessionCapture());
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => subscribeSessionCapture(setSelfStream), []);
+
+  // Who is in the room is the one thing here that changes without you doing
+  // anything, and the roster is the only place it shows. Every control below
+  // is labelled, but a label cannot tell you somebody just arrived: a screen
+  // reader user would have to go and look. The app already announces that a
+  // peer sent an emoji (ReactionLayer); this is the same courtesy for the
+  // peer themselves.
+  const [rosterNews, setRosterNews] = useState("");
+  const seenRef = useRef<Map<string, string> | null>(null);
+  useEffect(() => {
+    if (!active) {
+      // Leaving resets the baseline. This panel stays MOUNTED between
+      // sessions (a stable sibling of <main>, so entering never remounts the
+      // player), so without this a rejoin would diff the new roster against
+      // the old one and announce a crowd of arrivals that never happened.
+      seenRef.current = null;
+      setRosterNews("");
+      return;
+    }
+    // Keyed by member id, carrying the name: `left` has to be describable
+    // AFTER the person is gone from `participants`, and names can collide.
+    const now = new Map(participants.filter((p) => !p.isSelf).map((p) => [p.id, p.name]));
+    const prev = seenRef.current;
+    seenRef.current = now;
+    // The first roster of a session is the baseline, not news. Walking into
+    // a room that already has three people in it is not three arrivals.
+    if (!prev) return;
+    const joined = [...now].filter(([id]) => !prev.has(id)).map(([, name]) => name);
+    const left = [...prev].filter(([id]) => !now.has(id)).map(([, name]) => name);
+    const text = rosterAnnouncement(joined, left);
+    if (text) setRosterNews(text);
+  }, [active, participants]);
+
   if (!active) return null;
 
   const ordered = [...participants].sort((a, b) => Number(b.isSelf) - Number(a.isSelf));
   return (
     <aside className={"cp-people" + (strip ? " strip" : collapsed ? " spine" : "")} aria-label="Session participants">
+      <span className="cp-visually-hidden" role="status" aria-live="polite">{rosterNews}</span>
       <div className="cp-people-head">
         <span className="cp-people-title">People</span>
         <span className="cp-people-count">{participants.length}</span>
