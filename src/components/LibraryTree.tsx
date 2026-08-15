@@ -91,11 +91,16 @@ export function LibraryTree({
   // on every selection change would spring a manually-collapsed root back open.
   const seededRoots = useRef<Set<string>>(new Set());
   useEffect(() => {
+    // Which roots are new is decided BEFORE the updater, and the ref is
+    // mutated here rather than inside it. A setState updater must be pure:
+    // StrictMode runs it twice, and the second run would have found every root
+    // already seeded and expanded none of them - so in dev a freshly added
+    // root quietly failed to open.
+    const fresh = trees.filter((t) => !seededRoots.current.has(t.path)).map((t) => t.path);
+    for (const path of fresh) seededRoots.current.add(path);
     setExpanded((prev) => {
       const next = new Set(prev);
-      for (const t of trees) {
-        if (!seededRoots.current.has(t.path)) { seededRoots.current.add(t.path); next.add(t.path); }
-      }
+      for (const path of fresh) next.add(path);
       if (selection) for (const c of selection) next.add(c.path);
       return next;
     });

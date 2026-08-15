@@ -3145,14 +3145,18 @@ export default function App() {
     // queue was the one that did not, and it is the one holding work that
     // cannot be recreated by pressing a button again: each row is a range
     // somebody marked by hand.
-    setClipQueue((prev) => {
-      const pending = prev.filter((c) => c.status === "queued").length;
-      if (pending > 0 && !confirm(
-        `Clear ${pending} queued clip${pending === 1 ? "" : "s"}? `
-        + "The marks you set for them are not saved anywhere else.",
-      )) return prev;
-      return [];
-    });
+    // Asked OUTSIDE the updater. A setState updater has to be pure - React is
+    // free to run it more than once, and StrictMode does so deliberately to
+    // surface exactly this - so a confirm() in there put the dialog on screen
+    // twice in dev and made the outcome depend on which invocation React kept.
+    // clipQueueRef mirrors the state every render, so reading it here costs
+    // nothing and is not a stale closure.
+    const pending = clipQueueRef.current.filter((c) => c.status === "queued").length;
+    if (pending > 0 && !confirm(
+      `Clear ${pending} queued clip${pending === 1 ? "" : "s"}? `
+      + "The marks you set for them are not saved anywhere else.",
+    )) return;
+    setClipQueue([]);
   }, []);
 
   /** Run every "queued" item sequentially — web items through create_clip
