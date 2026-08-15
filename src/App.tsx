@@ -124,6 +124,7 @@ import { webPosterFor, setWebPoster } from "./lib/web-poster-store";
 import { exportLocalClipViaMediabunny } from "./lib/mediabunny-export";
 import { extractAudioAsWav16k } from "./lib/mediabunny-audio";
 import { migrateCaptionFont } from "./lib/caption-font";
+import { isMissingCommandError, staleBinaryMessage } from "./lib/stale-backend";
 
 const DEFAULT_FPS_FALLBACK: Record<string, number> = { "24": 24, "25": 25, "30": 30 };
 
@@ -131,23 +132,6 @@ const DEFAULT_FPS_FALLBACK: Record<string, number> = { "24": 24, "25": 25, "30":
 function nowHms(): string {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
-}
-
-/**
- * Detects the classic "stale Rust binary" error from Tauri's invoke handler.
- * Happens when frontend calls a newly-added Rust command but the dev server
- * still has the previous build loaded — cargo check passes but the running
- * process doesn't actually have the command registered.
- */
-function isMissingCommandError(err: unknown): boolean {
-  // r51 + r53 bug-fix sweep: formatError unwraps both legacy String errors
-  // and the new AppError discriminated union, so the regex hits the
-  // underlying "Command X not found" message in either world.
-  const msg = formatError(err);
-  return /Command [\w_]+ not found/i.test(msg);
-}
-function staleBinaryMessage(commandName: string): string {
-  return `${commandName} hasn't been compiled into the running dev server yet. Stop and restart \`npm run tauri dev\` so cargo rebuilds the Rust backend.`;
 }
 
 /**
