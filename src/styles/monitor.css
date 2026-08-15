@@ -760,7 +760,7 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.cp-icon-btn.volume.muted { color: #ff8a8a; }
+.cp-icon-btn.volume.muted { color: var(--danger-text); }
 
 /* Speed control: rate badge + popover menu (sibling of the volume control,
    same popover chrome). The badge is text ("1×"), so it sizes to content
@@ -857,7 +857,7 @@
   flex-shrink: 0;
 }
 .cp-canvas-toast.success .icon { background: rgba(var(--accent-rgb), 0.18); color: var(--accent); }
-.cp-canvas-toast.error   .icon { background: rgba(232,38,38, 0.18);            color: #ff8a8a;      }
+.cp-canvas-toast.error   .icon { background: rgba(232,38,38, 0.18);            color: var(--danger-text);      }
 .cp-canvas-toast.info    .icon { background: rgba(255,255,255,0.10);           color: var(--fg-1);  }
 .cp-canvas-toast .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .cp-canvas-toast .title {
@@ -1000,7 +1000,7 @@
   margin-top: 1px;
 }
 .cp-notif-item.success .cp-notif-icon { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); }
-.cp-notif-item.error   .cp-notif-icon { background: rgba(232,38,38, 0.16);            color: #ff8a8a;      }
+.cp-notif-item.error   .cp-notif-icon { background: rgba(232,38,38, 0.16);            color: var(--danger-text);      }
 .cp-notif-item.info    .cp-notif-icon { background: rgba(255,255,255,0.08);           color: var(--fg-2);  }
 
 .cp-notif-body { flex: 1; min-width: 0; }

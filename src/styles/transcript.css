@@ -610,7 +610,7 @@
   letter-spacing: 0.02em;
 }
 .cp-tx-tc-hint { margin: 8px 0 0; font-size: 10.5px; line-height: 1.45; color: var(--fg-4); }
-.cp-tx-tc-err { margin: 6px 0 0; font-size: 10.5px; color: var(--danger, #ff6b6b); }
+.cp-tx-tc-err { margin: 6px 0 0; font-size: 10.5px; color: var(--danger); }
 .cp-tx-tc-row { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
 .cp-tx-tc-row .cp-tx-iconbtn { height: 26px; padding: 0 10px; }
 .cp-tx-dl-menu {
@@ -1303,7 +1303,7 @@
   font-family: var(--font-ui);
   font-size: 11.5px;
   line-height: 1.45;
-  color: #ff8a8a;
+  color: var(--danger-text);
 }
 .cp-cast-lead {
   margin: 0;
@@ -1412,8 +1412,8 @@
 .cp-cast-select { flex: 1 1 0; min-width: 0; }
 /* Matches the queue drawer's destructive treatment rather than inventing a
    second red: tint on hover, never a permanently loud button. */
-.cp-cast-danger { color: #ff8a8a; }
-.cp-cast-danger:hover { color: #ff8a8a; background: rgba(232,38,38,0.14); }
+.cp-cast-danger { color: var(--danger-text); }
+.cp-cast-danger:hover { color: var(--danger-text); background: rgba(232,38,38,0.14); }
 
 /* Clickable colour pip in the Speakers modal — the trigger for the picker. */
 .cp-spk-pip-btn {

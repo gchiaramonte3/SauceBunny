@@ -346,7 +346,7 @@
 }
 .cp-analysis-empty p { margin: 0; max-width: 42ch; }
 .cp-analysis-actions { display: flex; gap: 8px; margin-top: 4px; }
-.cp-analysis-err { display: flex; align-items: center; gap: 6px; color: var(--danger, #ff6b6b); }
+.cp-analysis-err { display: flex; align-items: center; gap: 6px; color: var(--danger); }
 /* ── The follow-along player stage (far-right dock · thin rail · floating card) ── */
 /* The grid's third column. Docked panel lives inside; the rail toggle sits here
    when collapsed; a floating panel is position:fixed and lifts out of this box

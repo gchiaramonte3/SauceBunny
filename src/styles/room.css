@@ -377,15 +377,15 @@
   padding: 0 16px;
   font-size: 12.5px;
   font-weight: 700;
-  color: var(--danger, #ff6b6b);
+  color: var(--danger);
   background: transparent;
-  border: 1px solid color-mix(in srgb, var(--danger, #ff6b6b) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
   border-radius: var(--r-md, 8px);
 }
 .cp-room-end:hover {
-  background: color-mix(in srgb, var(--danger, #ff6b6b) 14%, transparent);
-  border-color: var(--danger, #ff6b6b);
-  color: var(--danger, #ff6b6b);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 .cp-room-bar-sep {
   width: 1px;

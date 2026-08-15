@@ -54,6 +54,12 @@
   --warning:  #E87826;
   --danger:   #E82626;
   --danger-2: #C2252D;
+  /* Danger as TEXT or an icon on a dark surface. --danger is the solid: at
+     full saturation it is heavy for a glyph and fails against dark greys, so
+     ten stylesheets had each reached for their own lighter red instead —
+     #ff8a8a in five files, #ff6b6b in five more. This is that colour, named
+     once. */
+  --danger-text: #FF8A8A;
   --info:     #1969F5;
   --gold:     #F5C451; /* host crown / winner accent — no status meaning */
 

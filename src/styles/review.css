@@ -229,7 +229,7 @@
 }
 .cp-review-export-tc:focus,
 .cp-review-export-select:focus { outline: none; border-color: var(--focus-ring); }
-.cp-review-export-tc.invalid { border-color: #ff8a8a; color: #ff8a8a; }
+.cp-review-export-tc.invalid { border-color: var(--danger-text); color: var(--danger-text); }
 .cp-review-export-drop {
   display: flex;
   align-items: center;
@@ -304,7 +304,7 @@
   cursor: pointer;
   border-radius: 6px;
 }
-.cp-review-history-del:hover { background: rgba(255,138,138,0.14); color: #ff8a8a; }
+.cp-review-history-del:hover { background: rgba(255,138,138,0.14); color: var(--danger-text); }
 /* Bulk clear — a quiet text row pinned under the list, danger-tinted on hover
    (same treatment as the per-row ✕). Only rendered when the list is non-empty. */
 .cp-review-history-clear {
@@ -322,7 +322,7 @@
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.cp-review-history-clear:hover { background: rgba(255,138,138,0.14); color: #ff8a8a; }
+.cp-review-history-clear:hover { background: rgba(255,138,138,0.14); color: var(--danger-text); }
 .cp-review-export-msg {
   padding: 6px 14px;
   font-family: var(--font-ui);
@@ -703,7 +703,7 @@
 }
 .cp-review-tool:disabled { opacity: 0.5; cursor: default; }
 .cp-review-tool.recording {
-  color: #ff6b6b;
+  color: var(--danger-text);
   background: rgba(255, 107, 107, 0.16);
   border-color: rgba(255, 107, 107, 0.45);
   animation: cp-mic-pulse 1.3s ease-in-out infinite;
@@ -835,12 +835,12 @@
   border-top: 1px solid rgba(var(--accent-rgb), 0.18);
 }
 .cp-review-drawhint.recording {
-  color: #ff6b6b;
+  color: var(--danger-text);
   background: rgba(255, 107, 107, 0.10);
   border-top-color: rgba(255, 107, 107, 0.22);
 }
 .cp-review-drawhint.error {
-  color: var(--danger, #ff6b6b);
+  color: var(--danger);
   background: rgba(255, 107, 107, 0.10);
   border-top-color: rgba(255, 107, 107, 0.22);
   cursor: pointer;

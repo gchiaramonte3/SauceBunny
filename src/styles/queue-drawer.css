@@ -345,7 +345,7 @@ body.cp-tab-dragging { cursor: grabbing; }
 }
 .cp-queue-status.running { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
 .cp-queue-status.done    { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
-.cp-queue-status.error   { color: #ff8a8a; background: rgba(232,38,38,0.14); }
+.cp-queue-status.error   { color: var(--danger-text); background: rgba(232,38,38,0.14); }
 
 .cp-queue-meta {
   display: flex;
@@ -397,7 +397,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   transition: all var(--dur-fast) var(--ease-out);
 }
 .cp-queue-iconbtn:hover { color: var(--fg-1); background: rgba(255,255,255,0.05); }
-.cp-queue-iconbtn.danger:hover { color: #ff8a8a; background: rgba(232,38,38,0.10); }
+.cp-queue-iconbtn.danger:hover { color: var(--danger-text); background: rgba(232,38,38,0.10); }
 
 .cp-queue-foot {
   border-top: 1px solid var(--line-1);
@@ -412,14 +412,14 @@ body.cp-tab-dragging { cursor: grabbing; }
   color: var(--fg-4);
 }
 .cp-queue-summary .ok  { color: var(--accent); }
-.cp-queue-summary .err { color: #ff8a8a; }
+.cp-queue-summary .err { color: var(--danger-text); }
 .cp-queue-foot-row { display: flex; gap: 8px; }
 .cp-queue-foot-row .btn { flex: 1; }
 .cp-queue-foot-row .btn-ghost { flex: 0 0 auto; padding: 0 14px; }
 .cp-queue-stop {
   background: rgba(232,38,38,0.14);
   border: 1px solid rgba(232,38,38,0.35);
-  color: #ff8a8a;
+  color: var(--danger-text);
 }
 .cp-queue-stop:hover { background: rgba(232,38,38,0.20); color: #fff; }
 
