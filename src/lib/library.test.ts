@@ -180,6 +180,43 @@ describe("sortLibraryItems", () => {
   });
 });
 
+describe("sortLibraryItems tiebreak direction", () => {
+  // Files sharing a modified date is the ordinary case, not the edge one:
+  // anything copied, exported or rendered as a batch lands on the same
+  // timestamp. Reversing the sorted array flipped the NAME tiebreak with the
+  // primary key, so "newest first" listed those files Z to A while "oldest
+  // first" listed them A to Z. Finder keeps its secondary sort ascending in
+  // both directions.
+  const same = (name: string) =>
+    ({ name, path: `/lib/${name}`, modified_ms: 1000, size_bytes: 42, kind: "video" }) as never;
+  const names = (xs: readonly unknown[]) => (xs as { name: string }[]).map((x) => x.name);
+  const items = [same("charlie.mov"), same("alpha.mov"), same("bravo.mov")];
+
+  it("keeps equal-date files alphabetical in BOTH directions", () => {
+    expect(names(sortLibraryItems(items, "date", "asc"))).toEqual(["alpha.mov", "bravo.mov", "charlie.mov"]);
+    expect(names(sortLibraryItems(items, "date", "desc"))).toEqual(["alpha.mov", "bravo.mov", "charlie.mov"]);
+  });
+
+  it("keeps equal-size files alphabetical in BOTH directions", () => {
+    expect(names(sortLibraryItems(items, "size", "asc"))).toEqual(["alpha.mov", "bravo.mov", "charlie.mov"]);
+    expect(names(sortLibraryItems(items, "size", "desc"))).toEqual(["alpha.mov", "bravo.mov", "charlie.mov"]);
+  });
+
+  it("still reverses when NAME is the key being sorted", () => {
+    expect(names(sortLibraryItems(items, "name", "desc"))).toEqual(["charlie.mov", "bravo.mov", "alpha.mov"]);
+  });
+
+  it("still orders by the primary key first", () => {
+    const mixed = [
+      { name: "b.mov", path: "/b", modified_ms: 3000, size_bytes: 1, kind: "video" },
+      { name: "a.mov", path: "/a", modified_ms: 1000, size_bytes: 9, kind: "video" },
+    ] as never[];
+    expect(names(sortLibraryItems(mixed, "date", "desc"))).toEqual(["b.mov", "a.mov"]);
+    expect(names(sortLibraryItems(mixed, "date", "asc"))).toEqual(["a.mov", "b.mov"]);
+    expect(names(sortLibraryItems(mixed, "size", "desc"))).toEqual(["a.mov", "b.mov"]);
+  });
+});
+
 describe("source timecodes (per-file store)", () => {
   function installLocalStorage(): void {
     const store = new Map<string, string>();

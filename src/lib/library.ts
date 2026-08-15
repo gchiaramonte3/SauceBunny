@@ -108,13 +108,19 @@ export function sortLibraryItems(
 ): LibraryItem[] {
   const byName = (a: LibraryItem, b: LibraryItem) =>
     a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+  // The direction applies to the PRIMARY key only. Reversing the finished
+  // array flips the name tiebreak along with it, so "newest first" listed
+  // same-day files Z to A while "oldest first" listed them A to Z. Finder
+  // keeps the secondary sort ascending in both directions, and a file list
+  // that reorders its own tiebreak reads as arbitrary.
+  const sign = dir === "desc" ? -1 : 1;
   const cmp = (a: LibraryItem, b: LibraryItem): number => {
-    if (key === "date") return (a.modified_ms - b.modified_ms) || byName(a, b);
-    if (key === "size") return (a.size_bytes - b.size_bytes) || byName(a, b);
-    return byName(a, b);
+    if (key === "date") return sign * (a.modified_ms - b.modified_ms) || byName(a, b);
+    if (key === "size") return sign * (a.size_bytes - b.size_bytes) || byName(a, b);
+    // Name IS the primary key here, so this one does flip.
+    return sign * byName(a, b);
   };
-  const sorted = [...items].sort(cmp);
-  return dir === "desc" ? sorted.reverse() : sorted;
+  return [...items].sort(cmp);
 }
 
 /**
