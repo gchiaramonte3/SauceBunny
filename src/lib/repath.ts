@@ -33,11 +33,21 @@
 export function repathKey<T>(
   map: Record<string, T>, from: string, to: string,
 ): Record<string, T> {
-  if (from === to) return map;
-  if (!Object.prototype.hasOwnProperty.call(map, from)) return map;
+  // NFC on both, because the two sides arrive in different spellings. The maps
+  // this moves keys in are canonicalised on load (see library.ts pathKey), and
+  // `from` is whatever the caller had - a scanned path, which macOS reports
+  // DECOMPOSED. Comparing those raw meant a rename AWAY from an accented name
+  // found no key to move and silently orphaned the poster and the timecode:
+  // exactly the bug that normalising the maps was meant to end, arriving from
+  // the other direction. Found by auditing that change rather than by using
+  // the app, which is the only way it would have surfaced.
+  const fromKey = from.normalize("NFC");
+  const toKey = to.normalize("NFC");
+  if (fromKey === toKey) return map;
+  if (!Object.prototype.hasOwnProperty.call(map, fromKey)) return map;
   const next = { ...map };
-  next[to] = next[from];
-  delete next[from];
+  next[toKey] = next[fromKey];
+  delete next[fromKey];
   return next;
 }
 

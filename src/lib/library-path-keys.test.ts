@@ -59,6 +59,29 @@ describe("poster and timecode keys are encoding-agnostic", () => {
     expect(sourceTimecodeFor(`/lib/${NFD}`)).toBe("01:00:00:00");
   });
 
+  it("keeps the poster when renaming AWAY from an accented name", () => {
+    // The direction the first version of this fix broke. Normalising the maps
+    // on load made their keys composed, while repathIdentity is handed the
+    // path a library scan produced, which is decomposed - so the move found
+    // nothing, left the value under the old key, and the new name came up
+    // empty. Caught by auditing the fix, not by using the app.
+    const oldNFD = `/lib/${NFD}`;
+    setChosenPoster(oldNFD, 12);
+    setSourceTimecode(oldNFD, "01:00:00:00");
+    repathIdentity(oldNFD, "/lib/plain.mov", {});
+    expect(chosenPosterFor("/lib/plain.mov")).toBe(12);
+    expect(sourceTimecodeFor("/lib/plain.mov")).toBe("01:00:00:00");
+    expect(chosenPosterFor(oldNFD)).toBe(null); // and it did not stay behind
+  });
+
+  it("keeps the poster renaming from one accented name to another", () => {
+    const from = `/lib/${NFD}`;
+    const to = `/lib/${"résumé.mov"}`;   // composed, as a dialog returns it
+    setChosenPoster(from, 9);
+    repathIdentity(from, to, {});
+    expect(chosenPosterFor(to.normalize("NFD"))).toBe(9);
+  });
+
   it("clears by either spelling", () => {
     setChosenPoster(`/lib/${NFC}`, 3);
     clearChosenPoster(`/lib/${NFD}`);
