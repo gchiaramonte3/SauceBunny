@@ -84,6 +84,45 @@ describe("co-review op relay (applyReviewOp)", () => {
     expect(setResolved(d0, "x1", true, 4000).comments[0].updatedAt).toBe(4000);
   });
 
+  it("a reaction removed during a live session can come back and STICK", () => {
+    // A RECORD OF A LIMITATION, not a specification. Measured, not reasoned.
+    //
+    // mergeReviewDoc unions reactions, and a union cannot express removal.
+    // The host publishes a snapshot on every change, so one is routinely in
+    // flight when a guest unlikes:
+    //
+    //   guest unlikes            -> local has none
+    //   stale snapshot arrives   -> union puts it back
+    //   host republishes WITHOUT it (it processed the unlike)
+    //                            -> union of local ["Ada"] and snapshot []
+    //                               is still ["Ada"]
+    //
+    // So it is not a flicker that settles. It is stuck until the guest
+    // unlikes a SECOND time, which is the recovery path and also why this is
+    // survivable rather than serious. What the user sees is a reaction they
+    // removed reappearing and the button apparently not working.
+    //
+    // Fixing it properly means tombstones, or last-write-wins per
+    // (comment, emoji, user), which is a change to the wire contract.
+    const { doc, v } = seed();
+    const withLike = setLike(insertComment(doc, mk(v, "x1", 1000)), "x1", "Ada", true);
+    const unliked = setLike(withLike, "x1", "Ada", false);
+    expect(reactionsOf(unliked.comments[0])["👍"]).toBeUndefined();
+
+    // A snapshot published before the host saw the unlike.
+    const resurrected = mergeReviewDoc(unliked, withLike);
+    expect(reactionsOf(resurrected.comments[0])["👍"]).toEqual(["Ada"]);
+
+    // And the host's NEXT snapshot, which correctly lacks the reaction, does
+    // not clear it — because union.
+    const afterHostCaughtUp = mergeReviewDoc(resurrected, unliked);
+    expect(reactionsOf(afterHostCaughtUp.comments[0])["👍"]).toEqual(["Ada"]);
+
+    // Unliking again does clear it, as long as no stale snapshot is still out.
+    const secondTry = mergeReviewDoc(setLike(afterHostCaughtUp, "x1", "Ada", false), unliked);
+    expect(reactionsOf(secondTry.comments[0])["👍"]).toBeUndefined();
+  });
+
   it("mergeReviewDoc is IDEMPOTENT — the host republishing changes nothing", () => {
     // The property the session actually leans on. The host publishes a
     // snapshot on every change, so a guest merges the same doc over and over.
