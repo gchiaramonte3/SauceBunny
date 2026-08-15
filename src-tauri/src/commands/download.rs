@@ -1191,7 +1191,8 @@ pub async fn save_thumbnail(args: SaveThumbArgs) -> Result<(), crate::AppError> 
 // playback fails mid-session the frontend can re-resolve.
 // ────────────────────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub struct DirectStreamResult {
     pub url: String,
     /// DASH-split sources (Reddit, YouTube >360p, …) have no single muxed

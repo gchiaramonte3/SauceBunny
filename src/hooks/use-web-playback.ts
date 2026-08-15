@@ -29,15 +29,12 @@ import {
   type StreamInfo,
 } from "../lib/web-playback-machine";
 
-/** What yt-dlp's resolver returns (mirrors DirectStreamResult). */
-type DirectStream = {
-  url: string;
-  audio_url: string | null;
-  width: number | null;
-  height: number | null;
-  vcodec: string | null;
-  acodec: string | null;
-};
+// What yt-dlp's resolver returns. Generated from the Rust struct rather than
+// mirrored here: the copy this replaces was field-for-field correct, which is
+// exactly how a copy survives long enough to drift. The binding also carries
+// the struct's doc comments, so the DASH split and the acodec rule are legible
+// at the call site instead of only in download.rs.
+import type { DirectStreamResult } from "../bindings/DirectStreamResult";
 
 // Imported, not restated. Four other call sites import it from CanvasToast;
 // this was the lone copy, and a copy of a union is a copy that drifts.
@@ -211,7 +208,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
         return;
       }
       try {
-        const stream = await invoke<DirectStream>("get_direct_stream_url", {
+        const stream = await invoke<DirectStreamResult>("get_direct_stream_url", {
           url,
           cookiesBrowser: h.cookiesBrowser(),
           maxHeight: h.previewMaxHeight,

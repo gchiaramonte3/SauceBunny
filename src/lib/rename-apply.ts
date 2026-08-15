@@ -6,6 +6,7 @@ import { repathKey } from "./repath";
 import { linkFingerprint, resolveByFingerprint, reviewFingerprint } from "./review";
 import { getHistory, renameEntryPath } from "./transcript-history";
 import type { RenamePlanRow } from "./rename-pattern";
+import type { LocalFileMeta } from "../bindings/LocalFileMeta";
 
 /**
  * Perform a rename, and carry the file's identity across with it.
@@ -52,9 +53,7 @@ export type RenameOutcome = {
  */
 export async function probeIdentity(path: string): Promise<RenameIdentity> {
   try {
-    const m = await invoke<{
-      size_bytes: number; duration: number | null; width: number | null; height: number | null;
-    }>("probe_local_file", { path });
+    const m = await invoke<LocalFileMeta>("probe_local_file", { path });
     return {
       durationSec: m.duration,
       width: m.width,
