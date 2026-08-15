@@ -49,7 +49,7 @@
 }
 .cp-logs-header .status-pill.success { color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
 .cp-logs-header .status-pill.error   { color: #ff7a7a; background: rgba(232,38,38, 0.12); }
-.cp-logs-header .status-pill.working { color: #E87826; background: rgba(232,120,38, 0.12); }
+.cp-logs-header .status-pill.working { color: var(--warning); background: rgba(232,120,38, 0.12); }
 .cp-logs-header .progress {
   flex: 1;
   height: 2px;
@@ -129,7 +129,7 @@
 .log-line .tag { font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 .log-line .tag.info  { color: var(--fg-3); }
 .log-line .tag.ok    { color: var(--accent); }
-.log-line .tag.warn  { color: #E87826; }
+.log-line .tag.warn  { color: var(--warning); }
 .log-line .tag.err   { color: var(--danger-text); }
 .log-line .tag.muxer { color: #B084FF; }
 .log-line .msg { color: var(--fg-2); white-space: pre-wrap; word-break: break-word; }

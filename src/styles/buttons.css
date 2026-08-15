@@ -55,7 +55,7 @@
      reads as "lit from above". Dark text for AAA contrast against
      the bright fill. The glow stack does the heavy lifting. */
   background: linear-gradient(180deg, var(--color-accent-green-2) 0%, var(--color-accent-green) 100%);
-  color: #0A0A0D;
+  color: var(--bg-0);
   border-color: transparent;
   box-shadow: var(--glow-green-cta);
 }

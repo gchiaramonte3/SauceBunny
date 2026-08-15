@@ -131,7 +131,7 @@
   color: var(--fg-1);
   letter-spacing: -0.005em;
 }
-.cp-palette-row.active .cp-palette-row-label { color: #FFFFFF; }
+.cp-palette-row.active .cp-palette-row-label { color: var(--fg-0); }
 .cp-palette-row-desc {
   font-family: var(--font-ui);
   font-size: 11px;
