@@ -25,7 +25,10 @@ export function truncateUtf8Bytes(s: string, max = MAX_BASE_BYTES): string {
 export function sanitizeFilename(name: string): string {
   const cleaned = name
     .trim()
-    .replace(/[\/\\:*?"<>|\0\x00-\x1f]/g, "_")
+    // \x7f-\x9f as well as \x00-\x1f: Rust maps on `char::is_control()`,
+    // which covers DEL and the C1 block too. Without them this mirror
+    // diverged — the app previewed a name the backend would never write.
+    .replace(/[\/\\:*?"<>|\0\x00-\x1f\x7f-\x9f]/g, "_")
     .replace(/^\.+|\.+$/g, "");
   // Exact-budget cut for user-typed names (mirrors Rust sanitize_filename);
   // trailing separators left by the cut are noise.

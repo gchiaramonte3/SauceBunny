@@ -70,3 +70,27 @@ describe("middleEllipsize", () => {
     expect(middleEllipsize("short.mp4")).toBe("short.mp4");
   });
 });
+
+describe("parity with Rust sanitize_filename", () => {
+  // The TS side is a documented mirror of src-tauri/src/commands/mod.rs, and a
+  // comment saying "keep both in sync" is not a mechanism — this pair had
+  // already drifted on the control-character range when this test was written.
+  it("replaces DEL and the C1 block, which Rust's is_control() covers", () => {
+    // Rust maps on char::is_control(): U+0000-001F *and* U+007F-009F. A regex
+    // of \x00-\x1f alone lets these through, so the app previewed a filename
+    // the backend would never write.
+    expect(sanitizeFilename("a\x7Fb")).toBe("a_b");
+    expect(sanitizeFilename("a\x80b")).toBe("a_b");
+    expect(sanitizeFilename("a\x9Fb")).toBe("a_b");
+  });
+
+  it("still replaces the C0 range and the reserved punctuation", () => {
+    expect(sanitizeFilename("a\x01b")).toBe("a_b");
+    expect(sanitizeFilename('a/b\\c:d*e?f"g<h>i|j')).toBe("a_b_c_d_e_f_g_h_i_j");
+  });
+
+  it("shares the byte budget the Rust constant declares", () => {
+    // Both sides say 180; the comment on each points at the other.
+    expect(MAX_BASE_BYTES).toBe(180);
+  });
+});
