@@ -3955,7 +3955,7 @@ export default function App() {
     } catch (e) {
       pushNotification("error", "Couldn't open transcript", formatError(e));
     }
-  }, [appendLog, pushNotification, setActiveView, openSourceView]);
+  }, [appendLog, pushNotification, openSourceView]);
 
   const handleImportTranscript = useCallback(async () => {
     // Default the picker to the library's current-month folder, where

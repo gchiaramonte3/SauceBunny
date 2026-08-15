@@ -519,7 +519,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       }
     } catch (err) {
       if (gen === genRef.current) {
-        onError?.(`Video decode failed: ${err instanceof Error ? err.message : String(err)}`);
+        onErrorRef.current?.(`Video decode failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   };
@@ -611,7 +611,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
         // else would ever settle the transport — the UI would sit reporting
         // "playing" against a frozen clock.
         if (!videoSinkRef.current) stopPlayback();
-        onError?.(`Audio decode failed: ${err instanceof Error ? err.message : String(err)}`);
+        onErrorRef.current?.(`Audio decode failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   };
@@ -665,6 +665,22 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
   // would freeze the moment App.tsx re-rendered.
   const onTimeUpdateRef = useRef(onTimeUpdate);
   useEffect(() => { onTimeUpdateRef.current = onTimeUpdate; }, [onTimeUpdate]);
+  /**
+   * Same treatment for onError, and for the same reason the ref above exists.
+   *
+   * The imperative handle is built once (`[]`) and captures startLoops,
+   * stopPlayback, cancelInFlight and startShuttleLoop as they were on the first
+   * render. Those close over props — and `onError` reaches this player from an
+   * inline arrow in App, rebuilt every render over live state. The player is
+   * NOT keyed on `path`, so switching files reuses this instance and the
+   * captured copies stay behind.
+   *
+   * Every onError call now reads the ref, not just the ones inside the handle:
+   * one pattern per prop is what stops the next long-lived closure quietly
+   * reintroducing this.
+   */
+  const onErrorRef = useRef(onError);
+  useEffect(() => { onErrorRef.current = onError; }, [onError]);
   useEffect(() => {
     const t = window.setInterval(() => {
       if (playingRef.current) onTimeUpdateRef.current?.(currentMediaTime());
@@ -923,7 +939,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
             // Sentinel prefix `[WEBCODECS_UNSUPPORTED]` lets App.tsx pattern-
             // match and trigger the ffmpeg-prep fallback for this single
             // import without touching the global Settings toggle.
-            onError?.(`[WEBCODECS_UNSUPPORTED] video codec "${codec}"`);
+            onErrorRef.current?.(`[WEBCODECS_UNSUPPORTED] video codec "${codec}"`);
             return;
           }
           // NO ProRes short-circuit (r148). turbores is the FASTER decoder
@@ -967,7 +983,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
               if (cancelled) return;
               if (!second || canvasLooksBlank(second.canvas)) {
                 const codec = await vt.getCodec().catch(() => "unknown");
-                onError?.(`[WEBCODECS_UNSUPPORTED] ${codec} decodes but paints black here`);
+                onErrorRef.current?.(`[WEBCODECS_UNSUPPORTED] ${codec} decodes but paints black here`);
                 return;
               }
               drawCanvas(second.canvas);
@@ -975,7 +991,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
           } catch (e) {
             if (cancelled) return;
             const codec = await vt.getCodec().catch(() => "unknown");
-            onError?.(`[WEBCODECS_UNSUPPORTED] ${codec} video can't be rendered here (${e instanceof Error ? e.message : String(e)})`);
+            onErrorRef.current?.(`[WEBCODECS_UNSUPPORTED] ${codec} video can't be rendered here (${e instanceof Error ? e.message : String(e)})`);
             return;
           }
         }
@@ -985,7 +1001,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
             // Audio-only codec issues also trigger fallback — playing
             // silent video is technically possible but most users hit
             // this in podcasts/interviews where audio IS the content.
-            onError?.(`[WEBCODECS_UNSUPPORTED] audio codec "${codec}"`);
+            onErrorRef.current?.(`[WEBCODECS_UNSUPPORTED] audio codec "${codec}"`);
             return;
           }
           audioSinkRef.current = new AudioBufferSink(at);
@@ -1004,7 +1020,7 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
         onReady?.(dur);
       } catch (err) {
         if (!cancelled) {
-          onError?.(`Failed to open file: ${err instanceof Error ? err.message : String(err)}`);
+          onErrorRef.current?.(`Failed to open file: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
     })();
