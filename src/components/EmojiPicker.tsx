@@ -201,11 +201,12 @@ export function EmojiPicker({ onPick, title = "Add emoji" }: { onPick: (emoji: s
 
   const pick = (emoji: string) => {
     onPick(emoji);
-    setRecents((prev) => {
-      const next = [emoji, ...prev.filter((e) => e !== emoji)].slice(0, 24);
-      try { localStorage.setItem(RECENTS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-      return next;
-    });
+    // Computed and persisted OUTSIDE the updater. React may run an updater
+    // more than once - StrictMode does, and a discarded concurrent render can
+    // too - so a write in there persists a pick that may never commit.
+    const next = [emoji, ...recents.filter((e) => e !== emoji)].slice(0, 24);
+    try { localStorage.setItem(RECENTS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+    setRecents(next);
   };
 
   const q = query.trim().toLowerCase();
