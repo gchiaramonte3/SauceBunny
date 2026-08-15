@@ -71,6 +71,20 @@ export function useBatchTranscribe(
         try {
           const jobId = await invoke<string>("new_job_id");
           jobRef.current = jobId;
+          // A cancel that landed while new_job_id was in flight read jobRef as
+          // null and had nothing to kill, so it stopped the QUEUE from handing
+          // out more work but not this file, which then transcribed to the end
+          // minutes after the user pressed Stop. Checked here, after the id
+          // exists and before the work starts.
+          //
+          // "skipped" rather than "error": nothing ran, so nothing failed and
+          // no output was written. That is the case cancelBatch's comment
+          // deliberately does not cover, since it is reasoning about a file
+          // already in flight.
+          if (stateRef.current.cancelled) {
+            apply(markItem(stateRef.current, idx, "skipped"));
+            break;
+          }
           await invoke<string>("transcribe_local_file", {
             args: {
               input_path: item.path,
