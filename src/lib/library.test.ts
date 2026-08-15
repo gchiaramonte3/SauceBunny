@@ -102,6 +102,54 @@ describe("searchLibrary", () => {
   });
 });
 
+describe("searchLibrary and macOS filename encoding", () => {
+  // APFS stores filenames DECOMPOSED. A keyboard sends PRECOMPOSED. The two
+  // render identically, so before this the user typed the name they could see
+  // and the file did not come back.
+  const NFD = "caf\u0065\u0301 interview.mov";   // e + combining acute, as on disk
+  const NFC = "caf\u00e9";                        // precomposed, as typed
+  const tree = {
+    name: "Root", path: "/root", folders: [],
+    items: [{ name: NFD, path: `/root/${NFD}`, modified_ms: 1, size_bytes: 1, kind: "video" }],
+  } as never;
+
+  it("finds a decomposed filename from a precomposed query", () => {
+    expect(NFD).not.toBe(NFD.normalize("NFC")); // the fixture really is decomposed
+    const r = searchLibrary([tree], NFC);
+    expect(r.items).toHaveLength(1);
+    expect(r.totalItems).toBe(1);
+  });
+
+  it("works the other way round too", () => {
+    const nfcTree = {
+      name: "Root", path: "/root", folders: [],
+      items: [{ name: NFD.normalize("NFC"), path: "/root/x", modified_ms: 1, size_bytes: 1, kind: "video" }],
+    } as never;
+    expect(searchLibrary([nfcTree], NFC.normalize("NFD")).items).toHaveLength(1);
+  });
+
+  it("matches a decomposed FOLDER name too", () => {
+    const folderTree = {
+      name: "Root", path: "/root", items: [],
+      folders: [{ name: NFD, path: `/root/${NFD}`, folders: [], items: [] }],
+    } as never;
+    expect(searchLibrary([folderTree], NFC).folders).toHaveLength(1);
+  });
+
+  it("does NOT fold accents away, which would break other scripts", () => {
+    // Deliberate: stripping diacritics would make "cafe" match "café", and it
+    // would also make か match が, which is a different word. Normalising is a
+    // bug fix; folding is a product decision.
+    expect(searchLibrary([tree], "cafe").items).toHaveLength(0);
+    const kana = {
+      name: "Root", path: "/root", folders: [],
+      items: [{ name: "\u304c.mov", path: "/root/ga", modified_ms: 1, size_bytes: 1, kind: "video" }],
+    } as never;
+    expect(searchLibrary([kana], "\u304b").items).toHaveLength(0); // か must not match が
+    expect(searchLibrary([kana], "\u304c").items).toHaveLength(1); // が finds itself
+  });
+});
+
 
 describe("formatBytes", () => {
   it("picks sensible units", () => {

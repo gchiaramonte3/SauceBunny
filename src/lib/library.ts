@@ -157,15 +157,27 @@ export function searchLibrary(
 ): LibrarySearchResult {
   const itemCap = caps.items ?? 120;
   const folderCap = caps.folders ?? 30;
-  const q = rawQuery.trim().toLowerCase();
+  // NFC on both sides. APFS stores filenames DECOMPOSED, so "café.mov" on disk
+  // is "cafe" plus a combining acute, while a keyboard sends the precomposed
+  // character. The two look identical and `includes` says false, so typing the
+  // name you can see returns nothing and the file reads as missing.
+  //
+  // Normalising is not the same as folding. Stripping diacritics would also
+  // make "cafe" match "café" - which the SORT already does, via
+  // sensitivity:"base" - but \p{Diacritic} covers Japanese dakuten too, so it
+  // would make か match が. That is a different word. Fixing the encoding
+  // mismatch is a bug fix; accent-insensitive search is a product decision,
+  // and it is not one to make by accident on somebody's Japanese library.
+  const norm = (s: string) => s.normalize("NFC").toLowerCase();
+  const q = norm(rawQuery.trim());
   const result: LibrarySearchResult = { folders: [], items: [], totalItems: 0 };
   if (!q) return result;
   const walk = (node: LibraryFolder, chain: LibraryCrumb[]) => {
-    if (node.name.toLowerCase().includes(q) && result.folders.length < folderCap) {
+    if (norm(node.name).includes(q) && result.folders.length < folderCap) {
       result.folders.push({ folder: node, chain });
     }
     for (const it of node.items) {
-      if (!it.name.toLowerCase().includes(q)) continue;
+      if (!norm(it.name).includes(q)) continue;
       result.totalItems++;
       if (result.items.length < itemCap) result.items.push(it);
     }
