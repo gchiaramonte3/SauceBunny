@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  groupBySite, hostOf, siteKey, siteName, sortByRecent, type CachedWebItem,
+  groupBySite, hostOf, siteKey, siteName, type CachedWebItem,
 } from "./web-source";
 
 const item = (url: string, fetched_at = 0): CachedWebItem => ({
@@ -87,15 +87,6 @@ describe("groupBySite", () => {
 
   it("survives an empty shelf", () => {
     expect(groupBySite([])).toEqual([]);
-  });
-});
-
-describe("sortByRecent", () => {
-  it("is newest first and does not mutate the input", () => {
-    const input = [item("https://a/1", 100), item("https://a/2", 300), item("https://a/3", 200)];
-    const out = sortByRecent(input);
-    expect(out.map((i) => i.fetched_at)).toEqual([300, 200, 100]);
-    expect(input.map((i) => i.fetched_at)).toEqual([100, 300, 200]);
   });
 });
 

@@ -108,13 +108,3 @@ export function groupBySite(items: readonly CachedWebItem[]): Array<{ site: stri
     (a, b) => b.items.length - a.items.length || a.site.localeCompare(b.site),
   );
 }
-
-/**
- * Newest first. `fetched_at` is when we last resolved the page, which is the
- * closest thing to "when did this enter my life" that the cache records —
- * the file's mtime is when the download finished, which for a resumed or
- * re-encoded copy is a different and less useful moment.
- */
-export function sortByRecent(items: readonly CachedWebItem[]): CachedWebItem[] {
-  return [...items].sort((a, b) => b.fetched_at - a.fetched_at);
-}
