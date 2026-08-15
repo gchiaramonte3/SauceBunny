@@ -3616,6 +3616,18 @@ export default function App() {
           appendLog("info", txChannel,
             `Audio extracted via mediabunny (${(wavBlob.size / 1_000_000).toFixed(1)} MB WAV); skipping ffmpeg.`);
           const bytes = Array.from(new Uint8Array(await wavBlob.arrayBuffer()));
+          // Checked AGAIN, because the line above is not free: reading the
+          // blob is async, and Array.from over a Uint8Array walks every byte
+          // of it. The extraction cap is 20 minutes of 16 kHz mono, so that is
+          // up to ~38 MB turned into a JS array element by element, which is
+          // seconds of window, not microseconds. A Stop landing in it passed
+          // the check above and then spawned the job anyway - the same shape
+          // as the batch-transcribe cancel, where the file finished and
+          // reported success after the user pressed Stop.
+          if (abort.signal.aborted) {
+            transcriptAbortRef.current = null;
+            return;
+          }
           await invoke<string>("transcribe_prepared_wav", {
             args: {
               wav_bytes: bytes,
