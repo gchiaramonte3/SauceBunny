@@ -3,7 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
 import { QueueDrawer } from "./components/QueueDrawer";
 import { setPlayheadFrames } from "./lib/playhead-store";
-import { PANEL_SNAPSHOT_KEY, PANEL_PLAYHEAD_EVENT, type PanelSnapshot } from "./hooks/use-panel-bus";
+import {
+  PANEL_SNAPSHOT_KEY, PANEL_PLAYHEAD_EVENT, INITIAL_SNAPSHOT, coercePanelSnapshot,
+  type PanelSnapshot,
+} from "./hooks/use-panel-bus";
 import type { TranscriptHistoryEntry } from "./lib/transcript-history";
 
 /**
@@ -31,23 +34,9 @@ import type { TranscriptHistoryEntry } from "./lib/transcript-history";
 /** Mirror of the main window's published snapshot (single shared type). */
 type PanelState = PanelSnapshot;
 
-const INITIAL: PanelState = {
-  queue: [],
-  fps: 30,
-  running: false,
-  hasFolder: false,
-  transcriptPath: null,
-  transcriptOrigin: "unknown",
-  transcriptPlayhead: null,
-  transcriptArrivedTick: 0,
-  regenerateBusy: false,
-  canRegenerate: false,
-  hasSource: false,
-  aiModelId: "qwen3-4b-instruct",
-  aiStyle: { format: "bullets", length: "standard" },
-  chapterSourceKey: null,
-  durationSec: null,
-};
+/** The panel's starting state IS the bus's, imported rather than restated:
+ *  two copies of a default in two files is a drift waiting to happen. */
+const INITIAL: PanelState = INITIAL_SNAPSHOT;
 
 type ActionKind =
   | "remove"
@@ -79,7 +68,7 @@ function sendAction(kind: ActionKind, payload?: unknown) {
 function readSnapshotSync(): { raw: string | null; state: PanelState } {
   try {
     const raw = localStorage.getItem(PANEL_SNAPSHOT_KEY);
-    if (raw) return { raw, state: JSON.parse(raw) as PanelState };
+    if (raw) return { raw, state: coercePanelSnapshot(JSON.parse(raw)) };
   } catch { /* corrupt/unavailable — fall through to INITIAL */ }
   return { raw: null, state: INITIAL };
 }
@@ -161,7 +150,7 @@ export default function PanelApp() {
         const raw = localStorage.getItem(PANEL_SNAPSHOT_KEY);
         if (raw && raw !== lastRawRef.current) {
           lastRawRef.current = raw;
-          setState(JSON.parse(raw) as PanelState);
+          setState(coercePanelSnapshot(JSON.parse(raw)));
         }
       } catch { /* ignore parse/quota */ }
     };

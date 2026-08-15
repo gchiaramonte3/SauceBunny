@@ -105,6 +105,43 @@ export type PanelHandlers = {
  *  snapshot content actually changed — never on a timer. */
 export const PANEL_SNAPSHOT_KEY = "saucebunny.panelSnapshot";
 
+/**
+ * Turn whatever is in the mirror into a snapshot the panel can render.
+ *
+ * The panel seeds its FIRST render from localStorage, before any event can
+ * arrive, and both read sites used to `JSON.parse(raw) as PanelSnapshot`. The
+ * try/catch around them covers corrupt JSON; it does not cover the thing that
+ * actually happens, which is a structurally valid object written by an OLDER
+ * BUILD. This type has gained fields over time, and `aiStyle` and `queue` go
+ * straight into children that read `.format` and `.map` on them - so a
+ * pre-aiStyle snapshot does not degrade, it throws during the panel's first
+ * render, in a separate window, where the main window sees nothing wrong.
+ *
+ * The rest of the app already treats persisted JSON this way: loadClipQueue
+ * validates row by row "because this is JSON a previous build wrote", the
+ * defaults key was version-bumped rather than trusted, and migrateCaptionFont
+ * exists for the same reason. This is the one persisted shape that was cast
+ * instead.
+ *
+ * Missing fields take the default rather than rejecting the whole snapshot: a
+ * panel seeded with four of five real values and one default is better than
+ * one that flashes empty and waits for the next publish.
+ */
+export function coercePanelSnapshot(parsed: unknown): PanelSnapshot {
+  if (!parsed || typeof parsed !== "object") return INITIAL_SNAPSHOT;
+  const p = parsed as Partial<PanelSnapshot>;
+  return {
+    ...INITIAL_SNAPSHOT,
+    ...p,
+    // Both are read straight through by children, so neither may arrive as
+    // undefined or as the wrong kind of thing.
+    queue: Array.isArray(p.queue) ? p.queue : INITIAL_SNAPSHOT.queue,
+    aiStyle: p.aiStyle && typeof p.aiStyle === "object"
+      ? { ...INITIAL_SNAPSHOT.aiStyle, ...p.aiStyle }
+      : INITIAL_SNAPSHOT.aiStyle,
+  };
+}
+
 /** Content equality for the publish gate — `queue` by reference (App only
  *  ever replaces it immutably), everything else by value. Runs on every App
  *  render, so it must stay allocation-free. Adding a field to PanelSnapshot?
@@ -144,7 +181,7 @@ export const PANEL_PLAYHEAD_EVENT = "panel:playhead";
  *  cues, so stepping at 250ms is indistinguishable from per-frame there. */
 const PANEL_PLAYHEAD_MS = 250;
 
-const INITIAL_SNAPSHOT: PanelSnapshot = {
+export const INITIAL_SNAPSHOT: PanelSnapshot = {
   queue: [],
   fps: 30,
   running: false,
