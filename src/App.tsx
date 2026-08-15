@@ -1865,7 +1865,7 @@ export default function App() {
     // appendLog / refreshWhisperModels / notify / classifyExtractorRot are
     // all stable (empty deps), so this effect runs exactly once for the
     // app's lifetime.
-  }, [appendLog, refreshWhisperModels, notify, pushNotification, classifyExtractorRot]);
+  }, [appendLog, refreshWhisperModels, notify, pushNotification, classifyExtractorRot, logRunTotals]);
 
   // ====== Player callbacks ======
   // Sync our playhead from the YouTube player's current time while it's playing.
@@ -2638,7 +2638,7 @@ export default function App() {
       setStatus("error");
       setExportPhase("error"); // create_clip rejected synchronously → cross flash
     }
-  }, [metadata, sourceKind, localFilePath, exportOpts, fps, inFrames, outFrames, runLocalClipExport, appendLog, pushNotification, classifyExtractorRot]);
+  }, [metadata, sourceKind, localFilePath, exportOpts, fps, inFrames, outFrames, runLocalClipExport, appendLog, pushNotification, classifyExtractorRot, notify]);
 
   const handleReveal = useCallback(() => {
     if (!resultPath) return;
@@ -3955,7 +3955,7 @@ export default function App() {
     } catch (e) {
       pushNotification("error", "Couldn't open transcript", formatError(e));
     }
-  }, [appendLog, pushNotification, setActiveView]);
+  }, [appendLog, pushNotification, setActiveView, openSourceView]);
 
   const handleImportTranscript = useCallback(async () => {
     // Default the picker to the library's current-month folder, where
@@ -4951,7 +4951,7 @@ export default function App() {
       ]);
     })();
     return () => { mounted = false; unlistens.forEach((u) => u()); };
-  }, [handleImportFile, handleImportTranscript, defaults.transcriptLibrary, setActiveView]);
+  }, [handleImportFile, handleImportTranscript, defaults.transcriptLibrary, setActiveView, pushNotification, setQueueOpenChoice]);
 
   // ── Suppress WKWebView's native context menu on UI chrome ──────
   // WKWebView shows "Look Up", "Translate", "Search with Google" when
@@ -5042,6 +5042,7 @@ export default function App() {
     handleExport, handleSnapshot, handleAddToQueue, handleExportQueue,
     handleQueueClearAll, handleGenerateTranscript, handleDownloadCaptions, handleImportTranscript,
     handleStop, keybindings, undoSnap, performUndo, performRedo,
+    pushNotification, setQueueOpenChoice,
   ]);
 
   // ====== First-run checklist derivation ======
