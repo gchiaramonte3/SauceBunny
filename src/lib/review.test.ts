@@ -84,6 +84,62 @@ describe("co-review op relay (applyReviewOp)", () => {
     expect(setResolved(d0, "x1", true, 4000).comments[0].updatedAt).toBe(4000);
   });
 
+  it("mergeReviewDoc is IDEMPOTENT — the host republishing changes nothing", () => {
+    // The property the session actually leans on. The host publishes a
+    // snapshot on every change, so a guest merges the same doc over and over.
+    // If merging twice differed from merging once, the two machines would
+    // drift a little on every publish and nothing would say so.
+    const { doc, v } = seed();
+    // BOTH sides carry the same reaction on h1. That detail is the test: with
+    // the reaction only on one side, a union and a plain concat produce the
+    // same answer, and the first version of this passed against a merge whose
+    // Set had been removed. Overlapping state is what makes idempotence mean
+    // something - and overlapping state is the normal case, because the host
+    // echoes back the reaction the guest just sent.
+    const seeded = setLike(insertComment(insertComment(doc, mk(v, "h1", 1000)), mk(v, "h2", 1100)), "h1", "Me", true);
+    const snapshot = seeded;
+    const local = setLike(insertComment(seeded, mk(v, "mine", 1200)), "h1", "Me", true);
+
+    const once = mergeReviewDoc(local, snapshot);
+    const twice = mergeReviewDoc(once, snapshot);
+    const thrice = mergeReviewDoc(twice, snapshot);
+    expect(twice).toEqual(once);
+    expect(thrice).toEqual(once);
+  });
+
+  it("mergeReviewDoc converges on comments whichever side arrives first", () => {
+    // Two peers merging each other's docs must agree about the COMMENT set,
+    // which is the part both of them author.
+    const { doc, v } = seed();
+    const shared = insertComment(doc, mk(v, "shared", 1000));
+    const a = setResolved(insertComment(shared, mk(v, "from-a", 1100)), "shared", true, 1300);
+    const b = setLike(insertComment(shared, mk(v, "from-b", 1200)), "shared", "Bo", true);
+
+    const ab = mergeReviewDoc(a, b);
+    const ba = mergeReviewDoc(b, a);
+    const ids = (d: ReviewDoc) => d.comments.map((c) => c.id).sort();
+    expect(ids(ab)).toEqual(ids(ba));
+    expect(ids(ab)).toEqual(["from-a", "from-b", "shared"]);
+    // The newest edit and the union of reactions survive from either direction.
+    const shared_ = (d: ReviewDoc) => d.comments.find((c) => c.id === "shared")!;
+    expect(shared_(ab).resolved).toBe(true);
+    expect(shared_(ba).resolved).toBe(true);
+    expect(reactionsOf(shared_(ab))["👍"]).toEqual(["Bo"]);
+    expect(reactionsOf(shared_(ba))["👍"]).toEqual(["Bo"]);
+  });
+
+  it("gives the INCOMING doc authority over everything outside the comments", () => {
+    // Deliberate, and worth pinning because it is asymmetric: everything that
+    // is not a comment or a status comes from `incoming` wholesale. The host
+    // publishes and guests merge, so the host owns the version list. Anyone
+    // calling this the other way round is asking a guest to overwrite it.
+    const { doc, v } = seed();
+    const host = ensureVersion(doc, "/clip.mp4", "V2", 2000).doc;
+    const guest = { ...doc, activeVersionId: v };
+    expect(mergeReviewDoc(guest, host).versions.length).toBe(host.versions.length);
+    expect(mergeReviewDoc(guest, host).activeVersionId).toBe(host.activeVersionId);
+  });
+
   it("mergeReviewDoc keeps a local in-flight comment the snapshot lacks", () => {
     const { doc, v } = seed();
     const shared = insertComment(doc, mk(v, "host1"));      // host's doc (snapshot)
