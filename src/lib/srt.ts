@@ -521,7 +521,18 @@ export function fmtTime(seconds: number): string {
 
 /**
  * Index of the cue covering `t` seconds, or -1. Binary search over cues that
- * are already sorted by start (parseSrt guarantees it).
+ * are already sorted by start - which parseSrt does NOT guarantee. Its own
+ * doc is explicit: it returns cues in SOURCE order and deliberately does not
+ * sort, "because both producers emit chronological output and resorting would
+ * obscure encoder bugs". That is an assumption about the producers, not a
+ * property of the data, and this file used to claim it as a guarantee.
+ *
+ * It holds for whisper-cli and for the diarizer. It is not promised by a
+ * caption file downloaded from whoever published the video, which the app also
+ * ingests. On out-of-order input this search does not fail loudly: it returns
+ * the right index sometimes, by luck, and -1 the rest of the time - so a
+ * caption that exists just does not appear, at some timecodes and not others.
+ * Pinned in srt.test.ts rather than left to be rediscovered.
  *
  * Why this is shared rather than inlined: the caption overlay and the
  * transcript reader both answer this question, both on every playhead tick.

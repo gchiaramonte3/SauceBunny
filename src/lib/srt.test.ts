@@ -281,6 +281,35 @@ describe("serializeCues", () => {
   });
 });
 
+describe("cueIndexAt on cues that are not in order", () => {
+  // NOT a specification of desired behaviour - a record of a sharp edge.
+  //
+  // cueIndexAt binary-searches, which requires cues sorted by start. parseSrt
+  // does not sort: it says so, and gives a reason (source order keeps encoder
+  // bugs visible). That is fine for whisper-cli and the diarizer, which emit
+  // chronologically. It is an assumption about a caption file downloaded from
+  // whoever published the video.
+  const jumbled: Cue[] = [
+    { index: 1, start: 4, end: 6, text: "third", speaker: null },
+    { index: 2, start: 0, end: 2, text: "first", speaker: null },
+    { index: 3, start: 2, end: 4, text: "second", speaker: null },
+  ];
+
+  it("still answers correctly for some times, which is what hides it", () => {
+    expect(cueIndexAt(jumbled, 1)).toBe(1);
+    expect(cueIndexAt(jumbled, 3)).toBe(2);
+  });
+
+  it("reports NO cue at a time a cue plainly covers", () => {
+    // 5 falls inside jumbled[0]. The search walks the wrong half and gives up.
+    // On screen that is a caption that silently does not appear.
+    expect(cueIndexAt(jumbled, 5)).toBe(-1);
+    // Sorted, the same question answers correctly.
+    const sorted = [...jumbled].sort((a, b) => a.start - b.start);
+    expect(cueIndexAt(sorted, 5)).toBe(2);
+  });
+});
+
 describe("cueIndexAt", () => {
   const cues: Cue[] = [
     { index: 1, start: 0, end: 2, text: "one", speaker: null },
