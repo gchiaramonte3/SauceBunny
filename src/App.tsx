@@ -52,6 +52,7 @@ import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playhead
 import { endSeekFrames } from "./lib/playhead-clock";
 import { usePanelBus } from "./hooks/use-panel-bus";
 import { useStreamRung } from "./hooks/use-stream-rung";
+import type { YtdlpStatus } from "./bindings/YtdlpStatus";
 import { clipTranscriptPath, type ActiveTranscript } from "./lib/transcript-owner";
 import { useTransport } from "./hooks/use-transport";
 import { useWebPlayback } from "./hooks/use-web-playback";
@@ -125,10 +126,6 @@ import { extractAudioAsWav16k } from "./lib/mediabunny-audio";
 
 const DEFAULT_FPS_FALLBACK: Record<string, number> = { "24": 24, "25": 25, "30": 30 };
 
-/** Mirrors the Rust `YtdlpStatus` struct returned by `update_ytdlp` (same
- *  local-mirror convention as YouTubeSettings.tsx — the struct predates the
- *  ts-rs bindings and isn't exported through them). */
-type YtdlpStatus = { version: string; updated: boolean };
 
 function nowHms(): string {
   const d = new Date();

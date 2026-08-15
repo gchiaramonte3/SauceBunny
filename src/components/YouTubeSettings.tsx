@@ -3,9 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import { CollapsibleSection } from "./CollapsibleSection";
 import type { Defaults } from "./SettingsModal";
+import type { YtdlpStatus } from "../bindings/YtdlpStatus";
 
-/** Mirrors the Rust `YtdlpStatus` struct returned by ytdlp_version/update_ytdlp. */
-type YtdlpStatus = { version: string; updated: boolean };
 
 const BROWSERS = ["none", "chrome", "safari", "firefox", "brave", "edge"] as const;
 const PREVIEW_HEIGHTS = [480, 720, 1080] as const;

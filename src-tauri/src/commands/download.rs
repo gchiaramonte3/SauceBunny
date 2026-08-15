@@ -229,7 +229,8 @@ fn updated_ytdlp_path(app: &AppHandle) -> Option<std::path::PathBuf> {
 
 /// Reported back to the YouTube Settings tab: the resolved yt-dlp version string
 /// and whether it's the user-updated copy (`true`) or the bundled sidecar.
-#[derive(serde::Serialize, Clone)]
+#[derive(serde::Serialize, Clone, ts_rs::TS)]
+#[ts(export, export_to = "../../src/bindings/")]
 pub struct YtdlpStatus {
     pub version: String,
     pub updated: bool,
