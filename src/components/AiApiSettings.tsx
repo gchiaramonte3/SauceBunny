@@ -26,7 +26,11 @@ function CloudProviderCard({ p }: { p: (typeof CLOUD)[number] }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  useEffect(() => { hasApiKey(p.id).then(setPresent).catch(() => setPresent(false)); }, []);
+  // `p.id` is fixed for the life of a card — CLOUD is a module constant and the
+  // list is keyed by id, so each instance owns one provider forever. Naming the
+  // dependency is therefore a no-op at runtime and states the truth, which is
+  // better than an empty array that quietly claims this depends on nothing.
+  useEffect(() => { hasApiKey(p.id).then(setPresent).catch(() => setPresent(false)); }, [p.id]);
 
   async function save() {
     const k = keyInput.trim();

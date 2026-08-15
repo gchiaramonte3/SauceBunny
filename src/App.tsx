@@ -5556,6 +5556,13 @@ export default function App() {
     };
     window.addEventListener(REVIEW_CHANGED_EVENT, onChanged);
     return () => window.removeEventListener(REVIEW_CHANGED_EVENT, onChanged);
+    // `localFilePath`, `localFileSize` and `sourceKind` are read lexically inside
+    // reload() and deliberately not listed: reviewSourceKey is DERIVED from all
+    // three (see its useMemo), so any change that could alter what reload()
+    // writes has already changed the key and re-run this effect with a fresh
+    // closure. Listing them again would re-read the review store and re-register
+    // the listener on every probe for a result that cannot differ.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- covered by reviewSourceKey, which derives from them
   }, [reviewSourceKey, coSessionActive, clearDraftHistory]);
 
   // Auto-chapter markers for the timeline — same pattern as the review
