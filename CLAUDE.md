@@ -258,6 +258,24 @@ When adding a new cross-window interaction, use this event pattern. Do not intro
 
 Do not change these paths without updating both the Rust backend and the frontend.
 
+**A key derived from a filename must be NFC-normalised.** macOS stores
+filenames DECOMPOSED and a text field hands back what the keyboard sent, which
+is COMPOSED, so "café.mov" is two different strings depending on which side
+asked. Three bugs shipped from this, all silent, all found only by measuring:
+library search could not find a file by the name shown on it (and, because the
+on-disk name is decomposed, searching WITHOUT the accent did work — insensitive
+in one direction and exact in the other); renaming a file to an accented name
+lost its chosen poster frame and source timecode; and `reviewFingerprint`
+produced two identities for one file, so a rename orphaned the producer's
+notes, which stayed on disk under the old key where nothing looked broken.
+
+Normalise on read as well as write and the store migrates itself. Do NOT fold
+case (repath.ts depends on these stores being case-SENSITIVE so a case-only
+rename does the identity work) and do NOT strip diacritics (`\p{Diacritic}`
+covers Japanese dakuten, so folding makes か match が — a different word).
+Accent-insensitive matching is a product decision; fixing an encoding mismatch
+is not.
+
 ---
 
 ## Build-ID handshake
