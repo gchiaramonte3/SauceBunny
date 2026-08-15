@@ -67,11 +67,17 @@ describe("review docs on the wire carry no local paths", () => {
 
   it("still finds the send sites, so a pass means something", () => {
     // The failure mode of a scraper is matching nothing and reporting success.
+    //
+    // The floor is ONE, not the current count. There are two sends today, and
+    // an earlier version of this asserted two - which would have failed the
+    // build for consolidating them into a single helper, a change this guard
+    // has no business having an opinion about. What it needs to catch is a
+    // matcher that stopped matching, and one is enough for that.
     let sends = 0;
     for (const file of walk(join(ROOT, "src"))) {
       sends += (readFileSync(file, "utf8").match(/kind:\s*"reviewDoc"/g) ?? []).length;
     }
-    expect(sends).toBeGreaterThanOrEqual(2);
+    expect(sends).toBeGreaterThanOrEqual(1);
   });
 
   it("strips the path shapes the guard is written for", () => {
