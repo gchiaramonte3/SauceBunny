@@ -460,7 +460,7 @@
   position: absolute;
   top: 50%;
   width: 11px; height: 11px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--marker-color, var(--accent));
   border: 1px solid var(--bg-1, #131316);
   box-shadow: 0 0 6px color-mix(in srgb, var(--marker-color, var(--accent)) 60%, transparent);

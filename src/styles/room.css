@@ -796,7 +796,7 @@
 .cp-person-presenting {
   flex-shrink: 0;
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--accent);
   font-size: 9px;
@@ -825,7 +825,7 @@
 .cp-room-blocked {
   flex-shrink: 0;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
   color: var(--color-warning);
   font-size: 10px;

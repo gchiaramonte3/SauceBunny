@@ -655,7 +655,7 @@
   align-items: center;
   gap: 3px;
   padding: 3px 9px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--marker-color, var(--accent));

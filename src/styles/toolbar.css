@@ -137,7 +137,7 @@
 .cp-recents-badge {
   flex-shrink: 0;
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   border: 1px solid var(--line-2);
   font-family: var(--font-mono);
   font-size: 9px;

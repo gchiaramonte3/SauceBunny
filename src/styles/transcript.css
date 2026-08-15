@@ -942,7 +942,7 @@
   gap: 6px;
   height: 30px;
   padding: 0 14px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   font: 600 11px var(--font-sans);
   color: var(--fg-0);
   background: var(--bg-5);
@@ -1040,7 +1040,7 @@
   color: var(--fg-2);
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--line-2);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
@@ -1093,7 +1093,7 @@
   font-weight: 700;
   color: var(--fg-3);
   background: rgba(255,255,255,0.07);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   padding: 1px 8px;
 }
 .cp-spk-x {
@@ -1641,7 +1641,7 @@
   font-weight: 700;
   color: var(--fg-3);
   background: rgba(255,255,255,0.07);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   padding: 0 6px;
   font-variant-numeric: tabular-nums;
 }
@@ -1673,7 +1673,7 @@
   align-items: center;
   gap: 5px;
   padding: 3px 4px 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   border: 1px solid var(--line-2);
   background: var(--bg-3);
   color: var(--fg-2);
@@ -1707,7 +1707,7 @@
   font-size: 9.5px;
   color: var(--fg-4);
   background: rgba(255,255,255,0.05);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   padding: 1px 5px;
   font-variant-numeric: tabular-nums;
 }
@@ -1939,7 +1939,7 @@
   align-items: center;
   gap: 6px;
   padding: 3px 9px 3px 3px;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   border: 1px solid var(--line-2);
   background: var(--bg-3);
   color: var(--fg-2);

@@ -153,7 +153,7 @@
   font-size: 11px;
   color: var(--fg-3);
   background: var(--bg-3);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   padding: 1px 8px;
 }
 .cp-reader-list {
@@ -235,7 +235,7 @@
   font-weight: 600;
   color: var(--fg-3);
   background: var(--bg-4);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   padding: 0 6px;
   line-height: 15px;
 }

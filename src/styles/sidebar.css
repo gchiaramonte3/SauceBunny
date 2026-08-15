@@ -386,7 +386,7 @@
   width: 30px;
   height: 18px;
   background: linear-gradient(180deg, rgba(0,0,0,0.4), rgba(255,255,255,0.04));
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   position: relative;
   cursor: pointer;
   transition: background var(--dur-base) var(--ease-out),

@@ -219,7 +219,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   padding: 0 5px;
   background: rgba(255,255,255,0.08);
   color: var(--fg-2);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   font-family: var(--font-mono);
   font-size: 9.5px;
   font-weight: 700;
