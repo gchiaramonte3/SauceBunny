@@ -33,7 +33,7 @@ import { RoomControlBar } from "./components/RoomControlBar";
 import { reactionGlyph } from "./lib/reactions";
 import { ReviewStatusChip } from "./components/ReviewStatusChip";
 import { useMediaCapture, subscribeCaptureError, setCaptureLogSink } from "./hooks/use-media-capture";
-import { SettingsModal, type Defaults, type CaptionFontKey } from "./components/SettingsModal";
+import { SettingsModal, type Defaults } from "./components/SettingsModal";
 import { YouTubeAuthModal } from "./components/YouTubeAuthModal";
 import type { PlayerHandle } from "./components/player-handle";
 import type {
@@ -123,6 +123,7 @@ import { chosenPosterFor, sourceTimecodeFor, setSourceTimecode, clearSourceTimec
 import { webPosterFor, setWebPoster } from "./lib/web-poster-store";
 import { exportLocalClipViaMediabunny } from "./lib/mediabunny-export";
 import { extractAudioAsWav16k } from "./lib/mediabunny-audio";
+import { migrateCaptionFont } from "./lib/caption-font";
 
 const DEFAULT_FPS_FALLBACK: Record<string, number> = { "24": 24, "25": 25, "30": 30 };
 
@@ -147,19 +148,6 @@ function isMissingCommandError(err: unknown): boolean {
 }
 function staleBinaryMessage(commandName: string): string {
   return `${commandName} hasn't been compiled into the running dev server yet. Stop and restart \`npm run tauri dev\` so cargo rebuilds the Rust backend.`;
-}
-
-// Map a stored captionFont pref to a current key. Old builds stored
-// "sans"/"serif"/"mono"; new builds store named system fonts. Unknown/missing →
-// "verdana" (the legibility default). Keeps a pre-existing pref meaningful.
-const CAPTION_FONT_KEYS = ["verdana", "helvetica", "arial", "tahoma", "trebuchet", "georgia", "courier", "nunito"];
-function migrateCaptionFont(raw: unknown): CaptionFontKey {
-  const legacy: Record<string, CaptionFontKey> = { sans: "nunito", serif: "georgia", mono: "courier" };
-  if (typeof raw === "string") {
-    if (raw in legacy) return legacy[raw];
-    if (CAPTION_FONT_KEYS.includes(raw)) return raw as CaptionFontKey;
-  }
-  return "verdana";
 }
 
 /**
