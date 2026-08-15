@@ -86,6 +86,21 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
   const retriedLoadRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
+  /**
+   * The imperative handle is built ONCE (deps `[]`) so `playerRef.current`
+   * never changes identity under App — but that means it closes over the props
+   * from the FIRST render, and `onMediaError` is an inline arrow in App,
+   * rebuilt every render over live state (localFilePath, metadata,
+   * playbackPrepBusy). A play() rejection therefore reported the failure
+   * against render-1's world, where those are all still null.
+   *
+   * Reading the two callbacks through refs keeps both properties: the handle
+   * stays stable, and the call always reaches the current prop.
+   */
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+  const onPlayStateChangeRef = useRef(onPlayStateChange);
+  onPlayStateChangeRef.current = onPlayStateChange;
   useImperativeHandle(ref, () => ({
     play: () => {
       const el = mediaRef.current;
@@ -100,7 +115,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
         // NotAllowedError → autoplay blocked (need user gesture)
         // NotSupportedError → codec/source issue
         if ((err as DOMException)?.name === "AbortError") return;
-        onError?.(`Playback failed: ${err?.name ?? "Error"}: ${err?.message ?? String(err)}`);
+        onErrorRef.current?.(`Playback failed: ${err?.name ?? "Error"}: ${err?.message ?? String(err)}`);
       });
     },
     pause: () => {
@@ -117,7 +132,7 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
       if (alreadyPaused) {
         playingRef.current = false;
         setIsPlaying(false);
-        onPlayStateChange?.(false);
+        onPlayStateChangeRef.current?.(false);
       }
     },
     seekTo: (s) => {
