@@ -13,6 +13,7 @@ import { NavRail } from "./components/NavRail";
 
 import { LibraryView } from "./components/LibraryView";
 import { LibraryBrowser } from "./components/LibraryBrowser";
+import { useTranscriptListeners } from "./hooks/use-transcript-listeners";
 import { useDiarizerPrepare } from "./hooks/use-diarizer-prepare";
 import { useLibraryScan } from "./hooks/use-library-scan";
 import type { LibraryCrumb } from "./lib/library";
@@ -1744,142 +1745,15 @@ export default function App() {
 
   // ── Transcription listeners ─────────────────────────────────────────
   // whisper + diarizer: logs, progress, phase, the model download, and the
-       // finished transcript.
-  useEffect(() => {
-    const unlistens: UnlistenFn[] = [];
-    let mounted = true;
-    (async () => {
-      const onTranscriptLog = (e: { payload: LogEvent }) => {
-        if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
-        appendLog(asLogTag(e.payload.tag), txChannelRef.current, e.payload.line);
-      };
-      const g = await listen<LogEvent>("transcript-log", onTranscriptLog);
-      const onTranscriptDone = (e: { payload: DoneEvent }) => {
-        if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
-        if (e.payload.success && e.payload.path) {
-          setTranscriptState("done");
-          setTranscriptResolution("success"); // GenerateButton → check flash
-          setTranscriptError(null);
-          setTranscriptProgress(100);
-          setTranscriptPhase(null);
-          const filename = e.payload.path.split("/").pop() ?? "Transcript ready.";
-          logRunTotals();
-          appendLog("ok", txChannelRef.current, `Transcript saved → ${e.payload.path}`);
-          // Load into the Transcript tab (same pulse-and-switch behavior
-          // as the captions path above).
-          setActiveTranscript({ path: e.payload.path, origin: "whisper", sourceKey: clipSourceKeyRef.current });
-          setTranscriptArrivedTick((n) => n + 1);
-          // Append to history (per-source) so the Transcript-tab popover
-          // surfaces it and a re-import auto-loads it.
-          try {
-            const meta = metadataRef.current;
-            recordTranscript({
-              srtPath: e.payload.path,
-              sourcePath: localFilePathRef.current,
-              sourceUrl: meta?.webpage_url ?? null,
-              title: meta?.title || (e.payload.path.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "transcript"),
-              origin: "whisper",
-            });
-          } catch { /* quota */ }
-          // Native OS notification keeps the filename for cross-window
-          // context, but the in-app popover is intentionally one-line —
-          // the new Transcript tab + pulse already shows the user where
-          // the result landed, so the body text was redundant chrome.
-          notify("Transcript ready", filename);
-          pushNotification("success", "Transcript ready", "", e.payload.path);
-          // Diarization is non-fatal: on success the backend still puts a note
-          // in `error` if speaker detection was skipped. Surface it so a user
-          // who asked for speakers isn't left wondering why there are none —
-          // previously this only appeared in the pipeline log.
-          if (e.payload.error) {
-            appendLog("warn", txChannelRef.current, e.payload.error);
-            pushNotification("info", "Speakers not detected", e.payload.error);
-          }
-        } else if (e.payload.error === "Cancelled") {
-          // User Stop — the Rust Terminated handlers map signal-kills to
-          // "Cancelled", so a bare exit-code message is a REAL crash (corrupt
-          // model, unreadable WAV, OOM) and must fall through to the error
-          // branch, not be silently absorbed as a cancel.
-          setTranscriptState("idle");
-          setTranscriptResolution(null); // cancel → no flash
-          setTranscriptError(null);
-          setTranscriptProgress(0);
-          setTranscriptPhase(null);
-          logRunTotals();
-          appendLog("warn", txChannelRef.current, "Transcription cancelled");
-        } else {
-          setTranscriptState("error");
-          setTranscriptResolution("error"); // GenerateButton → cross flash
-          setTranscriptPhase(null);
-          const msg = humanizeSpawnError(e.payload.error ?? "Transcription failed");
-          logRunTotals();
-          setTranscriptError(msg);
-          appendLog("err", txChannelRef.current, msg);
-          notify("Transcript failed", msg);
-          pushNotification("error", "Transcript failed", msg);
-        }
-      };
-      const h = await listen<DoneEvent>("transcript-done", onTranscriptDone);
-      const onModelDownloadDone = (e: { payload: DoneEvent }) => {
-        if (!mounted) return;
-        if (e.payload.success) {
-          refreshWhisperModels();
-          const filename = e.payload.path?.split("/").pop() ?? "Downloaded.";
-          notify("Whisper model ready", filename);
-          pushNotification("success", "Whisper model ready", filename, e.payload.path ?? undefined);
-        } else if (e.payload.error) {
-          pushNotification("error", "Model download failed", e.payload.error);
-        }
-      };
-      const i = await listen<DoneEvent>("model-download-done", onModelDownloadDone);
-      const onTranscriptProgress = (e: { payload: ProgressEvent }) => {
-        if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
-        setTranscriptProgress(e.payload.percent);
-      };
-      const j = await listen<ProgressEvent>("transcript-progress", onTranscriptProgress);
-      // Transcript stage marker — drives the Sidebar phase indicator.
-      // Backend emits this at well-known transitions; the frontend
-      // doesn't need to scrape pipeline log strings.
-      type TranscriptPhasePayload = { job_id: string; phase: string };
-      const onTranscriptPhase = (e: { payload: TranscriptPhasePayload }) => {
-        if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
-        // Close out the previous stage in the pipeline log. Every long
-        // pipeline reports its phases through this one event, so timing them
-        // here covers whisper, parakeet and each diarize step at once - and
-        // gives a number the user can read off and paste back when something
-        // is slower than it should be.
-        const stage = stageClockRef.current;
-        if (stage.phase && stage.phase !== e.payload.phase) {
-          appendLog("info", txChannelRef.current,
-            `${stageLabel(stage.phase)} finished in ${fmtElapsed(Date.now() - stage.at)}.`);
-        }
-        if (stage.phase !== e.payload.phase) {
-          stageClockRef.current = { phase: e.payload.phase, at: Date.now() };
-          // Each stage owns its own 0-100 meter (extract %, then whisper %), so
-          // reset on the transition — otherwise the pill would flash the prior
-          // stage's trailing value (e.g. "Whisper 99%") until the next tick.
-          setTranscriptProgress(0);
-        }
-        setTranscriptPhase(e.payload.phase);
-      };
-      const jPhase = await listen<TranscriptPhasePayload>("transcript-phase", onTranscriptPhase);
-      unlistens.push(g, h, i, j, jPhase);
-      // A cleanup that fires DURING the awaits above finds an empty array
-      // and unregisters nothing — under StrictMode that leaked every
-      // listener on each dev boot. The handlers are inert either way (each
-      // starts with a `mounted` check) but stayed registered forever.
-      if (!mounted) {
-        unlistens.forEach((u) => u());
-        unlistens.length = 0;
-      }
-    })();
-    return () => {
-      mounted = false;
-      unlistens.forEach((u) => u());
-    };
-    // Every dep here is stable (empty deps of its own), so this runs once
-    // for the app's lifetime and never re-subscribes.
-  }, [appendLog, refreshWhisperModels, notify, pushNotification, classifyExtractorRot, logRunTotals]);
+  // finished transcript. Lifted whole into src/hooks/use-transcript-listeners.ts
+  // — see that file for why THIS one was extractable when captions is not.
+  useTranscriptListeners({
+    appendLog, refreshWhisperModels, notify, pushNotification, logRunTotals,
+    setTranscriptState, setTranscriptResolution, setTranscriptError,
+    setTranscriptProgress, setTranscriptPhase, setActiveTranscript, setTranscriptArrivedTick,
+    transcriptJobIdRef, txChannelRef, clipSourceKeyRef, localFilePathRef,
+    metadataRef, stageClockRef,
+  });
 
   // ── Playback prep and the LLM server listeners ─────────────────────────────────────────
   // ffmpeg's transcode-for-playback, plus llama-server's stderr.
