@@ -706,7 +706,19 @@ pub async fn write_raw_to_path(request: tauri::ipc::Request<'_>) -> Result<Strin
             "write_raw_to_path: expected a raw body (pass the Uint8Array as the invoke payload)",
         ));
     };
-    write_bytes_impl(&path, bytes, false, unique, false)
+    // ATOMIC. This is the finished export landing in the user's own folder,
+    // under the name they chose, and a plain write truncates first: a crash or
+    // a full disk mid-write left a short file wearing that name, which plays
+    // as a corrupt clip rather than announcing itself as a failure. Worse in
+    // combination with `unique`, which is always on here - the retry walked
+    // past the wreckage to `clip-2.mov`, so the user was left with a broken
+    // file AND a suffixed one, neither of them obviously the good copy.
+    //
+    // The temp is a sibling dotfile, so the rename is same-filesystem and
+    // therefore atomic, and peak disk stays at one copy rather than two. The
+    // fsync before the rename costs about a second on a large clip, which is
+    // the right trade against handing someone a silently truncated master.
+    write_bytes_impl(&path, bytes, false, unique, true)
 }
 
 /// Decode a percent-encoded UTF-8 string (the output of JS
@@ -1180,7 +1192,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-08-15-r158-sync-job-id";
+pub const BACKEND_BUILD_ID: &str = "2026-08-15-r159-atomic-export";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {
@@ -1343,6 +1355,121 @@ mod raw_write_tests {
         assert_eq!(percent_decode_utf8("%GG").unwrap(), "%GG");
         // Decoded bytes that aren't UTF-8 are an error, not a lossy path.
         assert!(percent_decode_utf8("%FF%FE").is_err());
+    }
+}
+
+#[cfg(test)]
+mod atomic_write_tests {
+    use super::write_bytes_impl;
+    use std::path::{Path, PathBuf};
+
+    /// Temp dir removed on drop, including on unwind.
+    struct Dir(PathBuf);
+    impl Dir {
+        fn new(tag: &str) -> Self {
+            let d = std::env::temp_dir().join(format!("sb-atomic-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            std::fs::create_dir_all(&d).unwrap();
+            Self(d)
+        }
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Every entry in the dir, so a leftover temp cannot hide.
+    fn entries(d: &Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(d)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn atomic_write_leaves_the_file_and_nothing_else() {
+        // The temp is a sibling, so if it were ever left behind it would be
+        // sitting in the user's export folder next to the clip.
+        let d = Dir::new("clean");
+        let dest = d.path().join("clip.mov");
+        let out = write_bytes_impl(dest.to_str().unwrap(), b"payload", false, false, true).unwrap();
+        assert_eq!(out, dest.to_string_lossy());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"payload");
+        assert_eq!(entries(d.path()), vec!["clip.mov".to_string()]);
+    }
+
+    #[test]
+    fn atomic_overwrite_never_shortens_the_old_file_in_place() {
+        // The reason this matters for exports: a plain write truncates FIRST,
+        // so the window between truncate and finish is a real file, with the
+        // real name, holding a prefix of the real bytes.
+        let d = Dir::new("overwrite");
+        let dest = d.path().join("clip.mov");
+        std::fs::write(&dest, vec![b'x'; 4096]).unwrap();
+        write_bytes_impl(dest.to_str().unwrap(), b"new", false, false, true).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"new");
+        assert_eq!(entries(d.path()), vec!["clip.mov".to_string()]);
+    }
+
+    #[test]
+    fn atomic_composes_with_unique_which_the_export_always_passes() {
+        // write_raw_to_path sends x-unique: 1 on every call, so the two flags
+        // are only ever exercised together in production.
+        let d = Dir::new("unique");
+        let dest = d.path().join("clip.mov");
+        std::fs::write(&dest, b"first").unwrap();
+        let out = write_bytes_impl(dest.to_str().unwrap(), b"second", false, true, true).unwrap();
+        assert_ne!(out, dest.to_string_lossy(), "unique must not overwrite the original");
+        assert_eq!(std::fs::read(&dest).unwrap(), b"first");
+        assert_eq!(std::fs::read(&out).unwrap(), b"second");
+        assert_eq!(entries(d.path()).len(), 2, "no temp left over: {:?}", entries(d.path()));
+    }
+
+    #[test]
+    fn a_write_into_a_missing_folder_creates_nothing() {
+        // Fails before any temp is created, rather than half-landing.
+        let d = Dir::new("missing");
+        let dest = d.path().join("nope").join("clip.mov");
+        assert!(write_bytes_impl(dest.to_str().unwrap(), b"x", false, false, true).is_err());
+        assert_eq!(entries(d.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_export_command_opts_into_the_atomic_path() {
+        // Everything above tests the MECHANISM. This tests the WIRING, which
+        // is one boolean at one call site and invisible to every other test
+        // here - the same reason the TypeScript side guards its structural
+        // facts by reading its own source.
+        let src = include_str!("system.rs");
+        let after = src
+            .split("pub async fn write_raw_to_path")
+            .nth(1)
+            .expect("write_raw_to_path not found - the matcher broke, not the code");
+        let call = after
+            .split("write_bytes_impl(")
+            .nth(1)
+            .expect("write_raw_to_path no longer calls write_bytes_impl");
+        let args = &call[..call.find(')').expect("unterminated call")];
+        assert!(
+            args.trim_end().ends_with("true"),
+            "the export write must pass atomic=true; a plain write truncates \
+             first and leaves a short file under the user's chosen name. Got: {args}",
+        );
+    }
+
+    #[test]
+    fn the_non_atomic_path_still_writes_for_its_own_callers() {
+        // Small app documents opt out; that route must keep working.
+        let d = Dir::new("plain");
+        let dest = d.path().join("notes.json");
+        write_bytes_impl(dest.to_str().unwrap(), b"{}", false, false, false).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"{}");
     }
 }
 
