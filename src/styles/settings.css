@@ -1008,7 +1008,9 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 10px;
-  color: var(--fg-5);
+  /* Where the cache actually lives is something the reader is meant to READ,
+     so fg-4 or up per tokens.css. fg-5 measured 3.87:1 on this row. */
+  color: var(--fg-4);
   max-width: 360px;
   overflow: hidden;
   text-overflow: ellipsis;

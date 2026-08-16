@@ -127,8 +127,10 @@ test("the harness renders text to measure", async ({ page }) => {
 
 for (const [key, label, root] of [
   ["Control+1", "Home", "cp-view-home"],
+  ["Control+2", "Library", "cp-view-library"],
   ["Control+3", "Clip", "cp-view-clip"],
   ["Control+4", "Review", "cp-view-coreview"],
+  ["Control+5", "Transcripts", "cp-view-reader"],
 ] as const) {
   test(`${label} text meets WCAG AA contrast`, async ({ page }) => {
     await boot(page);
@@ -145,3 +147,74 @@ for (const [key, label, root] of [
     ).toEqual([]);
   });
 }
+
+test("the settings modal meets AA too", async ({ page }) => {
+  // The densest text surface in the app: rows of labels and long
+  // explanatory `desc` copy, which is exactly where a muted grey goes.
+  await boot(page);
+  const gear = page.locator('[aria-label="Settings"], button:has-text("Settings")').first();
+  if (await gear.count()) {
+    await gear.click();
+    await page.waitForTimeout(300);
+  }
+  const bad = await failures(page);
+  expect(
+    bad.map((b) => `${b.ratio}:1 ${b.px}px "${b.text}" .${b.cls} ${b.fg} on ${b.bg}`),
+    "Below AA in Settings",
+  ).toEqual([]);
+});
+
+/**
+ * Command-palette text that is below AA and needs a TOKEN decision, not a
+ * per-site edit.
+ *
+ * Every one of these is fg-5 at 3.81:1 on the palette's raised background.
+ * The obvious fix does not work: fg-4 measures 4.45:1 on that same surface,
+ * still under the floor, because the palette sits on rgb(20,20,21) rather
+ * than the page's rgb(10,10,13). Only fg-3 clears it, and fg-3 is the body
+ * text rung - putting eight group headings there flattens the hierarchy the
+ * ladder exists to express.
+ *
+ * So the honest finding is about the ladder, not these eight rules: tokens.css
+ * says "fg-4 now clears it (4.66:1)", and that is true on bg-0 and false on
+ * every raised surface. Deciding whether the ladder should guarantee its
+ * ratios on cards and overlays too is a design call with visible consequences
+ * across 174 fg-4 usages, so it is recorded here rather than guessed at.
+ *
+ * Listed by class so a NEW failure elsewhere in the palette still fails, and
+ * so an entry that gets fixed has to be deleted rather than quietly kept.
+ */
+const KNOWN_BELOW_AA: ReadonlyArray<{ cls?: string; text?: string; note: string }> = [
+  { cls: "cp-palette-group-label", note: "3.81:1 - eight section headings, fg-5" },
+  { cls: "cp-palette-count", note: "3.81:1 - the result count, fg-5" },
+  // The one that settles the argument: already on fg-4, still short.
+  { cls: "cp-palette-row-desc", note: "4.45:1 - row descriptions, ALREADY fg-4" },
+  { text: "navigate", note: "3.94:1 - keyboard legend in the footer" },
+  { text: "run", note: "3.94:1 - keyboard legend in the footer" },
+  { text: "close", note: "3.94:1 - keyboard legend in the footer" },
+];
+
+test("the command palette meets AA", async ({ page }) => {
+  // palette.css carries seven fg-5 text rules and the view tests never open
+  // it, so it was the largest surface this measurement had not seen.
+  await boot(page);
+  await page.keyboard.press("Control+k");
+  await page.waitForTimeout(250);
+  const open = await page.locator(".cp-palette, [role=\"dialog\"]").count();
+  expect(open, "the palette did not open, so this measured nothing").toBeGreaterThan(0);
+  const bad = await failures(page);
+  const known = (b: Fail) =>
+    KNOWN_BELOW_AA.some((k) => (k.cls ? b.cls.includes(k.cls) : false) || (k.text ? b.text === k.text : false));
+  const unknown = bad.filter((b) => !known(b));
+  expect(
+    unknown.map((b) => `${b.ratio}:1 ${b.px}px "${b.text}" .${b.cls} ${b.fg} on ${b.bg}`),
+    "New below-AA text in the command palette",
+  ).toEqual([]);
+
+  // The list may only shrink. An entry that stops failing has been fixed, and
+  // leaving it here would let the next regression hide behind it.
+  const fixed = KNOWN_BELOW_AA
+    .filter((k) => !bad.some((b) => (k.cls ? b.cls.includes(k.cls) : b.text === k.text)))
+    .map((k) => k.cls ?? k.text);
+  expect(fixed, "listed as a known gap but now passes - delete the entry").toEqual([]);
+});

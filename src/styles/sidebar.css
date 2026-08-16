@@ -359,7 +359,9 @@
   direction: rtl;
   text-align: left;
 }
-.cp-folder .path.empty { color: var(--fg-5); direction: ltr; }
+/* "Not set" is the state of the setting, not decoration around it - fg-5
+   measured 4.03:1. */
+.cp-folder .path.empty { color: var(--fg-4); direction: ltr; }
 .cp-folder button {
   height: 100%;
   background: rgba(255,255,255,0.03);
