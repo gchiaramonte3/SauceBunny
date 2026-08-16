@@ -13,16 +13,21 @@ import { speakerStats, speakerLanes } from "./speaker-stats";
  * hours of speech) costs ~10ms. Measured across 500/1000/2000/4000/8000 the
  * time doubles as the input doubles, with no bend.
  *
- * The reason to keep measuring is that this exact path used to be quadratic —
- * CLAUDE.md records the karaoke render's O(turns²) cue-offset scan being
- * replaced with memos keyed on turns/overrides. A quadratic regression would
- * be invisible on the 20-cue fixtures every other test uses, and would show up
- * for users as a transcript panel that stalls on long recordings.
+ * This file DELIBERATELY contains no timing assertion any more.
  *
- * The guard is a RATIO with a very wide bound, not a wall-clock budget: 8,000
- * cues is 8x the work of 1,000, so anything under 20x is linear-ish on any
- * machine, while a return to O(n²) would be ~64x. A millisecond budget here
- * would flake on a loaded CI runner and teach everyone to ignore it.
+ * It had one — a ratio, 8,000 cues against 1,000, bounded at 20x on the
+ * argument that noise could not reach that when linear is 8x and quadratic is
+ * ~64x. CI measured 23.7x and went red. At these magnitudes (1,000 cues is
+ * ~2ms) a shared runner's noise dominates the signal, so the bound was
+ * measuring the runner, not the code.
+ *
+ * It was also aimed at the wrong layer. The O(turns²) scan CLAUDE.md records
+ * lived in the karaoke RENDER inside TranscriptViewer, not in parse/derive,
+ * which was linear all along. A guard that is unreliable and points away from
+ * the bug it names is worse than none: it trains people to re-run CI.
+ *
+ * What remains is what this file can assert honestly — that a multi-hour
+ * transcript parses completely, in order, with every speaker derived.
  */
 
 const tc = (x: number) => {
@@ -45,14 +50,6 @@ function makeSrt(n: number): string {
   return out.join("\n");
 }
 
-function timeRun(n: number): number {
-  const text = makeSrt(n);
-  const t0 = performance.now();
-  const cues = parseSrt(text);
-  speakerStats(cues);
-  speakerLanes(cues);
-  return performance.now() - t0;
-}
 
 describe("a long transcript", () => {
   it("parses every cue of a multi-hour recording", () => {
@@ -75,16 +72,4 @@ describe("a long transcript", () => {
     expect(speakerLanes(cues)).toHaveLength(4000);
   });
 
-  it("scales linearly, not quadratically", () => {
-    // Warm the JIT so the first sample is not the slow one, which would flip
-    // the ratio the wrong way and fail for the wrong reason.
-    timeRun(1000);
-    const small = Math.max(timeRun(1000), 0.5);
-    const large = timeRun(8000);
-    const ratio = large / small;
-    expect(
-      ratio,
-      `8000 cues took ${ratio.toFixed(1)}x the time of 1000 (8x is linear, ~64x is quadratic)`,
-    ).toBeLessThan(20);
-  });
 });
