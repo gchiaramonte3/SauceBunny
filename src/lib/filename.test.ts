@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MAX_BASE_BYTES, middleEllipsize, sanitizeFilename, suggestFilename, truncateUtf8Bytes } from "./filename";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const bytes = (s: string) => new TextEncoder().encode(s).length;
 
@@ -92,5 +94,32 @@ describe("parity with Rust sanitize_filename", () => {
   it("shares the byte budget the Rust constant declares", () => {
     // Both sides say 180; the comment on each points at the other.
     expect(MAX_BASE_BYTES).toBe(180);
+  });
+});
+
+describe("MAX_BASE_BYTES agrees with Rust", () => {
+  // mod.rs calls this constant "MIRRORED in src/lib/filename.ts ... keep both
+  // in sync (vitest parity cases pin the shared behavior)". The behaviour is
+  // pinned — the cases above run the same inputs through truncateUtf8Bytes as
+  // Rust's truncate_utf8_bytes. The VALUE was not: every case uses the TS
+  // constant, so raising Rust's 180 alone leaves the suite green while the two
+  // sides disagree about the budget, and the UI previews a filename the
+  // backend then truncates somewhere else.
+  //
+  // Same shape as build-id.test.ts, which already reads its Rust counterpart.
+  it("is the same number on both sides", () => {
+    const rs = readFileSync(
+      resolve(__dirname, "../../src-tauri/src/commands/mod.rs"), "utf8",
+    );
+    const m = /const MAX_BASE_BYTES: usize = (\d+);/.exec(rs);
+    expect(m, "MAX_BASE_BYTES not found in mod.rs — the matcher broke, not the code").not.toBe(null);
+    expect(Number(m![1])).toBe(MAX_BASE_BYTES);
+  });
+
+  it("leaves room under the 255-byte APFS cap for what gets appended", () => {
+    // The reason for 180 rather than 255, per mod.rs: uniquing suffixes
+    // ("-12"), pipeline suffixes, and the extension all land after this.
+    expect(MAX_BASE_BYTES).toBeLessThan(255);
+    expect(255 - MAX_BASE_BYTES).toBeGreaterThanOrEqual(32);
   });
 });
