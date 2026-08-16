@@ -174,7 +174,16 @@ Do not add new Tauri plugins without explaining what existing capability is insu
 
 ### CSS
 - All styles live in `src/styles/app.css`, organized by component name in comment blocks.
-- Use tokens from `tokens.css` for colors, spacing, font sizes, radii. Never hardcode hex colors or pixel values that have a token equivalent.
+- Use tokens from `tokens.css` for colors, spacing, font sizes, radii.
+  **Colours: never hardcode a hex that a token already holds** — enforced by
+  `src/lib/token-usage-contract.test.ts`, which reports exact duplicates only
+  (a one-off shade with no token is a question about growing the palette, not a
+  violation). **Spacing is different, and the next entry is the one that
+  governs**: this rule used to say "or pixel values", which told a contributor
+  to do the exact mass-conversion that entry forbids. Note the trap that makes
+  a naive script agree with the old wording: `--r-sm` is `6px`, so a grep pairs
+  it with 72 `padding: 6px` uses. Substituting a RADIUS token into padding is
+  worse than the literal — it asserts a relationship that is not there.
 - No inline styles. No CSS-in-JS. No CSS modules.
 - Class names: kebab-case, all prefixed with the stable project namespace `cp-` (carryover from the original ClipPull name — kept intentionally because renaming ~600 classes touches every file and adds no user-visible value). Within that prefix, group by component context (e.g. `cp-player-controls-volume`, `cp-tx-speaker`, `cp-queue-foot-row`). New code MUST use the `cp-` prefix; do not introduce a new prefix.
 - No `!important` unless overriding a third-party style you can't control.
