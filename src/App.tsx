@@ -4628,8 +4628,24 @@ export default function App() {
         return;
       }
 
-      // ── Esc closes Settings (universal; not rebindable) ──
-      if (e.key === "Escape" && settingsOpen) { e.preventDefault(); setSettingsOpen(false); return; }
+      // ── Esc inside Settings belongs to SettingsModal, not here ──
+      // This used to be a second, independent closer: `if (Escape &&
+      // settingsOpen) setSettingsOpen(false)`. SettingsModal has always had its
+      // own Escape handler, so the same key closed the same modal from two
+      // places — harmless while both did the identical thing, and a real bug
+      // the moment one of them learned a rule the other had not.
+      //
+      // That happened when Delete gained an arm/confirm step. The modal orders
+      // it correctly (an armed Delete disarms; Escape only closes when nothing
+      // is armed), but BOTH listeners are window/keydown in the bubble phase
+      // and this one registers first — App mounts before the modal does — so it
+      // closed Settings out from under the arming every time. A unit test on
+      // SettingsModal alone could never see it; the e2e spec found it in a
+      // browser, which is the reason that spec exists.
+      //
+      // The modal is always mounted (`open={settingsOpen}`) and its handler is
+      // live whenever it is open, so nothing is lost by deleting the duplicate.
+      // Do not re-add a second closer here; give the rule to the modal.
 
       // ── Rebindable shortcuts ──
       // global actions (⌘-combos) fire even in a field / with Settings open;

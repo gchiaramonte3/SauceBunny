@@ -73,7 +73,15 @@ export function tauriMockInit(expectedBuildId: string): void {
     },
     get_direct_stream_url: () => Promise.reject(new Error("e2e: no stream")),
     download_audio_track: () => Promise.reject(new Error("e2e: no audio")),
-    list_whisper_models: [],
+    // One DOWNLOADED model, not an empty list. Empty meant the whole model
+    // region of Settings rendered nothing, so every sweep that walks visible
+    // controls (contrast, target-size, accessible-names, focus-visible) was
+    // blind to the rows holding "Use as default" and the armed Delete — the
+    // most consequential button in Settings. Shapes match the ts-rs bindings.
+    list_whisper_models: [
+      { id: "small", name: "Small", size_bytes: 488_000_000, url: "https://example/small.bin", downloaded: true, path: "/e2e-mock/whisper/small.bin" },
+      { id: "large-v3", name: "Large v3", size_bytes: 3_100_000_000, url: "https://example/large.bin", downloaded: false, path: null },
+    ],
     list_llm_models: [],
     list_audio_input_devices: [],
     get_downloaded_models: [],
