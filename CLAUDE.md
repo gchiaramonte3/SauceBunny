@@ -475,6 +475,46 @@ npm run tauri dev    # confirm no console errors
 
 The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commit if any fail.
 
+## Enforced contracts
+
+Sixteen rules in this file are checked by a test rather than remembered. If you
+are about to violate one you will meet its failure message, so this table is
+here to save you reverse-engineering the rule from it. Each test explains ITS
+OWN history at the top of the file; that is deliberately not repeated here.
+
+Every one of them exists because the rule alone was not enough — each was
+written after finding the rule already broken somewhere.
+
+| Test (`src/lib/`) | What it holds |
+|---|---|
+| `voice-contract` | No em/en dashes in user-facing copy |
+| `focus-contract` | A focus ring never uses the green accent |
+| `hit-target-contract` | Declared pointer-target sizes (see also `e2e/target-size.spec.ts`, which measures the rendered ones) |
+| `design-tokens-contract` | `--font-mono` always brings `tabular-nums`; no unreferenced token; the radius scale is used, not re-typed |
+| `path-identity-contract` | One NFC path normaliser, in `lib/repath` |
+| `storage-keys-contract` | New prefs use the `saucebunny.` namespace; nine legacy `cp-` keys are pinned by name |
+| `invoke-contract` | Invoke type args come from `src/bindings/`; byte payloads use the raw IPC body; every `write_text_to_path` is atomic |
+| `ipc-surface-contract` | Every registered command is called, and every invoked command is registered |
+| `job-id` | Job ids are minted locally and never awaited |
+| `updater-purity-contract` | No `setX(prev => …)` writes, invokes, persists or touches a ref |
+| `pure-updater-contract` | Reducer-style updaters stay pure |
+| `rust-panic-contract` | No `unwrap`/`expect`/`panic!` in production Rust |
+| `rung-ladder-contract` | The streaming rung table is identical in TS and Rust |
+| `wire-path-contract` | A review doc on the wire carries no local filesystem path |
+| `asset-scope-contract` | The `asset://` scope stays narrow |
+| `csp-contract` | The shipped CSP permits what startup actually registers |
+
+Two habits these encode, worth applying to any new one:
+
+- **Assert you scanned something.** A test that walks source and asserts a
+  filtered list is empty passes by finding nothing. Four of these could, until
+  a broken file filter left `voice-contract` reporting a clean bill of health
+  over zero files.
+- **Break-test it.** Change the code the rule forbids and watch the test fail.
+  Several tests in this repo were written, passed, and could not fail.
+
+---
+
 ## Before every release
 
 ```bash

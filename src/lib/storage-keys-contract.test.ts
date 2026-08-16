@@ -116,3 +116,24 @@ describe("localStorage keys", () => {
     expect(md.toLowerCase()).toContain("saucebunny.");
   });
 });
+
+/**
+ * CLAUDE.md's contract table lists every enforced rule.
+ *
+ * Sixteen tests encode rules that the constitution did not mention, so the
+ * next person read the file, wrote a violation, and met a failure message they
+ * had to reverse-engineer the rule from. The table fixes that only while it
+ * stays complete - a list of rules that is missing rules is worse than no list,
+ * because it reads as exhaustive.
+ */
+describe("the contract table in CLAUDE.md", () => {
+  it("names every contract test in the repo", () => {
+    const md = readFileSync(join(ROOT, "CLAUDE.md"), "utf8");
+    const tests = readdirSync(join(ROOT, "src/lib"))
+      .filter((f) => /(-contract)\.test\.tsx?$/.test(f))
+      .map((f) => f.replace(/\.test\.tsx?$/, ""));
+    expect(tests.length, "no contract tests found - the matcher broke").toBeGreaterThan(10);
+    const missing = tests.filter((t) => !md.includes(t));
+    expect(missing, "add these to the Enforced contracts table in CLAUDE.md").toEqual([]);
+  });
+});
