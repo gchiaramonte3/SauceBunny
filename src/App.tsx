@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   isPermissionGranted,
@@ -39,14 +39,14 @@ import { SettingsModal, type Defaults } from "./components/SettingsModal";
 import { YouTubeAuthModal } from "./components/YouTubeAuthModal";
 import type { PlayerHandle } from "./components/player-handle";
 import type {
-  AppError, AppStatus, ClientLog, DoneEvent, ExportOpts,
-  LocalFileMeta, LogEvent, Metadata, QueuedClip, QueueSource, RecentClip,
+  AppError, AppStatus, ClientLog, ExportOpts,
+  LocalFileMeta, Metadata, QueuedClip, QueueSource, RecentClip,
   SourceKind, WarmStart, WhisperModel,
   ReviewRangeDraft,
 } from "./types";
 import { isQueuedClip } from "./types";
 import { asLogTag } from "./types";
-import { formatError, humanizeSpawnError, isAppError } from "./lib/error-format";
+import { formatError, isAppError } from "./lib/error-format";
 import { fmtElapsed, stageLabel } from "./lib/elapsed";
 import { checkForUpdate } from "./lib/update-check";
 import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase";
@@ -110,6 +110,7 @@ import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./lib/storage"
 import { pushRecentClip } from "./lib/recent-clips";
 import { useClipExportListeners } from "./hooks/use-clip-export-listeners";
 import { usePlaybackPrepListeners } from "./hooks/use-playback-prep-listeners";
+import { useCaptionsListeners } from "./hooks/use-captions-listeners";
 import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
 import {
   durationToTc, framesToTc, secondsToTc,
@@ -1588,69 +1589,12 @@ export default function App() {
   });
 
   // ── Captions listeners ─────────────────────────────────────────
-  // yt-dlp's caption fetch. Its done-handler also loads the SRT into the
-       // Transcript tab, which is why captions cannot be lifted into a hook of
-       // its own - that state belongs to the Whisper pipeline too.
-  useEffect(() => {
-    const unlistens: UnlistenFn[] = [];
-    let mounted = true;
-    (async () => {
-      const onCaptionsLog = (e: { payload: LogEvent }) => {
-        if (!mounted || e.payload.job_id !== captionsJobIdRef.current) return;
-        appendLog(asLogTag(e.payload.tag), "captions", e.payload.line);
-      };
-      const d = await listen<LogEvent>("captions-log", onCaptionsLog);
-      const onCaptionsDone = (e: { payload: DoneEvent }) => {
-        if (!mounted || e.payload.job_id !== captionsJobIdRef.current) return;
-        if (e.payload.success && e.payload.path) {
-          setCaptionsState("done");
-          setCaptionsError(null);
-          appendLog("ok", "captions", `Transcript saved → ${e.payload.path}`);
-          // Load into the Transcript tab. Bumping arrivedTick triggers
-          // the drawer to pulse / auto-switch tabs so the user sees the
-          // result of the action they just took without having to hunt.
-          setActiveTranscript({ path: e.payload.path, origin: "captions", sourceKey: clipSourceKeyRef.current });
-          setTranscriptArrivedTick((n) => n + 1);
-          // Append to history so the Transcript-tab popover lists it
-          // and a future import of the same URL auto-loads it.
-          try {
-            const meta = metadataRef.current;
-            recordTranscript({
-              srtPath: e.payload.path,
-              sourceUrl: meta?.webpage_url ?? null,
-              sourcePath: null,
-              title: meta?.title || (e.payload.path.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "transcript"),
-              origin: "captions",
-            });
-          } catch { /* localStorage quota — non-fatal */ }
-          // (No Finder reveal — the transcript loads into the panel; popping
-          // Finder on every download was intrusive, especially on the auto
-          // fetch from the CC toggle.)
-        } else {
-          setCaptionsState("error");
-          const msg = humanizeSpawnError(e.payload.error ?? "Caption download failed");
-          setCaptionsError(msg);
-          appendLog("err", "captions", msg);
-        }
-      };
-      const f = await listen<DoneEvent>("captions-done", onCaptionsDone);
-      unlistens.push(d, f);
-      // A cleanup that fires DURING the awaits above finds an empty array
-      // and unregisters nothing — under StrictMode that leaked every
-      // listener on each dev boot. The handlers are inert either way (each
-      // starts with a `mounted` check) but stayed registered forever.
-      if (!mounted) {
-        unlistens.forEach((u) => u());
-        unlistens.length = 0;
-      }
-    })();
-    return () => {
-      mounted = false;
-      unlistens.forEach((u) => u());
-    };
-    // Every dep here is stable (empty deps of its own), so this runs once
-    // for the app's lifetime and never re-subscribes.
-  }, [appendLog]); // narrowed: the inherited array named five this never calls
+  // yt-dlp's caption fetch. Lifted into src/hooks/use-captions-listeners.ts —
+  // see that file for why the old "cannot be lifted" note no longer holds.
+  useCaptionsListeners({
+    appendLog, setCaptionsState, setCaptionsError, setActiveTranscript,
+    setTranscriptArrivedTick, captionsJobIdRef, clipSourceKeyRef, metadataRef,
+  });
 
   // ── Transcription listeners ─────────────────────────────────────────
   // whisper + diarizer: logs, progress, phase, the model download, and the

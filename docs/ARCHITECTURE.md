@@ -251,13 +251,24 @@ store a string nothing renders. The tests that came with it were impossible
 before: every one needs a `diarize-prepare-done` payload delivered to a listener
 that used to be registered inside App's central event effect.
 
-**Captions is NOT cohesive, despite reading like a subsystem.** Its state is
-scattered over six regions, but that is not the problem — the problem is that
-`captions-done` writes `setActiveTranscript` and `setTranscriptArrivedTick`,
-which the Whisper pipeline also owns. A hook that reached back into App to set
-those would be a worse seam than the status quo. The cohesive unit here is
-*transcript arrival* (captions + transcription + history recording), not
-captions.
+**~~Captions is NOT cohesive~~ — that reasoning has since been overtaken.**
+The objection was that `captions-done` writes `setActiveTranscript` and
+`setTranscriptArrivedTick`, "which the Whisper pipeline also owns", and that a
+hook reaching back into App to set those would be a worse seam than the status
+quo.
+
+That held while the Whisper pipeline was still inline. It stopped holding the
+moment that pipeline became `use-transcript-listeners.ts`, which takes the same
+two setters as arguments — as do the clip-export and playback-prep hooks.
+Neither pipeline owns that state; App does, and hands it to both. The seam the
+note warned about became the house pattern, so it no longer distinguishes
+captions from the three already extracted, and captions is now
+`use-captions-listeners.ts`.
+
+What the note got RIGHT is that the cohesive unit is *transcript arrival*
+rather than captions. Two hooks writing the same pair is that unit expressed as
+symmetry: whichever pipeline finishes hands App the same two setters, and the
+Transcript tab does not care which one produced the SRT.
 
 **The central listener effect is the real obstacle, and splitting it is not the
 easy win it looks like.** One `useEffect` registers 13 Tauri listeners behind a
