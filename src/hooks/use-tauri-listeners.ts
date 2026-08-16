@@ -25,6 +25,16 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
  *
  * Callers keep their own job-id filtering, which is per-handler policy rather
  * than lifecycle: `on("x", e => { if (e.job_id !== ref.current) return; ... })`.
+ *
+ * NOT every listener in the app goes through here, and that is deliberate.
+ * `use-co-review`, `use-panel-bus` and `use-stream-keep` clean up with
+ * `un.then((f) => f())` per listener — a simpler idiom that never grew the
+ * array, the flag or the tail sweep, so there is no duplicated subtlety in
+ * them to collapse. Moving them would be uniformity for its own sake. The one
+ * thing this adds over that idiom is the handler gate: between unmount and a
+ * pending `listen()` resolving, their handlers can still run. Harmless for a
+ * setState, less so for anything that writes a ref or settles a promise — so
+ * prefer this for new code, and leave those three alone until they need it.
  */
 export function useTauriListeners(
   register: (on: <T>(event: string, handler: (payload: T) => void) => void) => void,

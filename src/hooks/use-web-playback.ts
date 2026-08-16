@@ -14,7 +14,6 @@
 
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { buildProxyUrl } from "../lib/stream-proxy";
 import { formatError } from "../lib/error-format";
 import { asLogTag, type LogTag } from "../types";
@@ -40,6 +39,7 @@ import type { DirectStreamResult } from "../bindings/DirectStreamResult";
 // this was the lone copy, and a copy of a union is a copy that drifts.
 import type { ToastKind } from "../components/CanvasToast";
 import { newJobId } from "../lib/job-id";
+import { useTauriListeners } from "./use-tauri-listeners";
 
 type Helpers = {
   appendLog: (tag: LogTag, channel: string, line: string) => void;
@@ -127,39 +127,27 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
   //    jobId ref, so they coexist with App's local-file playback-prep
   //    listeners (which filter on the local prep job id). ──
   //
-  // Not on useTauriListeners yet. To be precise about why, because the first
-  // version of this note was not: the pure state machine this hook drives has
-  // 20 tests in lib/web-playback-machine.test.ts. What has none is the WIRING
-  // below — three handlers, a job-id filter, and a promise the download awaits
-  // — and a reducer test cannot see a wiring regression. Every other migration
-  // onto that primitive was safe because existing tests proved it
-  // behaviour-neutral; this one needs its own first.
-  useEffect(() => {
-    let mounted = true;
-    const unlistens: Array<() => void> = [];
-    void (async () => {
-      const p = await listen<ProgressEvent>("playback-prep-progress", (e) => {
-        if (!mounted || e.payload.job_id !== downloadJobIdRef.current) return;
-        const s = stateRef.current;
-        if (s.kind === "downloading") dispatch({ t: "DOWNLOAD_PROGRESS", seq: s.seq, progress: e.payload.percent });
-      });
-      const d = await listen<DoneEvent>("playback-prep-done", (e) => {
-        if (!mounted || e.payload.job_id !== downloadJobIdRef.current) return;
-        const r = attemptResolverRef.current;
-        attemptResolverRef.current = null;
-        if (e.payload.success && e.payload.path) r?.resolve(e.payload.path);
-        else r?.reject(e.payload.error ?? "Download failed");
-      });
-      const g = await listen<LogEvent>("playback-prep-log", (e) => {
-        if (!mounted || e.payload.job_id !== downloadJobIdRef.current) return;
-        helpersRef.current.appendLog(asLogTag(e.payload.tag), "web-preview", e.payload.line);
-      });
-      unlistens.push(p, d, g);
-      // Cleanup during the awaits above saw an empty array — release what
-      // registered late (StrictMode hits this on every dev boot).
-      if (!mounted) { unlistens.forEach((u) => u()); unlistens.length = 0; }
-    })();
-    return () => { mounted = false; unlistens.forEach((u) => u()); };
+  // The job gate is what lets these coexist with App's local-file prep
+  // listeners on the SAME three channels: those filter on the local prep job,
+  // these on the download job, and each ignores the other's traffic. Remove it
+  // and a local transcode drives this progress bar.
+  useTauriListeners((on) => {
+    on<ProgressEvent>("playback-prep-progress", (payload) => {
+      if (payload.job_id !== downloadJobIdRef.current) return;
+      const s = stateRef.current;
+      if (s.kind === "downloading") dispatch({ t: "DOWNLOAD_PROGRESS", seq: s.seq, progress: payload.percent });
+    });
+    on<DoneEvent>("playback-prep-done", (payload) => {
+      if (payload.job_id !== downloadJobIdRef.current) return;
+      const r = attemptResolverRef.current;
+      attemptResolverRef.current = null;
+      if (payload.success && payload.path) r?.resolve(payload.path);
+      else r?.reject(payload.error ?? "Download failed");
+    });
+    on<LogEvent>("playback-prep-log", (payload) => {
+      if (payload.job_id !== downloadJobIdRef.current) return;
+      helpersRef.current.appendLog(asLogTag(payload.tag), "web-preview", payload.line);
+    });
   }, []);
 
   // ── Resolve effect: kicks off get_direct_stream_url on entering `resolving`.
