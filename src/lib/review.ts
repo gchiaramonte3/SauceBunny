@@ -65,6 +65,17 @@ export type ReviewComment = {
   likes?: string[];
   /** Per-emoji reactions: glyph -> reviewer names. Optional for old docs. */
   reactions?: Record<string, string[]>;
+  /** When each reviewer last set or cleared each emoji: glyph -> name -> op.
+   *
+   *  `reactions` alone is a grow-only set, and a union of two grow-only sets
+   *  cannot express "Ana took hers off" - so the merge used to resurrect every
+   *  removal, write it back to disk, and resurrect it again on the next
+   *  reconcile. This is the missing half: the same carry-the-timestamp,
+   *  later-op-wins rule `edit` / `resolve` / `status` already use.
+   *
+   *  Optional, and absent on every doc written before it existed - which is
+   *  why the merge falls back to unioning names it has no history for. */
+  reactedAt?: Record<string, Record<string, { on: boolean; at: number }>>;
 };
 
 export type ReviewVersion = {
@@ -391,7 +402,9 @@ export function reactionsOf(c: ReviewComment): Record<string, string[]> {
  *  the idempotent form for the op relay (two applies land the same place).
  *  Default 👍 keeps pre-emoji ops meaningful; removing 👍 also strips the
  *  legacy likes entry so old docs un-react cleanly. */
-export function setLike(doc: ReviewDoc, id: string, name: string, liked: boolean, emoji = "👍"): ReviewDoc {
+export function setLike(
+  doc: ReviewDoc, id: string, name: string, liked: boolean, emoji = "👍", at = Date.now(),
+): ReviewDoc {
   const who = name.trim();
   // Unknown ids are an identity no-op (callers rely on reference equality
   // to skip persistence).
@@ -403,7 +416,12 @@ export function setLike(doc: ReviewDoc, id: string, name: string, liked: boolean
       const cur = c.reactions?.[emoji] ?? [];
       const inLegacy = emoji === "👍" && (c.likes ?? []).includes(who);
       const has = cur.includes(who) || inLegacy;
-      if (liked === has && !inLegacy) return c; // identity no-op
+      const known = c.reactedAt?.[emoji]?.[who];
+      // Identity no-op only when the history ALREADY says this, not merely
+      // when the membership happens to match. A peer applying "Ana un-reacted"
+      // against a copy that never had Ana still has to record the removal, or
+      // that peer is the one who resurrects it at the next merge.
+      if (liked === has && !inLegacy && known?.on === liked) return c;
       const reactions = { ...(c.reactions ?? {}) };
       if (liked) {
         if (!cur.includes(who)) reactions[emoji] = [...cur, who];
@@ -413,10 +431,15 @@ export function setLike(doc: ReviewDoc, id: string, name: string, liked: boolean
         else delete reactions[emoji];
       }
       const likes = inLegacy && !liked ? (c.likes ?? []).filter((n) => n !== who) : c.likes;
+      // Keep the newest op per (emoji, reviewer): a replayed or out-of-order
+      // relay echo must not roll the state back to an older one.
+      const forEmoji = { ...(c.reactedAt?.[emoji] ?? {}) };
+      if (!known || at >= known.at) forEmoji[who] = { on: liked, at };
       return {
         ...c,
         reactions: Object.keys(reactions).length ? reactions : undefined,
         likes: likes && likes.length ? likes : undefined,
+        reactedAt: { ...(c.reactedAt ?? {}), [emoji]: forEmoji },
       };
     }),
   };
@@ -438,7 +461,9 @@ export type ReviewOp =
   | { t: "edit"; id: string; body: string; at: number }
   | { t: "del"; id: string }
   | { t: "resolve"; id: string; resolved: boolean; at: number }
-  | { t: "like"; id: string; name: string; liked: boolean; emoji?: string }
+  /** `at` is optional only for peers on a build that predates it; without
+   *  one the receiver stamps arrival time, which is the best it can do. */
+  | { t: "like"; id: string; name: string; liked: boolean; emoji?: string; at?: number }
   | { t: "editReply"; versionId: string; commentId: string; replyId: string; body: string; at: number }
   | { t: "delReply"; versionId: string; commentId: string; replyId: string }
   /** Source-level verdict (per active version). LWW like edits; relayed in
@@ -486,7 +511,7 @@ export function applyReviewOp(doc: ReviewDoc, op: ReviewOp): ReviewDoc {
       return setResolved(doc, op.id, op.resolved, op.at);
     }
     case "like":
-      return setLike(doc, op.id, op.name, op.liked, op.emoji);
+      return setLike(doc, op.id, op.name, op.liked, op.emoji, op.at ?? Date.now());
     case "editReply": {
       const cur = doc.comments.find((c) => c.id === op.replyId);
       if (cur && editLoses(op, cur)) return doc;
@@ -570,6 +595,59 @@ export function restampReviewOp(op: ReviewOp, at: number): ReviewOp {
  *  re-folds any local-only comment (idempotent add), keeps the newer of a
  *  shared comment by updatedAt, and UNIONs likes (which don't bump updatedAt)
  *  so a not-yet-echoed like isn't dropped. */
+/**
+ * Reconcile two copies of one comment's reactions.
+ *
+ * Union is the right answer for ADDS - two people reacting at the same moment
+ * on different machines must both land, and that is what shipped. It is only
+ * wrong for removals, which a grow-only set cannot express at all.
+ *
+ * So: union the membership, then let any recorded op override it, newest
+ * first. Three consequences worth stating, because each is a decision:
+ *
+ *   · A name with no op history on either side keeps the old union
+ *     behaviour. Docs written before `reactedAt` existed record WHO reacted
+ *     but not WHEN, and there is nothing better to do with that.
+ *   · An op beats no-op-history. If one side says "Ana cleared hers at T"
+ *     and the other just lists Ana with no idea when, the side holding a
+ *     time is the one that learned something.
+ *   · A same-millisecond collision resolves to `on`, matching how the op
+ *     relay breaks its other ties (resolved=true wins) so both peers land
+ *     on the same value regardless of arrival order.
+ */
+function mergeReactions(
+  ic: ReviewComment, lc: ReviewComment,
+): { reactions?: Record<string, string[]>; reactedAt?: ReviewComment["reactedAt"] } {
+  const emojiKeys = new Set([
+    ...Object.keys(ic.reactions ?? {}), ...Object.keys(lc.reactions ?? {}),
+    ...Object.keys(ic.reactedAt ?? {}), ...Object.keys(lc.reactedAt ?? {}),
+  ]);
+  if (!emojiKeys.size) return {};
+
+  const reactions: Record<string, string[]> = {};
+  const reactedAt: NonNullable<ReviewComment["reactedAt"]> = {};
+  for (const e of emojiKeys) {
+    const latest: Record<string, { on: boolean; at: number }> = {};
+    for (const side of [ic, lc]) {
+      for (const [who, op] of Object.entries(side.reactedAt?.[e] ?? {})) {
+        const cur = latest[who];
+        if (!cur || op.at > cur.at || (op.at === cur.at && op.on)) latest[who] = op;
+      }
+    }
+    const names = new Set([...(ic.reactions?.[e] ?? []), ...(lc.reactions?.[e] ?? [])]);
+    for (const [who, op] of Object.entries(latest)) {
+      if (op.on) names.add(who);
+      else names.delete(who);
+    }
+    if (names.size) reactions[e] = [...names];
+    if (Object.keys(latest).length) reactedAt[e] = latest;
+  }
+  return {
+    reactions: Object.keys(reactions).length ? reactions : undefined,
+    reactedAt: Object.keys(reactedAt).length ? reactedAt : undefined,
+  };
+}
+
 export function mergeReviewDoc(local: ReviewDoc, incoming: ReviewDoc): ReviewDoc {
   // NEVER fold across sources. Without this, ending a session after the room
   // had switched sources called mergeReviewDoc(loadReview(A), docForB), which
@@ -585,15 +663,10 @@ export function mergeReviewDoc(local: ReviewDoc, incoming: ReviewDoc): ReviewDoc
     const base = lc.updatedAt > ic.updatedAt ? { ...lc } : { ...ic };
     const likes = Array.from(new Set([...(ic.likes ?? []), ...(lc.likes ?? [])]));
     base.likes = likes.length ? likes : undefined;
-    // Per-emoji union, same convergence rule as likes.
-    const emojiKeys = new Set([...Object.keys(ic.reactions ?? {}), ...Object.keys(lc.reactions ?? {})]);
-    if (emojiKeys.size) {
-      const reactions: Record<string, string[]> = {};
-      for (const e of emojiKeys) {
-        const u = Array.from(new Set([...(ic.reactions?.[e] ?? []), ...(lc.reactions?.[e] ?? [])]));
-        if (u.length) reactions[e] = u;
-      }
-      base.reactions = Object.keys(reactions).length ? reactions : undefined;
+    const { reactions, reactedAt } = mergeReactions(ic, lc);
+    if (reactions || reactedAt) {
+      base.reactions = reactions;
+      base.reactedAt = reactedAt;
     }
     byId.set(lc.id, base);
   }

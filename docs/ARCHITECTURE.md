@@ -194,6 +194,11 @@ topology: star — host + up to MAX_PEERS(3) guests, host relays everything
   LWW edits with a deterministic tiebreak, `mergeReviewDoc` snapshot-merge on
   join). Host applies + relays to all-but-sender, so the star converges.
   On session end everyone persists the collaborative doc locally.
+  Reactions merge as an LWW-element-set (`reactedAt`, glyph → name → when):
+  the membership list alone is grow-only, so unioning two copies could express
+  a reaction but never its removal, and every un-react was resurrected by the
+  next merge. Adds still union — two people reacting at once must both land —
+  and names with no recorded op (docs predating `reactedAt`) still union too.
 - **Screening mode** is a pure CSS reflow of the existing body (participant
   rail replaces the sidebar; the player is never remounted). The rail reads
   real roster data; the host is identified by roster position 0 — the name
