@@ -110,11 +110,18 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   /**
    * Resume-after-idle forensics.
    *
-   * "Sometimes I pause, come back later, hit play, and it is not snappy" is a
-   * real report with at least three different causes that look identical from
-   * the outside, so guessing at a fix would be guessing. These two refs make
-   * the next occurrence self-diagnosing: we record how much buffer existed at
-   * the moment of the pause, and compare it on resume.
+   * "Sometimes I pause, come back later, and it is not snappy" is a real
+   * report with at least three different causes that look identical from the
+   * outside, so guessing at a fix would be guessing. These refs make the next
+   * occurrence self-diagnosing: we record how much buffer existed at the
+   * moment of the pause, and compare it on the first gesture afterwards.
+   *
+   * That gesture is a SEEK as well as a play. The original wording of this
+   * comment said "hit play", and the code believed it — but the report being
+   * chased is "I scrub twenty minutes later and it holds on the frame it was
+   * parked on", and a scrub never fires `play`. LocalMediaPlayer was corrected
+   * for this; this player was not, so the web half of the investigation
+   * recorded nothing for the gesture it exists to explain.
    *
    *   buffer survived     → the stall is downstream (decode, or the source
    *                         swap), not the pipeline
@@ -125,6 +132,8 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
    */
   const pausedAtRef = useRef(0);
   const aheadAtPauseRef = useRef(0);
+  /** One idle report per idle, not one per seek event inside a scrub. */
+  const reportedIdleRef = useRef(false);
   // Authoritative total from yt-dlp metadata. The mediabunny probe of the
   // fragmented proxy stream can read short, which made `seekTo` clamp far
   // seeks early (e.g. 19:40 landing at 15:12). Metadata wins when present.
@@ -1053,28 +1062,46 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       catch { return -1; }
     };
 
+    /**
+     * The idle report, on the gesture that was actually reported.
+     *
+     * This fired only from onPlay, which measures the wrong thing for the same
+     * reason it did in LocalMediaPlayer: the complaint is "I scrub twenty
+     * minutes later and it holds on the parked frame", and a scrub does not
+     * start with a play. The local player was corrected; this one was not, so
+     * the web half of the investigation has been collecting nothing for the
+     * gesture it was written to explain.
+     *
+     * Fires once per idle rather than once per seek, because a scrub emits a
+     * burst of `seeking` events and the first is the one that pays.
+     */
+    const reportIdleResume = (gesture: string) => {
+      const idleMs = pausedAtRef.current ? Date.now() - pausedAtRef.current : 0;
+      if (idleMs <= 10_000 || reportedIdleRef.current) return;
+      reportedIdleRef.current = true;
+      const before = aheadAtPauseRef.current;
+      const after = aheadNow();
+      const pipeline = readerRef.current ? "alive" : (endedRef.current ? "ended" : "gone");
+      const verdict = after < 0 ? "NO BUFFER (source buffer empty or detached)"
+        : after < 0.5 ? "BUFFER EVICTED while idle"
+        : before - after > 5 ? "buffer partly evicted"
+        : "buffer survived (stall is downstream, not the pipeline)";
+      onDiagRef.current?.(
+        after >= 0.5 ? "info" : "warn",
+        `${gesture} after ${Math.round(idleMs / 1000)}s idle: ahead ${before.toFixed(1)}s → `
+        + `${after < 0 ? "n/a" : `${after.toFixed(1)}s`} · pipeline ${pipeline} · ${verdict}`,
+      );
+    };
+
     const onPlay = () => {
       playingRef.current = true; setIsPlaying(true); onPlayStateChange?.(true); startTick();
       // Only for a real idle. Every ordinary play/pause would drown the log.
-      const idleMs = pausedAtRef.current ? Date.now() - pausedAtRef.current : 0;
-      if (idleMs > 10_000) {
-        const before = aheadAtPauseRef.current;
-        const after = aheadNow();
-        const pipeline = readerRef.current ? "alive" : (endedRef.current ? "ended" : "gone");
-        const verdict = after < 0 ? "NO BUFFER (source buffer empty or detached)"
-          : after < 0.5 ? "BUFFER EVICTED while idle"
-          : before - after > 5 ? "buffer partly evicted"
-          : "buffer survived (stall is downstream, not the pipeline)";
-        onDiagRef.current?.(
-          after >= 0.5 ? "info" : "warn",
-          `resume after ${Math.round(idleMs / 1000)}s idle: ahead ${before.toFixed(1)}s → `
-          + `${after < 0 ? "n/a" : `${after.toFixed(1)}s`} · pipeline ${pipeline} · ${verdict}`,
-        );
-      }
+      reportIdleResume("resume");
       pausedAtRef.current = 0;
     };
     const onPause = () => {
       pausedAtRef.current = Date.now();
+      reportedIdleRef.current = false;
       aheadAtPauseRef.current = aheadNow();
       playingRef.current = false; setIsPlaying(false); onPlayStateChange?.(false);
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
@@ -1082,6 +1109,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     };
     // 'timeupdate' (≈4Hz) stays as the playhead signal while PAUSED — e.g. a
     // seek landing — and as a backstop if the frame callbacks are throttled.
+    const onSeeking = () => reportIdleResume("seek");
     const onTime = () => reportTime();
     const onErr = () => {
       if (failedRef.current) return; // first error already reported for this source
@@ -1117,6 +1145,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     el.addEventListener("playing", onResume);
     el.addEventListener("timeupdate", onTime);
     el.addEventListener("error", onErr);
+    el.addEventListener("seeking", onSeeking);
     el.addEventListener("seeked", onSettled);
     el.addEventListener("loadeddata", onSettled);
     return () => {
@@ -1133,6 +1162,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       el.removeEventListener("playing", onResume);
       el.removeEventListener("timeupdate", onTime);
       el.removeEventListener("error", onErr);
+      el.removeEventListener("seeking", onSeeking);
       el.removeEventListener("seeked", onSettled);
       el.removeEventListener("loadeddata", onSettled);
     };
