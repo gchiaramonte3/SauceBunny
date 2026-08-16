@@ -484,7 +484,7 @@ fn ytdlp_extractor_tag(stderr: &str) -> Option<String> {
 /// branch so the user sees the same text whether the failure was caught at
 /// the one-shot `output()` boundary or in a streaming loop.
 pub(crate) const YT_AUTH_HINT: &str = "YouTube is asking for sign-in to confirm you're not a bot. \
-    Check the yt-dlp line just above: if it says \"(no cookies)\", open Settings → YouTube auth \
+    Check the yt-dlp line just above: if it says \"(no cookies)\", open Settings → Web sources \
     and pick the browser you're already logged into YouTube on. If it names a browser, the \
     cookies were sent but YouTube rejected them - sign in again in that browser, then retry.";
 
@@ -520,7 +520,7 @@ pub(crate) fn humanize_ytdlp_error(stderr: &str) -> String {
         return "YouTube reports this video is unavailable (deleted, private, or region-locked).".into();
     }
     if trimmed.contains("age") && trimmed.contains("restricted") {
-        return "Age-restricted video — set Settings → YouTube auth so yt-dlp can use your signed-in cookies.".into();
+        return "Age-restricted video — set Settings → Web sources so yt-dlp can use your signed-in cookies.".into();
     }
     // Generic fall-through: surface the first non-empty line so we don't
     // dump the whole Python stack into the UI.

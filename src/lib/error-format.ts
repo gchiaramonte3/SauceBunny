@@ -70,7 +70,7 @@ export function formatError(e: unknown): string {
         return `Sidecar \`${e.data.name}\` failed${code}: ${e.data.tail}`;
       }
       case "YouTubeAuthRequired":
-        return "YouTube is asking for sign-in. Choose your browser in Settings → Source so we can use its cookies.";
+        return "YouTube is asking for sign-in. Choose your browser in Settings → Web sources so we can use its cookies.";
       case "Network":
         return `Network error: ${e.data}`;
       case "Io":

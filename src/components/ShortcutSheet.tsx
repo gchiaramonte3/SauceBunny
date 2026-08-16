@@ -58,7 +58,7 @@ export function ShortcutSheet({ open, onClose, keybindings, onCustomize }: Props
             type="button"
             className="btn btn-ghost btn-compact"
             onClick={() => { onClose(); onCustomize(); }}
-            title="Re-bind any shortcut in Settings → Commands"
+            title="Re-bind any shortcut in Settings → Shortcuts"
           >
             Customize…
           </button>

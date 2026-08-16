@@ -104,7 +104,7 @@ impl std::fmt::Display for AppError {
             }
             Self::YouTubeAuthRequired => write!(
                 f,
-                "YouTube is asking for sign-in. Choose your browser in Settings → Source so we can use its cookies.",
+                "YouTube is asking for sign-in. Choose your browser in Settings → Web sources so we can use its cookies.",
             ),
             Self::Network(msg) => write!(f, "Network error: {msg}"),
             Self::Io(msg) => write!(f, "I/O error: {msg}"),
