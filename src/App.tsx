@@ -2167,6 +2167,52 @@ export default function App() {
     setJobId(null);
   }, [resetWebPlayback]);
 
+  // Moved ABOVE handleFetch deliberately. It used to sit ~1,500 lines below,
+  // which meant the two hooks that call it could not name it in their
+  // dependency arrays at all: a `const` referenced before its declaration is
+  // a temporal-dead-zone error, and tsc rejects it. Two exhaustive-deps
+  // suppressions existed only to describe that. Declaration order was the
+  // whole obstacle, so the fix was to change the order.
+  // ── Transcript history wiring ───────────────────────────────────
+  // Auto-load a prior transcript when the user re-opens a source
+  // we've transcribed before. We verify the SRT still exists on disk
+  // (via the bounded read command — it returns an error for missing
+  // files which we catch). Done as a soft attempt: failure is silent
+  // so importing a brand-new file feels exactly the same as it does
+  // today.
+  const tryAutoLoadTranscript = useCallback(async (input: {
+    sourcePath?: string | null;
+    sourceUrl?: string | null;
+  }, seq: number) => {
+    const entry = findForSource(input);
+    if (!entry) return;
+    try {
+      // Probe existence/readability. Use the SAME 8 MB cap the viewer
+      // reads with — read_text_file_capped *errors* when a file exceeds
+      // the cap, so a tiny cap (the old 64 bytes) rejected every real
+      // transcript with "File too large". We don't keep the result; the
+      // viewer fetches the file itself when the path changes.
+      await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 8 * 1024 * 1024 });
+      // The probe is an awaited IPC disk read — if the user switched sources
+      // meanwhile, attaching the OLD source's transcript to the NEW source
+      // (and pulsing the Transcript tab open over it) would be wrong.
+      if (sourceSeqRef.current !== seq) return;
+      setActiveTranscript({
+        path: entry.srtPath,
+        origin: entry.origin === "captions" ? "captions"
+              : entry.origin === "whisper"  ? "whisper"
+              : "unknown",
+        sourceKey: entry.sourcePath ?? entry.sourceUrl ?? null,
+      });
+      setTranscriptArrivedTick((n) => n + 1);
+      touchEntry(entry.id);
+      appendLog("ok", "transcripts", `Auto-loaded prior transcript from ${entry.srtPath}`);
+    } catch {
+      // SRT was deleted or moved — leave activeTranscript null. The
+      // user can re-generate or pick another from the history popover.
+    }
+  }, [appendLog]);
+
   const handleFetch = useCallback(async (urlOverride?: string) => {
     // `urlOverride` lets callers (e.g. paste-and-fetch) pass the URL directly
     // instead of relying on the `url` state having committed — avoids the
@@ -2431,8 +2477,8 @@ export default function App() {
     } finally {
       if (sourceSeqRef.current === seq) setMetadataLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- `tryAutoLoadTranscript` is declared ~1500 lines BELOW this hook, so naming it here is a temporal-dead-zone error, not a style choice — tsc rejects it. Tried; reverted. It is a useCallback over refs, so the capture is not stale in practice. A real fix is the App.tsx split (refactor priority 6), not a dependency edit.
-  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, classifyExtractorRot, loadWebPlayback, loadCachedWebPlayback, recordRecentSource]);
+  }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, classifyExtractorRot, loadWebPlayback, loadCachedWebPlayback, recordRecentSource,
+      seedFilename, tryAutoLoadTranscript]);
 
   // Re-run the current fetch after the user picks a browser in the YouTube
   // auth modal. By the time this fires, `defaults.ytCookiesBrowser` (and thus
@@ -3041,8 +3087,8 @@ export default function App() {
       setStatus("error");
       return { message: msg, kind: isAppError(err) ? err.kind : null };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- `tryAutoLoadTranscript` is declared ~1500 lines BELOW this hook, so naming it here is a temporal-dead-zone error, not a style choice — tsc rejects it. Tried; reverted. It is a useCallback over refs, so the capture is not stale in practice. A real fix is the App.tsx split (refactor priority 6), not a dependency edit.
-  }, [appendLog, defaults.folder, defaults.useWebCodecsDecoder, resetForNewSource, runPlaybackPrep, recordRecentSource, setActiveView]);
+  }, [appendLog, defaults.folder, defaults.useWebCodecsDecoder, resetForNewSource, runPlaybackPrep, recordRecentSource,
+      openSourceView, seedFilename, tryAutoLoadTranscript]);
 
   const handleImportFile = useCallback(async () => {
     const picked = await import("@tauri-apps/plugin-dialog").then((m) =>
@@ -3989,45 +4035,6 @@ export default function App() {
     setSettingsOpen(true);
   }, []);
 
-  // ── Transcript history wiring ───────────────────────────────────
-  // Auto-load a prior transcript when the user re-opens a source
-  // we've transcribed before. We verify the SRT still exists on disk
-  // (via the bounded read command — it returns an error for missing
-  // files which we catch). Done as a soft attempt: failure is silent
-  // so importing a brand-new file feels exactly the same as it does
-  // today.
-  const tryAutoLoadTranscript = useCallback(async (input: {
-    sourcePath?: string | null;
-    sourceUrl?: string | null;
-  }, seq: number) => {
-    const entry = findForSource(input);
-    if (!entry) return;
-    try {
-      // Probe existence/readability. Use the SAME 8 MB cap the viewer
-      // reads with — read_text_file_capped *errors* when a file exceeds
-      // the cap, so a tiny cap (the old 64 bytes) rejected every real
-      // transcript with "File too large". We don't keep the result; the
-      // viewer fetches the file itself when the path changes.
-      await invoke<string>("read_text_file_capped", { path: entry.srtPath, maxBytes: 8 * 1024 * 1024 });
-      // The probe is an awaited IPC disk read — if the user switched sources
-      // meanwhile, attaching the OLD source's transcript to the NEW source
-      // (and pulsing the Transcript tab open over it) would be wrong.
-      if (sourceSeqRef.current !== seq) return;
-      setActiveTranscript({
-        path: entry.srtPath,
-        origin: entry.origin === "captions" ? "captions"
-              : entry.origin === "whisper"  ? "whisper"
-              : "unknown",
-        sourceKey: entry.sourcePath ?? entry.sourceUrl ?? null,
-      });
-      setTranscriptArrivedTick((n) => n + 1);
-      touchEntry(entry.id);
-      appendLog("ok", "transcripts", `Auto-loaded prior transcript from ${entry.srtPath}`);
-    } catch {
-      // SRT was deleted or moved — leave activeTranscript null. The
-      // user can re-generate or pick another from the history popover.
-    }
-  }, [appendLog]);
 
   const handleClearTranscript = useCallback(() => {
     // Clear is the "forget" action (the user's rule: an associated transcript
