@@ -53,12 +53,24 @@ async function focusInside(page: Page, selector: string): Promise<boolean> {
 
 const MODAL = '.cp-modal, [role="dialog"]';
 
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), '
+  + 'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /**
  * Press `key` n times, recording where focus lands each time and the first
  * press that left the modal.
+ *
+ * Identity is the control's INDEX among the dialog's focusables, not its label.
+ * Labels looked fine and are not: one of the stops is a select reading "Off,
+ * keep everything2 GB", whose text carries a live cache size, so the same
+ * control can describe itself two ways between two presses and shift a
+ * distinct-count that is supposed to be exact. Index is stable under that.
+ * The label is still collected, but only to make a failure readable.
  */
 async function walk(page: Page, key: string, presses: number) {
-  const visited: string[] = [];
+  const visited: number[] = [];
+  const labels: string[] = [];
   const escaped: string[] = [];
   for (let i = 0; i < presses; i += 1) {
     await page.keyboard.press(key);
@@ -66,9 +78,14 @@ async function walk(page: Page, key: string, presses: number) {
       escaped.push(`after ${i + 1} ${key}: ${await activeDescription(page)}`);
       break;
     }
-    visited.push(await activeDescription(page));
+    visited.push(await page.evaluate(([sel, F]) => {
+      const root = document.querySelector(sel);
+      if (!root) return -1;
+      return [...root.querySelectorAll<HTMLElement>(F)].indexOf(document.activeElement as HTMLElement);
+    }, [MODAL, FOCUSABLE] as const));
+    labels.push(await activeDescription(page));
   }
-  return { visited, escaped, distinct: new Set(visited).size };
+  return { visited, labels, escaped, distinct: new Set(visited).size };
 }
 
 async function activeDescription(page: Page): Promise<string> {
@@ -115,7 +132,7 @@ test("the settings modal takes focus, keeps it, and gives it back", async ({ pag
   expect(
     tab.distinct,
     `Tab revisited a control or stopped advancing (${tab.distinct} distinct in 25): ` +
-      `${tab.visited.join(" | ")}`,
+      `${tab.labels.join(" | ")}`,
   ).toBe(25);
 
   // 4. Closing returns focus to what opened it.
@@ -138,6 +155,6 @@ test("shift-tab cannot walk backwards out either", async ({ page }) => {
   expect(
     back.distinct,
     `Shift+Tab revisited a control or stopped advancing (${back.distinct} distinct in 15): ` +
-      `${back.visited.join(" | ")}`,
+      `${back.labels.join(" | ")}`,
   ).toBe(15);
 });
