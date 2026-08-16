@@ -497,7 +497,7 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ## Enforced contracts
 
-Nineteen rules in this file are checked by a test rather than remembered. If you
+Twenty rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -517,6 +517,7 @@ written after finding the rule already broken somewhere.
 | `ipc-surface-contract` | Every registered command is called, and every invoked command is registered |
 | `event-surface-contract` | Every event Rust emits has a listener, every listened event is emitted (`panel:*` is the frontend-only bus), and each handler is named after its event so a mis-wire is visible |
 | `sidecar-surface-contract` | Everything `externalBin` ships is spawnable, documented in the table above, and (for ours) has a build script |
+| `menu-surface-contract` | Every native menu item has a handler (React binding or a native arm), and no binding points at an item that does not exist |
 | `job-id` | Job ids are minted locally and never awaited |
 | `updater-purity-contract` | No `setX(prev => …)` writes, invokes, persists or touches a ref |
 | `pure-updater-contract` | Reducer-style updaters stay pure |
