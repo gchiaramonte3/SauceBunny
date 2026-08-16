@@ -562,6 +562,15 @@
   font-size: 10px;
   font-weight: 600;
   white-space: nowrap;
+  /* This is a REMOTE peer's display name, and it was the only name rule in the
+     app with nowrap and no bound: 35 of the other 36 clamp with an ellipsis.
+     A 198-character name measured 1136px in a 1100px window - a band of text
+     painted across someone else's video on every reaction, unfixable from this
+     side because the string belongs to the sender. Capped here rather than
+     only on input, since a peer on another build sends whatever it likes. */
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 @keyframes cp-react-rise {
   0%   { transform: translateY(0) scale(0.6); opacity: 0; }

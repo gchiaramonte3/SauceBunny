@@ -143,7 +143,10 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                 <h2 className="cp-colobby-card-title">You</h2>
                 <label className="cp-colobby-field">
                   <span className="cp-colobby-field-label">Your name</span>
-                  <input className="cp-colobby-input" value={name} autoFocus
+                  {/* Capped like the session title beside it (80). Every peer
+                      sees this on each reaction and in the roster; unbounded, it
+                      was the one user string with no limit at either end. */}
+                  <input className="cp-colobby-input" value={name} autoFocus maxLength={40}
                     onChange={(e) => setName(e.target.value)} placeholder="Your name"
                     onKeyDown={(e) => { if (e.key === "Enter") continueIdentity(); }} />
                 </label>
