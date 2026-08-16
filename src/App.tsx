@@ -1676,7 +1676,13 @@ export default function App() {
     };
     // Every dep here is stable (empty deps of its own), so this runs once
     // for the app's lifetime and never re-subscribes.
-  }, [appendLog, refreshWhisperModels, notify, pushNotification, classifyExtractorRot, logRunTotals]);
+  }, [
+    // Narrowed to what this effect actually calls. All four sibling effects
+    // were split out of one 292-line listener block and each inherited that
+    // block's whole dependency array, so two of these were never referenced
+    // here — a re-subscribe of all three clip listeners waiting on an identity
+    // change in something this code does not use.
+    appendLog, notify, pushNotification, classifyExtractorRot]);
 
   // ── Captions listeners ─────────────────────────────────────────
   // yt-dlp's caption fetch. Its done-handler also loads the SRT into the
@@ -1741,7 +1747,7 @@ export default function App() {
     };
     // Every dep here is stable (empty deps of its own), so this runs once
     // for the app's lifetime and never re-subscribes.
-  }, [appendLog, refreshWhisperModels, notify, pushNotification, classifyExtractorRot, logRunTotals]);
+  }, [appendLog]); // narrowed: the inherited array named five this never calls
 
   // ── Transcription listeners ─────────────────────────────────────────
   // whisper + diarizer: logs, progress, phase, the model download, and the
@@ -1814,7 +1820,7 @@ export default function App() {
     };
     // Every dep here is stable (empty deps of its own), so this runs once
     // for the app's lifetime and never re-subscribes.
-  }, [appendLog, refreshWhisperModels, notify, pushNotification, classifyExtractorRot, logRunTotals]);
+  }, [appendLog]); // narrowed: same inherited array, same five unused
 
 
   // ====== Player callbacks ======
