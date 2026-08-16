@@ -520,7 +520,8 @@ pub async fn clear_cache_category(
     }
 }
 
-#[tauri::command]
+/// Not a `#[tauri::command]`: lib.rs calls this directly during setup, and
+/// the renderer never did. Registering it only widened the IPC surface.
 pub fn cleanup_stale_cache(app: AppHandle) -> Result<u32, crate::AppError> {
     let cache = app
         .path()
@@ -594,18 +595,10 @@ fn sweep_stale_files(cache: &std::path::Path, now: std::time::SystemTime) -> u32
 /// export path used to hard-error on collision while the web path silently
 /// uniquified). `if_not_exists` remains for callers that genuinely want a
 /// refuse-to-overwrite error.
-#[tauri::command]
-pub async fn write_bytes_to_path(
-    path: String,
-    bytes: Vec<u8>,
-    if_not_exists: Option<bool>,
-    unique: Option<bool>,
-    atomic: Option<bool>,
-) -> Result<String, crate::AppError> {
-    write_bytes_impl(&path, &bytes, if_not_exists.unwrap_or(false), unique.unwrap_or(false), atomic.unwrap_or(false))
-}
-
-/// Shared body of the byte/text/raw writer commands.
+/// Shared by `write_text_to_path` and the raw-body `write_raw_to_path`.
+/// `write_bytes_to_path` used to be the third caller; its last TypeScript
+/// use went away when the frame snapshot moved to the raw body, so the
+/// command is gone and this stayed.
 fn write_bytes_impl(
     path: &str,
     bytes: &[u8],
@@ -1192,7 +1185,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-08-15-r160-raw-wav-staging";
+pub const BACKEND_BUILD_ID: &str = "2026-08-15-r161-trim-ipc";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

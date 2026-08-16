@@ -246,12 +246,6 @@ pub fn llm_server_status(state: State<'_, LlmServer>) -> Option<LlmServerInfo> {
     state.current()
 }
 
-#[tauri::command]
-pub async fn stop_llm_server(state: State<'_, LlmServer>) -> Result<(), crate::AppError> {
-    state.shutdown();
-    Ok(())
-}
-
 /// Start (or reuse) llama-server for `model_id`. Returns once the server's
 /// `/health` reports ready (model loaded), so the frontend can chat immediately.
 #[tauri::command]

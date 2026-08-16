@@ -2578,11 +2578,6 @@ fn list_displays_impl() -> Result<Vec<DisplayInfo>, crate::AppError> {
         .collect())
 }
 
-#[tauri::command]
-pub fn list_displays() -> Result<Vec<DisplayInfo>, crate::AppError> {
-    list_displays_impl()
-}
-
 /// Pure (unit-tested): picker display name from ordinal + main flag.
 pub(crate) fn display_name(index: usize, is_main: bool) -> String {
     if is_main {

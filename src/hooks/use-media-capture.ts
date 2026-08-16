@@ -70,11 +70,6 @@ function publishPermission(p: AvPermission) {
   for (const l of [...permissionListeners]) l(p);
 }
 
-/** The last capture failure, for non-React consumers. */
-export function getCaptureError(): string | null {
-  return currentError;
-}
-
 /** Subscribe to capture failures raised by ANY surface (room, settings, tile).
  *  App.tsx routes these to a notification so a dead camera says why. */
 export function subscribeCaptureError(cb: (e: string | null) => void): () => void {
