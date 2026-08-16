@@ -1204,7 +1204,7 @@ pub async fn generate_transcript(
         .join(format!("{}.%(ext)s", raw_prefix))
         .to_string_lossy()
         .to_string();
-    let wav_path = cache.join(format!("saucebunny-{}.wav", args.job_id));
+    let wav_path = job_wav_path(&app, &args.job_id)?;
 
     let ffmpeg = sidecar_path("ffmpeg")?;
     if !ffmpeg.exists() {
@@ -1972,7 +1972,7 @@ pub async fn re_diarize_transcript(
         return Err("No audio source provided for re-diarization".into());
     };
 
-    let wav_path = cache.join(format!("saucebunny-{}.wav", args.job_id));
+    let wav_path = job_wav_path(&app, &args.job_id)?;
     let job_id = args.job_id.clone();
     let job_for = job_id.clone();
     let app_for = app.clone();
@@ -2059,18 +2059,31 @@ pub struct TranscribeLocalArgs {
     pub duration_seconds: Option<f64>,
 }
 
-/// Where a prepared WAV waits for whisper to read it.
+/// Where a job's 16 kHz mono WAV lives while whisper reads it.
 ///
-/// ONE definition, because staging and transcribing are two commands now and
-/// they have to agree on this path exactly; deriving it in both places is
-/// precisely how they would drift apart. A stage with no matching transcribe
+/// ONE definition, used by all THREE commands that touch this file:
+/// stage_prepared_wav writes it, transcribe_prepared_wav reads it, and
+/// generate_transcript has ffmpeg produce it for the web path. Deriving the
+/// name separately is precisely how they would drift apart - and it had
+/// already happened three times over: generate_transcript, re_diarize_transcript
+/// and transcribe_local_file each built the same `saucebunny-{job}.wav` string
+/// inline, so each skipped the job-id filter below. Nothing collided, because
+/// job ids are unique; four copies of one filename rule is simply the state
+/// just before it stops being one rule.
+///
+/// There is deliberately NO test counting how many places build this name. I
+/// wrote one and it was wrong twice: the literal also appears in doc comments
+/// and in the test's own needle, and `format!("saucebunny-` matches error
+/// messages about sidecar binaries and three unrelated filename namespaces
+/// (dictation WAVs, yt-dlp raw downloads, diarizer JSON). A guard that keeps
+/// needing to be re-tuned to pass is not measuring anything. A stage with no matching transcribe
 /// (the user cancels in between) leaves the file for the startup cache sweep,
 /// which is what that sweep is for.
 ///
 /// The job id reaches this through an IPC HEADER, so it is filtered rather
 /// than trusted: only the shape crypto.randomUUID actually produces survives,
 /// and anything else cannot walk out of the cache directory.
-pub(crate) fn prepared_wav_name(job_id: &str) -> Result<String, crate::AppError> {
+pub(crate) fn job_wav_name(job_id: &str) -> Result<String, crate::AppError> {
     let safe: String = job_id
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
@@ -2081,11 +2094,11 @@ pub(crate) fn prepared_wav_name(job_id: &str) -> Result<String, crate::AppError>
     Ok(format!("saucebunny-{safe}.wav"))
 }
 
-pub(crate) fn prepared_wav_path(
+pub(crate) fn job_wav_path(
     app: &AppHandle,
     job_id: &str,
 ) -> Result<PathBuf, crate::AppError> {
-    let name = prepared_wav_name(job_id)?;
+    let name = job_wav_name(job_id)?;
     let cache = app
         .path()
         .app_cache_dir()
@@ -2112,7 +2125,7 @@ pub async fn stage_prepared_wav(
             "stage_prepared_wav: expected a raw body (pass the Uint8Array as the invoke payload)",
         ));
     };
-    let path = prepared_wav_path(&app, job_id)?;
+    let path = job_wav_path(&app, job_id)?;
     std::fs::write(&path, bytes).map_err(|e| format!("failed to stage WAV: {e}"))?;
     Ok(path.to_string_lossy().into_owned())
 }
@@ -2169,7 +2182,7 @@ pub async fn transcribe_prepared_wav(
     // WAV becoming a ~130 MB string, element by element, with the window
     // frozen for it. Now they arrive as a raw IPC body and land straight on
     // disk, and this command only reads the path.
-    let wav_path = prepared_wav_path(&app, &args.job_id)?;
+    let wav_path = job_wav_path(&app, &args.job_id)?;
     let wav_len = match std::fs::metadata(&wav_path) {
         Ok(m) if m.is_file() => m.len(),
         _ => {
@@ -2375,7 +2388,7 @@ pub async fn transcribe_local_file(
         .app_cache_dir()
         .map_err(|e| format!("app_cache_dir: {e}"))?;
     std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
-    let wav_path = cache.join(format!("saucebunny-{}.wav", args.job_id));
+    let wav_path = job_wav_path(&app, &args.job_id)?;
 
     let in_path_str = in_path.to_string_lossy().to_string();
     let wav_path_str = wav_path.to_string_lossy().to_string();
@@ -3474,13 +3487,13 @@ mod model_completeness_tests {
 
 #[cfg(test)]
 mod prepared_wav_tests {
-    use super::prepared_wav_name;
+    use super::job_wav_name;
 
     #[test]
     fn keeps_a_real_job_id_intact() {
         // crypto.randomUUID output, which is all production ever sends.
         assert_eq!(
-            prepared_wav_name("6f1c2b7a-9d3e-4a55-8b21-0c7d5e9f1a34").unwrap(),
+            job_wav_name("6f1c2b7a-9d3e-4a55-8b21-0c7d5e9f1a34").unwrap(),
             "saucebunny-6f1c2b7a-9d3e-4a55-8b21-0c7d5e9f1a34.wav",
         );
     }
@@ -3490,7 +3503,7 @@ mod prepared_wav_tests {
         // The id arrives in an IPC HEADER now, not a typed field, so it is
         // filtered rather than trusted. None of these may produce a separator.
         for hostile in ["../../etc/passwd", "a/b", "a\\b", "..", "./x", "a\0b"] {
-            let name = prepared_wav_name(hostile).unwrap_or_else(|_| "saucebunny-.wav".into());
+            let name = job_wav_name(hostile).unwrap_or_else(|_| "saucebunny-.wav".into());
             assert!(!name.contains('/'), "{hostile} produced {name}");
             assert!(!name.contains('\\'), "{hostile} produced {name}");
             assert!(name.starts_with("saucebunny-"), "{hostile} produced {name}");
@@ -3502,22 +3515,22 @@ mod prepared_wav_tests {
     fn dots_are_dropped_so_no_id_can_re_extension_the_file() {
         // "x.sh" must not become saucebunny-x.sh.wav's neighbour, and more to
         // the point must not end in anything but .wav.
-        assert_eq!(prepared_wav_name("x.sh").unwrap(), "saucebunny-xsh.wav");
+        assert_eq!(job_wav_name("x.sh").unwrap(), "saucebunny-xsh.wav");
     }
 
     #[test]
     fn an_id_with_nothing_usable_is_an_error_not_a_shared_file() {
         // Falling back to a fixed name would make two concurrent jobs collide
         // on one WAV, so this refuses instead.
-        assert!(prepared_wav_name("").is_err());
-        assert!(prepared_wav_name("../..").is_err());
-        assert!(prepared_wav_name("///").is_err());
+        assert!(job_wav_name("").is_err());
+        assert!(job_wav_name("../..").is_err());
+        assert!(job_wav_name("///").is_err());
     }
 
     #[test]
     fn distinct_jobs_get_distinct_files() {
-        let a = prepared_wav_name("job-a").unwrap();
-        let b = prepared_wav_name("job-b").unwrap();
+        let a = job_wav_name("job-a").unwrap();
+        let b = job_wav_name("job-b").unwrap();
         assert_ne!(a, b);
     }
 }
