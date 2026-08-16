@@ -116,6 +116,13 @@ accessibility tree; only VoiceOver proves it is announced.
 - [ ] Turn on VoiceOver (⌘F5). Press **VO+U**, choose Landmarks. Each view
       should list one main, named Library / Clip / Co-Review / Transcript, plus
       the Primary navigation. Nothing should say a bare "main".
+- [ ] With VoiceOver still on, Tab through **Settings ▸ General** (STUN, TURN
+      URL, username, password) and **▸ Captions** (size, font, background).
+      Each should be announced by name. They used to announce as "edit text,
+      blank" - the password fields included.
+- [ ] **Settings ▸ AI APIs:** click the words "API key" and "Model". The
+      caret should land in the field beside them. Those labels were previously
+      decorative and clicking them did nothing.
 
 ## 9. Look — token changes, no computed value should have moved
 
