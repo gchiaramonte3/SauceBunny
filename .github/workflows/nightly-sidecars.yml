@@ -71,12 +71,40 @@ jobs:
       # ── yt-dlp / ffmpeg / ffprobe: fetched FRESH every night ──
       # Catching their latest releases against our arg surfaces is the point,
       # so these are deliberately uncached.
+      #
+      # SB_PIN_ACCEPT_NEW: this job's whole purpose is to smoke the LATEST
+      # upstream builds, and sidecars.lock.json exists to stop an unreviewed
+      # binary reaching a RELEASE. Those two fight, and the pin was winning by
+      # aborting the job: once upstream ffmpeg moved, this step failed and
+      # every step after it — including the smoke this workflow exists to run —
+      # stopped happening. The nightly was red for days without testing
+      # anything.
+      #
+      # Accepting here changes nothing that survives: the runner is throwaway
+      # and this workflow commits nothing, so the repo's pin is untouched and
+      # the release path still refuses an unreviewed binary. The drift is
+      # reported below instead of swallowing the job.
       - name: Fetch latest yt-dlp
         run: npm run refresh:sidecars
+        env: { SB_PIN_ACCEPT_NEW: "1" }
       - name: Fetch latest static ffmpeg
         run: npm run refresh:ffmpeg
+        env: { SB_PIN_ACCEPT_NEW: "1" }
       - name: Fetch latest static ffprobe
         run: npm run refresh:ffprobe
+        env: { SB_PIN_ACCEPT_NEW: "1" }
+
+      # Drift is a decision for a human (is this build one we want to ship?),
+      # so it is surfaced as a notice on a job that still runs, not as a
+      # failure that hides the smoke's result.
+      - name: Report sidecar pin drift
+        run: |
+          if ! git diff --quiet -- sidecars.lock.json; then
+            echo "::notice title=Sidecar pin drifted::Upstream published new binaries. Smoke ran against them; the repo pin is unchanged. Run 'npm run refresh:ffmpeg -- --accept-new' locally to adopt."
+            git --no-pager diff --stat -- sidecars.lock.json
+          else
+            echo "sidecar pins unchanged"
+          fi
 
       # Sidecars the smoke doesn't exercise (Swift diarizer/dictate, llama):
       # stub them zero-byte, same as ci.yml, purely so tauri-build's
