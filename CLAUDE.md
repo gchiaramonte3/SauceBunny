@@ -555,7 +555,7 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ## Enforced contracts
 
-Thirty-five rules in this file are checked by a test rather than remembered. If you
+Thirty-six rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -609,6 +609,7 @@ written after finding the rule already broken somewhere.
 | `job-id` | Job ids are minted locally and never awaited |
 | `updater-purity-contract` | No `setX(prev => …)` writes, invokes, persists or touches a ref |
 | `pure-updater-contract` | Reducer-style updaters stay pure |
+| `hidden-instance-contract` | Every Cmd-chord in TranscriptViewer checks it is not inside a [hidden]/aria-hidden subtree. The component is mounted twice (reader + drawer keep-alive), and without the gate a Cmd-G advanced the HIDDEN copy and killed its auto-scroll |
 | `rust-panic-contract` | No `unwrap`/`expect`/`panic!` in production Rust |
 | `rung-ladder-contract` | The streaming rung table is identical in TS and Rust |
 | `wire-path-contract` | A review doc on the wire carries no local filesystem path |
@@ -622,6 +623,7 @@ written after finding the rule already broken somewhere.
 | `dismiss-parity-contract` | No NEW hand-rolled click-outside dismisser; use `useDismiss`, which brings Escape with it |
 | `diarizer-envelope-contract` | Swift and Rust name the same turn fields, and the SPEAKER_UNK sentinel agrees across Rust and the SRT parser |
 | `dictate-protocol-contract` | Swift emits every key Rust reads off a dictation line, and every line reporting `final` carries the text |
+| `hidden-instance-contract` | Every Cmd-chord in TranscriptViewer checks it is not inside a [hidden]/aria-hidden subtree. The component is mounted twice (reader + drawer keep-alive), and without the gate a Cmd-G advanced the HIDDEN copy and killed its auto-scroll |
 | `rust-panic-contract` | No .unwrap()/.expect()/panic! in production Rust (two allowlisted, each with a stated reason). A panic in a command handler never resolves the invoke and poisons any Mutex it held |
 | `e2e-mock-shape-contract` | The two object literals in `e2e/tauri-mock.ts` carry exactly the fields of their ts-rs binding, so 100 Playwright tests cannot certify a backend shape that no longer exists |
 
