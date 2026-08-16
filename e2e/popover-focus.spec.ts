@@ -49,21 +49,27 @@ for (const label of TRIGGERS) {
     await trigger.focus();
     expect(await activeLabel(page), "could not focus the trigger to begin with").toBe(label);
 
-    await page.keyboard.press("Enter");
-    await page.waitForTimeout(120);
-    expect(
-      await trigger.getAttribute("aria-expanded"),
-      "Enter did not open it, so the rest of this proves nothing",
-    ).toBe("true");
+    // Pressed ON the locator, not on the page: focus() followed by a page-level
+    // keypress races a re-render - this app re-renders the toolbar constantly
+    // (playhead, ambient backdrop) and the button node can be replaced between
+    // the two calls, so the key lands on a detached element. That was the
+    // remaining flake after the sleeps went.
+    await trigger.press("Enter");
+    // Auto-retrying assertions, not sleeps. The first version of this spec
+    // waited fixed 120ms and was FLAKY under parallel workers - two different
+    // tests in it failed on two consecutive runs, which is worse than no test:
+    // it teaches you to re-run until green.
+    await expect(trigger, "Enter did not open it, so the rest proves nothing")
+      .toHaveAttribute("aria-expanded", "true");
 
-    await page.keyboard.press("Escape");
-    await page.waitForTimeout(120);
-    expect(await trigger.getAttribute("aria-expanded"), "Escape did not close it").toBe("false");
+    await trigger.press("Escape");
+    await expect(trigger, "Escape did not close it").toHaveAttribute("aria-expanded", "false");
 
-    expect(
-      await activeLabel(page),
-      "focus was dropped on close; the next Tab restarts from the top of the app",
-    ).toBe(label);
+    await expect
+      .poll(() => activeLabel(page), {
+        message: "focus was dropped on close; the next Tab restarts from the top of the app",
+      })
+      .toBe(label);
   });
 }
 
@@ -100,9 +106,13 @@ for (const label of TRIGGERS) {
       document.querySelectorAll<HTMLElement>("button, input, select, textarea, [tabindex]:not([tabindex='-1'])")
         .forEach((e) => e.setAttribute(attr, "1"));
     }, SEEN);
-    await page.keyboard.press("Enter");
-    await page.waitForTimeout(120);
-    expect(await trigger.getAttribute("aria-expanded"), "Enter did not open it").toBe("true");
+    // Pressed ON the locator, not on the page: focus() followed by a page-level
+    // keypress races a re-render - this app re-renders the toolbar constantly
+    // (playhead, ambient backdrop) and the button node can be replaced between
+    // the two calls, so the key lands on a detached element. That was the
+    // remaining flake after the sleeps went.
+    await trigger.press("Enter");
+    await expect(trigger, "Enter did not open it").toHaveAttribute("aria-expanded", "true");
 
     const appeared = await page.evaluate((attr) =>
       Array.from(document.querySelectorAll<HTMLElement>("button, input, select, textarea, [tabindex]:not([tabindex='-1'])"))
@@ -126,11 +136,12 @@ for (const label of TRIGGERS) {
       // regression through: with the fix reverted focus simply stayed on the
       // trigger, which is not body, and the test passed while the panel sat
       // unreachable across the document.
-      expect(
-        where,
-        "the panel is empty and took no focus, so once it HAS content there is " +
-          "no way to tab to it - it is portalled away from its trigger",
-      ).toBe("MOVED-INTO-PANEL");
+      await expect
+        .poll(async () => where, {
+          message: "the panel is empty and took no focus, so once it HAS content " +
+            "there is no way to tab to it - it is portalled away from its trigger",
+        })
+        .toBe("MOVED-INTO-PANEL");
       return;
     }
 
@@ -142,6 +153,9 @@ for (const label of TRIGGERS) {
     let reached = false;
     for (let i = 0; i < 4 && !reached; i += 1) {
       await page.keyboard.press("Tab");
+      // One frame for focus to move. There is no state to assert on here -
+      // the question IS where focus landed - so this is the one wait that
+      // cannot become an assertion.
       await page.waitForTimeout(50);
       const at = await page.evaluate(() => {
         const a = document.activeElement as HTMLElement | null;

@@ -328,8 +328,17 @@ export default function App() {
     const boot = cacheRetentionBootRef.current;
     if (boot.done) return;
     boot.done = true;
-    invoke("set_clear_cache_on_quit", { enabled: boot.clearOnQuit }).catch(() => {
-      /* stale binary; the Settings toggle re-writes it */
+    invoke("set_clear_cache_on_quit", { enabled: boot.clearOnQuit }).catch((e) => {
+      // The marker file IS the setting - the exit handler runs after the
+      // webview is gone, so it cannot read the stored pref. If this re-sync
+      // fails and the user never opens Settings, clear-on-quit stays switched
+      // on in the UI and simply does not happen. There is no switch to put
+      // back at boot, so it goes to the pipeline log, which is the channel
+      // this app has for exactly that.
+      if (boot.clearOnQuit) {
+        appendLog("warn", "cache",
+          `Clear cache on quit could not be armed: ${formatError(e)}. Toggle it off and on in Settings to retry.`);
+      }
     });
     if (boot.cap > 0) {
       invoke<number>("enforce_media_cache_cap", {
@@ -337,6 +346,12 @@ export default function App() {
         exclude: [],
       }).catch(() => { /* cache dir may not exist yet */ });
     }
+    // appendLog deliberately NOT in the deps: it is declared far below this
+    // effect, and a deps array is evaluated during render, so naming it here
+    // is a temporal-dead-zone crash on boot rather than a lint nicety. tsc
+    // caught it. The effect is a one-shot anyway - `boot.done` above - so
+    // there is nothing for a dependency to do.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // mount-only by design
 
   // ── Editable keyboard shortcuts (Settings → Commands) ──
