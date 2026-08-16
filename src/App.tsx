@@ -40,7 +40,7 @@ import { YouTubeAuthModal } from "./components/YouTubeAuthModal";
 import type { PlayerHandle } from "./components/player-handle";
 import type {
   AppError, AppStatus, ClientLog, DoneEvent, ExportOpts,
-  LocalFileMeta, LogEvent, Metadata, ProgressEvent, QueuedClip, QueueSource, RecentClip,
+  LocalFileMeta, LogEvent, Metadata, QueuedClip, QueueSource, RecentClip,
   SourceKind, WarmStart, WhisperModel,
   ReviewRangeDraft,
 } from "./types";
@@ -109,6 +109,7 @@ import { appUndo } from "./lib/undo";
 import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./lib/storage";
 import { pushRecentClip } from "./lib/recent-clips";
 import { useClipExportListeners } from "./hooks/use-clip-export-listeners";
+import { usePlaybackPrepListeners } from "./hooks/use-playback-prep-listeners";
 import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
 import {
   durationToTc, framesToTc, secondsToTc,
@@ -1663,66 +1664,12 @@ export default function App() {
     metadataRef, stageClockRef,
   });
 
-  // ── Playback prep and the LLM server listeners ─────────────────────────────────────────
-  // ffmpeg's transcode-for-playback, plus llama-server's stderr.
-  useEffect(() => {
-    const unlistens: UnlistenFn[] = [];
-    let mounted = true;
-    (async () => {
-      const onPlaybackPrepProgress = (e: { payload: ProgressEvent }) => {
-        if (!mounted || e.payload.job_id !== playbackPrepJobIdRef.current) return;
-        setPlaybackPrepProgress(e.payload.percent);
-      };
-      const k = await listen<ProgressEvent>("playback-prep-progress", onPlaybackPrepProgress);
-      const onPlaybackPrepDone = (e: { payload: DoneEvent }) => {
-        if (!mounted || e.payload.job_id !== playbackPrepJobIdRef.current) return;
-        const resolver = playbackPrepResolverRef.current;
-        playbackPrepResolverRef.current = null;
-        if (e.payload.success && e.payload.path) {
-          resolver?.resolve(e.payload.path);
-        } else {
-          resolver?.reject(e.payload.error ?? "Playback prep failed");
-        }
-      };
-      const l = await listen<DoneEvent>("playback-prep-done", onPlaybackPrepDone);
-      // Playback prep ffmpeg log lines — surface in the pipeline panel so
-      // the user can see what's happening (codec choice, errors, etc).
-      const onPlaybackPrepLog = (e: { payload: LogEvent }) => {
-        if (!mounted || e.payload.job_id !== playbackPrepJobIdRef.current) return;
-        appendLog(asLogTag(e.payload.tag), "playback-prep", e.payload.line);
-      };
-      const m = await listen<LogEvent>("playback-prep-log", onPlaybackPrepLog);
-      // llama-server's stderr — model load progress and the reason a start
-      // failed. Rust has emitted this since the AI Summary feature landed,
-      // with a comment saying it drains to the Pipeline log; the listener was
-      // never written, so every line went nowhere. That made a slow first
-      // summary (a multi-GB model loading) indistinguishable from a hung one,
-      // and a server that refused to start silent about why.
-      //
-      // No job-id filter: unlike the per-run channels above, this one is the
-      // long-lived server and always reports job_id "llm-server".
-      const onLlmLog = (e: { payload: LogEvent }) => {
-        if (!mounted) return;
-        appendLog(asLogTag(e.payload.tag), "llm", e.payload.line);
-      };
-      const n = await listen<LogEvent>("llm-log", onLlmLog);
-      unlistens.push(k, l, m, n);
-      // A cleanup that fires DURING the awaits above finds an empty array
-      // and unregisters nothing — under StrictMode that leaked every
-      // listener on each dev boot. The handlers are inert either way (each
-      // starts with a `mounted` check) but stayed registered forever.
-      if (!mounted) {
-        unlistens.forEach((u) => u());
-        unlistens.length = 0;
-      }
-    })();
-    return () => {
-      mounted = false;
-      unlistens.forEach((u) => u());
-    };
-    // Every dep here is stable (empty deps of its own), so this runs once
-    // for the app's lifetime and never re-subscribes.
-  }, [appendLog]); // narrowed: same inherited array, same five unused
+  // ── Playback prep and the LLM server listeners ─────────────────────
+  // ffmpeg's transcode-for-playback, plus llama-server's stderr. Lifted whole
+  // into src/hooks/use-playback-prep-listeners.ts.
+  usePlaybackPrepListeners({
+    appendLog, setPlaybackPrepProgress, playbackPrepJobIdRef, playbackPrepResolverRef,
+  });
 
 
   // ====== Player callbacks ======
