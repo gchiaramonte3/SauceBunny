@@ -165,11 +165,31 @@ describe("a renamed clip keeps its transcript", () => {
     expect(getHistory()[0].srtPath).toBe("/docs/Transcripts/2026-08/clip.srt");
   });
 
-  it("matches across macOS filename encoding", () => {
+  it("matches an accented OLD name however it was stored", () => {
     const NFD = "/lib/" + "café.mov".normalize("NFD");
     seed(NFD);
     repathIdentity(NFD, "/lib/plain.mov", {});
     expect(findForSource({ sourcePath: "/lib/plain.mov" })).not.toBe(null);
+  });
+
+  it("is findable by the SCANNED path after renaming to an accented name", () => {
+    // The direction I got wrong first time. Normalising the comparison but
+    // storing whatever the rename dialog handed over just moves the mismatch
+    // one step later: the entry holds the composed path and the next library
+    // scan asks with the decomposed one. Measured before this: FOUND by the
+    // typed path, NOT FOUND by the scanned path.
+    seed("/lib/clip.mov");
+    const typed = "/lib/" + "café.mov";
+    repathIdentity("/lib/clip.mov", typed, {});
+    expect(findForSource({ sourcePath: typed })).not.toBe(null);
+    expect(findForSource({ sourcePath: typed.normalize("NFD") })).not.toBe(null);
+  });
+
+  it("finds an entry an older build wrote in the other encoding", () => {
+    // No migration: the comparison normalises both sides, so a row written
+    // before this change still resolves.
+    seed("/lib/" + "café.mov".normalize("NFD"));
+    expect(findForSource({ sourcePath: "/lib/" + "café.mov" })).not.toBe(null);
   });
 
   it("does not touch another clip's entry", () => {

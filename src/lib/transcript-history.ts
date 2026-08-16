@@ -116,9 +116,9 @@ export function recordTranscript(input: {
   // then on sourcePath/sourceUrl (so re-transcribing the same source
   // updates the same row instead of accumulating duplicates).
   const existingIdx = entries.findIndex((e) =>
-    e.srtPath === input.srtPath ||
-    (input.sourcePath && e.sourcePath === input.sourcePath) ||
-    (input.sourceUrl  && e.sourceUrl  === input.sourceUrl),
+    samePath(e.srtPath, input.srtPath) ||
+    (!!input.sourcePath && samePath(e.sourcePath, input.sourcePath)) ||
+    (!!input.sourceUrl  && e.sourceUrl  === input.sourceUrl),
   );
 
   const merged: TranscriptHistoryEntry = existingIdx >= 0
@@ -196,13 +196,22 @@ export function removeEntry(id: string): void {
  * scan produced is decomposed and the one a rename dialog produced is
  * composed, and an exact compare misses.
  */
+/** Canonical form for a path used as a MATCH target here. See CLAUDE.md:
+ *  a scanned path is decomposed, a dialog's is composed, and `===` misses. */
+function samePath(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return a.normalize("NFC") === b.normalize("NFC");
+}
+
 export function renameSourcePath(oldPath: string, newPath: string, newTitle?: string): void {
-  const want = oldPath.normalize("NFC");
   const entries = safeRead();
   let changed = false;
   for (const e of entries) {
-    if (e.sourcePath && e.sourcePath.normalize("NFC") === want) {
-      e.sourcePath = newPath;
+    if (samePath(e.sourcePath, oldPath)) {
+      // Stored normalised, not raw. Comparing NFC while WRITING whatever the
+      // dialog gave us just moves the mismatch one step down the line: the
+      // next scan asks with the decomposed path and misses again.
+      e.sourcePath = newPath.normalize("NFC");
       if (newTitle) e.title = newTitle;
       changed = true;
     }
@@ -239,7 +248,7 @@ export function findForSource(input: {
   if (!input.sourcePath && !input.sourceUrl) return null;
   const entries = safeRead();
   const matches = entries.filter((e) =>
-    (input.sourcePath != null && e.sourcePath === input.sourcePath) ||
+    (input.sourcePath != null && samePath(e.sourcePath, input.sourcePath)) ||
     (input.sourceUrl  != null && e.sourceUrl  === input.sourceUrl),
   );
   if (matches.length === 0) return null;
