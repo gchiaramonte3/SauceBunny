@@ -7,16 +7,30 @@ import {
 
 const h = vi.hoisted(() => ({
   calls: [] as Array<{ cmd: string; args: unknown }>,
-  /** Parks cloud_chat so a test can abort mid-flight. */
-  gate: null as null | { release: () => void },
+  /**
+   * Parks cloud_chat so a test can abort mid-flight.
+   *
+   * The promise and its resolver are created TOGETHER, before the call, and
+   * the mock only awaits it. An earlier version had the mock construct the
+   * promise and assign the resolver over a placeholder no-op, which leaves a
+   * window: release before that assignment resolves nothing and the awaited
+   * call hangs to the test timeout. That flaked once in a full-suite run and
+   * never again in fourteen — the kind of race that is easier to read than to
+   * reproduce.
+   */
+  gate: null as null | { wait: Promise<void>; release: () => void },
 }));
+
+function deferred() {
+  let release!: () => void;
+  const wait = new Promise<void>((res) => { release = res; });
+  return { wait, release };
+}
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (cmd: string, args?: unknown) => {
     h.calls.push({ cmd, args });
-    if (cmd === "cloud_chat" && h.gate) {
-      await new Promise<void>((r) => { h.gate!.release = r; });
-    }
+    if (cmd === "cloud_chat" && h.gate) await h.gate.wait;
     return cmd === "has_api_key" ? true : "reply";
   },
 }));
@@ -148,7 +162,7 @@ describe("cloudChat", () => {
   it("tells Rust to drop a request aborted mid-flight", async () => {
     // Stopping the UI is not enough — the provider keeps generating, and
     // billing, until the connection closes (r142).
-    h.gate = { release: () => {} };
+    h.gate = deferred();
     const ctrl = new AbortController();
     const pending = cloudChat("anthropic", "sys", [], ctrl.signal);
     await vi.waitFor(() => expect(h.calls.some((c) => c.cmd === "cloud_chat")).toBe(true));
