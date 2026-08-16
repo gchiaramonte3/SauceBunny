@@ -38,6 +38,7 @@ import logoUrl from "../assets/saucebunny.svg";
 import { UpdateRow } from "./UpdateRow";
 import { getVersion } from "@tauri-apps/api/app";
 import { EXPECTED_BACKEND_BUILD_ID } from "../lib/build-id";
+import { newJobId } from "../lib/job-id";
 
 type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "ai-apis" | "commands" | "about";
 
@@ -461,7 +462,7 @@ export function SettingsModal(props: Props) {
     setParakeetBusy(true);
     setParakeetError(null);
     try {
-      const id = await invoke<string>("new_job_id");
+      const id = newJobId();
       await invoke("download_parakeet_model", { jobId: id });
       // Confirm against disk rather than assuming success, so the row never
       // shows "Installed/In use" without the model actually being present.
@@ -594,7 +595,7 @@ export function SettingsModal(props: Props) {
     setDownloadingId(modelId);
     setDownloadProgress(null);
     try {
-      const id = await invoke<string>("new_job_id");
+      const id = newJobId();
       downloadJobIdRef.current = id;
       await invoke("download_llm_model", { args: { model_id: modelId, job_id: id } });
     } catch (e) {
@@ -678,7 +679,7 @@ export function SettingsModal(props: Props) {
     setDownloadError(null);
     setDownloadingId(modelId);
     try {
-      const id = await invoke<string>("new_job_id");
+      const id = newJobId();
       downloadJobIdRef.current = id; // sync, BEFORE the download can emit
       await invoke<string>("download_whisper_model", { args: { model_id: modelId, job_id: id } });
       // The backend early-returns WITHOUT emitting any event when the model

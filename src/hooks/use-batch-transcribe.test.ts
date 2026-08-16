@@ -5,15 +5,16 @@ import { useBatchTranscribe } from "./use-batch-transcribe";
 
 const h = vi.hoisted(() => ({
   calls: [] as string[],
-  /** Parks `new_job_id` so a cancel can land inside the round trip. */
-  gate: null as null | { release: () => void; reached: Promise<void> },
+  args: [] as unknown[],
+  /** Parks `transcribe_local_file` - the long await the loop actually has. */
+  gate: null as null | { release: () => void },
 }));
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: async (cmd: string) => {
+  invoke: async (cmd: string, a?: unknown) => {
     h.calls.push(cmd);
-    if (cmd === "new_job_id") {
-      if (h.gate) { await new Promise<void>((r) => { h.gate!.release = r; }); }
-      return "job-1";
+    h.args.push(a);
+    if (cmd === "transcribe_local_file" && h.gate) {
+      await new Promise<void>((r) => { h.gate!.release = r; });
     }
     return "";
   },
@@ -24,12 +25,20 @@ vi.mock("@tauri-apps/api/core", () => ({
  *
  * `cancel` does two things: it marks the state cancelled so the loop stops
  * handing out work, and it kills the Rust job so the file already being
- * transcribed stops too. The second half reads `jobRef`, which is only set
- * AFTER `new_job_id` comes back from Rust.
+ * transcribed stops too. The second half reads `jobRef`.
  *
- * So there is a window - short, one round trip - where a cancel finds no job
- * to kill. The queue stops, and the file whose id was in flight starts anyway
- * and runs to the end, minutes after the user pressed Stop.
+ * This file used to test a window in that second half. The id came from
+ * `await invoke("new_job_id")`, so between picking a file up and having
+ * something to cancel it with there was a round trip in which `jobRef` was
+ * still null - a Stop landing there stopped the QUEUE but not the file, which
+ * transcribed to the end minutes after the user pressed it.
+ *
+ * That window is gone by construction: the id is minted synchronously in the
+ * renderer (lib/job-id), so there is no instant where a file is in flight and
+ * unkillable. What these tests now hold down is the half that is still real -
+ * the loop awaits one file per turn, so a cancel during file 1 must be seen
+ * before file 2 is picked up - plus the new invariant, that a cancel during a
+ * running file finds a job id to kill.
  */
 const FILES = [{ path: "/a.mov", name: "a.mov" }, { path: "/b.mov", name: "b.mov" }];
 const SETTINGS = {
@@ -37,53 +46,72 @@ const SETTINGS = {
   detectSpeakers: false, expectedSpeakers: 0,
 };
 
+/** Start the batch and let it park inside the first file's transcription. */
+async function startParked() {
+  h.gate = { release: () => {} };
+  const { result } = renderHook(() => useBatchTranscribe());
+  let started!: Promise<void>;
+  await act(async () => {
+    started = result.current.start(FILES, SETTINGS);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  return { result, started: () => started };
+}
+
 describe("useBatchTranscribe cancel", () => {
-  beforeEach(() => { h.calls = []; h.gate = null; });
+  beforeEach(() => { h.calls = []; h.args = []; h.gate = null; });
 
-  it("does not start a file whose job id was in flight when Stop was pressed", async () => {
-    h.gate = { release: () => {}, reached: Promise.resolve() };
-    const { result } = renderHook(() => useBatchTranscribe());
+  it("never asks the backend for a job id", () => {
+    // The id is local now. If this ever fails, the round trip is back and the
+    // window it opened is back with it.
+    expect(h.calls).not.toContain("new_job_id");
+  });
 
-    let started: Promise<void>;
-    await act(async () => {
-      started = result.current.start(FILES, SETTINGS);
-      // Let the loop reach `await invoke("new_job_id")` and park there.
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+  it("has something to kill the moment a file is in flight", async () => {
+    // Cancel during the FIRST file kills it, rather than finding jobRef null
+    // and letting it run to the end.
+    //
+    // Scope, checked by mutation: this fails if jobRef is never set, and does
+    // NOT fail if the id merely arrives a tick late - the parked await is the
+    // transcription, well after the assignment, so the test cannot see a
+    // one-tick delay ahead of it. The synchronousness itself is structural,
+    // and lib/job-id.test.ts is what holds it down.
+    const { result, started } = await startParked();
+    expect(h.calls).toContain("transcribe_local_file");
 
-    expect(h.calls).toContain("new_job_id");
-    expect(h.calls).not.toContain("transcribe_local_file");
-
-    // Stop, while the id is still in flight. jobRef is null, so cancel_job
-    // has nothing to kill - this is the whole window.
     await act(async () => { result.current.cancel(); });
-    expect(h.calls).not.toContain("cancel_job");
+    expect(h.calls).toContain("cancel_job");
+    const killed = h.args[h.calls.indexOf("cancel_job")] as { jobId?: string };
+    expect(killed.jobId).toBeTruthy();
 
-    // The id arrives. The file must NOT start.
-    await act(async () => { h.gate!.release(); await started; });
-    expect(h.calls).not.toContain("transcribe_local_file");
+    await act(async () => { h.gate!.release(); await started(); });
+  });
+
+  it("does not start the next file when Stop lands during the current one", async () => {
+    const { result, started } = await startParked();
+    expect(h.calls.filter((c) => c === "transcribe_local_file")).toHaveLength(1);
+
+    await act(async () => { result.current.cancel(); });
+    await act(async () => { h.gate!.release(); await started(); });
+
+    // b.mov must never have been picked up.
+    expect(h.calls.filter((c) => c === "transcribe_local_file")).toHaveLength(1);
   });
 
   it("settles the batch instead of leaving a row running forever", async () => {
     // `finished` requires nothing running. A row abandoned in "running" would
     // leave the status strip saying "Transcribing a.mov" for the rest of the
     // session.
-    h.gate = { release: () => {}, reached: Promise.resolve() };
-    const { result } = renderHook(() => useBatchTranscribe());
-    let started: Promise<void>;
-    await act(async () => {
-      started = result.current.start(FILES, SETTINGS);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    const { result, started } = await startParked();
     await act(async () => { result.current.cancel(); });
-    await act(async () => { h.gate!.release(); await started; });
+    await act(async () => { h.gate!.release(); await started(); });
 
     const items = result.current.state.items;
     expect(items.every((i) => i.status !== "running")).toBe(true);
-    // Nothing ran, so nothing failed: not started is "skipped", not "error".
-    expect(items.map((i) => i.status)).toEqual(["skipped", "skipped"]);
+    // a.mov was cancelled mid-flight; b.mov was never started, so it is
+    // "skipped" rather than "error" - nothing ran, so nothing failed.
+    expect(items[1].status).toBe("skipped");
     expect(result.current.progress.finished).toBe(true);
     expect(result.current.progress.failed).toBe(0);
   });

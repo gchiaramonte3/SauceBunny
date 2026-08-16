@@ -249,7 +249,6 @@ pub fn run() {
             commands::list_share_sources,
             commands::start_screen_share,
             commands::stop_screen_share,
-            commands::new_job_id,
             commands::read_text_file_capped,
             commands::read_transcripts_bulk,
             commands::rename_path,

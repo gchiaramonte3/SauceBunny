@@ -39,6 +39,7 @@ import type { DirectStreamResult } from "../bindings/DirectStreamResult";
 // Imported, not restated. Four other call sites import it from CanvasToast;
 // this was the lone copy, and a copy of a union is a copy that drifts.
 import type { ToastKind } from "../components/CanvasToast";
+import { newJobId } from "../lib/job-id";
 
 type Helpers = {
   appendLog: (tag: LogTag, channel: string, line: string) => void;
@@ -277,7 +278,10 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
       const attempt = (cookies: string | undefined) =>
         new Promise<string>((resolve, reject) => {
           void (async () => {
-            const jobId = await invoke<string>("new_job_id");
+            const jobId = newJobId();
+            // Live, unlike the checks that used to follow a job id: `attempt`
+            // is called from the outer async body, so a cancel can have landed
+            // during the FIRST attempt before the no-cookies retry calls it.
             if (cancelled) { reject(new Error("Cancelled")); return; }
             downloadJobIdRef.current = jobId;
             dispatch({ t: "DOWNLOAD_STARTED", seq: mySeq, jobId });

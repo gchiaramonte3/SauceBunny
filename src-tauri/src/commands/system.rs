@@ -1096,11 +1096,6 @@ pub async fn read_transcripts_bulk(
     Ok(out)
 }
 
-#[tauri::command]
-pub fn new_job_id() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
 /// Read a text file from disk with a hard size cap. Used by the Transcripts
 /// tab to slurp SRT files (yt-dlp captions or Whisper output) into the
 /// renderer for parsing + display.
@@ -1185,7 +1180,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-08-13-r157-cached-web-shelf";
+pub const BACKEND_BUILD_ID: &str = "2026-08-15-r158-sync-job-id";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

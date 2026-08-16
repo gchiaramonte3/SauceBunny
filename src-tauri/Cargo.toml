@@ -47,7 +47,6 @@ plist = "1"
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 url = "2"
-uuid = { version = "1", features = ["v4"] }
 # `blocking` feature powers the localhost media proxy's thread-per-request
 # handler (r58) — reqwest's blocking client must run OUTSIDE a tokio
 # runtime, which the tiny_http worker threads satisfy. The async client
@@ -110,3 +109,8 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+[dev-dependencies]
+# Only the library-scanner tests, for unique temp dirs. Production job ids are
+# minted in the renderer (src/lib/job-id.ts), so nothing here needs a UUID.
+uuid = { version = "1", features = ["v4"] }

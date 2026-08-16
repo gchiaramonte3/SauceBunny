@@ -125,6 +125,7 @@ import { exportLocalClipViaMediabunny } from "./lib/mediabunny-export";
 import { extractAudioAsWav16k } from "./lib/mediabunny-audio";
 import { migrateCaptionFont } from "./lib/caption-font";
 import { isMissingCommandError, staleBinaryMessage } from "./lib/stale-backend";
+import { newJobId } from "./lib/job-id";
 
 const DEFAULT_FPS_FALLBACK: Record<string, number> = { "24": 24, "25": 25, "30": 30 };
 
@@ -2556,7 +2557,7 @@ export default function App() {
       `Exporting ${label} · ${exportOpts.format}${hasRange && exportOpts.format !== "audio" ? (exportOpts.reencode ? " · re-encode" : " · lossless cut") : ""}`,
     );
     try {
-      const id = await invoke<string>("new_job_id");
+      const id = newJobId();
       setJobId(id);
       // Attribute the Recent entry to THIS source now (see clipJobMetaRef) so a
       // source switch before clip-done can't stamp the new source's title on it.
@@ -2630,7 +2631,7 @@ export default function App() {
     try {
       setPlaybackPrepBusy(true);
       setPlaybackPrepProgress(0);
-      const jobId = await invoke<string>("new_job_id");
+      const jobId = newJobId();
       setPlaybackPrepJobId(jobId);
       appendLog("info", "local", `Preparing playback copy (h264_videotoolbox)…`);
       const prepared = await new Promise<string>((resolve, reject) => {
@@ -3241,7 +3242,7 @@ export default function App() {
       const runClip = (cookies: string | undefined) =>
         new Promise<{ success: boolean; path?: string; error?: string }>((resolve) => {
           void (async () => {
-            const jobId = await invoke<string>("new_job_id");
+            const jobId = newJobId();
             setJobId(jobId);
             queueResolverRef.current = resolve;
             invoke("create_clip", {
@@ -3572,17 +3573,14 @@ export default function App() {
       // so Stop pivots on this controller to interrupt it (and to skip the
       // backend invoke if the user bailed mid-extraction).
       //
-      // ARMED BEFORE the round trip, not after. new_job_id is quick but it is
-      // still an await, and a Stop landing inside it used to abort the
-      // PREVIOUS run's controller (or nothing at all) and null the ref - after
-      // which this run installed a fresh, un-aborted controller and carried on
-      // transcribing. handleStop had already reset the UI to idle, so the run
-      // finished, matched on job id, and loaded its transcript over a screen
-      // that said it had been cancelled.
+      // Armed and given its id without an await in between, so there is no
+      // instant where the run exists and Stop has nothing to cancel with.
+      // This used to be an await (see lib/job-id), and a Stop landing inside
+      // it aborted the PREVIOUS run's controller while this one carried on
+      // transcribing over a screen that already said "cancelled".
       const abort = new AbortController();
       transcriptAbortRef.current = abort;
-      const id = await invoke<string>("new_job_id");
-      if (abort.signal.aborted) return; // Stop arrived while the id was in flight
+      const id = newJobId();
       setTranscriptJobId(id);
       if (sourceKind === "file" && localFilePath) {
         // Two paths, mediabunny preferred:
@@ -3764,14 +3762,11 @@ export default function App() {
     setTranscriptPhase(null);
     appendLog("info", "diarize", "Re-detecting speakers (reusing the existing transcript)…");
     try {
-      // Armed before the round trip for the same reason as the main
-      // transcription path: a Stop landing inside new_job_id reset the UI to
-      // idle, and this run then spawned the backend job anyway and loaded its
-      // result over a screen that said it had been cancelled.
+      // Armed, then given its id, with no await between - same reason as the
+      // main transcription path above.
       const abort = new AbortController();
       transcriptAbortRef.current = abort;
-      const id = await invoke<string>("new_job_id");
-      if (abort.signal.aborted) return;
+      const id = newJobId();
       setTranscriptJobId(id);
       await invoke<string>("re_diarize_transcript", {
         args: {
@@ -3833,14 +3828,11 @@ export default function App() {
     const txChannel = engine === "parakeet" ? "parakeet" : "whisper";
     appendLog("info", txChannel, `Re-transcribing for accurate caption timing with ${engineLabel} (reusing the cached audio)…`);
     try {
-      // Armed before the round trip for the same reason as the main
-      // transcription path: a Stop landing inside new_job_id reset the UI to
-      // idle, and this run then spawned the backend job anyway and loaded its
-      // result over a screen that said it had been cancelled.
+      // Armed, then given its id, with no await between - same reason as the
+      // main transcription path above.
       const abort = new AbortController();
       transcriptAbortRef.current = abort;
-      const id = await invoke<string>("new_job_id");
-      if (abort.signal.aborted) return;
+      const id = newJobId();
       setTranscriptJobId(id);
       const dur = durationFrames > 0 ? durationFrames - 1 : 0;
       await invoke<string>("generate_transcript", {
@@ -4146,7 +4138,7 @@ export default function App() {
   const prepareReaderPlayback = useCallback(async (
     origPath: string, hasVideo: boolean, durationSeconds: number | null,
   ): Promise<string> => {
-    const jobId = await invoke<string>("new_job_id");
+    const jobId = newJobId();
     return await invoke<string>("prepare_local_for_playback", {
       args: { input_path: origPath, has_video: hasVideo, duration_seconds: durationSeconds, job_id: jobId },
     });
@@ -4340,7 +4332,7 @@ export default function App() {
     setDiarizerPrepareState("running");
     setDiarizerPrepareError(null);
     try {
-      const id = await invoke<string>("new_job_id");
+      const id = newJobId();
       setDiarizerPrepareJobId(id);
       await invoke<string>("prepare_diarizer_models", { jobId: id });
       // Resolution arrives via the diarize-prepare-done listener,
@@ -4394,7 +4386,7 @@ export default function App() {
     setCaptionsError(null);
     appendLog("info", "captions", "Requesting transcript from yt-dlp…");
     try {
-      const id = await invoke<string>("new_job_id");
+      const id = newJobId();
       setCaptionsJobId(id);
       // Plain invoke, no frontend cookie-retry wrapper: download_captions is
       // fire-and-forget (resolves at spawn, reports via captions-done), so a
@@ -4477,8 +4469,7 @@ export default function App() {
     const seq = sourceSeqRef.current;
     (async () => {
       try {
-        const jobId = await invoke<string>("new_job_id");
-        if (cancelled || sourceSeqRef.current !== seq) return;
+        const jobId = newJobId();
         audioCacheJobRef.current = jobId;
         appendLog("info", "audio-cache", "Pre-caching the audio track for fast, aligned transcription…");
         const path = await invokeWithCookieRetry<string>("download_audio_track", (cookies) => ({

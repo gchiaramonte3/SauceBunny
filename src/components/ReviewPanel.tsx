@@ -36,6 +36,7 @@ import {
   RATE_TABLE, DEFAULT_MARKER_SETTINGS, tcToFrames, FRAME_RATE_KEYS, fpsToRateKey,
   type FrameRateKey, type MarkerExportSettings,
 } from "../lib/marker-time";
+import { newJobId } from "../lib/job-id";
 
 /** The export popover's format choices — Notes (Markdown) + the five marker
  *  targets. Persisted marker settings drive every marker format. */
@@ -504,7 +505,7 @@ export function ReviewPanel({
     micLevelRef.current = 0;
     dictBaseRef.current = text; // partials + final append onto what's already typed
     try {
-      const job = await invoke<string>("new_job_id");
+      const job = newJobId();
       dictJobRef.current = job;
       try {
         // Prefer the native, on-device, LIVE-streaming path (Apple Speech):

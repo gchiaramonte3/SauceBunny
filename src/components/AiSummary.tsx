@@ -50,6 +50,7 @@ type Props = {
 };
 
 import { matchPrompts, slashQuery } from "../lib/transcript-prompts";
+import { newJobId } from "../lib/job-id";
 
 const SUGGESTIONS = [
   "Summarize this transcript in a few bullet points.",
@@ -201,7 +202,7 @@ export function AiSummary({
     setDownloadingId(modelId);
     setDownloadPct(0);
     try {
-      const id = await invoke<string>("new_job_id");
+      const id = newJobId();
       dlJobRef.current = id;
       await invoke("download_llm_model", { args: { model_id: modelId, job_id: id } });
     } catch (e) {

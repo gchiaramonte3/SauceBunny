@@ -6,6 +6,7 @@ import {
 } from "../lib/batch-queue";
 import { sanitizeFilename } from "../lib/filename";
 import { formatError } from "../lib/error-format";
+import { newJobId } from "../lib/job-id";
 
 /**
  * Transcribe a set of files, one after another, without loading any of them
@@ -69,13 +70,15 @@ export function useBatchTranscribe(
         apply(markItem(stateRef.current, idx, "running"));
 
         try {
-          const jobId = await invoke<string>("new_job_id");
+          const jobId = newJobId();
           jobRef.current = jobId;
-          // A cancel that landed while new_job_id was in flight read jobRef as
-          // null and had nothing to kill, so it stopped the QUEUE from handing
-          // out more work but not this file, which then transcribed to the end
-          // minutes after the user pressed Stop. Checked here, after the id
-          // exists and before the work starts.
+          // Cancel can have landed during the PREVIOUS item's transcription -
+          // this loop awaits one file per turn, so by the time it comes back
+          // round the user may have pressed Stop minutes ago. Without this the
+          // queue stopped handing out new work but the file already picked up
+          // here still ran to the end. Checked after the id exists and before
+          // the work starts. (The id itself is minted synchronously now, so it
+          // opens no window of its own - see lib/job-id.)
           //
           // "skipped" rather than "error": nothing ran, so nothing failed and
           // no output was written. That is the case cancelBatch's comment
