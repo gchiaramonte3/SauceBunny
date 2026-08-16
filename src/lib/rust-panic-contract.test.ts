@@ -1,139 +1,162 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
-
-const RUST = resolve(__dirname, "../../src-tauri/src");
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 
 /**
- * Production Rust does not panic.
+ * No production Rust panics, because a panic here is not an error message.
  *
- * A panic inside a Tauri command is not a caught error — it unwinds a task in
- * the app's own process, and on this app that costs the user whatever was
- * in flight: a transcription mid-run, an export mid-write, a live co-review
- * session. CLAUDE.md's error-handling section describes the migration to
- * `Result<T, AppError>` as finished, and this is the check that keeps it so.
+ * A `.unwrap()` inside a `#[tauri::command]` does not surface as a red toast.
+ * It unwinds the command's thread: the invoke never resolves, so the frontend
+ * `await` hangs forever with no rejection to catch, and any `Mutex` the thread
+ * held is left POISONED, which turns one bad input into every later lock
+ * failing. The JobRegistry is a `Mutex<HashMap<..>>`, so a single panic while
+ * holding it would take cancellation down for the rest of the session. The
+ * whole `AppError` system exists so failures come back as values instead.
  *
- * A sweep found the codebase already clean, which is worth recording rather
- * than assuming: 16,000 lines of non-test Rust contain two `.expect()` calls,
- * both listed below, and nothing else.
+ * The surface is genuinely clean today: 211 `.unwrap()`s and 37 `.expect()`s
+ * in the tree, and every one of them is test code except the two allowed
+ * below. This test is what keeps the next one from being the first real one.
  *
- * The first version of this sweep reported ZERO, which was wrong. It treated
- * everything after the first `#[cfg(test)]` as test code, so in any file with
- * a test module in the middle - library.rs has one at line 479 - the entire
- * rest of the file went unscanned. The brace-matched version below found
- * sixteen hits the naive one had hidden.
+ * TWO MEASUREMENTS OF THIS WERE WRONG BEFORE THIS FILE EXISTED, both in the
+ * direction of false comfort, which is why the scoping below is fussy:
+ *
+ *  1. "First `#[cfg(test)]` in the file, ignore everything after" reported
+ *     ZERO panic sites. `lib.rs` declares `#[cfg(test)] mod nightly;` on line
+ *     5, so that rule treated the entire application as test code.
+ *  2. Matching only inline `#[cfg(test)] mod tests { .. }` blocks then flagged
+ *     13 sites in `nightly.rs`, which is gated at its `mod` DECLARATION and
+ *     ships in nothing.
+ *
+ * So both forms are handled: an inline block is skipped by brace matching, and
+ * a file gated at its declaration is skipped wholesale. Each rule has a test
+ * below proving it still recognises the thing it is supposed to skip - a
+ * scoping rule that quietly stops matching would empty this scan and pass.
  */
 
-/** Test-support files whose panics are correct: a broken fixture SHOULD stop. */
-const TEST_SUPPORT = ["nightly.rs"];
+const ROOT = resolve(__dirname, "../../src-tauri");
+const SRC = join(ROOT, "src");
 
-/** Production panics that are argued for rather than overlooked. */
-const ALLOWED: ReadonlyArray<readonly [file: string, needle: string, why: string]> = [
-  ["lib.rs", "error while building tauri application",
-    "Tauri's own startup boilerplate. If the app cannot be built there is no app to return an error to"],
-  ["stream_proxy.rs", "static header",
-    "constructing a fixed HeaderValue from a literal; it cannot fail, and threading a Result out of it would be noise"],
+/** Every .rs file under src-tauri/src. */
+function rustFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) out.push(...rustFiles(p));
+    else if (name.endsWith(".rs")) out.push(p);
+  }
+  return out;
+}
+
+/** Modules gated at their declaration: `#[cfg(test)] mod foo;` in any file. */
+function declarationGatedModules(files: string[]): Set<string> {
+  const gated = new Set<string>();
+  for (const f of files) {
+    const s = readFileSync(f, "utf8");
+    for (const m of s.matchAll(/#\[cfg\(test\)\]\s*(?:pub\s+)?mod\s+(\w+)\s*;/g)) {
+      gated.add(m[1]);
+    }
+  }
+  return gated;
+}
+
+/** Byte spans of inline `#[cfg(test)] mod name { .. }` blocks. */
+function inlineTestSpans(s: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  for (const m of s.matchAll(/#\[cfg\(test\)\]\s*(?:pub\s+)?mod\s+\w+\s*\{/g)) {
+    let i = m.index! + m[0].length - 1;
+    let depth = 0;
+    for (; i < s.length; i++) {
+      if (s[i] === "{") depth++;
+      else if (s[i] === "}" && --depth === 0) break;
+    }
+    spans.push([m.index!, i]);
+  }
+  return spans;
+}
+
+const PANIC = /\.unwrap\(\)|\.expect\(|(?<![a-z_])panic!\(|unreachable!\(|todo!\(/g;
+
+/**
+ * The two that are allowed, each for a stated reason. Adding to this list is
+ * the deliberate act; a new panic anywhere else fails.
+ */
+const ALLOWED: Array<{ file: string; why: string }> = [
+  {
+    file: "src/lib.rs",
+    why: "tauri::Builder::build's own boilerplate. It panics at startup before any window exists, so there is no UI to report into and nothing to poison.",
+  },
+  {
+    file: "src/stream_proxy.rs",
+    why: "Header::from_bytes on a CORS value that came out of a PARSED request header and passed cors_origin_for's allowlist, so it is a valid header value by construction.",
+  },
 ];
 
-/**
- * Strip `#[cfg(test)] mod ... { }` bodies by brace matching, plus comments,
- * REPLACING each removed line with an empty one.
- *
- * Blanking rather than deleting keeps line numbers aligned with the real file.
- * The first version deleted them, so the offender it reported pointed at a
- * completely different function 80 lines away, and I went and read the wrong
- * code. A finding you cannot locate is barely a finding.
- */
-function productionCode(src: string): string {
-  const lines = src.split("\n");
-  const blank = new Set<number>();
-  let i = 0;
-  for (;;) {
-    const j = src.indexOf("#[cfg(test)]", i);
-    if (j === -1) break;
-    const k = src.indexOf("{", j);
-    if (k === -1) break;
-    let depth = 0, m = k;
-    for (; m < src.length; m += 1) {
-      if (src[m] === "{") depth += 1;
-      else if (src[m] === "}") { depth -= 1; if (depth === 0) break; }
-    }
-    const from = src.slice(0, j).split("\n").length - 1;
-    const to = src.slice(0, m).split("\n").length - 1;
-    for (let n = from; n <= to; n += 1) blank.add(n);
-    i = m + 1;
-  }
-  return lines
-    .map((l, n) => (blank.has(n) ? "" : l))
-    .join("\n")
-    .replace(/\/\*[\s\S]*?\*\//g, (m2) => m2.replace(/[^\n]/g, ""))
-    .replace(/\/\/[^\n]*/g, "");
-}
+const files = rustFiles(SRC);
+const gatedMods = declarationGatedModules(files);
 
-function rustFiles(): Array<[rel: string, code: string]> {
-  const out: Array<[string, string]> = [];
-  const walk = (dir: string) => {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, e.name);
-      if (e.isDirectory()) walk(full);
-      else if (e.name.endsWith(".rs")) out.push([full.slice(RUST.length + 1), readFileSync(full, "utf8")]);
-    }
-  };
-  walk(RUST);
-  return out;
-}
-
-const PANICS = [/\.unwrap\(\)/, /\.expect\(/, /\bpanic!\(/, /\bunreachable!\(/, /\btodo!\(/];
-
-function offenders(): string[] {
-  const out: string[] = [];
-  for (const [rel, raw] of rustFiles()) {
-    if (TEST_SUPPORT.includes(rel)) continue;
-    const code = productionCode(raw);
-    for (const [n, line] of code.split("\n").entries()) {
-      const l = line.trim();
-      if (!PANICS.some((re) => re.test(l))) continue;
-      if (ALLOWED.some(([f, needle]) => rel === f && l.includes(needle))) continue;
-      out.push(`${rel}:${n + 1}  ${l.slice(0, 80)}`);
+function productionPanics(): Array<{ file: string; line: number; text: string }> {
+  const hits: Array<{ file: string; line: number; text: string }> = [];
+  for (const f of files) {
+    const rel = relative(ROOT, f);
+    const stem = f.split("/").pop()!.replace(/\.rs$/, "");
+    if (gatedMods.has(stem)) continue;           // whole file is test-only
+    const s = readFileSync(f, "utf8");
+    const spans = inlineTestSpans(s);
+    const lines = s.split("\n");
+    for (const m of s.matchAll(PANIC)) {
+      const at = m.index!;
+      if (spans.some(([a, b]) => at >= a && at <= b)) continue;
+      const line = s.slice(0, at).split("\n").length;
+      const text = lines[line - 1].trim();
+      if (text.startsWith("//") || text.startsWith("*")) continue;
+      hits.push({ file: rel, line, text });
     }
   }
-  return out;
+  return hits;
 }
 
 describe("production Rust cannot panic", () => {
-  it("really scanned the crate", () => {
-    // A walker that finds nothing certifies everything.
-    const files = rustFiles();
-    expect(files.length).toBeGreaterThan(8);
-    const lines = files.reduce((n, [, c]) => n + productionCode(c).split("\n").length, 0);
-    expect(lines, "too little code scanned to be reading the real crate").toBeGreaterThan(8000);
+  it("is actually scanning the tree", () => {
+    // Canary. Every assertion here is "found nothing unexpected", which is
+    // exactly the shape that passes forever once a scan silently stops.
+    expect(files.length, "no .rs files found under src-tauri/src").toBeGreaterThan(10);
+    const totalPanicSites = files
+      .map((f) => (readFileSync(f, "utf8").match(PANIC) ?? []).length)
+      .reduce((a, b) => a + b, 0);
+    expect(totalPanicSites, "the panic matcher found nothing in ANY file, including tests")
+      .toBeGreaterThan(100);
   });
 
-  it("has no unargued unwrap, expect, panic, unreachable or todo", () => {
+  it("still recognises both ways a test module is scoped", () => {
+    // Rule 1 caught nothing and rule 2 over-caught, in the two earlier
+    // versions of this measurement. If either scoping rule stops matching,
+    // the scan goes quiet in the direction that passes.
+    expect(gatedMods, "no `#[cfg(test)] mod x;` declaration found - rule 2 broke")
+      .toContain("nightly");
+    const withInline = files.filter((f) => inlineTestSpans(readFileSync(f, "utf8")).length > 0);
+    expect(withInline.length, "no inline `#[cfg(test)] mod tests { }` block found - rule 1 broke")
+      .toBeGreaterThan(5);
+  });
+
+  it("has no panic outside the two allowed sites", () => {
+    const allowedFiles = new Set(ALLOWED.map((a) => a.file));
+    const offenders = productionPanics().filter((h) => !allowedFiles.has(h.file));
     expect(
-      offenders(),
-      "A panic in a command takes the app down with the user's in-flight work. " +
-        "Return Result<T, AppError>, or add it to ALLOWED with the reason it cannot fail.",
+      offenders.map((o) => `${o.file}:${o.line}  ${o.text}`),
+      "a panic in a command handler hangs the invoke forever and poisons any Mutex it held - return an AppError instead",
     ).toEqual([]);
   });
 
-  it("keeps the allowed list honest", () => {
-    // An entry that no longer matches anything reads as a considered
-    // exception when it actually means the code moved and nobody looked.
-    const stale = ALLOWED.filter(([f, needle]) => {
-      const hit = rustFiles().find(([rel]) => rel === f);
-      return !hit || !productionCode(hit[1]).includes(needle);
-    }).map(([f, needle]) => `${f}: ${needle}`);
-    expect(stale, "listed as an allowed panic but no longer present").toEqual([]);
-  });
-
-  it("excludes test support for a stated reason, not silently", () => {
-    // nightly.rs drives the real sidecars; a missing model or a failed spawn
-    // SHOULD stop that run loudly. It ships in no user-facing path.
-    for (const f of TEST_SUPPORT) {
-      const hit = rustFiles().find(([rel]) => rel === f);
-      expect(hit, `${f} is excluded but does not exist`).toBeTruthy();
-      expect(hit![1]).toMatch(/smoke tests|nightly/i);
+  it("keeps each allowed site earning its exemption", () => {
+    // An allowlist entry that no longer matches anything is a rule that has
+    // quietly stopped being enforced. This makes the exemption pay twice.
+    const hits = productionPanics();
+    for (const a of ALLOWED) {
+      expect(
+        hits.some((h) => h.file === a.file),
+        `${a.file} is allowlisted but has no panic site - drop the entry`,
+      ).toBe(true);
     }
+    expect(hits.length, "the allowlist should cover exactly the known sites").toBe(2);
   });
 });
