@@ -231,3 +231,34 @@ test("the command palette meets AA", async ({ page }) => {
     .map((k) => k.cls ?? k.text);
   expect(fixed, "listed as a known gap but now passes - delete the entry").toEqual([]);
 });
+
+test("the panel window meets AA", async ({ page }) => {
+  // A SECOND React root (`?window=panel` → PanelApp + QueueDrawer), and the
+  // largest surface this file had never opened. It renders on its own
+  // background rather than the main window's, which is precisely the kind of
+  // difference that made fg-4 pass on bg-1 and fail everywhere else.
+  //
+  // It is clean, and was clean before this test existed. Be honest about what
+  // that makes it: reverting the r156 fg-4 lift fails the command-palette test
+  // and NOT this one, because the panel's lowest non-exempt text sits at
+  // 5.06:1 with room to spare. This is a floor for a surface nothing was
+  // watching, not a detector for today's regression — worth having because
+  // the drawer's copy is muted greys on a raised panel, the exact recipe that
+  // has now gone wrong twice, but it would be overselling it to claim more.
+  await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
+  await page.addInitScript(() => localStorage.setItem("saucebunny.welcomed", "1"));
+  await page.goto("/?window=panel");
+  await expect(page.locator(".cp-panel-window-root"),
+    "the panel window did not boot, so this would measure nothing").toBeVisible({ timeout: 15_000 });
+
+  for (const tab of ["Queue", "Transcript", "AI Summary"]) {
+    const btn = page.getByText(tab, { exact: true }).first();
+    await expect(btn, `the drawer is missing its ${tab} tab`).toHaveCount(1);
+    await btn.click();
+    const bad = await failures(page);
+    expect(
+      bad.map((b) => `${b.ratio}:1 ${b.px}px "${b.text}" .${b.cls} ${b.fg} on ${b.bg}`),
+      `Below AA in the panel window, ${tab} tab`,
+    ).toEqual([]);
+  }
+});
