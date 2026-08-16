@@ -144,6 +144,21 @@ worth doing:
 - [ ] Repeat with the window **minimised** rather than backgrounded. The local
       half needed both because `focus` alone missed the minimised case.
 
+## 7b. Escape closes the AI Summary's Export menu
+
+It did not. The menu dismissed on a click away and ignored the key
+entirely, while every other menu in the app closed. Thirty seconds to
+check, and the same split has now appeared twice (the transcript history
+was the first), so it is worth a look rather than a shrug.
+
+- [ ] Generate a summary, click **Export**, press **Escape**. The menu
+      closes and focus is not left somewhere odd.
+- [ ] Open it again and click well outside it. Still closes.
+- [ ] Open it and click the **Export** button itself. It toggles shut
+      rather than closing-and-reopening — the deferred listener attach in
+      `use-dismiss.ts` is what makes that work, and it is the part that
+      breaks first if anyone "simplifies" the hook.
+
 ## 7c. AI Summary — llama-server now reports itself
 
 Rust has emitted llama-server's stderr since the feature shipped; nothing was
