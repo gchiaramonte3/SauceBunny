@@ -36,6 +36,11 @@ export type LibrarySearchResult = {
   items: LibraryItem[];
   /** Matching items BEFORE the cap — drives the "showing N of M" note. */
   totalItems: number;
+  /** Matching folders BEFORE the cap. Folders used to have no equivalent:
+   *  the cap was part of the MATCH condition, so the 31st matching folder was
+   *  not counted, not shown, and not reported. A big library searched for a
+   *  common word simply stopped listing folders, and nothing said so. */
+  totalFolders: number;
 };
 
 /**
@@ -171,11 +176,14 @@ export function searchLibrary(
   // and it is not one to make by accident on somebody's Japanese library.
   const norm = (s: string) => s.normalize("NFC").toLowerCase();
   const q = norm(rawQuery.trim());
-  const result: LibrarySearchResult = { folders: [], items: [], totalItems: 0 };
+  const result: LibrarySearchResult = { folders: [], items: [], totalItems: 0, totalFolders: 0 };
   if (!q) return result;
   const walk = (node: LibraryFolder, chain: LibraryCrumb[]) => {
-    if (norm(node.name).includes(q) && result.folders.length < folderCap) {
-      result.folders.push({ folder: node, chain });
+    // Count first, cap second - the same shape as items below. Folding the cap
+    // into the match is what made the overflow invisible.
+    if (norm(node.name).includes(q)) {
+      result.totalFolders++;
+      if (result.folders.length < folderCap) result.folders.push({ folder: node, chain });
     }
     for (const it of node.items) {
       if (!norm(it.name).includes(q)) continue;
@@ -190,6 +198,23 @@ export function searchLibrary(
   return result;
 }
 
+
+/**
+ * The "showing N of M" line under a truncated search, or null when nothing was
+ * cut. Pure so the wording is testable: the old view-level ternary fired only
+ * when ITEMS overflowed, so a search matching forty folders and three files
+ * showed thirty folders and said nothing at all.
+ *
+ * Names the thing to do about it. A count with no next step tells the user
+ * they are missing results without telling them how to see them.
+ */
+export function searchTruncationNote(r: LibrarySearchResult): string | null {
+  const parts: string[] = [];
+  if (r.totalFolders > r.folders.length) parts.push(`${r.folders.length} of ${r.totalFolders} folders`);
+  if (r.totalItems > r.items.length) parts.push(`${r.items.length} of ${r.totalItems} files`);
+  if (!parts.length) return null;
+  return `Showing ${parts.join(" and ")}. Narrow the search to see the rest.`;
+}
 
 /** "820 KB" / "34 MB" / "1.2 GB" — one significant decimal under 10. */
 export function formatBytes(n: number): string {

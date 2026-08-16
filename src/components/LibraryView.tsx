@@ -19,6 +19,7 @@ import {
   formatModifiedDate,
   libraryPosterPaths,
   searchLibrary,
+  searchTruncationNote,
   setChosenPoster,
   type LibraryCrumb,
 } from "../lib/library";
@@ -140,6 +141,7 @@ export function LibraryView({
     [roots, scans],
   );
   const results = useMemo(() => searchLibrary(trees, needle), [trees, needle]);
+  const truncationNote = searchTruncationNote(results);
   const searching = needle.trim() !== "";
   // Every transcript ON DISK, reconciled with history — not just the 50 the
   // localStorage history caps at. Re-scans when Home becomes active or a new
@@ -391,10 +393,8 @@ export function LibraryView({
         <>
           {results.folders.length + results.items.length === 0 ? (
             <p className="cp-lib-note cp-lib-grid-note">No matches for “{needle.trim()}”.</p>
-          ) : results.totalItems > results.items.length ? (
-            <p className="cp-lib-note cp-lib-grid-note">
-              Showing {results.items.length} of {results.totalItems} matches.
-            </p>
+          ) : truncationNote ? (
+            <p className="cp-lib-note cp-lib-grid-note">{truncationNote}</p>
           ) : null}
           <div role="list" aria-label="Search results" className="cp-lib-grid">
             {results.folders.map((hit) => folderCard(hit.folder, hit.chain))}

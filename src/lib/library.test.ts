@@ -9,6 +9,7 @@ import {
   libraryPosterPaths,
   sanitizeLibraryRoots,
   searchLibrary,
+  searchTruncationNote,
   sortLibraryItems,
 } from "./library";
 
@@ -93,6 +94,23 @@ describe("searchLibrary", () => {
     const r = searchLibrary([many], "take", { items: 4 });
     expect(r.items).toHaveLength(4);
     expect(r.totalItems).toBe(10);
+  });
+
+  it("caps folder results but reports the true total", () => {
+    // The mirror of the test above, which did not exist - and its absence is
+    // why folders capped INSIDE the match condition for so long. Past the cap
+    // a matching folder was not counted, not shown, and not reported.
+    const subs = Array.from({ length: 10 }, (_, i) => folder(`take-${i}`, [], [], `/lib/Bulk/take-${i}`));
+    const r = searchLibrary([folder("Bulk", [], subs, "/lib/Bulk")], "take", { folders: 4 });
+    expect(r.folders).toHaveLength(4);
+    expect(r.totalFolders).toBe(10);
+  });
+
+  it("counts every match even when both kinds overflow", () => {
+    const subs = Array.from({ length: 6 }, (_, i) => folder(`take-${i}`, [], [], `/lib/B/take-${i}`));
+    const items = Array.from({ length: 7 }, (_, i) => item(`take-${i}.mp4`));
+    const r = searchLibrary([folder("B", items, subs, "/lib/B")], "take", { items: 2, folders: 3 });
+    expect([r.folders.length, r.totalFolders, r.items.length, r.totalItems]).toEqual([3, 6, 2, 7]);
   });
 
   it("returns nothing for an empty/whitespace query", () => {
@@ -305,5 +323,40 @@ describe("source timecodes (per-file store)", () => {
     const { sourceTimecodeFor } = await import("./library");
     expect(sourceTimecodeFor("/x.mp4")).toBeNull();  // non-string dropped
     expect(sourceTimecodeFor("/y.mp4")).toBe("02:00:00:00");
+  });
+});
+
+describe("searchTruncationNote", () => {
+  const r = (folders: number, totalFolders: number, items: number, totalItems: number) => ({
+    folders: Array.from({ length: folders }, () => ({ folder: folder("f"), chain: [] })),
+    items: Array.from({ length: items }, (_, i) => item(`i-${i}.mp4`)),
+    totalFolders, totalItems,
+  });
+
+  it("says nothing when everything fits", () => {
+    expect(searchTruncationNote(r(3, 3, 5, 5))).toBe(null);
+    expect(searchTruncationNote(r(0, 0, 0, 0))).toBe(null);
+  });
+
+  it("reports folders alone, which the old view could not", () => {
+    // Forty folders and three files used to show thirty folders in silence:
+    // the note was gated on items overflowing.
+    expect(searchTruncationNote(r(30, 47, 3, 3)))
+      .toBe("Showing 30 of 47 folders. Narrow the search to see the rest.");
+  });
+
+  it("reports files alone", () => {
+    expect(searchTruncationNote(r(2, 2, 120, 340)))
+      .toBe("Showing 120 of 340 files. Narrow the search to see the rest.");
+  });
+
+  it("reports both in one sentence", () => {
+    expect(searchTruncationNote(r(30, 47, 120, 340)))
+      .toBe("Showing 30 of 47 folders and 120 of 340 files. Narrow the search to see the rest.");
+  });
+
+  it("tells the reader what to do about it", () => {
+    // A count with no next step says "you are missing results" and stops.
+    expect(searchTruncationNote(r(30, 47, 3, 3))).toContain("Narrow the search");
   });
 });
