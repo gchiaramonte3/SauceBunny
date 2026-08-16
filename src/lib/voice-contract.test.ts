@@ -125,7 +125,12 @@ function stripNonCopy(source: string): string {
 describe("voice contract", () => {
   it("no em/en dashes in user-facing strings (src/**/*.ts{,x})", () => {
     const violations: string[] = [];
-    for (const file of collectSources(SRC_ROOT)) {
+    const sources = collectSources(SRC_ROOT);
+    // A scanner that matches nothing certifies everything. Proven, not
+    // hypothetical: breaking the file filter left this passing over ZERO
+    // files while still reporting the rule as enforced.
+    expect(sources.length, "no source files scanned").toBeGreaterThan(50);
+    for (const file of sources) {
       const rel = path.relative(path.dirname(SRC_ROOT), file); // "src/…"
       const stripped = stripNonCopy(fs.readFileSync(file, "utf8"));
       stripped.split("\n").forEach((line, idx) => {

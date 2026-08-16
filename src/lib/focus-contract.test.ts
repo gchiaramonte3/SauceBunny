@@ -40,6 +40,10 @@ function focusViolations(file: string, css: string): Violation[] {
 describe("focus contract", () => {
   it("no :focus rule references the green accent", () => {
     const files = fs.readdirSync(STYLES_DIR).filter((f) => f.endsWith(".css"));
+    // A scanner that matches nothing certifies everything. Proven, not
+    // hypothetical: breaking the file filter left this passing over ZERO
+    // files while still reporting the rule as enforced.
+    expect(files.length, "no stylesheets scanned").toBeGreaterThan(5);
     const violations = files.flatMap((f) =>
       focusViolations(f, fs.readFileSync(path.join(STYLES_DIR, f), "utf8")),
     );

@@ -59,7 +59,12 @@ describe("the STUN endpoint stays configurable", () => {
   it("is hardcoded nowhere else", () => {
     // It lived inline in use-rtc-mesh, which is why nobody could see it, aim
     // it elsewhere, or turn it off. One home, one default.
-    const bad = walk(join(ROOT, "src"))
+    const scanned = walk(join(ROOT, "src"));
+    // A scanner that matches nothing certifies everything. Proven, not
+    // hypothetical: breaking the file filter left this passing over ZERO
+    // files while still reporting the rule as enforced.
+    expect(scanned.length, "no source files scanned").toBeGreaterThan(50);
+    const bad = scanned
       .map((f) => [f.slice(ROOT.length + 1), readFileSync(f, "utf8")] as const)
       .filter(([rel]) => rel !== "src/lib/ice-servers.ts" && rel !== "src/lib/ice-servers.test.ts")
       .filter(([, text]) => /["'`]stun:[^"'`]+["'`]/.test(text))

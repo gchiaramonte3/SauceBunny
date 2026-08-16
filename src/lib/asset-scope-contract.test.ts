@@ -69,7 +69,12 @@ describe("asset scope contract", () => {
     // convertFileSrc IS the asset:// mint. Keeping it to one module is what
     // makes the two-halves rule reviewable, and what makes a new consumer of
     // arbitrary paths visible in a diff rather than at runtime.
-    const offenders = walk(resolve(ROOT, "src"))
+    const scanned = walk(resolve(ROOT, "src"));
+    // A scanner that matches nothing certifies everything. Proven, not
+    // hypothetical: breaking the file filter left this passing over ZERO
+    // files while still reporting the rule as enforced.
+    expect(scanned.length, "no source files scanned").toBeGreaterThan(50);
+    const offenders = scanned
       .filter((f) => !f.endsWith("asset-url.ts") && !f.endsWith("asset-scope-contract.test.ts"))
       .filter((f) => /\bconvertFileSrc\s*\(/.test(readFileSync(f, "utf8")))
       .map((f) => f.slice(ROOT.length + 1));
