@@ -495,7 +495,7 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ## Enforced contracts
 
-Seventeen rules in this file are checked by a test rather than remembered. If you
+Eighteen rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -513,6 +513,7 @@ written after finding the rule already broken somewhere.
 | `storage-keys-contract` | New prefs use the `saucebunny.` namespace; nine legacy `cp-` keys are pinned by name |
 | `invoke-contract` | Invoke type args come from `src/bindings/`; byte payloads use the raw IPC body; every `write_text_to_path` is atomic |
 | `ipc-surface-contract` | Every registered command is called, and every invoked command is registered |
+| `event-surface-contract` | Every event Rust emits has a listener, and every listened event is emitted (`panel:*` is the frontend-only bus) |
 | `job-id` | Job ids are minted locally and never awaited |
 | `updater-purity-contract` | No `setX(prev => …)` writes, invokes, persists or touches a ref |
 | `pure-updater-contract` | Reducer-style updaters stay pure |

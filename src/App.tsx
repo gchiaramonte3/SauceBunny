@@ -1805,7 +1805,20 @@ export default function App() {
         if (!mounted || e.payload.job_id !== playbackPrepJobIdRef.current) return;
         appendLog(asLogTag(e.payload.tag), "playback-prep", e.payload.line);
       });
-      unlistens.push(a, b, c, d, f, g, h, i, j, k, l, m, jPhase);
+      // llama-server's stderr — model load progress and the reason a start
+      // failed. Rust has emitted this since the AI Summary feature landed,
+      // with a comment saying it drains to the Pipeline log; the listener was
+      // never written, so every line went nowhere. That made a slow first
+      // summary (a multi-GB model loading) indistinguishable from a hung one,
+      // and a server that refused to start silent about why.
+      //
+      // No job-id filter: unlike the per-run channels above, this one is the
+      // long-lived server and always reports job_id "llm-server".
+      const n = await listen<LogEvent>("llm-log", (e) => {
+        if (!mounted) return;
+        appendLog(asLogTag(e.payload.tag), "llm", e.payload.line);
+      });
+      unlistens.push(a, b, c, d, f, g, h, i, j, k, l, m, jPhase, n);
       // Cleanup that fired DURING the awaits above found an empty array and
       // unregistered nothing — under StrictMode that leaked all 15 listeners
       // on every dev boot. The handlers were inert (each starts with a

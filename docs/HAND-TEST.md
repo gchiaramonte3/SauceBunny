@@ -124,6 +124,17 @@ whatever gesture comes first. The app now pays it on return instead.
 diagnostics but no warm-up - rebuilding an MSE pipeline is a different and
 riskier fix than a zero-distance seek.
 
+## 7c. AI Summary — llama-server now reports itself
+
+Rust has emitted llama-server's stderr since the feature shipped; nothing was
+listening, so model-load progress and start failures went nowhere.
+
+- [ ] Open the AI Summary tab and generate a summary with a LOCAL model, with
+      the Pipeline log open. Expect `llm` lines during the model load - the
+      first run on a multi-GB model is the slow one worth watching.
+- [ ] If a local model fails to start, the reason should now appear in the log
+      instead of the tab simply never producing anything.
+
 ## 8. Screen reader — new landmark names, only VoiceOver can confirm them
 
 Each view's main region is now named. The e2e run proves the name is in the
