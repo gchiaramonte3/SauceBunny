@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { type CSSProperties, useEffect, useId, useMemo, useState, useSyncExternalStore } from "react";
 import { WEB_POSTERS_CHANGED_EVENT, webPosterFor } from "../lib/web-poster-store";
 import { inertWhen } from "../lib/inert";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -291,6 +291,15 @@ export function Sidebar(props: Props) {
   // Export is allowed when: source loaded, folder + filename set, marks are
   // either both unset (= full clip) or both valid with out > in.
   const marksOk = hasMarks ? (selFrames ?? 0) > 0 : (inFrames == null && outFrames == null);
+  // Mark in/out carried a VISIBLE <label> that was a sibling with no htmlFor,
+  // so the association was purely visual: `label[for]` matched nothing and the
+  // input was not inside the label either. A screen reader read both as a bare
+  // "edit text". Found by running the form-label sweep against a loaded source
+  // — the sweep itself is old, but it had only ever walked the opening screen,
+  // where these fields do not exist.
+  const inTcId = useId();
+  const outTcId = useId();
+
   const canExport =
     hasSource && !exporting && !success &&
     inValid && outValid && marksOk &&
@@ -587,8 +596,9 @@ export function Sidebar(props: Props) {
           >
             <div className="cp-field-row">
               <div className="cp-field">
-                <label>Mark in</label>
+                <label htmlFor={inTcId}>Mark in</label>
                 <input
+                  id={inTcId}
                   type="text"
                   inputMode="numeric"
                   className={"cp-input cp-input-tc" + (inValid ? "" : " invalid")}
@@ -610,8 +620,9 @@ export function Sidebar(props: Props) {
                 />
               </div>
               <div className="cp-field">
-                <label>Mark out</label>
+                <label htmlFor={outTcId}>Mark out</label>
                 <input
+                  id={outTcId}
                   type="text"
                   inputMode="numeric"
                   className={"cp-input cp-input-tc" + (outValid ? "" : " invalid")}

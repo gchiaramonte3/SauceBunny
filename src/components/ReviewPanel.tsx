@@ -1556,6 +1556,12 @@ function ReviewComposer({
           // it fits a narrow panel without wrapping; posted comments still
           // carry the full SMPTE timecode via secondsToTc.
           placeholder={drawActive ? "Describe the drawing…" : `Comment at ${secondsToHms(currentSec ?? 0).replace(/^0(?=\d)/, "")}`}
+          /* A NAME, not just a placeholder. The placeholder changes with the
+             playhead ("Comment at 1:23"), so it is a hint rather than a label,
+             and the form-label sweep deliberately refuses placeholders as
+             names. Without this the app's main writing surface announced as an
+             unlabelled text box. */
+          aria-label={drawActive ? "Describe the drawing" : "Comment"}
         />
         <button className="btn btn-primary btn-compact" onClick={submit} disabled={!text.trim() && !hasDraft}>Post</button>
       </div>
@@ -1612,6 +1618,7 @@ function NameGateModal({
         <p>Shown on every note you leave. Stored locally, no account.</p>
         <input
           autoFocus
+          aria-label="Your name"
           value={nameInput}
           onChange={(e) => setNameInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") onSave(nameInput); if (e.key === "Escape") onClose(); }}
