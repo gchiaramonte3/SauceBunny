@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { assetUrl } from "../lib/asset-url";
 import { formatError } from "../lib/error-format";
+import { secondsToClock } from "../lib/timecode";
 import type { LocalFileMeta } from "../bindings/LocalFileMeta";
 import { useModalFocus } from "../hooks/use-modal-focus";
 
@@ -67,7 +68,7 @@ export function LibraryQuickLook({
   const caption = meta
     ? [
         meta.width && meta.height ? `${meta.width}×${meta.height}` : null,
-        meta.duration != null ? fmtDuration(meta.duration) : null,
+        meta.duration != null ? secondsToClock(meta.duration, { round: true }) : null,
       ].filter(Boolean).join(" · ")
     : "";
 
@@ -117,10 +118,4 @@ export function LibraryQuickLook({
   );
 }
 
-function fmtDuration(sec: number): string {
-  const s = Math.round(sec);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const r = s % 60;
-  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`;
-}
+

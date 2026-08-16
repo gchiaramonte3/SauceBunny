@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { framesToTc, tcToFrames, tcToSeconds, hmsToSeconds, secondsToClock, tcDigitsToFrames, tcDigitsToDisplay } from "./timecode";
+import { framesToTc, tcToFrames, tcToSeconds, hmsToSeconds, secondsToClock, secondsToHms, tcDigitsToFrames, tcDigitsToDisplay } from "./timecode";
 
 // Frames↔timecode math drives the playhead, marks, exports, and the
 // transcript click-to-seek (whose floor-rounding produced the r85
@@ -176,5 +176,62 @@ describe("the transport HUD's digit entry", () => {
       const tc = framesToTc(frames, 24);
       expect(F(tc.replace(/:/g, ""))).toBe(frames);
     }
+  });
+});
+
+describe("duration formatters meet input that is not a number", () => {
+  /**
+   * `<video>.duration` is NaN until metadata arrives and Infinity for an
+   * unbounded stream. Both reach these two functions through ordinary duration
+   * displays across thirteen files, and both used to render straight through:
+   * "NaN:NaN" from secondsToClock and "Infinity:NaN:NaN" from secondsToHms.
+   *
+   * ReaderPlayerStage had its own copy of the clock WITH an isFinite guard,
+   * which is how we know somebody hit this; the guard never reached the shared
+   * function everyone else calls.
+   */
+  it("never renders NaN or Infinity into the UI", () => {
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      expect(secondsToClock(bad)).toBe("0:00");
+      expect(secondsToHms(bad)).toBe("00:00:00");
+      expect(secondsToClock(bad, { forceHours: true })).toBe("0:00:00");
+    }
+  });
+
+  it("still clamps a negative to zero", () => {
+    expect(secondsToClock(-5)).toBe("0:00");
+    expect(secondsToHms(-5)).toBe("00:00:00");
+  });
+
+  it("is unchanged for every finite input", () => {
+    // The guard must be invisible to real values, or it is a behaviour change
+    // wearing a bug fix's clothes.
+    expect(secondsToClock(0)).toBe("0:00");
+    expect(secondsToClock(59)).toBe("0:59");
+    expect(secondsToClock(60)).toBe("1:00");
+    expect(secondsToClock(3599)).toBe("59:59");
+    expect(secondsToClock(3600)).toBe("1:00:00");
+    expect(secondsToHms(3661)).toBe("01:01:01");
+  });
+});
+
+describe("round vs floor is a real distinction, not a preference", () => {
+  it("floors for a clock and rounds for a duration", () => {
+    // A playhead at 59.7s is still inside the 59th second, so the transport
+    // must read 0:59. A 59.7s CLIP shown as 0:59 on a shelf card reads as a
+    // rounding bug. Both local copies had already made this choice; it is now
+    // one function with a flag instead of two functions with a divergence.
+    expect(secondsToClock(59.7)).toBe("0:59");
+    expect(secondsToClock(59.7, { round: true })).toBe("1:00");
+    expect(secondsToClock(59.4, { round: true })).toBe("0:59");
+  });
+
+  it("rounds up across an hour boundary without corrupting the fields", () => {
+    expect(secondsToClock(3599.6, { round: true })).toBe("1:00:00");
+    expect(secondsToClock(3599.6)).toBe("59:59");
+  });
+
+  it("leaves rounding off by default", () => {
+    expect(secondsToClock(10.9)).toBe("0:10");
   });
 });

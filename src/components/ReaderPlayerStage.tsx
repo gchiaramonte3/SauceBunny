@@ -6,7 +6,7 @@ import {
   IconPlay, IconPause, IconSkipBack, IconSkipForward, IconPanelRight, IconFilm, IconSpinnerArc,
 } from "./Icons";
 import { usePlayheadSeconds } from "../lib/playhead-store";
-import { secondsToHms } from "../lib/timecode";
+import { secondsToClock, secondsToHms } from "../lib/timecode";
 
 /**
  * The reader's follow-along source — a local file resolved for playback the
@@ -32,13 +32,7 @@ export type ReaderSource = {
   prepared: boolean;
 };
 
-/** HH:MM:SS (or M:SS under an hour) for the transport clock. */
-function fmtClock(s: number): string {
-  const t = Math.max(0, Math.floor(isFinite(s) ? s : 0));
-  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
-  const mm = h > 0 ? String(m).padStart(2, "0") : String(m);
-  return (h > 0 ? `${h}:` : "") + `${mm}:${String(sec).padStart(2, "0")}`;
-}
+
 
 type Props = {
   /** The resolved local source to play, or null for text-only / while preparing. */
@@ -196,7 +190,7 @@ export function ReaderPlayerStage({
                 <IconSkipForward size={16} />
               </button>
               <span className="cp-reader-clock">
-                {fmtClock(cur)}<span className="cp-reader-clock-sep"> / </span>{fmtClock(duration)}
+                {secondsToClock(cur)}<span className="cp-reader-clock-sep"> / </span>{secondsToClock(duration)}
               </span>
             </div>
           </div>

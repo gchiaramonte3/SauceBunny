@@ -46,8 +46,30 @@ export function durationToTc(durationSec: number | null, fps: number): string {
 }
 
 // Coarse HH:MM:SS for ruler labels.
+/**
+ * Seconds → a safe whole number of seconds, for the formatters below.
+ *
+ * The non-finite case is not defensive padding. `<video>.duration` is NaN
+ * until metadata arrives and Infinity for an unbounded stream, and both of
+ * those reach these formatters through ordinary duration displays — so
+ * `Math.max(0, Math.floor(x))` was printing "NaN:NaN" and
+ * "Infinity:NaN:NaN" into the UI. ReaderPlayerStage carried its own copy of
+ * this clock WITH an isFinite guard, which is how we know somebody met it;
+ * the guard just never made it back to the shared function the other twelve
+ * files call.
+ *
+ * Unknown reads as zero rather than a dash because that is what the local
+ * copy already did, so adopting it changes nothing on screen. A distinct
+ * "--:--" for unknown would be a better UI and is a design decision, not a
+ * bug fix.
+ */
+function wholeSeconds(seconds: number, round: boolean): number {
+  if (!Number.isFinite(seconds)) return 0;
+  return Math.max(0, round ? Math.round(seconds) : Math.floor(seconds));
+}
+
 export function secondsToHms(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
+  const s = wholeSeconds(seconds, false);
   return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
 
@@ -60,9 +82,14 @@ export function secondsToHms(seconds: number): string {
  */
 export function secondsToClock(
   seconds: number,
-  opts: { padMinutes?: boolean; forceHours?: boolean } = {},
+  opts: { padMinutes?: boolean; forceHours?: boolean; round?: boolean } = {},
 ): string {
-  const s = Math.max(0, Math.floor(seconds));
+  // `round` exists for DURATION labels, which is a different job from a
+  // playhead clock. A 59.7s clip reading "0:59" looks like a rounding bug on a
+  // shelf card; a playhead flooring to 0:59 is correct, because the 60th
+  // second has not finished. Both local copies of this function had already
+  // chosen rounding for duration and flooring for the transport.
+  const s = wholeSeconds(seconds, !!opts.round);
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;

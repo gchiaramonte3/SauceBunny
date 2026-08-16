@@ -7,6 +7,7 @@ import { useModalFocus } from "../hooks/use-modal-focus";
 import type { MediaInfo } from "../bindings/MediaInfo";
 import type { MediaInfoVideo } from "../bindings/MediaInfoVideo";
 import { formatError } from "../lib/error-format";
+import { secondsToClock } from "../lib/timecode";
 
 /**
  * Deep media inspector — a compact modal over the ffprobe-backed
@@ -25,14 +26,7 @@ type Props = {
   onClose: () => void;
 };
 
-/** seconds → H:MM:SS */
-function fmtDuration(s: number): string {
-  const total = Math.round(s);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const sec = total % 60;
-  return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
-}
+
 
 const fmtMbps = (bps: number) => `${(bps / 1_000_000).toFixed(1)} Mb/s`;
 const fmtKbps = (bps: number) => `${Math.round(bps / 1000)} kb/s`;
@@ -356,7 +350,7 @@ export function MediaInfoModal({ path, onClose }: Props) {
                   info.duration_s != null
                     ? {
                         label: "Duration",
-                        value: fmtDuration(info.duration_s),
+                        value: secondsToClock(info.duration_s, { forceHours: true, round: true }),
                         secondary: v?.nb_frames != null ? `${v.nb_frames} frames` : null,
                         hint: HINTS.duration,
                       }
