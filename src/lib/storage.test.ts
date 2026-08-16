@@ -6,12 +6,10 @@ import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./storage";
  * The persistence primitive everything else is built on, and the clip queue's
  * crash-rescue rules.
  *
- * Note the spies target `localStorage` ITSELF, never `Storage.prototype`. This
- * suite runs against the plain-object stub `src/test-setup.ts` installs (Node
- * 22+ ships a Web Storage global that exists with no methods, and jsdom will
- * not replace a global that is already defined). A prototype spy silently
- * intercepts nothing there, so a failure-path test written that way passes
- * while asserting the happy path.
+ * Failure paths go through `withFailingStorage` rather than a spy: which of
+ * `localStorage` and `Storage.prototype` actually owns the methods differs
+ * between this machine and CI, so either spy passes silently on one of them.
+ * See the helper for the detail.
  *
  * The rescue is the part worth pinning. A row that was MID-EXPORT when the app
  * went away comes back as "queued": only finished work is dropped, because a
@@ -25,6 +23,40 @@ import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./storage";
  * throw, so a corrupt blob or a private-mode quota costs a preference and
  * never the boot.
  */
+
+/**
+ * Make one localStorage method throw, in a way that works in BOTH environments
+ * this suite runs in.
+ *
+ * Locally, test-setup.ts installs a plain-object stub (Node 22+ ships a Web
+ * Storage global with no methods, and jsdom will not replace an existing
+ * global), so methods are OWN properties and a prototype spy hits nothing. In
+ * CI the real Storage is present and the methods live on the PROTOTYPE, so an
+ * instance spy hits nothing instead. Either spy passes silently on the wrong
+ * machine — which is how the first version of this test went green locally and
+ * red in CI.
+ *
+ * Replacing the global sidesteps the question: the module under test reads
+ * `localStorage` by name at call time, so it sees whatever is installed.
+ */
+function withFailingStorage(method: "getItem" | "setItem", run: () => void): void {
+  const real = globalThis.localStorage;
+  const fake = {
+    getItem: (k: string) => real.getItem(k),
+    setItem: (k: string, v: string) => real.setItem(k, v),
+    removeItem: (k: string) => real.removeItem(k),
+    clear: () => real.clear(),
+    key: (i: number) => real.key(i),
+    get length() { return real.length; },
+  } as unknown as Storage;
+  (fake as unknown as Record<string, unknown>)[method] = () => {
+    throw new Error(method === "setItem" ? "QuotaExceededError" : "SecurityError");
+  };
+  Object.defineProperty(globalThis, "localStorage", { value: fake, configurable: true, writable: true });
+  try { run(); } finally {
+    Object.defineProperty(globalThis, "localStorage", { value: real, configurable: true, writable: true });
+  }
+}
 
 const QUEUE_KEY = "saucebunny.clipQueue";
 
@@ -58,8 +90,9 @@ describe("loadJson", () => {
   });
 
   it("falls back when localStorage itself throws", () => {
-    vi.spyOn(localStorage, "getItem").mockImplementation(() => { throw new Error("SecurityError"); });
-    expect(loadJson("k", "fallback")).toBe("fallback");
+    withFailingStorage("getItem", () => {
+      expect(loadJson("k", "fallback")).toBe("fallback");
+    });
   });
 
   it("preserves a stored falsy value", () => {
@@ -73,8 +106,9 @@ describe("loadJson", () => {
 
 describe("saveJson", () => {
   it("swallows a quota failure instead of throwing", () => {
-    vi.spyOn(localStorage, "setItem").mockImplementation(() => { throw new Error("QuotaExceeded"); });
-    expect(() => saveJson("k", { big: "x" })).not.toThrow();
+    withFailingStorage("setItem", () => {
+      expect(() => saveJson("k", { big: "x" })).not.toThrow();
+    });
     expect(console.warn).toHaveBeenCalled();
   });
 });

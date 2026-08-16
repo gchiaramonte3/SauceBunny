@@ -21,6 +21,40 @@ const h = vi.hoisted(() => ({
   gate: null as null | { wait: Promise<void>; release: () => void },
 }));
 
+/**
+ * Make one localStorage method throw, in a way that works in BOTH environments
+ * this suite runs in.
+ *
+ * Locally, test-setup.ts installs a plain-object stub (Node 22+ ships a Web
+ * Storage global with no methods, and jsdom will not replace an existing
+ * global), so methods are OWN properties and a prototype spy hits nothing. In
+ * CI the real Storage is present and the methods live on the PROTOTYPE, so an
+ * instance spy hits nothing instead. Either spy passes silently on the wrong
+ * machine — which is how the first version of this test went green locally and
+ * red in CI.
+ *
+ * Replacing the global sidesteps the question: the module under test reads
+ * `localStorage` by name at call time, so it sees whatever is installed.
+ */
+function withFailingStorage(method: "getItem" | "setItem", run: () => void): void {
+  const real = globalThis.localStorage;
+  const fake = {
+    getItem: (k: string) => real.getItem(k),
+    setItem: (k: string, v: string) => real.setItem(k, v),
+    removeItem: (k: string) => real.removeItem(k),
+    clear: () => real.clear(),
+    key: (i: number) => real.key(i),
+    get length() { return real.length; },
+  } as unknown as Storage;
+  (fake as unknown as Record<string, unknown>)[method] = () => {
+    throw new Error(method === "setItem" ? "QuotaExceededError" : "SecurityError");
+  };
+  Object.defineProperty(globalThis, "localStorage", { value: fake, configurable: true, writable: true });
+  try { run(); } finally {
+    Object.defineProperty(globalThis, "localStorage", { value: real, configurable: true, writable: true });
+  }
+}
+
 function deferred() {
   let release!: () => void;
   const wait = new Promise<void>((res) => { release = res; });
@@ -82,23 +116,18 @@ describe("loadAiProvider fails closed", () => {
     // Private browsing, a locked profile, a quota-exceeded read path. The
     // failure mode must be privacy-preserving, not a crash and not a cloud call.
     //
-    // The spy targets localStorage itself. Written against Storage.prototype
-    // it intercepted nothing — this suite runs on the plain-object stub from
-    // test-setup.ts — so it asserted the empty-storage path and would have
-    // passed with the try/catch deleted.
-    const spy = vi.spyOn(localStorage, "getItem").mockImplementation(() => {
-      throw new Error("SecurityError");
+    // Goes through withFailingStorage, not a spy: whether the methods are own
+    // properties or inherited differs between this machine and CI, so a spy on
+    // either target silently intercepts nothing on the other.
+    withFailingStorage("getItem", () => {
+      expect(loadAiProvider()).toBe("local");
     });
-    expect(loadAiProvider()).toBe("local");
-    spy.mockRestore();
   });
 
   it("survives a storage that refuses writes", () => {
-    const spy = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
-      throw new Error("QuotaExceeded");
+    withFailingStorage("setItem", () => {
+      expect(() => setAiProvider("anthropic")).not.toThrow();
     });
-    expect(() => setAiProvider("anthropic")).not.toThrow();
-    spy.mockRestore();
   });
 });
 
