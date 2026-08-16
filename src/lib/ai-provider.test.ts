@@ -81,7 +81,12 @@ describe("loadAiProvider fails closed", () => {
   it("returns local when localStorage itself throws", () => {
     // Private browsing, a locked profile, a quota-exceeded read path. The
     // failure mode must be privacy-preserving, not a crash and not a cloud call.
-    const spy = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    //
+    // The spy targets localStorage itself. Written against Storage.prototype
+    // it intercepted nothing — this suite runs on the plain-object stub from
+    // test-setup.ts — so it asserted the empty-storage path and would have
+    // passed with the try/catch deleted.
+    const spy = vi.spyOn(localStorage, "getItem").mockImplementation(() => {
       throw new Error("SecurityError");
     });
     expect(loadAiProvider()).toBe("local");
@@ -89,7 +94,7 @@ describe("loadAiProvider fails closed", () => {
   });
 
   it("survives a storage that refuses writes", () => {
-    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    const spy = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
       throw new Error("QuotaExceeded");
     });
     expect(() => setAiProvider("anthropic")).not.toThrow();
