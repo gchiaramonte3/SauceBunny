@@ -47,18 +47,54 @@ test("focus cannot leave the welcome dialog", async ({ page }) => {
   // second modal the user cannot see.
   await firstRun(page);
   const escaped: string[] = [];
+  const visited: string[] = [];
   for (let i = 0; i < 20; i++) {
     await page.keyboard.press("Tab");
-    const where = await page.evaluate(() => {
+    const at = await page.evaluate(() => {
       const el = document.activeElement as HTMLElement | null;
-      if (!el || el === document.body) return "body";
-      if (el.closest(".cp-welcome")) return null;
-      return `${el.closest(".cp-ytauth") ? "covered modal" : "page behind"}: `
-        + `${(el.textContent || el.getAttribute("aria-label") || "?").trim().slice(0, 24)}`;
+      if (!el || el === document.body) return { escaped: "body", at: "body" };
+      // The dialog container is a legal focus target on OPEN but must never be
+      // where a Tab lands; naming it separately is what tells a working
+      // one-control trap apart from a frozen one.
+      const isContainer = el.classList.contains("cp-welcome");
+      const label = isContainer
+        ? "container"
+        : `${el.tagName.toLowerCase()} "${
+            (el.textContent || el.getAttribute("aria-label") || "?").trim().slice(0, 24)}"`;
+      if (el.closest(".cp-welcome")) return { escaped: null, at: label };
+      return {
+        escaped: `${el.closest(".cp-ytauth") ? "covered modal" : "page behind"}: ${label}`,
+        at: label,
+      };
     });
-    if (where) escaped.push(where);
+    if (at.escaped) escaped.push(at.escaped);
+    visited.push(at.at);
   }
   expect(escaped, `focus left the welcome dialog:\n${[...new Set(escaped)].join("\n")}`).toEqual([]);
+
+  // And it LANDED ON THE CONTROL rather than resting on the container.
+  //
+  // Be clear about what this can and cannot show, because the first two
+  // attempts at it were wrong. "Focus must MOVE" is the wrong rule here: this
+  // screen has exactly one focusable control, so a correct trap parks on that
+  // control every press and not moving is the right answer. Asserting movement
+  // failed against correct code.
+  //
+  // And the honest limit: because the button carries `autoFocus`, focus STARTS
+  // on it, so a trap frozen solid - every Tab swallowed, nothing reachable -
+  // leaves focus in the same place a working one does. The two are
+  // indistinguishable from outside, and freezing the trap on purpose does not
+  // fail this test. A one-control dialog simply has no observable difference to
+  // catch. That failure mode is covered where it CAN be seen, against the
+  // ~40-control settings dialog in focus-trap.spec.ts.
+  //
+  // What is left is still worth pinning: the stop is a real control, and
+  // `.cp-welcome` (tabIndex={-1}, focusable programmatically but never a tab
+  // stop) is not where Tab comes to rest.
+  const stops = new Set(visited);
+  expect([...stops], "Tab rested on the dialog container, not on a control")
+    .not.toContain("container");
+  expect(stops.size, `visited: ${[...stops].join(" | ")}`).toBe(1);
 });
 
 test("Get started dismisses it, and it stays dismissed", async ({ page }) => {

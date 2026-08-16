@@ -6,14 +6,27 @@ import { tauriMockInit } from "./tauri-mock";
  * Modal focus — WCAG 2.1.2 (No Keyboard Trap, inverted) and 2.4.3 (Focus
  * Order).
  *
- * A modal owes a keyboard user three things: focus moves INTO it when it
- * opens, Tab cannot walk out of it into the page behind, and closing it puts
- * focus back where it came from. Miss the second and Tab silently lands on
- * controls the user cannot see, still covered by a backdrop. Miss the third
- * and focus resets to the top of the document, so the next Tab starts the
- * whole app again from the nav rail.
+ * A modal owes a keyboard user FOUR things: focus moves INTO it when it opens,
+ * Tab REACHES its controls, Tab cannot walk out of it into the page behind,
+ * and closing it puts focus back where it came from. Miss the third and Tab
+ * silently lands on controls the user cannot see, still covered by a backdrop.
+ * Miss the fourth and focus resets to the top of the document, so the next Tab
+ * starts the whole app again from the nav rail.
  *
- * None of that is visible without keyboard testing, which is why it goes
+ * The second is here because it was MISSING, and its absence was not academic.
+ * These tests only asked whether focus escaped, so a trap that swallowed every
+ * Tab and moved focus nowhere at all passed both of them - the dialog would be
+ * open with not one control reachable, and this file would be green. Verified
+ * by freezing the trap on purpose: both tests passed.
+ *
+ * That is also the precise shape `use-modal-focus` fails in. It bails with
+ * `preventDefault()` when its focusable list comes back empty, and that list
+ * was until recently filtered by `offsetParent !== null` - null for every
+ * `position: fixed` element. A dialog built entirely from fixed controls would
+ * have frozen exactly this way. So the walk below now records WHERE focus
+ * lands, not just whether it stayed.
+ *
+ * None of it is visible without keyboard testing, which is why it goes
  * unnoticed: the modal looks perfect and behaves perfectly with a mouse.
  */
 
@@ -36,6 +49,26 @@ async function focusInside(page: Page, selector: string): Promise<boolean> {
     const a = document.activeElement;
     return !!root && !!a && a !== document.body && root.contains(a);
   }, selector);
+}
+
+const MODAL = '.cp-modal, [role="dialog"]';
+
+/**
+ * Press `key` n times, recording where focus lands each time and the first
+ * press that left the modal.
+ */
+async function walk(page: Page, key: string, presses: number) {
+  const visited: string[] = [];
+  const escaped: string[] = [];
+  for (let i = 0; i < presses; i += 1) {
+    await page.keyboard.press(key);
+    if (!(await focusInside(page, MODAL))) {
+      escaped.push(`after ${i + 1} ${key}: ${await activeDescription(page)}`);
+      break;
+    }
+    visited.push(await activeDescription(page));
+  }
+  return { visited, escaped, distinct: new Set(visited).size };
 }
 
 async function activeDescription(page: Page): Promise<string> {
@@ -66,17 +99,26 @@ test("the settings modal takes focus, keeps it, and gives it back", async ({ pag
   // 2. Tab cannot walk out. Twenty-five is past the end of any single
   //    section's controls, so a missing trap shows up rather than being
   //    outrun by a long form.
-  const escaped: string[] = [];
-  for (let i = 0; i < 25; i += 1) {
-    await page.keyboard.press("Tab");
-    if (!(await focusInside(page, ".cp-modal, [role=\"dialog\"]"))) {
-      escaped.push(`after ${i + 1} tabs: ${await activeDescription(page)}`);
-      break;
-    }
-  }
-  expect(escaped, "Tab reached the page behind the modal").toEqual([]);
+  const tab = await walk(page, "Tab", 25);
+  expect(tab.escaped, "Tab reached the page behind the modal").toEqual([]);
 
-  // 3. Closing returns focus to what opened it.
+  // 3. ...and Tab REACHES things. Without this the assertion above is
+  //    satisfied by a trap that swallows every Tab and moves focus nowhere,
+  //    which is a worse dialog than a leaky one: nothing in it is operable.
+  //
+  //    EVERY press must reach a control not seen yet. That is measured, not
+  //    aspirational - the walk currently returns 25 distinct stops from 25
+  //    presses, so focus advances by exactly one control each time and never
+  //    doubles back. It holds because the settings dialog has ~41 focusable
+  //    controls, comfortably more than the 25 presses; strip it below that and
+  //    this fails, correctly, asking for the count to be revisited.
+  expect(
+    tab.distinct,
+    `Tab revisited a control or stopped advancing (${tab.distinct} distinct in 25): ` +
+      `${tab.visited.join(" | ")}`,
+  ).toBe(25);
+
+  // 4. Closing returns focus to what opened it.
   await page.keyboard.press("Escape");
   await expect(page.locator(".cp-modal, [role=\"dialog\"]").first()).toHaveCount(0);
   expect(await activeDescription(page), "focus did not return to the trigger").toBe(trigger);
@@ -90,13 +132,12 @@ test("shift-tab cannot walk backwards out either", async ({ page }) => {
   await gear.click();
   await expect(page.locator(".cp-modal, [role=\"dialog\"]").first()).toBeVisible();
 
-  const escaped: string[] = [];
-  for (let i = 0; i < 15; i += 1) {
-    await page.keyboard.press("Shift+Tab");
-    if (!(await focusInside(page, ".cp-modal, [role=\"dialog\"]"))) {
-      escaped.push(`after ${i + 1} shift-tabs: ${await activeDescription(page)}`);
-      break;
-    }
-  }
-  expect(escaped, "Shift+Tab reached the page behind the modal").toEqual([]);
+  const back = await walk(page, "Shift+Tab", 15);
+  expect(back.escaped, "Shift+Tab reached the page behind the modal").toEqual([]);
+  // Same rule backwards: fifteen presses, fifteen controls, no repeats.
+  expect(
+    back.distinct,
+    `Shift+Tab revisited a control or stopped advancing (${back.distinct} distinct in 15): ` +
+      `${back.visited.join(" | ")}`,
+  ).toBe(15);
 });
