@@ -31,8 +31,36 @@ export function tauriMockInit(expectedBuildId: string): void {
   // "no index yet" (fresh store), and ensure_dir_exists/write_text_to_path
   // (like every other unlisted write command) null-resolve as success — boot
   // never blocks on hydration.
+  /**
+   * OPT-IN file contents, for specs that need a real transcript on screen.
+   *
+   * A spec seeds `localStorage["e2e.files"]` with a `{ path: contents }` map
+   * before boot; `read_text_file_capped` then serves those paths and falls
+   * through to null for everything else. Absent by default, so the 105 specs
+   * that predate this see byte-identical behaviour — the review store still
+   * hydrates as "no index yet", and the transcript tab still shows its empty
+   * state.
+   *
+   * This exists because the transcript viewer is the largest component in the
+   * app and had NO behavioural coverage: it renders twice at once (reader +
+   * drawer keep-alive), which is a whole-app property no component test can
+   * reach, and the reason it went untested was purely that the mock could not
+   * put a transcript on screen.
+   */
+  const seededFiles = (): Record<string, string> => {
+    try { return JSON.parse(localStorage.getItem("e2e.files") ?? "{}"); }
+    catch { return {}; }
+  };
+
   const emptyCacheCategory = { file_count: 0, bytes_total: 0 };
   const table: Record<string, unknown> = {
+    read_text_file_capped: (args: Record<string, unknown>) => {
+      const path = String((args as { path?: string }).path ?? "");
+      const hit = seededFiles()[path];
+      // `undefined` (not null) so an unseeded path keeps the historical
+      // fallthrough exactly: the app reads it as "no file", never as "".
+      return hit === undefined ? null : hit;
+    },
     get_backend_build_id: expectedBuildId,
     get_cache_stats: {
       file_count: 0,
