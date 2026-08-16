@@ -279,3 +279,65 @@ fn short(s: &str) -> String {
     let clipped: String = t.chars().take(300).collect();
     if clipped.len() < t.len() { format!("{clipped}…") } else { clipped }
 }
+
+#[cfg(test)]
+mod cloud_ai_tests {
+    use super::{entry, short};
+
+    /// The provider guard runs BEFORE the Keychain is touched, which is what
+    /// makes it testable here: a CI runner has no Keychain, and these cases
+    /// return without asking for one.
+    #[test]
+    fn only_the_two_known_providers_reach_the_keychain() {
+        // Whitelist, not blacklist — the same shape the frontend's
+        // loadAiProvider uses, and for the same reason: an unrecognised value
+        // must not select a cloud path. A typo here would mean a key stored
+        // under an account nothing reads back.
+        for bad in ["", "Anthropic", "openai ", "gemini", "local", "../../etc", "anthropic\0"] {
+            let err = entry(bad).unwrap_err();
+            let msg = format!("{err:?}");
+            assert!(
+                msg.contains("Unknown AI provider"),
+                "{bad:?} was not rejected by the provider guard: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn short_leaves_a_brief_body_alone() {
+        assert_eq!(short("  rate limited  "), "rate limited");
+        assert_eq!(short(""), "");
+    }
+
+    #[test]
+    fn short_marks_a_clipped_body() {
+        let long = "x".repeat(400);
+        let out = short(&long);
+        assert!(out.ends_with('…'), "a clipped body must say so");
+        assert_eq!(out.chars().count(), 301, "300 chars plus the ellipsis");
+    }
+
+    #[test]
+    fn short_never_splits_a_character() {
+        // This embeds a PROVIDER's error body in a message shown to the user.
+        // Bodies are UTF-8 from a third party, and byte-slicing one mid
+        // codepoint panics — turning "the API said no" into a crash while
+        // reporting it. `chars().take` is what prevents that; this pins it.
+        for filler in ["é", "日", "🎬", "👍🏽"] {
+            let body = filler.repeat(400);
+            let out = short(&body);
+            assert!(out.chars().count() <= 301, "{filler} produced {}", out.chars().count());
+            assert!(out.ends_with('…'), "{filler} should have been clipped");
+            // Round-tripping proves no partial codepoint survived.
+            assert_eq!(String::from_utf8(out.clone().into_bytes()).unwrap(), out);
+        }
+    }
+
+    #[test]
+    fn short_is_exact_at_the_boundary() {
+        let exact: String = "🎬".repeat(300);
+        assert_eq!(short(&exact), exact, "300 chars is not 'too long'");
+        let over: String = "🎬".repeat(301);
+        assert!(short(&over).ends_with('…'));
+    }
+}
