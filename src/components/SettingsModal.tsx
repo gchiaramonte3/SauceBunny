@@ -1765,6 +1765,8 @@ function CacheControls({ excludePaths, capGb, clearOnQuit, onRetentionChange }: 
   const [stats, setStats] = useState<CacheStats | null>(null);
   const [cachePath, setCachePath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Why the clear-on-quit switch snapped back, if it did. */
+  const [quitErr, setQuitErr] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -1829,10 +1831,19 @@ function CacheControls({ excludePaths, capGb, clearOnQuit, onRetentionChange }: 
 
   const onQuitToggle = (next: boolean) => {
     onRetentionChange({ clearCacheOnQuit: next });
+    setQuitErr(null);
     // The marker file must exist before quit; localStorage alone is
     // invisible to the Rust exit handler (the webview is gone by then).
     invoke("set_clear_cache_on_quit", { enabled: next }).catch((err) => {
+      // The marker IS the setting. Without it the exit handler finds nothing
+      // and keeps the cache, so leaving the switch on would be the UI telling
+      // the user their downloads get cleared when they will not - and this is
+      // the setting people reach for precisely because they would rather not
+      // leave media on disk. Put it back where it really is, and say why:
+      // console.warn alone is invisible in a packaged app.
       console.warn("set_clear_cache_on_quit failed", err);
+      onRetentionChange({ clearCacheOnQuit: !next });
+      setQuitErr(formatError(err));
     });
   };
 
@@ -1898,6 +1909,11 @@ function CacheControls({ excludePaths, capGb, clearOnQuit, onRetentionChange }: 
             />
           </div>
         </div>
+        {quitErr && (
+          <span className="cp-cache-ret-note cp-cache-ret-err" role="alert">
+            Clear on quit could not be turned on: {quitErr}
+          </span>
+        )}
         <span className="cp-cache-ret-note">
           With a size limit, the oldest files are removed first; whatever is on screen stays.
           Cached downloads include videos fetched with your browser sign-in, so set a limit or

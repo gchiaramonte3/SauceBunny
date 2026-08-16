@@ -1004,6 +1004,10 @@
   max-width: 360px;
   text-align: right;
 }
+/* The failure variant of the note above: same size and spacing, destructive
+   colour. It appears when clear-on-quit could not be armed, which the switch
+   snapping back also signals - this says why. */
+.cp-cache-ret-err { color: var(--color-destructive); }
 .cp-cache-path {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
