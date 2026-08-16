@@ -216,6 +216,31 @@ export function searchTruncationNote(r: LibrarySearchResult): string | null {
   return `Showing ${parts.join(" and ")}. Narrow the search to see the rest.`;
 }
 
+/**
+ * The note for folders the scan stopped short of, or null when it reached
+ * everything.
+ *
+ * `scan_library_folder` descends LIBRARY_SCAN_DEPTH levels and omits whatever
+ * is below - it does not leave a stub, so a folder whose contents were never
+ * read looks exactly like a folder that is empty. Three levels is shallow for
+ * this app: Footage / Project / Shoot day / Camera A puts the clips on level
+ * four, and the library would show that folder as having nothing in it.
+ *
+ * Same shape as searchTruncationNote: say what was left out, and say what to
+ * do about it.
+ */
+export function unscannedDepthNote(trees: readonly LibraryFolder[]): string | null {
+  let n = 0;
+  const walk = (f: LibraryFolder) => {
+    if (f.deeper) n += 1;
+    for (const sub of f.folders) walk(sub);
+  };
+  for (const t of trees) walk(t);
+  if (n === 0) return null;
+  const what = n === 1 ? "One folder goes" : `${n} folders go`;
+  return `${what} deeper than this view scans. Add the inner folder as a library root to see what is inside.`;
+}
+
 /** "820 KB" / "34 MB" / "1.2 GB" — one significant decimal under 10. */
 export function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "";

@@ -4,4 +4,17 @@ import type { LibraryItem } from "./LibraryItem";
 /**
  * One folder node of the scanned tree, root included.
  */
-export type LibraryFolder = { name: string, path: string, folders: Array<LibraryFolder>, items: Array<LibraryItem>, };
+export type LibraryFolder = { name: string, path: string, folders: Array<LibraryFolder>, items: Array<LibraryItem>, 
+/**
+ * True when this folder has subfolders the scan did NOT descend into,
+ * because it had run out of depth.
+ *
+ * The scan stops at LIBRARY_SCAN_DEPTH levels and, until now, simply
+ * omitted whatever was below - "omit, don't stub", with nothing said to
+ * anyone. Three levels is shallow for this app in particular: a
+ * perfectly ordinary Footage / Project / Shoot day / Camera A layout
+ * puts the clips on level four, so the library looked empty and correct
+ * at the same time. Reporting it is the same fix the search truncation
+ * note got: say what was left out, rather than quietly leaving it out.
+ */
+deeper: boolean, };

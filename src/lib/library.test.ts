@@ -10,6 +10,7 @@ import {
   sanitizeLibraryRoots,
   searchLibrary,
   searchTruncationNote,
+  unscannedDepthNote,
   sortLibraryItems,
 } from "./library";
 
@@ -22,8 +23,9 @@ function folder(
   items: LibraryItem[] = [],
   folders: LibraryFolder[] = [],
   path = `/lib/${name}`,
+  deeper = false,
 ): LibraryFolder {
-  return { name, path, folders, items };
+  return { name, path, folders, items, deeper };
 }
 
 describe("sanitizeLibraryRoots", () => {
@@ -358,5 +360,33 @@ describe("searchTruncationNote", () => {
   it("tells the reader what to do about it", () => {
     // A count with no next step says "you are missing results" and stops.
     expect(searchTruncationNote(r(30, 47, 3, 3))).toContain("Narrow the search");
+  });
+});
+
+describe("unscannedDepthNote", () => {
+  it("says nothing when the scan reached everything", () => {
+    expect(unscannedDepthNote([folder("root", [], [folder("sub")])])).toBe(null);
+    expect(unscannedDepthNote([])).toBe(null);
+  });
+
+  it("reports a folder the scan stopped short of", () => {
+    // Without this the folder renders as empty, which is indistinguishable
+    // from a folder that really has nothing in it.
+    const deep = folder("Camera A", [], [], "/lib/Camera A", true);
+    const note = unscannedDepthNote([folder("Footage", [], [deep])]);
+    expect(note).toContain("One folder goes");
+    expect(note).toContain("library root");
+  });
+
+  it("counts them, however deep they are nested", () => {
+    const a = folder("A", [], [], "/lib/A", true);
+    const b = folder("B", [], [], "/lib/B", true);
+    const note = unscannedDepthNote([folder("root", [], [a, folder("mid", [], [b])])]);
+    expect(note).toContain("2 folders go");
+  });
+
+  it("tells the reader what to do about it", () => {
+    const deep = folder("X", [], [], "/lib/X", true);
+    expect(unscannedDepthNote([deep])).toContain("Add the inner folder");
   });
 });

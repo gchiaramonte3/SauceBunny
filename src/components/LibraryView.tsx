@@ -20,6 +20,7 @@ import {
   libraryPosterPaths,
   searchLibrary,
   searchTruncationNote,
+  unscannedDepthNote,
   setChosenPoster,
   type LibraryCrumb,
 } from "../lib/library";
@@ -142,6 +143,9 @@ export function LibraryView({
   );
   const results = useMemo(() => searchLibrary(trees, needle), [trees, needle]);
   const truncationNote = searchTruncationNote(results);
+  // Folders the scan stopped short of look identical to empty ones,
+  // so say so rather than letting the library read as complete.
+  const depthNote = unscannedDepthNote(trees);
   const searching = needle.trim() !== "";
   // Every transcript ON DISK, reconciled with history — not just the 50 the
   // localStorage history caps at. Re-scans when Home becomes active or a new
@@ -414,6 +418,7 @@ export function LibraryView({
             onPasteUrl={onSwitchToClip}
             montageActive={homeVisible}
           />
+          {depthNote && <p className="cp-lib-note">{depthNote}</p>}
           <div className="cp-lib-rows">
             {/* Ambient montage of already-cached posters — beneath the SHELVES
                 only, never behind the hero (the hero owns its art and must

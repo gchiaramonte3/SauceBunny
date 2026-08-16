@@ -62,6 +62,18 @@ pub struct LibraryFolder {
     pub path: String,
     pub folders: Vec<LibraryFolder>,
     pub items: Vec<LibraryItem>,
+    /// True when this folder has subfolders the scan did NOT descend into,
+    /// because it had run out of depth.
+    ///
+    /// The scan stops at LIBRARY_SCAN_DEPTH levels and, until now, simply
+    /// omitted whatever was below - "omit, don't stub", with nothing said to
+    /// anyone. Three levels is shallow for this app in particular: a
+    /// perfectly ordinary Footage / Project / Shoot day / Camera A layout
+    /// puts the clips on level four, so the library looked empty and correct
+    /// at the same time. Reporting it is the same fix the search truncation
+    /// note got: say what was left out, rather than quietly leaving it out.
+    #[serde(default)]
+    pub deeper: bool,
 }
 
 /// `Some(kind)` when the file's extension (lowercased — same semantics as
@@ -111,6 +123,7 @@ fn scan_dir(dir: &Path, depth_remaining: u32) -> Option<LibraryFolder> {
 
     let mut folders: Vec<LibraryFolder> = Vec::new();
     let mut items: Vec<LibraryItem> = Vec::new();
+    let mut deeper = false;
 
     for entry in entries.flatten() {
         let entry_name_os = entry.file_name();
@@ -134,7 +147,10 @@ fn scan_dir(dir: &Path, depth_remaining: u32) -> Option<LibraryFolder> {
                 continue; // package-like bundle
             }
             if depth_remaining == 0 {
-                continue; // depth limit reached — omit, don't stub
+                // Omit, but REMEMBER: the caller reports this rather than
+                // letting the folder look empty.
+                deeper = true;
+                continue;
             }
             // scan_dir yields None for an unreadable / non-UTF-8 subfolder;
             // extend() with the Option then adds nothing (no empty stub).
@@ -181,6 +197,7 @@ fn scan_dir(dir: &Path, depth_remaining: u32) -> Option<LibraryFolder> {
     Some(LibraryFolder {
         name,
         path: dir_path.to_string(),
+        deeper,
         folders,
         items,
     })
@@ -664,6 +681,23 @@ mod tests {
         let flat = scan_library_root(tree.path().to_str().unwrap(), 0).unwrap();
         assert_eq!(item_names(&flat), ["root.mp4"]);
         assert!(flat.folders.is_empty());
+    }
+
+    #[test]
+    fn scan_flags_the_folder_it_stopped_at() {
+        // The depth limit omits what is below, so a folder whose contents were
+        // never read renders exactly like an empty one. The flag is the only
+        // thing that tells them apart.
+        let t = TempTree::new("deeper");
+        std::fs::create_dir_all(t.path().join("l1/l2/l3")).unwrap();
+        std::fs::write(t.path().join("l1/l2/l3/clip.mp4"), b"x").unwrap();
+        let root = scan_library_root(t.path().to_str().unwrap(), 2).unwrap();
+        let l1 = &root.folders[0];
+        let l2 = &l1.folders[0];
+        assert!(!root.deeper, "the root itself was scanned");
+        assert!(!l1.deeper, "l1 still had depth to spend");
+        assert!(l2.deeper, "l2 hit the limit and dropped l3 without saying so");
+        assert!(l2.folders.is_empty());
     }
 
     #[test]
