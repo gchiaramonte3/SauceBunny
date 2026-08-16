@@ -352,9 +352,9 @@ export function Sidebar(props: Props) {
             </div>
           </div>
           <div className="cp-meta">
-            <h2 style={{ color: "var(--fg-4)" }}>Waiting for source…</h2>
+            <h2 className="cp-meta-empty-title">Waiting for source…</h2>
             <div className="cp-meta-row">
-              <span style={{ color: "var(--fg-5)" }}>Paste a URL above to begin</span>
+              <span className="cp-meta-empty-hint">Paste a URL above to begin</span>
             </div>
           </div>
         </div>

@@ -110,7 +110,8 @@
 .cp-thumb-empty-label {
   font-family: var(--font-ui);
   font-size: 10px;
-  color: var(--fg-5);
+  /* Status copy, so fg-4 or up per tokens.css. fg-5 measured 4.09:1. */
+  color: var(--fg-4);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -648,3 +649,9 @@
 @media (prefers-reduced-motion: reduce) {
   .cp-recent-chev { transition: none; }
 }
+
+/* Empty-state copy in the meta block. These were inline styles on the
+   elements, which the project forbids, and the hint was on fg-5 at 3.99:1 -
+   instructional text, which tokens.css reserves fg-4 or up for. */
+.cp-meta-empty-title { color: var(--fg-4); }
+.cp-meta-empty-hint { color: var(--fg-4); }

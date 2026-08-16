@@ -101,7 +101,10 @@
   font-weight: 800;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--fg-4);
+  /* fg-3: fg-4 clears 4.5:1 on the page background but only reaches 4.45:1 on
+     this raised card, because the card is lighter than bg-0. A title should
+     outrank body copy regardless. */
+  color: var(--fg-3);
 }
 
 /* ── Fields — one style everywhere. Focus comes from the house
@@ -468,7 +471,11 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-5);
+  /* fg-4, not fg-5: these are the step names ("Devices", "Ready"), which
+     tokens.css reserves fg-4 or up for. fg-5 measured 4.09:1 here, under the
+     4.5:1 floor. The SEPARATOR below stays fg-5 - a separator really is
+     decorative, which is the distinction the rule is drawing. */
+  color: var(--fg-4);
 }
 .cp-gr-trail-step { display: inline-flex; align-items: center; gap: 6px; }
 .cp-gr-trail-step.here { color: var(--fg-1); }
