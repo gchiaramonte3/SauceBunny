@@ -98,3 +98,35 @@ if (typeof document !== "undefined") {
     });
   }
 }
+
+/**
+ * Make one localStorage method throw, for tests that cover a failure path.
+ *
+ * Lives here because it exists entirely to work around the quirk documented
+ * above. Which object owns the methods differs by machine: with the stub
+ * installed they are OWN properties, so a `Storage.prototype` spy intercepts
+ * nothing; where the real Storage is present they are INHERITED, so an
+ * instance spy intercepts nothing. Each spy passes silently on the machine it
+ * is wrong for — one such test was green locally and red in CI.
+ *
+ * Swapping the global sidesteps the question: modules read `localStorage` by
+ * name at call time, so they see whatever is installed.
+ */
+export function withFailingStorage(method: "getItem" | "setItem", run: () => void): void {
+  const real = globalThis.localStorage;
+  const fake = {
+    getItem: (k: string) => real.getItem(k),
+    setItem: (k: string, v: string) => real.setItem(k, v),
+    removeItem: (k: string) => real.removeItem(k),
+    clear: () => real.clear(),
+    key: (i: number) => real.key(i),
+    get length() { return real.length; },
+  } as unknown as Storage;
+  (fake as unknown as Record<string, unknown>)[method] = () => {
+    throw new Error(method === "setItem" ? "QuotaExceededError" : "SecurityError");
+  };
+  Object.defineProperty(globalThis, "localStorage", { value: fake, configurable: true, writable: true });
+  try { run(); } finally {
+    Object.defineProperty(globalThis, "localStorage", { value: real, configurable: true, writable: true });
+  }
+}
