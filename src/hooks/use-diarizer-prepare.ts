@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { useTauriListeners } from "./use-tauri-listeners";
 import type { DoneEvent } from "../bindings/DoneEvent";
 import { formatError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
@@ -50,48 +50,33 @@ export function useDiarizerPrepare({ onReady, notify }: UseDiarizerPrepareOption
   useEffect(() => { onReadyRef.current = onReady; }, [onReady]);
   useEffect(() => { notifyRef.current = notify; }, [notify]);
 
-  useEffect(() => {
-    let mounted = true;
-    const unlistens: Array<() => void> = [];
-    (async () => {
-      // Progress carries a per-phase line we do not surface yet; the channel is
-      // still subscribed so the payload shape stays exercised for a future
-      // indeterminate-bar pulse.
-      const progress = await listen<{ job_id: string; line: string }>(
-        "diarize-prepare-progress",
-        () => {},
-      );
-      const done = await listen<DoneEvent>("diarize-prepare-done", (e) => {
-        if (!mounted) return;
-        // No job id yet means we never started this one — but a payload with a
-        // DIFFERENT id is somebody else's run and must not resolve ours.
-        if (jobIdRef.current && e.payload.job_id !== jobIdRef.current) return;
-        if (e.payload.success) {
-          setState("done");
-          setError(null);
-          onReadyRef.current();
-          notifyRef.current(
-            "success",
-            "Speaker models ready",
-            "FluidAudio cached. Future diarizations skip the download step.",
-          );
-        } else if (e.payload.error === "Cancelled") {
-          // A cancel is not a failure: back to idle with nothing to report.
-          setState("idle");
-          setError(null);
-        } else {
-          setState("error");
-          setError(e.payload.error ?? "Model preparation failed");
-        }
+  useTauriListeners((on) => {
+    // Progress carries a per-phase line we do not surface yet; the channel is
+    // still subscribed so the payload shape stays exercised for a future
+    // indeterminate-bar pulse.
+    on<{ job_id: string; line: string }>("diarize-prepare-progress", () => {});
+    on<DoneEvent>("diarize-prepare-done", (payload) => {
+      // No job id yet means we never started this one — but a payload with a
+      // DIFFERENT id is somebody else's run and must not resolve ours.
+      if (jobIdRef.current && payload.job_id !== jobIdRef.current) return;
+      if (payload.success) {
+        setState("done");
+        setError(null);
+        onReadyRef.current();
+        notifyRef.current(
+          "success",
+          "Speaker models ready",
+          "FluidAudio cached. Future diarizations skip the download step.",
+        );
+      } else if (payload.error === "Cancelled") {
+        // A cancel is not a failure: back to idle with nothing to report.
+        setState("idle");
+        setError(null);
+      } else {
+        setState("error");
+        setError(payload.error ?? "Model preparation failed");
+      }
       });
-      if (!mounted) { progress(); done(); return; }
-      unlistens.push(progress, done);
-    })();
-    return () => {
-      mounted = false;
-      unlistens.forEach((u) => u());
-      unlistens.length = 0;
-    };
   }, []);
 
   const prepare = useCallback(async () => {

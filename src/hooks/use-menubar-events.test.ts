@@ -19,13 +19,13 @@ import { useMenubarEvents } from "./use-menubar-events";
  */
 
 const h = vi.hoisted(() => ({
-  handlers: new Map<string, () => void>(),
+  handlers: new Map<string, (e: { payload: unknown }) => void>(),
   unlistened: 0,
   invoked: [] as Array<{ cmd: string; args: unknown }>,
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: async (name: string, cb: () => void) => {
+  listen: async (name: string, cb: (e: { payload: unknown }) => void) => {
     h.handlers.set(name, cb);
     return () => { h.unlistened += 1; };
   },
@@ -63,7 +63,12 @@ async function mount(over: Record<string, unknown> = {}) {
   await waitFor(() => expect(h.handlers.size).toBe(10));
   return { d, ...r };
 }
-const click = (id: string) => h.handlers.get(`menu:${id}`)!();
+// Tauri hands a handler an EVENT object, not bare args. The first version of
+// this helper called the listener with nothing, which worked only because the
+// hook's own listener ignored its argument — and broke the moment the shared
+// primitive started reading `e.payload`. Emulating the real contract is the
+// point of a mock.
+const click = (id: string) => h.handlers.get(`menu:${id}`)!({ payload: null });
 
 beforeEach(() => { h.handlers.clear(); h.unlistened = 0; h.invoked.length = 0; });
 afterEach(() => vi.clearAllMocks());

@@ -1,5 +1,5 @@
-import { useEffect, type Dispatch, type SetStateAction, type MutableRefObject } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { type Dispatch, type SetStateAction, type MutableRefObject } from "react";
+import { useTauriListeners } from "./use-tauri-listeners";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { checkForUpdate } from "../lib/update-check";
@@ -58,20 +58,13 @@ export function useMenubarEvents(d: UseMenubarEventsDeps): void {
     setLogsOpen, setPaletteOpen, setShortcutsOpen, sessionRoomRef, activeViewRef,
   } = d;
 
-  useEffect(() => {
-      let mounted = true;
-      const unlistens: Array<() => void> = [];
-      (async () => {
-        const bind = async (id: string, fn: () => void) => {
-          const off = await listen(`menu:${id}`, () => { if (mounted) fn(); });
-          // Cleanup can run mid-Promise.all (this effect re-attaches whenever a
-          // handler dep changes): it iterates the array as-is, so a bind that
-          // resolves after that must release itself instead of pushing into a
-          // list nobody will read again.
-          if (!mounted) { off(); return; }
-          unlistens.push(off);
-        };
-        await Promise.all([
+  useTauriListeners((on) => {
+    // The self-release this used to spell out by hand now lives in
+    // use-tauri-listeners: a bind resolving after teardown releases itself
+    // rather than joining a list nobody will read. That matters more here
+    // than anywhere else, because this hook genuinely re-subscribes.
+    const bind = (id: string, fn: () => void) => on(`menu:${id}`, () => fn());
+    [
           bind("open_url_bar",        () => {
             // In a live room the URL bar IS the room's source bar - focus that
             // and stay put. Ejecting a presenter to the Clip view mid-session
@@ -128,9 +121,7 @@ export function useMenubarEvents(d: UseMenubarEventsDeps): void {
           bind("toggle_queue",        () => setQueueOpenChoice((p) => !p)),
           bind("show_command_palette", () => setPaletteOpen(true)),
           bind("show_shortcuts",       () => setShortcutsOpen(true)),
-        ]);
-      })();
-      return () => { mounted = false; unlistens.forEach((u) => u()); };
+    ];
       }, [
     handleImportFile, handleImportTranscript, transcriptLibrary, pushNotification,
     setActiveView, setQueueOpenChoice, setSettingsOpen, setSettingsInitialTab,

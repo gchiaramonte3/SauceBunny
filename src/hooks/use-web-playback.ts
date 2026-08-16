@@ -126,7 +126,12 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
   // ── Persistent listeners for OUR download job. They filter on our own
   //    jobId ref, so they coexist with App's local-file playback-prep
   //    listeners (which filter on the local prep job id). ──
-  useEffect(() => {
+    // NOT on useTauriListeners, and deliberately so for now. This hook has no
+  // tests, and every other migration onto that primitive was safe only because
+  // 156 existing tests could prove it behaviour-neutral. Migrating the one
+  // uncovered hook on the strength of "it looks the same" is how a refactor
+  // with a good record acquires its first regression. It needs tests first.
+useEffect(() => {
     let mounted = true;
     const unlistens: Array<() => void> = [];
     void (async () => {
