@@ -54,7 +54,7 @@ async function overflowing(page: Page) {
   return page.evaluate(() => {
     const out: string[] = [];
     for (const el of document.querySelectorAll<HTMLElement>("*")) {
-      if (el.offsetParent === null || el.closest("[inert]")) continue;
+      if (!el.checkVisibility() || el.closest("[inert]")) continue;
       const b = el.getBoundingClientRect();
       if (b.width > 0 && b.right > window.innerWidth + 1) {
         out.push(`<${el.tagName.toLowerCase()} class="${(el.getAttribute("class") ?? "").slice(0, 34)}"> right=${Math.round(b.right)}`);

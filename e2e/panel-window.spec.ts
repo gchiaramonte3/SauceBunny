@@ -60,7 +60,7 @@ test("every control in the panel has an accessible name", async ({ page }) => {
     const out: string[] = [];
     let seen = 0;
     for (const el of document.querySelectorAll<HTMLElement>("button,input,select,textarea")) {
-      if (el.offsetParent === null) continue;
+      if (!el.checkVisibility()) continue;
       seen++;
       // Resolve in the platform's order, not textContent-first: aria-label
       // WINS over the text inside. That distinction matters here - the close

@@ -116,7 +116,7 @@ for (const label of TRIGGERS) {
 
     const appeared = await page.evaluate((attr) =>
       Array.from(document.querySelectorAll<HTMLElement>("button, input, select, textarea, [tabindex]:not([tabindex='-1'])"))
-        .filter((e) => !e.hasAttribute(attr) && e.offsetParent !== null)
+        .filter((e) => !e.hasAttribute(attr) && e.checkVisibility())
         .map((e) => (e.getAttribute("aria-label") || e.textContent || e.tagName).trim().slice(0, 40)), SEEN);
 
     // An EMPTY popover has nothing to tab to, and the notifications panel is

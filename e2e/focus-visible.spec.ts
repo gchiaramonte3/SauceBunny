@@ -55,7 +55,7 @@ test("every tab stop shows a visible focus indicator", async ({ page }) => {
     w.__base = new Map();
     let i = 0;
     for (const el of document.querySelectorAll<HTMLElement>("*")) {
-      if (el.offsetParent === null) continue;
+      if (!el.checkVisibility()) continue;
       el.setAttribute("data-fv", String(i));
       w.__base.set(String(i), w.__key(el));
       i++;

@@ -5,7 +5,7 @@ import { cleanup, render } from "@testing-library/react";
 import { useModalFocus } from "./use-modal-focus";
 
 /**
- * jsdom does no layout, so `offsetParent` is always null and the hook's
+ * jsdom does no layout, so `getClientRects()` is always empty and the hook's
  * "skip hidden controls" filter drops every candidate - the trap then takes
  * its empty-dialog path and focus never moves.
  *
@@ -13,12 +13,12 @@ import { useModalFocus } from "./use-modal-focus";
  * that costs: the VISIBILITY filter is no longer exercised by this file. It is
  * not what these tests are for - they check the wrap logic - and the e2e runs
  * the same hook in a real browser with real layout, where a hidden control
- * genuinely has no offsetParent.
+ * genuinely has no box.
  */
-Object.defineProperty(HTMLElement.prototype, "offsetParent", {
+Object.defineProperty(HTMLElement.prototype, "getClientRects", {
   configurable: true,
-  get(this: HTMLElement) {
-    return this.parentElement;
+  value(this: HTMLElement) {
+    return this.parentElement ? [new DOMRect(0, 0, 10, 10)] : [];
   },
 });
 

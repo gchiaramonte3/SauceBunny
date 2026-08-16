@@ -29,8 +29,15 @@ export function useModalFocus(open: boolean, ref: RefObject<HTMLElement | null>)
       if (e.key !== "Tab") return;
       const el = ref.current;
       if (!el) return;
+      // getClientRects(), not `offsetParent !== null`. The two agree on what
+      // this filter is FOR - a `display: none` control is skipped either way -
+      // but offsetParent is also null for every `position: fixed` element, so
+      // that form would drop a fixed control out of the tab ring and make it
+      // unreachable by keyboard inside its own dialog. No dialog has one today;
+      // a sticky action bar would be the obvious way to acquire one. (Not
+      // checkVisibility(): that needs Safari 17.4 and the app supports 14.0.)
       const nodes = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE))
-        .filter((n) => n.offsetParent !== null);
+        .filter((n) => n.getClientRects().length > 0);
       if (nodes.length === 0) { e.preventDefault(); return; }
       const first = nodes[0];
       const last = nodes[nodes.length - 1];

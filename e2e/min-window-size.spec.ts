@@ -55,7 +55,7 @@ async function clipped(page: Page) {
     const out: string[] = [];
     let checked = 0;
     for (const el of document.querySelectorAll<HTMLElement>("*")) {
-      if (el.offsetParent === null) continue;
+      if (!el.checkVisibility()) continue;
       if (el.closest("[inert]")) continue; // a closed panel, parked off-canvas
       const r = el.getBoundingClientRect();
       if (r.width === 0 && r.height === 0) continue;

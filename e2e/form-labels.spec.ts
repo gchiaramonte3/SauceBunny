@@ -31,7 +31,7 @@ async function unlabelledIn(page: Page): Promise<{ found: Unlabelled[]; total: n
     const found: Unlabelled[] = [];
     let total = 0;
     for (const el of document.querySelectorAll<HTMLElement>("input,select,textarea")) {
-      if (el.offsetParent === null) continue;
+      if (!el.checkVisibility()) continue;
       const type = (el as HTMLInputElement).type || el.tagName.toLowerCase();
       if (type === "hidden") continue;
       total++;
