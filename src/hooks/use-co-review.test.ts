@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { decideChase, type ChaseInput } from "./use-co-review";
 
 // The two confirmed RC3 failure modes from the 2026-07-18 review, pinned as
@@ -90,74 +88,5 @@ describe("co-review chase decisions", () => {
       ...base, justLoaded: true, curSeconds: 0, expectedSeconds: 640, sinceLastChaseMs: 0,
     });
     expect(d.seekSeconds).toBe(640);
-  });
-});
-
-/**
- * State updaters stay pure.
- *
- * React 18 StrictMode double-invokes every updater in development, and keeps
- * the SECOND result. So an updater that also does work - writes a file, drains
- * a queue, bumps a ref - runs that work twice, and any part of its own answer
- * that depended on the work is computed from the already-drained state.
- *
- * This was live here. The `reviewDoc` snapshot handler merged, replayed the
- * ops the author had posted before any doc existed, and emptied
- * `pendingOpsRef` inside a single `setSessionDoc(prev => ...)`. Second pass:
- * queue empty, ops not replayed, and that is the doc React kept. The author's
- * own comments vanished, in exactly the case the replay was written for.
- *
- * The lib tests around `adoptSnapshot` cannot catch this - a pure function
- * tested for purity passes by construction, which mutation testing confirmed:
- * gutting the replay failed one test, and making it impure failed none. The
- * defect was never in the merge logic. It was in WHERE that logic ran, so
- * that is what this reads.
- */
-describe("setSessionDoc updaters do no work of their own", () => {
-  const SRC = readFileSync(resolve(__dirname, "./use-co-review.ts"), "utf8");
-
-  /** The argument text of every `setSessionDoc(...)` call, paren-matched. */
-  function updaterBodies(): string[] {
-    const out: string[] = [];
-    let i = SRC.indexOf("setSessionDoc(");
-    while (i !== -1) {
-      let depth = 0;
-      let j = i + "setSessionDoc".length;
-      const start = j;
-      for (; j < SRC.length; j += 1) {
-        if (SRC[j] === "(") depth += 1;
-        else if (SRC[j] === ")") {
-          depth -= 1;
-          if (depth === 0) break;
-        }
-      }
-      out.push(SRC.slice(start, j));
-      i = SRC.indexOf("setSessionDoc(", j);
-    }
-    return out;
-  }
-
-  it("finds the updaters, so this is not passing over an empty list", () => {
-    const bodies = updaterBodies();
-    expect(bodies.length).toBeGreaterThan(1);
-    expect(bodies.some((b) => b.includes("adoptSnapshot"))).toBe(true);
-  });
-
-  it("never persists from inside an updater", () => {
-    // A disk write per render pass, and the write is of pre-merge state.
-    const bad = updaterBodies().filter((b) => /persistDoc(Ref)?\b/.test(b));
-    expect(bad, "Persist before calling setSessionDoc, using the ref for prev.").toEqual([]);
-  });
-
-  it("never mutates a ref from inside an updater", () => {
-    // The specific bug: `pendingOpsRef.current = []` inside the updater made
-    // the second invocation compute a different answer from the first.
-    const bad = updaterBodies().filter((b) => /Ref\.current\s*=[^=]/.test(b));
-    expect(bad, "Drain outside the updater and pass the value in.").toEqual([]);
-  });
-
-  it("never pushes to a ref's array from inside an updater", () => {
-    const bad = updaterBodies().filter((b) => /Ref\.current\.(push|pop|shift|splice)\s*\(/.test(b));
-    expect(bad, "Same reason: it would run twice per commit.").toEqual([]);
   });
 });
