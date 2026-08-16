@@ -283,6 +283,28 @@ When adding a new cross-window interaction, use this event pattern. Do not intro
 | Review docs | `~/Documents/Sauce Bunny/Reviews/` — one `<slug>-<hash>.json` per source + `index.json`; hydrated at boot, debounced write-through (`src/lib/review-store.ts`); legacy localStorage docs migrated out on first boot |
 | User prefs | `localStorage` namespaced `saucebunny.*` (incl. review history/fingerprint index/reviewer identity — only review DOCS moved to files). **Nine keys are still `cp-*`** — `cp-defaults-v2`, `cp-aspect`, `cp-captions-on`, `cp-folder`, `cp-logs-open`, `cp-muted`, `cp-recents`, `cp-sidebar-sections`, `cp-volume` — the same ClipPull carryover as the CSS classes. There were TWO legacy prefixes: `clippull.*` got a real migration (`lib/migrate-storage.ts`, still running at boot) and `cp-*` never did. They are not being renamed: renaming a key discards the user's value unless a migration copies it first, and `cp-defaults-v2` is the whole settings blob, so getting it wrong resets every preference on every existing install in exchange for a tidier string nobody sees. NEW prefs use `saucebunny.`; `src/lib/storage-keys-contract.test.ts` pins the nine and fails on a tenth. |
 
+**What grows without bound in `localStorage`, and why none of it is capped
+yet.** Three key families take one entry per source: `saucebunny.chapters.<key>`
+(a `{time,title}` list, ~1 KB for a 15-chapter video), `saucebunny.speakerNames.<path>`
+(~250 B), and — the concentrated one — `saucebunny.speakerNames.fpindex`, a
+SINGLE key holding every fingerprint→names mapping the rename bridge depends on.
+Nothing evicts from any of them, and nothing removes an entry when a transcript
+leaves the history.
+
+Measured rather than feared: 500 transcribed sources is roughly 875 KB across
+all three, well inside the quota. The failure mode when it does fill is the
+part worth knowing — `saveJson` and `saveIndex` both swallow a quota error, so
+the app keeps working and new speaker renames simply stop surviving a file
+move, with no signal.
+
+It is uncapped on purpose rather than by oversight. Every fix costs something a
+user would notice: evicting fpindex entries throws away exactly the names the
+bridge exists to preserve, and there is no timestamp in that index to evict BY,
+so an LRU needs a schema change and a migration. Clearing on history-removal
+sounds obvious and is not — the bridge is what restores names when the same
+source is re-transcribed later. Worth doing deliberately, with a policy chosen,
+rather than picked up as tidying.
+
 Do not change these paths without updating both the Rust backend and the frontend.
 
 **A key derived from a filename must be NFC-normalised.** macOS stores
