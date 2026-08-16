@@ -32,6 +32,7 @@ import { useStreamKeep } from "./use-stream-keep";
 import { acceptTransport, createClockEstimator, expectedPosition } from "../lib/session-clock";
 import {
   loadReview, saveReview, ensureVersion, applyReviewOp, attributeReviewOp, mergeReviewDoc,
+  adoptSnapshot,
   resolveByFingerprint, linkFingerprint, sanitizeDocForWire,
   commentMarkers as reviewMarkersOf, annotationsOf,
   loadReviewer, reviewerColorFor, initialsOf,
@@ -491,17 +492,20 @@ export function useCoReview({
         // then a clean replace rather than a silent contamination.
         try {
           const incoming = JSON.parse(m.doc) as ReviewDoc;
-          setSessionDoc((prev) => {
-            if (prev && prev.sourceKey !== incoming.sourceKey) persistDocRef.current(prev);
-            let next = prev ? mergeReviewDoc(prev, incoming) : incoming;
-            // First adoption: replay anything the author posted while the doc
-            // was still null, so their own pre-snapshot comments reappear.
-            if (!prev && pendingOpsRef.current.length) {
-              for (const op of pendingOpsRef.current) next = applyReviewOp(next, op);
-              pendingOpsRef.current = [];
-            }
-            return next;
-          });
+          // Both side effects happen HERE, once, not inside the updater.
+          // StrictMode double-invokes updaters in development, and this one
+          // used to write to disk and empty pendingOpsRef as it computed: the
+          // second invocation then found the queue drained and returned a doc
+          // without the replayed ops, which is the result React keeps. The
+          // author's own pre-snapshot comments disappeared - the very thing
+          // the replay exists to prevent.
+          const prev = sessionDocRef.current;
+          if (prev && prev.sourceKey !== incoming.sourceKey) persistDocRef.current(prev);
+          // First adoption replays anything the author posted while the doc
+          // was still null, so their own comments reappear.
+          const replay = prev ? [] : pendingOpsRef.current;
+          if (replay.length) pendingOpsRef.current = [];
+          setSessionDoc((cur) => adoptSnapshot(cur, incoming, replay));
         } catch { /* malformed snapshot */ }
         return;
       case "reviewOp":

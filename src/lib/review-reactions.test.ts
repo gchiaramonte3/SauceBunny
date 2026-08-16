@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mergeReviewDoc, reactionsOf, setLike, applyReviewOp, type ReviewDoc, type ReviewComment } from "./review";
+import {
+  mergeReviewDoc, reactionsOf, setLike, applyReviewOp, adoptSnapshot,
+  type ReviewDoc, type ReviewComment, type ReviewOp,
+} from "./review";
 
 /**
  * Un-reacting has to survive a merge.
@@ -157,5 +160,68 @@ describe("docs written before any of this", () => {
   it("still folds the legacy likes field in", () => {
     const old = doc([comment({ likes: ["Ana"] })]);
     expect(reactionsOf(old.comments[0])["👍"]).toEqual(["Ana"]);
+  });
+});
+
+/**
+ * Adopting the host's snapshot, twice, with the same input.
+ *
+ * React 18 StrictMode double-invokes state updaters in development to surface
+ * impure ones, and it keeps the SECOND result. The old code merged, replayed
+ * the author's queued ops, and emptied the queue all inside the updater, so
+ * the second pass ran with the queue already empty and returned a doc without
+ * them. React kept that one. The comments the author typed before the snapshot
+ * arrived were dropped, silently, in exactly the case the replay was added for.
+ */
+describe("adoptSnapshot", () => {
+  const doc2 = (key: string, comments: ReviewComment[] = []): ReviewDoc =>
+    ({ sourceKey: key, versions: [], activeVersionId: null, comments, status: {} });
+
+  const op = (id: string): ReviewOp => ({
+    t: "add",
+    comment: comment({ id, body: `posted ${id}`, versionId: "v1" }),
+  });
+
+  it("gives the same answer however many times it runs", () => {
+    // The property StrictMode is checking for. Same inputs, same output.
+    const prev = doc2("k");
+    const incoming = doc2("k");
+    const pending = [op("early")];
+    const once = adoptSnapshot(prev, incoming, pending);
+    const twice = adoptSnapshot(prev, incoming, pending);
+    expect(twice).toEqual(once);
+  });
+
+  it("keeps the author's pre-snapshot comments on a double invocation", () => {
+    // The concrete loss. Called twice with no doc yet, both results must
+    // still contain the queued comment.
+    const pending = [op("early")];
+    const first = adoptSnapshot(null, doc2("k"), pending);
+    const second = adoptSnapshot(null, doc2("k"), pending);
+    expect(first.comments.map((c) => c.id)).toContain("early");
+    expect(second.comments.map((c) => c.id)).toContain("early");
+  });
+
+  it("does not replay into a doc we already had", () => {
+    // The queue only exists for the window before the first doc arrives; the
+    // caller passes an empty list once there is one.
+    const prev = doc2("k", [comment({ id: "existing" })]);
+    const out = adoptSnapshot(prev, doc2("k"), []);
+    expect(out.comments.map((c) => c.id)).toEqual(["existing"]);
+  });
+
+  it("replaces rather than folds when the source changed", () => {
+    // mergeReviewDoc refuses to fold across sourceKeys, so a presenter switch
+    // adopts cleanly instead of contaminating one source's notes with another's.
+    const prev = doc2("old-source", [comment({ id: "mine" })]);
+    const out = adoptSnapshot(prev, doc2("new-source", [comment({ id: "theirs" })]), []);
+    expect(out.sourceKey).toBe("new-source");
+    expect(out.comments.map((c) => c.id)).toEqual(["theirs"]);
+  });
+
+  it("merges when the source is the same", () => {
+    const prev = doc2("k", [comment({ id: "mine" })]);
+    const out = adoptSnapshot(prev, doc2("k", [comment({ id: "theirs" })]), []);
+    expect(out.comments.map((c) => c.id).sort()).toEqual(["mine", "theirs"]);
   });
 });

@@ -648,6 +648,32 @@ function mergeReactions(
   };
 }
 
+/**
+ * Adopt a snapshot from the host: merge it over what we have, then replay any
+ * ops we posted before we had a doc to put them in.
+ *
+ * PURE, and that is the whole reason it exists as a function. This logic used
+ * to live inside a `setSessionDoc(prev => ...)` updater that also wrote to
+ * disk and emptied `pendingOpsRef` as it went. React 18 StrictMode
+ * double-invokes updaters in development precisely to surface that: the first
+ * call replayed the pending ops and cleared the ref, the second call ran again
+ * with the same `prev`, found the ref empty, and returned a doc WITHOUT them -
+ * and the second result is the one React keeps. So the author's own
+ * pre-snapshot comments vanished, which is the exact failure the replay was
+ * written to prevent.
+ *
+ * The caller now drains the queue once, outside, and hands the ops in.
+ */
+export function adoptSnapshot(
+  prev: ReviewDoc | null,
+  incoming: ReviewDoc,
+  pending: readonly ReviewOp[] = [],
+): ReviewDoc {
+  let next = prev ? mergeReviewDoc(prev, incoming) : incoming;
+  for (const op of pending) next = applyReviewOp(next, op);
+  return next;
+}
+
 export function mergeReviewDoc(local: ReviewDoc, incoming: ReviewDoc): ReviewDoc {
   // NEVER fold across sources. Without this, ending a session after the room
   // had switched sources called mergeReviewDoc(loadReview(A), docForB), which
