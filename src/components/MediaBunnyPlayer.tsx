@@ -883,6 +883,14 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
         out.toBlob((b) => resolve(b), mimeType, quality);
       });
     },
+  // The handle is built ONCE on purpose. Every function it captures
+  // (cancelInFlight, stopPlayback, startLoops, startShuttleLoop) reads
+  // playingRef / startMediaTimeRef rather than state, so a first-render
+  // capture behaves exactly like a fresh one — the mirrored-ref pattern
+  // eslint.config.js describes. `onPlayStateChange` is App's `setIsPlaying`,
+  // a useState setter React guarantees is stable. Listing them would rebuild
+  // the imperative handle on every render for no change in behaviour.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }), []);
 
   // ─── Open input + set up sinks on mount / path change ────────────────

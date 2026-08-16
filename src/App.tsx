@@ -427,6 +427,21 @@ export default function App() {
    * commands. Cancellations are never retried. `buildArgs` is called with the
    * cookie value to use so the same arg shape serves both attempts.
    */
+  /**
+   * A `function` declaration on purpose, and it cannot become a useCallback.
+   *
+   * `appendLog` is declared LATER in this component, and a hoisted function
+   * body only reads it when CALLED, which is always after render. A
+   * `useCallback(..., [appendLog])` evaluates that dependency during render
+   * instead, at a line where the binding is still in its temporal dead zone —
+   * tsc rejects it outright ("used before its declaration"). Tried; reverted.
+   *
+   * The consequence is a new identity every render, so the two hooks below
+   * that call this cannot list it without rebuilding themselves every render.
+   * They omit it, and that is safe rather than lucky: everything this closure
+   * reads is a ref. `cookiesBrowserOrNone` goes through defaultsRef precisely
+   * so a stale closure still sees the live cookie setting.
+   */
   async function invokeWithCookieRetry<T>(
     cmd: string,
     buildArgs: (cookies: string | undefined) => Record<string, unknown>,
@@ -2416,6 +2431,7 @@ export default function App() {
     } finally {
       if (sourceSeqRef.current === seq) setMetadataLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `tryAutoLoadTranscript` is declared ~1500 lines BELOW this hook, so naming it here is a temporal-dead-zone error, not a style choice — tsc rejects it. Tried; reverted. It is a useCallback over refs, so the capture is not stale in practice. A real fix is the App.tsx split (refactor priority 6), not a dependency edit.
   }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, classifyExtractorRot, loadWebPlayback, loadCachedWebPlayback, recordRecentSource]);
 
   // Re-run the current fetch after the user picks a browser in the YouTube
@@ -3025,6 +3041,7 @@ export default function App() {
       setStatus("error");
       return { message: msg, kind: isAppError(err) ? err.kind : null };
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `tryAutoLoadTranscript` is declared ~1500 lines BELOW this hook, so naming it here is a temporal-dead-zone error, not a style choice — tsc rejects it. Tried; reverted. It is a useCallback over refs, so the capture is not stale in practice. A real fix is the App.tsx split (refactor priority 6), not a dependency edit.
   }, [appendLog, defaults.folder, defaults.useWebCodecsDecoder, resetForNewSource, runPlaybackPrep, recordRecentSource, setActiveView]);
 
   const handleImportFile = useCallback(async () => {
@@ -3519,6 +3536,7 @@ export default function App() {
     } finally {
       setSnapshotBusy(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- invokeWithCookieRetry is a bare function (see its comment: appendLog's TDZ blocks useCallback), so listing it would rebuild this every render. It reads only refs, so a stale capture cannot stale the cookie setting.
   }, [metadata, sourceKind, localFilePath, snapshotBusy, fps, exportOpts.folder, defaults.useWebCodecsDecoder, appendLog, notify, pushNotification]);
 
   /**
@@ -4585,6 +4603,7 @@ export default function App() {
       const j = audioCacheJobRef.current;
       if (j) { audioCacheJobRef.current = null; invoke("cancel_job", { jobId: j }).catch(() => { /* best-effort */ }); }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- same: invokeWithCookieRetry is a bare function reading only refs, and listing it would restart this audio-cache effect on every render.
   }, [webStreaming, activeSourceUrl, webAudioCachedSrc, appendLog]);
 
   const handleClearLogs = useCallback(() => setLogs([]), []);
@@ -4978,6 +4997,15 @@ export default function App() {
     onGotoIn, onGotoOut, onStep, onSeek,
     handlePlaybackRateStep, handlePlaybackRateChange,
     performUndo, performRedo, navigateView,
+    // `exportOpts.folder` is READ in this listener (the ⌘E "choose an export
+    // folder first" guard). It refreshed anyway, but only because
+    // `handleExport` above happens to depend on the whole `exportOpts` object
+    // — narrow those deps to the fields it actually uses, which is an ordinary
+    // optimisation, and ⌘E starts insisting on a folder the user has already
+    // chosen. Listing it directly costs nothing (the effect already re-runs on
+    // that change) and removes a coupling nothing states.
+    exportOpts.folder,
+    kHeldRef, pushNotification, readerSeekRel, setQueueOpenChoice,
   ]);
 
   // ── Native menubar event wiring ─────────────────────────────────
