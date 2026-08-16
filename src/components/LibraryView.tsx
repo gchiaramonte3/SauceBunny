@@ -353,6 +353,7 @@ export function LibraryView({
     // makes .cp-lib a programmatic focus target for the view switch.
     <main
       className="cp-lib"
+      aria-label="Library"
       tabIndex={-1}
       onKeyDown={(e) => {
         // Esc anywhere in Home clears an active search.

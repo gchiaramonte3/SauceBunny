@@ -5987,7 +5987,7 @@ export default function App() {
                 metadataLoading={metadataLoading}
               />
 
-              <main className="cp-main">
+              <main className="cp-main" aria-label="Clip">
                 {roomActive && (
                   <div className="cp-room-head">
                     <div className="cp-room-title">

@@ -148,7 +148,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
           )}
         </div>
       </aside>
-      <main className="cp-reader-main">
+      <main className="cp-reader-main" aria-label="Transcript">
         {activePath ? (
           <>
             <div className="cp-reader-tabs" role="tablist" aria-label="Transcript view">

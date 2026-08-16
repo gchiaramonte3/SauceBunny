@@ -254,20 +254,21 @@ export function LibraryBrowser({
   // (no panel, no bar): there is nothing to browse, filter, or sort yet.
   if (roots.length === 0) {
     return (
-      <div className="cp-lib-browse">
+      <main className="cp-lib-browse" aria-label="Library">
         <div className="cp-lib-browse-zero">
           <p>Add a folder to build your library.</p>
           <button type="button" className="btn btn-primary" onClick={() => void addFolder()}>
             Add folder
           </button>
         </div>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div
+    <main
       className="cp-lib-browse"
+      aria-label="Library"
       onKeyDown={(e) => {
         // ⌘A selects every file ON SCREEN — the filtered, sorted list, not the
         // whole library. Selecting things the user has filtered away is how a
@@ -513,6 +514,6 @@ export function LibraryBrowser({
           onClose={() => setPickerPath(null)}
         />
       )}
-    </div>
+    </main>
   );
 }
