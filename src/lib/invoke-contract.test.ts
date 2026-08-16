@@ -137,3 +137,60 @@ describe("byte payloads use the raw IPC body", () => {
     expect(walk(join(ROOT, "src")).length).toBeGreaterThan(50);
   });
 });
+
+/**
+ * Files the user keeps are written atomically.
+ *
+ * `write_text_to_path` truncates the destination before writing unless it is
+ * told otherwise, so a crash, a full disk or a yanked drive part-way through
+ * leaves a short file wearing the name the user chose. The overwrite case is
+ * the sharp one: export over a file you already have and the previous good
+ * copy is gone before the new bytes land.
+ *
+ * The clip exporter was fixed for exactly this reason. Seven siblings were
+ * not, and were found only by re-reading that change rather than trusting it:
+ * transcript exports, the AI summary, review exports, the settings export, the
+ * diagnostics report, and a .bak whose whole job is to be the good copy.
+ *
+ * The stores (review, screening, cast) already passed atomic. Now everything
+ * does, so this has no exception list - if one is ever needed, the reason
+ * belongs here next to the rule.
+ */
+describe("durable writes", () => {
+  const CALL = /invoke\s*(?:<[^>]*>)?\s*\(\s*"write_text_to_path"\s*,/g;
+
+  it("passes atomic on every write_text_to_path call", () => {
+    const offenders: string[] = [];
+    for (const file of walk(join(ROOT, "src"))) {
+      const rel = file.slice(ROOT.length + 1);
+      if (/\.test\.tsx?$/.test(rel)) continue;
+      const code = readFileSync(file, "utf8");
+      for (const m of code.matchAll(CALL)) {
+        // Brace-match the argument object rather than reading to end of line:
+        // several of these calls span five lines, and a line-based check
+        // reported two false positives when I first ran it.
+        let depth = 0, i = m.index! + m[0].length;
+        for (; i < code.length; i += 1) {
+          if (code[i] === "{") depth += 1;
+          else if (code[i] === "}") { depth -= 1; if (depth === 0) break; }
+        }
+        const arg = code.slice(m.index! + m[0].length, i + 1);
+        if (!arg.includes("atomic")) {
+          offenders.push(`${rel}: ${arg.trim().slice(0, 60)}`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      "Pass `atomic: true`. Without it the destination is truncated first, so " +
+        "a failed write destroys the copy that was already there.",
+    ).toEqual([]);
+  });
+
+  it("really found the calls", () => {
+    const total = walk(join(ROOT, "src"))
+      .filter((f) => !/\.test\.tsx?$/.test(f))
+      .reduce((n, f) => n + [...readFileSync(f, "utf8").matchAll(CALL)].length, 0);
+    expect(total, "no write_text_to_path calls found at all").toBeGreaterThan(5);
+  });
+});

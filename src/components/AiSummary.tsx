@@ -464,7 +464,7 @@ export function AiSummary({
       });
       if (!dest) return;
       const content = format === "md" ? buildExportMd() : buildExportTxt();
-      await invoke("write_text_to_path", { path: dest, text: content });
+      await invoke("write_text_to_path", { path: dest, text: content, atomic: true });
       setDlError(null);
     } catch (e) { setDlError(formatError(e)); }
   }

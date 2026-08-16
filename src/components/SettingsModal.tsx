@@ -516,7 +516,7 @@ export function SettingsModal(props: Props) {
         sections: loadJson<Record<string, boolean>>(SECTIONS_LS_KEY, {}),
         media: loadJson<Record<string, unknown>>(DEVICE_CHOICE_KEY, {}),
       };
-      await invoke("write_text_to_path", { path, text: JSON.stringify(payload, null, 2) });
+      await invoke("write_text_to_path", { path, text: JSON.stringify(payload, null, 2), atomic: true });
       setBackupMsg(`Saved to ${path.split("/").pop()}`);
     } catch (e) {
       setBackupMsg(formatError(e));

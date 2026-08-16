@@ -4573,7 +4573,7 @@ export default function App() {
           shareState,
         },
       });
-      await invoke("write_text_to_path", { path, text: report });
+      await invoke("write_text_to_path", { path, text: report, atomic: true });
       pushNotification("success", "Diagnostics saved", "Attach this file to a bug report.");
     } catch (err) {
       pushNotification("error", "Diagnostics export failed", formatError(err));

@@ -1306,6 +1306,7 @@ export function TranscriptViewer({
             path: backupPath,
             text: raw,
             ifNotExists: true,
+            atomic: true,
           });
           notices.push(`Original saved as ${backupPath.split("/").pop()}`);
         } catch (e) {
@@ -1495,7 +1496,7 @@ export function TranscriptViewer({
         // the SRT spec anyway — there's nowhere to put them.
         content = raw ?? "";
       }
-      await invoke("write_text_to_path", { path: dest, text: content });
+      await invoke("write_text_to_path", { path: dest, text: content, atomic: true });
       setDlError(null);
     } catch (e) {
       console.error("transcript download failed:", e);
@@ -1537,7 +1538,7 @@ export function TranscriptViewer({
         sequenceStartTc: startTimecode || "00:00:00:00",
         dropFrame: false,
       });
-      await invoke("write_text_to_path", { path: dest, text: content });
+      await invoke("write_text_to_path", { path: dest, text: content, atomic: true });
       setDlError(null);
     } catch (e) {
       console.error("avid marker export failed:", e);
