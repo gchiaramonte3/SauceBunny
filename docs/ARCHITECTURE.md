@@ -280,9 +280,16 @@ pairing, so wiring `onClipDone` to `"captions-done"` fails a test instead of
 shipping. Worth knowing how weak the old safety net was: doing exactly that swap
 by hand, `tsc` reported only an *unused variable* — never the mis-wire.
 
-Splitting the effect by domain is now a reviewable change. Each domain's
-handlers move as named units with their `mounted` guard and cleanup intact, and
-the contract catches the one mistake the compiler cannot see.
+**And the split is done.** The one 292-line effect is now four, by domain —
+clip export (3 listeners), captions (2), transcription (5), playback prep + the
+LLM server (4) — each with its own `mounted` flag, its own `unlistens` array,
+its own StrictMode tail sweep and its own cleanup. Verified the way the naming
+pass was: every handler body hashed before and after, all 14 byte-identical, all
+14 still on their own event, and each effect cleaning up exactly what it pushes.
+
+What is left in App.tsx is now four readable blocks instead of one wall, and an
+extraction that owns an event lifts one small effect rather than carving a
+listener out of a shared one.
 
 ## Build-ID handshake
 

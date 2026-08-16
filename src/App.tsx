@@ -1560,6 +1560,8 @@ export default function App() {
   const exportOptsRef = useRef(exportOpts);
   exportOptsRef.current = exportOpts;
 
+  // ── Clip export listeners ─────────────────────────────────────────
+  // yt-dlp/ffmpeg progress and the finished clip.
   useEffect(() => {
     const unlistens: UnlistenFn[] = [];
     let mounted = true;
@@ -1642,6 +1644,32 @@ export default function App() {
         }
       };
       const c = await listen<DoneEvent>("clip-done", onClipDone);
+      unlistens.push(a, b, c);
+      // A cleanup that fires DURING the awaits above finds an empty array
+      // and unregisters nothing — under StrictMode that leaked every
+      // listener on each dev boot. The handlers are inert either way (each
+      // starts with a `mounted` check) but stayed registered forever.
+      if (!mounted) {
+        unlistens.forEach((u) => u());
+        unlistens.length = 0;
+      }
+    })();
+    return () => {
+      mounted = false;
+      unlistens.forEach((u) => u());
+    };
+    // Every dep here is stable (empty deps of its own), so this runs once
+    // for the app's lifetime and never re-subscribes.
+  }, [appendLog, refreshWhisperModels, notify, pushNotification, classifyExtractorRot, logRunTotals]);
+
+  // ── Captions listeners ─────────────────────────────────────────
+  // yt-dlp's caption fetch. Its done-handler also loads the SRT into the
+       // Transcript tab, which is why captions cannot be lifted into a hook of
+       // its own - that state belongs to the Whisper pipeline too.
+  useEffect(() => {
+    const unlistens: UnlistenFn[] = [];
+    let mounted = true;
+    (async () => {
       const onCaptionsLog = (e: { payload: LogEvent }) => {
         if (!mounted || e.payload.job_id !== captionsJobIdRef.current) return;
         appendLog(asLogTag(e.payload.tag), "captions", e.payload.line);
@@ -1681,6 +1709,31 @@ export default function App() {
         }
       };
       const f = await listen<DoneEvent>("captions-done", onCaptionsDone);
+      unlistens.push(d, f);
+      // A cleanup that fires DURING the awaits above finds an empty array
+      // and unregisters nothing — under StrictMode that leaked every
+      // listener on each dev boot. The handlers are inert either way (each
+      // starts with a `mounted` check) but stayed registered forever.
+      if (!mounted) {
+        unlistens.forEach((u) => u());
+        unlistens.length = 0;
+      }
+    })();
+    return () => {
+      mounted = false;
+      unlistens.forEach((u) => u());
+    };
+    // Every dep here is stable (empty deps of its own), so this runs once
+    // for the app's lifetime and never re-subscribes.
+  }, [appendLog, refreshWhisperModels, notify, pushNotification, classifyExtractorRot, logRunTotals]);
+
+  // ── Transcription listeners ─────────────────────────────────────────
+  // whisper + diarizer: logs, progress, phase, the model download, and the
+       // finished transcript.
+  useEffect(() => {
+    const unlistens: UnlistenFn[] = [];
+    let mounted = true;
+    (async () => {
       const onTranscriptLog = (e: { payload: LogEvent }) => {
         if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
         appendLog(asLogTag(e.payload.tag), txChannelRef.current, e.payload.line);
@@ -1795,6 +1848,30 @@ export default function App() {
         setTranscriptPhase(e.payload.phase);
       };
       const jPhase = await listen<TranscriptPhasePayload>("transcript-phase", onTranscriptPhase);
+      unlistens.push(g, h, i, j, jPhase);
+      // A cleanup that fires DURING the awaits above finds an empty array
+      // and unregisters nothing — under StrictMode that leaked every
+      // listener on each dev boot. The handlers are inert either way (each
+      // starts with a `mounted` check) but stayed registered forever.
+      if (!mounted) {
+        unlistens.forEach((u) => u());
+        unlistens.length = 0;
+      }
+    })();
+    return () => {
+      mounted = false;
+      unlistens.forEach((u) => u());
+    };
+    // Every dep here is stable (empty deps of its own), so this runs once
+    // for the app's lifetime and never re-subscribes.
+  }, [appendLog, refreshWhisperModels, notify, pushNotification, classifyExtractorRot, logRunTotals]);
+
+  // ── Playback prep and the LLM server listeners ─────────────────────────────────────────
+  // ffmpeg's transcode-for-playback, plus llama-server's stderr.
+  useEffect(() => {
+    const unlistens: UnlistenFn[] = [];
+    let mounted = true;
+    (async () => {
       const onPlaybackPrepProgress = (e: { payload: ProgressEvent }) => {
         if (!mounted || e.payload.job_id !== playbackPrepJobIdRef.current) return;
         setPlaybackPrepProgress(e.payload.percent);
@@ -1832,13 +1909,11 @@ export default function App() {
         appendLog(asLogTag(e.payload.tag), "llm", e.payload.line);
       };
       const n = await listen<LogEvent>("llm-log", onLlmLog);
-      unlistens.push(a, b, c, d, f, g, h, i, j, k, l, m, jPhase, n);
-      // Cleanup that fired DURING the awaits above found an empty array and
-      // unregistered nothing — under StrictMode that leaked all 15 listeners
-      // on every dev boot. The handlers were inert (each starts with a
-      // `mounted` check) but still registered forever. Sweep them here; the
-      // registration order is load-bearing, so this stays a tail check
-      // rather than a Promise.all restructure.
+      unlistens.push(k, l, m, n);
+      // A cleanup that fires DURING the awaits above finds an empty array
+      // and unregisters nothing — under StrictMode that leaked every
+      // listener on each dev boot. The handlers are inert either way (each
+      // starts with a `mounted` check) but stayed registered forever.
       if (!mounted) {
         unlistens.forEach((u) => u());
         unlistens.length = 0;
@@ -1848,10 +1923,10 @@ export default function App() {
       mounted = false;
       unlistens.forEach((u) => u());
     };
-    // appendLog / refreshWhisperModels / notify / classifyExtractorRot are
-    // all stable (empty deps), so this effect runs exactly once for the
-    // app's lifetime.
+    // Every dep here is stable (empty deps of its own), so this runs once
+    // for the app's lifetime and never re-subscribes.
   }, [appendLog, refreshWhisperModels, notify, pushNotification, classifyExtractorRot, logRunTotals]);
+
 
   // ====== Player callbacks ======
   // Sync our playhead from the YouTube player's current time while it's playing.
