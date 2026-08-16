@@ -1,6 +1,7 @@
 import { COMMENT_REACTION_EMOJI } from "../lib/reactions";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ColorSwatches } from "./ColorSwatches";
+import { useModalFocus } from "../hooks/use-modal-focus";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -1574,11 +1575,40 @@ function NameGateModal({
   onClose: () => void;
   onPickColor: (c: string) => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const headingId = useId();
+  useModalFocus(true, dialogRef);
+  // `autoFocus` alone did NOT move focus here, and neither did useModalFocus's
+  // root.focus(): measured, focus stayed on the Post button behind the scrim
+  // at +0ms, +100ms and +500ms. So a keyboard user pressed Post, a modal
+  // opened, and their focus was left outside it — with a Tab trap now in
+  // place, that is worse than before, because Tab has to walk back in.
+  // A rAF-deferred explicit focus lands after the drawer's own layout work.
   return (
     <div className="cp-review-namegate" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="cp-review-namegate-card">
+      {/* This was the ONLY modal in the app without dialog semantics. Every
+          other one (Settings, Share, Media info, YouTube auth, Rename, the
+          transcript search, Paste notes) declares role="dialog"; this one was
+          a bare div with a scrim, so a screen reader announced no dialog
+          boundary at all and `document.querySelector('[role="dialog"]')`
+          returned nothing while a modal was plainly on screen.
+          That last part is not cosmetic: TranscriptViewer's ⌘F and ⌘G both
+          refuse to act when `[role="dialog"][aria-modal="true"]` matches,
+          which is exactly the guard that should apply here.
+          useModalFocus adds the Tab trap and restores focus to the opener on
+          close, matching MediaInfoModal and LibraryQuickLook. It only focuses
+          the root when focus is not already inside, so the input's autoFocus
+          still wins. */}
+      <div
+        className="cp-review-namegate-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        ref={dialogRef}
+        tabIndex={-1}
+      >
         <Avatar name={nameInput.trim() || author || "?"} size={44} color={authorColor} />
-        <h3>What's your name?</h3>
+        <h3 id={headingId}>What's your name?</h3>
         <p>Shown on every note you leave. Stored locally, no account.</p>
         <input
           autoFocus

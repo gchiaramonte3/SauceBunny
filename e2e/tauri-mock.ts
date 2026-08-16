@@ -60,17 +60,25 @@ export function tauriMockInit(expectedBuildId: string): void {
    * re-read hands back the ORIGINAL text and the edit vanishes. That looked
    * exactly like an app bug for a while, and was not one.
    *
-   * Only paths already present in the seed are tracked. An unseeded write
-   * still null-resolves as success, which is what every other write command in
-   * this mock does and what the 105 older specs were written against.
+   * The opt-in is the PRESENCE of the `e2e.files` key, not the presence of a
+   * given path. A spec that sets it — even to `{}` — gets a small read/write
+   * filesystem, so it can assert on files the app CREATES (a review doc lands
+   * at a path no fixture could know in advance, since the filename embeds a
+   * hash of the source key). A spec that never sets the key sees the original
+   * behaviour exactly: writes null-resolve as success and store nothing, which
+   * is what the 105 older specs were written against.
    */
+  const fsEnabled = (): boolean => {
+    try { return localStorage.getItem("e2e.files") !== null; }
+    catch { return false; }
+  };
+
   const writeSeededFile = (path: string, text: string): null => {
     try {
+      if (!fsEnabled()) return null;
       const files = seededFiles();
-      if (path in files) {
-        files[path] = text;
-        localStorage.setItem("e2e.files", JSON.stringify(files));
-      }
+      files[path] = text;
+      localStorage.setItem("e2e.files", JSON.stringify(files));
     } catch { /* quota — treat as a successful write, same as before */ }
     return null;
   };
