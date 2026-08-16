@@ -176,6 +176,19 @@ button:focus-visible, input:focus-visible,
   transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 .cp-swatch:hover { opacity: 1; transform: scale(1.12); }
+/* A keyboard user had NO way to see which swatch they were on. The palette is
+   `border: none` circles whose only states were :hover and .picked, and .picked
+   is SELECTION — identical whether focused or not — so tabbing through the
+   colours changed nothing on screen. Measured: the resting and focused
+   computed styles were byte-identical.
+
+   An outline rather than another box-shadow, because .picked already owns the
+   shadow and the two would fight; the offset keeps the ring clear of the
+   circle. --focus-ring, never the green accent (focus-contract.test.ts). */
+.cp-swatch:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
 .cp-swatch.picked {
   opacity: 1;
   box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 3px var(--fg-1);
