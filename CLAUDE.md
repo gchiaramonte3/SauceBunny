@@ -210,7 +210,16 @@ Do not add new Tauri plugins without explaining what existing capability is insu
 - It **must** open in Xcode via `File > Open > swift-sidecar/Package.swift`.
 - **Never** add `.xcodeproj` or `.xcworkspace` files to git — SPM generates these on demand.
 - Target macOS 14+, Swift 5.9+ (matches the app's minimumSystemVersion — FluidAudio's floor).
-- Use AVFoundation for audio loading — do not introduce a WhisperKit dependency.
+- Use AVFoundation for audio loading — **do not import WhisperKit**. whisper.cpp
+  is the transcription engine; the sidecar decodes its own audio rather than
+  borrowing an ASR framework's helper. Note the rule is about the PRODUCT, not
+  the repository: `argmax-oss-swift` is a declared dependency and ships both
+  WhisperKit and **SpeakerKit**, and SpeakerKit is the primary diarizer. So
+  grepping for "WhisperKit" under `swift-sidecar/` finds four hits in
+  `.build/checkouts/` and none of them are a violation. This wording previously
+  said "do not introduce a WhisperKit dependency", which reads as broken the
+  moment anyone checks. Enforced on OUR sources by
+  `src/lib/swift-sidecar-contract.test.ts`.
 - The JSON envelope schema (v1) is a contract between Swift, Rust, and JS. Changing it requires updating all three layers.
 - **Never** import UIKit (this is macOS, not iOS).
 
@@ -477,7 +486,7 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ## Enforced contracts
 
-Sixteen rules in this file are checked by a test rather than remembered. If you
+Seventeen rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -502,6 +511,7 @@ written after finding the rule already broken somewhere.
 | `rung-ladder-contract` | The streaming rung table is identical in TS and Rust |
 | `wire-path-contract` | A review doc on the wire carries no local filesystem path |
 | `asset-scope-contract` | The `asset://` scope stays narrow |
+| `swift-sidecar-contract` | The Swift sidecar imports no UIKit and no WhisperKit, keeps no `.xcodeproj` in git, and takes SpeakerKit from `argmax-oss-swift` |
 | `csp-contract` | The shipped CSP permits what startup actually registers |
 
 Three more are measured against the RENDERED app rather than its source, in
