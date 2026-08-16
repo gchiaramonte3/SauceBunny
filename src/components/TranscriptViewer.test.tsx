@@ -81,8 +81,20 @@ describe("TranscriptViewer undo/redo", () => {
     // the same seam, which is the point of having one.
     act(() => appUndo.push({ label: "merge speakers", undo: () => {}, redo: () => {} }));
 
-    expect(undo().disabled).toBe(false);
-    expect(undo().getAttribute("title")).toBe("Undo merge speakers");
+    // waitFor, not a bare expect. This failed once on CI - a slower machine -
+    // reporting the button still disabled, and could not be reproduced in 12
+    // local runs. The store notifies its listeners synchronously and the
+    // toolbar reads it through subscribe/getSnapshot, so there is no path
+    // where undo simply never enables; what varies is which tick the render
+    // lands on when mount's async work is still settling nearby.
+    //
+    // This does NOT weaken the test. The subject is "undo lights up and names
+    // the edit", not "it does so within zero microtasks" - and if undo ever
+    // genuinely stopped enabling, this still fails, just at the timeout.
+    await waitFor(() => {
+      expect(undo().disabled).toBe(false);
+      expect(undo().getAttribute("title")).toBe("Undo merge speakers");
+    });
   });
 });
 
