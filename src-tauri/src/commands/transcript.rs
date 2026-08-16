@@ -513,7 +513,7 @@ pub async fn dictate_start(
 
     let cache = app.path().app_cache_dir().map_err(|e| format!("app_cache_dir: {e}"))?;
     std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
-    let wav = cache.join(format!("saucebunny-dictate-{job_id}.wav"));
+    let wav = cache.join(dictate_wav_name(&job_id)?);
     let wav_str = wav.to_string_lossy().to_string();
 
     // avfoundation input: ":default" (system default) or ":<index>" for a
@@ -2084,14 +2084,33 @@ pub struct TranscribeLocalArgs {
 /// than trusted: only the shape crypto.randomUUID actually produces survives,
 /// and anything else cannot walk out of the cache directory.
 pub(crate) fn job_wav_name(job_id: &str) -> Result<String, crate::AppError> {
+    Ok(format!("saucebunny-{}.wav", safe_job_id(job_id, "prepared WAV")?))
+}
+
+/// Dictation's WAV. A sibling of `job_wav_name`, not the same file: the prefix
+/// differs so a dictation capture and a prepared WAV for one job cannot collide.
+pub(crate) fn dictate_wav_name(job_id: &str) -> Result<String, crate::AppError> {
+    Ok(format!("saucebunny-dictate-{}.wav", safe_job_id(job_id, "dictation WAV")?))
+}
+
+/// The filter itself, so a second caller cannot get it subtly different.
+///
+/// `dictate_start` built its own WAV name by interpolating the raw job id
+/// straight into a path, which is the same untrusted string this module
+/// deliberately filters everywhere else - the renderer supplies it either way.
+/// A `..` in it walks out of the cache directory, and the only reason it never
+/// did is that our own caller happens to pass a UUID. That is a property of the
+/// caller, not of this function, and it is exactly the assumption that stops
+/// holding the day someone adds a third caller.
+pub(crate) fn safe_job_id(job_id: &str, what: &str) -> Result<String, crate::AppError> {
     let safe: String = job_id
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
         .collect();
     if safe.is_empty() {
-        return Err(crate::AppError::internal("prepared WAV: job id is empty"));
+        return Err(crate::AppError::internal(format!("{what}: job id is empty")));
     }
-    Ok(format!("saucebunny-{safe}.wav"))
+    Ok(safe)
 }
 
 pub(crate) fn job_wav_path(
@@ -3509,6 +3528,26 @@ mod prepared_wav_tests {
             assert!(name.starts_with("saucebunny-"), "{hostile} produced {name}");
             assert!(name.ends_with(".wav"), "{hostile} produced {name}");
         }
+    }
+
+    #[test]
+    fn the_dictation_name_is_filtered_by_the_same_rule() {
+        // dictate_start interpolated the raw id into its own path, so the rule
+        // that guarded five call sites did not guard the sixth. Both names are
+        // built from safe_job_id now; this asserts the shared filter, and the
+        // prefix stays distinct so a dictation WAV cannot land on a prepared
+        // one for the same job.
+        use super::dictate_wav_name;
+        assert_eq!(dictate_wav_name("abc-123").unwrap(), "saucebunny-dictate-abc-123.wav");
+        assert_ne!(dictate_wav_name("abc-123").unwrap(), job_wav_name("abc-123").unwrap());
+        for hostile in ["../../etc/passwd", "a/b", "a\\b", "..", "./x", "a\0b"] {
+            let name = dictate_wav_name(hostile).unwrap_or_else(|_| "saucebunny-dictate-.wav".into());
+            assert!(!name.contains(['/', '\\']), "{hostile} produced {name}");
+            assert!(name.ends_with(".wav"), "{hostile} produced {name}");
+            assert_eq!(name.matches('.').count(), 1, "{hostile} produced {name}");
+        }
+        assert!(dictate_wav_name("").is_err());
+        assert!(dictate_wav_name("///").is_err(), "an all-separator id must not pass as empty-safe");
     }
 
     #[test]
