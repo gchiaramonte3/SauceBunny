@@ -1,5 +1,5 @@
-import { useEffect, type Dispatch, type SetStateAction, type MutableRefObject } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { type Dispatch, type SetStateAction, type MutableRefObject } from "react";
+import { useTauriListeners } from "./use-tauri-listeners";
 import type { DoneEvent } from "../bindings/DoneEvent";
 import type { LogEvent } from "../bindings/LogEvent";
 import type { ProgressEvent } from "../bindings/ProgressEvent";
@@ -76,39 +76,36 @@ export function useTranscriptListeners(d: UseTranscriptListenersDeps): void {
     metadataRef, stageClockRef,
   } = d;
 
-  useEffect(() => {
-    const unlistens: UnlistenFn[] = [];
-    let mounted = true;
-    (async () => {
-      const onTranscriptLog = (e: { payload: LogEvent }) => {
-        if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
-        appendLog(asLogTag(e.payload.tag), txChannelRef.current, e.payload.line);
+  useTauriListeners((on) => {
+      const onTranscriptLog = (payload: LogEvent) => {
+          if (payload.job_id !== transcriptJobIdRef.current) return;
+        appendLog(asLogTag(payload.tag), txChannelRef.current, payload.line);
       };
-      const g = await listen<LogEvent>("transcript-log", onTranscriptLog);
-      const onTranscriptDone = (e: { payload: DoneEvent }) => {
-        if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
-        if (e.payload.success && e.payload.path) {
+      on<LogEvent>("transcript-log", onTranscriptLog);
+      const onTranscriptDone = (payload: DoneEvent) => {
+          if (payload.job_id !== transcriptJobIdRef.current) return;
+        if (payload.success && payload.path) {
           setTranscriptState("done");
           setTranscriptResolution("success"); // GenerateButton → check flash
           setTranscriptError(null);
           setTranscriptProgress(100);
           setTranscriptPhase(null);
-          const filename = e.payload.path.split("/").pop() ?? "Transcript ready.";
+          const filename = payload.path.split("/").pop() ?? "Transcript ready.";
           logRunTotals();
-          appendLog("ok", txChannelRef.current, `Transcript saved → ${e.payload.path}`);
+          appendLog("ok", txChannelRef.current, `Transcript saved → ${payload.path}`);
           // Load into the Transcript tab (same pulse-and-switch behavior
           // as the captions path above).
-          setActiveTranscript({ path: e.payload.path, origin: "whisper", sourceKey: clipSourceKeyRef.current });
+          setActiveTranscript({ path: payload.path, origin: "whisper", sourceKey: clipSourceKeyRef.current });
           setTranscriptArrivedTick((n) => n + 1);
           // Append to history (per-source) so the Transcript-tab popover
           // surfaces it and a re-import auto-loads it.
           try {
             const meta = metadataRef.current;
             recordTranscript({
-              srtPath: e.payload.path,
+              srtPath: payload.path,
               sourcePath: localFilePathRef.current,
               sourceUrl: meta?.webpage_url ?? null,
-              title: meta?.title || (e.payload.path.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "transcript"),
+              title: meta?.title || (payload.path.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "transcript"),
               origin: "whisper",
             });
           } catch { /* quota */ }
@@ -117,16 +114,16 @@ export function useTranscriptListeners(d: UseTranscriptListenersDeps): void {
           // the new Transcript tab + pulse already shows the user where
           // the result landed, so the body text was redundant chrome.
           notify("Transcript ready", filename);
-          pushNotification("success", "Transcript ready", "", e.payload.path);
+          pushNotification("success", "Transcript ready", "", payload.path);
           // Diarization is non-fatal: on success the backend still puts a note
           // in `error` if speaker detection was skipped. Surface it so a user
           // who asked for speakers isn't left wondering why there are none —
           // previously this only appeared in the pipeline log.
-          if (e.payload.error) {
-            appendLog("warn", txChannelRef.current, e.payload.error);
-            pushNotification("info", "Speakers not detected", e.payload.error);
+          if (payload.error) {
+            appendLog("warn", txChannelRef.current, payload.error);
+            pushNotification("info", "Speakers not detected", payload.error);
           }
-        } else if (e.payload.error === "Cancelled") {
+        } else if (payload.error === "Cancelled") {
           // User Stop — the Rust Terminated handlers map signal-kills to
           // "Cancelled", so a bare exit-code message is a REAL crash (corrupt
           // model, unreadable WAV, OOM) and must fall through to the error
@@ -142,7 +139,7 @@ export function useTranscriptListeners(d: UseTranscriptListenersDeps): void {
           setTranscriptState("error");
           setTranscriptResolution("error"); // GenerateButton → cross flash
           setTranscriptPhase(null);
-          const msg = humanizeSpawnError(e.payload.error ?? "Transcription failed");
+          const msg = humanizeSpawnError(payload.error ?? "Transcription failed");
           logRunTotals();
           setTranscriptError(msg);
           appendLog("err", txChannelRef.current, msg);
@@ -150,63 +147,48 @@ export function useTranscriptListeners(d: UseTranscriptListenersDeps): void {
           pushNotification("error", "Transcript failed", msg);
         }
       };
-      const h = await listen<DoneEvent>("transcript-done", onTranscriptDone);
-      const onModelDownloadDone = (e: { payload: DoneEvent }) => {
-        if (!mounted) return;
-        if (e.payload.success) {
+      on<DoneEvent>("transcript-done", onTranscriptDone);
+      const onModelDownloadDone = (payload: DoneEvent) => {
+        if (payload.success) {
           refreshWhisperModels();
-          const filename = e.payload.path?.split("/").pop() ?? "Downloaded.";
+          const filename = payload.path?.split("/").pop() ?? "Downloaded.";
           notify("Whisper model ready", filename);
-          pushNotification("success", "Whisper model ready", filename, e.payload.path ?? undefined);
-        } else if (e.payload.error) {
-          pushNotification("error", "Model download failed", e.payload.error);
+          pushNotification("success", "Whisper model ready", filename, payload.path ?? undefined);
+        } else if (payload.error) {
+          pushNotification("error", "Model download failed", payload.error);
         }
       };
-      const i = await listen<DoneEvent>("model-download-done", onModelDownloadDone);
-      const onTranscriptProgress = (e: { payload: ProgressEvent }) => {
-        if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
-        setTranscriptProgress(e.payload.percent);
+      on<DoneEvent>("model-download-done", onModelDownloadDone);
+      const onTranscriptProgress = (payload: ProgressEvent) => {
+          if (payload.job_id !== transcriptJobIdRef.current) return;
+        setTranscriptProgress(payload.percent);
       };
-      const j = await listen<ProgressEvent>("transcript-progress", onTranscriptProgress);
+      on<ProgressEvent>("transcript-progress", onTranscriptProgress);
       // Transcript stage marker — drives the Sidebar phase indicator.
       // Backend emits this at well-known transitions; the frontend
       // doesn't need to scrape pipeline log strings.
-      const onTranscriptPhase = (e: { payload: TranscriptPhasePayload }) => {
-        if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
+      const onTranscriptPhase = (payload: TranscriptPhasePayload) => {
+          if (payload.job_id !== transcriptJobIdRef.current) return;
         // Close out the previous stage in the pipeline log. Every long
         // pipeline reports its phases through this one event, so timing them
         // here covers whisper, parakeet and each diarize step at once - and
         // gives a number the user can read off and paste back when something
         // is slower than it should be.
         const stage = stageClockRef.current;
-        if (stage.phase && stage.phase !== e.payload.phase) {
+        if (stage.phase && stage.phase !== payload.phase) {
           appendLog("info", txChannelRef.current,
             `${stageLabel(stage.phase)} finished in ${fmtElapsed(Date.now() - stage.at)}.`);
         }
-        if (stage.phase !== e.payload.phase) {
-          stageClockRef.current = { phase: e.payload.phase, at: Date.now() };
+        if (stage.phase !== payload.phase) {
+          stageClockRef.current = { phase: payload.phase, at: Date.now() };
           // Each stage owns its own 0-100 meter (extract %, then whisper %), so
           // reset on the transition — otherwise the pill would flash the prior
           // stage's trailing value (e.g. "Whisper 99%") until the next tick.
           setTranscriptProgress(0);
         }
-        setTranscriptPhase(e.payload.phase);
+        setTranscriptPhase(payload.phase);
       };
-      const jPhase = await listen<TranscriptPhasePayload>("transcript-phase", onTranscriptPhase);
-      unlistens.push(g, h, i, j, jPhase);
-      // A cleanup that fires DURING the awaits above finds an empty array
-      // and unregisters nothing — under StrictMode that leaked every
-      // listener on each dev boot. The handlers are inert either way (each
-      // starts with a `mounted` check) but stayed registered forever.
-      if (!mounted) {
-        unlistens.forEach((u) => u());
-        unlistens.length = 0;
-      }
-    })();
-    return () => {
-      mounted = false;
-      unlistens.forEach((u) => u());
-    };
+      on<TranscriptPhasePayload>("transcript-phase", onTranscriptPhase);
     // Every dep here is stable (empty deps of its own), so this runs once
     // for the app's lifetime and never re-subscribes.
   }, [
@@ -215,5 +197,5 @@ export function useTranscriptListeners(d: UseTranscriptListenersDeps): void {
     setTranscriptProgress, setTranscriptPhase, setActiveTranscript, setTranscriptArrivedTick,
     transcriptJobIdRef, txChannelRef, clipSourceKeyRef, localFilePathRef,
     metadataRef, stageClockRef,
-  ]);
-}
+    ]);
+    }

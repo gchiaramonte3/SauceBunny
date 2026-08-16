@@ -39,7 +39,11 @@ function walk(dir: string, test: (f: string) => boolean, out: string[] = []): st
 
 const rustFiles = walk(join(ROOT, "src-tauri/src"), (f) => f.endsWith(".rs"));
 const tsFiles = walk(join(ROOT, "src"), (f) => /\.tsx?$/.test(f))
-  .filter((f) => !/\.test\.tsx?$/.test(f));
+  .filter((f) => !/\.test\.tsx?$/.test(f))
+  // use-tauri-listeners DEFINES the `on(...)` helper rather than calling it,
+  // and its docstring shows the call shape in prose. Scanning it reports the
+  // example as a live subscription to an event nothing emits.
+  .filter((f) => !f.endsWith("use-tauri-listeners.ts"));
 
 /** Event names Rust emits. */
 const emitted = new Map<string, string[]>();
@@ -56,7 +60,11 @@ for (const f of rustFiles) {
 const listened = new Map<string, string[]>();
 for (const f of tsFiles) {
   const text = readFileSync(f, "utf8");
-  for (const m of text.matchAll(/\blisten\s*(?:<[^>]*>)?\(\s*"([a-z][a-z0-9:_-]*)"/g)) {
+  // `listen(...)` OR the `on(...)` handed out by use-tauri-listeners. Four
+  // hooks moved onto that primitive and this contract found out the honest
+  // way: its "no listens found" canary fired rather than the sweep quietly
+  // reporting ten orphaned events.
+  for (const m of text.matchAll(/\b(?:listen|on)\s*(?:<[^>]*>)?\(\s*"([a-z][a-z0-9:_-]*)"/g)) {
     const at = listened.get(m[1]) ?? [];
     at.push(f.slice(ROOT.length + 1));
     listened.set(m[1], at);
@@ -104,7 +112,7 @@ describe("the Tauri event surface", () => {
     const wrong: string[] = [];
     for (const f of tsFiles) {
       const text = readFileSync(f, "utf8");
-      for (const m of text.matchAll(/\blisten\s*(?:<[^>]*>)?\(\s*"([a-z][a-z0-9:_-]*)"\s*,\s*([A-Za-z_$][\w$]*)\s*\)/g)) {
+      for (const m of text.matchAll(/\b(?:listen|on)\s*(?:<[^>]*>)?\(\s*"([a-z][a-z0-9:_-]*)"\s*,\s*([A-Za-z_$][\w$]*)\s*\)/g)) {
         const [, event, handler] = m;
         checked++;
         if (handler !== pascal(event)) {

@@ -1,5 +1,5 @@
-import { useEffect, type Dispatch, type SetStateAction, type MutableRefObject } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { type Dispatch, type SetStateAction, type MutableRefObject } from "react";
+import { useTauriListeners } from "./use-tauri-listeners";
 import type { DoneEvent } from "../bindings/DoneEvent";
 import type { LogEvent } from "../bindings/LogEvent";
 import type { ProgressEvent } from "../bindings/ProgressEvent";
@@ -61,110 +61,93 @@ export function useClipExportListeners(d: UseClipExportListenersDeps): void {
     jobIdRef, fpsRef, clipJobMetaRef, queueResolverRef,
   } = d;
 
-useEffect(() => {
-  const unlistens: UnlistenFn[] = [];
-  let mounted = true;
-  (async () => {
-    const onClipLog = (e: { payload: LogEvent }) => {
-      if (!mounted || e.payload.job_id !== jobIdRef.current) return;
-      const sourceHint =
-        e.payload.line.startsWith("[ffmpeg]") || e.payload.line.startsWith("[Merger]") ? "ffmpeg" :
-        e.payload.line.startsWith("[") ? "yt-dlp" :
-        e.payload.stream === "stderr" ? "stderr" : "yt-dlp";
-      appendLog(asLogTag(e.payload.tag), sourceHint, e.payload.line);
-    };
-    const a = await listen<LogEvent>("clip-log", onClipLog);
-    const onClipProgress = (e: { payload: ProgressEvent }) => {
-      if (!mounted || e.payload.job_id !== jobIdRef.current) return;
-      setProgress(e.payload.percent);
-    };
-    const b = await listen<ProgressEvent>("clip-progress", onClipProgress);
-    const onClipDone = (e: { payload: DoneEvent }) => {
-      if (!mounted || e.payload.job_id !== jobIdRef.current) return;
-      // If we're running the queue, route the event into the queue runner
-      // and skip the single-export bookkeeping below.
-      if (queueResolverRef.current) {
-        const resolver = queueResolverRef.current;
-        queueResolverRef.current = null;
-        resolver({
-          success: e.payload.success,
-          path: e.payload.path ?? undefined,
-          error: e.payload.error ?? undefined,
-        });
-        return;
-      }
-      if (e.payload.success && e.payload.path) {
-        // Stay on "loaded" so the canvas video stays visible; the toast +
-        // notification bell announce completion non-blockingly.
-        setStatus("loaded");
-        setExportPhase("success"); // Export button → check flash
-        setResultPath(e.payload.path);
-        setProgress(0);
-        const filename = e.payload.path.split("/").pop() ?? "Done.";
-        pushNotification("success", "Clip exported", filename, e.payload.path);
-        notify("Clip exported", filename);
-        // Title/thumbnail snapshot from export start — NOT metadataRef, which
-        // may now point at a different source the user switched to mid-export.
-        const m = clipJobMetaRef.current;
-        const f = fpsRef.current;
-        if (m) {
-          const span =
-            (tcToSeconds(m.outTc, f) ?? 0) - (tcToSeconds(m.inTc, f) ?? 0);
-          const dur = span > 0 ? secondsToTc(span, f) : "Full";
-          const r: RecentClip = {
-            id: Math.random().toString(36).slice(2),
-            title: m.title,
-            path: e.payload.path,
-            dur,
-            when: Date.now(),
-            thumbnail: m.thumbnail,
-            source: m.source,
-          };
-          setRecents((prev) => pushRecentClip(prev, r));
+  useTauriListeners((on) => {
+      const onClipLog = (payload: LogEvent) => {
+          if (payload.job_id !== jobIdRef.current) return;
+        const sourceHint =
+          payload.line.startsWith("[ffmpeg]") || payload.line.startsWith("[Merger]") ? "ffmpeg" :
+          payload.line.startsWith("[") ? "yt-dlp" :
+          payload.stream === "stderr" ? "stderr" : "yt-dlp";
+        appendLog(asLogTag(payload.tag), sourceHint, payload.line);
+      };
+      on<LogEvent>("clip-log", onClipLog);
+      const onClipProgress = (payload: ProgressEvent) => {
+          if (payload.job_id !== jobIdRef.current) return;
+        setProgress(payload.percent);
+      };
+      on<ProgressEvent>("clip-progress", onClipProgress);
+      const onClipDone = (payload: DoneEvent) => {
+          if (payload.job_id !== jobIdRef.current) return;
+        // If we're running the queue, route the event into the queue runner
+        // and skip the single-export bookkeeping below.
+        if (queueResolverRef.current) {
+          const resolver = queueResolverRef.current;
+          queueResolverRef.current = null;
+          resolver({
+            success: payload.success,
+            path: payload.path ?? undefined,
+            error: payload.error ?? undefined,
+          });
+          return;
         }
-      } else if (e.payload.error === "Cancelled") {
-        setStatus("loaded");
-        setExportPhase("idle"); // user cancel → straight to idle, no error flash
-        setErrorDetail(null);
-        setProgress(0);
-        appendLog("warn", "ffmpeg", "Export cancelled");
-        pushNotification("info", "Export cancelled", "");
-      } else {
-        setStatus("error");
-        setExportPhase("error"); // Export button → cross flash
-        // Humanize AFTER classifyExtractorRot sees the raw text (the
-        // humanizer only rewrites EACCES spawn failures, but keep the
-        // ordering honest anyway).
-        classifyExtractorRot(e.payload.error ?? "");
-        const msg = humanizeSpawnError(e.payload.error ?? "Export failed");
-        setErrorDetail(msg);
-        notify("Export failed", msg);
-        pushNotification("error", "Export failed", msg);
-      }
-    };
-    const c = await listen<DoneEvent>("clip-done", onClipDone);
-    unlistens.push(a, b, c);
-    // A cleanup that fires DURING the awaits above finds an empty array
-    // and unregisters nothing — under StrictMode that leaked every
-    // listener on each dev boot. The handlers are inert either way (each
-    // starts with a `mounted` check) but stayed registered forever.
-    if (!mounted) {
-      unlistens.forEach((u) => u());
-      unlistens.length = 0;
+        if (payload.success && payload.path) {
+          // Stay on "loaded" so the canvas video stays visible; the toast +
+          // notification bell announce completion non-blockingly.
+          setStatus("loaded");
+          setExportPhase("success"); // Export button → check flash
+          setResultPath(payload.path);
+          setProgress(0);
+          const filename = payload.path.split("/").pop() ?? "Done.";
+          pushNotification("success", "Clip exported", filename, payload.path);
+          notify("Clip exported", filename);
+          // Title/thumbnail snapshot from export start — NOT metadataRef, which
+          // may now point at a different source the user switched to mid-export.
+          const m = clipJobMetaRef.current;
+          const f = fpsRef.current;
+          if (m) {
+            const span =
+              (tcToSeconds(m.outTc, f) ?? 0) - (tcToSeconds(m.inTc, f) ?? 0);
+            const dur = span > 0 ? secondsToTc(span, f) : "Full";
+            const r: RecentClip = {
+              id: Math.random().toString(36).slice(2),
+              title: m.title,
+              path: payload.path,
+              dur,
+              when: Date.now(),
+              thumbnail: m.thumbnail,
+              source: m.source,
+            };
+            setRecents((prev) => pushRecentClip(prev, r));
+          }
+        } else if (payload.error === "Cancelled") {
+          setStatus("loaded");
+          setExportPhase("idle"); // user cancel → straight to idle, no error flash
+          setErrorDetail(null);
+          setProgress(0);
+          appendLog("warn", "ffmpeg", "Export cancelled");
+          pushNotification("info", "Export cancelled", "");
+        } else {
+          setStatus("error");
+          setExportPhase("error"); // Export button → cross flash
+          // Humanize AFTER classifyExtractorRot sees the raw text (the
+          // humanizer only rewrites EACCES spawn failures, but keep the
+          // ordering honest anyway).
+          classifyExtractorRot(payload.error ?? "");
+          const msg = humanizeSpawnError(payload.error ?? "Export failed");
+          setErrorDetail(msg);
+          notify("Export failed", msg);
+          pushNotification("error", "Export failed", msg);
+        }
+      };
+      on<DoneEvent>("clip-done", onClipDone);
+    // Every dep here is stable (empty deps of its own), so this runs once
+    // for the app's lifetime and never re-subscribes.
+    // Every entry is a stable reference — memoised callbacks, setState
+    // functions, and refs — so this subscribes once and never re-subscribes,
+    // which is what the comment above asserts and this array now enforces.
+  }, [
+    appendLog, notify, pushNotification, classifyExtractorRot,
+    setStatus, setExportPhase, setResultPath, setProgress, setErrorDetail, setRecents,
+    jobIdRef, fpsRef, clipJobMetaRef, queueResolverRef,
+    ]);
     }
-  })();
-  return () => {
-    mounted = false;
-    unlistens.forEach((u) => u());
-  };
-  // Every dep here is stable (empty deps of its own), so this runs once
-  // for the app's lifetime and never re-subscribes.
-  // Every entry is a stable reference — memoised callbacks, setState
-  // functions, and refs — so this subscribes once and never re-subscribes,
-  // which is what the comment above asserts and this array now enforces.
-}, [
-  appendLog, notify, pushNotification, classifyExtractorRot,
-  setStatus, setExportPhase, setResultPath, setProgress, setErrorDetail, setRecents,
-  jobIdRef, fpsRef, clipJobMetaRef, queueResolverRef,
-]);
-}
