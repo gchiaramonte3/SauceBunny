@@ -148,10 +148,14 @@ test("the settings modal's controls clear the bar too", async ({ page }) => {
   // small icon buttons, which is exactly where crowding shows up.
   await boot(page);
   const gear = page.locator('[aria-label="Settings"], button:has-text("Settings")').first();
-  if (await gear.count()) {
-    await gear.click();
-    await page.waitForTimeout(300);
-  }
+  // NOT `if (await gear.count())`. That guard meant a renamed or removed
+  // Settings button quietly skipped the open, leaving this test measuring the
+  // main view again and reporting a pass for a surface it never saw. The gear
+  // has to be there, and the dialog has to appear - both asserted, and the
+  // dialog with an auto-retrying assertion rather than a fixed wait.
+  await expect(gear, "no Settings control found, so this measured the main view").toHaveCount(1);
+  await gear.click();
+  await expect(page.locator('.cp-modal, [role="dialog"]').first()).toBeVisible();
   const bad = failures(await targets(page));
   expect(bad, `Undersized AND crowded in Settings:\n${bad.join("\n")}`).toEqual([]);
 });

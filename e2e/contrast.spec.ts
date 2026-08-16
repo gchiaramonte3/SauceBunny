@@ -135,10 +135,12 @@ for (const [key, label, root] of [
   test(`${label} text meets WCAG AA contrast`, async ({ page }) => {
     await boot(page);
     await page.keyboard.press(key);
-    await page.waitForTimeout(250);
-    const active = await page.evaluate(() =>
-      document.querySelector(".cp-view:not([hidden])")?.className ?? "");
-    expect(active, `${key} did not switch to ${label}`).toContain(root);
+    // Poll, do not sleep-then-snapshot. `expect(await ...)` captures one moment,
+    // so the fixed wait was load-bearing and fragile under parallel workers.
+    await expect
+      .poll(() => page.evaluate(() => document.querySelector(".cp-view:not([hidden])")?.className ?? ""),
+        { message: `${key} did not switch to ${label}` })
+      .toContain(root);
 
     const bad = await failures(page);
     expect(
@@ -153,10 +155,14 @@ test("the settings modal meets AA too", async ({ page }) => {
   // explanatory `desc` copy, which is exactly where a muted grey goes.
   await boot(page);
   const gear = page.locator('[aria-label="Settings"], button:has-text("Settings")').first();
-  if (await gear.count()) {
-    await gear.click();
-    await page.waitForTimeout(300);
-  }
+  // NOT `if (await gear.count())`. That guard meant a renamed or removed
+  // Settings button quietly skipped the open, leaving this test measuring the
+  // main view again and reporting a pass for a surface it never saw. The gear
+  // has to be there, and the dialog has to appear - both asserted, and the
+  // dialog with an auto-retrying assertion rather than a fixed wait.
+  await expect(gear, "no Settings control found, so this measured the main view").toHaveCount(1);
+  await gear.click();
+  await expect(page.locator('.cp-modal, [role="dialog"]').first()).toBeVisible();
   const bad = await failures(page);
   expect(
     bad.map((b) => `${b.ratio}:1 ${b.px}px "${b.text}" .${b.cls} ${b.fg} on ${b.bg}`),
@@ -199,9 +205,10 @@ test("the command palette meets AA", async ({ page }) => {
   // it, so it was the largest surface this measurement had not seen.
   await boot(page);
   await page.keyboard.press("Control+k");
-  await page.waitForTimeout(250);
-  const open = await page.locator(".cp-palette, [role=\"dialog\"]").count();
-  expect(open, "the palette did not open, so this measured nothing").toBeGreaterThan(0);
+  // Wait for the palette itself. Counting after a fixed wait would report
+  // "did not open" on a slow run, and - worse - measure the page behind it.
+  await expect(page.locator('.cp-palette, [role="dialog"]').first(),
+    "the palette did not open, so this would measure nothing").toBeVisible();
   const bad = await failures(page);
   const known = (b: Fail) =>
     KNOWN_BELOW_AA.some((k) => (k.cls ? b.cls.includes(k.cls) : false) || (k.text ? b.text === k.text : false));

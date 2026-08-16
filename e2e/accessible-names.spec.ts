@@ -93,10 +93,14 @@ test("no control is announced as an unnamed button", async ({ page }) => {
 test("the settings modal names its controls too", async ({ page }) => {
   await boot(page);
   const gear = page.locator('[aria-label="Settings"], button:has-text("Settings")').first();
-  if (await gear.count()) {
-    await gear.click();
-    await page.waitForTimeout(300);
-  }
+  // NOT `if (await gear.count())`. That guard meant a renamed or removed
+  // Settings button quietly skipped the open, leaving this test measuring the
+  // main view again and reporting a pass for a surface it never saw. The gear
+  // has to be there, and the dialog has to appear - both asserted, and the
+  // dialog with an auto-retrying assertion rather than a fixed wait.
+  await expect(gear, "no Settings control found, so this measured the main view").toHaveCount(1);
+  await gear.click();
+  await expect(page.locator('.cp-modal, [role="dialog"]').first()).toBeVisible();
   const bad = await unnamed(page);
   expect(
     bad.map((b) => `${b.tag}.${b.cls}`),
@@ -123,7 +127,6 @@ for (const [key, label, root] of VIEWS) {
   test(`${label} names every control it renders`, async ({ page }) => {
     await boot(page);
     await page.keyboard.press(key);
-    await page.waitForTimeout(250);
 
     // Prove the switch happened before believing the result. All five view
     // roots stay in the DOM with `hidden` toggling, so a shortcut that stops
@@ -131,9 +134,12 @@ for (const [key, label, root] of VIEWS) {
     // reporting five passes for one screen. Counting buttons does not show it
     // either: the raw count is identical from every view because it includes
     // the hidden ones.
-    const active = await page.evaluate(() =>
-      document.querySelector(".cp-view:not([hidden])")?.className ?? "");
-    expect(active, `${key} did not switch to ${label}`).toContain(root);
+    // Polled, not sleep-then-snapshot: `expect(await ...)` reads one moment,
+    // so the fixed wait it replaced was load-bearing and flaky under load.
+    await expect
+      .poll(() => page.evaluate(() => document.querySelector(".cp-view:not([hidden])")?.className ?? ""),
+        { message: `${key} did not switch to ${label}` })
+      .toContain(root);
 
     const bad = await unnamed(page);
     expect(
