@@ -500,6 +500,28 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
    and never stub away behaviour the test is supposed to be checking. Mock
    `@tauri-apps/api/*` and the heavy decode helpers (`mediabunny-helpers`,
    `waveform`) per file with `vi.mock`. Wrap a `setPlayheadFrames` in `act()`.
+
+   **A test that can reach past a modal is not testing the product.**
+   Playwright's actionability check blocks `click()` on a covered element, but
+   `fill()` does NOT — it focuses and sets the value regardless of what is on
+   top. So a spec can type into a field UNDERNEATH an open dialog, which no
+   user can do, and everything measured after that describes a state the app
+   cannot be in.
+
+   This cost a day. `e2e/name-gate-modal.spec.ts` used to `fill()` the review
+   composer and click Post while the name gate was already open over it (the
+   gate opens from the composer's own `onFocus`). The fill dragged focus out of
+   the dialog, so focus-on-open measured as broken. Four theories were tested
+   and disproven against that phantom — the focus hook, StrictMode's
+   double-invoke, duplicate mounts, mount timing — and two tasks were filed
+   describing a mechanism that was not happening, before instrumenting the
+   production bundle showed the effects running correctly all along. The tell
+   was there early and got read past: focusing the element from OUTSIDE the app
+   worked and stuck, which points at the harness, not the app.
+
+   So: drive a modal-raising flow the way a user reaches it, and if an
+   assertion about focus or visibility looks impossible, suspect the flow
+   before the app.
 6. **Shrink `App.tsx`.** It is ~6,400 lines and the largest single risk in the
    codebase: nothing can be tested without booting the whole app, and reviewing
    a change to it means reading around a dozen unrelated subsystems. The
