@@ -506,7 +506,7 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ## Enforced contracts
 
-Twenty-eight rules in this file are checked by a test rather than remembered. If you
+Twenty-nine rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -559,6 +559,7 @@ written after finding the rule already broken somewhere.
 | `csp-contract` | The shipped CSP permits what startup actually registers |
 | `reduced-motion-contract` | Every keyframe animation is guarded; a `forwards` animation gets a calmer replacement rather than `none`; a centring transform is never neutralised |
 | `token-usage-contract` | No stylesheet writes a literal hex that an existing token already holds (comments and `var(--x, #fallback)` excluded) |
+| `duplicated-tables-contract` (3rd block) | No component re-implements a helper `lib/` already exports |
 
 Three more are measured against the RENDERED app rather than its source, in
 `e2e/`, because CSS and the accessibility tree are not readable by grep:
