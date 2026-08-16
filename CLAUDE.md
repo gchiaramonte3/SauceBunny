@@ -534,6 +534,7 @@ Three more are measured against the RENDERED app rather than its source, in
 | `form-labels` | Every visible input/select/textarea has an accessible name, across all nine Settings tabs. A placeholder does not count |
 | `focus-visible` | Every tab stop looks different when focused. Transitions are zeroed first - reading mid-fade reports a correct ring as missing |
 | `panel-window` | The second window (`?window=panel`) boots, renders content, names its controls, and offers no pop-out |
+| `min-window-size` | Nothing overflows sideways at the `minWidth`/`minHeight` declared in `tauri.conf.json` (read from the config, not retyped) |
 
 Two habits these encode, worth applying to any new one:
 
