@@ -6156,7 +6156,6 @@ export default function App() {
                         <button
                           type="button"
                           className="btn btn-ghost btn-compact cp-room-code"
-                          title="Copy the join code"
                           onClick={() => { if (coSession.code) void navigator.clipboard.writeText(coSession.code).then(() => pushNotification("success", "Join code copied", "")); }}
                         >
                           Copy join code

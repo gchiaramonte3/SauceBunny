@@ -442,7 +442,7 @@ export function Sidebar(props: Props) {
                   ? `${metadata.width} × ${metadata.height}`
                   : "—"}
               </div>
-              <div className="k">Framerate</div>
+              <div className="k">Frame rate</div>
               <div className="v mono">
                 {metadata.fps ? `${metadata.fps.toFixed(metadata.fps % 1 === 0 ? 0 : 3)} fps` : "—"}
               </div>

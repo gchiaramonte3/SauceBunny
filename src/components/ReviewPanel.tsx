@@ -1068,7 +1068,7 @@ export function ReviewPanel({
                 <button
                   className="cp-review-carried-tc"
                   onClick={() => onSeek(c.timeStart)}
-                  title="Jump to this spot"
+                  title="Jump to this point"
                 >
                   {secondsToHms(c.timeStart).replace(/^00:/, "")}
                 </button>
