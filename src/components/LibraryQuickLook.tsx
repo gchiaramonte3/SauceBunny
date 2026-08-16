@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { assetUrl } from "../lib/asset-url";
 import { formatError } from "../lib/error-format";
 import type { LocalFileMeta } from "../bindings/LocalFileMeta";
+import { useModalFocus } from "../hooks/use-modal-focus";
 
 /**
  * Quick Look for the Library: press Space on a file, watch it, press Esc.
@@ -31,6 +32,11 @@ export function LibraryQuickLook({
   onClose: () => void;
   onOpenInClip: () => void;
 }) {
+  // Portalled behind a scrim: without this, Tab walks out of the dialog into
+  // the page underneath it, and closing drops focus instead of returning it.
+  // See hooks/use-modal-focus.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(true, dialogRef);
   const [meta, setMeta] = useState<LocalFileMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
@@ -67,7 +73,7 @@ export function LibraryQuickLook({
 
   return createPortal(
     <div className="cp-modal-scrim cp-ql-scrim" onMouseDown={onClose}>
-      <div className="cp-ql" role="dialog" aria-label={`Preview of ${name}`} onMouseDown={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} tabIndex={-1} className="cp-ql" role="dialog" aria-label={`Preview of ${name}`} onMouseDown={(e) => e.stopPropagation()}>
         <div className="cp-ql-head">
           <span className="cp-ql-name" title={path}>{name}</span>
           {caption && <span className="cp-ql-meta">{caption}</span>}

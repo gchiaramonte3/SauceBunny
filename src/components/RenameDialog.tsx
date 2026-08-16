@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { buildRenamePlan, type RenameItem } from "../lib/rename-pattern";
+import { useModalFocus } from "../hooks/use-modal-focus";
 
 /**
  * Rename one file, or a hundred, with the result visible before anything is
@@ -54,6 +55,11 @@ export function RenameDialog({
     });
   }, [single]);
 
+  // Portalled behind a scrim: without this, Tab walks out of the dialog
+  // into the page underneath it, and closing drops focus instead of
+  // returning it. See hooks/use-modal-focus.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(true, dialogRef);
   const plan = useMemo(
     () => buildRenamePlan(items, pattern, existingNames),
     [items, pattern, existingNames],
@@ -73,6 +79,8 @@ export function RenameDialog({
   return createPortal(
     <div className="cp-modal-scrim" onMouseDown={onCancel}>
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="cp-rename"
         role="dialog"
         aria-label={single ? "Rename file" : `Rename ${items.length} files`}

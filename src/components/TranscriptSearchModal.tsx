@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { IconSearch, IconTranscript } from "./Icons";
 import { fmtTime } from "../lib/srt";
 import { useTranscriptSearch } from "../hooks/use-transcript-search";
+import { useModalFocus } from "../hooks/use-modal-focus";
 
 /**
  * Search every transcript in the library, and jump to the line.
@@ -27,6 +28,11 @@ export function TranscriptSearchModal({
 }) {
   const { state, query, setQuery, build, hits, groups } = useTranscriptSearch();
   const inputRef = useRef<HTMLInputElement>(null);
+  // Portalled behind a scrim: without this, Tab walks out of the dialog into
+  // the page underneath it, and closing drops focus instead of returning it.
+  // See hooks/use-modal-focus.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(true, dialogRef);
 
   useEffect(() => {
     void build();
@@ -45,6 +51,8 @@ export function TranscriptSearchModal({
   return createPortal(
     <div className="cp-modal-scrim" onMouseDown={onClose}>
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="cp-txsearch"
         role="dialog"
         aria-label="Search transcripts"
