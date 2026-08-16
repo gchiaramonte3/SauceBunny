@@ -504,6 +504,16 @@ written after finding the rule already broken somewhere.
 | `asset-scope-contract` | The `asset://` scope stays narrow |
 | `csp-contract` | The shipped CSP permits what startup actually registers |
 
+Three more are measured against the RENDERED app rather than its source, in
+`e2e/`, because CSS and the accessibility tree are not readable by grep:
+
+| Test (`e2e/`) | What it holds |
+|---|---|
+| `target-size` · `contrast` · `accessible-names` | Rendered pointer targets, contrast ratios, and control names |
+| `focus-trap` · `popover-focus` | Focus stays in a dialog; a popover is reachable |
+| `console-clean` | No console error or warning in any view - where React reports duplicate keys and invalid nesting, and where a packaged WKWebView build shows nobody |
+| `landmarks` | Each view exposes exactly one NAMED main landmark |
+
 Two habits these encode, worth applying to any new one:
 
 - **Assert you scanned something.** A test that walks source and asserts a

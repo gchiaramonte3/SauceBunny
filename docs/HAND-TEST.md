@@ -82,7 +82,16 @@ that file's path from one helper.
       opens. Tab to a row's × and press Enter — it removes that row and does
       **not** also open the transcript.
 
-## 7. Look — token changes, no computed value should have moved
+## 7. Screen reader — new landmark names, only VoiceOver can confirm them
+
+Each view's main region is now named. The e2e run proves the name is in the
+accessibility tree; only VoiceOver proves it is announced.
+
+- [ ] Turn on VoiceOver (⌘F5). Press **VO+U**, choose Landmarks. Each view
+      should list one main, named Library / Clip / Co-Review / Transcript, plus
+      the Primary navigation. Nothing should say a bare "main".
+
+## 8. Look — token changes, no computed value should have moved
 
 - [ ] Timecodes, download percentages, cache sizes and the queue's numbers do
       not shimmy or shift width while they count.
