@@ -46,6 +46,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     // and it is not harmless: `setAudioInputs(null)` makes the render throw
     // inside a `.map`, surfacing as a failure in whichever test ran last. The
     // shared e2e mock lists all three of these for the same reason.
+    if (cmd === "parakeet_model_downloaded") return Promise.resolve(true);
     if (cmd.startsWith("list_")) return Promise.resolve([]);
     return Promise.resolve(null);
   },
@@ -144,6 +145,22 @@ describe("deleting a downloaded model", () => {
       expect(deleteBtns().find((x) => x.getAttribute("aria-label")?.includes("Large v3"))!.className)
         .not.toContain("armed");
     } finally { vi.useRealTimers(); }
+  });
+});
+
+describe("the Parakeet model, which has no size to name", () => {
+  it("arms too, and asks in words rather than inventing a number", async () => {
+    // Parakeet carries no size_bytes, and the only figure that exists is the
+    // "~0.5 GB" transcript.rs already states twice. A third copy in a third
+    // language is the drift duplicated-tables-contract exists to stop, so the
+    // arming carries the safety and the label stays qualitative.
+    render(<SettingsModal {...props()} />);
+    const b = await screen.findByRole("button", { name: "Delete the Parakeet model" });
+    fireEvent.click(b);
+    expect(h.calls.some((c) => c.cmd === "delete_parakeet_model")).toBe(false);
+    expect(b.textContent).toBe("Delete the model?");
+    fireEvent.click(b);
+    expect(h.calls.some((c) => c.cmd === "delete_parakeet_model")).toBe(true);
   });
 });
 

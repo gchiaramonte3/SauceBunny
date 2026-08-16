@@ -1351,12 +1351,27 @@ export function SettingsModal(props: Props) {
                                 Use as default
                               </button>
                             )}
+                            {/* Armed like the other two model deletes. The size
+                                is deliberately NOT in the label: Parakeet has
+                                no model list, so it carries no size_bytes, and
+                                the only figure available is the "~0.5 GB" that
+                                transcript.rs states in two places already. A
+                                third copy in a third language is exactly the
+                                drift duplicated-tables-contract exists to stop,
+                                and the arming does the load-bearing work here
+                                without it. */}
                             <button
-                              className="btn btn-ghost"
-                              onClick={deleteParakeet}
-                              title="Remove the Parakeet model from disk"
+                              className={"btn btn-ghost" + (armedDelete === "parakeet" ? " armed" : "")}
+                              onClick={() => {
+                                if (armedDelete === "parakeet") { setArmedDelete(null); deleteParakeet(); return; }
+                                setArmedDelete("parakeet");
+                              }}
+                              title="Remove the Parakeet model from disk. It downloads again the next time you pick it."
+                              aria-label={armedDelete === "parakeet"
+                                ? "Confirm deleting the Parakeet model"
+                                : "Delete the Parakeet model"}
                             >
-                              Delete
+                              {armedDelete === "parakeet" ? "Delete the model?" : "Delete"}
                             </button>
                           </>
                         )}
