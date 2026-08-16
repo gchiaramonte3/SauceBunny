@@ -105,9 +105,19 @@ echo "Sidecars:"
 for s in yt-dlp ffmpeg ffprobe whisper-cli saucebunny-diarize llama-server; do
   b="$APP/Contents/MacOS/$s"
   [ -x "$b" ] || { bad "missing: $s"; continue; }
-  otool -L "$b" 2>/dev/null | grep -qE '/opt/homebrew/|/usr/local/|/Users/' \
-    && bad "$s links a non-system dylib — crashes on another Mac" \
-    || ok "$s self-contained"
+  # Slurp, then match with `case` - the same shape as has() above, and for the
+  # same reason. `otool -L … | grep -q` inverts THIS guard in the reassuring
+  # direction: otool prints a line per dylib, grep exits at the first match,
+  # otool takes SIGPIPE, pipefail returns 141, the && is skipped, and the ||
+  # branch reports "self-contained" for a binary that is not. That is the one
+  # check standing between a leaky sidecar and a crash on every Mac without
+  # the exact Homebrew install it was built against.
+  deps="$(otool -L "$b" 2>/dev/null || true)"
+  case "$deps" in
+    */opt/homebrew/*|*/usr/local/*|*/Users/*)
+      bad "$s links a non-system dylib — crashes on another Mac" ;;
+    *) ok "$s self-contained" ;;
+  esac
 done
 
 echo

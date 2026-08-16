@@ -35,11 +35,18 @@ guard_self_contained() {
   local bin="$1"
   local deps
   deps="$(otool -L "${bin}" | tail -n +2)"
-  if printf '%s\n' "${deps}" | grep -qE '/opt/homebrew/|/usr/local/|/Users/'; then
-    echo "✗ ${bin} references a non-system dylib — refusing to install:" >&2
-    printf '%s\n' "${deps}" | grep -E '/opt/homebrew/|/usr/local/|/Users/' >&2
-    exit 3
-  fi
+  # `case`, not `printf | grep -q`: under `set -o pipefail` grep exits at the
+  # first match, the writer takes SIGPIPE, and the pipeline reports FAILURE on
+  # a successful match - which here means reporting a LEAKY binary as clean and
+  # installing it. The narrow writer makes that unlikely rather than
+  # impossible, and this is the guard rail that stops shipping a sidecar which
+  # crashes on any Mac without the exact Homebrew install it was built against.
+  case "${deps}" in
+    */opt/homebrew/*|*/usr/local/*|*/Users/*)
+      echo "✗ ${bin} references a non-system dylib — refusing to install:" >&2
+      printf '%s\n' "${deps}" | grep -E '/opt/homebrew/|/usr/local/|/Users/' >&2 || true
+      exit 3 ;;
+  esac
 }
 
 # Resolve repo root regardless of where the script is invoked from.
