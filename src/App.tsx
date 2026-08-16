@@ -6831,8 +6831,15 @@ export default function App() {
         />
       )}
 
+      {/* Never open at the same time as the welcome screen. On a true first
+          run both gates fire - they latch on independent flags - and the
+          welcome painted over this one at z-index 300. Two aria-modal dialogs
+          were open at once, and both bind Escape in the CAPTURE phase, so the
+          first Escape of a user's life closed the modal they could not see and
+          left up the one they could; this one's latch then meant the connect
+          prompt never came back. Sequenced instead: welcome first, this after. */}
       <YouTubeAuthModal
-        open={ytAuthOpen}
+        open={ytAuthOpen && !showWelcome}
         mode={ytAuthMode}
         site={ytAuthSite}
         current={defaults.ytCookiesBrowser}

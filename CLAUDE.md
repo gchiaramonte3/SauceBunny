@@ -539,6 +539,7 @@ Three more are measured against the RENDERED app rather than its source, in
 | `focus-trap` · `popover-focus` | Focus stays in a dialog; a popover is reachable |
 | `console-clean` | No console error or warning in any view - where React reports duplicate keys and invalid nesting, and where a packaged WKWebView build shows nobody |
 | `landmarks` | Each view exposes exactly one NAMED main landmark |
+| `first-run` | A brand-new install shows the welcome alone, traps focus in it, and the onboarding modals sequence rather than stack |
 | `reduced-motion` | No keyframe animation runs under `prefers-reduced-motion` (transitions are a known gap) |
 | `form-labels` | Every visible input/select/textarea has an accessible name, across all nine Settings tabs. A placeholder does not count |
 | `focus-visible` | Every tab stop looks different when focused. Transitions are zeroed first - reading mid-fade reports a correct ring as missing |

@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import logoUrl from "../assets/saucebunny.svg";
 import { IconCoReview, IconHome, IconLink, IconTranscript } from "./Icons";
+import { useModalFocus } from "../hooks/use-modal-focus";
 
 /**
  * First-launch welcome. Shows exactly once (App gates on the
@@ -13,6 +14,16 @@ import { IconCoReview, IconHome, IconLink, IconTranscript } from "./Icons";
  * prefers-reduced-motion. The CTA is the grey chip per the house rule.
  */
 export function WelcomeScreen({ onDone }: { onDone: () => void }) {
+  // This declares aria-modal but had no trap, and it is the FIRST screen a new
+  // user meets. Tab walked straight out of it: through the nav rail and Home's
+  // buttons, then into the YouTube connect modal stacked underneath (both open
+  // at once on a true first run, welcome painted over it at z-index 300). So a
+  // keyboard user could not reach "Get started" at all, and instead landed on
+  // controls they could not see - including the browser list that borrows
+  // cookies. Same hook the other dialogs use.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(true, dialogRef);
+
   // Esc = same as Get started (capture phase so app shortcuts don't fire).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -33,7 +44,14 @@ export function WelcomeScreen({ onDone }: { onDone: () => void }) {
   ];
 
   return (
-    <div className="cp-welcome" role="dialog" aria-modal="true" aria-label="Welcome to Sauce Bunny">
+    <div
+      ref={dialogRef}
+      tabIndex={-1}
+      className="cp-welcome"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Welcome to Sauce Bunny"
+    >
       <div className="cp-welcome-stage">
         <img className="cp-welcome-mark" src={logoUrl} alt="" />
         <h1 className="cp-welcome-title">Welcome to Sauce Bunny</h1>
