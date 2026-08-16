@@ -9,11 +9,7 @@
 :root {
   --ella-green:      #6CFF8D;
   --novella-purple:  #8627FF;
-  --novella-purple-2:#4826E8;
   --novella-violet:  #6D52ED;
-  --novella-magenta: #C54AF7;
-  --novella-fuchsia: #B519F5;
-  --novella-blue:    #1969F5;
 
   --bg-0:   #0A0A0D;
   --bg-1:   #0E0E10;
@@ -21,7 +17,6 @@
   --bg-3:   #1E1D20;
   --bg-4:   #28272A;
   --bg-5:   #403F46;
-  --bg-hair:#141419;
 
   --fg-0:   #FFFFFF;
   --fg-1:   #F5F5F5;
@@ -37,8 +32,6 @@
   --fg-5:   #71717A;
 
   --stroke-1: #141419;
-  --stroke-2: #28272A;
-  --stroke-3: #403F46;
   --stroke-green: rgba(108,255,141,0.6);
 
   /* ── Line system (r99 design pass) — crisp 1px hairlines in three roles.
@@ -60,7 +53,6 @@
      #ff8a8a in five files, #ff6b6b in five more. This is that colour, named
      once. */
   --danger-text: #FF8A8A;
-  --info:     #1969F5;
   --gold:     #F5C451; /* host crown / winner accent — no status meaning */
 
   /* r99 design pass: shadows are for FLOATING layers (popovers, modals,
@@ -68,7 +60,6 @@
      crisp 1px lines instead of blur. */
   --shadow-soft:   0 1px 4px rgba(0,0,0,0.35);
   --shadow-card:   0 4px 16px rgba(0,0,0,0.50);
-  --shadow-glow-purple: 0 0 16px rgba(134,39,255,0.32);
   --shadow-inset-hair:  inset 0 0 0 1px rgba(255,255,255,0.08);
 
   /* ── Bevel shadow stacks — reused across buttons & cards.
@@ -103,30 +94,27 @@
   --ring-green:
     0 0 0 1px rgba(108,255,141,0.60),
     0 0 8px rgba(108,255,141,0.18);
-  --ring-purple:
-    0 0 0 1px rgba(109,82,237,0.60),
-    0 0 8px rgba(109,82,237,0.24);
 
   /* ── Semantic surface tokens — aliases over the existing bg-N / fg-N
-        scale. Layered in so component CSS can opt into clearer names
-        without breaking historical rules. Mirrors the palette the user
-        proposed; the bg numbers stay in lockstep with the existing scale
-        so the visual change is purely additive.
+        scale, layered in so component CSS could opt into clearer names
+        without breaking historical rules.
+        THE MIGRATION STALLED HALFWAY, and that is worth knowing before
+        adding to it. Some aliases were adopted (--color-accent-green is
+        used more than either of its two older synonyms); the rest were
+        never referenced once and have been removed. What remains is a
+        third naming generation living beside --bg-N / --stroke-N and
+        --novella-*, so before minting a name here, check whether the
+        value already has one: several colours answered to three.
+        A test fails the build on an unreferenced token, so the pile
+        cannot quietly rebuild itself.
         (Comment text avoids the literal asterisk-slash sequence because
         PostCSS would treat it as the comment terminator and choke on
         whatever follows.) ── */
-  --color-bg:                #0A0A0B;
-  --color-surface:           #131315;
   --color-surface-elevated:  #1A1A1D;
-  --color-divider:           #2A2A2E;
-  --color-divider-strong:    #403F46;
-  --color-text-primary:      #FFFFFF;
   --color-text-secondary:    #8A8A8E;
-  --color-text-tertiary:     #5A5A5E;
   --color-accent-green:      #6CFF8D;
   --color-accent-green-2:    #88F362;
   --color-accent-purple:     #6D52ED;
-  --color-accent-pink:       #C54AF7;
   --color-destructive:       #FF5C5C;
   --color-warning:           #FFB545;
 

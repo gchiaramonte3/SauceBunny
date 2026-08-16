@@ -588,6 +588,7 @@
 }
 .cp-fetching .status {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   color: var(--fg-3);
   letter-spacing: 0.04em;
@@ -868,6 +869,7 @@
 }
 .cp-canvas-toast .body {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10.5px;
   color: var(--fg-3);
   /* Was `white-space: nowrap + text-overflow: ellipsis` — that's why
@@ -1013,6 +1015,7 @@
 }
 .cp-notif-text {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10.5px;
   color: var(--fg-3);
   margin-top: 3px;
@@ -1076,6 +1079,7 @@
 }
 .cp-error-overlay .detail {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   color: var(--fg-3);
   text-align: center;

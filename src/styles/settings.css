@@ -271,6 +271,7 @@
 .cp-model-head .name { letter-spacing: -0.005em; }
 .cp-model-head .size {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10.5px;
   color: var(--fg-4);
   font-weight: 500;
@@ -357,6 +358,7 @@
   align-items: center;
   gap: 10px;
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10.5px;
   color: var(--fg-3);
 }
@@ -422,6 +424,7 @@
 .cp-shortcut-row .keys { display: flex; gap: 3px; }
 .cp-shortcut-row .keys kbd {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10px;
   font-weight: 600;
   color: var(--fg-2);
@@ -480,6 +483,7 @@
 }
 .cp-about-name .ver {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   font-weight: 500;
   color: var(--fg-4);
@@ -947,6 +951,7 @@
 }
 .cp-cache-total {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   color: var(--fg-3);
 }
@@ -969,6 +974,7 @@
 }
 .cp-cache-cat-size {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10.5px;
   color: var(--fg-4);
 }
@@ -1000,6 +1006,7 @@
 }
 .cp-cache-path {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10px;
   color: var(--fg-5);
   max-width: 360px;
@@ -1028,7 +1035,8 @@
 .cp-spike-videos { display: flex; gap: var(--s-2); margin: var(--s-3) 0; }
 .cp-spike-video { width: 50%; aspect-ratio: 16/9; background: var(--bg-0); border-radius: var(--r-md); object-fit: cover; }
 .cp-spike-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
-.cp-spike-row { display: flex; gap: var(--s-2); align-items: baseline; font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-2); }
+.cp-spike-row { display: flex; gap: var(--s-2); align-items: baseline; font-family: var(--font-mono);
+ font-variant-numeric: tabular-nums; font-size: 10.5px; color: var(--fg-2); }
 .cp-spike-verdict { flex-shrink: 0; width: 52px; font-weight: 700; }
 .cp-spike-row.pass .cp-spike-verdict { color: var(--success); }
 .cp-spike-row.fail .cp-spike-verdict { color: var(--danger); }
@@ -1202,6 +1210,7 @@
 }
 .cp-spike-err {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   color: var(--danger, #e5484d);
   margin: var(--s-2) 0;

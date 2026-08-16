@@ -166,6 +166,7 @@
   bottom: 9px;
   transform: translateX(-50%);
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 9px;
   color: var(--fg-5);
   letter-spacing: 0.04em;

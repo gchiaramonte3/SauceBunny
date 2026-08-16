@@ -118,6 +118,7 @@
   position: absolute;
   bottom: 6px; right: 6px;
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10px;
   font-weight: 500;
   color: var(--fg-1);
@@ -188,7 +189,8 @@
   font-variant-numeric: tabular-nums;
   word-break: break-word;
 }
-.cp-kv .v.mono { font-family: var(--font-mono); }
+.cp-kv .v.mono { font-family: var(--font-mono);
+ font-variant-numeric: tabular-nums; }
 
 /* Source-level actions (transcripts, generation, etc) */
 .cp-source-actions {
@@ -214,6 +216,7 @@
   background: rgba(232,38,38,0.10);
   border: 1px solid rgba(232,38,38,0.25);
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10.5px;
   /* Long URLs and paths must wrap cleanly inside the sidebar. */
   word-break: break-word;
@@ -325,6 +328,7 @@
    side-by-side Mark In / Mark Out columns. */
 .cp-input-tc {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
   letter-spacing: 0.02em;
   padding: 0 8px;
@@ -345,6 +349,7 @@
   flex: 1;
   padding: 0 10px;
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 11px;
   color: var(--fg-2);
   white-space: nowrap;
@@ -611,6 +616,7 @@
 .cp-save-preview {
   margin-top: 5px;
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10px;
   color: var(--fg-4);
   white-space: nowrap;

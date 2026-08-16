@@ -303,6 +303,7 @@ body.cp-tab-dragging { cursor: grabbing; }
 }
 .cp-queue-num {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10.5px;
   color: var(--fg-5);
   flex-shrink: 0;
@@ -353,6 +354,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   gap: 5px;
   margin-top: 4px;
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10px;
   color: var(--fg-4);
   white-space: nowrap;
@@ -376,6 +378,7 @@ body.cp-tab-dragging { cursor: grabbing; }
 .cp-queue-error {
   margin-top: 5px;
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 10px;
   color: #ff9a9a;
   word-break: break-word;
@@ -440,6 +443,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   background: var(--ella-green);
   color: var(--bg-0);
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 9.5px;
   font-weight: 700;
   display: flex;
