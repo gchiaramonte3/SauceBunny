@@ -4,7 +4,7 @@ import { needsRepath, repathTo } from "./repath";
 import { loadChosenPosters, loadSourceTimecodes, saveChosenPosters, saveSourceTimecodes } from "./library";
 import { repathKey } from "./repath";
 import { linkFingerprint, resolveByFingerprint, reviewFingerprint } from "./review";
-import { getHistory, renameEntryPath } from "./transcript-history";
+import { renameSourcePath } from "./transcript-history";
 import type { RenamePlanRow } from "./rename-pattern";
 import type { LocalFileMeta } from "../bindings/LocalFileMeta";
 
@@ -101,9 +101,10 @@ export function repathIdentity(
   }
 
   // Transcript history: the entry that knows which .srt belongs to this clip.
-  for (const e of getHistory()) {
-    if (e.sourcePath === oldPath) renameEntryPath(oldPath, newPath, newName.replace(/\.[^.]+$/, ""));
-  }
+  // One call, matching on sourcePath. This used to loop the history, guard on
+  // e.sourcePath, and then hand the work to renameEntryPath - which matches on
+  // e.srtPath and therefore never matched anything.
+  renameSourcePath(oldPath, newPath, newName.replace(/\.[^.]+$/, ""));
 }
 
 /**

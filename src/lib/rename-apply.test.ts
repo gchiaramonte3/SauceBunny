@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { repathIdentity } from "./rename-apply";
 import { loadChosenPosters, setChosenPoster, setSourceTimecode, sourceTimecodeFor, chosenPosterFor } from "./library";
 import { linkFingerprint, resolveByFingerprint, reviewFingerprint } from "./review";
+import { recordTranscript, getHistory, findForSource, clearHistory } from "./transcript-history";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => "") }));
 
@@ -127,3 +128,53 @@ describe("review identity survives macOS filename encoding", () => {
   });
 });
 
+describe("a renamed clip keeps its transcript", () => {
+  // The rename flow carries the poster, the source timecode and the review
+  // fingerprint. It tried to carry the transcript history too and did not:
+  // it guarded on e.sourcePath, then called renameEntryPath, which matches on
+  // e.srtPath. An entry's srtPath is a .srt and its sourcePath is the video,
+  // so nothing ever matched. Measured before the fix: after renaming,
+  // findForSource(newPath) was NOT FOUND and the row still pointed at a file
+  // that no longer existed.
+  beforeEach(() => clearHistory());
+
+  const seed = (sourcePath: string) => recordTranscript({
+    srtPath: "/docs/Transcripts/2026-08/clip.srt",
+    sourcePath, title: "clip", origin: "whisper",
+  });
+
+  it("re-points the history entry at the new path", () => {
+    seed("/lib/clip.mov");
+    repathIdentity("/lib/clip.mov", "/lib/interview.mov", {});
+    expect(findForSource({ sourcePath: "/lib/interview.mov" })).not.toBe(null);
+    expect(findForSource({ sourcePath: "/lib/clip.mov" })).toBe(null);
+  });
+
+  it("retitles the row to the new name", () => {
+    seed("/lib/clip.mov");
+    repathIdentity("/lib/clip.mov", "/lib/interview.mov", {});
+    expect(getHistory()[0].title).toBe("interview");
+  });
+
+  it("leaves the transcript file itself alone", () => {
+    // Only the media moved. srtPath must not be rewritten to a video path,
+    // which is what calling renameEntryPath here would have done had the
+    // paths ever matched.
+    seed("/lib/clip.mov");
+    repathIdentity("/lib/clip.mov", "/lib/interview.mov", {});
+    expect(getHistory()[0].srtPath).toBe("/docs/Transcripts/2026-08/clip.srt");
+  });
+
+  it("matches across macOS filename encoding", () => {
+    const NFD = "/lib/" + "café.mov".normalize("NFD");
+    seed(NFD);
+    repathIdentity(NFD, "/lib/plain.mov", {});
+    expect(findForSource({ sourcePath: "/lib/plain.mov" })).not.toBe(null);
+  });
+
+  it("does not touch another clip's entry", () => {
+    seed("/lib/other.mov");
+    repathIdentity("/lib/clip.mov", "/lib/interview.mov", {});
+    expect(getHistory()[0].sourcePath).toBe("/lib/other.mov");
+  });
+});

@@ -179,6 +179,37 @@ export function removeEntry(id: string): void {
   notifyChanged();
 }
 
+/**
+ * Re-point a history entry at a moved/renamed MEDIA file (new sourcePath, and
+ * the title that goes with it). The transcript itself has not moved.
+ *
+ * Distinct from renameEntryPath, which is for a moved SRT and says in its own
+ * doc that "source keys are left intact". The rename flow used to call THAT
+ * one while renaming a video: it guarded on e.sourcePath, then asked a
+ * function that matches on e.srtPath to do the work. An entry's srtPath is a
+ * .srt in the Transcripts folder and its sourcePath is the video, so the two
+ * are never equal and the call did nothing. Renaming a clip left its history
+ * row pointing at the old path, so the transcript stopped auto-loading for the
+ * renamed file and the row pointed at something no longer on disk.
+ *
+ * Compared NFC-normalised, for the reason recorded in CLAUDE.md: the path a
+ * scan produced is decomposed and the one a rename dialog produced is
+ * composed, and an exact compare misses.
+ */
+export function renameSourcePath(oldPath: string, newPath: string, newTitle?: string): void {
+  const want = oldPath.normalize("NFC");
+  const entries = safeRead();
+  let changed = false;
+  for (const e of entries) {
+    if (e.sourcePath && e.sourcePath.normalize("NFC") === want) {
+      e.sourcePath = newPath;
+      if (newTitle) e.title = newTitle;
+      changed = true;
+    }
+  }
+  if (changed) { safeWrite(entries); notifyChanged(); }
+}
+
 /** Re-point a history entry to a moved/renamed transcript file (new srtPath,
  *  optional new title). Source keys are left intact. No-op if none match. */
 export function renameEntryPath(oldPath: string, newPath: string, newTitle?: string): void {
