@@ -184,6 +184,38 @@ audit as a guard rail and refuses to install a leaky binary.
 
 ---
 
+## Open decision: the ffmpeg pin (as of 2026-08-16)
+
+`sidecars.lock.json` pins each third-party binary by SHA-256, and upstream has
+moved. The fetch script refuses to install the new artifact and tells you to
+re-run with `--accept-new`; that refusal is the check working, not a fault.
+
+What is known, so the call can be made on evidence rather than nerve:
+
+| | |
+|---|---|
+| Pinned (what ships today) | **ffmpeg 8.1**, 51 860 280 bytes |
+| Upstream now offers | **ffmpeg 9.0**, 52 070 376 bytes — a MAJOR version bump |
+| Nightly smoke against 9.0 | **13/13 pass** (run 31942947935) |
+
+Those 13 are the real-binary arg surfaces, not a compile check: the fMP4 remux
+with audio, the DASH audio merge, seek-rebuild from an offset, 16 kHz mono WAV
+conversion and the mark-range cut, whisper-cli's and yt-dlp's full flag
+surfaces, and four playback-prep paths — including **10-bit ProRes HDR
+tonemap**, which is the zscale/libzimg dependency `check:release` guards.
+
+Two caveats:
+
+- The nightly runs on GitHub's virtualised macOS with
+  `SB_NIGHTLY_ALLOW_SW_ENCODER=1`, so VideoToolbox may have fallen back to
+  libx264. Hardware-encoder behaviour on a real Mac is NOT covered by that run.
+- A major version bump is a wider change than these tests probe. They verify the
+  arg surfaces this app uses, not everything ffmpeg altered between 8 and 9.
+
+To adopt: `npm run refresh:ffmpeg -- --accept-new`, which rewrites the pin and
+leaves a reviewable diff. Nothing in CI does this for you — the nightly accepts
+new builds only inside its own throwaway runner, so it can smoke them.
+
 ## Entitlements explained (`src-tauri/entitlements.plist`)
 
 We grant the minimum the Hardened Runtime requires for the app to
