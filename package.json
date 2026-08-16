@@ -25,7 +25,7 @@
     "verify:bundle": "bash scripts/verify-bundle.sh",
     "test:e2e": "playwright test",
     "set-version": "bash scripts/set-version.sh",
-    "lint": "eslint src e2e --max-warnings 7",
+    "lint": "eslint src e2e --max-warnings 0",
     "verify:packaged": "bash scripts/verify-packaged.sh",
     "verify": "bash scripts/verify-all.sh"
   },
