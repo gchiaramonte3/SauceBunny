@@ -438,8 +438,20 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
         onDiagRef.current?.("info", `warmed the decoder on focus at ${t.toFixed(1)}s`);
       } catch { /* torn-down element */ }
     };
+    // Both signals, because they catch different absences. `focus` fires when
+    // the user was in ANOTHER app and came back. It does NOT fire for a window
+    // that was merely covered or minimised and then revealed - that is
+    // visibilitychange, and it is the case where the app was never defocused so
+    // nothing else would ever warm it. The guard above makes the overlap free:
+    // a warm decoder, a playing element, or a short idle all return early, so
+    // arriving by both routes at once still costs one zero-distance seek.
+    const onVisible = () => { if (!document.hidden) warm(); };
     window.addEventListener("focus", warm);
-    return () => window.removeEventListener("focus", warm);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", warm);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   // True-unmount cleanup — prevents an "imported MP3 keeps playing in

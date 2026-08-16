@@ -82,7 +82,28 @@ that file's path from one helper.
       opens. Tab to a row's × and press Enter — it removes that row and does
       **not** also open the transcript.
 
-## 7. Screen reader — new landmark names, only VoiceOver can confirm them
+## 7. Scrub after a long idle — the one that needs a wait
+
+The known bug: park on a frame, leave the app for a long while, come back and
+scrub, and it holds on the parked frame before moving. WebKit tears the decode
+pipeline down while a paused `<video>` sits idle and the rebuild is billed to
+whatever gesture comes first. The app now pays it on return instead.
+
+- [ ] Open a **local** file, pause on a frame, switch to another app for **20+
+      minutes**, come back and scrub. It should move immediately.
+- [ ] Same, but instead of switching apps, **minimise** the window (or fully
+      cover it) for 20+ minutes. This is the case `focus` alone never caught.
+- [ ] Check the Pipeline log, channel **seek**, after each. Expect
+      `warmed the decoder on focus at <n>s` on return, and if the forensics
+      line appears it should say the decoder was torn down while idle.
+- [ ] Confirm the parked frame did **not** move: the warm-up is a zero-distance
+      seek, so `currentTime` must be exactly where you left it.
+
+**Still open:** the same idle problem on **web sources** (`MSEStreamPlayer`) has
+diagnostics but no warm-up - rebuilding an MSE pipeline is a different and
+riskier fix than a zero-distance seek.
+
+## 8. Screen reader — new landmark names, only VoiceOver can confirm them
 
 Each view's main region is now named. The e2e run proves the name is in the
 accessibility tree; only VoiceOver proves it is announced.
@@ -91,7 +112,7 @@ accessibility tree; only VoiceOver proves it is announced.
       should list one main, named Library / Clip / Co-Review / Transcript, plus
       the Primary navigation. Nothing should say a bare "main".
 
-## 8. Look — token changes, no computed value should have moved
+## 9. Look — token changes, no computed value should have moved
 
 - [ ] Timecodes, download percentages, cache sizes and the queue's numbers do
       not shimmy or shift width while they count.
