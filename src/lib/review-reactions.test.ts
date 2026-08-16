@@ -225,3 +225,34 @@ describe("adoptSnapshot", () => {
     expect(out.comments.map((c) => c.id).sort()).toEqual(["mine", "theirs"]);
   });
 });
+
+describe("the legacy likes field cannot resurrect a removal either", () => {
+  const NOW2 = NOW + 5000;
+
+  it("keeps a removal when the stale side carries it in `likes`", () => {
+    // reactionsOf folds `likes` into 👍, so a doc written before per-emoji
+    // reactions existed can put Ana's thumbs-up back through the OLD field
+    // even though the new one records the removal.
+    const legacy = doc([comment({ likes: ["Ana"] })]);
+    const removed = setLike(doc([comment({ likes: ["Ana"] })]), "c1", "Ana", false, "👍", NOW2);
+    expect(reactionsOf(removed.comments[0])["👍"] ?? []).not.toContain("Ana");
+
+    const merged = mergeReviewDoc(removed, legacy);
+    expect(reactionsOf(merged.comments[0])["👍"] ?? []).not.toContain("Ana");
+  });
+
+  it("holds in the other merge direction too", () => {
+    const legacy = doc([comment({ likes: ["Ana"] })]);
+    const removed = setLike(doc([comment({ likes: ["Ana"] })]), "c1", "Ana", false, "👍", NOW2);
+    const merged = mergeReviewDoc(legacy, removed);
+    expect(reactionsOf(merged.comments[0])["👍"] ?? []).not.toContain("Ana");
+  });
+
+  it("still keeps someone else's legacy like", () => {
+    // Only the person who removed theirs is affected.
+    const legacy = doc([comment({ likes: ["Ana", "Raj"] })]);
+    const removed = setLike(doc([comment({ likes: ["Ana", "Raj"] })]), "c1", "Ana", false, "👍", NOW2);
+    const merged = mergeReviewDoc(removed, legacy);
+    expect(reactionsOf(merged.comments[0])["👍"] ?? []).toContain("Raj");
+  });
+});

@@ -687,9 +687,16 @@ export function mergeReviewDoc(local: ReviewDoc, incoming: ReviewDoc): ReviewDoc
     const ic = byId.get(lc.id);
     if (!ic) { byId.set(lc.id, lc); continue; } // local-only → keep it
     const base = lc.updatedAt > ic.updatedAt ? { ...lc } : { ...ic };
-    const likes = Array.from(new Set([...(ic.likes ?? []), ...(lc.likes ?? [])]));
-    base.likes = likes.length ? likes : undefined;
     const { reactions, reactedAt } = mergeReactions(ic, lc);
+    // `likes` is the pre-emoji thumbs-up field, and reactionsOf folds it back
+    // in as 👍 - so unioning it blindly puts a removal straight back through
+    // the OLD representation, which is the exact bug reactedAt was added to
+    // fix. A doc written before per-emoji reactions existed carries no
+    // history of its own, so it is the recorded 👍 op that decides.
+    const thumbs = reactedAt?.["👍"] ?? {};
+    const likes = Array.from(new Set([...(ic.likes ?? []), ...(lc.likes ?? [])]))
+      .filter((who) => thumbs[who]?.on !== false);
+    base.likes = likes.length ? likes : undefined;
     if (reactions || reactedAt) {
       base.reactions = reactions;
       base.reactedAt = reactedAt;
