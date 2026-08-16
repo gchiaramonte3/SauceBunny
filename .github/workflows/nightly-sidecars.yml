@@ -34,7 +34,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The bundled sidecars are arm64-only (CLAUDE.md: Apple Silicon only).
       # macos-latest is arm64 today; fail loudly if that ever changes.
@@ -45,7 +45,7 @@ jobs:
             exit 1
           }
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
       - run: npm ci

@@ -11,8 +11,8 @@ jobs:
     name: tsc + vitest
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
       - run: npm ci
@@ -29,7 +29,7 @@ jobs:
     name: cargo check (src-tauri)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # The Tauri build script validates that every externalBin entry
       # in tauri.conf.json exists on disk. Sidecar binaries are not in
       # git (devs run `npm run setup`), so stub them as zero-byte files
@@ -41,7 +41,7 @@ jobs:
             touch "src-tauri/binaries/${name}-aarch64-apple-darwin"
             chmod +x "src-tauri/binaries/${name}-aarch64-apple-darwin"
           done
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
       - run: npm ci
@@ -59,7 +59,7 @@ jobs:
     name: swift build (diarizer)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: swift build -c release --arch arm64
         working-directory: swift-sidecar
 
@@ -67,8 +67,8 @@ jobs:
     name: ui smoke (playwright)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
       - run: npm ci
@@ -101,8 +101,8 @@ jobs:
     name: Build + verify the app bundle
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
       - uses: dtolnay/rust-toolchain@stable
