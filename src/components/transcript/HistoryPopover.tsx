@@ -112,6 +112,24 @@ export function HistoryPopover({
                 key={e.id}
                 className={"cp-tx-history-row" + (isActive ? " active" : "")}
                 onClick={() => onPick(e)}
+                // Focusable and activatable from the keyboard. This row claims
+                // role="menuitem" and had neither, so the history was mouse
+                // only: nothing to Tab to, no arrow keys, no way to open an
+                // entry - while announcing itself to a screen reader as a menu
+                // full of items.
+                //
+                // NOT a <button>, which would be the tidier fix elsewhere: the
+                // row already contains the remove button, and a button inside a
+                // button is invalid. tabIndex + Enter/Space is the ARIA menu
+                // pattern anyway.
+                tabIndex={0}
+                onKeyDown={(ev) => {
+                  if (ev.key !== "Enter" && ev.key !== " ") return;
+                  // Let the nested remove button handle its own activation.
+                  if (ev.target !== ev.currentTarget) return;
+                  ev.preventDefault();
+                  onPick(e);
+                }}
                 role="menuitem"
                 title={gone ? "Opens on its own - this transcript's video can't be found" : "Opens with its video"}
               >
