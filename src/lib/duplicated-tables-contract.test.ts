@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { globSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 /**
@@ -105,13 +104,31 @@ describe("export formats", () => {
  * an entry here with a reason, the same as everywhere else in this file.
  */
 
+/**
+ * Files under `dir` matching `ext`, recursing when asked.
+ *
+ * Hand-rolled rather than `fs.globSync`, which landed in Node 22: it works on
+ * this machine and threw "globSync is not a function" in CI, which runs older.
+ * That is the second time a Node-version assumption has passed locally and
+ * failed there, so this sticks to readdirSync.
+ */
+function filesUnder(dir: string, ext: string, recurse: boolean): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, e.name);
+    if (e.isDirectory()) { if (recurse) out.push(...filesUnder(full, ext, true)); continue; }
+    if (e.name.endsWith(ext) && !e.name.includes(".test.")) out.push(full);
+  }
+  return out;
+}
+
 const COMPONENTS = [
-  ...globSync(join(ROOT, "src/components/**/*.tsx")),
-  ...globSync(join(ROOT, "src/*.tsx")),
-].filter((f) => !f.includes(".test."));
+  ...filesUnder(join(ROOT, "src/components"), ".tsx", true),
+  ...filesUnder(join(ROOT, "src"), ".tsx", false),
+];
 
 const LIB_EXPORTS = new Map<string, string>();
-for (const file of globSync(join(ROOT, "src/lib/*.ts")).filter((f) => !f.includes(".test."))) {
+for (const file of filesUnder(join(ROOT, "src/lib"), ".ts", false)) {
   for (const m of readFileSync(file, "utf8").matchAll(/^export (?:function|const) (\w+)/gm)) {
     if (!LIB_EXPORTS.has(m[1])) LIB_EXPORTS.set(m[1], file.split("/").pop()!);
   }

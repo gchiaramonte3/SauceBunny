@@ -511,6 +511,15 @@ are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
 
+**CI runs Node 20; your machine probably does not.** `.github/workflows/ci.yml`
+pins `node-version: "20"`, so a test may use only APIs that exist there. This has
+now gone red twice from the same assumption: `fs.globSync` (Node 22+) threw
+"globSync is not a function" in CI after passing locally, and a `Storage.prototype`
+spy worked on one side and silently intercepted nothing on the other. Node-version
+skew is invisible to `npx tsc` and to a local `npm test`, so when a test reaches
+for a filesystem or platform API, prefer the older, duller call — `readdirSync`
+over `globSync` — rather than discovering the floor from a red build.
+
 **Any guard that SCANS needs a canary**, and this is the failure this repo keeps
 meeting rather than a general principle. `expect(offenders).toEqual([])` passes
 just as happily when the scan found nothing to examine, so a check that quietly
