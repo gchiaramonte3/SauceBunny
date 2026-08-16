@@ -164,6 +164,13 @@ test("Cmd+F does not focus the CLOSED drawer's copy", async ({ page }) => {
   const hide = page.getByRole("button", { name: "Hide panel" }).first();
   await expect(hide, "no Hide panel control, so the drawer was never closed").toHaveCount(1);
   await hide.click();
+  // Drop focus to a known-neutral place FIRST. The button just clicked lives
+  // inside the drawer, so once the drawer closes `document.activeElement` is
+  // itself inside the aria-hidden subtree and the assertion below fails for a
+  // reason that has nothing to do with ⌘F. That flaked about one run in four.
+  // Blurring makes the starting state deterministic and turns this into a real
+  // detector: if ⌘F is ungated it must MOVE focus into the hidden copy.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
   await page.keyboard.press("Control+f");
 
@@ -188,5 +195,40 @@ test("Cmd+F is inert while a modal dialog holds focus", async ({ page }) => {
     return !!el?.closest('[role="dialog"][aria-modal="true"]');
   });
   expect(insideDialog, "Cmd+F pulled focus out of the open modal").toBe(true);
+  expect(pageErrors, pageErrors.join("\n")).toHaveLength(0);
+});
+
+test("editing a cue writes the file and updates BOTH instances", async ({ page }) => {
+  // The full round trip, which had no coverage at any level: double-click →
+  // edit → commit → serialize the whole file → write → re-read → re-render.
+  // The mock persists writes back into its `e2e.files` map, so the re-read
+  // returns what was written; without that the save silently reverted and
+  // looked exactly like an app bug.
+  //
+  // The cross-instance half is the part worth having. Two mounted copies read
+  // the same file, so an edit made in the drawer has to appear in the reader
+  // too — otherwise the user switches view and sees their change gone.
+  await bootWithTranscript(page);
+
+  await page.locator("[data-cue-idx]:visible").nth(1).dblclick();
+  const editor = page.locator("textarea:visible, [contenteditable='true']:visible").first();
+  await expect(editor, "double-click did not open a cue editor").toBeVisible();
+  await editor.fill("EDITED SENTINEL TEXT");
+  await page.keyboard.press("Enter");
+
+  // Both copies, not just the one that was edited.
+  await expect(
+    page.locator("[data-cue-idx]", { hasText: "EDITED SENTINEL TEXT" }),
+    "the edit did not reach both mounted instances",
+  ).toHaveCount(2);
+
+  // And it actually went to the file rather than living in component state.
+  const onDisk = await page.evaluate(() => {
+    const files = JSON.parse(localStorage.getItem("e2e.files") ?? "{}");
+    return String(Object.values(files)[0] ?? "");
+  });
+  expect(onDisk, "the cue edit never reached the file").toContain("EDITED SENTINEL TEXT");
+  // The rewrite serializes the WHOLE file, so the untouched cues must survive.
+  expect(onDisk, "rewriting the file dropped an untouched cue").toContain("first line of dialogue");
   expect(pageErrors, pageErrors.join("\n")).toHaveLength(0);
 });

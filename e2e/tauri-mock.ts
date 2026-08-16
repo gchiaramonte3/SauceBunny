@@ -52,6 +52,29 @@ export function tauriMockInit(expectedBuildId: string): void {
     catch { return {}; }
   };
 
+  /**
+   * Writes land back in that map, so a read-after-write returns what was
+   * written. Without this the seed is read-only and every save silently
+   * reverts: `commitCueEdit` serializes the whole file, writes it, and the
+   * viewer re-reads from disk — against a write that stored nothing, the
+   * re-read hands back the ORIGINAL text and the edit vanishes. That looked
+   * exactly like an app bug for a while, and was not one.
+   *
+   * Only paths already present in the seed are tracked. An unseeded write
+   * still null-resolves as success, which is what every other write command in
+   * this mock does and what the 105 older specs were written against.
+   */
+  const writeSeededFile = (path: string, text: string): null => {
+    try {
+      const files = seededFiles();
+      if (path in files) {
+        files[path] = text;
+        localStorage.setItem("e2e.files", JSON.stringify(files));
+      }
+    } catch { /* quota — treat as a successful write, same as before */ }
+    return null;
+  };
+
   const emptyCacheCategory = { file_count: 0, bytes_total: 0 };
   const table: Record<string, unknown> = {
     read_text_file_capped: (args: Record<string, unknown>) => {
@@ -60,6 +83,10 @@ export function tauriMockInit(expectedBuildId: string): void {
       // `undefined` (not null) so an unseeded path keeps the historical
       // fallthrough exactly: the app reads it as "no file", never as "".
       return hit === undefined ? null : hit;
+    },
+    write_text_to_path: (args: Record<string, unknown>) => {
+      const a = args as { path?: string; text?: string };
+      return writeSeededFile(String(a.path ?? ""), String(a.text ?? ""));
     },
     get_backend_build_id: expectedBuildId,
     get_cache_stats: {

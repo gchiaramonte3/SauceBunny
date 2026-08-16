@@ -62,6 +62,7 @@ test("the command palette closes the popover it covers", async ({ page }) => {
   const pop = await openRecents(page);
 
   await page.keyboard.press("Control+k");
+  await expect(page.locator(".cp-palette")).toBeVisible();
 
   await expect(pop, "the recents popover survived under the palette").toHaveCount(0);
   expect(pageErrors, pageErrors.join("\n")).toHaveLength(0);
@@ -74,8 +75,17 @@ test("Enter in the palette does not load a recent source behind it", async ({ pa
   const url = page.locator(".cp-url input");
   await expect(url).toHaveValue("");
 
-  await openRecents(page);
+  const pop = await openRecents(page);
   await page.keyboard.press("Control+k");
+  // Wait for BOTH halves of the state this test depends on, not just the
+  // palette appearing. Waiting on the palette alone still flaked about one run
+  // in four: the dismiss event runs synchronously, but RecentSources' listener
+  // is only detached by its effect CLEANUP, which React runs on the next
+  // render — so there is a window where the popover is logically closed and
+  // still holding the keydown. Waiting for the popover to actually leave the
+  // DOM closes that window, and is what the test is really about anyway.
+  await expect(page.locator(".cp-palette")).toBeVisible();
+  await expect(pop).toHaveCount(0);
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
   await page.waitForTimeout(250);
