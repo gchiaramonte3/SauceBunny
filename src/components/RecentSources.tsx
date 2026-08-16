@@ -4,6 +4,7 @@ import { IconHistory } from "./Icons";
 import { formatTimeAgo } from "../lib/transcript-history";
 import { secondsToHms } from "../lib/timecode";
 import type { RecentSource } from "../lib/recent-sources";
+import { DISMISS_POPOVERS } from "../hooks/use-dismiss";
 
 type Props = {
   entries: RecentSource[];
@@ -62,11 +63,24 @@ export function RecentSources({ entries, onOpen, onRemove, onClearAll }: Props) 
         if (entry) { setOpen(false); onOpen(entry); }
       }
     }
+    // A keyboard-opened modal covers this popover without producing an outside
+    // mousedown or an Escape, so neither handler above fires and the ↑/↓/Enter
+    // listener below stays live under it. That is not theoretical: with this
+    // popover open, ⌘K then ↓ then Enter LOADED a recent video while the user
+    // was looking at the command palette.
+    //
+    // This component predates useDismiss and keeps its own listeners (it has
+    // two refs to test against, and the arrow navigation is bound up with
+    // them), so it subscribes to the same event the hook does rather than
+    // being migrated wholesale.
+    const onDismissAll = () => setOpen(false);
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
+    window.addEventListener(DISMISS_POPOVERS, onDismissAll);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener(DISMISS_POPOVERS, onDismissAll);
     };
   }, [open, entries, activeIdx, onOpen]);
 

@@ -25,6 +25,23 @@ import { useEffect, type RefObject } from "react";
  * hand-rolled copy has the same `setTimeout(..., 0)`, which is a good sign it
  * was learned the hard way at least once.
  */
+/**
+ * "A modal just opened over you; close." Fired by App when a KEYBOARD shortcut
+ * opens the command palette or the shortcut sheet.
+ *
+ * Neither of the two dismissals above can see that. ⌘K produces no outside
+ * mousedown and is not Escape, so a popover stayed open UNDERNEATH the palette
+ * with its own ↑/↓/Enter listener still attached: arrowing the palette moved
+ * the hidden list too, and one Enter loaded a recent video while the user was
+ * looking at the palette. A keystroke landing on a surface the user cannot see
+ * is the failure this closes.
+ *
+ * A window CustomEvent rather than shared state, matching
+ * `saucebunny:speakers-changed` — the popovers own their own open flags and
+ * App has no handle on them.
+ */
+export const DISMISS_POPOVERS = "saucebunny:dismiss-popovers";
+
 export function useDismiss(
   ref: RefObject<HTMLElement | null>,
   onClose: () => void,
@@ -38,13 +55,16 @@ export function useDismiss(
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
+    const onDismissAll = () => onClose();
     // Deferred so the click that opened this does not immediately close it.
     const t = setTimeout(() => document.addEventListener("mousedown", onDown), 0);
     document.addEventListener("keydown", onKey);
+    window.addEventListener(DISMISS_POPOVERS, onDismissAll);
     return () => {
       clearTimeout(t);
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener(DISMISS_POPOVERS, onDismissAll);
     };
   }, [ref, onClose, enabled]);
 }

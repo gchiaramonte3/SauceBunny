@@ -112,6 +112,7 @@ import { usePlaybackPrepListeners } from "./hooks/use-playback-prep-listeners";
 import { useCaptionsListeners } from "./hooks/use-captions-listeners";
 import { useMenubarEvents } from "./hooks/use-menubar-events";
 import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
+import { DISMISS_POPOVERS } from "./hooks/use-dismiss";
 import {
   durationToTc, framesToTc, secondsToTc,
   tcToFrames,
@@ -4482,8 +4483,25 @@ export default function App() {
       if (isPlaybackScoped(id) && !VIEWS_WITH_A_PLAYER.has(activeViewRef.current)) return;
       e.preventDefault();
       switch (id) {
-        case "app.palette":  setPaletteOpen((p) => !p); break;
-        case "app.shortcuts": setShortcutsOpen((p) => !p); break;
+        // A keyboard-opened modal has to dismiss the transient popovers it
+        // covers. `useDismiss` closes on an outside MOUSEDOWN and on Escape,
+        // and ⌘K is neither — so the recents popover stayed open UNDERNEATH
+        // the palette with its ↑/↓/Enter listener still live. Arrowing the
+        // palette moved the hidden list too, and one Enter loaded a recent
+        // video: the user's keystroke landed on a surface they could not see.
+        //
+        // Dispatched unconditionally rather than only on open. If this is the
+        // toggle that CLOSES the palette, no popover can be open to receive it
+        // (opening the palette is what closed them), so the extra event is
+        // inert and the alternative is reading state the handler does not hold.
+        case "app.palette":
+          window.dispatchEvent(new CustomEvent(DISMISS_POPOVERS));
+          setPaletteOpen((p) => !p);
+          break;
+        case "app.shortcuts":
+          window.dispatchEvent(new CustomEvent(DISMISS_POPOVERS));
+          setShortcutsOpen((p) => !p);
+          break;
         case "app.settings": setSettingsOpen((p) => !p); break;
         // ⌘Z / ⇧⌘Z — non-global on purpose: in a text field these cases never
         // run (and nothing is preventDefault-ed), so the keystroke falls
