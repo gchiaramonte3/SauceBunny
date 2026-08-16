@@ -39,17 +39,23 @@ import { UpdateRow } from "./UpdateRow";
 import { getVersion } from "@tauri-apps/api/app";
 import { EXPECTED_BACKEND_BUILD_ID } from "../lib/build-id";
 import { newJobId } from "../lib/job-id";
+import { DEFAULT_STUN_URL } from "../lib/ice-servers";
 
 type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "ai-apis" | "commands" | "about";
 
 export type Defaults = {
   folder: string | null;
-  /** Optional TURN relay for co-review webcams (empty = Google STUN only).
+  /** Optional TURN relay for co-review webcams (empty = STUN only).
    *  All three ride to RTCPeerConnection verbatim; nothing is validated
    *  here (a bad server just falls back to direct/STUN candidates). */
   turnUrl: string;
   turnUsername: string;
   turnPassword: string;
+  /** STUN server for co-review webcams. Defaults to DEFAULT_STUN_URL, which
+   *  is Google's - it used to be hardcoded, so it was neither visible nor
+   *  changeable. Empty means no reflexive candidates at all: LAN (and TURN,
+   *  if set) only. See lib/ice-servers for what a STUN server learns. */
+  stunUrl: string;
   format: FormatId;
   reencode: boolean;
   captions: boolean;
@@ -889,6 +895,20 @@ export function SettingsModal(props: Props) {
                         aria-label="Save a copy while watching"
                         onClick={() => setKeepEnabled(!keepEnabled)}
                       />
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      STUN server
+                      <span className="desc">
+                        Finds your public address so webcams can reach each other through a router. This is
+                        the one part of a session that contacts an outside server, and that server learns
+                        your IP address. Leave it empty to stay on your local network. Default is {DEFAULT_STUN_URL}.
+                      </span>
+                    </div>
+                    <div className="v" style={{ minWidth: 320 }}>
+                      <input className="cp-input" placeholder="Empty: local network only" value={defaults.stunUrl}
+                        onChange={(e) => setDefaults({ ...defaults, stunUrl: e.target.value })} spellCheck={false} />
                     </div>
                   </div>
                   <div className="cp-pane-row">

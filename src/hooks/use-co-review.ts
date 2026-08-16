@@ -132,6 +132,8 @@ type Args = {
   setReviewAnnotations: (annotations: ReviewAnnotationView[]) => void;
   /** Optional TURN relay for the webcam mesh (Settings; empty = STUN only). */
   turn: TurnConfig;
+  /** STUN server for the webcam mesh (Settings; empty contacts nobody). */
+  stunUrl: string;
 };
 
 /** One transient on-screen reaction (floater + tile badge, ~5s). */
@@ -248,7 +250,7 @@ export function useCoReview({
   onChaseSeek, setUrl, handleFetch, loadLocalPath, loadPeerStream,
   pushNotification, setQueueOpen,
   setReviewMarkers, setReviewAnnotations,
-  turn, appendLog,
+  turn, stunUrl, appendLog,
 }: Args): CoReview {
   // Every long-lived listener here is registered ONCE, so it must reach the
   // log through a ref or it captures the first render's closure forever.
@@ -1006,6 +1008,7 @@ export function useCoReview({
     role: coSession.role,
     memberIds,
     turn,
+    stunUrl,
     // Into the pipeline log, not the console: in a built .app the WKWebView
     // console needs Safari's inspector attached, so anything logged there
     // during a real session is unreachable by the person hitting the bug.

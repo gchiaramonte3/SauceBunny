@@ -6,6 +6,7 @@ import {
   SESSION_VOLUME_CHANGED_EVENT, SPEAKER_OUTPUT_CHANGED_EVENT,
   canPickSpeakers, loadDeviceChoice, loadSessionVolume,
 } from "../lib/media-devices";
+import { buildIceServers, type TurnConfig } from "../lib/ice-servers";
 
 /** Route one session-voice element to the chosen output (WebKit 18.4+;
  *  silently a no-op elsewhere or on "system default"). */
@@ -34,7 +35,7 @@ function applyVolume(el: HTMLAudioElement): void {
  * Consumed by use-co-review: it owns WHEN the mesh runs (session live +
  * self id known) and feeds incoming Rtc lines into handleSignal.
  */
-export type TurnConfig = { url: string; username: string; password: string };
+export type { TurnConfig } from "../lib/ice-servers";
 
 export function useRtcMesh(args: {
   active: boolean;
@@ -42,9 +43,13 @@ export function useRtcMesh(args: {
   role: string; // "off" | "host" | "peer"
   memberIds: { id: string; epoch: number }[];
   turn: TurnConfig;
+  /** STUN server for reflexive candidates; "" contacts nobody (LAN + TURN
+   *  only). See lib/ice-servers for what this reveals and to whom. */
+  stunUrl: string;
   onLog: (tag: "info" | "warn" | "err", msg: string) => void;
 }) {
-  const { active, selfId, role, memberIds, turn, onLog } = args;
+  const { active, selfId, role, memberIds, turn, stunUrl, onLog } = args;
+  const { url: turnUrl, username: turnUser, password: turnPass } = turn;
   const [remoteStreams, setRemoteStreams] = useState<ReadonlyMap<string, MediaStream>>(new Map());
   const [peerStates, setPeerStates] = useState<ReadonlyMap<string, MeshPeerState>>(new Map());
   // Per-peer LOCAL mute (People tile "Mute for me"): flips the hidden voice
@@ -93,10 +98,12 @@ export function useRtcMesh(args: {
   // full teardown (every PC closed, every voice stopped) when it ends.
   useEffect(() => {
     if (!active || !selfId) return;
-    const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
-    if (turn.url.trim()) {
-      iceServers.push({ urls: turn.url.trim(), username: turn.username || undefined, credential: turn.password || undefined });
-    }
+    // Rebuilt from the FIELDS, not from `turn` itself. App composes that
+    // object inline on every render, so depending on its identity would tear
+    // the whole mesh down and rebuild it on any unrelated re-render - every
+    // participant's video dropping several times a second. The deps below
+    // are primitives for the same reason.
+    const iceServers = buildIceServers(stunUrl, { url: turnUrl, username: turnUser, password: turnPass });
     const mesh = new RtcMesh({
       selfId,
       iceServers,
@@ -153,7 +160,10 @@ export function useRtcMesh(args: {
     // with no recovery short of rejoining. setMembers is idempotent.
     onLogRef.current("info",
       `mesh up: self=${selfId} role=${roleRef.current} `
-      + `turn=${turn.url.trim() ? "configured" : "none"} `
+      // Both, not just TURN: STUN is switchable now, and "nobody can see
+      // anybody" with an empty STUN field on a routed network is exactly the
+      // report this line has to be able to explain.
+      + `stun=${stunUrl.trim() ? "on" : "off"} turn=${turnUrl.trim() ? "configured" : "none"} `
       + `roster=[${memberIdsRef.current.map((m) => `${m.id}@${m.epoch}`).join(",")}]`);
     mesh.setMembers(memberIdsRef.current);
     const unsub = subscribeSessionCapture((s) => { void mesh.replaceLocalStream(s); });
@@ -167,7 +177,7 @@ export function useRtcMesh(args: {
       setRemoteStreams(new Map());
       setPeerStates(new Map());
     };
-  }, [active, selfId, turn.url, turn.username, turn.password]);
+  }, [active, selfId, stunUrl, turnUrl, turnUser, turnPass]);
 
   // Roster reconciliation on every membership change.
   useEffect(() => {

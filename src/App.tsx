@@ -126,6 +126,7 @@ import { extractAudioAsWav16k } from "./lib/mediabunny-audio";
 import { migrateCaptionFont } from "./lib/caption-font";
 import { isMissingCommandError, staleBinaryMessage } from "./lib/stale-backend";
 import { newJobId } from "./lib/job-id";
+import { DEFAULT_STUN_URL } from "./lib/ice-servers";
 
 const DEFAULT_FPS_FALLBACK: Record<string, number> = { "24": 24, "25": 25, "30": 30 };
 
@@ -222,6 +223,9 @@ export default function App() {
       // r71: latches once the first-run "Connect YouTube" prompt is handled.
       ytAuthOnboarded: stored.ytAuthOnboarded ?? false,
       // Co-review mesh TURN relay (Settings -> General); empty = STUN only.
+      // `??` not `||`: an empty string is a DELIBERATE "contact nobody",
+      // and must not fall back to the default. See lib/ice-servers.
+      stunUrl: stored.stunUrl ?? DEFAULT_STUN_URL,
       turnUrl: stored.turnUrl ?? "",
       turnUsername: stored.turnUsername ?? "",
       // NEVER hydrated from localStorage: the password lives in the macOS
@@ -5371,6 +5375,7 @@ export default function App() {
     pushNotification, setQueueOpen,
     setReviewMarkers, setReviewAnnotations,
     turn: { url: defaults.turnUrl, username: defaults.turnUsername, password: defaults.turnPassword },
+    stunUrl: defaults.stunUrl,
     appendLog,
   });
 
