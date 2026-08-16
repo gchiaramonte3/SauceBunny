@@ -162,6 +162,30 @@ worth doing:
 - [ ] Repeat with the window **minimised** rather than backgrounded. The local
       half needed both because `focus` alone missed the minimised case.
 
+## 7a. Deleting a model now takes two clicks
+
+These were the most expensive single clicks in the app: a Whisper or LLM
+model is a multi-GB download, and the Delete button sat beside "Use as
+default" in identical styling with its only explanation in a tooltip.
+
+Do this on a model you are willing to re-download, or just arm it and let it
+time out rather than confirming.
+
+- [ ] Settings ▸ Transcription. Click **Delete** on a downloaded Whisper
+      model **once**. Nothing should be deleted; the button should turn red
+      and read **"Delete 2.9 GB?"** with the real size of that model.
+- [ ] Wait about four seconds without touching it. It should go back to
+      **Delete** on its own. (A confirm that stays hot is a mine.)
+- [ ] Arm it again and press **Escape**. The arming cancels and **Settings
+      stays open** - this is the bit worth checking, because the modal also
+      closes on Escape and the two could easily fight.
+- [ ] Press **Escape** again with nothing armed. Now Settings closes.
+- [ ] Same two-click behaviour on an **AI Summary** model and on
+      **Parakeet** (whose label reads "Delete the model?" - it has no size to
+      name).
+- [ ] Confirm one for real if you can spare the re-download, and check the
+      model list refreshes and a model that was in use falls back to another.
+
 ## 7b. Escape closes the AI Summary's Export menu
 
 It did not. The menu dismissed on a click away and ignored the key
