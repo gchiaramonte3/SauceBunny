@@ -36,8 +36,17 @@
      floor everywhere it actually sits. #82828B is the smallest neutral step
      that clears 4.5:1 on ALL of them (4.65 / 4.75 / 4.56, and 5.19 on bg-1).
      Six values per channel, ~2% lightness: the ladder keeps its spacing and
-     fg-3 is untouched. */
-  --fg-4:   #82828B;
+     fg-3 is untouched.
+
+     And that pass STILL missed one, because it measured the surfaces that
+     exist on the opening screen. Behind a loaded source the export CTA sits
+     on a purple-tinted composite (#221C31 as rendered), where #82828B read
+     4.31:1 — under the floor, on a BUTTON LABEL ("Download entire clip"),
+     which is meaningful copy by any reading. #86868F is four more per channel
+     and clears it at 4.55, while staying 4.81–5.34 on every surface the
+     previous pass verified. Found by pointing the contrast sweep at a state
+     it had never been able to reach. */
+  --fg-4:   #86868F;
   --fg-5:   #71717A;
 
   --stroke-1: #141419;
