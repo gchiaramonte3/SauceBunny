@@ -197,3 +197,48 @@ describe("the read path", () => {
     expect(listScreenings().map((r) => r.id)).toContain(doc.id);
   });
 });
+
+describe("a failed save is not swallowed", () => {
+  /**
+   * It used to be caught and console.warn'd, with a comment saying that made
+   * the failure "not SILENTLY" reported. In a packaged .app the WKWebView
+   * console needs Safari's inspector attached - CLAUDE.md says so outright
+   * about logging - so it reached nobody, and a screening that never landed on
+   * disk simply vanished after the session ended.
+   *
+   * Its two sibling stores both surface write failures to the UI (review via
+   * reportProblem, casts via lastError + notify). This one has no subscriber,
+   * so it hands the error to its single caller, which sits in use-co-review
+   * and writes to the pipeline log.
+   */
+  it("rejects when the write fails, instead of resolving quietly", async () => {
+    resetScreeningStoreForTests();
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "default_transcript_library_path") return LIB;
+      if (cmd === "read_text_file_capped") throw new Error("no index yet");
+      if (cmd === "write_text_to_path") throw new Error("EROFS: read-only file system");
+      return null;
+    });
+    const doc = newScreening("s-fail", "Friday", "host", 1000);
+    await expect(saveScreening(doc)).rejects.toThrow(/EROFS/);
+  });
+
+  it("still resolves when the write succeeds", async () => {
+    // The other half: rejecting on failure must not mean rejecting always.
+    resetScreeningStoreForTests();
+    const fs = new Map<string, string>();
+    vi.mocked(invoke).mockImplementation(async (cmd: string, a?: unknown) => {
+      const args = a as { path?: string; text?: string } | undefined;
+      if (cmd === "default_transcript_library_path") return LIB;
+      if (cmd === "read_text_file_capped") {
+        const t = fs.get(args?.path ?? "");
+        if (t === undefined) throw new Error("missing");
+        return t;
+      }
+      if (cmd === "write_text_to_path") { fs.set(args?.path ?? "", args?.text ?? ""); return null; }
+      return null;
+    });
+    await expect(saveScreening(newScreening("s-ok", "Friday", "host", 1000))).resolves.toBeUndefined();
+    expect(fs.has(`${DIR}/${screeningFileName(newScreening("s-ok", "Friday", "host", 1000))}`)).toBe(true);
+  });
+});

@@ -700,7 +700,15 @@ export function useCoReview({
       const sc = screeningRef.current;
       if (sc) {
         const finished = closeSegment(sc);
-        if (screeningIsWorthKeeping(finished)) void saveScreening(finished);
+        if (screeningIsWorthKeeping(finished)) {
+          void saveScreening(finished).catch((e) => {
+            // The session is already over, so there is nothing to retry into -
+            // but the user watched something and it is not in their library,
+            // and they are entitled to know that rather than find out later.
+            appendLogRef.current("warn", "session",
+              `This screening could not be saved: ${formatError(e)}`);
+          });
+        }
         screeningRef.current = null;
       }
       prevDocKeyRef.current = null;

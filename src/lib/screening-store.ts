@@ -210,8 +210,17 @@ export async function saveScreening(doc: ScreeningDoc): Promise<void> {
     );
     await invoke("write_text_to_path", { path: `${dir}/${INDEX_FILE}`, text: indexJson, atomic: true });
   } catch (err) {
-    // The session continues (disk full, permissions), but not SILENTLY - a
-    // screening that never lands on disk should at least say so somewhere.
+    // REJECTS rather than swallowing. The previous version caught this and
+    // called console.warn, with a comment claiming that meant the failure was
+    // not silent - but in a packaged .app the WKWebView console needs Safari's
+    // inspector attached, which CLAUDE.md states outright, so it reached
+    // nobody. A screening that never landed on disk simply vanished.
+    //
+    // The two sibling stores both surface write failures to the UI (review via
+    // reportProblem, casts via lastError + notify). This one has no subscriber
+    // of its own, so it hands the error to its single caller, which sits in
+    // use-co-review and has the pipeline log.
     console.warn("screening-store: save failed:", err);
+    throw err;
   }
 }
