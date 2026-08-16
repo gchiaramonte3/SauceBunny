@@ -417,46 +417,6 @@ export default function App() {
       ? defaultsRef.current.ytCookiesBrowser
       : undefined;
 
-  /**
-   * Run a cookie-taking yt-dlp command, then RETRY once WITHOUT cookies if it
-   * failed while cookies were actually applied. Public social posts (LinkedIn,
-   * many Reddit/IG/X) break when yt-dlp is handed auth cookies — it fetches a
-   * logged-in page it can't parse ("Unable to extract video") — while the
-   * public page resolves fine. Mirrors the backend resolver's cookie-fallback
-   * (get_direct_stream_url / fetch_metadata) for the awaited download/export
-   * commands. Cancellations are never retried. `buildArgs` is called with the
-   * cookie value to use so the same arg shape serves both attempts.
-   */
-  /**
-   * A `function` declaration on purpose, and it cannot become a useCallback.
-   *
-   * `appendLog` is declared LATER in this component, and a hoisted function
-   * body only reads it when CALLED, which is always after render. A
-   * `useCallback(..., [appendLog])` evaluates that dependency during render
-   * instead, at a line where the binding is still in its temporal dead zone —
-   * tsc rejects it outright ("used before its declaration"). Tried; reverted.
-   *
-   * The consequence is a new identity every render, so the two hooks below
-   * that call this cannot list it without rebuilding themselves every render.
-   * They omit it, and that is safe rather than lucky: everything this closure
-   * reads is a ref. `cookiesBrowserOrNone` goes through defaultsRef precisely
-   * so a stale closure still sees the live cookie setting.
-   */
-  async function invokeWithCookieRetry<T>(
-    cmd: string,
-    buildArgs: (cookies: string | undefined) => Record<string, unknown>,
-  ): Promise<T> {
-    const cookies = cookiesBrowserOrNone();
-    try {
-      return await invoke<T>(cmd, buildArgs(cookies));
-    } catch (err) {
-      if (cookies && !formatError(err).toLowerCase().includes("cancel")) {
-        appendLog("info", "yt-dlp", `${cmd} failed with sign-in cookies. Retrying without…`);
-        return await invoke<T>(cmd, buildArgs(undefined));
-      }
-      throw err;
-    }
-  }
 
   // ====== YouTube sign-in (cookies-from-browser) — r71 ======
   // One modal (YouTubeAuthModal), three surfaces driven by `ytAuthMode`:
@@ -1337,6 +1297,45 @@ export default function App() {
       return next.length > LOG_MAX ? next.slice(next.length - LOG_MAX) : next;
     });
   }, []);
+
+  /**
+   * Run a cookie-taking yt-dlp command, then RETRY once WITHOUT cookies if it
+   * failed while cookies were actually applied. Public social posts (LinkedIn,
+   * many Reddit/IG/X) break when yt-dlp is handed auth cookies — it fetches a
+   * logged-in page it can't parse ("Unable to extract video") — while the
+   * public page resolves fine. Mirrors the backend resolver's cookie-fallback
+   * (get_direct_stream_url / fetch_metadata) for the awaited download/export
+   * commands. Cancellations are never retried. `buildArgs` is called with the
+   * cookie value to use so the same arg shape serves both attempts.
+   */
+  /**
+   * Sits directly below `appendLog` on purpose.
+   *
+   * It used to live 900 lines higher, as a hoisted `function` declaration —
+   * the only form that can reference a `const` declared later, because a
+   * hoisted body reads it at CALL time rather than at render time. The cost
+   * was a new identity every render, so the two hooks that call it could not
+   * list it as a dependency without rebuilding themselves on every render,
+   * and both carried a suppression saying so.
+   *
+   * Moving it below its one dependency removes the whole problem: it can be a
+   * useCallback, its identity is stable, and both call sites name it honestly.
+   */
+  const invokeWithCookieRetry = useCallback(async <T,>(
+    cmd: string,
+    buildArgs: (cookies: string | undefined) => Record<string, unknown>,
+  ): Promise<T> => {
+    const cookies = cookiesBrowserOrNone();
+    try {
+      return await invoke<T>(cmd, buildArgs(cookies));
+    } catch (err) {
+      if (cookies && !formatError(err).toLowerCase().includes("cancel")) {
+        appendLog("info", "yt-dlp", `${cmd} failed with sign-in cookies. Retrying without…`);
+        return await invoke<T>(cmd, buildArgs(undefined));
+      }
+      throw err;
+    }
+  }, [appendLog]);
 
   // Startup capability line + a catch-all for silent promise rejections
   // (r150). Both exist because a CSP that forbade WebAssembly made the Opus
@@ -3582,8 +3581,7 @@ export default function App() {
     } finally {
       setSnapshotBusy(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- invokeWithCookieRetry is a bare function (see its comment: appendLog's TDZ blocks useCallback), so listing it would rebuild this every render. It reads only refs, so a stale capture cannot stale the cookie setting.
-  }, [metadata, sourceKind, localFilePath, snapshotBusy, fps, exportOpts.folder, defaults.useWebCodecsDecoder, appendLog, notify, pushNotification]);
+  }, [metadata, sourceKind, localFilePath, snapshotBusy, fps, exportOpts.folder, defaults.useWebCodecsDecoder, appendLog, notify, pushNotification, invokeWithCookieRetry]);
 
   /**
    * Grab the frame on screen right now as a cast member's face.
@@ -4610,8 +4608,7 @@ export default function App() {
       const j = audioCacheJobRef.current;
       if (j) { audioCacheJobRef.current = null; invoke("cancel_job", { jobId: j }).catch(() => { /* best-effort */ }); }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- same: invokeWithCookieRetry is a bare function reading only refs, and listing it would restart this audio-cache effect on every render.
-  }, [webStreaming, activeSourceUrl, webAudioCachedSrc, appendLog]);
+  }, [webStreaming, activeSourceUrl, webAudioCachedSrc, appendLog, invokeWithCookieRetry]);
 
   const handleClearLogs = useCallback(() => setLogs([]), []);
   const handleCopyLogs = useCallback(() => {
