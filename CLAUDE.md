@@ -103,7 +103,7 @@ scripts/                      # Build/maintenance scripts
 | Styling | Hand-rolled CSS | Tokens in `tokens.css`, components in `app.css` |
 | Font | Nunito Sans | Self-hosted via `@fontsource/nunito-sans` (300/400/600/700/800 + italic) |
 | State | React hooks only | Cross-window sync via Tauri events |
-| Persistence | `localStorage` | Namespaced `saucebunny.*` |
+| Persistence | `localStorage` | Namespaced `saucebunny.*` (nine legacy `cp-` keys survive; see Storage layout) |
 | Backend | Tauri 2 invoke commands | `tokio` async, `serde` JSON |
 | Media decode | mediabunny | WebCodecs MP4/MOV, frame-accurate scrub |
 | MP3 encode | `@mediabunny/mp3-encoder` | LAME-via-WASM, registered once at startup |
@@ -263,7 +263,7 @@ When adding a new cross-window interaction, use this event pattern. Do not intro
 | Transcript library | `~/Documents/Sauce Bunny/Transcripts/YYYY-MM/` |
 | Casts | `~/Documents/Sauce Bunny/Casts/casts.json` — ONE file, not sharded like Reviews: a shelf of casts is a few hundred KB and the picker needs all of them at once. Debounced atomic write-through (`src/lib/cast-store.ts`); writes are refused until hydration has accounted for the disk copy, or a save made during boot would erase the file with a subset of itself |
 | Review docs | `~/Documents/Sauce Bunny/Reviews/` — one `<slug>-<hash>.json` per source + `index.json`; hydrated at boot, debounced write-through (`src/lib/review-store.ts`); legacy localStorage docs migrated out on first boot |
-| User prefs | `localStorage` namespaced `saucebunny.*` (incl. review history/fingerprint index/reviewer identity — only review DOCS moved to files) |
+| User prefs | `localStorage` namespaced `saucebunny.*` (incl. review history/fingerprint index/reviewer identity — only review DOCS moved to files). **Nine keys are still `cp-*`** — `cp-defaults-v2`, `cp-aspect`, `cp-captions-on`, `cp-folder`, `cp-logs-open`, `cp-muted`, `cp-recents`, `cp-sidebar-sections`, `cp-volume` — the same ClipPull carryover as the CSS classes. There were TWO legacy prefixes: `clippull.*` got a real migration (`lib/migrate-storage.ts`, still running at boot) and `cp-*` never did. They are not being renamed: renaming a key discards the user's value unless a migration copies it first, and `cp-defaults-v2` is the whole settings blob, so getting it wrong resets every preference on every existing install in exchange for a tidier string nobody sees. NEW prefs use `saucebunny.`; `src/lib/storage-keys-contract.test.ts` pins the nine and fails on a tenth. |
 
 Do not change these paths without updating both the Rust backend and the frontend.
 
