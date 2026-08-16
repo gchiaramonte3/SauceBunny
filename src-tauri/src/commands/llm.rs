@@ -363,3 +363,70 @@ pub async fn start_llm_server(
     }
     Ok(info)
 }
+
+#[cfg(test)]
+mod llm_tests {
+    use super::{free_loopback_port, mint_api_key, spec, LLM_MODELS};
+    use std::collections::HashSet;
+
+    #[test]
+    fn every_key_is_different_and_random() {
+        // Guards a bug that was already here once: the earlier version
+        // swallowed a failed /dev/urandom read and encoded the untouched
+        // buffer, producing an ALL-ZERO bearer token — a publicly known
+        // password on the local model server. Any constant-returning
+        // regression makes these collide.
+        let keys: HashSet<String> = (0..32).map(|_| mint_api_key().unwrap()).collect();
+        assert_eq!(keys.len(), 32, "mint_api_key repeated itself");
+        assert!(!keys.contains(&"A".repeat(43)), "an all-zero buffer would encode as a constant");
+    }
+
+    #[test]
+    fn the_key_is_url_safe_and_full_length() {
+        // It rides in a header and a URL; base64url with no padding keeps it
+        // safe in both. 32 bytes → 43 chars unpadded.
+        let k = mint_api_key().unwrap();
+        assert_eq!(k.len(), 43, "expected 32 bytes of base64url, got {k:?}");
+        assert!(
+            k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "not URL-safe: {k:?}"
+        );
+    }
+
+    #[test]
+    fn only_models_in_the_table_resolve() {
+        // spec() is the whitelist that keeps a model id out of the filesystem
+        // path: llm_model_path joins s.file from this static table, never the
+        // caller's string, so traversal is impossible by construction.
+        for m in LLM_MODELS {
+            assert!(spec(m.id).is_some(), "{} should resolve", m.id);
+        }
+        for bad in ["", "unknown", "../../etc/passwd", "qwen/../..", "QWEN"] {
+            assert!(spec(bad).is_none(), "{bad:?} must not resolve to a model");
+        }
+    }
+
+    #[test]
+    fn the_model_table_is_self_consistent() {
+        // Duplicate ids would make spec() return whichever came first, and a
+        // shared filename would have two models overwrite each other on disk.
+        let ids: HashSet<&str> = LLM_MODELS.iter().map(|m| m.id).collect();
+        assert_eq!(ids.len(), LLM_MODELS.len(), "duplicate model id");
+        let files: HashSet<&str> = LLM_MODELS.iter().map(|m| m.file).collect();
+        assert_eq!(files.len(), LLM_MODELS.len(), "two models share a filename");
+        for m in LLM_MODELS {
+            assert!(!m.file.contains('/'), "{} carries a path, not a filename", m.id);
+        }
+    }
+
+    #[test]
+    fn the_port_is_loopback_assigned() {
+        // Asked of the OS rather than hardcoded, so two runs cannot collide.
+        let a = free_loopback_port().unwrap();
+        assert!(a > 0);
+        let b = free_loopback_port().unwrap();
+        assert!(b > 0);
+        // Not asserting a != b: the OS may legitimately hand back the same
+        // freed port twice. The property that matters is that it answers.
+    }
+}
