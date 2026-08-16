@@ -1192,7 +1192,7 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
 // command is added. Bump it whenever you touch commands.rs in a way the
 // frontend depends on.
 // ============================================================
-pub const BACKEND_BUILD_ID: &str = "2026-08-15-r159-atomic-export";
+pub const BACKEND_BUILD_ID: &str = "2026-08-15-r160-raw-wav-staging";
 
 #[tauri::command]
 pub fn get_backend_build_id() -> &'static str {

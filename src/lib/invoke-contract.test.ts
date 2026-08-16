@@ -103,3 +103,37 @@ describe("invoke boundary types", () => {
     }
   });
 });
+
+/**
+ * Large payloads cross the boundary as a RAW body, never as a number array.
+ *
+ * `invoke(cmd, { bytes: Array.from(new Uint8Array(buf)) })` decimal-prints
+ * every byte into a JSON string, synchronously, on the WKWebView main thread.
+ * The clip exporter measured it at ~2s of frozen UI and ~2.2 GB peak for a
+ * 100 MB clip, which is why `write_raw_to_path` exists. Two more sites kept
+ * doing it anyway - the frame snapshot and the prepared WAV - because nothing
+ * connected the fix to the pattern.
+ *
+ * The raw form is `invoke(cmd, uint8array, { headers: { ... } })`: a straight
+ * buffer copy, with the small arguments riding in headers.
+ */
+describe("byte payloads use the raw IPC body", () => {
+  const strip = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+
+  it("never marshals a buffer into a JS number array", () => {
+    const bad = walk(join(ROOT, "src"))
+      .map((f) => [f.slice(ROOT.length + 1), strip(readFileSync(f, "utf8"))] as const)
+      .filter(([rel]) => rel !== "src/lib/invoke-contract.test.ts")
+      .filter(([, code]) => /Array\.from\(\s*new\s+Uint8Array|\[\s*\.\.\.\s*new\s+Uint8Array/.test(code))
+      .map(([rel]) => rel);
+    expect(
+      bad,
+      "Pass the Uint8Array as the invoke payload with the small args in headers, " +
+        "the way write_raw_to_path and stage_prepared_wav take it.",
+    ).toEqual([]);
+  });
+
+  it("really is scanning files", () => {
+    expect(walk(join(ROOT, "src")).length).toBeGreaterThan(50);
+  });
+});

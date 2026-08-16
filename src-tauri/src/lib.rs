@@ -227,6 +227,7 @@ pub fn run() {
             commands::move_transcript_to_folder,
             commands::save_transcript_analysis,
             commands::transcribe_local_file,
+            commands::stage_prepared_wav,
             commands::transcribe_prepared_wav,
             commands::re_diarize_transcript,
             commands::extract_frame,

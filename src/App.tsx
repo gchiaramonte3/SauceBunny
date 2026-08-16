@@ -3362,8 +3362,15 @@ export default function App() {
           // pulling in @tauri-apps/plugin-fs + its capability scope for
           // a one-shot write. saveDialog already vetted the path is
           // writable by the user.
-          const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-          await invoke("write_bytes_to_path", { path: dest, bytes });
+          // RAW body, not a JSON number array. The JSON route decimal-prints
+          // every byte on the WKWebView main thread, so a 4K PNG snapshot
+          // became a multi-megabyte string built one element at a time, with
+          // the window frozen for it. Same reason the clip exporter uses this
+          // path. saveDialog already vetted the destination, so no uniquing.
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          await invoke("write_raw_to_path", bytes, {
+            headers: { "x-dest-path": encodeURIComponent(dest) },
+          });
           // Synthesise a result shape matching the ffmpeg path so the
           // success log + notification code below works uniformly.
           // Width/height come from probe metadata when available.
@@ -3648,22 +3655,28 @@ export default function App() {
         if (wavBlob) {
           appendLog("info", txChannel,
             `Audio extracted via mediabunny (${(wavBlob.size / 1_000_000).toFixed(1)} MB WAV); skipping ffmpeg.`);
-          const bytes = Array.from(new Uint8Array(await wavBlob.arrayBuffer()));
-          // Checked AGAIN, because the line above is not free: reading the
-          // blob is async, and Array.from over a Uint8Array walks every byte
-          // of it. The extraction cap is 20 minutes of 16 kHz mono, so that is
-          // up to ~38 MB turned into a JS array element by element, which is
-          // seconds of window, not microseconds. A Stop landing in it passed
-          // the check above and then spawned the job anyway - the same shape
-          // as the batch-transcribe cancel, where the file finished and
-          // reported success after the user pressed Stop.
+          // RAW body, keyed by job id. This used to be
+          // `Array.from(new Uint8Array(...))` feeding a `wav_bytes` field:
+          // the extraction cap is 20 minutes of 16 kHz mono, so up to ~38 MB
+          // was walked byte by byte into a JS array and then decimal-printed
+          // into a ~130 MB JSON string, on the webview's main thread, with
+          // the window frozen throughout. Rust lands the buffer on disk and
+          // transcribe_prepared_wav reads the path.
+          const bytes = new Uint8Array(await wavBlob.arrayBuffer());
+          await invoke<string>("stage_prepared_wav", bytes, {
+            headers: { "x-job-id": id },
+          });
+          // Checked AGAIN, because the staging above is still an await, and a
+          // Stop landing in it would otherwise pass the check above and spawn
+          // the job anyway - the same shape as the batch-transcribe cancel,
+          // where the file finished and reported success after the user
+          // pressed Stop. The staged WAV is left for the startup cache sweep.
           if (abort.signal.aborted) {
             transcriptAbortRef.current = null;
             return;
           }
           await invoke<string>("transcribe_prepared_wav", {
             args: {
-              wav_bytes: bytes,
               output_dir: outDir,
               filename: sanitizeFilename(exportOpts.filename || "transcript"),
               model_id: defaults.whisperModel,

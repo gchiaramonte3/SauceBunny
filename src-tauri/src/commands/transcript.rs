@@ -2059,6 +2059,64 @@ pub struct TranscribeLocalArgs {
     pub duration_seconds: Option<f64>,
 }
 
+/// Where a prepared WAV waits for whisper to read it.
+///
+/// ONE definition, because staging and transcribing are two commands now and
+/// they have to agree on this path exactly; deriving it in both places is
+/// precisely how they would drift apart. A stage with no matching transcribe
+/// (the user cancels in between) leaves the file for the startup cache sweep,
+/// which is what that sweep is for.
+///
+/// The job id reaches this through an IPC HEADER, so it is filtered rather
+/// than trusted: only the shape crypto.randomUUID actually produces survives,
+/// and anything else cannot walk out of the cache directory.
+pub(crate) fn prepared_wav_name(job_id: &str) -> Result<String, crate::AppError> {
+    let safe: String = job_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect();
+    if safe.is_empty() {
+        return Err(crate::AppError::internal("prepared WAV: job id is empty"));
+    }
+    Ok(format!("saucebunny-{safe}.wav"))
+}
+
+pub(crate) fn prepared_wav_path(
+    app: &AppHandle,
+    job_id: &str,
+) -> Result<PathBuf, crate::AppError> {
+    let name = prepared_wav_name(job_id)?;
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("app_cache_dir: {e}"))?;
+    std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
+    Ok(cache.join(name))
+}
+
+/// Land the frontend's prepared WAV on disk as a RAW IPC body, keyed by job
+/// id. See `write_raw_to_path` for why the raw body matters: the JSON route
+/// decimal-prints every byte on the webview's main thread.
+#[tauri::command]
+pub async fn stage_prepared_wav(
+    app: AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<String, crate::AppError> {
+    let job_id = request
+        .headers()
+        .get("x-job-id")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| crate::AppError::internal("stage_prepared_wav: missing x-job-id header"))?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(crate::AppError::internal(
+            "stage_prepared_wav: expected a raw body (pass the Uint8Array as the invoke payload)",
+        ));
+    };
+    let path = prepared_wav_path(&app, job_id)?;
+    std::fs::write(&path, bytes).map_err(|e| format!("failed to stage WAV: {e}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Frontend-provided pre-normalised audio (16 kHz mono WAV bytes). Lets
 /// us skip the ffmpeg subprocess for the "extract audio → WAV" step when
 /// mediabunny + WebCodecs can do it in-browser. Falls through to
@@ -2066,7 +2124,6 @@ pub struct TranscribeLocalArgs {
 /// (codec WebCodecs can't decode, etc).
 #[derive(Deserialize)]
 pub struct TranscribePreparedWavArgs {
-    pub wav_bytes: Vec<u8>,
     pub output_dir: String,
     pub filename: String,
     pub model_id: String,
@@ -2106,14 +2163,21 @@ pub async fn transcribe_prepared_wav(
         ).into());
     }
 
-    let cache = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| format!("app_cache_dir: {e}"))?;
-    std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
-    let wav_path = cache.join(format!("saucebunny-{}.wav", args.job_id));
-    std::fs::write(&wav_path, &args.wav_bytes)
-        .map_err(|e| format!("failed to stage WAV: {e}"))?;
+    // Staged by `stage_prepared_wav` before this call. The bytes used to ride
+    // in `wav_bytes`, which meant the frontend decimal-printed every one of
+    // them into a JSON array on the WKWebView main thread - up to ~38 MB of
+    // WAV becoming a ~130 MB string, element by element, with the window
+    // frozen for it. Now they arrive as a raw IPC body and land straight on
+    // disk, and this command only reads the path.
+    let wav_path = prepared_wav_path(&app, &args.job_id)?;
+    let wav_len = match std::fs::metadata(&wav_path) {
+        Ok(m) if m.is_file() => m.len(),
+        _ => {
+            return Err(crate::AppError::internal(
+                "prepared WAV is missing; call stage_prepared_wav with the same job id first",
+            ))
+        }
+    };
 
     let wav_path_str = wav_path.to_string_lossy().to_string();
     let model_str = model_p.to_string_lossy().to_string();
@@ -2131,7 +2195,7 @@ pub async fn transcribe_prepared_wav(
         emit_transcript_log(
             &app_for, &job_for, "ok",
             format!("Audio ready ({} MB) — transcribing with Whisper…",
-                    (args.wav_bytes.len() as f64 / 1_000_000.0).round() as u32),
+                    (wav_len as f64 / 1_000_000.0).round() as u32),
         );
 
         // Phase 2 only — whisper-cli on the pre-staged WAV. Mirrors the
@@ -3405,5 +3469,55 @@ mod model_completeness_tests {
         assert!(!model_file_complete(&dir, 0));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod prepared_wav_tests {
+    use super::prepared_wav_name;
+
+    #[test]
+    fn keeps_a_real_job_id_intact() {
+        // crypto.randomUUID output, which is all production ever sends.
+        assert_eq!(
+            prepared_wav_name("6f1c2b7a-9d3e-4a55-8b21-0c7d5e9f1a34").unwrap(),
+            "saucebunny-6f1c2b7a-9d3e-4a55-8b21-0c7d5e9f1a34.wav",
+        );
+    }
+
+    #[test]
+    fn a_job_id_cannot_walk_out_of_the_cache_directory() {
+        // The id arrives in an IPC HEADER now, not a typed field, so it is
+        // filtered rather than trusted. None of these may produce a separator.
+        for hostile in ["../../etc/passwd", "a/b", "a\\b", "..", "./x", "a\0b"] {
+            let name = prepared_wav_name(hostile).unwrap_or_else(|_| "saucebunny-.wav".into());
+            assert!(!name.contains('/'), "{hostile} produced {name}");
+            assert!(!name.contains('\\'), "{hostile} produced {name}");
+            assert!(name.starts_with("saucebunny-"), "{hostile} produced {name}");
+            assert!(name.ends_with(".wav"), "{hostile} produced {name}");
+        }
+    }
+
+    #[test]
+    fn dots_are_dropped_so_no_id_can_re_extension_the_file() {
+        // "x.sh" must not become saucebunny-x.sh.wav's neighbour, and more to
+        // the point must not end in anything but .wav.
+        assert_eq!(prepared_wav_name("x.sh").unwrap(), "saucebunny-xsh.wav");
+    }
+
+    #[test]
+    fn an_id_with_nothing_usable_is_an_error_not_a_shared_file() {
+        // Falling back to a fixed name would make two concurrent jobs collide
+        // on one WAV, so this refuses instead.
+        assert!(prepared_wav_name("").is_err());
+        assert!(prepared_wav_name("../..").is_err());
+        assert!(prepared_wav_name("///").is_err());
+    }
+
+    #[test]
+    fn distinct_jobs_get_distinct_files() {
+        let a = prepared_wav_name("job-a").unwrap();
+        let b = prepared_wav_name("job-b").unwrap();
+        assert_ne!(a, b);
     }
 }
