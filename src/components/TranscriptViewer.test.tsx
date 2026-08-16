@@ -184,8 +184,14 @@ describe("splitting a speaker by selecting their dialogue", () => {
     lasso(0, 0);
     rightClick(0);
     act(() => { screen.getByRole("menuitem", { name: /a new speaker/ }).click(); });
-    expect(undo().disabled).toBe(false);
-    expect(undo().getAttribute("title")).toBe("Undo reassign dialogue");
+    // Same shape as "lights up, and names the edit" above, in the same
+    // component behind the same async mount - which is the one that actually
+    // went red on CI. Fixing that one and leaving this is just waiting for the
+    // next slow machine.
+    await waitFor(() => {
+      expect(undo().disabled).toBe(false);
+      expect(undo().getAttribute("title")).toBe("Undo reassign dialogue");
+    });
   });
 
   it("offers the OTHER speakers to reassign to, and not the current one", async () => {
