@@ -2219,3 +2219,17 @@
   border-radius: 2px;
   padding: 0 1px;
 }
+
+/* Reduced motion. Transitions here are stopped by DURATION, never by
+   neutralising the transform: a `-50%` translate is CENTRING, so replacing it
+   moves the element half its own width off target. Zeroing a duration cannot
+   change a final computed style. Guarded by
+   src/lib/reduced-motion-contract.test.ts. */
+@media (prefers-reduced-motion: reduce) {
+  .cp-cast-chev,
+  .cp-spk-pip-btn,
+  .cp-tx-group-chev,
+  .cp-tx-speaker { transition-duration: 0s; }
+  .cp-spk-backdrop,
+  .cp-tx-follow-pill { animation: none; }
+}

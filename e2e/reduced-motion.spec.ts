@@ -11,11 +11,21 @@ import { tauriMockInit } from "./tauri-mock";
  * `animation:` added without a guard would be the first anyone heard of it, and
  * only from a user who feels ill.
  *
- * TRANSITIONS are deliberately not asserted here. 33 rules across 10 files move
- * something on :hover/:active (mostly a 1px lift), and they still transition
- * under reduce. Suppressing them one by one, or tokenising the lift so a single
- * rule can switch it off, is a design decision rather than a bug fix - recorded
- * in docs/HAND-TEST.md rather than quietly changed here.
+ * TRANSITIONS are now covered too, and the WAY they are suppressed is the part
+ * worth pinning. 41 base rules across 15 files transition `transform` or `all`.
+ * The obvious fix - `transform: none` under reduce - would have broken the app:
+ * several of those transforms do real work rather than decoration. A
+ * translateX(-50%) on `.cp-ai-chip::after`, `.cp-playhead::before` and the
+ * follow pill is CENTRING, so neutralising it shifts them half their own width
+ * off target; and `.cp-thumb-actions` translateY(0) is what REVEALS the
+ * sidebar's hover buttons, so neutralising it hides controls permanently.
+ *
+ * What ships instead is `transition-duration: 0s` - the interpolation goes, the
+ * destination does not. "Resting geometry is identical" below is the test that
+ * keeps it that way: it compares every visible element's computed transform
+ * with reduce on and off, so anyone who later reaches for `transform: none`
+ * inside one of these blocks hears about it here rather than from a user whose
+ * buttons vanished.
  */
 
 async function boot(page: Page) {
@@ -38,7 +48,7 @@ async function animating(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const out: string[] = [];
     for (const el of document.querySelectorAll<HTMLElement>("*")) {
-      if (el.offsetParent === null && el.tagName !== "BODY") continue;
+      if (!el.checkVisibility()) continue;
       const cs = getComputedStyle(el);
       if ((parseFloat(cs.animationDuration) || 0) > 0.001) {
         out.push(`${cs.animationName} ${cs.animationDuration} .${el.getAttribute("class")}`);
@@ -75,6 +85,82 @@ test("no keyframe animation runs in any view under reduced motion", async ({ pag
   }
   expect(visited, "no view was visited").toBe(VIEWS.length);
   expect(found, `still animating:\n${found.join("\n")}`).toEqual([]);
+});
+
+/**
+ * Every visible element's resting `transform`, keyed by a stable-ish label.
+ *
+ * Pseudo-elements are included on purpose, and are most of the point: the
+ * centring translateX(-50%) this test exists to protect lives on
+ * `.cp-playhead::before`, `.cp-ai-chip::after` and the segmented control's
+ * sliding `::before`. `getComputedStyle(el)` alone reports NONE of them, so a
+ * first version of this probe found zero transforms on the whole page and would
+ * have compared two empty objects for ever.
+ */
+async function restingTransforms(page: Page): Promise<Record<string, string>> {
+  return page.evaluate(() => {
+    const out: Record<string, string> = {};
+    document.querySelectorAll<HTMLElement>("*").forEach((el, i) => {
+      if (!el.checkVisibility()) return;
+      const key = `${i}:${el.tagName}.${el.getAttribute("class") ?? ""}`;
+      for (const pseudo of [null, "::before", "::after"]) {
+        const t = getComputedStyle(el, pseudo).transform;
+        if (t && t !== "none") out[key + (pseudo ?? "")] = t;
+      }
+    });
+    return out;
+  });
+}
+
+/** Walk every view so the transformed elements actually exist to be measured. */
+async function walkViews(page: Page) {
+  for (const [label, root] of [
+    ["Library", ".cp-view-library"], ["Clip", ".cp-view-clip"],
+    ["Review", ".cp-view-coreview"], ["Transcripts", ".cp-view-reader"],
+    ["Home", ".cp-view-home"],
+  ] as Array<[string, string]>) {
+    await page.getByRole("button", { name: label, exact: true }).click();
+    await expect(page.locator(root)).toBeVisible();
+  }
+}
+
+test("nothing still travels: no transform transition survives reduce", async ({ page }) => {
+  await boot(page);
+  const moving = await page.evaluate(() => {
+    const out: string[] = [];
+    for (const el of document.querySelectorAll<HTMLElement>("*")) {
+      if (!el.checkVisibility()) continue;
+      const cs = getComputedStyle(el);
+      const props = cs.transitionProperty;
+      if (!/\btransform\b|\ball\b/.test(props)) continue;
+      // A comma list pairs property N with duration N; any nonzero one counts.
+      const secs = cs.transitionDuration.split(",").map((d) => parseFloat(d) || 0);
+      if (secs.some((s) => s > 0.001)) {
+        out.push(`.${el.getAttribute("class")} — ${props} ${cs.transitionDuration}`);
+      }
+    }
+    return out;
+  });
+  expect(moving, `still transitioning transform under reduce:\n${moving.join("\n")}`).toEqual([]);
+});
+
+test("resting geometry is identical with reduced motion on and off", async ({ page }) => {
+  // The guard on HOW the above is achieved. Zeroing a duration cannot move
+  // anything; `transform: none` moves centred elements off-centre and hides
+  // the sidebar's revealed actions. Only the first survives this comparison.
+  await boot(page);
+  await walkViews(page);
+  const reduced = await restingTransforms(page);
+
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.reload();
+  await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
+  await walkViews(page);
+  const normal = await restingTransforms(page);
+
+  expect(Object.keys(normal).length, "no transforms found at all — the probe is measuring nothing")
+    .toBeGreaterThan(0);
+  expect(reduced).toEqual(normal);
 });
 
 test("the settings modal does not animate in under reduced motion", async ({ page }) => {

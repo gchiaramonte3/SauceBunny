@@ -196,7 +196,18 @@
 .cp-sidebar-toggle { flex-shrink: 0; }
 .cp-sidebar-toggle.active { background: rgba(255,255,255,0.06); }
 
-/* Reduced motion: still the co-review live-session blink (an infinite
-   attention pulse). */
+/* The co-review live-session blink used to be guarded here. The rule moved to
+   coreview.css (.cp-colobby-live) and is guarded next to it now; what stayed
+   behind was an EMPTY media block and a comment claiming a suppression that no
+   longer had anything to suppress. Removed rather than left to read as
+   coverage. */
+
+/* Reduced motion. Transitions here are stopped by DURATION, never by
+   neutralising the transform: a `-50%` translate is CENTRING, so replacing it
+   moves the element half its own width off target. Zeroing a duration cannot
+   change a final computed style. Guarded by
+   src/lib/reduced-motion-contract.test.ts. */
 @media (prefers-reduced-motion: reduce) {
+  .cp-url { transition-duration: 0s; }
+  .cp-recents-pop { animation: none; }
 }

@@ -136,3 +136,11 @@
 .log-line .tag.muxer { color: #B084FF; }
 .log-line .msg { color: var(--fg-2); white-space: pre-wrap; word-break: break-word; }
 
+/* Reduced motion. Transitions here are stopped by DURATION, never by
+   neutralising the transform: a `-50%` translate is CENTRING, so replacing it
+   moves the element half its own width off target. Zeroing a duration cannot
+   change a final computed style. Guarded by
+   src/lib/reduced-motion-contract.test.ts. */
+@media (prefers-reduced-motion: reduce) {
+  .cp-logs-header .chev { transition-duration: 0s; }
+}

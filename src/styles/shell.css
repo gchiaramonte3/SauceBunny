@@ -697,3 +697,12 @@
 .cp-rowmenu-folder:hover { color: var(--fg-1); background: var(--bg-4); }
 .cp-rowmenu-newfolder { display: flex; gap: 6px; margin-top: 10px; }
 .cp-rowmenu-newfolder .cp-tx-iconbtn { flex: 0 0 auto; height: 34px; padding: 0 12px; }
+
+/* Reduced motion. Transitions here are stopped by DURATION, never by
+   neutralising the transform: a `-50%` translate is CENTRING, so replacing it
+   moves the element half its own width off target. Zeroing a duration cannot
+   change a final computed style. Guarded by
+   src/lib/reduced-motion-contract.test.ts. */
+@media (prefers-reduced-motion: reduce) {
+  .cp-reader { transition-duration: 0s; }
+}

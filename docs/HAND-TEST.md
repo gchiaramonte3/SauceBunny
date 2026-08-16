@@ -172,10 +172,28 @@ accessibility tree; only VoiceOver proves it is announced.
   `useDismiss`; standardising them changes how Escape resolves when they nest.
 - The library scan depth stays at 3 levels. Raising it trades scan time for
   reach on unknown disk layouts.
-- **Reduced motion covers animations but not transitions.** All 58 keyframe
-  animations stop under `prefers-reduced-motion: reduce`, and `e2e/reduced-
-  motion.spec.ts` now holds that. 33 rules across 10 files still transition a
-  `transform` on hover or active - almost all of them a 1px lift. Closing that
-  is either 33 targeted suppressions or one tokenised `--lift` that a single
-  rule can switch off; the second is the better design-system answer and the
-  bigger diff. Both are a call to make deliberately, so neither was made here.
+- ~~**Reduced motion covers animations but not transitions.**~~ Closed, and
+  BOTH halves of the note that recorded it were wrong.
+
+  It said all 58 keyframe animations were guarded. They were not: the e2e probe
+  skipped any element whose `offsetParent` was null, which is true of every
+  `position: fixed` element, so it never looked at the popovers, scrims,
+  banners and modal backdrops where entrance animations mostly live. Fourteen
+  were unguarded behind that blind spot - including the Settings backdrop
+  fading in behind a dialog that was correctly holding still, and an INFINITE
+  pulse on the live-session dot. All fourteen are guarded now, and
+  `src/lib/reduced-motion-contract.test.ts` reads the stylesheets instead of
+  the page, so no element can hide from it by not being rendered.
+
+  It also proposed the wrong fix for the transitions: 33 suppressions or a
+  tokenised `--lift`, both of which neutralise the transform. That breaks the
+  app. `translateX(-50%)` on the playhead, the AI chip and the follow pill is
+  CENTRING, not decoration, so removing it moves each one half its own width
+  off target. What shipped instead is `transition-duration: 0s` on the 41
+  affected rules - the travel goes, the destination cannot change, because a
+  duration is incapable of moving anything.
+
+  Worth a look by eye with System Settings ▸ Accessibility ▸ Display ▸ Reduce
+  motion on: open Settings, the command palette, and a live session, and
+  confirm things APPEAR rather than arrive, with nothing off-centre and no
+  hover control that has stopped appearing.

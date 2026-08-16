@@ -37,9 +37,14 @@
   animation: cp-modal-in var(--dur-slow) var(--ease-out);
 }
 /* Reduced motion: modal appears without the rise/scale entrance
-   (covers Settings + the MediaInfo modal, which reuses .cp-modal). */
+   (covers Settings + the MediaInfo modal, which reuses .cp-modal).
+   The BACKDROP needs it too, and was missed for as long as this guard has
+   existed: it is `position: fixed`, and the e2e probe skipped anything whose
+   offsetParent was null - true of every fixed element on the page. So the
+   dialog obeyed the setting while the sheet of glass behind it faded in. */
 @media (prefers-reduced-motion: reduce) {
-  .cp-modal { animation: none; }
+  .cp-modal,
+  .cp-modal-backdrop { animation: none; }
 }
 .cp-modal-header {
   height: 50px;
@@ -1227,4 +1232,16 @@
   background: #000;
   border-radius: var(--r-md);
   overflow: hidden;
+}
+
+/* Reduced motion. Transitions here are stopped by DURATION, never by
+   neutralising the transform: a `-50%` translate is CENTRING, so replacing it
+   moves the element half its own width off target. Zeroing a duration cannot
+   change a final computed style. Guarded by
+   src/lib/reduced-motion-contract.test.ts. */
+@media (prefers-reduced-motion: reduce) {
+  .cp-modal-close,
+  .cp-modal-tab,
+  .cp-model-info-btn { transition-duration: 0s; }
+  .cp-model-info-popover { animation: none; }
 }

@@ -657,3 +657,19 @@
    instructional text, which tokens.css reserves fg-4 or up for. */
 .cp-meta-empty-title { color: var(--fg-4); }
 .cp-meta-empty-hint { color: var(--fg-4); }
+
+/* Reduced motion. Transitions here are stopped by DURATION, never by
+   neutralising the transform: a `-50%` translate is CENTRING, so replacing it
+   moves the element half its own width off target. Zeroing a duration cannot
+   change a final computed style. Guarded by
+   src/lib/reduced-motion-contract.test.ts. */
+@media (prefers-reduced-motion: reduce) {
+  .cp-input,
+  .cp-recent,
+  .cp-recent-chev,
+  .cp-section.collapsible > .cp-section-head .chev,
+  .cp-segmented button,
+  .cp-segmented::before,
+  .cp-thumb-actions,
+  .cp-toggle-switch::after { transition-duration: 0s; }
+}

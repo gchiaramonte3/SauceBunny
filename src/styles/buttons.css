@@ -626,3 +626,14 @@
   [data-phase="error"] .cp-draw { animation: none; stroke-dashoffset: 0; }
   .cp-gen-result { transition: none; }
 }
+
+/* Reduced motion. Transitions here are stopped by DURATION, never by
+   neutralising the transform: a `-50%` translate is CENTRING, so replacing it
+   moves the element half its own width off target. Zeroing a duration cannot
+   change a final computed style. Guarded by
+   src/lib/reduced-motion-contract.test.ts. */
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .btn-icon,
+  .cp-export-cta { transition-duration: 0s; }
+}

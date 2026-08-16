@@ -1272,3 +1272,13 @@
   border-radius: 0 0 6px 6px;
 }
 .cp-review-verunlink:hover { background: rgba(255,255,255,0.07); color: var(--fg-1); }
+
+/* Reduced motion. Transitions here are stopped by DURATION, never by
+   neutralising the transform: a `-50%` translate is CENTRING, so replacing it
+   moves the element half its own width off target. Zeroing a duration cannot
+   change a final computed style. Guarded by
+   src/lib/reduced-motion-contract.test.ts. */
+@media (prefers-reduced-motion: reduce) {
+  .cp-emoji-cell,
+  .cp-react-pop-btn { transition-duration: 0s; }
+}
