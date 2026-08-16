@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { audioCodecCandidates, encodedStreamMime, peerStreamMime, videoCodecCandidates } from "./codec-strings";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 /**
  * The support table below is MEASURED, not assumed. Chromium (Playwright) was
@@ -115,6 +117,36 @@ describe("encodedStreamMime", () => {
     // fail rather than a silent decode error on the guest.
     expect(encodedStreamMime(webkitish)).toBe(
       `video/mp4; codecs="${videoCodecCandidates("h264")[0]}, ${audioCodecCandidates("aac")[0]}"`,
+    );
+  });
+
+  it("reads those codec names OUT of rung.rs rather than trusting the comment", () => {
+    // The assertion above promises to fail if the encoder moves to HEVC or
+    // Opus. It cannot: "h264" and "aac" are written here by hand, so changing
+    // rung.rs leaves it green and the guest gets a silent decode error, which
+    // is the exact outcome the promise was made about.
+    //
+    // Same gap filename.test.ts had, and the same fix build-id.test.ts has
+    // used all along: parse the counterpart.
+    const rs = readFileSync(
+      resolve(__dirname, "../../src-tauri/src/commands/rung.rs"), "utf8",
+    );
+    const arg = (flag: string) =>
+      new RegExp(`"${flag}"\\.into\\(\\),\\s*"([^"]+)"\\.into\\(\\)`).exec(rs)?.[1];
+    const v = arg("-c:v");
+    const a = arg("-c:a");
+    expect(v, "-c:v not found in rung.rs — the matcher broke, not the code").toBeTruthy();
+    expect(a, "-c:a not found in rung.rs — the matcher broke, not the code").toBeTruthy();
+
+    // ffmpeg's encoder name carries the backend ("h264_videotoolbox"); the
+    // codec it produces is the part before the first underscore.
+    const videoCodec = v!.split("_")[0];
+    expect(videoCodec).toBe("h264");
+    expect(a).toBe("aac");
+
+    // And the MIME the guest builds must describe exactly that.
+    expect(encodedStreamMime(webkitish)).toBe(
+      `video/mp4; codecs="${videoCodecCandidates(videoCodec)[0]}, ${audioCodecCandidates(a!)[0]}"`,
     );
   });
 });
