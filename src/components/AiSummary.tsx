@@ -8,6 +8,7 @@ import { streamChat, type ChatMessage } from "../lib/ai-chat";
 import { loadAiProvider, cloudChat } from "../lib/ai-provider";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
+import { useDismiss } from "../hooks/use-dismiss";
 import { IconAiSummary } from "./Icons";
 import { Markdown } from "./Markdown";
 import { AiChapters } from "./AiChapters";
@@ -429,14 +430,13 @@ export function AiSummary({
   const dlRef = useRef<HTMLDivElement>(null);
   const hasOutput = messages.some((m) => m.role === "assistant" && m.content.trim());
 
-  useEffect(() => {
-    if (!dlOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (dlRef.current && !dlRef.current.contains(e.target as Node)) setDlOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [dlOpen]);
+  // useDismiss, not a local listener: this menu handled the click-outside half
+  // and had NO Escape handler at all — not on the document, and not on the
+  // element either, where it could never have fired since nothing focuses the
+  // menu. Opening Export and pressing Escape did nothing while every other
+  // menu in the app closed. That is the exact pair of symptoms use-dismiss.ts
+  // was written for, after the same split was found in the transcript history.
+  useDismiss(dlRef, () => setDlOpen(false), dlOpen);
 
   // Strip leaked emphasis for the plain-text export (the renderer does this for
   // the on-screen view; .txt has no renderer).
