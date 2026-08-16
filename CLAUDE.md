@@ -516,6 +516,7 @@ Three more are measured against the RENDERED app rather than its source, in
 | `reduced-motion` | No keyframe animation runs under `prefers-reduced-motion` (transitions are a known gap) |
 | `form-labels` | Every visible input/select/textarea has an accessible name, across all nine Settings tabs. A placeholder does not count |
 | `focus-visible` | Every tab stop looks different when focused. Transitions are zeroed first - reading mid-fade reports a correct ring as missing |
+| `panel-window` | The second window (`?window=panel`) boots, renders content, names its controls, and offers no pop-out |
 
 Two habits these encode, worth applying to any new one:
 
