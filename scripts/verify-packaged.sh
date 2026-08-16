@@ -80,9 +80,24 @@ else
   else
     ok "entry chunk free of the encoder ($(du -h "$entry" | cut -f1))"
   fi
-  find dist/assets -name '*.woff' 2>/dev/null | grep -q . \
-    && skip "legacy .woff fonts still shipping (audit item E2)" \
-    || ok "woff2 only"
+  # NO PIPELINE. `find ... | grep -q .` is the trap this file's own header
+  # warns about, twenty lines up: grep exits on the first match, find takes
+  # SIGPIPE, and under `set -o pipefail` the pipeline reports FAILURE on a
+  # successful match. Here that inverts the answer in the reassuring
+  # direction - it would print "woff2 only" while 30 .woff files ship.
+  # Whether it misfires is a race with 30 files to write, which is exactly
+  # the kind of check you do not want deciding by timing.
+  if [ -n "$(find dist/assets -name '*.woff' -print -quit 2>/dev/null)" ]; then
+    skip "legacy .woff fonts still shipping (audit item E2: 432K of woff \
+beside 360K of woff2; WKWebView has read woff2 since Safari 10, so the \
+legacy copies are never loaded. Not removed: @fontsource ships no \
+woff2-only stylesheet, so dropping them means hand-rolling @font-face for \
+the app's only typeface, or a Vite plugin - and CLAUDE.md forbids bundler \
+config. 432K of a 103MB local bundle, with no per-visit download, does not \
+buy that risk.)"
+  else
+    ok "woff2 only"
+  fi
 fi
 
 echo
