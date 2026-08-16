@@ -110,6 +110,7 @@ import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type 
 import {
   durationToTc, framesToTc, secondsToTc,
   tcToFrames, tcToSeconds,
+  tcDigitsToFrames, tcDigitsToDisplay,
 } from "./lib/timecode";
 import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, looksLikeExtractorRot, prettyHost } from "./lib/validation";
 import { sanitizeFilename, suggestFilename } from "./lib/filename";
@@ -4923,9 +4924,7 @@ export default function App() {
         if (e.key === "Escape")           { e.preventDefault(); setTcEntry(null); return; }
         if (e.key === "Enter") {
           e.preventDefault();
-          const d = (tcEntryRef.current || "0").slice(-8).padStart(8, "0");
-          const r = Math.max(1, Math.round(fps));
-          const frames = ((+d.slice(0, 2) * 3600 + +d.slice(2, 4) * 60 + +d.slice(4, 6)) * r) + +d.slice(6, 8);
+          const frames = tcDigitsToFrames(tcEntryRef.current ?? "", fps);
           setTcEntry(null);
           onSeek(frames);
           return;
@@ -5773,8 +5772,7 @@ export default function App() {
   const annLabelColor = (annDrawing ? loadReviewer().color
     : annotationDisplayColor) ?? undefined;
   // Live HH:MM:SS:FF for the timecode-entry HUD (right-aligned digit fill).
-  const tcOverlay = tcEntry == null ? null
-    : (() => { const d = tcEntry.slice(-8).padStart(8, "0"); return `${d.slice(0, 2)}:${d.slice(2, 4)}:${d.slice(4, 6)}:${d.slice(6, 8)}`; })();
+  const tcOverlay = tcEntry == null ? null : tcDigitsToDisplay(tcEntry);
   const titleSuffix = (status === "loaded" || status === "exporting" || status === "success") && exportOpts.filename
     ? ` · ${exportOpts.filename}`
     : "";

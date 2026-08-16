@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { framesToTc, tcToFrames, tcToSeconds, hmsToSeconds, secondsToClock } from "./timecode";
+import { framesToTc, tcToFrames, tcToSeconds, hmsToSeconds, secondsToClock, tcDigitsToFrames, tcDigitsToDisplay } from "./timecode";
 
 // Frames↔timecode math drives the playhead, marks, exports, and the
 // transcript click-to-seek (whose floor-rounding produced the r85
@@ -96,5 +96,85 @@ describe("secondsToClock", () => {
   it("clamps negatives and floors fractions", () => {
     expect(secondsToClock(-5)).toBe("0:00");
     expect(secondsToClock(61.9)).toBe("1:01");
+  });
+});
+
+describe("the transport HUD's digit entry", () => {
+  // 24fps throughout: a round rate keeps the arithmetic readable, and the
+  // rounding of 23.976 is covered separately below.
+  const F = (digits: string, fps = 24) => tcDigitsToFrames(digits, fps);
+
+  it("fills right-to-left, the way an NLE timecode field does", () => {
+    // The whole grammar in four lines. Typing "1" then "3" then "0" walks
+    // 00:00:00:01 → 00:00:00:13 → 00:00:01:30, so every intermediate state has
+    // to mean something rather than being rejected as malformed.
+    expect(F("1")).toBe(1);
+    expect(F("13")).toBe(13);
+    expect(F("130")).toBe(24 + 30);          // 00:00:01:30
+    expect(F("1000")).toBe(10 * 24);         // 00:00:10:00
+    expect(F("10000")).toBe(60 * 24);        // 00:01:00:00
+    expect(F("1000000")).toBe(3600 * 24);    // 01:00:00:00
+  });
+
+  it("treats an empty entry as frame zero rather than NaN", () => {
+    // Return pressed on an open-but-empty HUD. `+"" ` is 0 but `+"  "` is not,
+    // and the padding is what keeps this arithmetic away from NaN.
+    expect(F("")).toBe(0);
+    expect(F("0")).toBe(0);
+  });
+
+  it("keeps only the last eight digits typed", () => {
+    // The HUD slices as you type, so this is belt and braces: a paste or a
+    // held key cannot walk the hours field off the end.
+    expect(F("9910000000")).toBe(F("10000000"));
+    expect(tcDigitsToDisplay("9910000000")).toBe("10:00:00:00");
+  });
+
+  it("NORMALISES overflow instead of rejecting it", () => {
+    // The deliberate difference from tcToFrames, and the reason both exist.
+    // 90 frames at 24fps is 3s18f; 90 seconds is a minute and a half.
+    expect(F("90")).toBe(90);                      // 00:00:00:90 → 3s 18f
+    expect(F("9000")).toBe(90 * 24);               // 00:00:90:00 → 1m 30s
+    expect(F("00990000")).toBe(99 * 60 * 24);      // 00:99:00:00 → 1h 39m
+  });
+
+  it("disagrees with tcToFrames on purpose, and only about validity", () => {
+    // Same digits, same rate. The strict parser refuses; the HUD lands on a
+    // frame. If someone ever "fixes" this divergence, a half-typed timecode
+    // stops being enterable - so it is pinned rather than left to judgement.
+    expect(tcToFrames("00:99:00:00", 24)).toBeNull();
+    expect(F("00990000")).toBeGreaterThan(0);
+
+    // ...and they AGREE wherever the input is a legal timecode, which is what
+    // makes the divergence a deliberate narrowing rather than two rival
+    // implementations that have drifted.
+    for (const tc of ["00:00:00:00", "00:00:01:12", "00:01:30:07", "01:23:45:21"]) {
+      expect(F(tc.replace(/:/g, ""))).toBe(tcToFrames(tc, 24));
+    }
+  });
+
+  it("rounds a fractional rate the same way the rest of the module does", () => {
+    // 23.976 and 29.97 are the rates this app actually meets. Frame counts are
+    // integers, so the entry rounds to 24 and 30 exactly as framesToTc does.
+    expect(F("100", 23.976)).toBe(24);   // 00:00:01:00
+    expect(F("100", 29.97)).toBe(30);
+    expect(F("100", 0)).toBe(1);         // an unknown rate must not divide by zero
+  });
+
+  it("paints what was typed, padded but never reformatted", () => {
+    expect(tcDigitsToDisplay("")).toBe("00:00:00:00");
+    expect(tcDigitsToDisplay("7")).toBe("00:00:00:07");
+    expect(tcDigitsToDisplay("130")).toBe("00:00:01:30");
+    // Not normalised for display: the user sees the digits they typed, and the
+    // jump to a legal timecode happens on Return. Showing 00:00:03:18 while
+    // they are still typing "90" would move the target as they aim at it.
+    expect(tcDigitsToDisplay("90")).toBe("00:00:00:90");
+  });
+
+  it("round-trips through framesToTc for every legal entry", () => {
+    for (const frames of [0, 1, 23, 24, 25, 1439, 1440, 86_399, 2_073_599]) {
+      const tc = framesToTc(frames, 24);
+      expect(F(tc.replace(/:/g, ""))).toBe(frames);
+    }
   });
 });

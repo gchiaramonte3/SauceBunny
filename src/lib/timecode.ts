@@ -103,3 +103,37 @@ export function normalizeTc(tc: string, fps: number): string {
   const f = tcToFrames(tc, fps);
   return f == null ? tc : framesToTc(f, fps);
 }
+
+/**
+ * The transport HUD's digit entry, which is a DIFFERENT problem from
+ * `tcToFrames` above and deliberately answers it differently.
+ *
+ * `tcToFrames` parses a timecode someone typed in full and VALIDATES it:
+ * `00:99:99:99` is not a timecode, so it returns null and the caller refuses.
+ * The HUD is the opposite. Digits arrive one at a time and fill right-to-left,
+ * so every intermediate state is nonsense on the way to something real - "1"
+ * is 00:00:00:01 before it becomes "130" is 00:00:01:30 - and there is nothing
+ * to reject, only a position to land on. Overflow NORMALISES the way an NLE's
+ * timecode field does: 90 frames at 24fps is three seconds and eighteen frames,
+ * not an error.
+ *
+ * Both behaviours are correct for their own caller, which is exactly why they
+ * sit next to each other here. They were 400 lines apart before, one of them
+ * inlined in App.tsx with no test, and the risk was somebody noticing the
+ * "missing" validation and helpfully adding it - which would make a half-typed
+ * timecode unenterable.
+ */
+
+/** Digits typed so far (right-to-left into HHMMSSFF) → the frame they mean. */
+export function tcDigitsToFrames(digits: string, fps: number): number {
+  const d = (digits || "0").slice(-8).padStart(8, "0");
+  const r = Math.max(1, Math.round(fps));
+  const hh = +d.slice(0, 2), mm = +d.slice(2, 4), ss = +d.slice(4, 6), ff = +d.slice(6, 8);
+  return ((hh * 3600 + mm * 60 + ss) * r) + ff;
+}
+
+/** Digits typed so far → the HH:MM:SS:FF the HUD paints. */
+export function tcDigitsToDisplay(digits: string): string {
+  const d = digits.slice(-8).padStart(8, "0");
+  return `${d.slice(0, 2)}:${d.slice(2, 4)}:${d.slice(4, 6)}:${d.slice(6, 8)}`;
+}
