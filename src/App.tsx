@@ -48,7 +48,6 @@ import { isQueuedClip } from "./types";
 import { asLogTag } from "./types";
 import { formatError, isAppError } from "./lib/error-format";
 import { fmtElapsed, stageLabel } from "./lib/elapsed";
-import { checkForUpdate } from "./lib/update-check";
 import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase";
 import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek } from "./lib/playhead-store";
 import { endSeekFrames } from "./lib/playhead-clock";
@@ -111,6 +110,7 @@ import { pushRecentClip } from "./lib/recent-clips";
 import { useClipExportListeners } from "./hooks/use-clip-export-listeners";
 import { usePlaybackPrepListeners } from "./hooks/use-playback-prep-listeners";
 import { useCaptionsListeners } from "./hooks/use-captions-listeners";
+import { useMenubarEvents } from "./hooks/use-menubar-events";
 import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
 import {
   durationToTc, framesToTc, secondsToTc,
@@ -4686,84 +4686,16 @@ export default function App() {
   ]);
 
   // ── Native menubar event wiring ─────────────────────────────────
-  // The Rust shell emits `menu:<id>` window events when a menu item
-  // is clicked. Most route to existing handlers; a couple toggle
-  // local state. This effect re-attaches when those handlers change
-  // — which is rarely, since they're stable useCallbacks.
-  useEffect(() => {
-    let mounted = true;
-    const unlistens: Array<() => void> = [];
-    (async () => {
-      const bind = async (id: string, fn: () => void) => {
-        const off = await listen(`menu:${id}`, () => { if (mounted) fn(); });
-        // Cleanup can run mid-Promise.all (this effect re-attaches whenever a
-        // handler dep changes): it iterates the array as-is, so a bind that
-        // resolves after that must release itself instead of pushing into a
-        // list nobody will read again.
-        if (!mounted) { off(); return; }
-        unlistens.push(off);
-      };
-      await Promise.all([
-        bind("open_url_bar",        () => {
-          // In a live room the URL bar IS the room's source bar - focus that
-          // and stay put. Ejecting a presenter to the Clip view mid-session
-          // (which is what an unconditional setActiveView("clip") did) breaks
-          // the sticky-workspace rule.
-          if (sessionRoomRef.current && activeViewRef.current === "coreview") {
-            setTimeout(() => {
-              const el = document.querySelector<HTMLInputElement>(".cp-room-source-field input");
-              el?.focus();
-              el?.select();
-            }, 0);
-            return;
-          }
-          // Otherwise the URL bar lives in the Clip view's toolbar - surface
-          // that view first (a [hidden] subtree can't take focus), then focus
-          // once React has committed the unhide (setTimeout lands after the
-          // microtask-flushed render).
-          setActiveView("clip");
-          setTimeout(() => {
-            const el = document.querySelector<HTMLInputElement>(".cp-url input");
-            el?.focus();
-            el?.select();
-          }, 0);
-        }),
-        bind("import_local",        () => handleImportFile()),
-        bind("import_transcript",   () => handleImportTranscript()),
-        bind("reveal_library",      () => {
-          const lib = defaults.transcriptLibrary;
-          if (!lib) return;
-          invoke("ensure_dir_exists", { path: lib })
-            .then(() => invoke("reveal_in_finder", { path: lib }))
-            .catch(() => { /* ignore */ });
-        }),
-        bind("open_settings",       () => setSettingsOpen(true)),
-        // Help > Check for Updates used to just open a browser tab. Now it
-        // asks, and either says you're current or offers the new version.
-        bind("check_updates",       () => {
-          void (async () => {
-            const current = await getVersion().catch(() => null);
-            if (!current) { setSettingsInitialTab("about"); setSettingsOpen(true); return; }
-            const status = await checkForUpdate(current);
-            if (status.kind === "available") {
-              pushNotification("info", `Sauce Bunny ${status.version} is available`,
-                "Open Settings, About to download it.");
-            } else if (status.kind === "current") {
-              pushNotification("success", "You're up to date", `Version ${current}.`);
-            } else {
-              pushNotification("info", "Couldn't check for updates",
-                "No connection, or no release published yet.");
-            }
-          })();
-        }),
-        bind("toggle_pipeline",     () => setLogsOpen((p) => !p)),
-        bind("toggle_queue",        () => setQueueOpenChoice((p) => !p)),
-        bind("show_command_palette", () => setPaletteOpen(true)),
-        bind("show_shortcuts",       () => setShortcutsOpen(true)),
-      ]);
-    })();
-    return () => { mounted = false; unlistens.forEach((u) => u()); };
-  }, [handleImportFile, handleImportTranscript, defaults.transcriptLibrary, setActiveView, pushNotification, setQueueOpenChoice]);
+  // The Rust shell emits `menu:<id>` when a menu item is clicked. Lifted into
+  // src/hooks/use-menubar-events.ts, which is where the ten bindings are now
+  // testable — menu-surface-contract proves the ids agree, not that they act.
+  useMenubarEvents({
+    handleImportFile, handleImportTranscript,
+    transcriptLibrary: defaults.transcriptLibrary,
+    pushNotification, setActiveView, setQueueOpenChoice, setSettingsOpen,
+    setSettingsInitialTab, setLogsOpen, setPaletteOpen, setShortcutsOpen,
+    sessionRoomRef, activeViewRef,
+  });
 
   // ── Suppress WKWebView's native context menu on UI chrome ──────
   // WKWebView shows "Look Up", "Translate", "Search with Google" when

@@ -24,7 +24,14 @@ import { join, resolve } from "node:path";
 
 const ROOT = resolve(__dirname, "../..");
 const rust = readFileSync(join(ROOT, "src-tauri/src/lib.rs"), "utf8");
-const app = readFileSync(join(ROOT, "src/App.tsx"), "utf8");
+// The React side moved out of App.tsx into a hook, and this contract found
+// out the honest way: its "no bind() calls found — the matcher broke" canary
+// fired instead of the scan quietly reporting ten unhandled menu items. Both
+// files are read now, so the binding can live in either without this going
+// blind again.
+const app =
+  readFileSync(join(ROOT, "src/App.tsx"), "utf8") +
+  readFileSync(join(ROOT, "src/hooks/use-menubar-events.ts"), "utf8");
 
 /** Every item the menubar offers. */
 const defined = [...rust.matchAll(/MenuItem::with_id\(app,\s*"([a-z_]+)"/g)].map((m) => m[1]);
