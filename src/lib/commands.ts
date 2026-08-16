@@ -118,7 +118,15 @@ export type CommandDeps = {
   handleStop: () => void;
   onProbeDiarizer: () => void;
   /** Top-level view switch (nav rail / ⌘1-⌘4) — state, not a router. */
-  onNavigateView: (view: "home" | "library" | "clip" | "coreview") => void;
+  /**
+   * Mirrors App's `AppView`, spelled out rather than imported: App imports
+   * this module, so importing the type back would be circular. It was missing
+   * "reader", which is the whole reason the Transcripts view had no palette
+   * entry — the command could not be written, because its own callback would
+   * not accept the argument. `settings-pointer-contract`'s sibling below
+   * (keybindings vs commands) is what keeps the two in step now.
+   */
+  onNavigateView: (view: "home" | "library" | "clip" | "coreview" | "reader") => void;
   /** Opens the ⌘/ shortcut cheat-sheet (ShortcutSheet). */
   onShowShortcuts: () => void;
   // ── scoped undo/redo (lib/undo.ts) ──
@@ -295,6 +303,11 @@ export function buildCommands(d: CommandDeps): Command[] {
       keywords: ["co-review", "watch party", "session", "peers", "theater", "nav"],
       disabled: d.activeView === "coreview",
       run: () => d.onNavigateView("coreview") },
+    { id: "view.reader", label: "Go to Transcripts", group: "View",
+      hotkey: "⌘5", description: "Read and search finished transcripts",
+      keywords: ["transcript", "transcripts", "reader", "read", "srt", "text", "nav"],
+      disabled: d.activeView === "reader",
+      run: () => d.onNavigateView("reader") },
     { id: "view.captions", label: d.captionsOn ? "Hide captions" : "Show captions",
       group: "View", disabled: !d.hasSource,
       run: () => d.setCaptionsOn((p) => !p) },
