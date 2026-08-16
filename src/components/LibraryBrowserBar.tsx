@@ -38,7 +38,7 @@ export function LibraryBrowserBar({
         <button
           type="button"
           className="cp-lib-bar-tree btn-icon"
-          title="Show folders"
+          title="Show folder tree"
           aria-label="Show folder tree"
           onClick={onShowTree}
         >

@@ -241,7 +241,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
             {isHost && session.code && (
               <div className="cp-colobby-share">
                 <button type="button" className="cp-keycap cp-colobby-code"
-                  onClick={copyCode} aria-label="Copy invite" title="Copy the full invite">
+                  onClick={copyCode} aria-label="Copy the full invite" title="Copy the full invite">
                   {/* 13a: the invite renders COLLAPSED (SAUC- handle + first
                       groups); the click copies the full dressed ticket. */}
                   {session.code.length > 26 ? session.code.slice(0, 26) + "…" : session.code}

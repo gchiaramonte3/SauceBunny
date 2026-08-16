@@ -124,7 +124,7 @@ export function Toolbar({
         <button
           type="button"
           className="btn-icon"
-          title="Paste & fetch"
+          title="Paste URL and fetch"
           aria-label="Paste URL and fetch"
           onClick={(e) => {
             e.stopPropagation();

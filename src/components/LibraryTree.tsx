@@ -221,7 +221,7 @@ export function LibraryTree({
         <button
           type="button"
           className="cp-lib-tree-act"
-          title="Add a folder to the library"
+          title="Add folder"
           aria-label="Add folder"
           onClick={() => void addFolder()}
         >
@@ -240,7 +240,7 @@ export function LibraryTree({
         <button
           type="button"
           className="cp-lib-tree-act"
-          title="Hide folders"
+          title="Hide folder tree"
           aria-label="Hide folder tree"
           onClick={onCollapse}
         >

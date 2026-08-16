@@ -96,7 +96,7 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
       <button
         type="button"
         className={"cp-room-bar-btn" + (devicesOpen ? " active" : "")}
-        title="Camera and mic settings"
+        title="Camera and microphone settings"
         aria-label="Camera and microphone settings"
         aria-pressed={devicesOpen}
         onClick={() => { setPickerOpen(false); setReactionsOpen(false); setDevicesOpen((v) => !v); }}
