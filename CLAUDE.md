@@ -534,6 +534,7 @@ written after finding the rule already broken somewhere.
 | `swift-sidecar-contract` | The Swift sidecar imports no UIKit and no WhisperKit, keeps no `.xcodeproj` in git, and takes SpeakerKit from `argmax-oss-swift` |
 | `csp-contract` | The shipped CSP permits what startup actually registers |
 | `reduced-motion-contract` | Every keyframe animation is guarded; a `forwards` animation gets a calmer replacement rather than `none`; a centring transform is never neutralised |
+| `token-usage-contract` | No stylesheet writes a literal hex that an existing token already holds (comments and `var(--x, #fallback)` excluded) |
 
 Three more are measured against the RENDERED app rather than its source, in
 `e2e/`, because CSS and the accessibility tree are not readable by grep:

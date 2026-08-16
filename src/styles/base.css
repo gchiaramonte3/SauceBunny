@@ -62,7 +62,7 @@ body {
      to a "warning" semantic and clashed with the green accent on focus.
      Now uses the brand violet from the user's palette: signals
      "selected/active" without competing with the success-green CTAs. */
-  --marker: #6D52ED;
+  --marker: var(--novella-violet);
   --marker-rgb: 109, 82, 237;
   /* Focus indicator. HOUSE RULE (2026-07-18, user directive): focus NEVER
      shows the green accent, and never draws a ring INSIDE a composed field.
