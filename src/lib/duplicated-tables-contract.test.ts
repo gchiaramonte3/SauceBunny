@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { globSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 /**
@@ -84,5 +85,63 @@ describe("export formats", () => {
     // Order matters: these render as a row of chips, and two orders would read
     // as two different features.
     expect(inSidebar).toEqual(inSettings);
+  });
+});
+
+/**
+ * A third shape of the same problem: a component defining a helper that lib/
+ * already exports.
+ *
+ * `formatBytes` lived in BOTH `lib/library.ts` and `SettingsModal.tsx`, and the
+ * two disagreed. 1536 bytes read "1.5 KB" in Settings and "2 KB" in the
+ * library; 15 MB read "15.0 MB" and "15 MB". Seven files used the shared one
+ * and Settings used its own, so the same quantity was formatted two ways in one
+ * app depending on which panel you were looking at — and only the shared copy
+ * guarded against a non-finite input.
+ *
+ * A name collision is not always a bug, so the check is narrow: it fires only
+ * when a component defines a name lib/ exports AND does not import it. A
+ * component that imports the shared one and shadows it deliberately would need
+ * an entry here with a reason, the same as everywhere else in this file.
+ */
+
+const COMPONENTS = [
+  ...globSync(join(ROOT, "src/components/**/*.tsx")),
+  ...globSync(join(ROOT, "src/*.tsx")),
+].filter((f) => !f.includes(".test."));
+
+const LIB_EXPORTS = new Map<string, string>();
+for (const file of globSync(join(ROOT, "src/lib/*.ts")).filter((f) => !f.includes(".test."))) {
+  for (const m of readFileSync(file, "utf8").matchAll(/^export (?:function|const) (\w+)/gm)) {
+    if (!LIB_EXPORTS.has(m[1])) LIB_EXPORTS.set(m[1], file.split("/").pop()!);
+  }
+}
+
+describe("no component re-implements a lib helper", () => {
+  it("found both sides to compare", () => {
+    // Without this the sweep below passes by scanning nothing, which is how
+    // three other checks in this repo reported success for months.
+    expect(COMPONENTS.length, "no component files found").toBeGreaterThan(30);
+    expect(LIB_EXPORTS.size, "no lib exports parsed").toBeGreaterThan(50);
+  });
+
+  it("defines no helper that lib/ already exports", () => {
+    const shadowed: string[] = [];
+    for (const file of COMPONENTS) {
+      const text = readFileSync(file, "utf8");
+      const imported = new Set(
+        [...text.matchAll(/import \{([^}]*)\} from "[^"]*lib\//g)]
+          .flatMap((m) => m[1].split(",").map((x) => x.trim().split(" as ")[0])),
+      );
+      for (const m of text.matchAll(/^(?:function|const) (\w+)\s*[=(]/gm)) {
+        const name = m[1];
+        if (!LIB_EXPORTS.has(name) || imported.has(name)) continue;
+        const line = text.slice(0, m.index).split("\n").length;
+        shadowed.push(
+          `${file.replace(ROOT + "/", "")}:${line}  ${name}() — lib/${LIB_EXPORTS.get(name)} exports this`,
+        );
+      }
+    }
+    expect(shadowed, "import the shared one, or rename the local helper").toEqual([]);
   });
 });

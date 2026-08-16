@@ -34,6 +34,7 @@ import { CollapsibleSection } from "./CollapsibleSection";
 import { YouTubeSettings } from "./YouTubeSettings";
 import { AiApiSettings } from "./AiApiSettings";
 import { useModalFocus } from "../hooks/use-modal-focus";
+import { formatBytes } from "../lib/library";
 import logoUrl from "../assets/saucebunny.svg";
 import { UpdateRow } from "./UpdateRow";
 import { getVersion } from "@tauri-apps/api/app";
@@ -1961,9 +1962,4 @@ function CacheControls({ excludePaths, capGb, clearOnQuit, onRetentionChange }: 
   );
 }
 
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
+
