@@ -116,7 +116,7 @@ import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
 import { capabilitySummary, probePlatformCapabilities } from "./lib/platform-capabilities";
 import { onReviewStoreProblem } from "./lib/review-store";
 import { assetUrl } from "./lib/asset-url";
-import { buildDiagnosticsReport, diagnosticsFilename } from "./lib/diagnostics";
+import { buildDiagnosticsReport, diagnosticsFilename, type SessionDiagnostics } from "./lib/diagnostics";
 import { extractFrameAsBlob, extractPosterBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
 import { frameToAvatarDataUrl } from "./lib/avatar";
 import { chosenPosterFor, sourceTimecodeFor, setSourceTimecode, clearSourceTimecode } from "./lib/library";
@@ -4540,6 +4540,16 @@ export default function App() {
   // log. This is the no-telemetry answer to remote bug reports; assembly is
   // pure + unit-tested in lib/diagnostics.ts. Every piece is best-effort so
   // a dead backend still produces a (maximally useful) report.
+  /**
+   * The live co-review snapshot for a diagnostics report.
+   *
+   * Written by an effect further down (the session values are declared after
+   * this point) and read, never captured, by handleExportDiagnostics. Null
+   * until the first commit, which reads as "no session" - correct, because
+   * there cannot be one yet.
+   */
+  const diagSessionRef = useRef<SessionDiagnostics | null>(null);
+
   const handleExportDiagnostics = useCallback(async () => {
     try {
       const now = new Date();
@@ -4575,24 +4585,30 @@ export default function App() {
         // Only when a session is live - a solo report should not carry an
         // empty room. Two of these side by side is how a roster or floor
         // disagreement becomes visible instead of inferred.
-        session: coSession.role === "off" ? undefined : {
-          role: coSession.role,
-          selfId: coSession.selfId,
-          presenter: coSession.presenter,
-          presenterEpoch: coSession.presenterEpoch,
-          peers: coSession.peers.map((p) => ({ id: p.id, name: p.name, epoch: p.epoch ?? 0 })),
-          meshStates: [...meshStates].map(([id, state]) => ({ id, state })),
-          capture: capture.stream
-            ? capture.stream.getTracks().map((t) => `${t.kind}(${t.readyState})`).join(" ")
-            : "none",
-          shareState,
-        },
+        session: diagSessionRef.current && diagSessionRef.current.role !== "off"
+          ? diagSessionRef.current
+          : undefined,
       });
       await invoke("write_text_to_path", { path, text: report, atomic: true });
       pushNotification("success", "Diagnostics saved", "Attach this file to a bug report.");
     } catch (err) {
       pushNotification("error", "Diagnostics export failed", formatError(err));
     }
+    // Session state is read through diagSessionRef, NOT captured here.
+    //
+    // This closure used to read coSession/meshStates/capture/shareState
+    // directly while memoised on [logs, pushNotification], so it kept whatever
+    // session existed when the last log line landed. A report saved after
+    // joining a room but before anything else logged recorded `role: "off"` and
+    // dropped the session block entirely - a live session reporting as solo,
+    // which is the exact confusion the block above exists to prevent. A
+    // diagnostics file is the worst place to be quietly wrong: it gets read
+    // INSTEAD of asking.
+    //
+    // Naming them as deps is not available: all four are declared further down
+    // the component, and a deps array is evaluated during render, so it is a
+    // TDZ crash rather than a lint fix. The ref is the pattern this file
+    // already uses for exactly this (see defaultsRef).
   }, [logs, pushNotification]);
 
   /**
@@ -5472,6 +5488,25 @@ export default function App() {
   useEffect(() => subscribeCaptureError((e) => {
     if (e) pushNotification("error", "Camera or mic unavailable", e);
   }), [pushNotification]);
+
+  // Keep the diagnostics snapshot current. Deliberately runs on EVERY commit
+  // with no deps array: a report is only as useful as it is current, and the
+  // alternative was the stale closure this replaced. The body is a handful of
+  // small maps over a roster that is single digits in practice.
+  useEffect(() => {
+    diagSessionRef.current = {
+      role: coSession.role,
+      selfId: coSession.selfId,
+      presenter: coSession.presenter,
+      presenterEpoch: coSession.presenterEpoch,
+      peers: coSession.peers.map((p) => ({ id: p.id, name: p.name, epoch: p.epoch ?? 0 })),
+      meshStates: [...meshStates].map(([id, state]) => ({ id, state })),
+      capture: capture.stream
+        ? capture.stream.getTracks().map((t) => `${t.kind}(${t.readyState})`).join(" ")
+        : "none",
+      shareState,
+    };
+  });
   // The capture singleton lives outside React, so it gets the log by
   // installation rather than by argument.
   useEffect(() => {

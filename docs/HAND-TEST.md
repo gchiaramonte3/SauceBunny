@@ -51,6 +51,11 @@ that file's path from one helper.
 - [ ] Export a transcript (SRT / TXT), an AI summary, review notes, and the
       settings export. Each should land complete.
 - [ ] Save a diagnostics report from Settings ▸ About.
+- [ ] **Join a co-review session, then save a report immediately** - before
+      doing anything else that would write a log line. The report must contain
+      a Session block with your role and the roster. It used to record
+      `role: off` and omit the block entirely, because the handler held session
+      state from whenever the last log line landed.
 
 ## 4. Co-review — reactions, and the STUN setting
 
