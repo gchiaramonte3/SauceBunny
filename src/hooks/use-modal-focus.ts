@@ -37,7 +37,14 @@ export function useModalFocus(open: boolean, ref: RefObject<HTMLElement | null>)
       const active = document.activeElement;
       const inside = active instanceof Node && el.contains(active);
       if (e.shiftKey) {
-        if (!inside || active === first) { e.preventDefault(); last.focus(); }
+        // `active === el` is the case this used to miss, and it is the case
+        // that actually happens: on open the hook focuses the CONTAINER, which
+        // carries tabIndex={-1} and is therefore excluded from FOCUSABLE. So
+        // it is inside the dialog but is never `first`, the trap declined to
+        // act, and the browser walked focus backwards out of the modal on the
+        // very first Shift+Tab - onto a control behind the scrim. Forward Tab
+        // was fine, which is why nobody saw it.
+        if (!inside || active === first || active === el) { e.preventDefault(); last.focus(); }
       } else {
         if (!inside || active === last) { e.preventDefault(); first.focus(); }
       }
