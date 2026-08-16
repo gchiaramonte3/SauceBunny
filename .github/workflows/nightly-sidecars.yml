@@ -58,7 +58,7 @@ jobs:
         run: echo "sha=$(git ls-remote https://github.com/ggerganov/whisper.cpp.git refs/heads/master | cut -f1)" >> "$GITHUB_OUTPUT"
       - name: Cache whisper-cli binary
         id: whisper-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: src-tauri/binaries/whisper-cli-aarch64-apple-darwin
           key: nightly-whisper-cli-${{ steps.whisper-ref.outputs.sha }}-${{ hashFiles('scripts/build-whisper.sh') }}
@@ -107,13 +107,13 @@ jobs:
       # Bumped v1→v2 so the existing hit re-saves with the fixture included
       # (actions/cache skips the save on an exact-key hit).
       - name: Cache whisper/VAD models + speech fixture
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/sauce-bunny/nightly
           key: nightly-models-v2
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
