@@ -62,9 +62,10 @@ function CloudProviderCard({ p }: { p: (typeof CLOUD)[number] }) {
         <span className="cp-aiapi-name">{p.label}</span>
         {present && <span className="cp-aiapi-set"><IconCheck size={12} /> Key saved</span>}
       </div>
-      <label className="cp-aiapi-label">API key</label>
+      <label className="cp-aiapi-label" htmlFor={`aiapi-key-${p.id}`}>API key</label>
       <div className="cp-aiapi-row">
         <input
+          id={`aiapi-key-${p.id}`}
           type="password" className="cp-aiapi-input" value={keyInput}
           onChange={(e) => setKeyInput(e.target.value)}
           placeholder={present ? "•••••••••• (saved)" : p.keyHint}
@@ -73,9 +74,10 @@ function CloudProviderCard({ p }: { p: (typeof CLOUD)[number] }) {
         <button type="button" className="btn" disabled={busy || !keyInput.trim()} onClick={save}>Save</button>
         {present && <button type="button" className="btn btn-ghost" disabled={busy} onClick={remove}>Remove</button>}
       </div>
-      <label className="cp-aiapi-label">Model</label>
+      <label className="cp-aiapi-label" htmlFor={`aiapi-model-${p.id}`}>Model</label>
       <div className="cp-aiapi-row">
         <input
+          id={`aiapi-model-${p.id}`}
           type="text" className="cp-aiapi-input" value={model}
           onChange={(e) => setModel(e.target.value)} onBlur={() => setCloudModel(p.id, model)}
           placeholder={DEFAULT_CLOUD_MODEL[p.id]} spellCheck={false}

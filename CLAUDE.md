@@ -514,6 +514,7 @@ Three more are measured against the RENDERED app rather than its source, in
 | `console-clean` | No console error or warning in any view - where React reports duplicate keys and invalid nesting, and where a packaged WKWebView build shows nobody |
 | `landmarks` | Each view exposes exactly one NAMED main landmark |
 | `reduced-motion` | No keyframe animation runs under `prefers-reduced-motion` (transitions are a known gap) |
+| `form-labels` | Every visible input/select/textarea has an accessible name, across all nine Settings tabs. A placeholder does not count |
 
 Two habits these encode, worth applying to any new one:
 

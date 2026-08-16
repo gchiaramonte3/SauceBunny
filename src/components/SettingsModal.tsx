@@ -862,6 +862,7 @@ export function SettingsModal(props: Props) {
                     <div className="v">
                       <select
                         className="cp-select"
+                        aria-label="Streaming quality"
                         value={String(streamRungPref)}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -907,7 +908,7 @@ export function SettingsModal(props: Props) {
                       </span>
                     </div>
                     <div className="v" style={{ minWidth: 320 }}>
-                      <input className="cp-input" placeholder="Empty: local network only" value={defaults.stunUrl}
+                      <input className="cp-input" aria-label="STUN server" placeholder="Empty: local network only" value={defaults.stunUrl}
                         onChange={(e) => setDefaults({ ...defaults, stunUrl: e.target.value })} spellCheck={false} />
                     </div>
                   </div>
@@ -917,11 +918,11 @@ export function SettingsModal(props: Props) {
                       <span className="desc">Optional. Webcams connect direct or via STUN; a TURN server helps strict networks. Empty uses STUN only. The password is stored in the macOS Keychain and never included in settings exports.</span>
                     </div>
                     <div className="v" style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 320 }}>
-                      <input className="cp-input" placeholder="turn:host:3478" value={defaults.turnUrl}
+                      <input className="cp-input" aria-label="TURN relay URL" placeholder="turn:host:3478" value={defaults.turnUrl}
                         onChange={(e) => setDefaults({ ...defaults, turnUrl: e.target.value })} spellCheck={false} />
-                      <input className="cp-input" placeholder="Username" value={defaults.turnUsername}
+                      <input className="cp-input" aria-label="TURN username" placeholder="Username" value={defaults.turnUsername}
                         onChange={(e) => setDefaults({ ...defaults, turnUsername: e.target.value })} spellCheck={false} />
-                      <input className="cp-input" placeholder="Password" type="password" value={defaults.turnPassword}
+                      <input className="cp-input" aria-label="TURN password" placeholder="Password" type="password" value={defaults.turnPassword}
                         onChange={(e) => setDefaults({ ...defaults, turnPassword: e.target.value })} />
                     </div>
                   </div>
@@ -1083,6 +1084,7 @@ export function SettingsModal(props: Props) {
                     <div className="v cp-cap-range">
                       <input
                         type="range"
+                        aria-label="Caption size"
                         min={CAP_SIZE_MIN}
                         max={CAP_SIZE_MAX}
                         step={1}
@@ -1092,6 +1094,7 @@ export function SettingsModal(props: Props) {
                       <input
                         type="number"
                         className="cp-cap-size-num"
+                        aria-label="Caption size in pixels"
                         min={CAP_SIZE_MIN}
                         max={CAP_SIZE_MAX}
                         step={1}
@@ -1109,6 +1112,7 @@ export function SettingsModal(props: Props) {
                     <div className="v">
                       <select
                         className="cp-select cp-cap-font-select"
+                        aria-label="Caption font"
                         value={defaults.captionFont}
                         onChange={(e) => setDefaults({ ...defaults, captionFont: e.target.value as CaptionFontKey })}
                       >
@@ -1125,6 +1129,7 @@ export function SettingsModal(props: Props) {
                     <div className="v cp-cap-range">
                       <input
                         type="range"
+                        aria-label="Caption background opacity"
                         min={0}
                         max={100}
                         value={Math.round(defaults.captionBgOpacity * 100)}
@@ -1338,6 +1343,7 @@ export function SettingsModal(props: Props) {
                     <div className="v">
                       <select
                         className="cp-select"
+                        aria-label="Language"
                         value={defaults.transcriptionLanguage}
                         onChange={(e) => setDefaults({ ...defaults, transcriptionLanguage: e.target.value })}
                       >
@@ -1430,6 +1436,7 @@ export function SettingsModal(props: Props) {
                     <div className="v" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <select
                         className="cp-select"
+                        aria-label="Microphone"
                         value={dictDevice}
                         onChange={(e) => pickDictDevice(e.target.value)}
                       >
