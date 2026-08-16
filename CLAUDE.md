@@ -531,7 +531,10 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
    that were impossible before. Do NOT attempt a single sweeping split.
 
    Done so far: `use-panel-bus`, `use-web-playback`, `use-co-review`,
-   `use-library-scan`, `use-media-capture`, and `use-transport` (shuttle,
+   `use-library-scan`, `use-media-capture`, `use-keyboard-shortcuts` (the
+   global dispatch: 258 lines and a 25-entry dep array, moved VERBATIM so the
+   diff is a move and tsc enumerated the dependency surface instead of a human
+   guessing at it — that is the technique to reuse), and `use-transport` (shuttle,
    steps, seeks, in/out marks — 190 lines, 36 new tests). Extracting transport
    also surfaced that `applyShuttle`/`exitShuttle` had never been part of
    App's surface at all; every one of their references was another transport
