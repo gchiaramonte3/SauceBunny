@@ -670,7 +670,13 @@ fn pick_thumbnail(v: &serde_json::Value) -> Option<String> {
         // nothing, so a source offering only a 4K still gets a poster.
         let score = if known && w > 1920 { -area } else { area };
         let cand = (pref, score, url.to_string());
-        if best.as_ref().is_none_or(|b| (b.0, b.1) < (cand.0, cand.1)) {
+        // `map_or(true, …)`, not `is_none_or`: the latter is stable since
+        // 1.82 and this crate declares rust-version 1.77.2, so clippy's
+        // incompatible_msrv fires and CI runs it with -D warnings. Raising the
+        // declared MSRV would also silence it, but that is a policy change
+        // about who can build this, not a cleanup.
+        #[allow(clippy::unnecessary_map_or)]
+        if best.as_ref().map_or(true, |b| (b.0, b.1) < (cand.0, cand.1)) {
             best = Some(cand);
         }
     }
@@ -2638,7 +2644,10 @@ pub async fn list_cached_web(app: AppHandle) -> Result<Vec<CachedWebItem>, crate
             url: meta.url,
         });
     }
-    out.sort_by(|a, b| b.fetched_at.cmp(&a.fetched_at));
+    // Descending by fetched_at, same as the sort_by it replaces: sorting
+    // ascending on Reverse(x) IS descending on x, and both are stable sorts so
+    // ties keep their original order. None sorts last either way.
+    out.sort_by_key(|b| std::cmp::Reverse(b.fetched_at));
     Ok(out)
 }
 

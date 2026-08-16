@@ -33,6 +33,11 @@ run "Unit tests"    npm test --silent
 run "Lint"          npm run lint --silent
 run "Rust compile"  cargo check --manifest-path src-tauri/Cargo.toml
 run "Rust tests"    cargo test --lib --manifest-path src-tauri/Cargo.toml
+# CI runs this with -D warnings, and this script did not - so "all gates
+# passed" was reported for 98 commits while clippy was failing on two
+# pre-existing lints. A local gate that is a subset of the CI gate is a
+# gate that tells you the wrong thing.
+run "Clippy"        cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 run "Swift sidecar" swift build --package-path swift-sidecar
 run "E2E"           npx playwright test e2e/
 
