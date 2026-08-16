@@ -229,6 +229,19 @@ Do not add new Tauri plugins without explaining what existing capability is insu
   said "do not introduce a WhisperKit dependency", which reads as broken the
   moment anyone checks. Enforced on OUR sources by
   `src/lib/swift-sidecar-contract.test.ts`.
+- **Where the untyped-JSON risk is, and where it is not.** Rust reads a JSON
+  field with `.get("x")` and a silent default in 16 places. Five are our own
+  Swift sidecars (the diarizer envelope and the dictation line protocol) and
+  both are now pinned by contracts — those are the ones where a rename is a
+  local edit in one language that another language stops understanding, with
+  no compiler in between. The other eleven parse schemas we do not own:
+  ffprobe's output (media.rs, 8) and GitHub's releases API (system.rs, 3). A
+  source-comparison contract is meaningless there — there is no local emitter
+  to compare against — and the failure would arrive from an upstream change
+  rather than from drift. Do not write contracts for those; if they need
+  protection it is a typed `serde` struct, the way the capture sidecar's list
+  output already works.
+
 - **The diarizer envelope is TWO contracts, not one three-way contract**, and
   they break differently. **Swift → Rust** is the JSON: `turns[].{speaker,
   start, end}`. **Rust → JS** is the SRT label convention — `[SPEAKER_00] text`
