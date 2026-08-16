@@ -181,23 +181,29 @@ test("the settings modal meets AA too", async ({ page }) => {
  * text rung - putting eight group headings there flattens the hierarchy the
  * ladder exists to express.
  *
- * So the honest finding is about the ladder, not these eight rules: tokens.css
- * says "fg-4 now clears it (4.66:1)", and that is true on bg-0 and false on
- * every raised surface. Deciding whether the ladder should guarantee its
- * ratios on cards and overlays too is a design call with visible consequences
- * across 174 fg-4 usages, so it is recorded here rather than guessed at.
+ * RESOLVED (r156), and the reasoning above is what made it decidable. The
+ * finding was about the ladder rather than these eight rules: tokens.css said
+ * "fg-4 now clears it (4.66:1)", true on bg-1 and false on every raised
+ * surface. So the ladder was measured on all of them — the titlebar (#18181B),
+ * the settings pane (#161618), --color-surface-elevated (#1A1A1D) and this
+ * palette (rgb(20,20,21)) — and fg-4 moved #7C7C85 → #82828B, the smallest
+ * neutral step that clears 4.5:1 on every one. Six values per channel, about
+ * 2% lightness; fg-3 untouched, so the hierarchy keeps its spacing.
  *
- * Listed by class so a NEW failure elsewhere in the palette still fails, and
- * so an entry that gets fixed has to be deleted rather than quietly kept.
+ * That alone fixed `cp-palette-row-desc`, the entry whose note said it was
+ * "already on fg-4, still short". The remaining five were fg-5 carrying real
+ * copy — a result count, the group headings, the footer's key legend — which
+ * tokens.css already forbids ("keep fg-5 for decorative/duplicated text
+ * only"), so they moved up a rung rather than needing a palette change.
+ *
+ * The list below is now EMPTY, which is the useful state: the shrink-only
+ * assertion at the end of this file means the next below-AA text has nothing
+ * to hide behind.
  */
 const KNOWN_BELOW_AA: ReadonlyArray<{ cls?: string; text?: string; note: string }> = [
-  { cls: "cp-palette-group-label", note: "3.81:1 - eight section headings, fg-5" },
-  { cls: "cp-palette-count", note: "3.81:1 - the result count, fg-5" },
-  // The one that settles the argument: already on fg-4, still short.
-  { cls: "cp-palette-row-desc", note: "4.45:1 - row descriptions, ALREADY fg-4" },
-  { text: "navigate", note: "3.94:1 - keyboard legend in the footer" },
-  { text: "run", note: "3.94:1 - keyboard legend in the footer" },
-  { text: "close", note: "3.94:1 - keyboard legend in the footer" },
+  // Empty, and the emptying is the point: every entry above was fixed by ONE
+  // token step plus three rules moved off fg-5. Leaving the list here, with
+  // the shrink-only test below, is what will catch the next one.
 ];
 
 test("the command palette meets AA", async ({ page }) => {

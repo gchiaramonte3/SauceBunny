@@ -287,7 +287,12 @@
   font-weight: 700;
   letter-spacing: 0.10em;
   text-transform: uppercase;
-  color: var(--fg-5);
+  /* fg-4, not fg-5. tokens.css states the rule from the r141 legibility
+     audit: "keep fg-5 for decorative/duplicated text only; meaningful
+     secondary copy belongs on fg-4 or up." A card heading is meaningful
+     copy, and on this card's tinted surface fg-5 measured 3.73:1 against a
+     4.5:1 floor. */
+  color: var(--fg-4);
 }
 .cp-getting-started-dismiss {
   background: none;
@@ -298,7 +303,8 @@
   font-size: 10px;
   letter-spacing: 0.02em;
   text-transform: none;
-  color: var(--fg-5);
+  /* Same rule: this is a control's own label, not decoration. */
+  color: var(--fg-4);
   text-decoration: underline;
   text-underline-offset: 2px;
 }

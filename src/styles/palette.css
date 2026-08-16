@@ -75,7 +75,11 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-5);
+  /* fg-4, not fg-5. tokens.css reserves fg-5 for decorative or duplicated
+     text, and a result count, the group headings and the footer's key legend
+     are all copy someone reads. On the palette's raised surface fg-5 measures
+     3.81:1; fg-4 measures 4.84:1 since the r156 lift. */
+  color: var(--fg-4);
   flex-shrink: 0;
 }
 .cp-palette-list {
@@ -98,7 +102,7 @@
   font-weight: 700;
   letter-spacing: 0.10em;
   text-transform: uppercase;
-  color: var(--fg-5);
+  color: var(--fg-4);
 }
 .cp-palette-row {
   display: flex;
@@ -164,7 +168,7 @@
   border-top: 1px solid var(--line-1);
   font-family: var(--font-ui);
   font-size: 10.5px;
-  color: var(--fg-5);
+  color: var(--fg-4);
   background: rgba(0,0,0,0.20);
 }
 .cp-palette-foot kbd {

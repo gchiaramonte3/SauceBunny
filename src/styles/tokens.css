@@ -27,8 +27,17 @@
      clears it (4.66:1) and fg-5 takes fg-4's old value (3.99:1) - the whole
      ladder shifts one notch brighter, hierarchy intact (fg-3 stays 7.48:1).
      Keep fg-5 for decorative/duplicated text only; meaningful secondary copy
-     belongs on fg-4 or up. */
-  --fg-4:   #7C7C85;
+     belongs on fg-4 or up.
+
+     r141 measured against bg-1 only, and the app does not paint most of its
+     copy there. On the RAISED surfaces — the titlebar (#18181B), the settings
+     pane (#161618), --color-surface-elevated (#1A1A1D) — the same fg-4 fell to
+     4.28 / 4.37 / 4.20:1, so the very text that lift was for still missed the
+     floor everywhere it actually sits. #82828B is the smallest neutral step
+     that clears 4.5:1 on ALL of them (4.65 / 4.75 / 4.56, and 5.19 on bg-1).
+     Six values per channel, ~2% lightness: the ladder keeps its spacing and
+     fg-3 is untouched. */
+  --fg-4:   #82828B;
   --fg-5:   #71717A;
 
   --stroke-1: #141419;
