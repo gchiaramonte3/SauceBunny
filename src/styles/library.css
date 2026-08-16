@@ -304,6 +304,15 @@
   font-weight: 800;
   letter-spacing: -0.01em;
   color: var(--fg-1);
+  /* A folder name with no spaces or hyphens has nowhere to wrap, so its
+     intrinsic width becomes the row's. A 203-character one (legal: macOS
+     allows 255 bytes, and camera originals arrive as one long token) pushed
+     this title 1110px past a minimum-width window and dragged the row's count
+     and its Remove button off-screen with it - unreachable, because the page
+     itself does not scroll sideways. `anywhere` rather than `break-word`
+     because only the former shrinks the intrinsic size that the flex row
+     measures. No effect on names that can already wrap. */
+  overflow-wrap: anywhere;
 }
 .cp-lib-row-count {
   font-family: var(--font-ui);

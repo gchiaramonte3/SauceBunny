@@ -548,6 +548,7 @@ Three more are measured against the RENDERED app rather than its source, in
 | `focus-visible` | Every tab stop looks different when focused. Transitions are zeroed first - reading mid-fade reports a correct ring as missing |
 | `panel-window` | The second window (`?window=panel`) boots, renders content, names its controls, and offers no pop-out |
 | `min-window-size` | Nothing overflows sideways at the `minWidth`/`minHeight` declared in `tauri.conf.json` (read from the config, not retyped) |
+| `long-names` | A filename with no break opportunity cannot push a library row's controls out of the window |
 
 Two habits these encode, worth applying to any new one:
 
