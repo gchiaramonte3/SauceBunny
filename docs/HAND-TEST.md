@@ -120,9 +120,29 @@ whatever gesture comes first. The app now pays it on return instead.
 - [ ] Confirm the parked frame did **not** move: the warm-up is a zero-distance
       seek, so `currentTime` must be exactly where you left it.
 
-**Still open:** the same idle problem on **web sources** (`MSEStreamPlayer`) has
-diagnostics but no warm-up - rebuilding an MSE pipeline is a different and
-riskier fix than a zero-distance seek.
+**Still open, and now actually measurable:** the same idle problem on **web
+sources** (`MSEStreamPlayer`) has diagnostics but no warm-up, because rebuilding
+an MSE pipeline is a different and riskier fix than a zero-distance seek - three
+causes look identical from outside and the remedies for them conflict.
+
+Until today those diagnostics fired only on PLAY, which is not the gesture in
+the report. A scrub never fires `play`, so a scrub-after-idle on a web source
+recorded nothing at all. It now fires on the first seek too, which makes this
+worth doing:
+
+- [ ] Load a **YouTube (or other web) source**, let it buffer, pause it, leave
+      for **20+ minutes**, come back and **scrub** (do not press play first).
+- [ ] Read the Pipeline log, channel **seek**. The line begins `seek after
+      <n>s idle` and ends with one of four verdicts. Which one it is decides
+      the fix, so it is the thing worth reporting back:
+      - `buffer survived` - the pipeline is fine and the stall is downstream.
+      - `BUFFER EVICTED while idle` - WebKit dropped the SourceBuffer; the fix
+        is a re-append, not a rebuild.
+      - `buffer partly evicted` - same family, milder.
+      - `NO BUFFER` with `pipeline gone` - ffmpeg or the fetch died on an idle
+        timeout; the fix is keeping it warm or rebuilding sooner.
+- [ ] Repeat with the window **minimised** rather than backgrounded. The local
+      half needed both because `focus` alone missed the minimised case.
 
 ## 7c. AI Summary — llama-server now reports itself
 
