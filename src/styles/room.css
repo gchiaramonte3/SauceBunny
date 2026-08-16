@@ -345,7 +345,7 @@
   padding: 0;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--line-1);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   color: var(--fg-3);
   font-family: var(--font-ui);
   font-size: 11.5px;
@@ -429,7 +429,7 @@
 }
 .cp-devpanel-preview {
   aspect-ratio: 16 / 9;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   overflow: hidden;
   background: var(--bg-0);
   display: flex;
@@ -509,7 +509,7 @@
   width: 36px;
   height: 34px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: transparent;
   font-size: 19px;
   cursor: pointer;
@@ -773,7 +773,7 @@
   max-width: 340px;
   flex: 1 1 240px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: var(--bg-0, #0c0c0e);
   color: var(--fg-3);
 }
@@ -853,7 +853,7 @@
   place-items: center;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--line-2);
   background: color-mix(in srgb, var(--bg-0) 72%, transparent);
   color: var(--fg-1);

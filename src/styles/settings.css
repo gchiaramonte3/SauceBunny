@@ -29,7 +29,7 @@
   max-height: 720px;
   background: #121214;
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   box-shadow: 0 0 0 0.5px rgba(255,255,255,0.05), 0 30px 90px rgba(0,0,0,0.6);
   display: flex;
   flex-direction: column;
@@ -69,7 +69,7 @@
 .cp-modal-header .filler { flex: 1; }
 .cp-modal-close {
   width: 28px; height: 28px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: transparent;
   border: 1px solid transparent;
   color: var(--fg-3);
@@ -105,7 +105,7 @@
   padding: 0 11px;
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   color: var(--fg-3);
   font-family: var(--font-ui);
   font-size: 12px;
@@ -215,7 +215,7 @@
   padding: 10px 12px;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   font-family: var(--font-ui);
   font-size: 11.5px;
   line-height: 1.45;
@@ -245,7 +245,7 @@
   padding: 12px 14px;
   background: rgba(255,255,255,0.02);
   border: 1px solid var(--line-1);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
 .cp-model-row.selected {
@@ -283,7 +283,7 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
 }
 .cp-model-head .badge.installed {
   color: var(--fg-2);
@@ -322,7 +322,7 @@
   width: 320px;
   background: #15151a;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
   padding: 12px 14px;
   z-index: 30;
@@ -413,7 +413,7 @@
   align-items: center;
   padding: 6px 8px;
   margin: 0 -8px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 .cp-shortcut-row:hover { background: rgba(255,255,255,0.025); }
 .cp-shortcut-row .lbl {
@@ -458,7 +458,7 @@
    the brand green; the tile stays neutral). */
 .cp-about-hero .mark {
   width: 56px; height: 56px;
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   background: var(--bg-3);
   border: 1px solid var(--line-1);
   display: flex;
@@ -505,7 +505,7 @@
   justify-content: space-between;
   padding: 9px 12px;
   background: rgba(255,255,255,0.02);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   font-family: var(--font-ui);
   font-size: 11.5px;
 }
@@ -696,7 +696,7 @@
   color: var(--fg-2);
   background: rgba(255,255,255,0.025);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out),
               border-color var(--dur-fast) var(--ease-out),
@@ -743,7 +743,7 @@
   color: var(--fg-3);
   background: transparent;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   padding: 8px 16px;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out),
@@ -778,7 +778,7 @@
   color: var(--fg-3);
   background: var(--bg-2);
   border: 1px solid var(--stroke-1);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   padding: 4px 8px;
   white-space: nowrap;
 }
@@ -796,7 +796,7 @@
   width: 100%;
   min-width: 240px;
   padding: 14px 10px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   /* A checkerboard hints at transparency so the background-opacity slider
      reads clearly even over a flat panel. */
   background:
@@ -808,7 +808,7 @@
 .cp-cap-preview-cue {
   display: inline-block;
   padding: 3px 11px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   font-weight: 600;
   line-height: 1.4;
   text-align: center;
@@ -832,7 +832,7 @@
   padding: 0 8px;
   background: var(--bg-0, #0c0c0e);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 12px;
@@ -846,7 +846,7 @@
   padding: 0 30px 0 11px;
   background: var(--bg-0, #0c0c0e);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 12px;
@@ -889,7 +889,7 @@
   gap: 12px;
   min-height: 34px;
   padding: 3px 8px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   transition: background var(--dur-fast) var(--ease-out);
 }
 .cp-keybind-row:hover { background: rgba(255,255,255,0.025); }
@@ -917,7 +917,7 @@
   color: var(--fg-1);
   background: rgba(255,255,255,0.06);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   padding: 2px 8px;
   box-shadow: inset 0 -1px 0 rgba(0,0,0,0.25);
 }
@@ -1048,7 +1048,7 @@
 .cp-av-preview {
   width: 200px;
   aspect-ratio: 16 / 9;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   overflow: hidden;
   background: var(--bg-0);
   border: 1px solid var(--line-1);
@@ -1098,7 +1098,7 @@
 .cp-update-row { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
 .cp-update-ver {
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--line-2);
   background: var(--bg-0, #0c0c0e);
   color: var(--fg-1);
@@ -1124,7 +1124,7 @@
 .cp-aiapi-choice {
   padding: 7px 16px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: var(--bg-3);
   color: var(--fg-2);
   font-family: var(--font-ui);
@@ -1140,7 +1140,7 @@
   gap: 8px;
   margin: 12px 0 0;
   padding: 9px 12px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: rgba(232,38,38,0.08);
   border: 1px solid rgba(232,38,38,0.24);
   color: var(--fg-2);

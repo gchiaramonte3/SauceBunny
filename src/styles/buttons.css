@@ -22,7 +22,7 @@
      read without committing to skeuomorphic gloss. */
   background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   cursor: pointer;
   transition: transform var(--dur-fast) var(--ease-out),
               box-shadow var(--dur-fast) var(--ease-out),
@@ -142,7 +142,7 @@
      them feel disconnected from the labeled buttons next to them. */
   background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01));
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   color: var(--fg-3);
   display: inline-flex;
   align-items: center;
@@ -215,7 +215,7 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   font-weight: 600;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 
 

@@ -1404,7 +1404,7 @@
   padding: 6px 10px;
   margin: 0 0 6px;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: rgba(255,255,255,0.04);
 }
 .cp-lib-selbar-count {
@@ -1502,7 +1502,7 @@
   padding: 16px;
   background: var(--bg-1, #161616);
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
 }
 .cp-rename-head { font-family: var(--font-ui); font-size: 13px; font-weight: 700; color: var(--fg-1); }
@@ -1534,7 +1534,7 @@
   min-height: 0;
   overflow-y: auto;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   padding: 4px;
 }
 .cp-rename-row {
@@ -1573,7 +1573,7 @@
   flex-direction: column;
   max-width: min(920px, 88vw);
   max-height: 84vh;
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   overflow: hidden;
   background: var(--bg-1, #161616);
   border: 1px solid var(--line-2);
@@ -1733,7 +1733,7 @@
   aspect-ratio: 16 / 9;
   overflow: hidden;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: var(--bg-3);
   color: var(--fg-4);
   transition: border-color var(--dur-fast) var(--ease-out);
@@ -1749,7 +1749,7 @@
   position: absolute;
   bottom: 5px;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   background: rgba(10, 10, 12, 0.82);
   font-size: 10px;
   font-weight: 700;
@@ -1788,7 +1788,7 @@
   height: 22px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: rgba(10, 10, 12, 0.82);
   color: var(--fg-3);
   cursor: pointer;

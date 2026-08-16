@@ -86,7 +86,7 @@
   padding: 0 6px;
   background: var(--bg-0);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 12.5px;
@@ -105,7 +105,7 @@
   padding: 0 8px;
   background: var(--bg-0);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 12px;
@@ -235,7 +235,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   background: rgba(255,255,255,0.04);
   color: var(--fg-5);
   border: 1px solid var(--line-2);
@@ -256,7 +256,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   transition: background var(--dur-fast) var(--ease-out),
               color var(--dur-fast) var(--ease-out);
 }
@@ -283,7 +283,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   display: flex;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: rgba(255,255,255,0.02);
   border: 1px solid var(--line-1);
   margin-bottom: 6px;
@@ -340,7 +340,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   color: var(--fg-4);
   background: rgba(255,255,255,0.04);
 }
@@ -392,7 +392,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   background: transparent;
   border: none;
   color: var(--fg-3);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -438,7 +438,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   /* Count badge = a notification (5a): brand green with dark text. */
   background: var(--ella-green);
   color: var(--bg-0);

@@ -104,7 +104,7 @@ button:focus-visible, input:focus-visible,
   background: var(--bg-3);
   border: 1px solid var(--line-2);
   border-bottom-width: 2px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   vertical-align: middle;
 }
 

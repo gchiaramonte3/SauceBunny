@@ -150,3 +150,68 @@ describe("no unreferenced design tokens", () => {
     expect([...tokens.matchAll(/(--[a-z0-9-]+)\s*:/g)].length).toBeGreaterThan(40);
   });
 });
+
+/**
+ * The radius scale is used, not re-typed.
+ *
+ * 306 of the 406 `border-radius` declarations were literals, and 186 of those
+ * spelled out a value the scale already names: 8px sixty-nine times, 6px
+ * sixty-six, 4px forty-one. A scale followed a quarter of the time is not a
+ * scale, it is a suggestion, and the drift it produces is invisible until two
+ * things that should match do not.
+ *
+ * Those 186 are now `var(--r-*)`. Safe to do mechanically because the tokens
+ * are defined once, at `:root`, and never redefined in a narrower scope -
+ * checked before substituting, since a scoped override would have made this a
+ * behaviour change rather than a rename.
+ *
+ * What this does NOT enforce is the off-scale values, and that is deliberate.
+ * 67 declarations use 2px, 5px, 7px and 10px, which is too many to be
+ * mistakes: it says the scale (4 / 6 / 8 / 12 / 16) does not match what the UI
+ * actually needs. Whether to add steps or to move those to the nearest rung is
+ * a design decision with visible consequences, so it stays a decision rather
+ * than becoming a rule enforced by a robot.
+ */
+describe("radius scale", () => {
+  const RADIUS = /border-radius\s*:\s*([^;{}]+);/g;
+
+  function tokenValues(): Map<string, string> {
+    const tokens = readFileSync(join(STYLES, "tokens.css"), "utf8");
+    return new Map([...tokens.matchAll(/(--r-[a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[2].trim(), m[1]]));
+  }
+
+  it("defines every radius token once, at :root", () => {
+    // The premise of the substitution. A scoped redefinition would mean a
+    // literal and its token are no longer interchangeable.
+    const defs = cssFiles().flatMap(([name, css]) =>
+      [...css.matchAll(/(--r-[a-z0-9-]+)\s*:\s*[^;]+;/g)].map(() => name),
+    );
+    expect(new Set(defs)).toEqual(new Set(["tokens.css"]));
+  });
+
+  it("never writes a literal that a token already names", () => {
+    const byValue = tokenValues();
+    const offenders: string[] = [];
+    for (const [name, css] of cssFiles()) {
+      for (const m of css.matchAll(RADIUS)) {
+        const val = m[1].trim();
+        if (val.includes("var(")) continue;
+        const token = byValue.get(val);
+        if (token) offenders.push(`${name}: border-radius: ${val} -> use var(${token})`);
+      }
+    }
+    expect(offenders, "The scale already has a name for this value.").toEqual([]);
+  });
+
+  it("leaves 50% alone, which is the circle idiom and not a scale value", () => {
+    // --r-pill (999px) and 50% are not interchangeable on a non-square box,
+    // so this is a real distinction rather than an unconverted literal.
+    const all = cssFiles().flatMap(([, css]) => [...css.matchAll(RADIUS)].map((m) => m[1].trim()));
+    expect(all.filter((v) => v === "50%").length).toBeGreaterThan(10);
+  });
+
+  it("really is finding declarations", () => {
+    const all = cssFiles().flatMap(([, css]) => [...css.matchAll(RADIUS)]);
+    expect(all.length).toBeGreaterThan(200);
+  });
+});

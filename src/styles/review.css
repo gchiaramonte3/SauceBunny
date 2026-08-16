@@ -62,7 +62,7 @@
   gap: 2px;
   background: rgba(255,255,255,0.04);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   padding: 2px;
 }
 .cp-review-filter button {
@@ -76,7 +76,7 @@
   font-size: 11px;
   font-weight: 600;
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
@@ -99,7 +99,7 @@
   height: 26px;
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   color: var(--fg-3);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
@@ -122,7 +122,7 @@
   height: 30px;
   background: var(--bg-0, #0c0c0e);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   color: var(--fg-4);
 }
 .cp-review-search:focus-within { border-color: var(--focus-ring); color: var(--fg-2); }
@@ -155,7 +155,7 @@
   z-index: 20;
   background: #1a1a1d;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
   padding: 4px;
   min-width: 224px;
@@ -171,7 +171,7 @@
   font-family: var(--font-ui);
   font-size: 12px;
   padding: 7px 10px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   cursor: pointer;
 }
 .cp-review-export-menu button:hover { background: rgba(255,255,255,0.07); color: var(--fg-1); }
@@ -216,7 +216,7 @@
   padding: 0 8px;
   background: var(--bg-0, #0c0c0e);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 11px;
@@ -252,7 +252,7 @@
   z-index: 20;
   background: #1a1a1d;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
   padding: 4px;
   width: 280px;
@@ -277,7 +277,7 @@
   border: none;
   background: transparent;
   padding: 7px 9px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -302,7 +302,7 @@
   color: var(--fg-3);
   font-size: 11px;
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 .cp-review-history-del:hover { background: rgba(255,138,138,0.14); color: var(--danger-text); }
 /* Bulk clear — a quiet text row pinned under the list, danger-tinted on hover
@@ -334,7 +334,7 @@
   padding: 0 8px;
   background: var(--bg-0, #0c0c0e);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   color: var(--fg-2);
   font-family: var(--font-ui);
   font-size: 11px;
@@ -393,12 +393,12 @@
 .cp-review-badge {
   font-family: var(--font-ui); font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em;
   text-transform: uppercase; color: var(--color-accent-green, #7bdcb5);
-  background: rgba(108,255,141,0.12); border-radius: 4px; padding: 1px 6px;
+  background: rgba(108,255,141,0.12); border-radius: var(--r-xs); padding: 1px 6px;
 }
 .cp-review-actions { margin-left: auto; display: flex; gap: 2px; }
 .cp-review-actions button {
   border: none; background: transparent; color: var(--fg-4);
-  font-family: var(--font-ui); font-size: 10.5px; padding: 2px 6px; border-radius: 4px; cursor: pointer;
+  font-family: var(--font-ui); font-size: 10.5px; padding: 2px 6px; border-radius: var(--r-xs); cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .cp-review-actions button:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); }
@@ -427,7 +427,7 @@
   color: #6db3ff;
   background: rgba(77,171,247,0.14);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   padding: 2px 8px;
   cursor: pointer;
 }
@@ -508,7 +508,7 @@
 /* The emoji tool inside the reply input / reply edit rows shrinks to the
    28px input height (the composer's 34px square would overpower the row). */
 .cp-review-reply-input .cp-review-tool,
-.cp-review-edit .cp-review-tool { width: 28px; height: 28px; border-radius: 8px; }
+.cp-review-edit .cp-review-tool { width: 28px; height: 28px; border-radius: var(--r-md); }
 
 /* First-run name prompt — a panel-anchored modal shown before the first note. */
 .cp-review-namegate {
@@ -557,7 +557,7 @@
   padding: 0 12px;
   background: var(--bg-0, #0c0c0e);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 13px;
@@ -581,7 +581,7 @@
   padding: 0 10px;
   background: var(--bg-0, #0c0c0e);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 12px;
@@ -621,7 +621,7 @@
   padding: 7px 10px;
   background: var(--bg-0, #0c0c0e);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 13px;
@@ -671,7 +671,7 @@
   flex-shrink: 0;
   width: 19px; height: 19px;
   display: inline-flex; align-items: center; justify-content: center;
-  border: none; border-radius: 6px;
+  border: none; border-radius: var(--r-sm);
   background: rgba(255,255,255,0.06);
   color: var(--fg-3);
   font-size: 14px; line-height: 1; cursor: pointer;
@@ -691,7 +691,7 @@
   color: var(--fg-3);
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
@@ -725,7 +725,7 @@
   flex-direction: column;
   background: var(--bg-3);
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   box-shadow: var(--shadow-card), var(--shadow-inset-hair);
   overflow: hidden;
   transform-origin: bottom left;
@@ -748,7 +748,7 @@
   padding: 0 10px;
   background: var(--bg-0, #0c0c0e);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   color: var(--fg-4);
   transition: border-color var(--dur-fast) var(--ease-out);
 }
@@ -800,7 +800,7 @@
   padding: 0;
   background: transparent;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   cursor: pointer;
   font-size: 20px;
   line-height: 1;
@@ -884,7 +884,7 @@
   color: var(--accent);
   background: rgba(var(--accent-rgb), 0.12);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   padding: 3px 6px;
   cursor: pointer;
 }
@@ -958,7 +958,7 @@
   width: 26px;
   height: 24px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: transparent;
   font-size: 14px;
   cursor: pointer;
@@ -996,7 +996,7 @@
   color: var(--fg-1);
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 .cp-pastenotes-input::placeholder { color: var(--fg-3); }
 .cp-pastenotes-input:focus { outline: none; border-color: var(--focus-ring); }
@@ -1012,7 +1012,7 @@
   max-height: 240px;
   overflow-y: auto;
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   padding: 4px;
 }
 .cp-pastenotes-row {
@@ -1020,7 +1020,7 @@
   align-items: baseline;
   gap: 8px;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out);
 }
@@ -1034,7 +1034,7 @@
   font-size: 10.5px;
   color: var(--fg-2);
   background: rgba(255,255,255,0.07);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   padding: 1px 6px;
   text-align: center;
 }
@@ -1077,7 +1077,7 @@
   color: var(--fg-1);
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 .cp-pastenotes-author input:focus { outline: none; border-color: var(--focus-ring); }
 .cp-pastenotes-actions { display: flex; gap: 8px; }
@@ -1121,7 +1121,7 @@
   padding: 4px;
   background: var(--bg-1, #161616);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
 }
 .cp-review-veritem {
@@ -1130,7 +1130,7 @@
   justify-content: space-between;
   gap: 10px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: none;
   border: none;
   cursor: pointer;
@@ -1154,7 +1154,7 @@
   margin: 6px 10px 0;
   padding: 6px 8px 6px 10px;
   border: 1px dashed var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 .cp-review-linkoffer-text {
   flex: 1 1 auto;
@@ -1197,7 +1197,7 @@
   align-items: baseline;
   gap: 7px;
   padding: 5px 4px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 .cp-review-carried:hover { background: rgba(255,255,255,0.04); }
 .cp-review-carried-tc {
@@ -1208,7 +1208,7 @@
   font-size: 10px;
   color: var(--fg-2);
   background: rgba(255,255,255,0.07);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   cursor: pointer;
 }
 .cp-review-carried-tc:hover { background: rgba(255,255,255,0.14); color: var(--fg-1); }
@@ -1218,7 +1218,7 @@
   font-weight: 700;
   color: var(--fg-3);
   border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   padding: 0 4px;
 }
 .cp-review-carried-body {
@@ -1237,7 +1237,7 @@
   color: var(--fg-2);
   font-size: 10.5px;
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   /* Hidden until the row is under the pointer: thirty carried notes each
      shouting Resolve would out-weigh the actual comment list. */

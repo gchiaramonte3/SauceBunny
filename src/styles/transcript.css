@@ -69,7 +69,7 @@
   position: fixed;
   background: var(--bg-1, #161616);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
   z-index: 9998;
   display: flex;
@@ -94,7 +94,7 @@
   color: var(--fg-3);
   background: rgba(255,255,255,0.05);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   font-weight: 600;
 }
 .cp-tx-history-empty {
@@ -161,7 +161,7 @@
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   flex-shrink: 0;
 }
 .cp-tx-history-row-remove:hover {
@@ -176,7 +176,7 @@
   position: fixed;
   background: var(--bg-1, #161616);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
   z-index: 9998;
   display: flex;
@@ -230,14 +230,14 @@
 }
 .cp-tx-insights-bar {
   height: 7px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   background: rgba(255,255,255,0.06);
   overflow: hidden;
   margin: 4px 0 3px;
 }
 .cp-tx-insights-bar-fill {
   height: 100%;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   transition: width var(--dur-base) var(--ease-out);
 }
 .cp-tx-insights-meta {
@@ -262,7 +262,7 @@
   flex-shrink: 0;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   padding: 1px;
 }
 .cp-tx-search-mode-btn {
@@ -270,7 +270,7 @@
   padding: 0 8px;
   background: transparent;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   font-family: var(--font-sans);
   font-size: 10.5px;
   font-weight: 600;
@@ -289,7 +289,7 @@
   padding: 0 10px;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   color: var(--fg-1);
   font-family: var(--font-sans);
   font-size: 12px;
@@ -364,7 +364,7 @@
 .cp-tx-body::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
 .cp-tx-body::-webkit-scrollbar-thumb {
   background: rgba(255,255,255,0.32);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   /* Transparent border + padding-box inset the thumb off the track edges for a
      polished, pill look instead of a slab flush to the wall. */
   border: 2px solid transparent;
@@ -420,7 +420,7 @@
   background: transparent;
   border: none;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   cursor: pointer;
 }
 .cp-tx-jump:hover {
@@ -448,7 +448,7 @@
   padding: 10px 12px;
   background: rgba(255,255,255,0.025);
   border: 1px solid var(--line-1);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   font-size: 13px;
   line-height: 1.55;
   color: var(--fg-2);
@@ -477,7 +477,7 @@
   transition-delay: 150ms;
   background: rgba(255, 255, 255, 0.10);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
 }
 /* ...but not while a selection drag is in flight. The lift is a 150ms-delayed
    background plus a ring, and dragging across a paragraph would strobe it
@@ -528,7 +528,7 @@
   padding: 4px 6px;
   background: rgba(108, 255, 141, 0.05);
   border: 1px solid rgba(108, 255, 141, 0.45);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   color: var(--fg-1);
   font-family: inherit;
   font-size: inherit;
@@ -589,7 +589,7 @@
   width: 264px;
   background: var(--bg-1);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
   padding: 12px;
   z-index: 210;
@@ -602,7 +602,7 @@
   padding: 6px 8px;
   background: var(--bg-3);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   color: var(--fg-1);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-variant-numeric: tabular-nums;
@@ -620,7 +620,7 @@
   min-width: 200px;
   background: var(--bg-1, #161616);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   box-shadow: var(--shadow-card);
   padding: 4px 0;
   z-index: 200;
@@ -660,7 +660,7 @@
   position: fixed;
   background: var(--bg-1, #161616);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
   padding: 12px;
   z-index: 9998;
@@ -684,7 +684,7 @@
   padding: 0 10px;
   background: rgba(255,255,255,0.04);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   color: var(--fg-1);
   font: 12px var(--font-sans);
   outline: none;
@@ -711,7 +711,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: rgba(0,0,0,0.22);
   border: 1px solid var(--line-1);
 }
@@ -723,7 +723,7 @@
   padding: 4px 7px;
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   color: var(--fg-2);
   font-family: var(--font-sans);
   font-size: 11.5px;
@@ -814,7 +814,7 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   background: rgba(255, 255, 255, 0.06);
   color: var(--fg-3);
   border: 1px solid var(--line-2);
@@ -831,7 +831,7 @@
   color: var(--fg-2);
   background: rgba(255,255,255,0.04);
   border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   cursor: pointer;
   outline: none;
 }
@@ -847,7 +847,7 @@
   padding: 8px 10px;
   background: rgba(255,255,255,0.025);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 .cp-folder-path {
   flex: 1;
@@ -872,7 +872,7 @@
   padding: 7px 8px 7px 10px;
   border: 1px solid var(--line-2);
   background: rgba(255,255,255,0.025);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   font-size: 11px;
   color: var(--fg-3);
 }
@@ -891,7 +891,7 @@
   padding: 0 9px;
   background: rgba(108, 255, 141, 0.10);
   border: 1px solid rgba(108, 255, 141, 0.22);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   color: var(--color-accent-green);
   font: 600 11px var(--font-sans);
   cursor: pointer;
@@ -908,7 +908,7 @@
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
 }
 .cp-tx-hint-close:hover { color: var(--fg-1); background: rgba(255,255,255,0.06); }
 
@@ -923,7 +923,7 @@
   justify-content: center;
   background: rgba(255,255,255,0.04);
   border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   color: var(--fg-3);
   cursor: pointer;
 }
@@ -1017,7 +1017,7 @@
   margin-top: 4px;
   max-width: 260px;
   padding: 6px 9px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: var(--bg-2);
   border: 1px solid var(--danger);
   color: var(--danger);
@@ -1067,7 +1067,7 @@
   flex-direction: column;
   background: #15151a;
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   box-shadow: 0 24px 64px rgba(0,0,0,0.55), 0 0 0 0.5px rgba(255,255,255,0.04);
   overflow: hidden;
   animation: cp-modal-in var(--dur-base) var(--ease-out);
@@ -1108,7 +1108,7 @@
   color: var(--fg-3);
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   cursor: pointer;
 }
 .cp-spk-x:hover { background: rgba(255,255,255,0.07); color: var(--fg-1); }
@@ -1140,7 +1140,7 @@
   color: var(--fg-4);
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   padding: 3px 8px;
   cursor: pointer;
   transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
@@ -1166,7 +1166,7 @@
   align-items: center;
   gap: 10px;
   padding: 7px 8px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 .cp-spk-row:hover { background: rgba(255,255,255,0.03); }
 .cp-spk-row.picked { background: rgba(255,255,255,0.07); }
@@ -1228,7 +1228,7 @@
   color: var(--fg-1);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   padding: 4px 7px;
 }
 .cp-spk-name:hover { border-color: var(--line-2); }
@@ -1319,7 +1319,7 @@
   align-items: center;
   gap: 10px;
   padding: 8px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 .cp-cast-row:hover { background: rgba(255,255,255,0.03); }
 /* A row of the cast's own colours reads faster than any label: you recognise
@@ -1391,7 +1391,7 @@
   align-items: center;
   gap: 8px;
   padding: 5px 8px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 .cp-cast-assign:hover { background: rgba(255,255,255,0.03); }
 .cp-cast-from {
@@ -1468,7 +1468,7 @@
 .cp-colorpick-sv {
   position: relative;
   height: 150px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   cursor: crosshair;
   touch-action: none;
   background:
@@ -1534,7 +1534,7 @@
   gap: 4px;
   background: rgba(0,0,0,0.25);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   padding: 5px 9px;
   font-family: var(--font-ui);
   font-size: 12px;
@@ -1603,7 +1603,7 @@
   flex-direction: column;
   gap: var(--s-2);
   padding: var(--s-4);
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   background: var(--bg-2);
   border: 1px solid var(--line-2);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
@@ -1664,7 +1664,7 @@
   /* Recessed, so the region reads as a container with more inside it rather
      than as a list that happens to stop. */
   padding: 6px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: rgba(0,0,0,0.22);
   border: 1px solid var(--line-1);
 }
@@ -1754,7 +1754,7 @@
   align-items: center;
   gap: 8px;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 .cp-cast-member:hover { background: rgba(255,255,255,0.03); }
 /* 24px rendered, so the stored 96px face is 4x — sharp on any display, and
@@ -1901,7 +1901,7 @@
   padding: 5px 8px;
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   text-align: left;
 }
@@ -2054,7 +2054,7 @@
   color: var(--fg-1);
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 .cp-badgesheet-search::placeholder { color: var(--fg-3); }
 .cp-badgesheet-search:focus { outline: none; border-color: var(--focus-ring); }
@@ -2145,7 +2145,7 @@
   flex-direction: column;
   background: var(--bg-1, #161616);
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
   overflow: hidden;
 }
@@ -2193,7 +2193,7 @@
   width: 100%;
   padding: 6px 8px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: none;
   text-align: left;
   cursor: pointer;

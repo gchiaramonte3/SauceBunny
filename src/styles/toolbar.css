@@ -24,7 +24,7 @@
   padding: 0 12px;
   background: rgba(0,0,0,0.4);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   transition: all var(--dur-base) var(--ease-out);
   max-width: 720px;
   margin: 0 auto;

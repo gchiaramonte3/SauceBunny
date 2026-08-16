@@ -105,7 +105,7 @@
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out);
 }
@@ -153,7 +153,7 @@
   color: var(--fg-3);
   background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
   border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   flex-shrink: 0;
   box-shadow: inset 0 -1px 0 rgba(0,0,0,0.25);
 }
@@ -173,7 +173,7 @@
   margin-right: 4px;
   background: rgba(255,255,255,0.06);
   border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   font-family: var(--font-sans);
   font-size: 10px;
   color: var(--fg-3);
@@ -246,7 +246,7 @@
   letter-spacing: 0.06em;
   color: var(--fg-5);
   border: 1px solid var(--line-1);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   padding: 0 5px;
 }
 .cp-shortcuts-row {
@@ -277,7 +277,7 @@
   color: var(--fg-3);
   background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
   border: 1px solid var(--line-2);
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   box-shadow: inset 0 -1px 0 rgba(0,0,0,0.25);
   white-space: nowrap;
 }
