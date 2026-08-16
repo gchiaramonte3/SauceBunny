@@ -460,10 +460,12 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
 
    Before picking one by name, read "What is left to extract, and what only
    looks extractable" in `docs/ARCHITECTURE.md`. It records which candidates
-   the code actually supports: diarizer model prep is cohesive and ready;
-   captions is not, because its done-listener writes transcript state the
-   Whisper pipeline owns; and the single listener effect that registers every
-   Tauri event and writes 16 setters is the obstacle in front of most of them.
+   the code actually supports: diarizer model prep is DONE
+   (`use-diarizer-prepare`); captions is not extractable, because its
+   done-listener writes transcript state the Whisper pipeline owns; and the
+   single listener effect that registers every Tauri event is the obstacle in
+   front of most of them — splitting it needs its handlers named first, because
+   three payload types are shared across channels and a mis-wire type-checks.
 
 7. ~~**Transcript render performance**~~ — DONE (`68d4a25`): the karaoke render's O(turns²) cue-offset scan, per-turn name/alias resolution, and search-match lookup are precomputed in memos keyed on turns/overrides, so a playhead tick only re-marks the active cue.
 

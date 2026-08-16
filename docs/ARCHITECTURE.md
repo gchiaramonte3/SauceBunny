@@ -257,13 +257,25 @@ those would be a worse seam than the status quo. The cohesive unit here is
 *transcript arrival* (captions + transcription + history recording), not
 captions.
 
-**The central listener effect is the real obstacle.** One `useEffect` registers
-the whole app's Tauri listeners behind a shared `mounted` flag and writes 16
-different setters across captions, transcript, export and status. Any extraction
-that owns an event has to lift its listener out of that effect. That is fine for
-the diarizer pair (own listeners, own cleanup) and is the hard part for
-everything else. Splitting that effect by domain is worth doing on its own,
-before — not during — the next subsystem extraction.
+**The central listener effect is the real obstacle, and splitting it is not the
+easy win it looks like.** One `useEffect` registers 13 Tauri listeners behind a
+shared `mounted` flag and writes 16 setters across captions, transcript, export
+and status. Any extraction that owns an event has to lift its listener out of
+it. That was fine for the diarizer pair — own listeners, own cleanup — and is
+the hard part for everything else.
+
+The obvious move is to split it by domain (clip/export `a,b,c`; captions `d,f`;
+transcript `g,h,i,j,jPhase`; playback-prep `k,l,m` — the boundaries are clean).
+Do not do that casually. `dcaef9d` kept the registrations sequential *on
+purpose*, and its tail comment says why: **several handlers share event shapes**.
+`LogEvent`, `DoneEvent` and `ProgressEvent` each serve multiple channels, so
+attaching the wrong handler to the wrong event NAME type-checks perfectly and
+fails silently at runtime — and nothing in the suite exercises these 13 events.
+
+The prerequisite is to make the pairing checkable before moving anything: give
+each handler a name (`listen("clip-done", onClipDone)`) so the event-to-handler
+mapping is greppable rather than positional. Splitting is mechanical after that
+and unreviewable before it.
 
 ## Build-ID handshake
 
