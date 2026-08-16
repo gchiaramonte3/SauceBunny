@@ -129,6 +129,7 @@ export function resetReviewStoreForTests(): void {
   indexReady = false;
   if (flushTimer !== null) clearTimeout(flushTimer);
   flushTimer = null;
+  writeBackoffMs = 0;
 }
 
 // ── filenames ────────────────────────────────────────────────────────────────
@@ -233,12 +234,45 @@ export function putReviewDoc(doc: ReviewDoc): void {
   scheduleFlush();
 }
 
+/**
+ * Backoff after a failed write, in ms. 0 while things are healthy.
+ *
+ * A failed write re-arms the flush, and the flush was always armed at the
+ * 500ms debounce - so a write that fails PERMANENTLY (read-only volume, the
+ * Reviews folder deleted underneath us, a full disk) turned into a disk
+ * attempt twice a second for as long as the app stayed open. This app is
+ * meant to sit open all day, so "forever" is the operative word rather than
+ * an edge case, and the user-visible warning is throttled to one per 30s,
+ * which means the loop is also invisible while it runs.
+ *
+ * Backing off does NOT mean giving up: the notes exist only in memory until
+ * a write lands, so stopping would turn a recoverable failure into data loss
+ * when the user reconnects the drive. It settles at one attempt per 30s.
+ */
+let writeBackoffMs = 0;
+const MAX_WRITE_BACKOFF_MS = 30_000;
+
+/** Note a failed write and lengthen the wait before the next attempt. */
+function backOffAfterFailure(): void {
+  writeBackoffMs = writeBackoffMs === 0
+    ? WRITE_DEBOUNCE_MS * 2
+    : Math.min(writeBackoffMs * 2, MAX_WRITE_BACKOFF_MS);
+}
+
+/** A write landed: healthy again, so the next save uses the plain debounce. */
+function clearWriteBackoff(): void {
+  writeBackoffMs = 0;
+}
+
 function scheduleFlush(): void {
   if (flushTimer !== null) clearTimeout(flushTimer);
+  // While a failure streak is active the backoff wins, including for a save
+  // the user just made: writing sooner cannot help a disk that is refusing.
+  const delay = Math.max(WRITE_DEBOUNCE_MS, writeBackoffMs);
   flushTimer = setTimeout(() => {
     flushTimer = null;
     void flushDirtyDocs();
-  }, WRITE_DEBOUNCE_MS);
+  }, delay);
 }
 
 async function flushDirtyDocs(): Promise<void> {
@@ -336,12 +370,14 @@ async function flushDirtyDocs(): Promise<void> {
       ).length;
       index.set(key, { file, updatedAt: Date.now(), count, bytes: bytes.length });
       indexDirty = true;
+      clearWriteBackoff();
     } catch (err) {
       reportProblem(
         "A review note could not be written to disk. It is still here, and saving will be retried.",
         true, err,
       );
       dirty.add(key); // retry on the next save
+      backOffAfterFailure();
       scheduleFlush();
     }
   }

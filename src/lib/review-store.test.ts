@@ -404,3 +404,84 @@ describe("boot-race durability (r140)", () => {
     expect(fs.has(`${DIR}/${reviewFileName("/early.mp4")}`)).toBe(true);
   });
 });
+
+describe("a failing write backs off instead of hammering the disk", () => {
+  /**
+   * A failed write re-arms the flush, and the flush was always armed at the
+   * 500ms debounce - so a write that fails PERMANENTLY (read-only volume, the
+   * folder deleted underneath us, a full disk) became a disk attempt twice a
+   * second for as long as the app stayed open, which for this app is all day.
+   * The user-visible warning is throttled to one per 30s, so the loop ran
+   * invisibly.
+   */
+  async function setup(): Promise<{ path: string; attempts: () => number; setFailing: (v: boolean) => void }> {
+    fs.set(`${DIR}/index.json`, serializeReviewIndex(new Map()));
+    await hydrateReviewStore({ migrate: false });
+    const path = `${DIR}/${reviewFileName("/fail.mp4")}`;
+    let failing = true;
+    let attempts = 0;
+    const base = vi.mocked(invoke).getMockImplementation()!;
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
+      const a = args as { path?: string } | undefined;
+      if (cmd === "write_text_to_path" && a?.path === path) {
+        attempts += 1;
+        if (failing) throw new Error("EROFS: read-only file system");
+      }
+      return base(cmd, args as Parameters<typeof base>[1]);
+    });
+    return { path, attempts: () => attempts, setFailing: (v) => { failing = v; } };
+  }
+
+  it("does not retry at the debounce interval forever", async () => {
+    const { attempts } = await setup();
+    saveReview(mkDoc("/fail.mp4", { comments: [mkComment("v1", "c1")] }));
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(attempts()).toBe(1); // first try
+
+    // Old behaviour: another attempt every 500ms. Two full seconds of that
+    // would be four more; the backoff allows at most one.
+    await vi.advanceTimersByTimeAsync(600);
+    expect(attempts()).toBe(1); // still waiting - backoff is 1000ms now
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(attempts()).toBe(2);
+  });
+
+  it("keeps stretching the gap, so an hour of failure is not 7200 attempts", async () => {
+    const { attempts } = await setup();
+    saveReview(mkDoc("/fail.mp4", { comments: [mkComment("v1", "c1")] }));
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    // Doubling to a 30s ceiling: a handful of early tries, then ~2/minute.
+    expect(attempts()).toBeLessThan(130);
+    expect(attempts()).toBeGreaterThan(5);
+  });
+
+  it("never gives up, because the notes exist only in memory until one lands", async () => {
+    // Backing off is not abandoning. If the drive comes back, the write must
+    // land without the user having to touch anything.
+    const { path, attempts, setFailing } = await setup();
+    saveReview(mkDoc("/fail.mp4", { comments: [mkComment("v1", "c1")] }));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fs.has(path)).toBe(false);
+    const during = attempts();
+    setFailing(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fs.has(path)).toBe(true);
+    expect(attempts()).toBeGreaterThan(during);
+  });
+
+  it("returns to the plain debounce once a write succeeds", async () => {
+    // The streak must not leave the next ordinary save waiting 30 seconds.
+    const { attempts, setFailing } = await setup();
+    saveReview(mkDoc("/fail.mp4", { comments: [mkComment("v1", "c1")] }));
+    await vi.advanceTimersByTimeAsync(20_000);
+    setFailing(false);
+    await vi.advanceTimersByTimeAsync(60_000); // recovery write lands
+    const settled = attempts();
+
+    saveReview(mkDoc("/fail.mp4", { comments: [mkComment("v1", "c2")] }));
+    await vi.advanceTimersByTimeAsync(600); // plain debounce, not a backoff
+    expect(attempts()).toBe(settled + 1);
+  });
+});
