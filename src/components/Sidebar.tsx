@@ -751,10 +751,21 @@ export function Sidebar(props: Props) {
                   style={{ flex: 1, height: 36, fontSize: 13 }}
                   onClick={onExportQueue}
                   /* status gate: a running SINGLE export owns the shared
-                     local-export cancel token — the queue must wait. */
-                  disabled={queueRunning || !exportOpts.folder || status === "exporting"}
+                     local-export cancel token, so the queue must wait. That
+                     wait used to be invisible: `exporting` also suppresses the
+                     folder nudge below, and this branch replaces the single
+                     export's own button, so the whole screen went quiet and a
+                     fully-labelled "Export 3 clips" did nothing when clicked.
+                     The label carries the reason, the way it already does for
+                     queueRunning; the title is the longer version. */
+                  disabled={queueRunning || !exportOpts.folder || exporting}
+                  title={exporting ? "A single clip export is running. The queue starts when it finishes." : undefined}
                 >
-                  {queueRunning ? "Exporting…" : `Export ${queueCount} ${queueCount === 1 ? "clip" : "clips"}`}
+                  {queueRunning
+                    ? "Exporting…"
+                    : exporting
+                    ? "Waiting for the current export"
+                    : `Export ${queueCount} ${queueCount === 1 ? "clip" : "clips"}`}
                 </button>
               ) : (
                 <StatefulButton
