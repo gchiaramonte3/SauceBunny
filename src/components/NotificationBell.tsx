@@ -62,11 +62,34 @@ export function NotificationBell({ notifications, onMarkAllRead, onClearAll, onD
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
+
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  /**
+   * Focus the panel while it is open, and hand focus back when it closes.
+   *
+   * This panel is PORTALLED to <body>: on screen it sits under the bell, in
+   * the DOM it is nowhere near it. So tabbing from the trigger went to the
+   * next toolbar button and the notifications could not be reached by keyboard
+   * at all. The app's other popovers are siblings of their trigger and need
+   * none of this.
+   *
+   * Keyed on `anchor` as well as `open`, which is the part that matters:
+   * `anchor` is measured in another effect and arrives in a SECOND render, and
+   * the portal only mounts once it exists. Keyed on `open` alone this ran
+   * while popoverRef was still null and did nothing at all - the fix looked
+   * right, changed nothing, and only a tightened assertion caught it.
+   */
+  useEffect(() => {
+    if (!open || !anchor) return;
+    const restoreTo = document.activeElement as HTMLElement | null;
+    popoverRef.current?.focus();
+    return () => { if (restoreTo?.isConnected) restoreTo.focus(); };
+  }, [open, anchor]);
 
   function toggle() {
     if (open) {
@@ -99,6 +122,7 @@ export function NotificationBell({ notifications, onMarkAllRead, onClearAll, onD
         <div
           ref={popoverRef}
           className="cp-notif-popover"
+          tabIndex={-1}
           style={{
             // Position fixed to viewport so the portal renders above
             // every in-flow element regardless of stacking context.
