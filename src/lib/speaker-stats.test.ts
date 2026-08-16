@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { speakerStats, speakerLanes, fmtTalkTime } from "./speaker-stats";
+import { speakerStats, speakerLanes, fmtTalkSeconds, fmtTalkTime } from "./speaker-stats";
 import type { Cue } from "./srt";
 
 // Speaker analytics feed two visible surfaces — the header Insights popover
@@ -111,3 +111,42 @@ describe("fmtTalkTime", () => {
     expect(fmtTalkTime(3_720_000)).toBe("1h 02m");
   });
 });
+
+describe("fmtTalkSeconds", () => {
+  it("reads in seconds under a minute", () => {
+    expect(fmtTalkSeconds(0)).toBe("0s");
+    expect(fmtTalkSeconds(1.4)).toBe("1s");
+    expect(fmtTalkSeconds(59)).toBe("59s");
+  });
+
+  it("switches to whole minutes, then hours", () => {
+    expect(fmtTalkSeconds(60)).toBe("1m");
+    expect(fmtTalkSeconds(3599)).toBe("59m");
+    expect(fmtTalkSeconds(3600)).toBe("1h");
+    expect(fmtTalkSeconds(3600 + 30 * 60)).toBe("1h 30m");
+  });
+
+  it("drops the redundant minutes on a whole hour", () => {
+    // One of the four copies printed "2h" and the rest "2h 0m", for the same
+    // speaker on the same screen.
+    expect(fmtTalkSeconds(7200)).toBe("2h");
+    expect(fmtTalkSeconds(7260)).toBe("2h 1m");
+  });
+
+  it("clamps a negative to zero", () => {
+    // The other drift: the roster row had no clamp, so a cue whose end
+    // precedes its start rendered "-3s" there and "0s" in the three panels
+    // beside it.
+    expect(fmtTalkSeconds(-3)).toBe("0s");
+    expect(fmtTalkSeconds(-0.4)).toBe("0s");
+  });
+
+  it("is not the millisecond one", () => {
+    // Two helpers, different units. 5000 here is 83 minutes, not 5 seconds —
+    // pinned so a caller that passes the wrong unit fails loudly in review
+    // rather than quietly on screen.
+    expect(fmtTalkSeconds(5000)).toBe("1h 23m");
+    expect(fmtTalkTime(5000)).toBe("5s");
+  });
+});
+

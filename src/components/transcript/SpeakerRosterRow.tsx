@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { IconPlay } from "../Icons";
 import { KindGlyph } from "./KindGlyph";
 import type { RosterItem } from "./SpeakerRosterModal";
+import { fmtTalkSeconds } from "../../lib/speaker-stats";
 
 /**
  * One speaker in the roster.
@@ -78,7 +79,7 @@ export function SpeakerRosterRow({
         aria-label="Speaker name"
       />
       <span className="cp-spk-count" title={`${item.turnCount} turns`}>
-        {formatTalk(item.talkSeconds)}
+        {fmtTalkSeconds(item.talkSeconds)}
       </span>
       {/* To name a voice you have to hear it. Before this the modal was a dead
           end: you closed it, scrolled the transcript, found a turn, played it,
@@ -97,9 +98,3 @@ export function SpeakerRosterRow({
 }
 
 /** Talk time, short enough to sit in a narrow column. */
-function formatTalk(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  const m = Math.floor(seconds / 60);
-  if (m < 60) return `${m}m`;
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
-}

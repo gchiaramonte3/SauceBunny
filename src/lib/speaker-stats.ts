@@ -94,3 +94,30 @@ export function fmtTalkTime(ms: number): string {
   if (m > 0) return `${m}m ${String(sec).padStart(2, "0")}s`;
   return `${sec}s`;
 }
+
+/**
+ * Coarse talk time for the speaker chips and roster rows — SECONDS in, unlike
+ * `fmtTalkTime` above which takes milliseconds. The unit is in the name because
+ * having two of these with different units is exactly how a wrong number gets
+ * rendered confidently.
+ *
+ * Both exist on purpose: `fmtTalkTime` is the precise reading (`5m 03s`) for a
+ * single speaker's total, this is the glanceable one (`5m`) for a list where
+ * seconds are noise.
+ *
+ * It had four copies — SpeakerRosterRow, SpeakerGroups, RenamePopover,
+ * NewSpeakerSheet — and they had drifted twice over. Three clamped negatives to
+ * zero and the roster row did not, so a cue whose end precedes its start
+ * rendered "-3s" in one panel and "0s" in the others. And one omitted the
+ * redundant minutes on a whole hour ("2h") while the rest printed "2h 0m", for
+ * the same speaker on the same screen.
+ *
+ * Resolved toward the better half of each drift: clamp, and drop the "0m".
+ */
+export function fmtTalkSeconds(seconds: number): string {
+  if (seconds < 60) return `${Math.max(0, Math.round(seconds))}s`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}`;
+}
+

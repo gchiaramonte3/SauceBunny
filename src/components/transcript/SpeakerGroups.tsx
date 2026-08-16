@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { KindGlyph } from "./KindGlyph";
 import type { Turn } from "../../lib/srt";
+import { fmtTalkSeconds } from "../../lib/speaker-stats";
 
 export type SpeakerGroup = {
   tag: string;
@@ -93,7 +94,7 @@ export function SpeakerGroups({
               <span className="cp-tx-group-name">{g.name}</span>
               {/* Talk time is the sort key, so it has to be on screen — an
                   order with no visible reason reads as no order at all. */}
-              <span className="cp-tx-group-talk">{formatTalk(g.talkSeconds)}</span>
+              <span className="cp-tx-group-talk">{fmtTalkSeconds(g.talkSeconds)}</span>
               <span className="cp-tx-group-turns">
                 {g.turnCount === 1 ? "1 line" : `${g.turnCount} lines`}
               </span>
@@ -131,9 +132,3 @@ export function SpeakerGroups({
 }
 
 /** Talk time, short enough for a row that also carries a name and a count. */
-function formatTalk(seconds: number): string {
-  if (seconds < 60) return `${Math.max(0, Math.round(seconds))}s`;
-  const m = Math.floor(seconds / 60);
-  if (m < 60) return `${m}m`;
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
-}

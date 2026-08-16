@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { SPEAKER_PALETTE } from "./helpers";
 import { KindGlyph } from "./KindGlyph";
 import { KIND_LABEL, kindTag, NON_SPEECH_COLOR, NON_SPEECH_KINDS, type SpeechKind } from "../../lib/speech-kind";
+import { fmtTalkSeconds } from "../../lib/speaker-stats";
 
 /** One speaker already in this transcript, offered as an alternative target. */
 export type SpeakerSuggestion = {
@@ -162,7 +163,7 @@ export function NewSpeakerSheet({ suggestions, initialColor, onName, onPickExist
                     <span className="cp-newspk-sname">{s.name}</span>
                     {/* The number is what makes the order legible. Without it
                         "why is this person first?" has no answer on screen. */}
-                    <span className="cp-newspk-talk">{formatTalk(s.talkSeconds)}</span>
+                    <span className="cp-newspk-talk">{fmtTalkSeconds(s.talkSeconds)}</span>
                   </button>
                 );
               })}
@@ -176,12 +177,6 @@ export function NewSpeakerSheet({ suggestions, initialColor, onName, onPickExist
 }
 
 /** Talk time, short enough to sit inside a chip. */
-function formatTalk(seconds: number): string {
-  if (seconds < 60) return `${Math.max(0, Math.round(seconds))}s`;
-  const m = Math.floor(seconds / 60);
-  if (m < 60) return `${m}m`;
-  return `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}`;
-}
 
 /**
  * Step to the next palette entry, wrapping.

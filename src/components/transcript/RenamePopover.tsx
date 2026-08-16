@@ -7,6 +7,7 @@ import { badgeIcon } from "./badge-icons";
 import { noteBadgeIconUsed, readBadgeRecents } from "./badge-recents";
 import { KIND_LABEL, kindTag, NON_SPEECH_KINDS } from "../../lib/speech-kind";
 import { IconPlus } from "../Icons";
+import { fmtTalkSeconds } from "../../lib/speaker-stats";
 
 /**
  * Inline rename UI for a speaker chip. Anchored to the chip's bounding
@@ -342,7 +343,7 @@ export function RenamePopover({
                   <KindGlyph tag={c.tag === "Speaker" ? null : c.tag} name={c.name} size={11} />
                 </span>
                 <span className="cp-tx-rename-assign-name">{c.name}</span>
-                <span className="cp-tx-rename-assign-talk">{formatTalk(c.talkSeconds)}</span>
+                <span className="cp-tx-rename-assign-talk">{fmtTalkSeconds(c.talkSeconds)}</span>
               </button>
             ))}
           </div>
@@ -384,9 +385,3 @@ function currentIconLabel(value: string | null | undefined): string {
 }
 
 /** Talk time, short enough to sit at the end of a narrow row. */
-function formatTalk(seconds: number): string {
-  if (seconds < 60) return `${Math.max(0, Math.round(seconds))}s`;
-  const m = Math.floor(seconds / 60);
-  if (m < 60) return `${m}m`;
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
-}
