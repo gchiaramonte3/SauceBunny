@@ -232,3 +232,62 @@ test("editing a cue writes the file and updates BOTH instances", async ({ page }
   expect(onDisk, "rewriting the file dropped an untouched cue").toContain("first line of dialogue");
   expect(pageErrors, pageErrors.join("\n")).toHaveLength(0);
 });
+
+test("Escape abandons a cue edit without touching the file", async ({ page }) => {
+  await bootWithTranscript(page);
+  await page.locator("[data-cue-idx]:visible").nth(1).dblclick();
+  const editor = page.locator("textarea:visible, [contenteditable='true']:visible").first();
+  await expect(editor).toBeVisible();
+  await editor.fill("SHOULD NOT PERSIST");
+  await page.keyboard.press("Escape");
+
+  await expect(page.locator("textarea:visible"), "the editor stayed open after Escape").toHaveCount(0);
+  await expect(page.locator("[data-cue-idx]:visible").nth(1)).toContainText("second speaker answers");
+  const onDisk = await page.evaluate(() =>
+    String(Object.values(JSON.parse(localStorage.getItem("e2e.files") ?? "{}"))[0] ?? ""));
+  expect(onDisk, "an abandoned edit was written to the file anyway").not.toContain("SHOULD NOT PERSIST");
+  expect(pageErrors, pageErrors.join("\n")).toHaveLength(0);
+});
+
+test("emptying a cue cancels rather than deleting it", async ({ page }) => {
+  // Deliberate: removing a cue shifts every index after it and loses timing,
+  // which is a bigger feature than a keystroke. Pinned because "clear the box
+  // and press Enter" is a reasonable thing for a user to try, and the quiet
+  // revert is the intended answer rather than a dropped edit.
+  await bootWithTranscript(page);
+  await page.locator("[data-cue-idx]:visible").nth(1).dblclick();
+  const editor = page.locator("textarea:visible, [contenteditable='true']:visible").first();
+  await expect(editor).toBeVisible();
+  await editor.fill("");
+  await page.keyboard.press("Enter");
+
+  await expect(page.locator("[data-cue-idx]"), "a cue was removed").toHaveCount(6);
+  await expect(page.locator("[data-cue-idx]:visible").nth(1)).toContainText("second speaker answers");
+  expect(pageErrors, pageErrors.join("\n")).toHaveLength(0);
+});
+
+test("a committed cue edit is NOT undoable, which is the deliberate boundary", async ({ page }) => {
+  // Speaker renames go through `editOverrides` and ARE on the app undo stack;
+  // cue text edits rewrite the FILE and are not, because undoing would mean a
+  // second write over a file the app may not own. Both halves are defensible,
+  // and the asymmetry is invisible to a user — so it is pinned here rather
+  // than left to be rediscovered. If cue-edit undo is ever added, this test
+  // should FAIL and be rewritten, not deleted quietly.
+  await bootWithTranscript(page);
+  await page.locator("[data-cue-idx]:visible").nth(1).dblclick();
+  const editor = page.locator("textarea:visible, [contenteditable='true']:visible").first();
+  await expect(editor).toBeVisible();
+  await editor.fill("UNDO SENTINEL");
+  await page.keyboard.press("Enter");
+  await expect(page.locator("[data-cue-idx]", { hasText: "UNDO SENTINEL" })).toHaveCount(2);
+
+  // Outside a text field, so the app claims ⌘Z rather than the native undo.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("Control+z");
+
+  await expect(
+    page.locator("[data-cue-idx]", { hasText: "UNDO SENTINEL" }),
+    "cue-edit undo appeared — good news, but this test and the comment on commitCueEdit now both lie",
+  ).toHaveCount(2);
+  expect(pageErrors, pageErrors.join("\n")).toHaveLength(0);
+});

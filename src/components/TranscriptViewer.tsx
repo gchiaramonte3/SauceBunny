@@ -1279,6 +1279,25 @@ export function TranscriptViewer({
   const backupHandledRef = useRef<Set<string>>(new Set());
   const flattenWarnedRef = useRef<Set<string>>(new Set());
 
+  /**
+   * NOT on the undo stack, unlike every speaker edit above, and the asymmetry
+   * is deliberate rather than an oversight.
+   *
+   * `editOverrides` can snapshot-undo because speaker overrides are a small
+   * map in localStorage: restoring the previous value touches nothing outside
+   * this app. A cue edit rewrites the SRT FILE, so an undo entry would have to
+   * perform a SECOND write — over a file the user may have edited in another
+   * editor since, and one this app does not own when the transcript was
+   * imported. Silently re-writing someone's file to satisfy a ⌘Z is a worse
+   * failure than not offering the ⌘Z. The safety net for this path is the
+   * one-time sibling `.bak` written before the first in-place rewrite.
+   *
+   * The consequence, which is worth knowing before "fixing" it: inside this
+   * one view, renaming a speaker is undoable and editing a cue is not, with
+   * nothing on screen saying so. Pinned by
+   * `e2e/transcript-two-instances.spec.ts` so the boundary moves only on
+   * purpose.
+   */
   const commitCueEdit = useCallback(async (cueIdx: number, newText: string) => {
     setEditingCue(null);
     const target = flatCues[cueIdx]?.cue;
