@@ -107,10 +107,12 @@ import { loadReview, saveReview, ensureVersion, setActiveVersion, removeVersion,
 import { loadChapters, adoptSourceChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
 import { appUndo } from "./lib/undo";
 import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./lib/storage";
+import { pushRecentClip } from "./lib/recent-clips";
+import { useClipExportListeners } from "./hooks/use-clip-export-listeners";
 import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
 import {
   durationToTc, framesToTc, secondsToTc,
-  tcToFrames, tcToSeconds,
+  tcToFrames,
   tcDigitsToFrames, tcDigitsToDisplay,
 } from "./lib/timecode";
 import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, looksLikeExtractorRot, prettyHost } from "./lib/validation";
@@ -994,8 +996,6 @@ export default function App() {
   // source at render time: the newest export leads each group, a chevron
   // reveals the rest. Storage stays flat and dumb.
   const [recents, setRecents] = useState<RecentClip[]>(() => loadJson<RecentClip[]>(RECENTS_KEY, []));
-  const pushRecentClip = (prev: RecentClip[], r: RecentClip): RecentClip[] =>
-    [r, ...prev].slice(0, 12);
   useEffect(() => saveJson(RECENTS_KEY, recents), [recents]);
 
   // ====== Recent sources (URL-bar history + "Resume last session") ======
@@ -1577,112 +1577,14 @@ export default function App() {
   exportOptsRef.current = exportOpts;
 
   // ── Clip export listeners ─────────────────────────────────────────
-  // yt-dlp/ffmpeg progress and the finished clip.
-  useEffect(() => {
-    const unlistens: UnlistenFn[] = [];
-    let mounted = true;
-    (async () => {
-      const onClipLog = (e: { payload: LogEvent }) => {
-        if (!mounted || e.payload.job_id !== jobIdRef.current) return;
-        const sourceHint =
-          e.payload.line.startsWith("[ffmpeg]") || e.payload.line.startsWith("[Merger]") ? "ffmpeg" :
-          e.payload.line.startsWith("[") ? "yt-dlp" :
-          e.payload.stream === "stderr" ? "stderr" : "yt-dlp";
-        appendLog(asLogTag(e.payload.tag), sourceHint, e.payload.line);
-      };
-      const a = await listen<LogEvent>("clip-log", onClipLog);
-      const onClipProgress = (e: { payload: ProgressEvent }) => {
-        if (!mounted || e.payload.job_id !== jobIdRef.current) return;
-        setProgress(e.payload.percent);
-      };
-      const b = await listen<ProgressEvent>("clip-progress", onClipProgress);
-      const onClipDone = (e: { payload: DoneEvent }) => {
-        if (!mounted || e.payload.job_id !== jobIdRef.current) return;
-        // If we're running the queue, route the event into the queue runner
-        // and skip the single-export bookkeeping below.
-        if (queueResolverRef.current) {
-          const resolver = queueResolverRef.current;
-          queueResolverRef.current = null;
-          resolver({
-            success: e.payload.success,
-            path: e.payload.path ?? undefined,
-            error: e.payload.error ?? undefined,
-          });
-          return;
-        }
-        if (e.payload.success && e.payload.path) {
-          // Stay on "loaded" so the canvas video stays visible; the toast +
-          // notification bell announce completion non-blockingly.
-          setStatus("loaded");
-          setExportPhase("success"); // Export button → check flash
-          setResultPath(e.payload.path);
-          setProgress(0);
-          const filename = e.payload.path.split("/").pop() ?? "Done.";
-          pushNotification("success", "Clip exported", filename, e.payload.path);
-          notify("Clip exported", filename);
-          // Title/thumbnail snapshot from export start — NOT metadataRef, which
-          // may now point at a different source the user switched to mid-export.
-          const m = clipJobMetaRef.current;
-          const f = fpsRef.current;
-          if (m) {
-            const span =
-              (tcToSeconds(m.outTc, f) ?? 0) - (tcToSeconds(m.inTc, f) ?? 0);
-            const dur = span > 0 ? secondsToTc(span, f) : "Full";
-            const r: RecentClip = {
-              id: Math.random().toString(36).slice(2),
-              title: m.title,
-              path: e.payload.path,
-              dur,
-              when: Date.now(),
-              thumbnail: m.thumbnail,
-              source: m.source,
-            };
-            setRecents((prev) => pushRecentClip(prev, r));
-          }
-        } else if (e.payload.error === "Cancelled") {
-          setStatus("loaded");
-          setExportPhase("idle"); // user cancel → straight to idle, no error flash
-          setErrorDetail(null);
-          setProgress(0);
-          appendLog("warn", "ffmpeg", "Export cancelled");
-          pushNotification("info", "Export cancelled", "");
-        } else {
-          setStatus("error");
-          setExportPhase("error"); // Export button → cross flash
-          // Humanize AFTER classifyExtractorRot sees the raw text (the
-          // humanizer only rewrites EACCES spawn failures, but keep the
-          // ordering honest anyway).
-          classifyExtractorRot(e.payload.error ?? "");
-          const msg = humanizeSpawnError(e.payload.error ?? "Export failed");
-          setErrorDetail(msg);
-          notify("Export failed", msg);
-          pushNotification("error", "Export failed", msg);
-        }
-      };
-      const c = await listen<DoneEvent>("clip-done", onClipDone);
-      unlistens.push(a, b, c);
-      // A cleanup that fires DURING the awaits above finds an empty array
-      // and unregisters nothing — under StrictMode that leaked every
-      // listener on each dev boot. The handlers are inert either way (each
-      // starts with a `mounted` check) but stayed registered forever.
-      if (!mounted) {
-        unlistens.forEach((u) => u());
-        unlistens.length = 0;
-      }
-    })();
-    return () => {
-      mounted = false;
-      unlistens.forEach((u) => u());
-    };
-    // Every dep here is stable (empty deps of its own), so this runs once
-    // for the app's lifetime and never re-subscribes.
-  }, [
-    // Narrowed to what this effect actually calls. All four sibling effects
-    // were split out of one 292-line listener block and each inherited that
-    // block's whole dependency array, so two of these were never referenced
-    // here — a re-subscribe of all three clip listeners waiting on an identity
-    // change in something this code does not use.
-    appendLog, notify, pushNotification, classifyExtractorRot]);
+  // yt-dlp/ffmpeg progress and the finished clip. Lifted whole into
+  // src/hooks/use-clip-export-listeners.ts — including the queue-resolver
+  // branch, which is the part that must not double-report a queued clip.
+  useClipExportListeners({
+    appendLog, notify, pushNotification, classifyExtractorRot,
+    setStatus, setExportPhase, setResultPath, setProgress, setErrorDetail, setRecents,
+    jobIdRef, fpsRef, clipJobMetaRef, queueResolverRef,
+  });
 
   // ── Captions listeners ─────────────────────────────────────────
   // yt-dlp's caption fetch. Its done-handler also loads the SRT into the
