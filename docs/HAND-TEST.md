@@ -73,6 +73,24 @@ what changed is where they live and how a failed start releases its job id.
       `role: off` and omit the block entirely, because the handler held session
       state from whenever the last log line landed.
 
+### 3b. The queue button, which used to go dead in silence
+
+A single export holds the shared local-export cancel token, so a queue has to
+wait for it. Nothing said so: the queue branch replaces the single export's own
+button, and a running export also suppresses the "No output folder set" nudge,
+so the panel went quiet around a full-strength button reading `Export 3 clips`
+that did nothing when clicked.
+
+- [ ] Start a single clip export. **While it is still running**, add two or
+      three clips to the queue.
+- [ ] The primary button should now read **"Waiting for the current export"**,
+      greyed, with a tooltip on hover saying the queue starts when the current
+      one finishes. It must NOT read `Export 3 clips`.
+- [ ] When the single export finishes, the button should return to
+      `Export 3 clips` and work.
+- [ ] Sanity check the other direction: with the queue running, the same button
+      reads `Exporting…`, not the waiting text.
+
 ## 4. Co-review — reactions, and the STUN setting
 
 - [ ] With a peer: react to a comment, **remove the reaction**, end the session,
