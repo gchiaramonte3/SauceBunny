@@ -231,6 +231,39 @@ The one deliberate exception to "state lives in App" is the playhead. It ticks u
 - **Action-time readers** — mark in/out, frame snapshot, seek-by-seconds, and the co-review heartbeat/presence/chase call `getPlayheadFrames()` when they fire; the shuttle edge-stop watches via a plain subscription (no re-render at all).
 - **Cross-window feed** — the popped-out panel can't subscribe across webviews, so the playhead reaches it as data, without re-rendering App: the change-driven `panel:state` snapshot carries the position as of its publish (the boot seed + the pause/seek truth), and `use-panel-bus` emits a lightweight `panel:playhead` heartbeat (4 Hz, only while a panel is detached and the playhead actually moved) that PanelApp writes into its window's store. The live clock deliberately stays OUT of the snapshot so playback never re-serializes it.
 
+### What is left to extract, and what only looks extractable
+
+`App.tsx` is ~6,850 lines. The roadmap direction is one cohesive subsystem at a
+time into `src/hooks/use-*.ts` (done: `use-panel-bus`, `use-web-playback`,
+`use-co-review`, `use-library-scan`, `use-media-capture`, `use-transport`).
+Picking the next one by *name* is how the exercise goes wrong, so this records
+what the code actually shows.
+
+**Diarizer model prep is cohesive — take this one.** Three `useState`, one job-id
+ref, two handlers (`handlePrepareDiarizerModels`, `handleCancelDiarizerPrepare`)
+and two Tauri listeners (`diarize-prepare-progress`, `diarize-prepare-done`). It
+reaches outside itself exactly twice: `pushNotification`, and flipping
+`diarizerReady` (plus its `saucebunny.diarizerModelsReady` flag). Both are clean
+callback seams — `useDiarizerPrepare({ pushNotification, onReady })` returning
+`{ state, error, prepare, cancel }`. Nothing else in App reads its state; the
+Sidebar and Settings take it as props.
+
+**Captions is NOT cohesive, despite reading like a subsystem.** Its state is
+scattered over six regions, but that is not the problem — the problem is that
+`captions-done` writes `setActiveTranscript` and `setTranscriptArrivedTick`,
+which the Whisper pipeline also owns. A hook that reached back into App to set
+those would be a worse seam than the status quo. The cohesive unit here is
+*transcript arrival* (captions + transcription + history recording), not
+captions.
+
+**The central listener effect is the real obstacle.** One `useEffect` registers
+the whole app's Tauri listeners behind a shared `mounted` flag and writes 16
+different setters across captions, transcript, export and status. Any extraction
+that owns an event has to lift its listener out of that effect. That is fine for
+the diarizer pair (own listeners, own cleanup) and is the hard part for
+everything else. Splitting that effect by domain is worth doing on its own,
+before — not during — the next subsystem extraction.
+
 ## Build-ID handshake
 
 Both sides of the IPC carry a build-ID string:
