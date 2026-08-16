@@ -506,10 +506,25 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ## Enforced contracts
 
-Twenty-six rules in this file are checked by a test rather than remembered. If you
+Twenty-eight rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
+
+**Any guard that SCANS needs a canary**, and this is the failure this repo keeps
+meeting rather than a general principle. `expect(offenders).toEqual([])` passes
+just as happily when the scan found nothing to examine, so a check that quietly
+stops looking reports success for ever. It has happened here four separate ways:
+a reduced-motion probe that skipped every `position: fixed` element and so
+declared the policy perfect while fourteen animations ran; a focus-trap test
+that asked only whether focus escaped, so a trap reaching NO control passed; a
+long-name overflow sweep that would have passed on a library which failed to
+seed; and a transform comparison that found zero transforms because
+`getComputedStyle(el)` never reports pseudo-elements. So assert the population
+too — `expect(found.length).toBeGreaterThan(0)`, or an allowlist whose entries
+must still MATCH something, which is the same idea paying twice. Then break the
+code on purpose and confirm the test fails, and confirm the mutation landed
+before believing the result.
 
 Every one of them exists because the rule alone was not enough — each was
 written after finding the rule already broken somewhere.

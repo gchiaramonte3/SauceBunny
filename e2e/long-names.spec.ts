@@ -47,6 +47,17 @@ async function libraryWithRoot(page: Page, name: string) {
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".cp-lib-row-title").first()).toBeVisible();
+
+  // The name is REALLY on screen. Without this the overflow sweep below is
+  // satisfied by a library that failed to seed: nothing renders, nothing
+  // overflows, every test passes, and the one input the file exists to try was
+  // never applied. Asserting a row is visible is not enough - it has to be the
+  // row with this name in it.
+  const title = await page.locator(".cp-lib-row-title").first().textContent();
+  expect(
+    (title ?? "").replace(/\s+/g, " ").trim(),
+    `the seeded name never reached the row (got "${(title ?? "").slice(0, 40)}…")`,
+  ).toContain(name.slice(0, 24));
 }
 
 /** Reachable elements pushed past the right edge. */
