@@ -10,6 +10,7 @@
 
 import type { LibraryFolder, LibraryItem } from "../types";
 import { loadJson, saveJson } from "./storage";
+import { pathKey } from "./repath";
 
 const ROOTS_KEY = "saucebunny.libraryRoots";
 const THUMB_TIMES_KEY = "saucebunny.libraryThumbTimes";
@@ -234,27 +235,6 @@ export function saveLibraryRoots(roots: readonly string[]): void {
  * Load the chosen-poster map, tolerating junk: only string→finite-number
  * entries survive (a corrupt blob yields {} rather than crashing the Library).
  */
-/**
- * The canonical form of a path used as a STORE KEY.
- *
- * macOS stores filenames decomposed; a rename dialog hands back what the
- * keyboard sent, which is composed. So renaming a file to "café.mov" writes
- * the poster and timecode under a composed key, the next library scan asks for
- * the decomposed one, and the answer is null - the user's chosen poster frame
- * is silently gone, on that file only, for a reason nothing on screen explains.
- *
- * Normalising on both read and write makes the key space canonical, and load
- * normalises what is already stored, so a map written by an older build
- * migrates the first time it is read rather than needing a migration step.
- *
- * Case is deliberately NOT touched. The stores are case-SENSITIVE on purpose -
- * repath.ts turns on that, so a case-only rename does the identity work - and
- * folding case here would quietly undo it.
- */
-function pathKey(path: string): string {
-  return path.normalize("NFC");
-}
-
 export function loadChosenPosters(): Record<string, number> {
   const raw = loadJson<unknown>(THUMB_TIMES_KEY, {});
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};

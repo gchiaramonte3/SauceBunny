@@ -14,6 +14,8 @@
  * this to be per-machine (the SRTs themselves are on this machine).
  */
 
+import { pathKey, samePath } from "./repath";
+
 const STORAGE_KEY = "saucebunny.transcriptHistory";
 const MAX_ENTRIES = 50;
 
@@ -196,13 +198,6 @@ export function removeEntry(id: string): void {
  * scan produced is decomposed and the one a rename dialog produced is
  * composed, and an exact compare misses.
  */
-/** Canonical form for a path used as a MATCH target here. See CLAUDE.md:
- *  a scanned path is decomposed, a dialog's is composed, and `===` misses. */
-function samePath(a: string | null | undefined, b: string | null | undefined): boolean {
-  if (!a || !b) return false;
-  return a.normalize("NFC") === b.normalize("NFC");
-}
-
 export function renameSourcePath(oldPath: string, newPath: string, newTitle?: string): void {
   const entries = safeRead();
   let changed = false;
@@ -211,7 +206,7 @@ export function renameSourcePath(oldPath: string, newPath: string, newTitle?: st
       // Stored normalised, not raw. Comparing NFC while WRITING whatever the
       // dialog gave us just moves the mismatch one step down the line: the
       // next scan asks with the decomposed path and misses again.
-      e.sourcePath = newPath.normalize("NFC");
+      e.sourcePath = pathKey(newPath);
       if (newTitle) e.title = newTitle;
       changed = true;
     }

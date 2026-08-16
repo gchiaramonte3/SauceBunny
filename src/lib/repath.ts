@@ -24,6 +24,38 @@
  */
 
 /**
+ * THE path-identity helpers. Everything that compares or keys on a filesystem
+ * path goes through these two, and the reason is a scar rather than a
+ * principle.
+ *
+ * macOS stores filenames decomposed; a text field returns what the keyboard
+ * sent, which is composed. Three separate stores learned that separately, and
+ * each grew its own private normaliser — and because each was written while
+ * looking at one direction of the problem, each needed a SECOND pass to fix
+ * the other: canonicalising the poster maps on load broke renaming AWAY from
+ * an accented name, and normalising the transcript-history comparison while
+ * still WRITING the raw path moved the mismatch one step later instead of
+ * ending it. Both were caught by reverting the fix and watching a test fail,
+ * not by reading.
+ *
+ * One implementation means one place to be wrong, and one place to fix.
+ *
+ * Case is deliberately untouched: these stores are case-SENSITIVE on purpose,
+ * which is what makes a case-only rename do its identity work (see
+ * needsRepath). Diacritics are untouched too — folding them would make か
+ * match が. See CLAUDE.md's storage section.
+ */
+export function pathKey(path: string): string {
+  return path.normalize("NFC");
+}
+
+/** True when two paths name the same file, whatever encoding each arrived in. */
+export function samePath(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return pathKey(a) === pathKey(b);
+}
+
+/**
  * Move one key in a record, if it is there.
  *
  * Returns the SAME object when nothing moved, so a caller can skip a write.
@@ -41,8 +73,8 @@ export function repathKey<T>(
   // exactly the bug that normalising the maps was meant to end, arriving from
   // the other direction. Found by auditing that change rather than by using
   // the app, which is the only way it would have surfaced.
-  const fromKey = from.normalize("NFC");
-  const toKey = to.normalize("NFC");
+  const fromKey = pathKey(from);
+  const toKey = pathKey(to);
   if (fromKey === toKey) return map;
   if (!Object.prototype.hasOwnProperty.call(map, fromKey)) return map;
   const next = { ...map };
