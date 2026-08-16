@@ -16,23 +16,26 @@ import { tauriMockInit } from "./tauri-mock";
  *    TranscriptViewer's ⌘F and ⌘G consult before deciding it is safe to act;
  *  · and Tab walked straight out of it.
  *
- * The first three are fixed and asserted below. A FOURTH defect is confirmed
- * and NOT fixed, so it is written down rather than quietly left: focus never
- * enters the gate when it opens. `document.activeElement` is still the Post
- * button behind the scrim at +0ms, +100ms and +500ms.
+ * All of those are fixed and asserted below.
  *
- * The mechanism is known, which is the useful part. Instrumenting the mount
- * showed the focus call SUCCEEDING — activeElement was the input immediately
- * after — and then being taken back. `useModalFocus`'s cleanup ends with
- * `if (prev && prev.isConnected) prev.focus()`, restoring focus to whatever
- * opened the modal; something re-runs that cleanup after mount, so the Post
- * button reclaims focus. Focusing the same input from outside afterwards
- * works and sticks, so nothing refuses focus — it is purely that restore
- * winning the last word.
+ * A NOTE ON A DEFECT THAT TURNED OUT NOT TO EXIST, because an earlier version
+ * of this file asserted it and two tasks were filed about it. Focus DOES enter
+ * the gate. The gate opens from the composer's own `onFocus` handler
+ * (`ensureNamed()`), so by the time it mounts the caret is already heading
+ * into it — `useModalFocus` observes `prev: INPUT, contains: true` and
+ * `document.activeElement` settles on the gate's name field.
  *
- * Two attempts (a rAF, then a 0ms macrotask) did not beat it, and guessing
- * further at ordering is how a real fix gets papered over. It needs the
- * focus-restore contract looked at properly, not another delay.
+ * The apparent bug was this test's fault. It used to type into the composer
+ * with `fill()` and then click Post — but the gate is modal and covers the
+ * composer, so filling it is something Playwright can do and a user cannot.
+ * That dragged focus back out before the assertion ran, and every measurement
+ * afterwards reported the Post button. Four theories were tested against that
+ * phantom (the focus hook, StrictMode, duplicate mounts, mount timing) before
+ * instrumenting the production bundle showed the effects running correctly all
+ * along.
+ *
+ * The helper below now opens the gate the way a user does: focus the composer,
+ * and it appears.
  *
  * It was only reachable at all once the mock could load a source and open the
  * review tab, which is why it survived every earlier accessibility sweep —
@@ -68,22 +71,15 @@ async function openNameGate(page: Page) {
   await expect(tab, "no review tab, so nothing below was exercised").toHaveCount(1);
   await tab.click();
 
+  // Focusing the composer IS what raises the gate — `onFocus={() => ensureNamed()}`.
+  // No typing, no Post click: those were the steps that used to reach past an
+  // open modal and invalidate every focus measurement in this file.
   const box = page.getByPlaceholder(/^Comment at/);
   await expect(box, "no comment composer found").toBeVisible();
   await box.click();
-  await box.fill("HELLO");
-  // Assert the value LANDED before reading the button that depends on it.
-  // `type()` into a composer the drawer may still be laying out dropped the
-  // text under parallel load, so Post stayed disabled and the helper failed
-  // for a reason unrelated to any test using it.
-  await expect(box).toHaveValue("HELLO");
-
-  const post = page.getByRole("button", { name: "Post", exact: true });
-  await expect(post).toBeEnabled();
-  await post.click();
 
   const gate = page.locator(".cp-review-namegate");
-  await expect(gate, "posting without a name did not raise the name gate").toBeVisible();
+  await expect(gate, "focusing the composer did not raise the name gate").toBeVisible();
   return gate;
 }
 
@@ -100,17 +96,20 @@ test("the name gate is a real dialog, with a name", async ({ page }) => {
   expect(pageErrors, pageErrors.join("\n")).toHaveLength(0);
 });
 
-test("Tab cannot leave the gate", async ({ page }) => {
+test("focus enters the gate, and Tab cannot leave it", async ({ page }) => {
   const gate = await openNameGate(page);
 
-  // NOTE: focus-on-open is NOT asserted, because it does not work — see the
-  // header. Asserting it would mean shipping a red test or, worse, deleting
-  // the assertion later and losing the record that it was ever broken.
-  //
+  // Focus-on-open, asserted again now that the flow above matches what a user
+  // can actually do. This is the assertion an earlier version of this file
+  // deleted on the strength of a measurement taken from an unreachable state.
+  await expect(async () => {
+    const inside = await page.evaluate(() =>
+      !!(document.activeElement as HTMLElement | null)?.closest(".cp-review-namegate"));
+    expect(inside, "focus did not enter the dialog").toBe(true);
+  }).toPass({ timeout: 3000 });
+
   // Eight tabs is more than the control count, so an untrapped dialog would
-  // certainly have leaked by now. The trap works from outside too: Tab walks
-  // in and then cannot get back out, which is what makes the modal usable by
-  // keyboard even with the focus-on-open defect present.
+  // certainly have leaked by now.
   for (let i = 0; i < 8; i++) await page.keyboard.press("Tab");
   const stillInside = await page.evaluate(() =>
     !!(document.activeElement as HTMLElement | null)?.closest(".cp-review-namegate"));
@@ -119,15 +118,19 @@ test("Tab cannot leave the gate", async ({ page }) => {
   expect(pageErrors, pageErrors.join("\n")).toHaveLength(0);
 });
 
-test("naming keeps the typed comment rather than discarding it", async ({ page }) => {
-  // `submit` bails at `ensureNamed()` BEFORE clearing the composer, so the
-  // draft survives. Worth pinning: the alternative — a user types a note,
-  // presses Post, and the text is gone — is the kind of loss that is invisible
-  // in code review and infuriating in use.
+test("naming dismisses the gate and hands the composer back", async ({ page }) => {
+  // The gate blocks the composer until a name exists; once saved it should get
+  // out of the way and leave the user typing where they meant to.
   await openNameGate(page);
   await page.locator(".cp-review-namegate input").first().fill("Ada");
   await page.getByRole("button", { name: "Start reviewing" }).click();
   await expect(page.locator(".cp-review-namegate")).toHaveCount(0);
-  await expect(page.getByPlaceholder(/^Comment at/)).toHaveValue("HELLO");
+
+  const box = page.getByPlaceholder(/^Comment at/);
+  await box.click();
+  await box.fill("a real note");
+  await expect(box, "the composer is unusable after naming").toHaveValue("a real note");
+  await expect(page.locator(".cp-review-namegate"), "the gate came back for a named reviewer")
+    .toHaveCount(0);
   expect(pageErrors, pageErrors.join("\n")).toHaveLength(0);
 });

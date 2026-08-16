@@ -123,13 +123,13 @@ test("the review tab: every field has a name", async ({ page }) => {
 test("the name gate: every field has a name", async ({ page }) => {
   await bootWithSource(page);
   await page.locator("#cp-tab-review").click();
-  const box = page.getByPlaceholder(/^Comment at/);
-  await box.click();
-  await box.fill("HELLO");
-  await expect(box).toHaveValue("HELLO");
-  const post = page.getByRole("button", { name: "Post", exact: true });
-  await expect(post).toBeEnabled();
-  await post.click();
+  // Focusing the composer raises the gate (`onFocus={() => ensureNamed()}`).
+  // An earlier version typed into the composer and clicked Post first, which
+  // reaches past an already-open modal — something Playwright can do and a
+  // user cannot. Harmless for a label sweep, but it modelled an unreachable
+  // state, and in the sibling name-gate spec the same flow invented a
+  // focus defect that cost two filed tasks before it was disproven.
+  await page.getByPlaceholder(/^Comment at/).click();
   await expect(page.locator(".cp-review-namegate")).toBeVisible();
 
   const { found, total } = await unlabelled(page);
