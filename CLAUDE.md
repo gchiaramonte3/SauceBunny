@@ -497,7 +497,7 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ## Enforced contracts
 
-Twenty-three rules in this file are checked by a test rather than remembered. If you
+Twenty-four rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -521,6 +521,7 @@ written after finding the rule already broken somewhere.
 | `settings-pointer-contract` | "Settings → X" in user-facing copy names a tab or section that exists (labels read from SettingsModal, never retyped) |
 | `command-coverage-contract` | Every rebindable action has a ⌘K entry, and `onNavigateView` accepts every view that has one |
 | `error-format` | Every `AppError` variant in the generated binding renders user copy — a new Rust variant fails rather than showing "[object Object]" |
+| `session-msg-contract` | Every co-review `SessionMsg` kind is handled somewhere, lifecycle in Rust and app messages in the frontend |
 | `job-id` | Job ids are minted locally and never awaited |
 | `updater-purity-contract` | No `setX(prev => …)` writes, invokes, persists or touches a ref |
 | `pure-updater-contract` | Reducer-style updaters stay pure |
