@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { createPortal } from "react-dom";
 import { fmtTalkTime, type SpeakerStat } from "../../lib/speaker-stats";
+import { useDismiss } from "../../hooks/use-dismiss";
 
 /**
  * "Speaker insights" popover anchored to the Insights button in the
@@ -24,22 +25,7 @@ type Props = {
 
 export function InsightsPopover({ anchor, stats, colorOf, onClose }: Props) {
   const popRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (!popRef.current?.contains(e.target as Node)) onClose();
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    // Defer so the click that opened the popover doesn't immediately close it.
-    const t = setTimeout(() => document.addEventListener("mousedown", onDoc), 0);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
+  useDismiss(popRef, onClose);
 
   const POP_W = 340;
   const POP_H_MAX = 360;

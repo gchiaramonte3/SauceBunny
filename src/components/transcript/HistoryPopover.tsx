@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { createPortal } from "react-dom";
+import { useDismiss } from "../../hooks/use-dismiss";
 import {
   formatTimeAgo,
   type TranscriptHistoryEntry,
@@ -54,17 +55,8 @@ export function HistoryPopover({
     })();
     return () => { live = false; };
   }, [entries]);
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (!popRef.current?.contains(e.target as Node)) onClose();
-    }
-    // Defer so the click that opened the popover doesn't immediately close it.
-    const t = setTimeout(() => document.addEventListener("mousedown", onDoc), 0);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener("mousedown", onDoc);
-    };
-  }, [onClose]);
+  // Escape included, which this popover was missing entirely.
+  useDismiss(popRef, onClose);
 
   const POP_W = 340;
   const POP_H_MAX = 360;
