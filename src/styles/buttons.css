@@ -627,6 +627,19 @@
   .cp-gen-result { transition: none; }
 }
 
+/* An armed destructive button, the text-button twin of `.cp-web-forget.armed`
+   in library.css. Same bargain: the second click deletes, so the control has
+   to stop looking like the ghost button beside it and start naming what goes.
+   It carries the size in its label, because a model Delete used to be
+   indistinguishable from the "Use as default" next to it. */
+.btn.armed {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--fg-0);
+  font-weight: 700;
+}
+.btn.armed:hover { background: var(--danger-2); border-color: var(--danger-2); }
+
 /* Reduced motion. Transitions here are stopped by DURATION, never by
    neutralising the transform: a `-50%` translate is CENTRING, so replacing it
    moves the element half its own width off target. Zeroing a duration cannot

@@ -500,6 +500,36 @@ export function SettingsModal(props: Props) {
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
 
+  /**
+   * Arming for the two model Delete buttons, keyed `whisper:<id>` / `llm:<id>`
+   * so one piece of state serves both lists and arming one disarms the other.
+   *
+   * These were the most expensive single-click actions in the app. A model is
+   * a multi-GB download measured in minutes or hours, the button sat directly
+   * beside "Use as default" in the same `btn btn-ghost` styling, and the only
+   * statement of what it did lived in a `title` nobody reads before clicking.
+   *
+   * The rule was already written down. CachedWebPane says it in full: a
+   * multi-GB consequence gets named in the control the user clicks and never
+   * only in a tooltip. Clearing the cache asks (and names the bytes); the
+   * settings reset asks. The two actions that cost the most were the two that
+   * did not, so this is the existing policy reaching the places it missed
+   * rather than a new pattern.
+   */
+  const [armedDelete, setArmedDelete] = useState<string | null>(null);
+  useEffect(() => {
+    if (!armedDelete) return;
+    // An armed button disarms itself. A confirm that stays hot is a mine: the
+    // next ordinary click on this row would be the destructive one.
+    // Escape is NOT handled here. CachedWebPane can own its own Escape because
+    // it is a pane; this is a modal that already closes on Escape, and a second
+    // window listener would fire alongside the first, disarming AND closing
+    // Settings in one keystroke. The precedence lives in that one handler
+    // below, where the innermost dismissable thing wins.
+    const t = setTimeout(() => setArmedDelete(null), 4000);
+    return () => clearTimeout(t);
+  }, [armedDelete]);
+
   const exportSettings = useCallback(async () => {
     setBackupMsg(null);
     try {
@@ -726,11 +756,18 @@ export function SettingsModal(props: Props) {
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") { e.preventDefault(); onClose(); }
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      // Innermost first: an armed Delete is the thing the user most recently
+      // opened, so Escape cancels that and leaves Settings where it was.
+      // Closing the whole modal instead would be a surprising amount of
+      // dismissal for a keystroke aimed at one button.
+      if (armedDelete) { setArmedDelete(null); return; }
+      onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, armedDelete]);
 
   // Trap Tab inside the dialog + restore focus to the opener on close.
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -1240,11 +1277,17 @@ export function SettingsModal(props: Props) {
                             )}
                             {m.downloaded && (
                               <button
-                                className="btn btn-ghost"
-                                onClick={() => deleteModel(m.id)}
-                                title="Remove this model file from disk"
+                                className={"btn btn-ghost" + (armedDelete === `whisper:${m.id}` ? " armed" : "")}
+                                onClick={() => {
+                                  if (armedDelete === `whisper:${m.id}`) { setArmedDelete(null); deleteModel(m.id); return; }
+                                  setArmedDelete(`whisper:${m.id}`);
+                                }}
+                                title={`Remove this model file from disk. Re-downloading it is ${formatBytes(m.size_bytes)}.`}
+                                aria-label={armedDelete === `whisper:${m.id}`
+                                  ? `Confirm deleting ${m.name}, ${formatBytes(m.size_bytes)}`
+                                  : `Delete ${m.name}, ${formatBytes(m.size_bytes)}`}
                               >
-                                Delete
+                                {armedDelete === `whisper:${m.id}` ? `Delete ${formatBytes(m.size_bytes)}?` : "Delete"}
                               </button>
                             )}
                           </div>
@@ -1558,8 +1601,18 @@ export function SettingsModal(props: Props) {
                               </button>
                             )}
                             {m.downloaded && (
-                              <button className="btn btn-ghost" onClick={() => deleteLlmModel(m.id)} title="Remove this model file from disk">
-                                Delete
+                              <button
+                                className={"btn btn-ghost" + (armedDelete === `llm:${m.id}` ? " armed" : "")}
+                                onClick={() => {
+                                  if (armedDelete === `llm:${m.id}`) { setArmedDelete(null); deleteLlmModel(m.id); return; }
+                                  setArmedDelete(`llm:${m.id}`);
+                                }}
+                                title={`Remove this model file from disk. Re-downloading it is ${formatBytes(m.size_bytes)}.`}
+                                aria-label={armedDelete === `llm:${m.id}`
+                                  ? `Confirm deleting ${m.name}, ${formatBytes(m.size_bytes)}`
+                                  : `Delete ${m.name}, ${formatBytes(m.size_bytes)}`}
+                              >
+                                {armedDelete === `llm:${m.id}` ? `Delete ${formatBytes(m.size_bytes)}?` : "Delete"}
                               </button>
                             )}
                           </div>
