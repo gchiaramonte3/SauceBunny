@@ -229,7 +229,21 @@ Do not add new Tauri plugins without explaining what existing capability is insu
   said "do not introduce a WhisperKit dependency", which reads as broken the
   moment anyone checks. Enforced on OUR sources by
   `src/lib/swift-sidecar-contract.test.ts`.
-- The JSON envelope schema (v1) is a contract between Swift, Rust, and JS. Changing it requires updating all three layers.
+- **The diarizer envelope is TWO contracts, not one three-way contract**, and
+  they break differently. **Swift → Rust** is the JSON: `turns[].{speaker,
+  start, end}`. **Rust → JS** is the SRT label convention — `[SPEAKER_00] text`
+  and the `SPEAKER_UNK` sentinel Rust writes for a cue matching no turn. JS
+  never opens the envelope (`schema_version` appears nowhere under `src/`);
+  Rust merges the turns into the SRT and the viewer parses labels out of that.
+  Both are pinned by `src/lib/diarizer-envelope-contract.test.ts`.
+  Why it needs pinning: `parse_diarizer_json` is forgiving by design — a
+  missing `start` becomes 0.0 and `end` becomes `start`, then any turn where
+  `end > start` is false is dropped. So renaming ONE field in the Swift emitter
+  raises nothing: every turn collapses, the parse returns an empty vec, and the
+  user gets a transcript with no speakers plus a "Speakers not detected"
+  notification that reads like a legitimate result. `schema_version` cannot
+  save you — Swift emits it and Rust never reads it, so it is documentation
+  rather than a guard.
 - **Never** import UIKit (this is macOS, not iOS).
 
 ---
@@ -528,7 +542,7 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ## Enforced contracts
 
-Thirty-one rules in this file are checked by a test rather than remembered. If you
+Thirty-two rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -593,6 +607,7 @@ written after finding the rule already broken somewhere.
 | `duplicated-tables-contract` (3rd block) | No component re-implements a helper `lib/` already exports |
 | `control-naming-contract` | A control's tooltip and accessible name never use different words for the same thing |
 | `dismiss-parity-contract` | No NEW hand-rolled click-outside dismisser; use `useDismiss`, which brings Escape with it |
+| `diarizer-envelope-contract` | Swift and Rust name the same turn fields, and the SPEAKER_UNK sentinel agrees across Rust and the SRT parser |
 
 Three more are measured against the RENDERED app rather than its source, in
 `e2e/`, because CSS and the accessibility tree are not readable by grep:
