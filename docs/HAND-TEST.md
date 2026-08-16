@@ -43,6 +43,22 @@ that file's path from one helper.
       timing). Both paths use the same staged-WAV helper.
 - [ ] Transcribe a **web source**. Different command, same helper.
 
+### 2b. Speaker models — the path that moved out of App.tsx
+
+`useDiarizerPrepare` now owns this. The states and the button are the same;
+what changed is where they live and how a failed start releases its job id.
+
+- [ ] Settings ▸ Transcription ▸ **Download speaker models**. It reports
+      running, then a "Speaker models ready" notification, and the Detect
+      speakers hint switches to cached.
+- [ ] Start it and **Cancel**. It returns to idle with NO error banner, and
+      the button is immediately usable again.
+- [ ] With it already cached, run it again. Nothing should get stuck on
+      "running".
+- [ ] Trigger a failure twice in a row if you can (unplug the network mid
+      download, twice). The button must still work on the third press — a
+      job-id leak there used to be possible and is what the new test pins.
+
 ## 3. Exports — every write is now atomic
 
 - [ ] Export a clip. Check the file plays.
