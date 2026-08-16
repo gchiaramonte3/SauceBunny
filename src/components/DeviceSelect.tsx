@@ -1,4 +1,5 @@
 import { IconMic, IconVideo } from "./Icons";
+import { deviceLabel } from "../lib/media-devices";
 
 /**
  * One labelled device picker: camera or microphone.
@@ -40,7 +41,7 @@ export function DeviceSelect({ kind, devices, value, onPick }: {
         {devices.length === 0 && <option value="">Default</option>}
         {devices.map((d, i) => (
           <option key={d.deviceId || i} value={d.deviceId}>
-            {d.label || `${title} ${i + 1}`}
+            {deviceLabel(d, i, title)}
           </option>
         ))}
       </select>

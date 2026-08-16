@@ -8,6 +8,7 @@ import {
 import { IconMic, IconScreenShare, IconVideo } from "./Icons";
 import { METER_SEGMENTS, meterZoneClass, startLevelMeter } from "../lib/level-meter";
 import { invoke } from "@tauri-apps/api/core";
+import { deviceLabel } from "../lib/media-devices";
 
 /**
  * Settings > Camera & Mic - the Discord-style AV panel, scoped to what
@@ -164,8 +165,6 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
     testAudioRef.current?.pause();
     testAudioRef.current = null;
   }, []);
-
-  const label = (d: MediaDeviceInfo, i: number, kind: string) => d.label || `${kind} ${i + 1}`;
   const acquire = (patch: Partial<typeof cap.choice>) => {
     ownedHereRef.current = true;
     void cap.acquire({ ...cap.choice, ...patch });
@@ -289,7 +288,7 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
                 >
                   {cap.devices.cameras.length === 0 && <option value="">Default</option>}
                   {cap.devices.cameras.map((d, i) => (
-                    <option key={d.deviceId || i} value={d.deviceId}>{label(d, i, "Camera")}</option>
+                    <option key={d.deviceId || i} value={d.deviceId}>{deviceLabel(d, i, "Camera")}</option>
                   ))}
                 </select>
               </div>
@@ -304,7 +303,7 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
                 >
                   {cap.devices.mics.length === 0 && <option value="">Default</option>}
                   {cap.devices.mics.map((d, i) => (
-                    <option key={d.deviceId || i} value={d.deviceId}>{label(d, i, "Microphone")}</option>
+                    <option key={d.deviceId || i} value={d.deviceId}>{deviceLabel(d, i, "Microphone")}</option>
                   ))}
                 </select>
               </div>
@@ -364,7 +363,7 @@ export function AvSettingsPane({ sectionOpen, toggleSection }: {
                   >
                     <option value="">System default</option>
                     {cap.devices.speakers.map((d, i) => (
-                      <option key={d.deviceId || i} value={d.deviceId}>{label(d, i, "Speakers")}</option>
+                      <option key={d.deviceId || i} value={d.deviceId}>{deviceLabel(d, i, "Speakers")}</option>
                     ))}
                   </select>
                 </div>

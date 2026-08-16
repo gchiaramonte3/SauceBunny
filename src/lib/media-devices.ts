@@ -252,3 +252,20 @@ export function stopStream(s: MediaStream | null): void {
     void src.ctx.close();
   }
 }
+
+/**
+ * What to show for a device the browser has not named.
+ *
+ * A DEVICE WITH NO LABEL IS THE NORMAL CASE, not an edge one: the browser
+ * withholds device labels until capture permission is granted, so before the
+ * user says yes every entry is an empty string. A picker of blank rows is
+ * indistinguishable from a broken one, hence the positional fallback.
+ *
+ * Here rather than in a component because it had three copies - DevicePanel,
+ * GreenRoomDevices and AvSettingsPane - and consolidating the first two into
+ * DeviceSelect left the third behind, in a pane whose chrome is different
+ * enough that sharing the whole control would be wrong.
+ */
+export function deviceLabel(d: MediaDeviceInfo, i: number, kind: string): string {
+  return d.label || `${kind} ${i + 1}`;
+}
