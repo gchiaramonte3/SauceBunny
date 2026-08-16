@@ -401,7 +401,11 @@ fn timecode_to_seconds(tc: &str, fps: f64) -> Result<f64, crate::AppError> {
         3 => (nums[0], nums[1], nums[2], 0),
         2 => (0, nums[0], nums[1], 0),
         1 => (0, 0, nums[0], 0),
-        _ => unreachable!(),
+        // Unreachable today: the guard above rejects anything outside 1..=4.
+        // It returns the same error rather than panicking so that the guard
+        // and this match cannot drift apart - widen the guard to five parts
+        // and a panic on typed input is the only thing that tells you.
+        _ => return Err(crate::AppError::invalid(format!("Invalid timecode: {tc}"))),
     };
     if m >= 60 || s >= 60 {
         return Err(crate::AppError::invalid(format!("Invalid timecode: {tc}")));
