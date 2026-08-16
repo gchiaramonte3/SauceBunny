@@ -27,7 +27,16 @@ export function reactionGlyph(emote: string): string {
 }
 
 export function reactionLabel(emote: string): string {
-  return REACTION_EMOTES.find((e) => e.key === emote)?.label ?? emote;
+  const known = REACTION_EMOTES.find((e) => e.key === emote)?.label;
+  if (known) return known;
+  // Unknown keys fall through on PURPOSE: a newer peer sending "party" should
+  // announce as "party" rather than as nothing. But this is a peer's string
+  // reaching a live region, so it is bounded — the glyph beside it already
+  // fails closed to ✨, and a label that can be any length is the one half of
+  // this pair that a modified build could abuse.
+  const trimmed = emote.trim();
+  if (!trimmed) return "a reaction";
+  return trimmed.length > 24 ? `${trimmed.slice(0, 24)}…` : trimmed;
 }
 
 /** Comment-reaction palette (the review panel's emoji set). */
