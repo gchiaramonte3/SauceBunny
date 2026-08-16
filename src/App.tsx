@@ -3486,6 +3486,39 @@ export default function App() {
     }
   }, [defaults.transcriptLibrary, appendLog]);
 
+  /**
+   * Is the active engine's model on disk? Bounces to Settings and returns
+   * false when it is not; the caller just stops.
+   *
+   * One copy. This block was written out twice, verbatim, with the second
+   * carrying a comment saying it "mirrors handleGenerateTranscript so
+   * re-timing works with whichever engine is active" - which is exactly the
+   * arrangement where the two drift and only one of them learns about the
+   * next engine. The comment was right about the danger; it just could not
+   * enforce anything.
+   */
+  const ensureEngineModelReady = useCallback(async (): Promise<boolean> => {
+    if (defaults.transcriptionEngine === "parakeet") {
+      const ready = await invoke<boolean>("parakeet_model_downloaded").catch(() => false);
+      if (!ready) {
+        setTranscriptState("error");
+        setTranscriptError("The Parakeet model isn't downloaded yet. Opening Settings → Transcription.");
+        setSettingsInitialTab("transcription");
+        setSettingsOpen(true);
+        return false;
+      }
+      return true;
+    }
+    if (!selectedModel?.downloaded) {
+      setTranscriptState("error");
+      setTranscriptError(`Whisper model "${defaults.whisperModel}" is not downloaded. Opening Settings → Transcription.`);
+      setSettingsInitialTab("transcription");
+      setSettingsOpen(true);
+      return false;
+    }
+    return true;
+  }, [defaults.transcriptionEngine, defaults.whisperModel, selectedModel?.downloaded]);
+
   const handleGenerateTranscript = useCallback(async () => {
     // One run at a time. Without this, an impatient second click spawned a
     // SECOND full audio download racing the first on the same pipe (three
@@ -3520,22 +3553,7 @@ export default function App() {
     // Engine gate — Parakeet needs its Core ML model on disk; Whisper needs
     // the selected ggml model. Either way, missing → bounce to Settings.
     const engine = defaults.transcriptionEngine;
-    if (engine === "parakeet") {
-      const ready = await invoke<boolean>("parakeet_model_downloaded").catch(() => false);
-      if (!ready) {
-        setTranscriptState("error");
-        setTranscriptError("The Parakeet model isn't downloaded yet. Opening Settings → Transcription.");
-        setSettingsInitialTab("transcription");
-        setSettingsOpen(true);
-        return;
-      }
-    } else if (!selectedModel?.downloaded) {
-      setTranscriptState("error");
-      setTranscriptError(`Whisper model "${defaults.whisperModel}" is not downloaded. Opening Settings → Transcription.`);
-      setSettingsInitialTab("transcription");
-      setSettingsOpen(true);
-      return;
-    }
+    if (!(await ensureEngineModelReady())) return;
     setTranscriptState("running");
     setTranscriptResolution(null); // clear any prior flash before a new run
     setTranscriptError(null);
@@ -3717,7 +3735,7 @@ export default function App() {
       setTranscriptError(msg);
       appendLog("err", txChannel, msg);
     }
-  }, [transcriptState, metadata, metadataLoading, exportOpts, fps, selectedModel, defaults.whisperModel,
+  }, [ensureEngineModelReady, transcriptState, metadata, metadataLoading, exportOpts, fps, selectedModel, defaults.whisperModel,
       defaults.transcriptionEngine, defaults.useWebCodecsDecoder,
       defaults.detectSpeakers, defaults.expectedSpeakers, defaults.transcriptionLanguage,
       appendLog, resolveTranscriptOutDir, localFilePath, sourceKind,
@@ -3805,22 +3823,7 @@ export default function App() {
     // whichever engine is active (Parakeet has no Whisper model, so the old
     // Whisper-only check always bounced Parakeet users to Settings).
     const engine = defaults.transcriptionEngine;
-    if (engine === "parakeet") {
-      const ready = await invoke<boolean>("parakeet_model_downloaded").catch(() => false);
-      if (!ready) {
-        setTranscriptState("error");
-        setTranscriptError("The Parakeet model isn't downloaded yet. Opening Settings → Transcription.");
-        setSettingsInitialTab("transcription");
-        setSettingsOpen(true);
-        return;
-      }
-    } else if (!selectedModel?.downloaded) {
-      setTranscriptState("error");
-      setTranscriptError(`Whisper model "${defaults.whisperModel}" is not downloaded. Opening Settings → Transcription.`);
-      setSettingsInitialTab("transcription");
-      setSettingsOpen(true);
-      return;
-    }
+    if (!(await ensureEngineModelReady())) return;
     setTranscriptState("running");
     setTranscriptResolution(null); // clear any prior flash before a new run
     setTranscriptError(null);
@@ -3862,7 +3865,7 @@ export default function App() {
       setTranscriptError(formatError(err));
       appendLog("warn", txChannel, `Caption-timing fix failed (${formatError(err)}); keeping the existing captions.`);
     }
-  }, [metadata, metadataLoading, exportOpts.folder, exportOpts.filename, resolveTranscriptOutDir, selectedModel,
+  }, [ensureEngineModelReady, metadata, metadataLoading, exportOpts.folder, exportOpts.filename, resolveTranscriptOutDir,
       durationFrames, fps, defaults.whisperModel, defaults.transcriptionEngine, defaults.detectSpeakers,
       defaults.expectedSpeakers, defaults.transcriptionLanguage, appendLog]);
 
