@@ -1564,19 +1564,21 @@ export default function App() {
     const unlistens: UnlistenFn[] = [];
     let mounted = true;
     (async () => {
-      const a = await listen<LogEvent>("clip-log", (e) => {
+      const onClipLog = (e: { payload: LogEvent }) => {
         if (!mounted || e.payload.job_id !== jobIdRef.current) return;
         const sourceHint =
           e.payload.line.startsWith("[ffmpeg]") || e.payload.line.startsWith("[Merger]") ? "ffmpeg" :
           e.payload.line.startsWith("[") ? "yt-dlp" :
           e.payload.stream === "stderr" ? "stderr" : "yt-dlp";
         appendLog(asLogTag(e.payload.tag), sourceHint, e.payload.line);
-      });
-      const b = await listen<ProgressEvent>("clip-progress", (e) => {
+      };
+      const a = await listen<LogEvent>("clip-log", onClipLog);
+      const onClipProgress = (e: { payload: ProgressEvent }) => {
         if (!mounted || e.payload.job_id !== jobIdRef.current) return;
         setProgress(e.payload.percent);
-      });
-      const c = await listen<DoneEvent>("clip-done", (e) => {
+      };
+      const b = await listen<ProgressEvent>("clip-progress", onClipProgress);
+      const onClipDone = (e: { payload: DoneEvent }) => {
         if (!mounted || e.payload.job_id !== jobIdRef.current) return;
         // If we're running the queue, route the event into the queue runner
         // and skip the single-export bookkeeping below.
@@ -1638,12 +1640,14 @@ export default function App() {
           notify("Export failed", msg);
           pushNotification("error", "Export failed", msg);
         }
-      });
-      const d = await listen<LogEvent>("captions-log", (e) => {
+      };
+      const c = await listen<DoneEvent>("clip-done", onClipDone);
+      const onCaptionsLog = (e: { payload: LogEvent }) => {
         if (!mounted || e.payload.job_id !== captionsJobIdRef.current) return;
         appendLog(asLogTag(e.payload.tag), "captions", e.payload.line);
-      });
-      const f = await listen<DoneEvent>("captions-done", (e) => {
+      };
+      const d = await listen<LogEvent>("captions-log", onCaptionsLog);
+      const onCaptionsDone = (e: { payload: DoneEvent }) => {
         if (!mounted || e.payload.job_id !== captionsJobIdRef.current) return;
         if (e.payload.success && e.payload.path) {
           setCaptionsState("done");
@@ -1675,12 +1679,14 @@ export default function App() {
           setCaptionsError(msg);
           appendLog("err", "captions", msg);
         }
-      });
-      const g = await listen<LogEvent>("transcript-log", (e) => {
+      };
+      const f = await listen<DoneEvent>("captions-done", onCaptionsDone);
+      const onTranscriptLog = (e: { payload: LogEvent }) => {
         if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
         appendLog(asLogTag(e.payload.tag), txChannelRef.current, e.payload.line);
-      });
-      const h = await listen<DoneEvent>("transcript-done", (e) => {
+      };
+      const g = await listen<LogEvent>("transcript-log", onTranscriptLog);
+      const onTranscriptDone = (e: { payload: DoneEvent }) => {
         if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
         if (e.payload.success && e.payload.path) {
           setTranscriptState("done");
@@ -1744,8 +1750,9 @@ export default function App() {
           notify("Transcript failed", msg);
           pushNotification("error", "Transcript failed", msg);
         }
-      });
-      const i = await listen<DoneEvent>("model-download-done", (e) => {
+      };
+      const h = await listen<DoneEvent>("transcript-done", onTranscriptDone);
+      const onModelDownloadDone = (e: { payload: DoneEvent }) => {
         if (!mounted) return;
         if (e.payload.success) {
           refreshWhisperModels();
@@ -1755,16 +1762,18 @@ export default function App() {
         } else if (e.payload.error) {
           pushNotification("error", "Model download failed", e.payload.error);
         }
-      });
-      const j = await listen<ProgressEvent>("transcript-progress", (e) => {
+      };
+      const i = await listen<DoneEvent>("model-download-done", onModelDownloadDone);
+      const onTranscriptProgress = (e: { payload: ProgressEvent }) => {
         if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
         setTranscriptProgress(e.payload.percent);
-      });
+      };
+      const j = await listen<ProgressEvent>("transcript-progress", onTranscriptProgress);
       // Transcript stage marker — drives the Sidebar phase indicator.
       // Backend emits this at well-known transitions; the frontend
       // doesn't need to scrape pipeline log strings.
       type TranscriptPhasePayload = { job_id: string; phase: string };
-      const jPhase = await listen<TranscriptPhasePayload>("transcript-phase", (e) => {
+      const onTranscriptPhase = (e: { payload: TranscriptPhasePayload }) => {
         if (!mounted || e.payload.job_id !== transcriptJobIdRef.current) return;
         // Close out the previous stage in the pipeline log. Every long
         // pipeline reports its phases through this one event, so timing them
@@ -1784,12 +1793,14 @@ export default function App() {
           setTranscriptProgress(0);
         }
         setTranscriptPhase(e.payload.phase);
-      });
-      const k = await listen<ProgressEvent>("playback-prep-progress", (e) => {
+      };
+      const jPhase = await listen<TranscriptPhasePayload>("transcript-phase", onTranscriptPhase);
+      const onPlaybackPrepProgress = (e: { payload: ProgressEvent }) => {
         if (!mounted || e.payload.job_id !== playbackPrepJobIdRef.current) return;
         setPlaybackPrepProgress(e.payload.percent);
-      });
-      const l = await listen<DoneEvent>("playback-prep-done", (e) => {
+      };
+      const k = await listen<ProgressEvent>("playback-prep-progress", onPlaybackPrepProgress);
+      const onPlaybackPrepDone = (e: { payload: DoneEvent }) => {
         if (!mounted || e.payload.job_id !== playbackPrepJobIdRef.current) return;
         const resolver = playbackPrepResolverRef.current;
         playbackPrepResolverRef.current = null;
@@ -1798,13 +1809,15 @@ export default function App() {
         } else {
           resolver?.reject(e.payload.error ?? "Playback prep failed");
         }
-      });
+      };
+      const l = await listen<DoneEvent>("playback-prep-done", onPlaybackPrepDone);
       // Playback prep ffmpeg log lines — surface in the pipeline panel so
       // the user can see what's happening (codec choice, errors, etc).
-      const m = await listen<LogEvent>("playback-prep-log", (e) => {
+      const onPlaybackPrepLog = (e: { payload: LogEvent }) => {
         if (!mounted || e.payload.job_id !== playbackPrepJobIdRef.current) return;
         appendLog(asLogTag(e.payload.tag), "playback-prep", e.payload.line);
-      });
+      };
+      const m = await listen<LogEvent>("playback-prep-log", onPlaybackPrepLog);
       // llama-server's stderr — model load progress and the reason a start
       // failed. Rust has emitted this since the AI Summary feature landed,
       // with a comment saying it drains to the Pipeline log; the listener was
@@ -1814,10 +1827,11 @@ export default function App() {
       //
       // No job-id filter: unlike the per-run channels above, this one is the
       // long-lived server and always reports job_id "llm-server".
-      const n = await listen<LogEvent>("llm-log", (e) => {
+      const onLlmLog = (e: { payload: LogEvent }) => {
         if (!mounted) return;
         appendLog(asLogTag(e.payload.tag), "llm", e.payload.line);
-      });
+      };
+      const n = await listen<LogEvent>("llm-log", onLlmLog);
       unlistens.push(a, b, c, d, f, g, h, i, j, k, l, m, jPhase, n);
       // Cleanup that fired DURING the awaits above found an empty array and
       // unregistered nothing — under StrictMode that leaked all 15 listeners

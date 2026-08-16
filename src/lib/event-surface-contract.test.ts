@@ -86,6 +86,36 @@ describe("the Tauri event surface", () => {
     expect(ghosts, "listening for a channel nothing sends — a dead handler").toEqual([]);
   });
 
+  it("names every listener handler after the event it handles", () => {
+    // The mis-wire guard. `dcaef9d` kept these registrations sequential
+    // because "several handlers share event shapes" - DoneEvent serves five
+    // channels, LogEvent five, ProgressEvent three - so attaching the wrong
+    // handler to the wrong event name type-checks perfectly and fails only at
+    // runtime. That made the effect unsafe to restructure.
+    //
+    // Naming the handlers after their events turns that invisible mistake into
+    // a visible one: `listen("captions-done", onClipDone)` fails here. It is
+    // what makes splitting the 264-line listener effect by domain a reviewable
+    // change rather than a leap.
+    const pascal = (event: string) =>
+      "on" + event.split(/[-:_]/).map((w) => w[0].toUpperCase() + w.slice(1)).join("");
+
+    let checked = 0;
+    const wrong: string[] = [];
+    for (const f of tsFiles) {
+      const text = readFileSync(f, "utf8");
+      for (const m of text.matchAll(/\blisten\s*(?:<[^>]*>)?\(\s*"([a-z][a-z0-9:_-]*)"\s*,\s*([A-Za-z_$][\w$]*)\s*\)/g)) {
+        const [, event, handler] = m;
+        checked++;
+        if (handler !== pascal(event)) {
+          wrong.push(`${f.slice(ROOT.length + 1)}: listen("${event}", ${handler}) — expected ${pascal(event)}`);
+        }
+      }
+    }
+    expect(checked, "no named-handler registrations found").toBeGreaterThan(10);
+    expect(wrong, "a listener is wired to a handler named for a different event").toEqual([]);
+  });
+
   it("keeps the cross-window bus namespaced", () => {
     // The exclusion above is a prefix rule, so it only stays honest while the
     // frontend-only channels keep using it.

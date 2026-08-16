@@ -274,10 +274,15 @@ purpose*, and its tail comment says why: **several handlers share event shapes**
 attaching the wrong handler to the wrong event NAME type-checks perfectly and
 fails silently at runtime — and nothing in the suite exercises these 13 events.
 
-The prerequisite is to make the pairing checkable before moving anything: give
-each handler a name (`listen("clip-done", onClipDone)`) so the event-to-handler
-mapping is greppable rather than positional. Splitting is mechanical after that
-and unreviewable before it.
+**That prerequisite is now done.** All 14 handlers are named after their events
+(`listen("clip-done", onClipDone)`), and `event-surface-contract` asserts the
+pairing, so wiring `onClipDone` to `"captions-done"` fails a test instead of
+shipping. Worth knowing how weak the old safety net was: doing exactly that swap
+by hand, `tsc` reported only an *unused variable* — never the mis-wire.
+
+Splitting the effect by domain is now a reviewable change. Each domain's
+handlers move as named units with their `mounted` guard and cleanup intact, and
+the contract catches the one mistake the compiler cannot see.
 
 ## Build-ID handshake
 

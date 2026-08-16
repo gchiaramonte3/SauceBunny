@@ -515,7 +515,7 @@ written after finding the rule already broken somewhere.
 | `storage-keys-contract` | New prefs use the `saucebunny.` namespace; nine legacy `cp-` keys are pinned by name |
 | `invoke-contract` | Invoke type args come from `src/bindings/`; byte payloads use the raw IPC body; every `write_text_to_path` is atomic |
 | `ipc-surface-contract` | Every registered command is called, and every invoked command is registered |
-| `event-surface-contract` | Every event Rust emits has a listener, and every listened event is emitted (`panel:*` is the frontend-only bus) |
+| `event-surface-contract` | Every event Rust emits has a listener, every listened event is emitted (`panel:*` is the frontend-only bus), and each handler is named after its event so a mis-wire is visible |
 | `sidecar-surface-contract` | Everything `externalBin` ships is spawnable, documented in the table above, and (for ours) has a build script |
 | `job-id` | Job ids are minted locally and never awaited |
 | `updater-purity-contract` | No `setX(prev => …)` writes, invokes, persists or touches a ref |
