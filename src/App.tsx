@@ -13,6 +13,7 @@ import { NavRail } from "./components/NavRail";
 
 import { LibraryView } from "./components/LibraryView";
 import { LibraryBrowser } from "./components/LibraryBrowser";
+import { useDiarizerPrepare } from "./hooks/use-diarizer-prepare";
 import { useLibraryScan } from "./hooks/use-library-scan";
 import type { LibraryCrumb } from "./lib/library";
 import { Sidebar } from "./components/Sidebar";
@@ -819,10 +820,6 @@ export default function App() {
   // success, persist `diarizerReady = true` so the Sidebar's "Detect
   // speakers" toggle can show a "✓ Ready" hint instead of warning the
   // user about the first-run download.
-  const [diarizerPrepareState, setDiarizerPrepareState] =
-    useState<"idle" | "running" | "done" | "error">("idle");
-  const [diarizerPrepareError, setDiarizerPrepareError] = useState<string | null>(null);
-  const [diarizerPrepareJobId, setDiarizerPrepareJobId] = useState<string | null>(null);
   const [diarizerReady, setDiarizerReady] = useState<boolean>(() => {
     try { return localStorage.getItem("saucebunny.diarizerModelsReady") === "1"; }
     catch { return false; }
@@ -1548,8 +1545,6 @@ export default function App() {
   // even if the user switches sources before clip-done fires (the listener
   // guards only on job_id, which we must keep live to resolve the queue).
   const clipJobMetaRef = useRef<{ title: string; thumbnail: RecentClip["thumbnail"]; source?: string; inTc: string; outTc: string } | null>(null);
-  const diarizerPrepareJobIdRef = useRef<string | null>(null);
-  diarizerPrepareJobIdRef.current = diarizerPrepareJobId;
   // Ref for transcript-history bookkeeping — captions/whisper listeners
   // read localFilePath off this so they pick up the current source
   // rather than a stale closure copy. `metadataRef` already exists
@@ -1790,31 +1785,6 @@ export default function App() {
         }
         setTranscriptPhase(e.payload.phase);
       });
-      // Speaker-model pre-warm channel (Settings → Transcription).
-      type DiarizeProgressPayload = { job_id: string; line: string };
-      const mPrep = await listen<DiarizeProgressPayload>("diarize-prepare-progress", () => {
-        // Today we only need the on/off state — the per-phase progress
-        // payload is preserved for a future indeterminate-bar pulse.
-      });
-      const nPrep = await listen<DoneEvent>("diarize-prepare-done", (e) => {
-        if (!mounted) return;
-        if (diarizerPrepareJobIdRef.current && e.payload.job_id !== diarizerPrepareJobIdRef.current) return;
-        if (e.payload.success) {
-          setDiarizerPrepareState("done");
-          setDiarizerPrepareError(null);
-          setDiarizerReady(true);
-          try { localStorage.setItem("saucebunny.diarizerModelsReady", "1"); } catch { /* quota */ }
-          pushNotification("success", "Speaker models ready", "FluidAudio cached. Future diarizations skip the download step.");
-        } else if (e.payload.error === "Cancelled") {
-          setDiarizerPrepareState("idle");
-          setDiarizerPrepareError(null);
-        } else {
-          setDiarizerPrepareState("error");
-          setDiarizerPrepareError(e.payload.error ?? "Model preparation failed");
-        }
-      });
-      // Playback prep events — independent channel so this never collides
-      // with the main export/transcript pipelines.
       const k = await listen<ProgressEvent>("playback-prep-progress", (e) => {
         if (!mounted || e.payload.job_id !== playbackPrepJobIdRef.current) return;
         setPlaybackPrepProgress(e.payload.percent);
@@ -1835,7 +1805,7 @@ export default function App() {
         if (!mounted || e.payload.job_id !== playbackPrepJobIdRef.current) return;
         appendLog(asLogTag(e.payload.tag), "playback-prep", e.payload.line);
       });
-      unlistens.push(a, b, c, d, f, g, h, i, j, k, l, m, jPhase, mPrep, nPrep);
+      unlistens.push(a, b, c, d, f, g, h, i, j, k, l, m, jPhase);
       // Cleanup that fired DURING the awaits above found an empty array and
       // unregistered nothing — under StrictMode that leaked all 15 listeners
       // on every dev boot. The handlers were inert (each starts with a
@@ -4359,27 +4329,13 @@ export default function App() {
    * success so the Sidebar's "Detect speakers" affordance can label
    * itself "✓ Models cached".
    */
-  const handlePrepareDiarizerModels = useCallback(async () => {
-    if (diarizerPrepareState === "running") return;
-    setDiarizerPrepareState("running");
-    setDiarizerPrepareError(null);
-    try {
-      const id = newJobId();
-      setDiarizerPrepareJobId(id);
-      await invoke<string>("prepare_diarizer_models", { jobId: id });
-      // Resolution arrives via the diarize-prepare-done listener,
-      // which flips state to "done" / "error" depending on the payload.
-    } catch (e) {
-      setDiarizerPrepareState("error");
-      setDiarizerPrepareError(formatError(e));
-    }
-  }, [diarizerPrepareState]);
-
-  const handleCancelDiarizerPrepare = useCallback(async () => {
-    const id = diarizerPrepareJobIdRef.current;
-    if (!id) return;
-    try { await invoke("cancel_job", { jobId: id }); } catch { /* ignore */ }
-  }, []);
+  const diarizerPrepare = useDiarizerPrepare({
+    onReady: useCallback(() => {
+      setDiarizerReady(true);
+      try { localStorage.setItem("saucebunny.diarizerModelsReady", "1"); } catch { /* quota */ }
+    }, []),
+    notify: pushNotification,
+  });
 
   const handleClear = useCallback(() => {
     resetForNewSource("");
@@ -6725,10 +6681,10 @@ export default function App() {
         initialTab={settingsInitialTab}
         commands={commands}
         diarizerReady={diarizerReady}
-        diarizerPrepareState={diarizerPrepareState}
-        diarizerPrepareError={diarizerPrepareError}
-        onPrepareDiarizerModels={handlePrepareDiarizerModels}
-        onCancelDiarizerPrepare={handleCancelDiarizerPrepare}
+        diarizerPrepareState={diarizerPrepare.state}
+        diarizerPrepareError={diarizerPrepare.error}
+        onPrepareDiarizerModels={diarizerPrepare.prepare}
+        onCancelDiarizerPrepare={diarizerPrepare.cancel}
         onApplyToCurrent={(patch) => {
           setExportOpts((prev) => ({ ...prev, ...patch }));
         }}

@@ -239,14 +239,15 @@ time into `src/hooks/use-*.ts` (done: `use-panel-bus`, `use-web-playback`,
 Picking the next one by *name* is how the exercise goes wrong, so this records
 what the code actually shows.
 
-**Diarizer model prep is cohesive — take this one.** Three `useState`, one job-id
-ref, two handlers (`handlePrepareDiarizerModels`, `handleCancelDiarizerPrepare`)
-and two Tauri listeners (`diarize-prepare-progress`, `diarize-prepare-done`). It
-reaches outside itself exactly twice: `pushNotification`, and flipping
-`diarizerReady` (plus its `saucebunny.diarizerModelsReady` flag). Both are clean
-callback seams — `useDiarizerPrepare({ pushNotification, onReady })` returning
-`{ state, error, prepare, cancel }`. Nothing else in App reads its state; the
-Sidebar and Settings take it as props.
+**Diarizer model prep — DONE** (`src/hooks/use-diarizer-prepare.ts`, 13 tests).
+It was picked because it reached outside itself exactly twice — a
+notification and the "models are cached" latch — and both became arguments
+(`useDiarizerPrepare({ notify, onReady })` → `{ state, error, prepare, cancel }`).
+App.tsx lost 57 lines. The job id stopped being `useState` mirrored into a
+`useRef`, so starting a download no longer re-renders the whole App tree to
+store a string nothing renders. The tests that came with it were impossible
+before: every one needs a `diarize-prepare-done` payload delivered to a listener
+that used to be registered inside App's central event effect.
 
 **Captions is NOT cohesive, despite reading like a subsystem.** Its state is
 scattered over six regions, but that is not the problem — the problem is that
