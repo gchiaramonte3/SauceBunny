@@ -112,3 +112,10 @@ accessibility tree; only VoiceOver proves it is announced.
   `useDismiss`; standardising them changes how Escape resolves when they nest.
 - The library scan depth stays at 3 levels. Raising it trades scan time for
   reach on unknown disk layouts.
+- **Reduced motion covers animations but not transitions.** All 58 keyframe
+  animations stop under `prefers-reduced-motion: reduce`, and `e2e/reduced-
+  motion.spec.ts` now holds that. 33 rules across 10 files still transition a
+  `transform` on hover or active - almost all of them a 1px lift. Closing that
+  is either 33 targeted suppressions or one tokenised `--lift` that a single
+  rule can switch off; the second is the better design-system answer and the
+  bigger diff. Both are a call to make deliberately, so neither was made here.
