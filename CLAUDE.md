@@ -408,6 +408,8 @@ All sidecars are bundled binaries invoked through `tauri-plugin-shell`. Each lon
 | whisper-cli | Local speech-to-text (whisper.cpp) | `npm run build:whisper` (builds from source, statically linked) |
 | saucebunny-diarize | Speaker diarization (Swift) | `npm run build:diarizer` (builds from `swift-sidecar/`) |
 | llama-server | Local LLM chat for the AI Summary tab | `npm run build:llama` (builds llama.cpp from source, static + Metal) |
+| saucebunny-dictate | Live on-device dictation for review comments (Apple Speech, partial results while you speak) | `npm run build:dictate` (builds from `swift-sidecar/`) |
+| saucebunny-capture | ScreenCaptureKit engine for co-review screen sharing (display list + capture) | `npm run build:capture` (builds from `swift-sidecar/`) |
 
 **Not in git**: sidecar binaries are assembled locally by `npm run setup`
 (fresh clones) — they are gitignored, and CI stubs them.
@@ -495,7 +497,7 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ## Enforced contracts
 
-Eighteen rules in this file are checked by a test rather than remembered. If you
+Nineteen rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -514,6 +516,7 @@ written after finding the rule already broken somewhere.
 | `invoke-contract` | Invoke type args come from `src/bindings/`; byte payloads use the raw IPC body; every `write_text_to_path` is atomic |
 | `ipc-surface-contract` | Every registered command is called, and every invoked command is registered |
 | `event-surface-contract` | Every event Rust emits has a listener, and every listened event is emitted (`panel:*` is the frontend-only bus) |
+| `sidecar-surface-contract` | Everything `externalBin` ships is spawnable, documented in the table above, and (for ours) has a build script |
 | `job-id` | Job ids are minted locally and never awaited |
 | `updater-purity-contract` | No `setX(prev => …)` writes, invokes, persists or touches a ref |
 | `pure-updater-contract` | Reducer-style updaters stay pure |

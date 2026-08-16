@@ -110,7 +110,7 @@ Generate transcript:
 
 ## Sidecars
 
-Six executables ship in `src-tauri/binaries/`, using the platform-tuple naming convention (`<name>-aarch64-apple-darwin`). The app invokes `yt-dlp`, `ffmpeg`, `whisper-cli`, `saucebunny-diarize`, and `llama-server` directly (via `app.shell().sidecar(name)` / a resolved path). `ffprobe` is the exception — the app never spawns it; it ships beside `ffmpeg` so yt-dlp can discover it (yt-dlp derives `ffprobe-<triple>` from the `--ffmpeg-location` path it's given).
+Eight executables ship in `src-tauri/binaries/`, using the platform-tuple naming convention (`<name>-aarch64-apple-darwin`). The app invokes `yt-dlp`, `ffmpeg`, `whisper-cli`, `saucebunny-diarize`, `saucebunny-dictate`, `saucebunny-capture`, and `llama-server` directly (via `app.shell().sidecar(name)` / a resolved path). `ffprobe` is the exception — the app never spawns it; it ships beside `ffmpeg` so yt-dlp can discover it (yt-dlp derives `ffprobe-<triple>` from the `--ffmpeg-location` path it's given).
 
 | Sidecar | What it does | Where it comes from |
 |---|---|---|
@@ -120,6 +120,8 @@ Six executables ship in `src-tauri/binaries/`, using the platform-tuple naming c
 | `whisper-cli` | Whisper.cpp speech-to-text | Build whisper.cpp from source, copy the `whisper-cli` binary. Stable. |
 | `saucebunny-diarize` | Speaker diarization (SpeakerKit primary, FluidAudio fallback) | Built locally via `npm run build:diarizer`. We own this code (`swift-sidecar/`). |
 | `llama-server` | Local LLM for the AI Summary tab (loopback HTTP, token-gated) | Build llama.cpp from source via `npm run build:llama`. Static + Metal. |
+| `saucebunny-dictate` | Live dictation for review comments — Apple Speech, partial transcripts while you speak | Built locally via `npm run build:dictate`. We own this code (`swift-sidecar/`). |
+| `saucebunny-capture` | ScreenCaptureKit capture engine for co-review screen sharing | Built locally via `npm run build:capture`. We own this code (`swift-sidecar/`). |
 
 ## Diarizer architecture
 
