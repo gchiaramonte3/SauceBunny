@@ -186,7 +186,14 @@ Do not add new Tauri plugins without explaining what existing capability is insu
   worse than the literal — it asserts a relationship that is not there.
 - No inline styles. No CSS-in-JS. No CSS modules.
 - Class names: kebab-case, all prefixed with the stable project namespace `cp-` (carryover from the original ClipPull name — kept intentionally because renaming ~600 classes touches every file and adds no user-visible value). Within that prefix, group by component context (e.g. `cp-player-controls-volume`, `cp-tx-speaker`, `cp-queue-foot-row`). New code MUST use the `cp-` prefix; do not introduce a new prefix.
-- No `!important` unless overriding a third-party style you can't control.
+- No `!important` unless specificity leaves no alternative, and the reason is
+  written at the site. Three sanctioned cases exist today and there are no
+  others: overriding an inline `style` React sets from state (an inline style
+  outranks every class, so `!important` is the only lever CSS has), and the two
+  drag cursors that must win over whatever is under the pointer. The rule used
+  to say "unless overriding a third-party style you can't control", which none
+  of the three are - the code was right and the wording was too narrow.
+  Guarded by `src/lib/important-contract.test.ts` as a shrink-only ratchet.
 - **The spacing scale does not describe this UI, and that is measured, not felt.**
   `--s-*` is a 4px grid (4/8/12/16/20/24/28/32/40/48). Of 737 raw `gap` /
   `padding` / `margin` values in the stylesheets, **460 are off that grid** —
@@ -613,7 +620,7 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ## Enforced contracts
 
-Forty-seven rules in this file are checked by a test rather than remembered. If you
+Fifty-one rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -683,6 +690,10 @@ written after finding the rule already broken somewhere.
 | `dictate-protocol-contract` | Swift emits every key Rust reads off a dictation line, and every line reporting `final` carries the text |
 | `hidden-instance-contract` | Every Cmd-chord in TranscriptViewer checks it is not inside a [hidden]/aria-hidden subtree. The component is mounted twice (reader + drawer keep-alive), and without the gate a Cmd-G advanced the HIDDEN copy and killed its auto-scroll |
 | `rust-panic-contract` | No .unwrap()/.expect()/panic! in production Rust (two allowlisted, each with a stated reason). A panic in a command handler never resolves the invoke and poisons any Mutex it held |
+| `forbidden-dirs-contract` | The directory names CLAUDE.md forbids (utils/, helpers/, services/, store/ …) stay absent |
+| `no-any-contract` | No `any` in src, shipped or test; `@typescript-eslint` is registered with no rules so nothing else checks |
+| `important-contract` | `!important` stays at three explained sites, shrink-only |
+| `sidecar-naming-contract` | Every sidecar install target in scripts/ carries the `-<arch>-apple-darwin` triple |
 | `token-fallback-contract` | A token tokens.css defines carries no duplicate hex fallback (the palette was retuned; 34 of 40 had drifted) |
 | `no-barrel-contract` | No `index.ts` re-export files, and no module that is nothing but re-exports under another name |
 | `class-prefix-contract` | New CSS classes carry the `cp-` prefix; 69 legacy names pinned as a shrink-only ratchet |

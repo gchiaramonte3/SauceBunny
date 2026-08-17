@@ -705,7 +705,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
           if (!mimeRef.current && videoCodecRef.current) {
             const MSx: typeof MediaSource | undefined =
               (typeof MediaSource !== "undefined" ? MediaSource : undefined) ??
-              (window as any).ManagedMediaSource;
+              (window as { ManagedMediaSource?: typeof MediaSource }).ManagedMediaSource;
             const supported = MSx && typeof MSx.isTypeSupported === "function"
               ? (m: string) => MSx.isTypeSupported(m)
               : null;
@@ -772,7 +772,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
 
           const MS: typeof MediaSource | undefined =
             (typeof MediaSource !== "undefined" ? MediaSource : undefined) ??
-            (window as any).ManagedMediaSource;
+            (window as { ManagedMediaSource?: typeof MediaSource }).ManagedMediaSource;
           if (!MS) { fail("MediaSource API unavailable in this WebView."); return; }
           if (mime.includes('codecs=""')) { fail("Could not determine stream codecs."); return; }
           if (typeof MS.isTypeSupported === "function" && !MS.isTypeSupported(mime)) {

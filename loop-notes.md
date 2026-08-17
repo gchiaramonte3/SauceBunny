@@ -1,3 +1,55 @@
+## Goal — every mechanical CLAUDE.md contract becomes a test
+
+Eight guards added, taking the register from 43 to 51. Four of the eight claims
+named in the brief turned out to be guarded already, and one did not exist.
+
+### Already guarded (checked, not assumed)
+
+| claim | guard that already covers it |
+|---|---|
+| localStorage keys namespaced | `storage-keys-contract` (nine named exceptions) |
+| no hex outside tokens.css | `token-usage-contract` |
+| build-ID two-file match | `build-id.test.ts` — parses the Rust constant out of `system.rs` |
+| sidecar set agreement | `sidecar-surface-contract` (four places; NOT `scripts/`, now closed) |
+
+### The claim that did not exist
+
+There is no BunnyLoader hex mirror. The hexes live only in `tokens.css`;
+`loader.css` reaches them through `var()`, and `BunnyLoader.tsx` carries a comment
+explaining that `stop-color` is a CSS presentation property so the colours belong
+in the stylesheet. Nothing to pin. What WAS there instead: 34 stale `var(--x, #hex)`
+fallbacks from a palette retune, now removed and guarded.
+
+### Review-only: judgment calls a regex cannot make
+
+These are real rules in CLAUDE.md. They are listed here so nobody mistakes the
+absence of a guard for the absence of a rule.
+
+- **"Keep components under 150 lines."** Countable, but the doc itself says a
+  longer component "probably needs to be split" — advisory, not a threshold. A
+  ratchet would need an allowlist of most of `components/`, which documents the
+  status quo rather than constraining it.
+- **"Composition over abstraction"**, **"extract a hook only when the same
+  stateful logic appears in 3+ components"**, **"define handlers inline if ≤2
+  lines"**, **"avoid useEffect for derived state"**, **"React.memo only after
+  profiling"**. Each turns on whether two pieces of logic are *the same* or whether
+  a render was *actually* a problem. A regex can count lines; it cannot read
+  intent, and a guard that guessed would be argued with and then disabled.
+- **Whether a given `!important` was unavoidable.** The count and the presence of
+  an explanation are now guarded (`important-contract`); the judgment is not.
+- **"No dead code."** Unreferenced exports are findable; whether something is a
+  seam kept deliberately is not. The `untested-libs.sh` skip list is the same
+  problem solved by hand, per module, with a written reason.
+
+### One pattern worth carrying forward
+
+Six times in this codebase a scanner has read a description of a thing as the
+thing: `role="dialog"` in a `querySelector` string, `useModalFocus` in a
+commented-out call, `.cp-ql-scrim` in a CSS comment, `globSync` in its own
+explanation, an ejected crate named in the comment explaining its ejection, and —
+best of all — `no-any-contract` matching the `Array<any>` inside its own regex
+literal. Strip comments before believing a match, and exclude the guard's own file.
+
 # loop-notes.md
 
 Things a loop found and deliberately did **not** change, with the reason. A
