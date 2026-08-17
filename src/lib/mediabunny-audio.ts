@@ -101,7 +101,10 @@ export async function extractAudioAsWav16k(
  * sidesteps the need for a WAV encoder library — the WAV spec for
  * uncompressed PCM is ~44 bytes of header + raw samples.
  */
-function encodeWavMono16(samples: Float32Array, sampleRate: number): Blob {
+/* Exported for its tests. The WAV this writes is what Whisper reads, so a wrong
+   header field or a mis-scaled sample does not error - it transcribes garbage,
+   or silence, and looks like a bad model. Worth pinning byte by byte. */
+export function encodeWavMono16(samples: Float32Array, sampleRate: number): Blob {
   const byteLen = samples.length * 2; // int16 = 2 bytes per sample
   const buf = new ArrayBuffer(44 + byteLen);
   const view = new DataView(buf);

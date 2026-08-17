@@ -8,6 +8,47 @@ are neither silently done nor silently lost.
 
 ## Loop 2 — untested pure modules
 
+### Outcome
+
+Ten iterations, cap reached, gate empty. Fourteen modules at the start; eight
+covered, five skipped with reasons recorded in `scripts/untested-libs.sh` itself
+rather than here, so the justification sits where the exclusion is.
+
+Nine real defects were found and fixed along the way, none of which announced
+itself — every one degraded silently:
+
+| module | defect | how it presented |
+|---|---|---|
+| text + App | filenames kept `&#39;` while the sidebar showed `'` | exports named wrongly on disk |
+| level-meter | hold marker one segment above the signal | red "peaking" bar with nothing red lit |
+| level-meter + PeoplePanel | time-domain buffer half the window | both meters under-read |
+| sound | AudioContext never resumed | every UI cue silent, no error |
+| platform-capabilities | blob-Worker probe blind to async CSP rejection | reported working on the broken config |
+| identity | fresh install id per call on the storage-failure path | rejoin looked like a stranger; roster grew |
+| share-stream | `gotData` had no reject | share hung forever, teardown never ran |
+| share-stream | quota `return` outside its guard | share stalled with no death reported |
+| ai-chat | trailing buffer and decoder never flushed | summary truncated, looked finished |
+
+### The pattern worth keeping
+
+Six of the nine were in code whose own comment described the correct behaviour.
+`identity` promised "a rejoin inside the same run still reclaims" and minted
+fresh every call. `sound` sat two files away from two other modules that document
+the suspended-AudioContext rule. `platform-capabilities` was written *because* a
+failure parked instead of throwing, and its own probe then parked instead of
+throwing. Intent written down is not intent implemented, and a comment asserting
+a behaviour is the strongest available hint that nothing checks it.
+
+### Skipped, and why the list is short
+
+Two modules that looked like obvious skips — `mediabunny-source` and
+`mediabunny-audio` — turned out to hold real testable logic: a URL/path routing
+branch guarding the 800 MB `asset://` stall, and a hand-rolled WAV encoder that
+feeds Whisper. Both are now covered. That is the reason the skip list requires
+reading the module first and stating what a test would have to fake.
+
+
+
 ### Partially fixed, with the remainder named: the blob-Worker capability gate
 
 `platform-capabilities.ts` exists because a CSP-blocked WASM decoder did not

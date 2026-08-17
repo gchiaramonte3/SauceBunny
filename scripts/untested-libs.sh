@@ -36,6 +36,49 @@ for f in src/lib/*.ts; do
     continue
   fi
 
+  # Deliberate skips, each with its reason. NOT a convenience list — anything
+  # here was read first and judged untestable without a harness bigger and less
+  # trustworthy than the code it tests. Every claim below was checked, and two
+  # candidates that LOOKED like they belonged here (mediabunny-source,
+  # mediabunny-audio) turned out to contain real testable logic and were
+  # covered instead. Adding a line here needs the same standard: read it, and
+  # say what a test would have to fake.
+  case "$base" in
+    asset-url)
+      # One line: `return convertFileSrc(path)`. No branch, no arithmetic. A
+      # test could only assert that the Tauri function was called with the
+      # argument the test just passed. The invariant that MATTERS here is the
+      # asset-protocol scope, and asset-scope-contract.test.ts already guards
+      # it.
+      continue ;;
+    mediabunny-decoders)
+      # Registers a WASM Opus decoder and the ProRes decoder into mediabunny's
+      # global registry. Faking it means faking registerDecoder, OpusDecoder
+      # and WebCodecs — at which point the test asserts the fakes ran. The
+      # capability GATE in front of it (platform-capabilities) is tested, and
+      # its blobWorker/wasm answers are what decide whether this runs at all.
+      continue ;;
+    mediabunny-export)
+      # A full demux → encode → mux pipeline (Input/Output/Conversion). A test
+      # needs a real container in and a real encoder out; anything less is
+      # asserting a stub. Covered end to end by the export hand-tests, and its
+      # caller's decision logic lives in use-clip-export, which IS tested.
+      continue ;;
+    mediabunny-helpers)
+      # Frame grabs, posters and filmstrips: every export needs a real decoder
+      # and a canvas with real pixels. `canvasLooksBlank` is the one pure
+      # function in here and is worth a test the day jsdom gets a canvas with
+      # getImageData; today that means shipping the `canvas` native module for
+      # one assertion.
+      continue ;;
+    motion)
+      # `window.matchMedia("(prefers-reduced-motion: reduce)").matches` at
+      # module scope, one ternary. The behaviour that matters — that reduced
+      # motion is honoured across the app — is covered where it is observable,
+      # in reduced-motion-contract.test.ts and the e2e reduced-motion spec.
+      continue ;;
+  esac
+
   # Runtime exports: functions, consts, classes, enums. `export type` and
   # `export interface` are excluded by the pattern, as is `export type {`.
   runtime=$(grep -cE '^export (async )?(function|const|class|enum|let) ' "$f" || true)
@@ -56,12 +99,28 @@ for f in src/lib/*.ts; do
   report=$((report + 1))
 done
 
-# The script's own canary: if the loop above stops matching files at all, the
-# empty output would read as "fully covered" rather than "scan broke".
+# ── The script's own canaries ────────────────────────────────────────────────
+# Empty output is the goal, which makes every way of being wrongly empty a
+# hazard. Two of them are checked here.
+
+# 1. The scan still finds files. If the glob or the loop breaks, silence would
+#    read as "fully covered" rather than "measured nothing".
 total=$(ls src/lib/*.ts 2>/dev/null | grep -vc '\.test\.ts$' || true)
 if [ "$total" -lt 20 ]; then
   echo "untested-libs.sh: only found $total modules in src/lib — the scan is broken" >&2
   exit 2
 fi
+
+# 2. Every documented skip still names a module that EXISTS. A skip for a
+#    deleted file is dead weight that quietly grants cover to the next module
+#    someone names the same thing.
+stale=0
+for skipped in asset-url mediabunny-decoders mediabunny-export mediabunny-helpers motion; do
+  if [ ! -f "src/lib/${skipped}.ts" ]; then
+    echo "untested-libs.sh: skip list names src/lib/${skipped}.ts, which no longer exists" >&2
+    stale=1
+  fi
+done
+[ "$stale" -eq 0 ] || exit 2
 
 exit 0
