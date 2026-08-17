@@ -6,6 +6,50 @@ are neither silently done nor silently lost.
 
 ---
 
+## Loop 2 — untested pure modules
+
+### Partially fixed, with the remainder named: the blob-Worker capability gate
+
+`platform-capabilities.ts` exists because a CSP-blocked WASM decoder did not
+throw — it PARKED, and a file played with perfect picture and no sound. Its own
+header says so. The blob: Worker probe then reproduced that exact shape.
+
+Measured in Chromium under `default-src 'self'`: the console logs *"Creating a
+worker from 'blob:…' violates the following CSP"*, `new Worker(url)` **returns a
+Worker object anyway**, and the rejection arrives later as an `error` event with
+an empty message. A probe that constructs, terminates and returns in one
+synchronous breath cannot see any of it, so it answered `blobWorker: true` on
+exactly the configuration the module was written to detect.
+
+Fixed where it is observable. `confirmBlobWorker` awaits a message or an error
+and corrects the cached capability, one-directionally: only positive evidence of
+failure flips it, and a timeout resolves to working, so a slow machine can never
+lose a decoder it actually has. That makes the startup log line truthful (the
+module's stated diagnostic purpose) and — more usefully — fixes
+`mediabunny-export.ts`, which reads `platformSupports()` at EXPORT time, long
+after any probe has settled.
+
+**Not fixed:** `main.tsx:45` registers decoders during startup, synchronously,
+before any async probe can settle. On a CSP-blocking build the ProRes decoder is
+still registered on the optimistic answer, which is the original parking bug.
+Closing it means deferring registration until after an async probe — a startup
+architecture change, not a test-coverage change, and it risks delaying every
+local playback path to fix a configuration that the CSP fix already addresses.
+Left deliberately, with the sync probe now named `probeBlobWorkerSync` and its
+blind spot documented at the site.
+
+### Verified, then corrected rather than assumed: which WASM step CSP blocks
+
+`probeWasm`'s comment asserted that under a blocking CSP `WebAssembly.compile()`
+and `new WebAssembly.Module()` both SUCCEED and WebKit enforces at instance
+creation. In Chromium the opposite happens: `new WebAssembly.Module()` itself
+throws `CompileError`. Since the app's engine is WKWebView, neither claim is
+verifiable from here, so the comment now says only what is true on every engine
+— the probe does BOTH steps in one expression, so a throw from either is caught
+and the question does not need answering.
+
+---
+
 ## Loop 1 — clippy warnings to zero
 
 **Outcome: the goal was already met.** `cargo clippy --all-targets -- -D warnings`
