@@ -108,3 +108,75 @@ test("the full name is still recoverable when a card truncates it", async ({ pag
   const hasCards = await page.locator(".cp-lib-card").count();
   if (hasCards > 0) expect(titled, "a truncated card name with no title attribute").toBe(true);
 });
+
+/**
+ * The same hazard in the TRANSCRIPT, which is where most user text lives.
+ *
+ * Filenames were the known case. Cue text is the bigger one: it is arbitrary
+ * output from Whisper, and it reaches a user with no break opportunity all the
+ * time — URLs, hyphen-free camera IDs, and any language that does not space
+ * its words. `.cp-tx-cue` was the only text surface in the app with no
+ * unbreakable-string guard, while the library carried `overflow-wrap: anywhere`
+ * in six places and the AI chat and co-review roster had their own.
+ *
+ * Measured before the fix, at this file's minimum-window viewport: a
+ * 180-character token put the cue at right=2234 in a ~900px window. The page
+ * does not scroll sideways, so this was not awkward layout — the rest of the
+ * line was CLIPPED and unreadable.
+ */
+const HOSTILE_SRT = `1
+00:00:01,000 --> 00:00:03,000
+[SPEAKER_${"X".repeat(120)}] ${"Z".repeat(180)}
+
+2
+00:00:04,000 --> 00:00:06,000
+[SPEAKER_01] A normal line for contrast.
+`;
+const HOSTILE_SRT_PATH = "/e2e-mock/Documents/Sauce Bunny/Transcripts/2026-08/hostile.srt";
+const HOSTILE_URL = "https://youtube.com/watch?v=abc";
+
+async function transcriptWithHostileText(page: Page) {
+  await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
+  await page.addInitScript(([srt, srtPath, url]: string[]) => {
+    localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
+    localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("e2e.files", JSON.stringify({ [srtPath]: srt }));
+    localStorage.setItem("saucebunny.transcriptHistory", JSON.stringify([{
+      id: "h1", srtPath, sourcePath: null, sourceUrl: url,
+      title: "demo", origin: "whisper", createdAt: Date.now(), lastOpenedAt: Date.now(),
+    }]));
+    // A long source title too — it rides the same rows.
+    localStorage.setItem("saucebunny.recentSources", JSON.stringify([
+      { kind: "url", value: url, title: "P".repeat(150), durationSeconds: 90, lastOpenedAt: Date.now() },
+    ]));
+  }, [HOSTILE_SRT, HOSTILE_SRT_PATH, HOSTILE_URL]);
+
+  await page.goto("/");
+  await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press("Control+3");
+  await page.getByTitle("Recent sources", { exact: true }).click();
+  await page.locator(".cp-recents-row").first().click();
+  await expect(page.locator("[data-cue-idx]")).toHaveCount(4, { timeout: 15_000 });
+  // The hostile text REALLY rendered. Without this the sweep below is happy
+  // with a transcript that failed to load: nothing renders, nothing overflows.
+  const body = await page.locator("body").innerText();
+  expect(body, "the hostile cue never reached the page").toContain("ZZZZZZZZZZ");
+}
+
+test("an unbreakable cue wraps instead of running off the panel", async ({ page }) => {
+  await transcriptWithHostileText(page);
+  const over = await overflowing(page);
+  expect(over, `pushed out of the window:\n${over.join("\n")}`).toEqual([]);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth),
+    "the page scrolls sideways",
+  ).toBe(false);
+});
+
+test("and the review tab survives the same source", async ({ page }) => {
+  await transcriptWithHostileText(page);
+  await page.locator("#cp-tab-review").click();
+  await expect(page.getByPlaceholder(/^Comment at/)).toBeVisible();
+  const over = await overflowing(page);
+  expect(over, `pushed out of the window:\n${over.join("\n")}`).toEqual([]);
+});

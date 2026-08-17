@@ -464,6 +464,18 @@
   display: inline;
   cursor: pointer;
   border-radius: 2px;
+  /* A cue with no break opportunity used to run straight off the panel. This
+     is the surface that shows the MOST user-supplied text and it was the only
+     text surface in the app without an unbreakable-string guard — the library
+     uses overflow-wrap: anywhere in six places, the AI chat and the co-review
+     roster have their own. Measured at the app's minimum window width: a
+     180-character token reached right=2234 in a ~900px window. The page does
+     not scroll sideways, so the overflow was not awkward, it was CLIPPED —
+     the rest of the line simply could not be read.
+
+     Transcripts get there honestly: URLs, hyphen-free camera IDs, and any
+     language that does not space its words. Whisper emits all three. */
+  overflow-wrap: anywhere;
 }
 /* Hover REVEALS the cue block (2a): no click needed. Clearly visible per
    feedback - lifted grey fill + a slight outline (the active/karaoke cue
