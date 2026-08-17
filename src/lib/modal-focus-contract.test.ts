@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { globSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 
 /**
  * A dialog behind a scrim declares `aria-modal`, and anything that declares it
@@ -27,7 +27,23 @@ import { resolve } from "node:path";
  */
 
 const ROOT = resolve(__dirname, "../..");
-const files = globSync("src/**/*.tsx", { cwd: ROOT }).filter((f) => !f.includes(".test."));
+
+/**
+ * readdirSync, not `globSync` from node:fs. CI pins Node 20 and globSync
+ * arrived in 22, so the first version of this file passed on a Node 25 laptop
+ * and died in CI with "globSync is not a function". The rest of the contracts
+ * walk the tree this way for the same reason.
+ */
+function tsxFiles(dir: string, out: string[] = []): string[] {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, e.name);
+    if (e.isDirectory()) tsxFiles(full, out);
+    else if (e.name.endsWith(".tsx") && !e.name.includes(".test.")) out.push(relative(ROOT, full));
+  }
+  return out;
+}
+
+const files = tsxFiles(resolve(ROOT, "src"));
 
 /** Every JSX `role="dialog"` attribute, with the opening tag it belongs to. */
 function dialogTags(src: string): string[] {
