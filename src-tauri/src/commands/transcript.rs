@@ -3573,3 +3573,56 @@ mod prepared_wav_tests {
         assert_ne!(a, b);
     }
 }
+
+#[cfg(test)]
+mod whisper_parser_tests {
+    use super::*;
+    /// whisper.cpp's stdout is a CONTRACT, and it had no test.
+    ///
+    /// These two parsers are the only source of transcription progress. If
+    /// whisper.cpp changes its output — a version bump is all it takes — they
+    /// return None for every line, the meter sits at 0% for the length of a
+    /// ten-minute job, and the app looks hung while working perfectly. Nothing
+    /// errors, nothing logs. Same silent-degradation shape the dictate and
+    /// diarizer envelope contracts exist for, on the third sidecar.
+    #[test]
+    fn whisper_progress_reads_the_real_line_shape() {
+        // Canary: a parser that always returned None would satisfy every
+        // rejection below.
+        assert_eq!(parse_whisper_progress_line("whisper_print_progress_callback: progress =  35%"), Some(35.0));
+        assert_eq!(parse_whisper_progress_line("progress = 0%"), Some(0.0));
+        assert_eq!(parse_whisper_progress_line("progress = 100%"), Some(100.0));
+        // Case-insensitive on the keyword, and a decimal survives.
+        assert_eq!(parse_whisper_progress_line("PROGRESS = 12.5%"), Some(12.5));
+    }
+
+    #[test]
+    fn whisper_progress_ignores_everything_else() {
+        // A percentage that is not progress must not move the meter — the
+        // model-load and system lines carry them too.
+        assert_eq!(parse_whisper_progress_line("load time =  100%"), None);
+        assert_eq!(parse_whisper_progress_line("progress without a percent"), None);
+        assert_eq!(parse_whisper_progress_line(""), None);
+        // Out of range is refused rather than clamped: a 900% meter is a
+        // parser that has locked onto the wrong number, and silently clamping
+        // it would hide exactly the breakage this test is for.
+        assert_eq!(parse_whisper_progress_line("progress = 900%"), None);
+    }
+
+    #[test]
+    fn whisper_segment_end_reads_the_timestamp() {
+        // The per-segment fallback: when progress lines are absent, elapsed
+        // media time drives the meter instead.
+        assert_eq!(
+            parse_whisper_segment_end("[00:00:00.000 --> 00:00:11.000]  Hello there"),
+            Some(11.0),
+        );
+        assert_eq!(
+            parse_whisper_segment_end("[00:01:02.500 --> 01:02:03.250]  Later"),
+            Some(3723.25),
+        );
+        // No arrow, no timestamp, no guess.
+        assert_eq!(parse_whisper_segment_end("just a line of text"), None);
+        assert_eq!(parse_whisper_segment_end("[00:00:01.000] no arrow"), None);
+    }
+}
