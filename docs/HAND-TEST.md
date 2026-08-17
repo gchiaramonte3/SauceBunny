@@ -100,6 +100,23 @@ that did nothing when clicked.
 - [ ] Empty the STUN field and start a session on the **same LAN**. It should
       still connect. (Across the internet it is expected NOT to.)
 
+### 4a. Share a portion of a screen — the caption used to lie
+
+Needs a real screen; the mock has no ScreenCaptureKit. Open a session, click
+**Share**, choose the **Portion** tab, pick a display.
+
+- [ ] Drag a **wide, short strip** across a title bar — roughly 400 wide by
+      under 16 tall. The caption must read **"400×9 is too small to share."**
+      and Share must stay disabled. Before this, it read "400×9 on Built-in
+      Display" and Share was dead anyway, which sent you hunting for a fault
+      that was in the drag all along.
+- [ ] Drag a **tall, narrow strip** — the same must happen with the numbers
+      the other way round.
+- [ ] Click once on the thumbnail without dragging. It must say **"Drag the
+      area to share."**, not scold you about a 0×0 selection.
+- [ ] Drag a normal region. Caption reads `W×H on <display name>`, Share
+      enables, and the shared picture matches the rectangle you drew.
+
 ## 5. Library
 
 - [ ] Add a root whose media sits **four folders deep**. Home should now say

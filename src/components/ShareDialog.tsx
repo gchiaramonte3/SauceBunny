@@ -6,6 +6,36 @@ import type { ShareSourceArg } from "../bindings/ShareSourceArg";
 import type { ShareSources } from "../bindings/ShareSources";
 
 type Tab = "screens" | "windows" | "portion";
+type Crop = { x: number; y: number; w: number; h: number };
+
+/**
+ * A dragged region has to clear this in BOTH dimensions to be shareable.
+ * A one-pixel-tall strip is a mis-drag, not a selection.
+ */
+export const MIN_CROP_PX = 16;
+
+/** The Share button's gate. */
+export function cropShareable(c: Crop | null): boolean {
+  return c != null && c.w > MIN_CROP_PX && c.h > MIN_CROP_PX;
+}
+
+/**
+ * What the foot says about the current drag - derived from the SAME predicate
+ * the Share button uses, which is the point of it being a function.
+ *
+ * These two had drifted: the gate wanted both dimensions over the floor, the
+ * readout checked only the width. Drag a wide, short strip across a title bar
+ * and the dialog printed "420x9 on Built-in Display", drew the rectangle, and
+ * left Share dead with nothing on screen disagreeing. A caption that confirms
+ * a selection the button rejects is worse than no caption: it sends the user
+ * looking for the fault somewhere else entirely.
+ */
+export function cropStatus(c: Crop | null, label: string): string {
+  if (!c || (c.w <= MIN_CROP_PX && c.h <= MIN_CROP_PX)) return "Drag the area to share.";
+  const size = `${Math.round(c.w)}×${Math.round(c.h)}`;
+  if (!cropShareable(c)) return `${size} is too small to share.`;
+  return `${size} on ${label}`;
+}
 
 /**
  * The share dialog - the Meet/Zoom picker shape: tabs for entire screens,
@@ -25,7 +55,7 @@ export function ShareDialog({ onPick, onClose }: {
   const [audio, setAudio] = useState<boolean>(() => loadJson<boolean>("saucebunny.shareAudio", false));
   // Portion state: which display + the dragged rect in DISPLAY points.
   const [portionDisplay, setPortionDisplay] = useState<number | null>(null);
-  const [crop, setCrop] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [crop, setCrop] = useState<Crop | null>(null);
   const dragRef = useRef<{ startX: number; startY: number } | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
 
@@ -57,9 +87,7 @@ export function ShareDialog({ onPick, onClose }: {
   const portionSrc = displays.find((d) => d.id === portionDisplay) ?? null;
 
   const shareReady =
-    tab === "portion"
-      ? portionSrc != null && crop != null && crop.w > 16 && crop.h > 16
-      : picked != null;
+    tab === "portion" ? portionSrc != null && cropShareable(crop) : picked != null;
 
   const share = () => {
     saveJson("saucebunny.shareAudio", audio);
@@ -224,7 +252,7 @@ export function ShareDialog({ onPick, onClose }: {
                     </div>
                     <div className="cp-share-portion-foot">
                       <span className="cp-share-dialog-sub">
-                        {crop && crop.w > 16 ? `${Math.round(crop.w)}×${Math.round(crop.h)} on ${portionSrc.label}` : "Drag the area to share."}
+                        {cropStatus(crop, portionSrc.label)}
                       </span>
                       <button type="button" className="btn btn-ghost btn-compact"
                         onClick={() => { setPortionDisplay(null); setCrop(null); }}>
