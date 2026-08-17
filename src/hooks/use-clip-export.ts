@@ -123,7 +123,7 @@ export function useClipExport(p: ClipExportDeps) {
       // installed ITS token; blindly nulling would strand its Stop button.
       if (localExportCancelRef.current === cancelToken) localExportCancelRef.current = null;
     }
-  }, [, localExportCancelRef]);
+  }, [localExportCancelRef]);
 
   const handleExport = useCallback(async () => {
     if (!metadata || !exportOpts.folder) return;
