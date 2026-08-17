@@ -17,6 +17,17 @@ function getCtx(): AudioContext | null {
   } catch {
     ctxRef = null;
   }
+  // WKWebView starts an AudioContext created OUTSIDE a user gesture in the
+  // "suspended" state, where scheduling an oscillator succeeds and produces
+  // silence. Every cue here fires from an async completion - an export
+  // finishing, a transcript landing - never from a click, so this context was
+  // always born suspended. And because ctxRef caches it for the life of the
+  // page, nothing later could rescue it: the app simply had no sounds.
+  //
+  // level-meter.ts and PeoplePanel.tsx both carry this same lesson in their
+  // own comments. This module predates neither of them; it just never got it.
+  // resume() is a no-op on a running context, so it is called unconditionally.
+  if (ctxRef && ctxRef.state === "suspended") void ctxRef.resume();
   return ctxRef;
 }
 
@@ -43,7 +54,7 @@ export function playSuccess() {
   tone(1318.5, 0.10, 0.32, "sine", 0.14);
 }
 
-/** Single low buzz for failures. */
+/** Two-note descending buzz for failures - A3 down to E3. */
 export function playError() {
   tone(220, 0.00, 0.40, "triangle", 0.10);
   tone(165, 0.08, 0.32, "triangle", 0.08);
