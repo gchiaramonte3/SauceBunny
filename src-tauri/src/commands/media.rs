@@ -1423,9 +1423,21 @@ pub async fn generate_local_thumbnail(
 
 #[cfg(test)]
 mod ffmpeg_banner_tests {
-    use super::parse_ffmpeg_video;
+    use super::{parse_ffmpeg_audio, parse_ffmpeg_duration, parse_ffmpeg_video};
 
     const H264: &str = "  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 1920x1080 [SAR 1:1 DAR 16:9], 8000 kb/s, 29.97 fps, 29.97 tbr, 90k tbn (default)";
+
+    /// A whole banner, the way ffmpeg actually prints one. The two parsers
+    /// below read a MULTI-LINE blob, not a single line, so a one-line fixture
+    /// would not exercise the search at all.
+    const BANNER: &str = "\
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from '/Users/x/A001C001.mov':
+  Metadata:
+    major_brand     : qt
+  Duration: 00:01:23.45, start: 0.000000, bitrate: 12345 kb/s
+  Stream #0:0[0x1](und): Video: prores (apch / 0x68637061), yuv422p10le, 1920x1080, 12345 kb/s, 25 fps, 25 tbr, 25k tbn (default)
+  Stream #0:1[0x2](und): Audio: pcm_s16le (lpcm / 0x6D63706C), 48000 Hz, stereo, s16, 1536 kb/s (default)
+";
 
     #[test]
     fn reads_the_geometry() {
@@ -1457,6 +1469,47 @@ mod ffmpeg_banner_tests {
     fn survives_a_banner_with_no_streams_at_all() {
         assert_eq!(parse_ffmpeg_video("ffmpeg version 7.1\n"), (None, None, None, None));
     }
+
+    /// Duration and audio codec feed `LocalFileMeta`, which is what the app
+    /// knows about a local file before anything decodes it. Neither had a
+    /// test, and neither fails loudly: a duration that stops parsing gives a
+    /// clip with no length, and the timeline has nothing to scale to.
+    #[test]
+    fn duration_comes_off_the_banner() {
+        // Canary and contract in one: 00:01:23.45 is 83.45 seconds.
+        let d = parse_ffmpeg_duration(BANNER).expect("no duration parsed from a real banner");
+        assert!((d - 83.45).abs() < 0.001, "got {d}");
+    }
+
+    #[test]
+    fn duration_is_none_when_ffmpeg_prints_none() {
+        // A stream with no container duration is normal, not an error — the
+        // app has to cope rather than invent a number.
+        assert_eq!(parse_ffmpeg_duration("Input #0, ...\n  Stream #0:0: Video: h264"), None);
+        assert_eq!(parse_ffmpeg_duration(""), None);
+        // "N/A" is what ffmpeg prints for a live/unknown source; it must not
+        // parse as a time.
+        assert_eq!(parse_ffmpeg_duration("  Duration: N/A, start: 0.000000"), None);
+    }
+
+    #[test]
+    fn audio_codec_is_the_bare_ffmpeg_name() {
+        // Same convention as the video codec above: the bare name, not an
+        // RFC 6381 string, and stopping before the parenthesised fourcc.
+        assert_eq!(parse_ffmpeg_audio(BANNER).as_deref(), Some("pcm_s16le"));
+        let aac = "  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo, fltp, 128 kb/s";
+        assert_eq!(parse_ffmpeg_audio(aac).as_deref(), Some("aac"));
+    }
+
+    #[test]
+    fn audio_codec_is_none_for_a_silent_file() {
+        // A video-only file is ordinary — a camera original with no audio
+        // track — and must not report a codec it does not have.
+        let video_only = "  Stream #0:0[0x1](und): Video: prores (apch / 0x68637061), 1920x1080, 25 fps";
+        assert_eq!(parse_ffmpeg_audio(video_only), None);
+        assert_eq!(parse_ffmpeg_audio(""), None);
+    }
+
 }
 
 #[cfg(test)]

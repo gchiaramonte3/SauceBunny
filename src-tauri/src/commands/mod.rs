@@ -129,6 +129,37 @@ fn compose_spawn_path(updated_bin: Option<&Path>, sidecars: Option<&Path>) -> St
 
 #[cfg(test)]
 mod spawn_path_tests {
+
+    /// `is_ytdlp_progress` decides whether a stdout line is PROGRESS NOISE or
+    /// something worth keeping. Three call sites depend on it, and it had no
+    /// test.
+    ///
+    /// Both failure directions are real. Stop recognising progress and the
+    /// pipeline log fills with hundreds of near-identical percentage lines,
+    /// burying the one line that says why a download failed. Recognise too
+    /// much and a genuine error carrying a percentage is swallowed silently.
+    #[test]
+    fn ytdlp_progress_lines_are_recognised() {
+        // The canary: a predicate that always said false would satisfy every
+        // rejection below.
+        assert!(is_ytdlp_progress("[download]  45.2% of 123.45MiB at 1.23MiB/s ETA 00:59"));
+        assert!(is_ytdlp_progress("[download] 100% of 12.00MiB in 00:03"));
+        // yt-dlp indents some lines; the check trims first.
+        assert!(is_ytdlp_progress("   [download]   0.0% of ~1.00GiB at Unknown B/s"));
+    }
+
+    #[test]
+    fn other_lines_are_kept() {
+        // A destination line has the tag but no percentage — it is worth
+        // logging once, so it must NOT be treated as noise.
+        assert!(!is_ytdlp_progress("[download] Destination: /tmp/video.mp4"));
+        // An error carrying a percentage must survive: it is not a
+        // [download] line, and swallowing it would hide the reason a job died.
+        assert!(!is_ytdlp_progress("ERROR: fragment 3 failed, 45% complete"));
+        assert!(!is_ytdlp_progress("[info] Writing metadata"));
+        assert!(!is_ytdlp_progress(""));
+    }
+
     use super::*;
 
     fn dirs(path: &str) -> Vec<&str> {
