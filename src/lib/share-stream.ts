@@ -73,30 +73,57 @@ export async function openShareStream(
         if ((err as DOMException)?.name === "QuotaExceededError") {
           queue.unshift(chunk);
           const keepFrom = Math.max(0, video.currentTime - 10);
-          try {
-            if (keepFrom > 0) sb.remove(0, keepFrom);
-            return; // the remove's updateend re-enters pump
-          } catch { /* fall through to death below */ }
+          // The `return` belongs INSIDE the guard. With keepFrom === 0 - which
+          // is every quota hit in the first ten seconds of playback - the old
+          // shape skipped the remove and returned anyway: nothing was evicted,
+          // so no updateend fired, so pump was never re-entered, and the share
+          // stalled forever without ever reporting a death. A quota hit with
+          // nothing evictable is a real death; only a remove we actually issued
+          // earns the retry.
+          if (keepFrom > 0) {
+            try {
+              sb.remove(0, keepFrom);
+              return; // the remove's updateend re-enters pump
+            } catch { /* fall through to death below */ }
+          }
         }
         died();
       }
     };
     sb.addEventListener("updateend", pump);
 
+    // gotData has to settle BOTH ways. It used to have only a resolve, so a
+    // stream that ended or errored before its first byte left `await gotData`
+    // waiting forever: openShareStream never settled, teardown never ran, and
+    // the caller sat on a share that was already dead - with a detached playing
+    // <video>, an open MediaSource and a live read loop left behind. A proxy
+    // that answers 200 with an empty body is enough to reach it.
+    //
+    // After the first chunk the promise is already settled, so these rejections
+    // become no-ops and a later death goes through onDied() as before.
     let signalFirst: () => void = () => {};
-    const gotData = new Promise<void>((resolve) => { signalFirst = resolve; });
+    let failFirst: (e: Error) => void = () => {};
+    const gotData = new Promise<void>((resolve, reject) => {
+      signalFirst = resolve;
+      failFirst = reject;
+    });
     void (async () => {
       try {
         for (;;) {
           const { done, value } = await reader.read();
-          if (done) { died(); return; }
+          if (done) {
+            failFirst(new Error("share stream ended before sending any data"));
+            died();
+            return;
+          }
           if (value && value.byteLength) {
             queue.push(value);
             pump();
             signalFirst();
           }
         }
-      } catch {
+      } catch (e) {
+        failFirst(e instanceof Error ? e : new Error("share stream read failed"));
         died();
       }
     })();
