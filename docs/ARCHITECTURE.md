@@ -344,9 +344,41 @@ Done since this list was written: the commands.rs split (r47 — `commands/{down
 
 Remaining, roughly in priority order:
 
-1. **UI smoke harness** — unit tests cover the parsers/math; playback and the transcript pipeline are still verified manually. A Playwright (or tauri-driver) smoke run would close that gap.
+1. ~~**UI smoke harness**~~ — done (r105). `npm run test:e2e` drives the Vite-served frontend in Chromium with the Tauri IPC layer mocked at the `__TAURI_INTERNALS__` seam; tauri-driver has no macOS/WKWebView support, so it is deliberately a shell smoke. Native playback and transcription remain manual (see `docs/HAND-TEST.md`).
 2. **First public release** — tagged v0.1.0 with a notarized .dmg (see docs/DISTRIBUTION.md), plus an app-update story (tauri-plugin-updater) and a plan for yt-dlp staleness (YouTube breaks extractors faster than app releases ship).
 3. **Linux / Windows builds** — macOS-first while we hit 1.0; cross-platform after.
+
+## Boot cost, measured — and why the decode stack stays eagerly imported
+
+The main bundle is ~1.82 MB, and Vite says so on every build. Roughly 40% of it
+is one dependency: attributing source bytes through the sourcemap gives
+mediabunny 1,652 kB and `@mediabunny/prores` 265 kB, against 303 kB for
+`App.tsx` and 131 kB each for `@tauri-apps/api` and `react-dom`. All nine
+mediabunny imports are static, none of it is needed to render the home view,
+and the MP3 encoder next door is already lazy — so making the decode stack lazy
+too looks like the obvious win.
+
+It is not, and the numbers are here so this does not get re-argued. Serving the
+real `dist/` build and timing a cold load to the home view:
+
+    to home            166 ms
+    first paint        152 ms
+    domInteractive      18 ms
+    bundle fetch+parse  41 ms   (one file; 547 kB over the wire)
+
+41 ms. Making mediabunny lazy means converting nine modules from static to
+dynamic imports, which turns every call site on the local-playback, export,
+waveform and ProRes paths async. That is the code CLAUDE.md is most emphatic
+about not destabilising, and the ceiling on the win is a few tens of ms of parse
+time that happens once per launch, behind a splash the user is not watching.
+
+Two things the same run confirms. Only ONE js file loads at boot, so the MP3
+encoder chunk genuinely stays out of the boot path — the invariant
+`verify:packaged` checks in the packaged app, observed here in the browser.
+And measure the SHIPPED bundle, not the dev server: the e2e harness serves
+unbundled per-module Vite, where the same boot reads 547 ms with `App.tsx` and
+`MediaBunnyPlayer.tsx` as separate resources. That number describes the
+developer's dev loop and nothing a user ever experiences.
 
 ## Media stream cache + timeline contract (r112–r114)
 
