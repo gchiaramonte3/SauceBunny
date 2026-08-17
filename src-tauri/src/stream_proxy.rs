@@ -296,6 +296,20 @@ fn cors_origin_for(request: &tiny_http::Request) -> String {
         .iter()
         .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("origin"))
         .map(|h| h.value.as_str().to_string());
+    cors_origin_from(origin.as_deref())
+}
+
+/// The allowlist decision on its own, so it can be tested without building a
+/// `tiny_http::Request` — which is why it had no test before.
+///
+/// Echo the caller's Origin only when it is one of OURS; anything else is
+/// pinned to the prod origin. Never `*`: a page that somehow learned the
+/// session token still must not be able to READ the response.
+///
+/// The two prefix rules are deliberately permissive — the dev server picks its
+/// own port — but they end in a COLON, which is what stops `localhost.evil.com`
+/// matching. Loosening either to a `contains` would open exactly that.
+fn cors_origin_from(origin: Option<&str>) -> String {
     match origin {
         Some(o)
             if o == "tauri://localhost"
@@ -304,7 +318,7 @@ fn cors_origin_for(request: &tiny_http::Request) -> String {
                 || o.starts_with("http://localhost:")
                 || o.starts_with("http://127.0.0.1:") =>
         {
-            o
+            o.to_string()
         }
         _ => "tauri://localhost".to_string(),
     }
@@ -1209,6 +1223,42 @@ fn decode_upstream(url_path: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The CORS allowlist. It decides who may READ a proxy response, and until
+    /// now it had no test because it took a `tiny_http::Request`.
+    #[test]
+    fn cors_echoes_our_own_origins() {
+        for ours in [
+            "tauri://localhost",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+            "http://localhost:5173",
+            "http://127.0.0.1:4173",
+        ] {
+            assert_eq!(cors_origin_from(Some(ours)), ours, "should echo {ours}");
+        }
+    }
+
+    #[test]
+    fn cors_pins_everything_else_and_never_stars() {
+        // A missing Origin, a foreign site, and the two shapes that look close
+        // enough to be worth naming: a subdomain of a hostname we allow, and
+        // one that merely CONTAINS it. The trailing colon in the prefix rules
+        // is what rejects both — loosen either to a `contains` and the first
+        // one gets in.
+        for other in [
+            None,
+            Some("https://evil.example"),
+            Some("http://localhost.evil.com"),
+            Some("http://notlocalhost:5173"),
+            Some("https://localhost:5173"),   // https on the dev host is not ours
+        ] {
+            let got = cors_origin_from(other);
+            assert_eq!(got, "tauri://localhost", "should have pinned {other:?}");
+            assert_ne!(got, "*", "the proxy must never answer with a wildcard origin");
+        }
+    }
+
 
     /// The capability gate. CLAUDE.md says "keep the token check intact when
     /// touching stream_proxy.rs", and until now nothing enforced that — 25
