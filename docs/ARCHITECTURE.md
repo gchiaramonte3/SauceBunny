@@ -235,7 +235,7 @@ The one deliberate exception to "state lives in App" is the playhead. It ticks u
 
 ### What is left to extract, and what only looks extractable
 
-`App.tsx` is ~5,230 lines. The roadmap direction is one cohesive subsystem at a
+`App.tsx` is ~5,040 lines. The roadmap direction is one cohesive subsystem at a
 time into `src/hooks/use-*.ts` (done: `use-panel-bus`, `use-web-playback`,
 `use-co-review`, `use-library-scan`, `use-media-capture`, `use-transport`,
 `use-keyboard-shortcuts`, `use-clip-export`, `use-clip-queue`).
