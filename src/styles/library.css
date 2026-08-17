@@ -1449,7 +1449,7 @@
 .cp-tagrow-dot:hover { transform: scale(1.18); }
 /* The ring is WHITE, never the accent: a lit tag dot must not read as a
    selected control, and the swatch under it is already coloured. */
-.cp-tagrow-dot.on { box-shadow: 0 0 0 2px var(--bg-1, #161616), 0 0 0 3.5px rgba(255,255,255,0.92); }
+.cp-tagrow-dot.on { box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 3.5px rgba(255,255,255,0.92); }
 .cp-tagrow-dot:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
 .cp-tagrow-clear {
   display: flex;
@@ -1509,7 +1509,7 @@
   flex-direction: column;
   gap: 10px;
   padding: 16px;
-  background: var(--bg-1, #161616);
+  background: var(--bg-1);
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
@@ -1573,7 +1573,7 @@
   gap: 8px;
   padding: 12px 14px;
   border-top: 1px solid var(--line-2);
-  background: var(--bg-2, #17171a);
+  background: var(--bg-2);
 }
 .cp-rename-confirm-lead {
   margin: 0;
@@ -1626,7 +1626,7 @@
   max-height: 84vh;
   border-radius: var(--r-lg);
   overflow: hidden;
-  background: var(--bg-1, #161616);
+  background: var(--bg-1);
   border: 1px solid var(--line-2);
   box-shadow: var(--shadow-card);
 }

@@ -1,8 +1,8 @@
 /* Gradient stops for the trace (referenced by the SVG defs' classes) —
    the brand tokens straight from tokens.css, hex fallbacks only for the
    pathological no-tokens case. */
-.cp-bl-stop-a { stop-color: var(--novella-purple, #8627FF); }
-.cp-bl-stop-b { stop-color: var(--ella-green, #6CFF8D); }
+.cp-bl-stop-a { stop-color: var(--novella-purple); }
+.cp-bl-stop-b { stop-color: var(--ella-green); }
 
 /* BunnyLoader (BunnyLoader.tsx) — branded stroke-trace loading indicator for
    screen-level waits. Colors come from the token stops above; dash math is

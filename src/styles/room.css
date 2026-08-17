@@ -783,7 +783,7 @@
   flex: 1 1 240px;
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
-  background: var(--bg-0, #0c0c0e);
+  background: var(--bg-0);
   color: var(--fg-3);
 }
 /* Composed field: the WRAPPER takes the focus ring, never the accent. */

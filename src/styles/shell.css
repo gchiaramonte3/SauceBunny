@@ -680,7 +680,7 @@
   color: var(--fg-3);
 }
 .cp-rowmenu-warn b { color: var(--fg-1); font-weight: 700; }
-.cp-rowmenu-err { margin: 8px 0 0; font-size: 11.5px; color: var(--danger, #E82626); }
+.cp-rowmenu-err { margin: 8px 0 0; font-size: 11.5px; color: var(--danger); }
 .cp-rowmenu-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .cp-rowmenu-actions .cp-tx-iconbtn { height: 28px; padding: 0 12px; }
 .cp-rowmenu-folders { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }

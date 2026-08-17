@@ -16,7 +16,7 @@
     radial-gradient(52% 44% at 18% 12%, color-mix(in srgb, var(--ella-green) 13%, transparent), transparent 70%),
     radial-gradient(56% 48% at 84% 88%, color-mix(in srgb, var(--novella-purple) 17%, transparent), transparent 72%),
     radial-gradient(40% 36% at 78% 18%, color-mix(in srgb, var(--novella-violet) 8%, transparent), transparent 70%),
-    var(--bg-0, #0b0b0d);
+    var(--bg-0);
 }
 .cp-welcome-stage {
   display: flex;
@@ -65,7 +65,7 @@
   padding: 10px 14px;
   border: 1px solid var(--line-1);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-1, #131316) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-1) 82%, transparent);
   animation: cp-welcome-rise 520ms var(--ease-out) both;
 }
 .cp-welcome-row-icon {

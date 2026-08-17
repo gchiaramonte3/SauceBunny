@@ -67,7 +67,7 @@
    Right-aligned + portaled so it can overflow the drawer width. */
 .cp-tx-history {
   position: fixed;
-  background: var(--bg-1, #161616);
+  background: var(--bg-1);
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
@@ -174,7 +174,7 @@
    speaker with a talk-share bar tinted in that speaker's colour. */
 .cp-tx-insights {
   position: fixed;
-  background: var(--bg-1, #161616);
+  background: var(--bg-1);
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
@@ -630,7 +630,7 @@
   top: calc(100% + 4px);
   right: 0;
   min-width: 200px;
-  background: var(--bg-1, #161616);
+  background: var(--bg-1);
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
   box-shadow: var(--shadow-card);
@@ -664,13 +664,13 @@
 .cp-tx-speaker { cursor: pointer; transition: transform 80ms ease, box-shadow 80ms ease; }
 .cp-tx-speaker:hover { transform: scale(1.05); }
 .cp-tx-speaker.renamed {
-  box-shadow: 0 0 0 2px var(--bg-0, #0a0a0a), 0 0 0 3px var(--fg-4);
+  box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 3px var(--fg-4);
 }
 
 /* Rename popover — portaled to body, positioned next to the chip. */
 .cp-tx-rename {
   position: fixed;
-  background: var(--bg-1, #161616);
+  background: var(--bg-1);
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-card);
@@ -2055,7 +2055,7 @@
   padding: 8px;
   border-radius: 10px;
   border: 1px solid var(--line-2);
-  background: var(--bg-1, #161616);
+  background: var(--bg-1);
   box-shadow: var(--shadow-card);
 }
 .cp-badgesheet-search {
@@ -2155,7 +2155,7 @@
   max-height: 76vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg-1, #161616);
+  background: var(--bg-1);
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
