@@ -60,6 +60,40 @@ The comment stayed, trimmed. Its core claim — use `map_or(true, …)` rather t
 `is_none_or` because of the MSRV — is still true and still the reason the code
 is shaped that way. Only the sentence about needing an attribute was stale.
 
+### Surveyed and not adopted: `clippy::pedantic`
+
+With the default set at zero, the obvious next question is whether a stricter
+bar is hiding anything. `cargo clippy --all-targets -- -W clippy::pedantic`
+reports **1,104** warnings. The shape of them is the answer:
+
+| count | lint | worth it? |
+|------:|------|-----------|
+| 319 | `doc_markdown` | no — backticks in doc comments, 29% of the total |
+| 94 | `needless_pass_by_value` | changes signatures; behavioural, out of scope |
+| 84 | `cast_precision_loss` | benign, see below |
+| 83 | `map_unwrap_or` | style |
+| 80 | `cast_possible_truncation` | benign, see below |
+| 64 | `redundant_closure_for_method_calls` | style |
+| 58 | `manual_let_else` | style |
+| 52 | `uninlined_format_args` | style |
+
+Concentrated in `media.rs` (204), `transcript.rs` (203) and `session.rs` (195),
+which is simply where the code is.
+
+**The cast cluster was checked, not assumed.** It looked like the one place a
+real defect could hide — truncation in media or timecode maths. It does not: all
+42 sites in `media.rs` / `transcript.rs` / `stream_proxy.rs` are ffprobe JSON
+fields narrowed `u64 → u32` (`width`, `height`, `channels`, `sample_rate`) or
+`CGDisplayPixelsWide`, none of which can exceed `u32`. The one float cast,
+`media.rs:1272`, feeds a poster **cache key**: a non-finite input would saturate
+to 0 and collide with the `t = 0.0` bucket, serving a valid poster for the wrong
+timestamp. Harmless, and not reachable from a caller that passes a real
+timestamp.
+
+So: pedantic is noise here, adopting it wholesale would be ~1,100 mechanical
+edits across the media paths for no defect found, and the default set is the
+right bar. Recorded so this is a decision rather than an omission.
+
 ### Closed off, so nobody re-checks
 
 - **No `[features]` section and zero `cfg(feature = …)` sites**, so
