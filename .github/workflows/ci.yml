@@ -55,7 +55,15 @@ jobs:
       - run: cargo test --lib
         working-directory: src-tauri
       # Zero-warning policy — the codebase is clippy-clean as of r86.
-      - run: cargo clippy -- -D warnings
+      # --all-targets is load-bearing, not tidiness. Without it clippy lints
+      # the lib and the bin and stops; the ~264 unit tests live in
+      # `#[cfg(test)]` modules that are only compiled for the TEST targets, so
+      # they were never linted at all. Verified by planting a `v.len() == 0`
+      # in one of those modules: the bare `cargo clippy -- -D warnings` above
+      # passed it silently, and --all-targets rejected it as len_zero. The
+      # tree is already clean under the wider flag, so this locks in a
+      # standard the test code was meeting only by luck.
+      - run: cargo clippy --all-targets -- -D warnings
         working-directory: src-tauri
 
   swift-build:
