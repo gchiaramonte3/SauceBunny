@@ -670,12 +670,12 @@ fn pick_thumbnail(v: &serde_json::Value) -> Option<String> {
         // nothing, so a source offering only a 4K still gets a poster.
         let score = if known && w > 1920 { -area } else { area };
         let cand = (pref, score, url.to_string());
-        // `map_or(true, …)`, not `is_none_or`: the latter is stable since
-        // 1.82 and this crate declares rust-version 1.77.2, so clippy's
-        // incompatible_msrv fires and CI runs it with -D warnings. Raising the
-        // declared MSRV would also silence it, but that is a policy change
-        // about who can build this, not a cleanup.
-        #[allow(clippy::unnecessary_map_or)]
+        // `map_or(true, …)`, not `is_none_or`: the latter is stable since 1.82
+        // and this crate declares rust-version 1.77.2. Clippy used to want the
+        // swap regardless, which cost an `#[allow]` here; it is MSRV-aware now
+        // (verified against the 0.1.97 CI runs on) and stays quiet on its own.
+        // Raising the declared MSRV would also work, but that is a policy
+        // change about who can build this, not a cleanup.
         if best.as_ref().map_or(true, |b| (b.0, b.1) < (cand.0, cand.1)) {
             best = Some(cand);
         }

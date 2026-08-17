@@ -41,23 +41,24 @@ To decide: if the crate is meant to stay `cargo check`-able off macOS, keep
 them and accept that they are unverified. If not, delete both and let a
 non-macOS build fail honestly at the missing function.
 
-### Pending a fact CI did not record: the single `#[allow]` looks stale
+### Resolved: the last `#[allow]` in the crate is gone
 
-`src-tauri/src/commands/download.rs:678` carries
+`src-tauri/src/commands/download.rs` carried
 `#[allow(clippy::unnecessary_map_or)]`, justified by the crate's declared
 `rust-version = "1.77.2"` against `is_none_or` stabilising in 1.82 — the lint
 used to suggest an API the MSRV forbids.
 
-Removed it locally and clippy said nothing. Under **clippy 0.1.95** the lint is
-MSRV-aware and no longer suggests `is_none_or` below 1.82, so the allow is doing
-no work. The lint fixed itself.
+Removing it locally produced no warning: clippy became MSRV-aware and stopped
+suggesting `is_none_or` below 1.82. The lint fixed itself. The blocker was that
+deleting the attribute is only safe if CI's clippy is at least that new, and the
+workflow had never printed its toolchain — so the version step went in first,
+and the next run recorded **rustc 1.97.1 / clippy 0.1.97**, newer than the 0.1.95
+the behaviour was observed on. Attribute deleted; `src-tauri/src` now contains
+zero `#[allow]` of any kind.
 
-Not removed, because removing it is only safe if CI's clippy is at least that
-new, and **CI never printed its toolchain**, so there was no way to know. That
-gap is now closed: the `cargo-check` job runs `rustc --version && cargo clippy
---version` before the lint step. Once a run records a version ≥ 0.1.95, delete
-the attribute and its comment; if the runner is older, keep both and this note
-explains why.
+The comment stayed, trimmed. Its core claim — use `map_or(true, …)` rather than
+`is_none_or` because of the MSRV — is still true and still the reason the code
+is shaped that way. Only the sentence about needing an attribute was stale.
 
 ### Closed off, so nobody re-checks
 
