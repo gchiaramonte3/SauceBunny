@@ -78,6 +78,31 @@ const LLM_MODELS: &[LlmSpec] = &[
         recommended: false,
         blurb: "Highest quality + cleanest prose (least markdown clutter). ~7.1 GB. Best on 24 GB+ Macs.",
     },
+    // The heavy option. Deliberately NOT recommended: it is a 27B dense model,
+    // so the download and the resident footprint are both a different order of
+    // magnitude from everything above, and on a 16 GB Mac it will swap rather
+    // than run. Offered because a 27B genuinely reads a long transcript better,
+    // for people whose machine has the headroom.
+    //
+    // The URL is pinned to a commit SHA like its siblings, not to `main` - the
+    // whole point is that the bytes cannot change under a user mid-download.
+    // `size` was read from the pinned URL itself (HTTP 200, content-length
+    // 17106775008), not from the model card, because it is passed to the
+    // downloader as `expected_bytes` and a wrong value fails verification.
+    //
+    // `ctx` stays at the same 40,960 as the other 2026 models even though this
+    // one's native window is far larger. The cap is a KV-cache decision, not a
+    // model limit: see the note above qwen3.5-9b.
+    LlmSpec {
+        id: "qwen3.8-27b",
+        name: "Qwen3.8 27B",
+        file: "Qwen3.8-27B-Q4_K_M.gguf",
+        url: "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+        size: 17_106_775_008,
+        ctx: 40_960,
+        recommended: false,
+        blurb: "Strongest summaries of long transcripts, and the slowest. ~17 GB download, needs ~24 GB free RAM. Only worth it on a 32 GB+ Mac.",
+    },
 ];
 
 fn spec(id: &str) -> Option<&'static LlmSpec> {
