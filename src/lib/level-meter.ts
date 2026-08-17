@@ -16,6 +16,47 @@
  *  - prefers-reduced-motion must NOT disable the meter: it's essential
  *    feedback, not decoration. The CSS drops transitions instead.
  */
+
+/**
+ * The highest segment index lit by `level`, or -1 for "nothing lit".
+ *
+ * ONE quantiser, used for both the lit run and the peak-hold marker, because
+ * using two was the bug. A segment lights at its MIDPOINT (`level >= (i+0.5)/n`)
+ * — that is what makes a half-lit-looking strip read honestly — while the hold
+ * marker used to bucket at a segment's LOWER edge (`Math.floor(level * n)`).
+ * For 46 of the 128 reachable peak values those disagree by exactly one, always
+ * in the same direction, so the marker sat one segment ABOVE the signal.
+ *
+ * It crossed zone boundaries, which is what made it more than cosmetic: a peak
+ * of 84 (≈ -3.6 dBFS, an ordinary loud speaking voice) lit up to bar 13, the
+ * last yellow, while the marker landed on bar 14 — red — and CSS paints `.hold`
+ * at opacity 0.85 against `.zone-red { background: var(--danger) }`. The user
+ * saw a near-solid red "peaking" bar with nothing red lit, on the exact strip
+ * the Settings copy tells them to watch.
+ *
+ * `holdLevel` is assigned `= level` on any rising frame, so on the peak frame
+ * the two are equal and the marker must coincide with the top of the lit run.
+ * The offset could never be explained away as hold decay.
+ *
+ * Deriving both from this function makes the disagreement unrepresentable.
+ * It also retires the separate `holdLevel > 0.02` silence gate: the marker now
+ * appears exactly when the first segment lights, rather than at a second,
+ * slightly lower threshold of its own.
+ */
+export function topLitIndex(level: number, n: number): number {
+  // Non-finite means we do not know the level, so paint nothing rather than
+  // guess at either end. Unreachable from the analyser (peak comes from a
+  // Uint8Array, so `peak / 96` is always finite) but the contract below is
+  // then true for every input rather than every expected input.
+  if (!Number.isFinite(level) || n <= 0) return -1;
+  // Highest i satisfying level >= (i + 0.5) / n  ⟺  i <= level * n - 0.5.
+  // Clamped BOTH ends: the result is an index into the strip or -1, never the
+  // -9 that a negative level would otherwise produce. Callers compare with
+  // `i <= topLit` and `i === holdIdx`, where -9 behaves like -1 today — but a
+  // function whose doc says "-1" should return -1.
+  return Math.max(-1, Math.min(n - 1, Math.floor(level * n - 0.5)));
+}
+
 export function startLevelMeter(
   stream: MediaStream,
   getBars: () => (HTMLElement | null)[],
@@ -44,13 +85,14 @@ export function startLevelMeter(
     }
     const bars = getBars();
     const n = bars.length;
-    // The peak-hold marker sits on the highest segment the hold level
-    // reaches (-1 = silence, no marker).
-    const holdIdx = holdLevel > 0.02 ? Math.min(n - 1, Math.floor(holdLevel * n)) : -1;
+    // Both derived from the SAME quantiser - see topLitIndex. -1 is silence,
+    // and it now falls out of the maths rather than a separate threshold.
+    const topLit = topLitIndex(level, n);
+    const holdIdx = topLitIndex(holdLevel, n);
     for (let i = 0; i < n; i++) {
       const b = bars[i];
       if (!b) continue;
-      b.classList.toggle("lit", level >= (i + 0.5) / n);
+      b.classList.toggle("lit", i <= topLit);
       b.classList.toggle("hold", i === holdIdx);
     }
     raf = requestAnimationFrame(tick);
