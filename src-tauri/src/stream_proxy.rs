@@ -61,6 +61,28 @@ static BASE: OnceLock<String> = OnceLock::new();
 /// the `/fmp4/` string-replace) carries it transparently — no frontend change.
 static TOKEN: OnceLock<String> = OnceLock::new();
 
+/// The capability gate as a pure function, so it can be tested without a
+/// server. Returns the path AFTER `/t/<token>`, or None to answer 403.
+///
+/// Three conditions, and two of them are the whole point:
+///
+///  * `!token.is_empty()` — if TOKEN were ever unset, `strip_prefix("")`
+///    succeeds on everything and the gate would FAIL OPEN, turning the proxy
+///    into the open relay for any local process that this exists to prevent.
+///  * `rest.starts_with('/')` — without it a token that is a PREFIX of the
+///    supplied one passes: token `abc` would admit `/t/abcdef/x`.
+///  * the `/t/` prefix itself, which is what makes an unprefixed request 403
+///    rather than a path traversal into the routes below.
+fn strip_token_prefix(path: &str, token: &str) -> Option<String> {
+    if token.is_empty() {
+        return None;
+    }
+    path.strip_prefix("/t/")
+        .and_then(|r| r.strip_prefix(token))
+        .filter(|rest| rest.starts_with('/'))
+        .map(str::to_string)
+}
+
 /// 24 crypto-random bytes from `/dev/urandom` (always present on macOS — the
 /// only target), base64url-encoded → an unguessable 32-char token. Reads the
 /// OS CSPRNG directly so we add no `rand`/`getrandom` dependency.
@@ -331,12 +353,9 @@ fn serve(client: &reqwest::blocking::Client, request: tiny_http::Request) -> std
     // port-scanning web page from using us as an open proxy / reading the
     // user's media. The token is base64url (no '/'), so the split is exact.
     let token = TOKEN.get().map(String::as_str).unwrap_or("");
-    let raw_path = match raw_path_full
-        .strip_prefix("/t/")
-        .and_then(|r| r.strip_prefix(token))
-    {
-        Some(rest) if !token.is_empty() && rest.starts_with('/') => rest.to_string(),
-        _ => {
+    let raw_path = match strip_token_prefix(&raw_path_full, token) {
+        Some(rest) => rest,
+        None => {
             return request.respond(
                 tiny_http::Response::from_string("forbidden").with_status_code(403),
             );
@@ -1190,6 +1209,45 @@ fn decode_upstream(url_path: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The capability gate. CLAUDE.md says "keep the token check intact when
+    /// touching stream_proxy.rs", and until now nothing enforced that — 25
+    /// tests in this file and none of them touched the one thing standing
+    /// between a local port scan and the user's media.
+    #[test]
+    fn token_gate_admits_only_the_exact_token() {
+        // The happy path, and the canary: if this stopped returning Some, every
+        // rejection below would pass for the wrong reason.
+        assert_eq!(strip_token_prefix("/t/abc/fmp4/v1/x", "abc"), Some("/fmp4/v1/x".to_string()));
+        assert_eq!(strip_token_prefix("/t/abc/", "abc"), Some("/".to_string()));
+    }
+
+    #[test]
+    fn token_gate_rejects_the_ways_in() {
+        // No prefix at all — a bare port scan.
+        assert_eq!(strip_token_prefix("/fmp4/v1/x", "abc"), None);
+        // Wrong token.
+        assert_eq!(strip_token_prefix("/t/nope/fmp4", "abc"), None);
+        // A token that merely STARTS with the real one. Without the
+        // `starts_with('/')` check this is admitted, because stripping "abc"
+        // from "abcdef/x" succeeds and leaves "def/x".
+        assert_eq!(strip_token_prefix("/t/abcdef/x", "abc"), None);
+        // The token with nothing after it: no route follows, so there is
+        // nothing to serve and it must not fall through to the handlers.
+        assert_eq!(strip_token_prefix("/t/abc", "abc"), None);
+    }
+
+    #[test]
+    fn token_gate_fails_closed_when_the_token_is_unset() {
+        // The one that matters most. TOKEN is a OnceLock read with
+        // `.unwrap_or("")`, so an unset token yields "". `strip_prefix("")`
+        // succeeds on EVERY string, so without the emptiness guard the gate
+        // would admit any `/t/`-prefixed path — the proxy becomes the open
+        // relay it exists to prevent, and nothing would look wrong.
+        assert_eq!(strip_token_prefix("/t//fmp4/v1/x", ""), None);
+        assert_eq!(strip_token_prefix("/t/anything/at/all", ""), None);
+    }
+
 
     /// The functional contract of `try_claim`: never hand out more than `max`,
     /// and give the slot back when refusing.
