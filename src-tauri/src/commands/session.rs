@@ -2302,6 +2302,40 @@ pub fn session_cancel_fetch(blake3_hex: String) -> Result<(), crate::AppError> {
 
 #[cfg(test)]
 mod tests {
+
+    /// Peer display names arrive over the wire from another machine and are
+    /// rendered in the roster, so they are untrusted input. `sanitize_name`
+    /// had no test.
+    #[test]
+    fn sanitize_name_keeps_ordinary_names() {
+        // Canary first: a filter that stripped everything would satisfy every
+        // rejection below.
+        assert_eq!(sanitize_name("Ada Lovelace"), "Ada Lovelace");
+        assert_eq!(sanitize_name("  Ada  "), "Ada");
+        // Non-ASCII is a name, not an attack.
+        assert_eq!(sanitize_name("Ada Łovelace 日本"), "Ada Łovelace 日本");
+    }
+
+    #[test]
+    fn sanitize_name_strips_control_characters() {
+        // A newline or an ANSI escape in a roster entry can forge a second
+        // participant, or scramble any log line the name is written into.
+        assert_eq!(sanitize_name("Ada\nMallory"), "AdaMallory");
+        assert_eq!(sanitize_name("Ada\u{001b}[31m"), "Ada[31m");
+        assert_eq!(sanitize_name("Ada\u{0000}"), "Ada");
+        assert_eq!(sanitize_name("\r\n"), "");
+    }
+
+    #[test]
+    fn sanitize_name_caps_the_length() {
+        // 40 CHARS, not bytes — a cap counted in bytes would split a
+        // multi-byte character and panic on the slice.
+        let long = "A".repeat(200);
+        assert_eq!(sanitize_name(&long).chars().count(), 40);
+        let wide = "日".repeat(200);
+        assert_eq!(sanitize_name(&wide).chars().count(), 40);
+    }
+
     use super::*;
 
     #[tokio::test]

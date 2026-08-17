@@ -495,6 +495,62 @@ pub fn move_transcript_to_folder(srt_path: String, dest_dir: String) -> Result<S
 
 #[cfg(test)]
 mod tests {
+
+    /// `valid_stem` is the path-traversal guard for library renames, and it
+    /// had no test. Its output is used DIRECTLY as a path segment —
+    /// `PathBuf::from(&library_path).join(&stem)` and `dir.join(stem.ext)` —
+    /// so anything it admits lands on disk where it says. `Path::join` with an
+    /// absolute segment REPLACES the base entirely, which is what makes the
+    /// slash rejection load-bearing rather than cosmetic.
+    #[test]
+    fn valid_stem_accepts_an_ordinary_name() {
+        // The canary: every rejection below would pass on a function that
+        // rejected everything.
+        assert_eq!(valid_stem("Interview with Ada").unwrap(), "Interview with Ada");
+        assert_eq!(valid_stem("  Reel A  ").unwrap(), "Reel A");
+    }
+
+    #[test]
+    fn valid_stem_refuses_to_leave_its_directory() {
+        for bad in ["..", ".", "../etc", "a/b", "a\\b", "/absolute", "sub/dir"] {
+            assert!(valid_stem(bad).is_err(), "should have rejected {bad:?}");
+        }
+        // A NUL cannot reach a filesystem call as part of a name.
+        assert!(valid_stem("a\0b").is_err());
+    }
+
+    #[test]
+    fn valid_stem_refuses_hidden_names() {
+        // A leading dot would make the transcript or folder invisible in
+        // Finder — the user would rename something and watch it disappear.
+        for hidden in [".hidden", ".DS_Store", "..twodots"] {
+            assert!(valid_stem(hidden).is_err(), "should have rejected {hidden:?}");
+        }
+    }
+
+    #[test]
+    fn valid_stem_refuses_names_that_are_empty_once_trimmed() {
+        for empty in ["", "   ", "\t\n"] {
+            assert!(valid_stem(empty).is_err(), "should have rejected {empty:?}");
+        }
+        // Trailing dots and spaces are stripped, so a name made only of them
+        // collapses to empty and must be refused rather than yielding "".
+        assert!(valid_stem("...").is_err());   // also caught by the leading-dot rule
+        assert!(valid_stem(" . ").is_err());
+    }
+
+    #[test]
+    fn valid_stem_strips_trailing_dots_and_spaces() {
+        // A trailing dot or space is legal on APFS but confuses every tool
+        // that round-trips through a Windows share, and a trailing dot before
+        // the extension produces "name..srt".
+        assert_eq!(valid_stem("Reel A.").unwrap(), "Reel A");
+        assert_eq!(valid_stem("Reel A ").unwrap(), "Reel A");
+        assert_eq!(valid_stem("Reel A. . ").unwrap(), "Reel A");
+        // but an interior dot is ordinary and must survive
+        assert_eq!(valid_stem("v1.2 final").unwrap(), "v1.2 final");
+    }
+
     use super::*;
 
     /// Unique temp dir, removed on drop (unwind included) so failed tests
