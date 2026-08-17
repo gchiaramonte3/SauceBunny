@@ -522,6 +522,15 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
    So: drive a modal-raising flow the way a user reaches it, and if an
    assertion about focus or visibility looks impossible, suspect the flow
    before the app.
+
+   **A scripted edit needs the same review as a typed one, and the script
+   itself needs fixing — not just a note.** Appending to a dependency array
+   with `replace("]);", ", x]);")` produces `}, [, x]);` when the array was
+   empty: a hole, which reads as `undefined`, is perfectly stable, and passes
+   tsc, ESLint and every test. It has happened twice in this file's history,
+   the second time one commit after the first was written up — because the
+   write-up was a warning rather than a fix. Handle the empty case in the
+   script, and grep the result for `[, ` before believing it.
 6. **Shrink `App.tsx`.** It is ~6,400 lines and the largest single risk in the
    codebase: nothing can be tested without booting the whole app, and reviewing
    a change to it means reading around a dozen unrelated subsystems. The
@@ -531,7 +540,11 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
    that were impossible before. Do NOT attempt a single sweeping split.
 
    Done so far: `use-panel-bus`, `use-web-playback`, `use-co-review`,
-   `use-library-scan`, `use-media-capture`, `use-keyboard-shortcuts` (the
+   `use-library-scan`, `use-media-capture`, `use-clip-export` + `use-clip-queue`
+   (the single Export button and the six queue handlers; the queue takes
+   `runLocalClipExport` from the export hook rather than owning it, so one
+   cancel token still has one owner and two callers),
+   `use-keyboard-shortcuts` (the
    global dispatch: 258 lines and a 25-entry dep array, moved VERBATIM so the
    diff is a move and tsc enumerated the dependency surface instead of a human
    guessing at it — that is the technique to reuse), and `use-transport` (shuttle,
