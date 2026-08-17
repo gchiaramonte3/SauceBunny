@@ -24,12 +24,29 @@ import { CustomSource, UrlSource } from "mediabunny";
  * a wrong length here fails loudly rather than silently.
  */
 
-const h = vi.hoisted(() => ({ calls: [] as Array<{ cmd: string; args: unknown }>, size: 0 }));
+/**
+ * Sizes keyed by PATH, not one global number.
+ *
+ * A single shared size cross-contaminates: `getSize()` starts a prefetch that
+ * outlives the test, so a read for the 812 MB file can land after the next test
+ * has set the size to something smaller — the orchestrator then reads past EOF
+ * and throws inside mediabunny. Every test still passed; the run failed on an
+ * unhandled rejection, which vitest reports separately and CI treats as a
+ * non-zero exit. Per-path sizes make a late read from any source satisfiable.
+ */
+const h = vi.hoisted(() => ({
+  calls: [] as Array<{ cmd: string; args: unknown }>,
+  sizes: new Map<string, number>(),
+  defaultSize: 8_000_000,
+}));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (cmd: string, args: unknown) => {
     h.calls.push({ cmd, args });
-    if (cmd === "get_file_size") return h.size;
+    if (cmd === "get_file_size") {
+      const { path } = args as { path: string };
+      return h.sizes.get(path) ?? h.defaultSize;
+    }
     // Must honour the requested length: mediabunny validates that a read
     // returns exactly what it asked for, and a short buffer throws.
     if (cmd === "read_file_range") return new ArrayBuffer((args as { length: number }).length);
@@ -40,7 +57,9 @@ vi.mock("@tauri-apps/api/core", () => ({
 // Imported after the mock is declared, which vi.mock hoisting guarantees.
 const { localFileSource, mediabunnySource } = await import("./mediabunny-source");
 
-beforeEach(() => { h.calls.length = 0; h.size = 0; });
+// Calls are cleared per test; sizes are NOT, so an in-flight prefetch from an
+// earlier test still gets a consistent answer.
+beforeEach(() => { h.calls.length = 0; });
 
 describe("routing a URL to UrlSource", () => {
   it("sends http and https to UrlSource", () => {
@@ -108,7 +127,7 @@ describe("boundaries worth knowing about", () => {
 
 describe("the size path, which is public", () => {
   it("asks the backend for the size of the exact path it was given", async () => {
-    h.size = 812_345_678;
+    h.sizes.set("/Users/me/Movies/big.mp4", 812_345_678);
     const src = localFileSource("/Users/me/Movies/big.mp4");
     await expect(src.getSize()).resolves.toBe(812_345_678);
     // The size is asked for FIRST and exactly once. Not "only one call
@@ -132,7 +151,7 @@ describe("the size path, which is public", () => {
     // Our arithmetic, not mediabunny's: the callback receives (start, end) and
     // must invoke read_file_range with offset=start and length=end-start. An
     // off-by-one here hands the decoder a frame short of its data.
-    h.size = 4_000_000;
+    h.sizes.set("/Users/me/big.mp4", 4_000_000);
     await localFileSource("/Users/me/big.mp4").getSize();
     const reads = h.calls.filter((c) => c.cmd === "read_file_range")
       .map((c) => c.args as { path: string; offset: number; length: number });
@@ -141,7 +160,7 @@ describe("the size path, which is public", () => {
       expect(r.length, `non-positive length at offset ${r.offset}`).toBeGreaterThan(0);
       expect(r.offset).toBeGreaterThanOrEqual(0);
       expect(r.offset + r.length, "a read ran past the end of the file")
-        .toBeLessThanOrEqual(h.size);
+        .toBeLessThanOrEqual(4_000_000);
       expect(r.path).toBe("/Users/me/big.mp4");
     }
   });
