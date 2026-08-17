@@ -180,3 +180,38 @@ test("and the review tab survives the same source", async ({ page }) => {
   const over = await overflowing(page);
   expect(over, `pushed out of the window:\n${over.join("\n")}`).toEqual([]);
 });
+
+test("an unbreakable review COMMENT wraps too", async ({ page }) => {
+  // The other surface where a user supplies arbitrary text, and the one they
+  // are most likely to paste a URL into. It already wraps — this is a pin on
+  // correct behaviour, not a fix — but it is the same failure the transcript
+  // had, on the app's main writing surface, so it is worth one test.
+  await transcriptWithHostileText(page);
+  await page.locator("#cp-tab-review").click();
+
+  // Focusing the composer raises the name gate; clear it the way a user does.
+  const box = page.getByPlaceholder(/^Comment at/);
+  await box.click();
+  const gate = page.locator(".cp-review-namegate");
+  if (await gate.count()) {
+    await gate.locator("input").first().fill("Ada");
+    await page.getByRole("button", { name: "Start reviewing" }).click();
+    await expect(gate).toHaveCount(0);
+  }
+
+  const unbreakable = "Z".repeat(200);
+  await box.click();
+  await box.fill(unbreakable);
+  await expect(box).toHaveValue(unbreakable);
+  await page.getByRole("button", { name: "Post", exact: true }).click();
+
+  // Canary: a comment that never posted cannot overflow anything.
+  await expect(page.locator("body")).toContainText("ZZZZZZZZZZ");
+
+  const over = await overflowing(page);
+  expect(over, `pushed out of the window:\n${over.join("\n")}`).toEqual([]);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth),
+    "the page scrolls sideways",
+  ).toBe(false);
+});
