@@ -4454,6 +4454,7 @@ export default function App() {
                     streamKeepAction={keepAction}
                     onStreamKeepAction={keepAction?.kind === "resume" ? onKeepResume : onKeepCancel}
                     onDiag={(tag, msg) => appendLog(asLogTag(tag), "seek", msg)}
+                    onAudioDiag={(tag, msg) => appendLog(asLogTag(tag), "audio", msg)}
                     /* Audio track + codecs are meaningful only while STREAMING (the
                        cached file is already muxed and sample-accurate). */
                     audioStreamUrl={webPlayback.audioUrl}

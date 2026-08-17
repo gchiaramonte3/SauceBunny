@@ -90,6 +90,10 @@ type Props = {
   onStreamKeepAction?: () => void;
   /** Pipeline/seek diagnostics → the Pipeline log (channel "seek"). */
   onDiag?: (tag: string, message: string) => void;
+  /** Audio-pipeline diagnostics from MediaBunnyPlayer. Separate from
+   *  `onDiag` so the streaming player's lines keep their own log source
+   *  instead of both engines reporting under one label. */
+  onAudioDiag?: (tag: string, message: string) => void;
   /** r75: RAW audio-track CDN URL for DASH-split sources (Reddit, YouTube
    *  >360p). Passed to the proxy's fMP4 route so video+audio are merged on the
    *  fly → the source streams with sound instead of downloading first. */
@@ -246,7 +250,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     errorDetail, extractorRot,
     resumeTitle, onResume, onboarding,
     aspect,
-    sourceKind, localFilePath, webStreamUrl, webCachedUseMediabunny, streamStartAt, disableScrubPreview, onDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
+    sourceKind, localFilePath, webStreamUrl, webCachedUseMediabunny, streamStartAt, disableScrubPreview, onDiag, onAudioDiag, audioStreamUrl, streamVideoCodec, streamAudioCodec, initialVolume, onMediaError,
     streamRung, onStreamStall, onStreamInfo, streamRungBadge, streamRungBadgeTitle, streamKeepBadge, streamKeepAction, onStreamKeepAction,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs, scrubAudio,
     streamLoadingPhase,
@@ -434,6 +438,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               onReady={onPlayerReady}
               onError={onMediaError}
               onSurfaceClick={onSurfaceClick}
+              onDiag={onAudioDiag}
             />
           ) : (
             <LocalMediaPlayer
@@ -511,6 +516,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               onReady={onPlayerReady}
               onError={onMediaError}
               onSurfaceClick={onSurfaceClick}
+              onDiag={onAudioDiag}
             />
           ) : (
             <LocalMediaPlayer

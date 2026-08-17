@@ -8,7 +8,7 @@ import {
 } from "mediabunny";
 import { mediabunnySource } from "../lib/mediabunny-source";
 import { canvasLooksBlank } from "../lib/mediabunny-helpers";
-import { audioAnchorWaitMs, shouldRetakeAnchor } from "../lib/av-clock";
+import { audioAnchorWaitMs, audioVitals, shouldRetakeAnchor } from "../lib/av-clock";
 import { createScrubPump, type ScrubPump } from "../lib/scrub-pump";
 import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle } from "./player-handle";
@@ -18,6 +18,13 @@ import type { PlayerHandle } from "./player-handle";
  *  where the audio loop is the sole anchor and a dead track would otherwise
  *  leave the transport wedged. */
 const ANCHOR_FALLBACK_MS = 1000;
+/**
+ * How long a playback generation runs before the audio path reports its
+ * vitals. Past the cold-decoder anchor wait (3000ms) on purpose: summarising
+ * before that would call a still-warming decoder silent and cry wolf on every
+ * first play.
+ */
+const AUDIO_SUMMARY_MS = 3500;
 
 /** How long seeks must stop arriving before a scrub-while-playing gesture is
  *  considered over and the decode pipelines are rebuilt. Matches
@@ -70,10 +77,28 @@ type Props = {
   onReady?: (duration: number) => void;
   onError?: (message: string) => void;
   onSurfaceClick?: () => void;
+  /**
+   * Audio-pipeline diagnostics, one line per event worth seeing in the log.
+   *
+   * This player can be inaudible without failing. Every guard in it — the
+   * canDecode gates, the paint probe, the anchor retake — reports a fault by
+   * THROWING or by calling onError, and App reroutes the import when it does.
+   * A track that decodes and never reaches the speakers throws nothing, so the
+   * log reads exactly like success and the automatic fallback never fires.
+   * That is not hypothetical: it shipped, and the log a user sent in said
+   * "Decoding via mediabunny (h264 / aac); no transcode." and nothing else.
+   *
+   * So the audio path states its own vitals — sink built, decoder warm, chunks
+   * scheduled vs dropped, context running — and silence stops looking like
+   * success. Summarised per playback generation, never per chunk: AAC at 48kHz
+   * delivers ~47 buffers a second and a per-chunk line would bury the log it
+   * is meant to make readable.
+   */
+  onDiag?: (tag: string, message: string) => void;
 };
 
 export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function MediaBunnyPlayer(
-  { path, filename, hasVideo, initialVolume, scrubAudio, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick },
+  { path, filename, hasVideo, initialVolume, scrubAudio, onTimeUpdate, onPlayStateChange, onReady, onError, onSurfaceClick, onDiag },
   ref,
 ) {
   // ─── Refs (mutable across renders without triggering re-render) ──────
@@ -90,6 +115,19 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
   const playingRef = useRef(false);
   const mutedRef = useRef(false);
   const volumeRef = useRef(initialVolume);
+
+  /** Mirrored like onError/onTimeUpdate — the loops outlive the render that
+   *  supplied the callback, so reading the prop directly would call a stale
+   *  one (see the onErrorRef comment). */
+  const onDiagRef = useRef(onDiag);
+  useEffect(() => { onDiagRef.current = onDiag; }, [onDiag]);
+  /** Chunks that got a start() vs chunks entirely in the past when they
+   *  arrived. All-dropped IS the silent failure, so the ratio is the single
+   *  most diagnostic number this player can report. Reset per generation. */
+  const audioSchedRef = useRef(0);
+  const audioDropRef = useRef(0);
+  /** One summary per generation; a repeat would be noise, not information. */
+  const audioSummaryRef = useRef(false);
 
   /**
    * Master-clock anchor. While playing:
@@ -586,12 +624,14 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
           started = true;
         }
         if (started) {
+          audioSchedRef.current += 1;
           scheduledRef.current.push(source);
           source.onended = () => {
             const idx = scheduledRef.current.indexOf(source);
             if (idx >= 0) scheduledRef.current.splice(idx, 1);
           };
         } else {
+          audioDropRef.current += 1;
           // Never-started nodes can never fire onended, so they must not go in
           // scheduledRef — they would sit there holding their decoded PCM.
           try { source.disconnect(); } catch { /* ignore */ }
@@ -635,7 +675,10 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
         // Settle paused and let the next gesture-backed play() retry. This is a
         // recoverable transport condition, NOT a decode failure — reporting it
         // through onError would make App tear this player down and swap engines
-        // over something the very next click fixes.
+        // over something the very next click fixes. It still has to be VISIBLE:
+        // WKWebView starts a non-gesture context suspended, and a suspended
+        // context is silent with a frozen clock and no error anywhere.
+        onDiagRef.current?.("warn", "audio: context stayed suspended, playback settled paused");
         playingRef.current = false;
         setIsPlaying(false);
         onPlayStateChange?.(false);
@@ -644,8 +687,29 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
     }
     if (gen !== genRef.current) return;
     audioDeliveredRef.current = false;
+    audioSchedRef.current = 0;
+    audioDropRef.current = 0;
+    audioSummaryRef.current = false;
     runAudioLoop(fromTime, gen);
     runVideoLoop(fromTime, gen);
+    // Vitals, once, a couple of seconds in — long enough that a healthy file
+    // has scheduled ~100 buffers and a silent one has provably scheduled none.
+    // Reported at "warn" when nothing was heard, because a run that decodes
+    // and schedules nothing is the exact failure this channel exists for and
+    // it must not read like the routine line above it.
+    window.setTimeout(() => {
+      if (gen !== genRef.current || audioSummaryRef.current) return;
+      audioSummaryRef.current = true;
+      const ctxNow = audioCtxRef.current;
+      if (!audioSinkRef.current) return; // no audio track: already said so
+      const { tag, message } = audioVitals({
+        scheduled: audioSchedRef.current,
+        dropped: audioDropRef.current,
+        contextState: ctxNow?.state ?? "gone",
+        gain: gainRef.current?.gain.value ?? -1,
+      });
+      onDiagRef.current?.(tag, message);
+    }, AUDIO_SUMMARY_MS);
     // Anchor fallback. runVideoLoop is the unconditional anchor, but it returns
     // immediately when there is no video sink, which leaves runAudioLoop as the
     // ONLY anchor on audio-only sources (podcasts, interviews). If it never
@@ -1013,6 +1077,11 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
             return;
           }
           audioSinkRef.current = new AudioBufferSink(at);
+          void at.getCodec().then((codec) => {
+            if (cancelled) return;
+            onDiagRef.current?.("info",
+              `audio: track ready - ${codec ?? "?"} ${at.sampleRate ?? "?"}Hz/${at.numberOfChannels ?? "?"}ch`);
+          }).catch(() => { /* the codec label is a nicety, not a gate */ });
           // Pay the audio decoder's one-time instantiate NOW, not on the first
           // play(). A custom WASM decoder (Opus registers one) builds libopus
           // inside its first decode; when that cost lands during play() the
@@ -1020,8 +1089,24 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
           // late and dropped, and the file plays SILENTLY behind a perfect
           // picture. Fire and forget — onReady must not wait on it.
           void audioSinkRef.current.getBuffer(0)
-            .then(() => { if (!cancelled) audioWarmRef.current = true; })
-            .catch(() => { /* still cold: the video loop just waits longer */ });
+            .then((b) => {
+              if (cancelled) return;
+              audioWarmRef.current = true;
+              // A resolved-but-null warm-up means the decoder ran and produced
+              // no buffer at timestamp 0 — worth seeing, since the loop that
+              // follows asks the same sink the same question.
+              if (!b) onDiagRef.current?.("warn", "audio: decoder warm but no buffer at 0s");
+            })
+            .catch((e) => {
+              // Previously swallowed entirely. The comment said "still cold:
+              // the video loop just waits longer", which is true and is also
+              // how a decoder that can never start looks from the outside.
+              if (cancelled) return;
+              onDiagRef.current?.("warn",
+                `audio: decoder warm-up failed - ${e instanceof Error ? e.message : String(e)}`);
+            });
+        } else {
+          onDiagRef.current?.("info", "audio: no audio track in this file");
         }
 
         readyRef.current = true;

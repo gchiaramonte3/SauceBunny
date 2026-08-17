@@ -63,3 +63,45 @@ export function shouldRetakeAnchor(i: AnchorRetakeInput): boolean {
 export function audioAnchorWaitMs(audioDecoderWarm: boolean): number {
   return audioDecoderWarm ? 500 : 3000;
 }
+
+/** What the audio path looked like a few seconds into a playback generation. */
+export type AudioVitals = {
+  /** Buffers that got a start() — i.e. that will be heard. */
+  scheduled: number;
+  /** Buffers already entirely in the past on arrival, so discarded. */
+  dropped: number;
+  /** AudioContext.state, or "gone" if the context was torn down. */
+  contextState: string;
+  /** Master gain, 0..1. -1 when the node has gone. */
+  gain: number;
+};
+
+/**
+ * Turn the audio path's vitals into the one log line a user will read.
+ *
+ * Here rather than inline in the player for the reason the rest of this file
+ * exists: the decision of what counts as broken is the part worth pinning, and
+ * it cannot be checked by rendering a component that needs a real AudioContext
+ * and a real decoder.
+ *
+ * The rule is deliberately about `scheduled`, not about `dropped`. Dropping
+ * late chunks is CORRECT — it is how playback stays in sync after a stall — so
+ * a high drop count alongside real scheduling is healthy recovery, not a
+ * fault. Scheduling nothing at all is the failure: the decoder ran, the loop
+ * ran, and not one sample was ever handed to the speakers. That is the shape
+ * of the silence this reports, and the shape a log full of successes hid.
+ */
+export function audioVitals(v: AudioVitals): { tag: "info" | "warn"; message: string } {
+  const detail =
+    `${v.scheduled} scheduled, ${v.dropped} dropped, ` +
+    `context ${v.contextState}, gain ${v.gain.toFixed(2)}`;
+  if (v.scheduled === 0) {
+    return { tag: "warn", message: `audio: nothing reached the speakers - ${detail}` };
+  }
+  // A running context at zero gain is muted, not broken — say so rather than
+  // reporting a healthy pipeline the user cannot hear and calling it fine.
+  if (v.gain === 0) {
+    return { tag: "info", message: `audio: playing but muted - ${detail}` };
+  }
+  return { tag: "info", message: `audio: playing - ${detail}` };
+}
