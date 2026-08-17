@@ -3,6 +3,18 @@
 const pad = (n: number, w = 2) => n.toString().padStart(w, "0");
 
 export function framesToTc(frames: number, fps: number): string {
+  // `Math.max(0, Math.floor(x))` LOOKS like a clamp and is not one for
+  // non-finite input: floor(NaN) is NaN and max(0, NaN) is NaN, so the whole
+  // string came out "NaN:NaN:NaN:NaN", and Infinity gave
+  // "Infinity:NaN:NaN:NaN". `durationToTc` below already guards this way; the
+  // same fix went into secondsToHms and secondsToClock earlier and simply
+  // missed these two, which is why only they still printed it.
+  //
+  // Reachable rather than theoretical: fps rides in queue items restored from
+  // localStorage and in metadata that has no fps of its own, and a single NaN
+  // there turns every mark, log line and recent-clip duration into that
+  // string.
+  if (!isFinite(frames) || !isFinite(fps)) return "00:00:00:00";
   const f = Math.max(0, Math.floor(frames));
   const r = Math.max(1, Math.round(fps));
   const total = Math.floor(f / r);
