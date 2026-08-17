@@ -69,7 +69,13 @@ export function startLevelMeter(
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 256;
   src.connect(analyser);
-  const data = new Uint8Array(analyser.frequencyBinCount);
+  // fftSize, NOT frequencyBinCount. getByteTimeDomainData fills fftSize
+  // samples and DROPS the excess when the array is shorter;
+  // frequencyBinCount is fftSize/2 and is the right size for
+  // getByteFrequencyData instead. Sized at 128 this read only the first
+  // half of each 256-sample window, so a transient in the second half
+  // never reached the peak scan and the meter under-read.
+  const data = new Uint8Array(analyser.fftSize);
   let raf = 0;
   let holdLevel = 0;
   let holdUntil = 0;

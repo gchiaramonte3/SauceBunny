@@ -219,7 +219,9 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       src.connect(analyser);
-      const data = new Uint8Array(analyser.frequencyBinCount);
+      // See level-meter.ts: fftSize, not frequencyBinCount — the latter is
+      // half the window, so the speaking ring missed late transients too.
+      const data = new Uint8Array(analyser.fftSize);
       timer = window.setInterval(() => {
         analyser.getByteTimeDomainData(data);
         let peak = 0;
