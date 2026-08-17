@@ -41,6 +41,24 @@ To decide: if the crate is meant to stay `cargo check`-able off macOS, keep
 them and accept that they are unverified. If not, delete both and let a
 non-macOS build fail honestly at the missing function.
 
+### Pending a fact CI did not record: the single `#[allow]` looks stale
+
+`src-tauri/src/commands/download.rs:678` carries
+`#[allow(clippy::unnecessary_map_or)]`, justified by the crate's declared
+`rust-version = "1.77.2"` against `is_none_or` stabilising in 1.82 — the lint
+used to suggest an API the MSRV forbids.
+
+Removed it locally and clippy said nothing. Under **clippy 0.1.95** the lint is
+MSRV-aware and no longer suggests `is_none_or` below 1.82, so the allow is doing
+no work. The lint fixed itself.
+
+Not removed, because removing it is only safe if CI's clippy is at least that
+new, and **CI never printed its toolchain**, so there was no way to know. That
+gap is now closed: the `cargo-check` job runs `rustc --version && cargo clippy
+--version` before the lint step. Once a run records a version ≥ 0.1.95, delete
+the attribute and its comment; if the runner is older, keep both and this note
+explains why.
+
 ### Closed off, so nobody re-checks
 
 - **No `[features]` section and zero `cfg(feature = …)` sites**, so

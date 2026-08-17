@@ -54,6 +54,14 @@ jobs:
       # exports, which double as a stale-bindings check.
       - run: cargo test --lib
         working-directory: src-tauri
+      # Record the toolchain. "clippy-clean" is a claim about a specific
+      # clippy: lints get added, and existing ones get smarter about MSRV, so
+      # the same tree can be clean on one version and not another. Without this
+      # line the logs never say which version passed, which is what blocked
+      # deciding whether the one `#[allow]` in commands/download.rs is still
+      # load-bearing (see loop-notes.md).
+      - run: rustc --version && cargo clippy --version
+        working-directory: src-tauri
       # Zero-warning policy — the codebase is clippy-clean as of r86.
       # --all-targets is load-bearing, not tidiness. Without it clippy lints
       # the lib and the bin and stops; the ~264 unit tests live in
