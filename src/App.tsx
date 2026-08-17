@@ -634,8 +634,13 @@ export default function App() {
    *                  the ffmpeg-transcoded copy when mediabunny can't decode.
    *  - "mediabunny"→ MediaBunnyPlayer (WebCodecs video + in-app/WASM audio) —
    *                  plays the ORIGINAL with no transcode (AV1+Opus etc.).
-   * Independent of the useWebCodecsDecoder toggle so mediabunny-first is the
-   * default for everyone. Only governs local files; the web path is untouched.
+   * mediabunny-first is the DEFAULT for everyone — the useWebCodecsDecoder
+   * toggle ships on, so nobody has to opt in. It is not mandatory: turning it
+   * off routes local imports through ffmpeg-prep + <video>. This comment used
+   * to say the two were "independent", and they were, which left the toggle's
+   * own description ("Disable if local files won't play") promising an escape
+   * hatch that moved nothing but the thumbnail. Default and mandatory are not
+   * the same thing. Only governs local files; the web path is untouched.
    */
   const [localPlayer, setLocalPlayer] = useState<"native" | "mediabunny">("native");
 

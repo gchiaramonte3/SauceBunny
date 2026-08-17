@@ -271,7 +271,23 @@ export function useLocalSource(p: LocalSourceProps) {
       // Probe whether WebCodecs (+ our registered WASM decoders) can decode
       // this file IN-APP. If so, play the original directly via MediaBunnyPlayer
       // with NO ffmpeg transcode — the reliable path for any local file.
-      const canMb = await canMediabunnyDecode(lf.path);
+      //
+      // The Settings toggle is an OPT-OUT, not an opt-in. It defaults to true,
+      // so mediabunny-first is still the path everyone gets without touching
+      // anything — but a user who turns it off gets the ffmpeg-prep + <video>
+      // path, which is exactly what its description has always promised
+      // ("Disable if local files won't play"). It used to promise that and do
+      // nothing: this hook read the flag only for POSTER extraction, so the
+      // one control the UI offers for a misbehaving decoder changed the
+      // thumbnail and not the playback.
+      //
+      // That gap matters because the automatic fallback cannot cover it.
+      // `webCodecsFallbackForImport` reroutes an import when MediaBunnyPlayer
+      // REPORTS an undecodable codec — but a track that decodes and is
+      // inaudible reports nothing, so nothing reroutes. A file that plays with
+      // a perfect picture and no sound is the case with no automatic way out,
+      // and therefore the case the manual one has to actually work for.
+      const canMb = defaults.useWebCodecsDecoder && await canMediabunnyDecode(lf.path);
       if (sourceSeqRef.current !== seq) return null;
       if (canMb) {
         setLocalPlayer("mediabunny");
@@ -289,6 +305,13 @@ export function useLocalSource(p: LocalSourceProps) {
       if (!videoNative) reasonParts.push(`video ${vc || "?"} → h264`);
       if (!audioNative) reasonParts.push(`audio ${ac || "?"} → aac`);
       if (!containerOk)  reasonParts.push(`container .${ext} → .mp4`);
+      // A file whose codecs are ALL native still gets here when the toggle is
+      // off, and then there is nothing to list — the old line rendered as
+      // "Transcoding for playback: ." and told the user the wait had no cause.
+      // The toggle IS the cause, so name it, and name it first when both apply.
+      if (!defaults.useWebCodecsDecoder) {
+        reasonParts.unshift("WebCodecs decoder off in Settings");
+      }
       appendLog("info", "local",
         `Transcoding for playback: ${reasonParts.join(", ")}.`);
       await runPlaybackPrep(lf.path, lf.has_video, lf.duration, seq);
