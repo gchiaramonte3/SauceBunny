@@ -14,6 +14,22 @@
 
 const INSTALL_ID_KEY = "saucebunny.installId";
 
+/**
+ * The fallback id, held for the life of the page.
+ *
+ * Without this the catch below minted a NEW uuid on every call, so the comment
+ * promising "a rejoin inside the same run still reclaims" was false: on any
+ * install where localStorage throws — private mode, quota, storage disabled —
+ * a returning friend arrived with a different id, the host minted them a second
+ * member id, and the roster grew with an abandoned tile stuck on "Connecting".
+ * Precisely the bug this module was added to prevent, reintroduced by its own
+ * error path.
+ *
+ * Only the FALLBACK is cached. The happy path still reads localStorage each
+ * call, so clearing app data mid-run regenerates the id the way the doc says.
+ */
+let runFallbackId: string | null = null;
+
 export function loadInstallId(): string {
   try {
     const existing = localStorage.getItem(INSTALL_ID_KEY);
@@ -22,9 +38,10 @@ export function loadInstallId(): string {
     localStorage.setItem(INSTALL_ID_KEY, fresh);
     return fresh;
   } catch {
-    // Private mode / quota: fall back to a per-run id. A rejoin inside the
-    // same run still reclaims; across runs it mints, which is the old
-    // behaviour rather than a regression.
-    return crypto.randomUUID();
+    // Private mode / quota: fall back to a per-RUN id, stable for this page.
+    // A rejoin inside the same run reclaims its member id; across runs it
+    // mints, which is the old behaviour rather than a regression.
+    runFallbackId ??= crypto.randomUUID();
+    return runFallbackId;
   }
 }
