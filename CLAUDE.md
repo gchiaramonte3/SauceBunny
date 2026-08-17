@@ -554,6 +554,26 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
 
 7. ~~**Transcript render performance**~~ — DONE (`68d4a25`): the karaoke render's O(turns²) cue-offset scan, per-turn name/alias resolution, and search-match lookup are precomputed in memos keyed on turns/overrides, so a playhead tick only re-marks the active cue.
 
+   **Measured, so nobody has to rediscover it** (Chromium via the e2e harness,
+   loading a transcript then switching views):
+
+   | cues | ≈ speech | first cue | DOM nodes | view switch |
+   |---|---|---|---|---|
+   | 1,200 | 1 h | 465 ms | 18,646 | 107 ms |
+   | 3,600 | 3 h | 1,170 ms | 54,646 | 311 ms |
+   | 15,000 | 12.5 h | 5,273 ms | 225,646 | 1,286 ms |
+
+   Linear, no cliff, no errors even at 15,000 — past any real single recording.
+   Realistic files are fine, so there is nothing to fix and no virtualisation
+   is warranted; `e2e/transcript-scale.spec.ts` guards only against a collapse,
+   with thresholds several times the measured value so it cannot flake.
+
+   The DOM count is exactly TWICE the cue count at every size, because
+   TranscriptViewer renders in the reader and the drawer at once and both
+   keep-alive wrappers hide the loser rather than unmounting it. That is what
+   makes switching instant (311 ms at 3,600 cues), and it is the right trade at
+   these sizes. Do not "fix" the 2x without measuring what it costs switching.
+
 ---
 
 ## Before every change
