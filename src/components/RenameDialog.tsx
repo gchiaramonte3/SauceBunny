@@ -2,6 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { buildRenamePlan, type RenameItem } from "../lib/rename-pattern";
 import { useModalFocus } from "../hooks/use-modal-focus";
+import { loadJson, saveJson } from "../lib/storage";
+
+/** Set once the user has been told a rename touches the file on disk. */
+const DISK_ACK_KEY = "saucebunny.renameDiskAck";
 
 /**
  * Rename one file, or a hundred, with the result visible before anything is
@@ -71,9 +75,41 @@ export function RenameDialog({
     return () => document.removeEventListener("keydown", onKey);
   }, [onCancel]);
 
-  const commit = () => {
+  /**
+   * The one-time "this touches your disk" step.
+   *
+   * The preview above shows NAMES, which is exactly why this is needed: a list
+   * of old -> new reads like editing labels in a library, and nothing on it says
+   * the files themselves are being moved. A user who believes they are renaming
+   * a catalogue entry has not agreed to what Apply actually does.
+   *
+   * An inline step rather than a modal over the modal. Stacking would put a
+   * focus trap inside a focus trap, which SpeakerRosterModal already documents
+   * as the thing to avoid - and it would cover the preview, which is the part
+   * being consented to.
+   */
+  const [ackedDisk, setAckedDisk] = useState(() => loadJson<boolean>(DISK_ACK_KEY, false));
+  const [confirming, setConfirming] = useState(false);
+  const [dontAskAgain, setDontAskAgain] = useState(false);
+
+  const write = () => {
     if (!plan.ok || plan.changed === 0) return;
     onApply(plan.rows.map((r) => ({ path: r.path, to: r.to })));
+  };
+
+  const commit = () => {
+    if (!plan.ok || plan.changed === 0) return;
+    // First rename on this install stops here. Every one after goes straight
+    // through, because a warning shown every time is a warning nobody reads.
+    if (!ackedDisk) { setConfirming(true); return; }
+
+    write();
+  };
+
+  const confirmAndWrite = () => {
+    if (dontAskAgain) { saveJson(DISK_ACK_KEY, true); setAckedDisk(true); }
+    setConfirming(false);
+    write();
   };
 
   return createPortal(
@@ -139,23 +175,57 @@ export function RenameDialog({
           ))}
         </div>
 
-        <div className="cp-rename-foot">
-          <span className="cp-rename-summary">
-            {failures?.size
-              ? `${failures.size} could not be renamed`
-              : plan.ok
-              ? (plan.changed === 0 ? "No change" : `${plan.changed} will be renamed`)
-                : `${plan.rows.filter((r) => r.problem).length} cannot be renamed`}
-          </span>
-          <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-          <button
-            className="btn btn-primary"
-            disabled={!plan.ok || plan.changed === 0}
-            onClick={commit}
-          >
-            Rename
-          </button>
-        </div>
+        {confirming ? (
+          <div className="cp-rename-confirm" role="group" aria-label="Confirm renaming files on disk">
+            {/* Says what happens to the DISK, then what survives it. The second
+                half is not padding: without it this reads as "your notes may be
+                lost", which is both frightening and untrue - the poster, the
+                source timecode and the review are carried to the new name. */}
+            <p className="cp-rename-confirm-lead">
+              {plan.changed === 1
+                ? "This renames the file on your Mac, not just its name in the library."
+                : `This renames ${plan.changed} files on your Mac, not just their names in the library.`}
+            </p>
+            <p className="cp-rename-confirm-sub">
+              Transcripts, review notes, posters and timecodes follow the new name.
+              Anything outside Sauce Bunny that points at the old name will not.
+            </p>
+            <label className="cp-rename-confirm-again">
+              <input
+                type="checkbox"
+                checked={dontAskAgain}
+                onChange={(e) => setDontAskAgain(e.target.checked)}
+              />
+              Don&apos;t warn me again
+            </label>
+            <div className="cp-rename-confirm-actions">
+              <button className="btn btn-ghost" onClick={() => setConfirming(false)}>
+                Back
+              </button>
+              <button className="btn btn-primary" onClick={confirmAndWrite}>
+                {plan.changed === 1 ? "Rename the file" : `Rename ${plan.changed} files`}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="cp-rename-foot">
+            <span className="cp-rename-summary">
+              {failures?.size
+                ? `${failures.size} could not be renamed`
+                : plan.ok
+                ? (plan.changed === 0 ? "No change" : `${plan.changed} will be renamed`)
+                  : `${plan.rows.filter((r) => r.problem).length} cannot be renamed`}
+            </span>
+            <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+            <button
+              className="btn btn-primary"
+              disabled={!plan.ok || plan.changed === 0}
+              onClick={commit}
+            >
+              Rename
+            </button>
+          </div>
+        )}
       </div>
     </div>,
     document.body,

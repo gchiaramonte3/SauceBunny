@@ -160,6 +160,22 @@ the least convenient item here and the one I could not verify myself.
       text colour, matching other chips rather than inheriting from the video
       surface.
 
+### 4e. Rename now asks before it touches the disk, once
+
+- [ ] Library ▸ right-click a file ▸ **Rename**, change the name, press
+      **Rename**. It must NOT write yet: a step appears saying it renames the
+      file **on your Mac**, not just its name in the library, and that
+      transcripts, review notes, posters and timecodes follow the new name.
+- [ ] **Back** returns to the preview with nothing written. The preview list
+      stays visible behind the question the whole time.
+- [ ] Confirm WITHOUT ticking the box. Rename again: the warning should appear
+      a second time. Confirming once must not opt you out silently.
+- [ ] Now tick **Don't warn me again** and confirm. Every later rename, single
+      or bulk, should go straight through with no warning.
+- [ ] To get the warning back: clear `saucebunny.renameDiskAck` from
+      localStorage (there is deliberately no Settings toggle yet - say if you
+      want one).
+
 ## 5. Library
 
 - [ ] Add a root whose media sits **four folders deep**. Home should now say
