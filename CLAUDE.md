@@ -613,7 +613,7 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ## Enforced contracts
 
-Thirty-six rules in this file are checked by a test rather than remembered. If you
+Thirty-eight rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -683,6 +683,7 @@ written after finding the rule already broken somewhere.
 | `dictate-protocol-contract` | Swift emits every key Rust reads off a dictation line, and every line reporting `final` carries the text |
 | `hidden-instance-contract` | Every Cmd-chord in TranscriptViewer checks it is not inside a [hidden]/aria-hidden subtree. The component is mounted twice (reader + drawer keep-alive), and without the gate a Cmd-G advanced the HIDDEN copy and killed its auto-scroll |
 | `rust-panic-contract` | No .unwrap()/.expect()/panic! in production Rust (two allowlisted, each with a stated reason). A panic in a command handler never resolves the invoke and poisons any Mutex it held |
+| `contract-register` | This table describes itself: the spelled-out count matches the rows, and every row names a test file that exists |
 | `e2e-mock-shape-contract` | The two object literals in `e2e/tauri-mock.ts` carry exactly the fields of their ts-rs binding, so 100 Playwright tests cannot certify a backend shape that no longer exists |
 
 Three more are measured against the RENDERED app rather than its source, in

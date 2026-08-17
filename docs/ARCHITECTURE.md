@@ -235,11 +235,37 @@ The one deliberate exception to "state lives in App" is the playhead. It ticks u
 
 ### What is left to extract, and what only looks extractable
 
-`App.tsx` is ~6,850 lines. The roadmap direction is one cohesive subsystem at a
+`App.tsx` is ~5,880 lines. The roadmap direction is one cohesive subsystem at a
 time into `src/hooks/use-*.ts` (done: `use-panel-bus`, `use-web-playback`,
-`use-co-review`, `use-library-scan`, `use-media-capture`, `use-transport`).
+`use-co-review`, `use-library-scan`, `use-media-capture`, `use-transport`,
+`use-keyboard-shortcuts`, `use-clip-export`, `use-clip-queue`).
 Picking the next one by *name* is how the exercise goes wrong, so this records
 what the code actually shows.
+
+**The last three were moved VERBATIM, and that is the technique to reuse.**
+The block comes out byte-identical — asserted programmatically before
+committing — so the diff is a move rather than a rewrite, and `tsc` enumerates
+the real dependency surface instead of a human guessing at it. That caught
+four wrong types on the keyboard hook and six on the export hook, including
+`framesToTc` resolving to marker-time's three-argument version rather than
+timecode's two. Each hook then gets the tests that were impossible before:
+27 across the three.
+
+Two things fall out of moving code across a component boundary, both of which
+were invisible while it stayed inside. First, an unstable callback becomes
+visible: `readerFps` and `cookiesBrowserOrNone` were bare arrows recreated
+every render, harmless in place but, as props, enough to re-subscribe the
+window key listeners on every render — both are now `useCallback`s with no
+deps. Second, ESLint stops being able to prove that refs and setState
+functions are stable, so they have to be listed; every one of them is
+identity-stable, so the lint moved and the behaviour did not.
+
+**A scripted dependency edit needs the same review as a typed one.** Appending
+with `replace("]);", ", x]);")` produces `}, [, x]);` on an array that was
+empty — an elision hole that reads as `undefined`, is perfectly stable, and
+passes tsc, ESLint and every test. It happened twice, the second time one
+commit after the first was written up, because a write-up is not a fix. Handle
+the empty case in the script and grep the result for `[, `.
 
 **Diarizer model prep — DONE** (`src/hooks/use-diarizer-prepare.ts`, 13 tests).
 It was picked because it reached outside itself exactly twice — a
