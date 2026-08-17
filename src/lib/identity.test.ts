@@ -31,32 +31,52 @@ async function freshModule() {
 }
 
 /**
- * Break localStorage for real — spy on the INSTANCE, not the prototype.
+ * Break localStorage by REPLACING the property, not by spying on a method.
  *
- * A prototype-level spy is inert here. Measured in this jsdom: with
- * `Storage.prototype.getItem` mocked to throw, `localStorage.getItem` still
- * succeeds, so a helper written that way exercises the HAPPY path in every test
- * that claims to test a storage failure — and they all pass, for nothing.
- * Spying on `window.localStorage` directly does intercept.
+ * A method spy is environment-fragile and this file has now been burned by it
+ * twice. `vi.spyOn(Storage.prototype, "getItem")` never intercepts in jsdom at
+ * all; `vi.spyOn(window.localStorage, "getItem")` intercepted on a Node 25
+ * laptop and did NOT on CI's Node 20, so the suite went green locally and red
+ * on push. The module under test reads a bare `localStorage`, and which object
+ * that binding resolves to is exactly what varies.
  *
- * The CANARY test below is the guard against that: it seeds a known id, breaks
- * the read, and fails if the seeded value comes back. It has already caught
- * this exact mistake twice.
+ * Substituting the property removes the question: every access path -
+ * `localStorage`, `window.localStorage`, `globalThis.localStorage` - goes
+ * through the same lookup, so a stub installed here is the one the module gets.
+ * `which` picks the failure mode, since "quota blocks the write" and "storage
+ * is disabled entirely" are different real situations.
+ *
+ * The CANARY test below is the guard: it seeds a known id, breaks the read, and
+ * fails if the seeded value comes back. It caught both earlier mistakes.
  */
+let restoreStorage: (() => void) | null = null;
+
 function breakStorage(which: "get" | "set" | "both") {
-  if (which !== "set") {
-    vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
-      throw new DOMException("storage disabled", "SecurityError");
-    });
-  }
-  if (which !== "get") {
-    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
-      throw new DOMException("quota exceeded", "QuotaExceededError");
-    });
-  }
+  const real = window.localStorage;
+  const die = (name: string, msg: string) => () => { throw new DOMException(msg, name); };
+  const stub: Storage = {
+    getItem: which === "set" ? real.getItem.bind(real) : die("SecurityError", "storage disabled"),
+    setItem: which === "get" ? real.setItem.bind(real) : die("QuotaExceededError", "quota exceeded"),
+    removeItem: real.removeItem.bind(real),
+    clear: real.clear.bind(real),
+    key: real.key.bind(real),
+    get length() { return real.length; },
+  } as Storage;
+  // Installed on BOTH bindings. In jsdom `window === globalThis`, so this is
+  // usually one write - but "usually" is what made the method-spy version pass
+  // locally and fail in CI, and a test harness is free to hand the module a
+  // different `localStorage` binding than `window`'s. Defining both costs
+  // nothing and removes the assumption.
+  const targets = window === (globalThis as unknown as Window) ? [window] : [window, globalThis];
+  for (const t of targets) Object.defineProperty(t, "localStorage", { configurable: true, value: stub });
+  restoreStorage = () => {
+    for (const t of targets) Object.defineProperty(t, "localStorage", { configurable: true, value: real });
+    restoreStorage = null;
+  };
 }
 
 afterEach(() => {
+  restoreStorage?.();
   vi.restoreAllMocks();
   localStorage.clear();
 });
@@ -157,7 +177,7 @@ describe("when localStorage throws", () => {
     breakStorage("set");
     const m = await freshModule();
     const id = m.loadInstallId();
-    vi.restoreAllMocks();
+    restoreStorage?.();
     expect(localStorage.getItem(KEY), "the fallback id was written to disk").toBeNull();
     expect(id).toMatch(UUID);
   });
