@@ -116,6 +116,7 @@ import {
 } from "./lib/timecode";
 import { isLikelyVideoUrl, normalizeUrl, hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, looksLikeExtractorRot, prettyHost } from "./lib/validation";
 import { sanitizeFilename, suggestFilename } from "./lib/filename";
+import { decodeHtmlEntities } from "./lib/text";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
 import { capabilitySummary, probePlatformCapabilities } from "./lib/platform-capabilities";
 import { onReviewStoreProblem } from "./lib/review-store";
@@ -1705,6 +1706,31 @@ export default function App() {
     () => filenameEditedForRef.current != null && filenameEditedForRef.current === currentSourceKeyRef.current,
     [],
   );
+  /**
+   * Decode entities ONCE, where scraped metadata enters.
+   *
+   * yt-dlp's LinkedIn/Reddit extractors scrape page HTML and hand back titles
+   * with raw entities ("Tom&#39;s Big Day"). The sidebar decoded for display,
+   * so the h2 read correctly while the seeded export name, the "Saves as"
+   * preview and the file on disk all kept the entity - one component
+   * contradicting itself about the same string. A leading entity was worse:
+   * suggestFilename("&quot;Quoted&quot; Title") gave "quot;Quoted&quot;-Title",
+   * because the leading-non-alphanumeric strip eats the "&" and promotes the
+   * entity NAME to the first word.
+   *
+   * Decoding here rather than in filename.ts is deliberate. `sanitizeFilename`
+   * mirrors Rust's `sanitize_filename` byte for byte, and `suggestFilename` and
+   * `matchSlug` are pure node-tested modules - `decodeHtmlEntities` needs a DOM,
+   * so pushing it down there would either break the mirror or drag two pure
+   * modules into jsdom. At the boundary, display, filename and the stored
+   * recents title all agree, which is also what keeps transcript
+   * re-association (matchSlug) matching on both sides.
+   */
+  const decodeMetaTitle = useCallback(
+    <T extends { title: string }>(m: T): T => ({ ...m, title: decodeHtmlEntities(m.title) }),
+    [],
+  );
+
   /** The one hydrate rule, shared by warm/fresh/local hydrates. */
   const seedFilename = useCallback(
     (prevName: string, title: string) => (keepUserFilename() && prevName ? prevName : suggestFilename(title)),
@@ -1987,7 +2013,7 @@ export default function App() {
       appendLog("ok", "cache", `Details for ${hostnameOf(full)} loaded from cache`);
       // Mirror the fresh-fetch hydrate: caption availability + a filename
       // suggestion from the real title (user-typed names always win).
-      const wm = warm.metadata;
+      const wm = decodeMetaTitle(warm.metadata);
       setExportOpts((prev) => ({
         ...prev,
         captions: defaults.captions && wm.has_subs,
@@ -2083,11 +2109,14 @@ export default function App() {
     // tearing the canvas down.
     appendLog("info", "yt-dlp", `Extracting URL: ${full}`);
     try {
-      const m = await invoke<Metadata>("fetch_metadata", {
+      const raw = await invoke<Metadata>("fetch_metadata", {
         url: full,
         cookiesBrowser: cookiesBrowserOrNone(),
       });
       if (sourceSeqRef.current !== seq) return; // user already moved on
+      // Decode ONCE here so every downstream consumer - display, the seeded
+      // export filename, and the stored recents title - sees the same string.
+      const m = decodeMetaTitle(raw);
       setMetadata(m);
       setFetchPhase("success"); // metadata hydrated → success flash
       // Re-attach a transcript previously associated with THIS url (imported or
@@ -2153,7 +2182,7 @@ export default function App() {
       if (sourceSeqRef.current === seq) setMetadataLoading(false);
     }
   }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, classifyExtractorRot, loadWebPlayback, loadCachedWebPlayback, recordRecentSource,
-      seedFilename, tryAutoLoadTranscript, cookiesBrowserOrNone]);
+      seedFilename, tryAutoLoadTranscript, cookiesBrowserOrNone, decodeMetaTitle]);
 
   // Re-run the current fetch after the user picks a browser in the YouTube
   // auth modal. By the time this fires, `defaults.ytCookiesBrowser` (and thus
