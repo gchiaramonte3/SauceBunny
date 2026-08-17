@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import { IconAlert } from "./Icons";
 import type { TranscriptHistoryEntry } from "../lib/transcript-history";
+import { useModalFocus } from "../hooks/use-modal-focus";
 
 export type RowMenuTarget = { entry: TranscriptHistoryEntry; title: string; x: number; y: number };
 
@@ -29,6 +30,8 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
   const [newFolder, setNewFolder] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useModalFocus(true, dialogRef);
 
   // Outside-click / Escape closes the whole thing.
   useEffect(() => {
@@ -78,7 +81,7 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
   const ext = target.entry.srtPath.split(".").pop() || "srt";
   return (
     <div className="cp-rowmenu-scrim modal" onMouseDown={onClose}>
-      <div className="cp-rowmenu-dialog" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+      <div ref={dialogRef} tabIndex={-1} className="cp-rowmenu-dialog" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         {mode === "rename" ? (
           <>
             <h4 className="cp-rowmenu-title">Rename transcript</h4>

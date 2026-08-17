@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { loadJson, saveJson } from "../lib/storage";
 import { IconVideoOff } from "./Icons";
+import { useModalFocus } from "../hooks/use-modal-focus";
 import type { ShareSourceArg } from "../bindings/ShareSourceArg";
 import type { ShareSources } from "../bindings/ShareSources";
 
@@ -58,6 +59,8 @@ export function ShareDialog({ onPick, onClose }: {
   const [crop, setCrop] = useState<Crop | null>(null);
   const dragRef = useRef<{ startX: number; startY: number } | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useModalFocus(true, dialogRef);
 
   useEffect(() => {
     void (async () => {
@@ -134,7 +137,7 @@ export function ShareDialog({ onPick, onClose }: {
           cmd+G on `[role="dialog"][aria-modal="true"]` existing, so without it
           those shortcuts fired at the transcript BEHIND this scrim while the
           user was looking at the dialog. */}
-      <div className="cp-share-dialog" role="dialog" aria-modal="true" aria-label="Share your screen" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} tabIndex={-1} className="cp-share-dialog" role="dialog" aria-modal="true" aria-label="Share your screen" onClick={(e) => e.stopPropagation()}>
         <h2 className="cp-share-dialog-title">Share your screen</h2>
 
         {access === "checking" && <p className="cp-share-dialog-line">Checking screen access…</p>}

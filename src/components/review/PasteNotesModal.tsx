@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { parseProducerNotes } from "../../lib/note-import";
 import { secondsToClock } from "../../lib/timecode";
+import { useModalFocus } from "../../hooks/use-modal-focus";
 
 /** One row the panel actually imports. */
 export type ImportedNote = {
@@ -84,6 +85,9 @@ export function PasteNotesModal({
   const isChecked = (i: number) => overrides[i] ?? !rows[i].suspectHeader;
   const picked = rows.filter((_, i) => isChecked(i));
 
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useModalFocus(true, dialogRef);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
@@ -101,8 +105,14 @@ export function PasteNotesModal({
   return createPortal(
     <div className="cp-modal-backdrop" onClick={onClose}>
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="cp-modal cp-pastenotes"
         role="dialog"
+        // Without aria-modal this modal was invisible to the app's OWN guard:
+        // TranscriptViewer gates cmd+F / cmd+G on an aria-modal dialog being
+        // present, so those keys reached the transcript behind the scrim.
+        aria-modal="true"
         aria-label="Paste producer notes"
         onClick={(e) => e.stopPropagation()}
       >

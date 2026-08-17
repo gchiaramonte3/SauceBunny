@@ -4,6 +4,7 @@ import { SPEAKER_PALETTE } from "./helpers";
 import { KindGlyph } from "./KindGlyph";
 import { KIND_LABEL, kindTag, NON_SPEECH_COLOR, NON_SPEECH_KINDS, type SpeechKind } from "../../lib/speech-kind";
 import { fmtTalkSeconds } from "../../lib/speaker-stats";
+import { useModalFocus } from "../../hooks/use-modal-focus";
 
 /** One speaker already in this transcript, offered as an alternative target. */
 export type SpeakerSuggestion = {
@@ -58,6 +59,8 @@ export function NewSpeakerSheet({ suggestions, initialColor, onName, onPickExist
 }) {
   const [name, setName] = useState("");
   const [color, setColor] = useState(initialColor);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useModalFocus(true, dialogRef);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
@@ -84,6 +87,8 @@ export function NewSpeakerSheet({ suggestions, initialColor, onName, onPickExist
   return createPortal(
     <div className="cp-spk-backdrop" onMouseDown={onCancel}>
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="cp-newspk"
         role="dialog"
         aria-modal="true"

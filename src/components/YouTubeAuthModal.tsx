@@ -1,4 +1,5 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { useModalFocus } from "../hooks/use-modal-focus";
 import type { Defaults } from "./SettingsModal";
 
 /** The browser identifiers we can borrow YouTube cookies from. Derived from
@@ -109,6 +110,8 @@ export function YouTubeAuthModal({
           dismiss: "Not now",
         }
       : COPY[mode];
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+
   // Self-contained Esc handling (capture phase so it beats the App-level
   // shortcut handler) — the modal owns its own dismissal.
   useEffect(() => {
@@ -123,11 +126,16 @@ export function YouTubeAuthModal({
     return () => window.removeEventListener("keydown", onKey, true);
   }, [open, onClose]);
 
+  useModalFocus(open, dialogRef);
+
+  // Hooks run before the early return, so the ref is declared with them.
   if (!open) return null;
 
   return (
     <div className="cp-modal-backdrop" onClick={onClose}>
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="cp-modal cp-ytauth"
         onClick={(e) => e.stopPropagation()}
         role="dialog"

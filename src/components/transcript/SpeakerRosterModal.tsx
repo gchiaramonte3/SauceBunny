@@ -4,6 +4,7 @@ import { SpeakerRosterRow } from "./SpeakerRosterRow";
 import { CastShelf } from "./CastShelf";
 import { CastApply } from "./CastApply";
 import type { Cast } from "../../lib/cast";
+import { useModalFocus } from "../../hooks/use-modal-focus";
 
 /** One canonical speaker, as computed by the viewer's roster useMemo. */
 export type RosterItem = {
@@ -74,6 +75,10 @@ export function SpeakerRosterModal({
   const [view, setView] = useState<"roster" | "casts">("roster");
   const [applying, setApplying] = useState<Cast | null>(null);
   const filterRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  // Declared before the filter-autofocus effect below so it captures the
+  // element that OPENED the modal as the restore target, not the filter.
+  useModalFocus(true, dialogRef);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -113,6 +118,8 @@ export function SpeakerRosterModal({
   return (
     <div className="cp-spk-backdrop" onMouseDown={onClose}>
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="cp-spk-modal"
         role="dialog"
         // See ShareDialog: cmd+F / cmd+G are gated on an aria-modal dialog

@@ -55,6 +55,10 @@ export function TranscriptSearchModal({
         tabIndex={-1}
         className="cp-txsearch"
         role="dialog"
+        // Focus was already trapped here; the attribute is what the
+        // app's OWN cmd+F / cmd+G guard reads, so without it those keys
+        // reached the transcript search bar behind this scrim.
+        aria-modal="true"
         aria-label="Search transcripts"
         onMouseDown={(e) => e.stopPropagation()}
       >

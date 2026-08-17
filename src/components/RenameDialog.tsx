@@ -83,6 +83,10 @@ export function RenameDialog({
         tabIndex={-1}
         className="cp-rename"
         role="dialog"
+        aria-modal="true"
+        // Focus was already trapped here; the attribute is what the
+        // app's OWN cmd+F / cmd+G guard reads, so without it those keys
+        // reached the transcript search bar behind this scrim.
         aria-label={single ? "Rename file" : `Rename ${items.length} files`}
         onMouseDown={(e) => e.stopPropagation()}
       >

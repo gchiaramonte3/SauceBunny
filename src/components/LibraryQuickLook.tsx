@@ -74,7 +74,7 @@ export function LibraryQuickLook({
 
   return createPortal(
     <div className="cp-modal-scrim cp-ql-scrim" onMouseDown={onClose}>
-      <div ref={dialogRef} tabIndex={-1} className="cp-ql" role="dialog" aria-label={`Preview of ${name}`} onMouseDown={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} tabIndex={-1} className="cp-ql" role="dialog" aria-modal="true" aria-label={`Preview of ${name}`} onMouseDown={(e) => e.stopPropagation()}>
         <div className="cp-ql-head">
           <span className="cp-ql-name" title={path}>{name}</span>
           {caption && <span className="cp-ql-meta">{caption}</span>}

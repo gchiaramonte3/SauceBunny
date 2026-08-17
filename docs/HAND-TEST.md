@@ -117,6 +117,22 @@ Needs a real screen; the mock has no ScreenCaptureKit. Open a session, click
 - [ ] Drag a normal region. Caption reads `W×H on <display name>`, Share
       enables, and the shared picture matches the rectangle you drew.
 
+### 4b. Modals now hold on to the keyboard
+
+Nine dialogs changed. For each: open it, press **Tab** about fifteen times, then
+**Shift+Tab** the same. Focus must stay inside the dialog the whole way round.
+Then close it with **Escape** and press **Tab once** — focus must land back on
+the control that opened it, not at the top of the app.
+
+- [ ] Reader row menu (the ⋯ on a transcript row), Share ▸ Portion,
+      the Connect YouTube sheet, "Who is speaking?", Manage speakers.
+- [ ] While **Rename**, **Quick Look**, **Paste notes**, or the transcript
+      **Search** modal is open, press **⌘F**. Nothing should happen. Before
+      this, it yanked focus to the transcript search bar behind the dialog —
+      you would be typing into a field you could not see.
+- [ ] Manage speakers still autofocuses the filter box on open (the trap must
+      not steal that), and closing it returns focus to where you were.
+
 ## 5. Library
 
 - [ ] Add a root whose media sits **four folders deep**. Home should now say
