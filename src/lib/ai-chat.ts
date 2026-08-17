@@ -46,6 +46,19 @@ export async function streamChat(
   let buffer = "";
   let full = "";
 
+  /** One SSE line. `.trim()` also absorbs the \r of a CRLF stream. */
+  const handleLine = (line: string) => {
+    const t = line.trim();
+    if (!t.startsWith("data:")) return;
+    const payload = t.slice(5).trim();
+    if (payload === "[DONE]") return;
+    try {
+      const json = JSON.parse(payload);
+      const delta: string = json?.choices?.[0]?.delta?.content ?? "";
+      if (delta) { full += delta; onToken(delta); }
+    } catch { /* partial/keepalive frame — ignore */ }
+  };
+
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -53,17 +66,17 @@ export async function streamChat(
     // SSE frames are separated by blank lines; each "data: <json>" line is one chunk.
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? ""; // keep the trailing partial line
-    for (const line of lines) {
-      const t = line.trim();
-      if (!t.startsWith("data:")) continue;
-      const payload = t.slice(5).trim();
-      if (payload === "[DONE]") continue;
-      try {
-        const json = JSON.parse(payload);
-        const delta: string = json?.choices?.[0]?.delta?.content ?? "";
-        if (delta) { full += delta; onToken(delta); }
-      } catch { /* partial/keepalive frame — ignore */ }
-    }
+    for (const line of lines) handleLine(line);
   }
+
+  // Flush what the loop cannot see. Two things are held back by design and were
+  // then thrown away: `buffer` keeps the trailing partial line, which is the
+  // WHOLE last frame when a stream does not end with a newline, and the decoder
+  // holds any incomplete multi-byte character. Dropping either silently
+  // truncates the answer - the worst shape for a summary, because it reads as
+  // finished. llama-server ends with "data: [DONE]\n\n" so this is empty in
+  // practice today; it stops being empty the moment this points at anything else.
+  buffer += decoder.decode();
+  if (buffer.trim()) handleLine(buffer);
   return full;
 }
