@@ -2,7 +2,21 @@
 /* ============================================================
    SETTINGS MODAL
    ============================================================ */
-.cp-modal-backdrop {
+/* Two names for the sheet of glass, and only one of them existed.
+   `.cp-modal-scrim` is what the transcript search, the library rename dialog
+   and Quick Look all put on their backdrop - three components, three separate
+   commits, none of which noticed the rule was never written. A className that
+   matches nothing is silent: React renders it, tsc has no opinion about CSS,
+   and the dialog inside keeps its own width and background, so it still looks
+   like a dialog. What went missing was the LAYER. Measured in the e2e harness
+   at 1280x800: position static, z-index auto, transparent, and the dialog
+   sitting at y=739 in the bottom-left corner with a third of it below the
+   fold. `.cp-ql-scrim` sets only `background`, which is the tell - its author
+   expected this rule to supply everything else.
+   Guarded by e2e/scrim-layout.spec.ts, which measures the scrim rather than
+   asserting a class name. */
+.cp-modal-backdrop,
+.cp-modal-scrim {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
@@ -44,7 +58,8 @@
    dialog obeyed the setting while the sheet of glass behind it faded in. */
 @media (prefers-reduced-motion: reduce) {
   .cp-modal,
-  .cp-modal-backdrop { animation: none; }
+  .cp-modal-backdrop,
+  .cp-modal-scrim { animation: none; }
 }
 .cp-modal-header {
   height: 50px;

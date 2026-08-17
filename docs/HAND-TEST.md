@@ -133,6 +133,20 @@ the control that opened it, not at the top of the app.
 - [ ] Manage speakers still autofocuses the filter box on open (the trap must
       not steal that), and closing it returns focus to where you were.
 
+### 4c. Three modals had no backdrop at all
+
+The most visible fix in a while, and the easiest to confirm. Each of these
+should open **centred, over a dimmed and blurred page**, the way Settings does.
+Before this they rendered in the bottom-left corner with about a third of the
+box below the window edge, on no background.
+
+- [ ] ⌘K ▸ "Search all transcripts…"
+- [ ] Library ▸ right-click an item ▸ **Rename** (and a bulk rename)
+- [ ] Library ▸ **Quick Look** an item. Its scrim is darker than the others
+      on purpose; it should still cover the whole window.
+- [ ] Compare against **Settings** and the **AI model info** modal, which were
+      always correct, and confirm they still look the same.
+
 ## 5. Library
 
 - [ ] Add a root whose media sits **four folders deep**. Home should now say
