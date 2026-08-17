@@ -110,6 +110,13 @@
    timecode HUD (centred) or the transport (bottom). Quiet by design: it only
    appears when the quality is not what the viewer would assume, and the one
    case it must never miss is a relayed path. */
+/* --fg-2 / --fg-1, not --text-2 / --text-1: those two are not tokens and never
+   were. An unresolvable var() with no fallback makes the whole declaration
+   invalid at computed-value time, so `color` fell back to inherit and the
+   hover/focus rules below changed only their border. The comment above them
+   says a chip that takes a click while looking exactly like the label next to
+   it is how people stop trusting either - and the brightening it describes was
+   silently not happening. Guarded by src/lib/css-var-contract.test.ts. */
 .cp-stream-rung {
   position: absolute;
   left: 10px;
@@ -119,7 +126,7 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: var(--text-2);
+  color: var(--fg-2);
   background: rgba(10, 10, 12, 0.72);
   border: 1px solid var(--line-2);
   backdrop-filter: blur(6px);
@@ -151,7 +158,7 @@
 }
 
 .cp-stream-keep.is-action:hover {
-  color: var(--text-1);
+  color: var(--fg-1);
   border-color: var(--line-1);
 }
 
@@ -159,7 +166,7 @@
    in base.css, guarded by src/lib/focus-contract.test.ts. */
 .cp-stream-keep.is-action:focus-visible {
   outline: none;
-  color: var(--text-1);
+  color: var(--fg-1);
   border-color: var(--focus-ring);
 }
 

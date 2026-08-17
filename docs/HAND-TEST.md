@@ -147,6 +147,19 @@ box below the window edge, on no background.
 - [ ] Compare against **Settings** and the **AI model info** modal, which were
       always correct, and confirm they still look the same.
 
+### 4d. Stream chips brighten on hover again (needs a peer)
+
+Only reachable in a live session with someone watching a stream, so this is
+the least convenient item here and the one I could not verify myself.
+
+- [ ] Hover the **"keep a copy"** chip over the video. The TEXT should
+      brighten, not just the border. Tab to it and the same should happen.
+      Its colour rule referenced a token that does not exist, so the
+      declaration was dropped and only the border ever changed.
+- [ ] The **quality chip** above it should read in the app's normal secondary
+      text colour, matching other chips rather than inheriting from the video
+      surface.
+
 ## 5. Library
 
 - [ ] Add a root whose media sits **four folders deep**. Home should now say

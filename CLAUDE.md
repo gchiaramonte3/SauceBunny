@@ -613,7 +613,7 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ## Enforced contracts
 
-Forty-one rules in this file are checked by a test rather than remembered. If you
+Forty-two rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -683,6 +683,7 @@ written after finding the rule already broken somewhere.
 | `dictate-protocol-contract` | Swift emits every key Rust reads off a dictation line, and every line reporting `final` carries the text |
 | `hidden-instance-contract` | Every Cmd-chord in TranscriptViewer checks it is not inside a [hidden]/aria-hidden subtree. The component is mounted twice (reader + drawer keep-alive), and without the gate a Cmd-G advanced the HIDDEN copy and killed its auto-scroll |
 | `rust-panic-contract` | No .unwrap()/.expect()/panic! in production Rust (two allowlisted, each with a stated reason). A panic in a command handler never resolves the invoke and poisons any Mutex it held |
+| `css-var-contract` | Every `var(--x)` resolves: defined in CSS, carries a fallback, or is set inline from JSX |
 | `scrim-layer-contract` | Every element with a `-scrim`/`-backdrop` class gets `position: fixed` from one of its own classes (composition allowed) |
 | `node-baseline-contract` | No source file imports a `node:fs` API newer than the Node major CI pins (globSync is Node 22; CI is 20) |
 | `modal-focus-contract` | An `aria-modal` dialog traps and restores focus; a dialog behind a scrim declares `aria-modal` (the cmd+F guard reads it) |
