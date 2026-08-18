@@ -2245,3 +2245,51 @@
   .cp-spk-backdrop,
   .cp-tx-follow-pill { animation: none; }
 }
+
+/* ── Cue menu: speaker submenu ──────────────────────────────────────────
+   Only appears past COLLAPSE_SPEAKERS_AT targets (CueSelectionMenu). Sits
+   INSIDE the parent popover so its outside-click and Escape handling covers
+   this too; positioned against that fixed parent. */
+.cp-cuemenu-caret {
+  margin-left: auto;
+  padding-left: var(--s-2);
+  color: var(--fg-4);
+  font-size: 14px;
+  line-height: 1;
+}
+.cp-cuemenu-flyout {
+  position: absolute;
+  width: 210px;
+  padding: var(--s-1);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
+  z-index: 1;
+}
+.cp-cuemenu-flyout.to-right { left: 100%; margin-left: var(--s-1); }
+.cp-cuemenu-flyout.to-left  { right: 100%; margin-right: var(--s-1); }
+.cp-cuemenu-filter {
+  width: 100%;
+  padding: var(--s-2) var(--s-3);
+  margin-bottom: var(--s-1);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--fg-1);
+}
+/* Brightens toward white on focus, never the green accent (focus-contract). */
+.cp-cuemenu-filter:focus-visible { outline: none; border-color: var(--focus-ring); }
+.cp-cuemenu-flyout-list {
+  /* Ten rows, then scroll. A submenu that grows to the height of the cast
+     reintroduces the problem the submenu exists to solve. */
+  max-height: 300px;
+  overflow-y: auto;
+}
+.cp-cuemenu-flyout-empty {
+  padding: var(--s-2) var(--s-3);
+  color: var(--fg-4);
+  font-size: 12px;
+}

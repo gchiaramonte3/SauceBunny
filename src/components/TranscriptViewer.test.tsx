@@ -207,3 +207,74 @@ describe("splitting a speaker by selecting their dialogue", () => {
     expect(items.filter((t) => /Assign to Speaker 2/.test(t))).toHaveLength(0);
   });
 });
+
+/**
+ * The cue menu's reassign list is ordered by talk time, like every other
+ * speaker surface in the app.
+ *
+ * It was the one that was not. This call site handed the menu `roster`
+ * directly, and the roster's order is FIRST APPEARANCE — deliberately, because
+ * the chips above the transcript should not reshuffle while you scroll. The
+ * Speakers view, the roster panel, the reassign sheet and the split sheet all
+ * re-sort by talk time before rendering; the cue menu did not, so on a real
+ * cast it showed Speaker 16 above Speaker 8 whenever 16 happened to speak
+ * first, and put the people you had named wherever they first spoke among the
+ * ones you had not.
+ *
+ * The component's prop doc said "already display-named and ordered" the whole
+ * time. It was display-named.
+ */
+const ORDER_SRT = `1
+00:00:00,000 --> 00:00:01,000
+[SPEAKER_15] Briefly, and first.
+
+2
+00:00:02,000 --> 00:00:22,000
+[SPEAKER_07] At length, and second.
+
+3
+00:00:24,000 --> 00:00:29,000
+[SPEAKER_02] In the middle, and last.
+`;
+
+describe("cue menu reassign order", () => {
+  async function mountOrdered() {
+    invoke.mockResolvedValue(ORDER_SRT);
+    render(
+      <TranscriptViewer
+        path="/tmp/order.srt"
+        playheadActive={false}
+        onSeek={() => {}}
+        origin="whisper"
+        onClearTranscript={() => {}}
+        onLoadFromHistory={() => {}}
+        onRegenerate={() => {}}
+        onImportTranscript={() => {}}
+        regenerateBusy={false}
+        canRegenerate={false}
+      />,
+    );
+    await waitFor(() => expect(document.querySelectorAll(".cp-tx-cue").length).toBeGreaterThan(0));
+  }
+
+  it("lists the loudest speaker first, not the one who spoke first", async () => {
+    await mountOrdered();
+    // Right-click the cue belonging to Speaker 3, so the other two are offered.
+    const cue = document.querySelector('[data-cue-idx="2"]') as HTMLElement;
+    act(() => {
+      cue.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    });
+    const assigns = screen.getAllByRole("menuitem")
+      .map((b) => b.textContent ?? "")
+      .filter((t) => t.startsWith("Assign to "));
+
+    // SPEAKER_07 talks 20s, SPEAKER_15 talks 1s — but 15 speaks FIRST, so the
+    // roster's own order puts it above. Talk time is the axis that survives.
+    const eight = assigns.findIndex((t) => t.includes("Speaker 8"));
+    const sixteen = assigns.findIndex((t) => t.includes("Speaker 16"));
+    expect(eight, "Speaker 8 missing from the menu").toBeGreaterThanOrEqual(0);
+    expect(sixteen, "Speaker 16 missing from the menu").toBeGreaterThanOrEqual(0);
+    expect(eight, "first-appearance order again: the 1s speaker outranked the 20s one")
+      .toBeLessThan(sixteen);
+  });
+});

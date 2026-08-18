@@ -2257,7 +2257,18 @@ export function TranscriptViewer({
         <CueSelectionMenu
           anchor={{ x: cueMenu.x, y: cueMenu.y }}
           cueCount={cueMenu.to - cueMenu.from + 1}
-          speakers={roster.map((r) => ({ tag: r.tag, name: r.name, color: speakerDisplayColor(r.colorTag) }))}
+          // Loudest first, like the Speakers view, the roster, the reassign
+          // sheet and the split sheet. This one alone passed the roster's own
+          // order, which is FIRST APPEARANCE — so the menu listed Speaker 16
+          // above Speaker 8 whenever 16 happened to talk first, and scattered
+          // the people you had named among the ones you had not. Sorted here
+          // rather than in the component for the reason the rest of this file
+          // sorts here: the order is a decision this file owns, and the menu
+          // stays a renderer. Its prop doc has always claimed the list arrives
+          // "already display-named and ordered"; now it does.
+          speakers={[...roster]
+            .sort((a, b) => b.talkSeconds - a.talkSeconds)
+            .map((r) => ({ tag: r.tag, name: r.name, color: speakerDisplayColor(r.colorTag) }))}
           currentTag={resolveAlias(flatCues[cueMenu.from]?.cue.speaker ?? null) ?? "Speaker"}
           onAssign={(tag) => assignCueRange(cueMenu.from, cueMenu.to, tag === "Speaker" ? "" : tag)}
           onNewSpeaker={() => splitToNewSpeaker(cueMenu.from, cueMenu.to)}
