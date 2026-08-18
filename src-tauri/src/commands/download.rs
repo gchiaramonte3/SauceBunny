@@ -26,6 +26,28 @@ use super::*;
 /// it, yt-dlp falls back to lower-resolution clients automatically.
 pub(crate) const YT_EXTRACTOR_ARGS: [&str; 2] = ["--extractor-args", "youtube:player_client=default,-tv"];
 
+/// Every JS runtime yt-dlp knows, not just the one it enables by default.
+///
+/// yt-dlp ships with ONLY `deno` enabled, and the note above accepted that as
+/// the cost of not being able to bundle a 141 MB binary. But the flag takes a
+/// list, and yt-dlp also accepts `node`, `quickjs` and `bun` — it just will not
+/// look for them unless asked. So a machine with any of the three was falling
+/// back to a low-resolution player client while a perfectly good runtime sat on
+/// its PATH, for want of one argument.
+///
+/// Measured on the same video with our ffmpeg and no deno anywhere: 360p
+/// without a runtime, 2160p with `node` named here. Node is on far more Macs
+/// than deno is, and nothing is downloaded or bundled to gain it.
+///
+/// Naming a runtime that is absent is harmless — yt-dlp uses the
+/// highest-priority one that is both enabled AND available, and falls back
+/// exactly as before when none are.
+pub(crate) const YT_JS_RUNTIME_ARGS: [&str; 6] = [
+    "--js-runtimes", "deno",
+    "--js-runtimes", "node",
+    "--js-runtimes", "quickjs",
+];
+
 /// Build the `--cookies-from-browser <name>` argv fragment if the user
 /// has picked a browser in Settings. Returns an empty Vec for `None` /
 /// `"none"` so callers can `cmd_args.extend(cookies_args(...))` blindly.
@@ -597,6 +619,12 @@ async fn run_metadata_ytdlp(
         "--socket-timeout".into(), "10".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[0].into(),
+        YT_JS_RUNTIME_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[2].into(),
+        YT_JS_RUNTIME_ARGS[3].into(),
+        YT_JS_RUNTIME_ARGS[4].into(),
+        YT_JS_RUNTIME_ARGS[5].into(),
     ];
     args.extend(cookies_args(cookies_browser));
     args.push(url.to_string());
@@ -940,6 +968,12 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
         "--newline".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[0].into(),
+        YT_JS_RUNTIME_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[2].into(),
+        YT_JS_RUNTIME_ARGS[3].into(),
+        YT_JS_RUNTIME_ARGS[4].into(),
+        YT_JS_RUNTIME_ARGS[5].into(),
         "-o".into(), template_str.clone(),
     ];
     // `caption_args` stays the cookie-free, URL-free base; each attempt appends
@@ -1298,6 +1332,12 @@ async fn resolve_stream_tiers(
         "-S".into(), "res,vbr,ext".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[0].into(),
+        YT_JS_RUNTIME_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[2].into(),
+        YT_JS_RUNTIME_ARGS[3].into(),
+        YT_JS_RUNTIME_ARGS[4].into(),
+        YT_JS_RUNTIME_ARGS[5].into(),
         "--print".into(), "url".into(),
         "--print".into(), "%(width)s\t%(height)s\t%(vcodec)s\t%(acodec)s".into(),
     ];
@@ -1363,6 +1403,12 @@ async fn resolve_split_stream(
         ),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[0].into(),
+        YT_JS_RUNTIME_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[2].into(),
+        YT_JS_RUNTIME_ARGS[3].into(),
+        YT_JS_RUNTIME_ARGS[4].into(),
+        YT_JS_RUNTIME_ARGS[5].into(),
         // requested_formats.0 = video, .1 = audio for a merged (v+a) selection.
         "--print".into(),
         "%(requested_formats.0.url)s\t%(requested_formats.1.url)s\t%(width)s\t%(height)s\t%(vcodec)s\t%(requested_formats.1.acodec)s".into(),
@@ -1413,6 +1459,12 @@ async fn resolve_hls_stream(
         "b[acodec!=none][vcodec!=none]/b".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[0].into(),
+        YT_JS_RUNTIME_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[2].into(),
+        YT_JS_RUNTIME_ARGS[3].into(),
+        YT_JS_RUNTIME_ARGS[4].into(),
+        YT_JS_RUNTIME_ARGS[5].into(),
         "--print".into(),
         "%(url)s\t%(width)s\t%(height)s\t%(vcodec)s\t%(acodec)s".into(),
     ];
@@ -1580,6 +1632,12 @@ pub async fn download_web_preview(
         "--progress".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[0].into(),
+        YT_JS_RUNTIME_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[2].into(),
+        YT_JS_RUNTIME_ARGS[3].into(),
+        YT_JS_RUNTIME_ARGS[4].into(),
+        YT_JS_RUNTIME_ARGS[5].into(),
         "--concurrent-fragments".into(), "16".into(),
         "--http-chunk-size".into(), "10M".into(),
         // r81: we pass the bundled ffmpeg *file* here, and yt-dlp derives the
@@ -2118,6 +2176,12 @@ pub async fn download_audio_track(
         "--newline".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[0].into(),
+        YT_JS_RUNTIME_ARGS[1].into(),
+        YT_JS_RUNTIME_ARGS[2].into(),
+        YT_JS_RUNTIME_ARGS[3].into(),
+        YT_JS_RUNTIME_ARGS[4].into(),
+        YT_JS_RUNTIME_ARGS[5].into(),
         "--concurrent-fragments".into(), "16".into(),
         "--ffmpeg-location".into(), ffmpeg_str,
         "-o".into(), template.clone(),
@@ -2575,6 +2639,51 @@ mod chapter_tests {
         assert_eq!(truncate_chars("hello", MAX_DESCRIPTION_CHARS), "hello");
     }
 }
+
+#[cfg(test)]
+mod js_runtime_tests {
+    /// A YouTube spawn that names extractor args must also name JS runtimes.
+    ///
+    /// yt-dlp enables only `deno` by default, so without this pairing a spawn
+    /// drops to a low-resolution player client on any machine that has node or
+    /// quickjs but not deno. Measured on one video with our ffmpeg and no deno
+    /// anywhere: 360p without the runtimes, 2160p with them. Nothing errors, so
+    /// the only symptom is a worse download - the kind of quiet loss nobody
+    /// reports as a bug, and the reason this is a test and not a convention.
+    #[test]
+    fn every_youtube_spawn_enables_the_js_runtimes() {
+        let src = include_str!("download.rs");
+        // Only the SHIPPING half of the file. This test names
+        // "YT_EXTRACTOR_ARGS[1]" in its own body, and the first version of it
+        // duly reported itself as an unpatched call site - the seventh time in
+        // this codebase a scanner has read a description of a thing as the
+        // thing, and the second time one has done it to itself.
+        let code = src.split("#[cfg(test)]").next().unwrap_or(src);
+        let lines: Vec<&str> = code.lines().collect();
+        let mut missing = Vec::new();
+        for (i, l) in lines.iter().enumerate() {
+            // The [1] half marks a real spawn; the const definition is one line
+            // and the scan below never sees it as a call site.
+            if !l.contains("YT_EXTRACTOR_ARGS[1]") {
+                continue;
+            }
+            let window = lines[i..(i + 3).min(lines.len())].join("\n");
+            if !window.contains("YT_JS_RUNTIME_ARGS[0]") {
+                missing.push(i + 1);
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "yt-dlp spawn(s) pass extractor args without JS runtimes, at line(s) {missing:?}"
+        );
+        // Canary: a scan that matched nothing would pass forever.
+        assert!(
+            code.matches("YT_EXTRACTOR_ARGS[1]").count() >= 5,
+            "the scan matched too little to be checking anything"
+        );
+    }
+}
+
 
 /// One cached web source, as the Library's web shelf needs it.
 ///
