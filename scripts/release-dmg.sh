@@ -35,6 +35,13 @@ else
 fi
 VERSION="$(node -p "require('./package.json').version")"
 
+# A semver bump is a RELEASE and needs a CHANGELOG entry; a re-stamp is a dev
+# build and needs nothing. Checked only when the caller asked for a new semver,
+# so handing someone a test build stays frictionless.
+if [ -n "$WANT_VERSION" ]; then
+  bash scripts/check-changelog.sh
+fi
+
 echo "── 3/5  building (this is the slow part)"
 # Bundling is the only step that trips over a mount, and it happens last, so a
 # retry costs the bundler and not the whole compile.

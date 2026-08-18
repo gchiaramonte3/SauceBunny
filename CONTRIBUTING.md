@@ -5,6 +5,37 @@ for pulling and trimming clips from YouTube + arbitrary web sources, with
 on-device transcription and speaker diarization. The codebase rewards
 readers — start here, then dig in.
 
+
+## Changelog
+
+One rule, and it is about which builds are versions:
+
+- **A build you hand someone to test is not a version.** `npm run release:dmg`
+  with no argument keeps the semver and re-stamps only `CFBundleVersion`, which
+  is what Settings ▸ About shows next to it. No CHANGELOG entry, no tag.
+- **A version is a semver bump**, and it needs a `## [X.Y.Z]` entry before it
+  can be built. `npm run release:dmg -- 0.4.0` refuses without one
+  (`scripts/check-changelog.sh`), then it gets a tag and a GitHub Release.
+
+Write entries for the person on the other side of the change — what now works
+that did not, or what stopped happening — not for the person who wrote it. Say
+what the symptom was:
+
+```markdown
+### Fixed
+- **The rename dialog opens.** It rendered underneath the app because it was
+  the one menu not portaled to <body>, so it was present in the DOM and
+  invisible.
+```
+
+Not `- Fixed z-index in ReaderRowMenu`. Someone reading the changelog is trying
+to find out whether the thing that annoyed them is fixed, and they do not know
+what a ReaderRowMenu is.
+
+Group under `### Fixed`, `### Added`, `### Changed`, `### Removed`. Keep
+`## [Unreleased]` at the top and move its contents down when you cut a version.
+
+
 ## Setup
 
 From a clean machine:

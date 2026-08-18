@@ -219,6 +219,13 @@
   align-items: center;
   gap: 8px;
   justify-content: flex-end;
+  /* LOAD-BEARING. A flex item defaults to min-width:auto, so this cell could
+     not shrink below its content and a wide control ran off the right edge of
+     the pane instead of fitting the column. The segmented controls carry a
+     `minWidth` floor (270px for the summary style rows) and size their columns
+     to the label text, so "Brief / Standard / Detailed" grew past the cell and
+     the last pill was clipped by the modal. */
+  min-width: 0;
 }
 /* Contextual note under a setting (e.g. the per-browser cookie hint). A slim,
    neutral strip — folds conditional rows into one line that changes with the

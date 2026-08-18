@@ -442,6 +442,11 @@
   position: relative;
   display: grid;
   grid-template-columns: repeat(var(--seg-count, 4), 1fr);
+  /* Never wider than the cell it sits in. The sliding pill is sized and moved
+     in PERCENTAGES of this element, so clamping the track keeps the pill
+     aligned — it shrinks with the columns instead of drifting off them. */
+  max-width: 100%;
+  box-sizing: border-box;
   gap: 0;
   padding: 3px;
   /* Sunken track effect — inset shadow pulls the panel "into" the
@@ -487,6 +492,7 @@
 }
 @media (prefers-reduced-motion: reduce) { .cp-segmented::before { transition: none; } }
 .cp-segmented button {
+  min-width: 0;
   position: relative;
   z-index: 1;
   background: transparent;

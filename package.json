@@ -30,7 +30,8 @@
     "verify": "bash scripts/verify-all.sh",
     "build:dmg": "bash scripts/detach-stale-dmg.sh && bash scripts/set-version.sh && tauri build",
     "release:dmg": "bash scripts/release-dmg.sh",
-    "check:licenses": "bash scripts/check-licenses.sh"
+    "check:licenses": "bash scripts/check-licenses.sh",
+    "check:changelog": "bash scripts/check-changelog.sh"
   },
   "dependencies": {
     "@fontsource/nunito-sans": "^5.2.7",
