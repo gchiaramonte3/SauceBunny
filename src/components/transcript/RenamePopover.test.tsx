@@ -202,3 +202,30 @@ describe("the sheet behind the plus", () => {
     expect(props.onPickIcon).toHaveBeenCalledWith(null);
   });
 });
+
+describe("the icon row holds still", () => {
+  it("does not re-order when you pick from it", () => {
+    // Reported: "when I click the icons they move around". Picking promoted the
+    // icon to the front of recents and fed that straight back into state, so
+    // the buttons swapped under the cursor and a second pick landed somewhere
+    // other than where it was aimed. A control has to stay put while in use.
+    const props = show();
+    const order = () => rowButtons().map((b) => b.getAttribute("title") ?? "");
+    const before = order();
+    const star = rowButtons().find((b) => /star/i.test(b.getAttribute("title") ?? ""));
+    expect(star, "no star in the default row").toBeTruthy();
+    fireEvent.click(star!);
+    expect(props.onPickIcon, "the pick never reached the handler").toHaveBeenCalled();
+    expect(order(), "the row re-ordered under the cursor").toEqual(before);
+  });
+
+  it("still records the use, so the order settles on the NEXT open", () => {
+    // Freezing the row must not throw the recency away: it is persisted now and
+    // applied when the popover reopens, which is when moving costs nothing.
+    show();
+    const star = rowButtons().find((b) => /star/i.test(b.getAttribute("title") ?? ""));
+    fireEvent.click(star!);
+    expect(localStorage.getItem("saucebunny.badgeIconRecents"), "the use was not recorded")
+      .toContain("star");
+  });
+});

@@ -81,15 +81,34 @@ export function RenamePopover({
   const popRef = useRef<HTMLDivElement>(null);
   const plusRef = useRef<HTMLButtonElement>(null);
   /** The four non-kind slots in the icon row. See badge-recents for why. */
-  const [recents, setRecents] = useState<string[]>(() => readBadgeRecents());
+  // Read ONCE per open. See pickIcon for why this never updates in place.
+  const [recents] = useState<string[]>(() => readBadgeRecents());
   /** Anchor for the full icon sheet, or null when it is closed. */
   const [sheetAt, setSheetAt] = useState<DOMRect | null>(null);
   /** What the strip under the row names right now. */
   const [iconHint, setIconHint] = useState<string | null>(null);
+  /**
+   * The pick made in THIS popover, so an icon chosen from the full sheet shows
+   * up in the row straight away rather than waiting for the parent to hand
+   * `iconValue` back. It only ever ADDS; the row's existing members keep their
+   * places, which is the difference between this and the recency reordering
+   * that used to move buttons under the cursor.
+   */
+  const [justPicked, setJustPicked] = useState<string | null>(null);
 
   function pickIcon(id: string | null) {
     onPickIcon?.(id);
-    if (id) setRecents(noteBadgeIconUsed(id));
+    // Record the use, but do NOT re-order the row you are looking at.
+    //
+    // `noteBadgeIconUsed` promotes the pick to the front of recents, and
+    // feeding that straight back into state moved the buttons under the
+    // cursor: pick the star and the star and the group swap places, so the
+    // thing you just pressed is no longer where you pressed it and a second
+    // pick lands on a different icon. A control has to hold still while it is
+    // being used. The new order is persisted and shows up the next time the
+    // popover opens, which is the moment it costs nothing.
+    if (id) noteBadgeIconUsed(id);
+    setJustPicked(id);
     setSheetAt(null);
   }
 
@@ -104,7 +123,8 @@ export function RenamePopover({
    */
   const rowIds = (() => {
     const base = recents.slice(0, 4);
-    const worn = iconValue && iconValue !== "none" ? iconValue : null;
+    const shown = justPicked ?? iconValue;
+    const worn = shown && shown !== "none" ? shown : null;
     if (!worn || base.includes(worn) || !badgeIcon(worn)) return base;
     if (NON_SPEECH_KINDS.some((k) => k === worn)) return base; // already in the row
     return [worn, ...base].slice(0, 4);
