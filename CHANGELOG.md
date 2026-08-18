@@ -46,6 +46,15 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [0.3.0] — 2026-08-18
 
+Local AI got dramatically faster, YouTube breakage became self-repairing, and
+the app can finally tell you which build you are running.
+
+> Versions 0.2.1–0.2.9 were development builds produced during one working
+> session and were never released. Their changes are folded in here rather than
+> given entries of their own, because a version nobody received is not a
+> version. Build identity is carried by `CFBundleVersion` (`YYYYMMDDNN`), which
+> changes on every build; the semver moves only when the feature set does.
+
 ### Fixed
 - **The "Update yt-dlp & retry" offer now appears for the commonest YouTube
   failure.** yt-dlp reports it as `unable to download video data: HTTP Error
@@ -63,9 +72,6 @@ All notable changes to Sauce Bunny. Format loosely follows
   node or quickjs was falling back to a low-resolution player client while a
   working runtime sat on its PATH (measured 360p → 2160p).
 
-## [0.2.9] — 2026-08-18
-
-### Fixed
 - **Local AI answers arrive in seconds instead of a minute.** Every feature now
   shares one transcript prefix, so llama.cpp reuses the KV cache across the
   summary, the chapters and each chat turn (measured 60.92 s → 0.13 s on the
@@ -79,15 +85,6 @@ All notable changes to Sauce Bunny. Format loosely follows
   reasoning before answering.
 - **A running chapter detection can be stopped.**
 
-### Added
-- Chapters fold away and can be cleared.
-- Hidden warnings and tips can be restored from Settings ▸ Backup & reset.
-- The reader's transcript menu gained Reveal in Finder, and its rename dialog
-  no longer draws underneath the app.
-
-## [0.2.3] — 2026-08-18
-
-### Fixed
 - **Hidden warnings can be brought back.** Four "don't show me this again"
   flags — the rename-writes-to-disk warning, the first-run tips, and two
   per-transcript notices — were one-way doors: ticked once, and the only route
@@ -95,9 +92,6 @@ All notable changes to Sauce Bunny. Format loosely follows
   now restores them all, and a contract test fails if a fifth is added without
   one.
 
-## [0.2.2] — 2026-08-18
-
-### Fixed
 - **The cue right-click menu survives a big cast.** Past six reassignment
   targets they collapse into an "Assign to speaker" submenu with a filter,
   instead of one row per person running off the bottom of the screen and
@@ -107,9 +101,6 @@ All notable changes to Sauce Bunny. Format loosely follows
   Speaker 16 above Speaker 8 whenever 16 spoke first and scattered named
   people among unnamed ones.
 
-## [0.2.1] — 2026-08-18
-
-### Fixed
 - **The WebCodecs decoder toggle works.** Its description has always said
   "Disable if local files won't play"; it was read only for thumbnail
   extraction, so turning it off changed the poster and not the playback. It now
@@ -120,6 +111,11 @@ All notable changes to Sauce Bunny. Format loosely follows
   tab shows the build number it always claimed was the distinguishing one.
 
 ### Added
+- Chapters fold away and can be cleared.
+- Hidden warnings and tips can be restored from Settings ▸ Backup & reset.
+- The reader's transcript menu gained Reveal in Finder, and its rename dialog
+  no longer draws underneath the app.
+
 - **The audio path reports whether it is audible.** A track that decodes and
   never reaches the speakers used to log exactly like success. It now states
   chunks scheduled vs dropped, context state and gain, once per playback.

@@ -8,6 +8,39 @@ and the constraints that follow.
 
 ---
 
+
+## What the two numbers mean
+
+There are two, they do different jobs, and conflating them is how nine
+"versions" got produced in a single day and none of them were released.
+
+| number | changes | job |
+|---|---|---|
+| `CFBundleVersion` — `YYYYMMDDNN` | **every build** | Which build is this? Stamped by `set-version.sh`, shown in Settings ▸ About next to the semver. |
+| semver — `X.Y.Z` | **when the feature set does** | What is in it? Appears in the DMG filename and is what the updater compares. |
+
+So a development build handed to someone for testing takes **no semver bump**:
+
+```bash
+npm run release:dmg          # keeps the semver, re-stamps the build number
+```
+
+The semver moves once, when the work is ready to be a release, and then it gets
+a tag and a GitHub Release — because until it is tagged it is not a version,
+it is a build. `latest_release` (Settings ▸ About) reads GitHub Releases, so an
+untagged bump is invisible to every user regardless.
+
+```bash
+npm run release:dmg -- 0.4.0
+git tag v0.4.0 && git push origin v0.4.0
+gh release create v0.4.0 --notes-from-tag   # or draft it and edit
+```
+
+The CHANGELOG follows the same rule. 0.2.1 through 0.2.9 were dev builds from
+one session; they are folded into the 0.3.0 entry rather than given headings of
+their own, because a version nobody received is not a version.
+
+
 ## Why not the Mac App Store
 
 Three blockers, in order of severity. Future contributors should know
