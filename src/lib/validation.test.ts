@@ -4,6 +4,7 @@ import {
   isLikelyVideoUrl,
   looksLikeExtractorRot,
   needsCookiesError,
+  needsJsRuntimeError,
   normalizeUrl,
   prettyHost,
   youTubeVideoId,
@@ -135,6 +136,68 @@ describe("looksLikeExtractorRot", () => {
     for (const s of authOwned) {
       expect(needsCookiesError(s), `needsCookiesError should claim: ${s}`).toBe(true);
       expect(looksLikeExtractorRot(s), `rot must NOT claim: ${s}`).toBe(false);
+    }
+  });
+});
+
+describe("extractor rot, with the source URL as context", () => {
+  // Verbatim from a user report of the breakage that prompted this: yt-dlp
+  // names no host, so a check against the message alone can never match it.
+  const REAL = "ERROR: unable to download video data: HTTP Error 403: Forbidden";
+  const YT = "https://www.youtube.com/watch?v=PZbkF-15ObM";
+
+  it("matches the real-world 403 once the URL is supplied", () => {
+    expect(looksLikeExtractorRot(REAL, YT), "the commonest YouTube failure went unoffered").toBe(true);
+  });
+
+  it("did NOT match on the message alone, which is the bug being fixed", () => {
+    // Kept as a statement of the old behaviour: the message carries no host,
+    // so without context there is nothing to key on and no offer appeared.
+    expect(looksLikeExtractorRot(REAL)).toBe(false);
+  });
+
+  it("still refuses a 403 that has nothing to do with YouTube", () => {
+    // A permissions refusal from someone's own server is not fixed by updating
+    // yt-dlp, and offering that would be the dead-end this file exists to avoid.
+    expect(looksLikeExtractorRot(REAL, "https://files.example.com/a.mp4")).toBe(false);
+    expect(looksLikeExtractorRot("HTTP Error 403: Forbidden", null)).toBe(false);
+  });
+
+  it("takes context from the message when it has it, URL or not", () => {
+    expect(looksLikeExtractorRot("HTTP Error 403 on googlevideo.com/videoplayback")).toBe(true);
+  });
+
+  it("treats a bare download failure as rot only in a YouTube context", () => {
+    expect(looksLikeExtractorRot("unable to download video data", YT)).toBe(true);
+    expect(looksLikeExtractorRot("unable to download video data", "https://vimeo.com/1")).toBe(false);
+  });
+});
+
+describe("a missing JS runtime is its own class", () => {
+  const WARN =
+    "WARNING: [youtube] No supported JavaScript runtime could be found. Only deno is enabled by default; " +
+    "YouTube extraction without a JS runtime has been deprecated";
+
+  it("is recognised", () => {
+    expect(needsJsRuntimeError(WARN)).toBe(true);
+  });
+
+  it("is NOT extractor rot, because no yt-dlp version fixes it", () => {
+    // The runtime is a separate program. Offering "Update yt-dlp & retry" here
+    // would be a repair that provably cannot repair — the same shape as a
+    // stable update that returns the version already installed.
+    expect(looksLikeExtractorRot(WARN, "https://www.youtube.com/watch?v=x")).toBe(false);
+  });
+
+  it("wins even when a rot signature shares the text", () => {
+    const both = `${WARN}\nERROR: unable to download video data: HTTP Error 403: Forbidden`;
+    expect(looksLikeExtractorRot(both, "https://www.youtube.com/watch?v=x"),
+      "sent to an update that cannot help").toBe(false);
+  });
+
+  it("does not fire on ordinary errors", () => {
+    for (const s of ["", "HTTP Error 403: Forbidden", "Video unavailable", "some js parse error"]) {
+      expect(needsJsRuntimeError(s), JSON.stringify(s)).toBe(false);
     }
   });
 });

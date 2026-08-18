@@ -112,6 +112,34 @@ export function needsCookiesError(msg: string): boolean {
 }
 
 /**
+ * True when yt-dlp could not find a JavaScript runtime.
+ *
+ * Its OWN class, deliberately kept out of extractor rot. yt-dlp needs a JS
+ * runtime to solve YouTube's nsig, and without one it silently drops to a
+ * lower-resolution player client or fails outright. Updating yt-dlp cannot fix
+ * that — the runtime is a separate program — so classifying it as rot would
+ * offer a repair that provably cannot repair, which is the exact failure the
+ * stable/nightly channel work was fixing at the other end of this flow.
+ *
+ * The app enables deno, node and quickjs (YT_JS_RUNTIME_ARGS), so this only
+ * fires when the machine has none of them.
+ */
+export function needsJsRuntimeError(errText: string): boolean {
+  if (!errText) return false;
+  const m = errText.toLowerCase();
+  return (
+    m.includes("no supported javascript runtime") ||
+    m.includes("javascript runtime could be found") ||
+    (m.includes("js runtime") && m.includes("deprecated"))
+  );
+}
+
+/** YouTube-ish context, from an error body OR the source URL it came from. */
+function youTubeContext(...parts: (string | null | undefined)[]): boolean {
+  return parts.some((p) => !!p && /youtube|googlevideo|youtu\.be/.test(p.toLowerCase()));
+}
+
+/**
  * True when an error reads like a STALE yt-dlp extractor — the classic
  * "YouTube changed something and yt-dlp shipped a fix days later" breakage
  * class (nsig/signature solvers, player-response parsing, format maps, CDN
@@ -125,13 +153,16 @@ export function needsCookiesError(msg: string): boolean {
  * update). Genuinely-unavailable videos (unavailable/private/removed/
  * age-gated) are excluded the same way.
  */
-export function looksLikeExtractorRot(errText: string): boolean {
+export function looksLikeExtractorRot(errText: string, sourceUrl?: string | null): boolean {
   if (!errText) return false;
   const m = errText.toLowerCase();
   // 1) Auth flow wins — the sign-in reminder (YouTubeAuthModal) already
   //    handles these; offering an engine update would point users away
   //    from the actual fix.
   if (needsCookiesError(errText)) return false;
+  // 1b) A missing JS runtime is not rot either, and for a sharper reason: no
+  //     yt-dlp version fixes it, so the update offer would be a dead end.
+  if (needsJsRuntimeError(errText)) return false;
   // 2) Genuinely unavailable — no yt-dlp update will bring these back.
   if (
     m.includes("video unavailable") ||
@@ -161,7 +192,20 @@ export function looksLikeExtractorRot(errText: string): boolean {
   }
   // A 403 from the video CDN is rot ONLY in a YouTube/googlevideo context
   // (stale signed URLs) — anywhere else it's a real permissions refusal.
-  if (m.includes("http error 403") && /youtube|googlevideo|youtu\.be/.test(m)) {
+  //
+  // The context now also comes from the SOURCE URL, which is what this missed.
+  // yt-dlp's own line for the breakage that prompted all of this reads
+  // "unable to download video data: HTTP Error 403: Forbidden" and names no
+  // host at all, so a check against the message alone could never match it and
+  // the update offer never appeared for the single commonest YouTube failure.
+  // App.tsx had the URL in hand the whole time and simply never passed it.
+  if (m.includes("http error 403") && youTubeContext(m, sourceUrl)) {
+    return true;
+  }
+  // Same shape without a status code: yt-dlp reports the download half of a
+  // stale-URL failure this way when the player data parsed but the media
+  // fetch did not.
+  if (m.includes("unable to download video data") && youTubeContext(m, sourceUrl)) {
     return true;
   }
   return false;

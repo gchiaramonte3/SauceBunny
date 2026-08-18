@@ -540,7 +540,10 @@ export default function App() {
    *  the overlay shows. Stable — safe in the long-lived event listeners. */
   const classifyExtractorRot = useCallback((msg: string) => {
     const u = activeSourceUrlRef.current;
-    if (!u || !looksLikeExtractorRot(msg)) {
+    // The URL is the missing half of the 403 test: yt-dlp's own message for the
+    // commonest YouTube breakage names no host, so the detector could not tell
+    // a stale signed URL from a genuine permissions refusal without it.
+    if (!u || !looksLikeExtractorRot(msg, u)) {
       // Not rot (or no committed source): drop any leftover flag so an
       // unrelated later error can't render a misleading update button. An
       // in-flight update keeps its busy state — it resolves itself.
@@ -1430,9 +1433,12 @@ export default function App() {
   useEffect(() => {
     const s = webPlayback.state;
     if (s.kind !== "failed" || s.seq !== sourceSeqRef.current) return;
-    const rotMsg = looksLikeExtractorRot(s.message)
+    // Same URL context as classifyExtractorRot — both paths decide the same
+    // question and must not disagree about it.
+    const rotUrl = activeSourceUrlRef.current;
+    const rotMsg = looksLikeExtractorRot(s.message, rotUrl)
       ? s.message
-      : errorDetail != null && looksLikeExtractorRot(errorDetail)
+      : errorDetail != null && looksLikeExtractorRot(errorDetail, rotUrl)
         ? errorDetail
         : null;
     if (!rotMsg) return;
