@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import { IconAlert } from "./Icons";
@@ -40,6 +41,14 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  /** Same verb the library's card menu offers. It was absent here, so the one
+   *  place you manage transcripts could not show you where they live. */
+  async function revealInFinder() {
+    try { await invoke("reveal_in_finder", { path: target.entry.srtPath }); }
+    catch (e) { setErr(formatError(e)); return; }
+    onClose();
+  }
+
   async function doRename() {
     const stem = nameInput.trim();
     if (!stem) { setErr("Enter a name."); return; }
@@ -64,22 +73,32 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
   }
 
   // The bare context menu, positioned at the cursor (clamped to the viewport).
+  //
+  // PORTALED, like CueSelectionMenu and LibraryCardMenu. This one used to
+  // render inline in the reader's tree at z-index 401 while the app stacks
+  // layers up to 10002, so the menu and its Rename dialog were in the DOM and
+  // underneath something - which from the outside is a rename that does
+  // nothing. `position: fixed` was also anchored to whatever ancestor happened
+  // to establish a containing block rather than to the viewport, so the cursor
+  // coordinates it is positioned from could put it somewhere else entirely.
   if (mode === "menu") {
     const left = Math.min(target.x, window.innerWidth - 200);
     const top = Math.min(target.y, window.innerHeight - 110);
-    return (
+    return createPortal(
       <>
         <div className="cp-rowmenu-scrim" onMouseDown={onClose} />
         <div className="cp-rowmenu" style={{ left, top }} role="menu">
           <button role="menuitem" onClick={() => { setNameInput(target.title); setErr(null); setMode("rename"); }}>Rename…</button>
           <button role="menuitem" onClick={() => { setErr(null); setMode("move"); }}>Move to folder…</button>
+          <button role="menuitem" onClick={() => { void revealInFinder(); }}>Reveal in Finder</button>
         </div>
-      </>
+      </>,
+      document.body,
     );
   }
 
   const ext = target.entry.srtPath.split(".").pop() || "srt";
-  return (
+  return createPortal(
     <div className="cp-rowmenu-scrim modal" onMouseDown={onClose}>
       <div ref={dialogRef} tabIndex={-1} className="cp-rowmenu-dialog" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         {mode === "rename" ? (
@@ -127,6 +146,7 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

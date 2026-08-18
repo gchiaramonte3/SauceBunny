@@ -197,16 +197,10 @@ export function LibraryTree({
     () => rows.filter((r) => r.key !== "all").map((r) => r.key),
     [rows],
   );
+  // The focus re-read that used to live here now lives in useFinderTags, so
+  // the grid in LibraryBrowser gets it too instead of showing a stale colour
+  // beside a fresh one.
   const finderTags = useFinderTags(folderPaths);
-  // Finder owns these colours, and it can change them while we are in the
-  // background. Without this the tree keeps showing whatever was true when the
-  // rows were built, so "we read Finder colours" would only be true once.
-  const refreshTags = finderTags.refresh;
-  useEffect(() => {
-    const onFocus = () => refreshTags();
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [refreshTags]);
 
   return (
     <div className="cp-lib-tree" style={{ flexBasis: treeWidth }}>

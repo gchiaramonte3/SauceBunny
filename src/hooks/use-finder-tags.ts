@@ -77,5 +77,23 @@ export function useFinderTags(paths: readonly string[]) {
   /** Force a re-read — for writes made outside this hook's own setters. */
   const refresh = useCallback(() => setRefreshTick((n) => n + 1), []);
 
+  /**
+   * Re-read when the window comes back, because Finder owns these colours and
+   * changes them while we are in the background.
+   *
+   * IN THE HOOK, not at the call site. LibraryTree had this effect and
+   * LibraryBrowser did not, so tagging a folder in Finder updated the sidebar
+   * and left the grid beside it showing the old colour — the same set of tags,
+   * one pane fresh and one stale, which reads as the app failing to see a tag
+   * at all. Every consumer gets it here by construction, and the third one
+   * cannot forget it. Same argument that put outside-click and Escape together
+   * in useDismiss after two siblings each implemented half.
+   */
+  useEffect(() => {
+    const onFocus = () => setRefreshTick((n) => n + 1);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
   return { tags, toggle, clear, toggleMany, refresh };
 }
