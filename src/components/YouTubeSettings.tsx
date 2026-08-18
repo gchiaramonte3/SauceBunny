@@ -49,6 +49,9 @@ export function YouTubeSettings({
   });
   const [busy, setBusy] = useState<"idle" | "checking" | "updating" | "resetting">("checking");
   const [msg, setMsg] = useState<string | null>(null);
+  /** Shown only after a stable update turned out to be a no-op. Nightly is not
+   *  advertised up front: it is the escalation for someone already stuck. */
+  const [offerNightly, setOfferNightly] = useState(false);
 
   const applyStatus = (s: YtdlpStatus) => {
     setStatus(s);
@@ -69,13 +72,30 @@ export function YouTubeSettings({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const update = async () => {
+  /**
+   * Update the downloader, and be honest when there was nothing to update to.
+   *
+   * yt-dlp ships extractor fixes to nightly days or weeks before stable. In
+   * that window a stable update returns the SAME version already installed, and
+   * the old copy still said "Updated to 2026.07.04." - which reads as a repair
+   * having happened. Somebody whose downloads are broken then has no idea the
+   * button did nothing, and no idea what to try next. So a no-op says so, and
+   * names the one thing left.
+   */
+  const update = async (channel: "stable" | "nightly" = "stable") => {
     setBusy("updating");
     setMsg(null);
+    const before = status?.version ?? null;
     try {
-      const s = await invoke<YtdlpStatus>("update_ytdlp");
+      const s = await invoke<YtdlpStatus>("update_ytdlp", { channel });
       applyStatus(s);
-      setMsg(`Updated to ${s.version}.`);
+      if (before && s.version === before && channel === "stable") {
+        setOfferNightly(true);
+        setMsg(`Already on the newest stable build (${s.version}). If downloads are still failing, YouTube has probably changed something the stable build has not caught up with yet.`);
+      } else {
+        setOfferNightly(false);
+        setMsg(`Updated to ${s.version}.`);
+      }
     } catch (e) {
       setMsg(`Update failed: ${formatError(e)}`);
     } finally {
@@ -242,9 +262,23 @@ export function YouTubeSettings({
             <code className="cp-ytdlp-version">
               {status?.version ?? (busy === "checking" ? "checking…" : "unknown")}
             </code>
-            <button className="btn btn-primary" onClick={update} disabled={busy === "updating"}>
+            <button className="btn btn-primary" onClick={() => update("stable")} disabled={busy === "updating"}>
               {busy === "updating" ? "Updating…" : "Update yt-dlp"}
             </button>
+            {/* Appears only once a stable update has proved to be a no-op. Not
+                offered up front: nightly is a daily unreviewed build, and it is
+                worth its risk only to somebody whose downloads are already
+                failing on the newest stable. */}
+            {offerNightly && (
+              <button
+                className="btn btn-ghost"
+                onClick={() => update("nightly")}
+                disabled={busy === "updating"}
+                title="Nightly carries YouTube fixes days before they reach stable"
+              >
+                Try the nightly build
+              </button>
+            )}
             {status?.updated && (
               <button className="btn btn-ghost" onClick={reset} disabled={busy === "resetting"}>
                 Reset to bundled

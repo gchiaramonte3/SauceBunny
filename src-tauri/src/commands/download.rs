@@ -277,6 +277,36 @@ pub async fn ytdlp_version(app: AppHandle) -> Result<YtdlpStatus, crate::AppErro
 /// Hard cap on the updater download — the real binary is ~35 MB.
 const MAX_YTDLP_BYTES: u64 = 200 * 1024 * 1024;
 
+/// Which yt-dlp release feed an update reads from.
+///
+/// WHY NIGHTLY IS OFFERED AT ALL. yt-dlp ships extractor fixes to nightly days
+/// or weeks before they reach stable, and the app's whole self-repair loop is
+/// built on "the download failed, so fetch a newer yt-dlp and retry". When
+/// YouTube breaks something the fix exists ONLY in nightly for a while, and in
+/// that window an update from stable returns the identical version the user
+/// already has: the offer appears, the download runs, the retry fails, and the
+/// app reports "engine is current". Repair machinery that cannot repair.
+///
+/// Stable stays the default - it is the reviewed build, and most rot is fixed
+/// there. Nightly is the escalation for someone already blocked, which is the
+/// only moment its risk is worth taking.
+pub(crate) fn ytdlp_release_api(channel: &str) -> &'static str {
+    match channel {
+        "nightly" => "https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest",
+        _ => "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest",
+    }
+}
+
+/// The tagged-release base for the same channel, used for the binary and its
+/// checksum manifest so both come from ONE immutable tag.
+pub(crate) fn ytdlp_release_base(channel: &str, tag: &str) -> String {
+    let repo = match channel {
+        "nightly" => "yt-dlp/yt-dlp-nightly-builds",
+        _ => "yt-dlp/yt-dlp",
+    };
+    format!("https://github.com/{repo}/releases/download/{tag}")
+}
+
 /// Download the latest official self-contained macOS yt-dlp into app-data and
 /// make it the active binary. yt-dlp ships fixes for YouTube extractor changes
 /// often, so this lets users refresh without reinstalling the app.
@@ -289,7 +319,8 @@ const MAX_YTDLP_BYTES: u64 = 200 * 1024 * 1024;
 /// executable, the download is size-capped, and only then does the
 /// `--version` probe run. Writes to a temp path + atomically renames.
 #[tauri::command]
-pub async fn update_ytdlp(app: AppHandle) -> Result<YtdlpStatus, crate::AppError> {
+pub async fn update_ytdlp(app: AppHandle, channel: Option<String>) -> Result<YtdlpStatus, crate::AppError> {
+    let channel = channel.unwrap_or_else(|| "stable".into());
     let data = app
         .path()
         .app_data_dir()
@@ -309,7 +340,7 @@ pub async fn update_ytdlp(app: AppHandle) -> Result<YtdlpStatus, crate::AppError
         tag_name: String,
     }
     let rel: Release = client
-        .get("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest")
+        .get(ytdlp_release_api(&channel))
         .header("user-agent", "sauce-bunny-updater")
         .header("accept", "application/vnd.github+json")
         .send()
@@ -330,7 +361,7 @@ pub async fn update_ytdlp(app: AppHandle) -> Result<YtdlpStatus, crate::AppError
 
     // 2. The checksum manifest from the SAME immutable release.
     let sums = client
-        .get(format!("https://github.com/yt-dlp/yt-dlp/releases/download/{tag}/SHA2-256SUMS"))
+        .get(format!("{}/SHA2-256SUMS", ytdlp_release_base(&channel, &tag)))
         .header("user-agent", "sauce-bunny-updater")
         .send()
         .await
@@ -353,7 +384,7 @@ pub async fn update_ytdlp(app: AppHandle) -> Result<YtdlpStatus, crate::AppError
 
     // 3. The binary, size-capped while streaming.
     let mut resp = client
-        .get(format!("https://github.com/yt-dlp/yt-dlp/releases/download/{tag}/yt-dlp_macos"))
+        .get(format!("{}/yt-dlp_macos", ytdlp_release_base(&channel, &tag)))
         .header("user-agent", "sauce-bunny-updater")
         .send()
         .await
@@ -2778,4 +2809,49 @@ pub async fn forget_cached_web(app: AppHandle, url: String) -> Result<(), crate:
     }
     let _ = std::fs::remove_file(meta_path(&cache, &url));
     Ok(())
+}
+
+#[cfg(test)]
+mod ytdlp_channel_tests {
+    use super::{ytdlp_release_api, ytdlp_release_base};
+
+    /// The reason the channel exists at all.
+    ///
+    /// On the day this was written the installed yt-dlp was 2026.07.04 and the
+    /// latest STABLE was also 2026.07.04, while nightly was 2026.08.18 and
+    /// carried the fix for a YouTube change that was breaking downloads. The
+    /// app's self-repair offer ("Update yt-dlp & retry") therefore downloaded
+    /// the identical binary, retried, failed again, and reported "engine is
+    /// current" - a repair path that cannot repair, at exactly the moment it is
+    /// needed.
+    #[test]
+    fn nightly_and_stable_are_different_feeds() {
+        assert_ne!(ytdlp_release_api("stable"), ytdlp_release_api("nightly"));
+        assert!(ytdlp_release_api("nightly").contains("nightly-builds"));
+        assert!(!ytdlp_release_api("stable").contains("nightly"));
+    }
+
+    /// Anything unrecognised must land on STABLE, never nightly. A typo, an old
+    /// persisted value or a future channel name should downgrade to the
+    /// reviewed build rather than silently opting someone into daily builds.
+    #[test]
+    fn an_unknown_channel_falls_back_to_stable() {
+        for c in ["", "STABLE", "beta", "nightlyish", "../nightly-builds"] {
+            assert_eq!(ytdlp_release_api(c), ytdlp_release_api("stable"), "channel {c:?}");
+            assert!(ytdlp_release_base(c, "1.2.3").contains("/yt-dlp/yt-dlp/"), "channel {c:?}");
+        }
+    }
+
+    /// The binary and its checksum manifest must come from ONE immutable tag,
+    /// on whichever feed. r140 moved off the mutable `latest` asset URL for
+    /// exactly this reason; a channel that rebuilt the URLs by hand could undo
+    /// it without anything failing until a bad binary shipped.
+    #[test]
+    fn both_assets_share_one_tagged_release() {
+        for c in ["stable", "nightly"] {
+            let base = ytdlp_release_base(c, "2026.08.18.122307");
+            assert!(base.ends_with("/releases/download/2026.08.18.122307"), "{base}");
+            assert!(!base.contains("/latest/"), "mutable pointer crept back in: {base}");
+        }
+    }
 }
