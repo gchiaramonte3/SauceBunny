@@ -3,8 +3,9 @@ import { streamChat } from "../lib/ai-chat";
 import { formatError } from "../lib/error-format";
 import {
   type Chapter, loadChapters, saveChapters, parseChapters,
-  buildChapterPrompt, sampleTranscriptEvenly, chaptersToYouTube, chapterTimestamp,
+  buildChapterPrompt, chaptersToYouTube, chapterTimestamp,
 } from "../lib/chapters";
+import { buildSourcePrefix } from "../lib/prompt-prefix";
 import type { LlmServerInfo } from "../bindings/LlmServerInfo";
 
 /** Namespaced like every other preference (storage-keys-contract). */
@@ -107,12 +108,13 @@ export function AiChapters({
       // Same context math as the summary chat: ~3.5 chars/token, ~65% of the
       // window for the transcript — but sampled EVENLY across the duration
       // (never head-truncated) so late chapters are still found.
-      const budget = Math.floor(info.ctx * 3.5 * 0.65);
-      const { text, sampled } = sampleTranscriptEvenly(lines, budget);
+      // The SHARED prefix, identical to the one the summary and the chat send,
+      // so whichever ran first has already paid for the transcript.
+      const { system, sampled } = buildSourcePrefix(lines, info.ctx);
       const ctrl = new AbortController();
       abortRef.current = ctrl;
       const raw = await streamChat(
-        info, buildChapterPrompt(text, durationSec, sampled),
+        info, buildChapterPrompt(system, durationSec, sampled),
         () => {}, ctrl.signal, { temperature: 0.2 },
       );
       const parsed = parseChapters(raw, durationSec);

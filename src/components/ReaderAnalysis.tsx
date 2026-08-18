@@ -6,7 +6,8 @@ import { loadSpeakerOverrides, prepareCues, resolveSpeakerName } from "./transcr
 import { formatError } from "../lib/error-format";
 import { Markdown } from "./Markdown";
 import { IconSparkles, IconSpinnerArc, IconRefresh, IconAlert } from "./Icons";
-import { buildSystemPrompt, type SummaryStyle } from "./AiSummary";
+import { buildTaskInstruction, type SummaryStyle } from "./AiSummary";
+import { buildSourcePrefix } from "../lib/prompt-prefix";
 import { loadAiProvider, cloudChat, loadCloudModel } from "../lib/ai-provider";
 import { loadAnalysis, saveAnalysis, analysisIsStale, type TranscriptAnalysis } from "../lib/transcript-analysis";
 import { TRANSCRIPTS_CHANGED_EVENT } from "../lib/transcript-history";
@@ -23,16 +24,19 @@ function buildTranscriptForModel(raw: string, ctx: number, srtPath: string) {
   try { turns = groupIntoTurns(prepareCues(parseSrt(raw), overrides)); } catch { return null; }
   if (!turns.length) return null;
   const hasSpeakers = turns.some((t) => !!t.speaker);
-  const text = turns.map((t) => {
+  // Per-turn LINES, not a joined blob: the shared prefix windows by line so
+  // every feature produces byte-identical transcript text for a source.
+  const lines = turns.map((t) => {
     const name = t.speaker ? resolveSpeakerName(t.speaker, overrides) : null;
     return `[${fmtTime(t.start)}] ${name ? name + ": " : ""}${t.cues.map((c) => c.text).join(" ")}`;
-  }).join("\n");
+  });
+  const text = lines.join("\n");
   const budget = Math.floor(ctx * 3.5 * 0.65);
   const truncated = text.length > budget;
   let clipped = truncated ? text.slice(0, budget) : text;
   const last = clipped.charCodeAt(clipped.length - 1);
   if (truncated && last >= 0xd800 && last <= 0xdbff) clipped = clipped.slice(0, -1);
-  return { text: clipped, truncated, hasSpeakers };
+  return { text: clipped, truncated, hasSpeakers, lines };
 }
 
 type Props = {
@@ -114,7 +118,7 @@ export function ReaderAnalysis({ transcriptPath, visible, selectedModelId, style
         if (!built) { setError("This transcript has no readable content to analyze."); setPhase("error"); return; }
         setPhase("generating");
         const messages: ChatMessage[] = [
-          { role: "system", content: buildSystemPrompt(built.text, built.truncated, style ?? DEFAULT_STYLE, built.hasSpeakers) },
+          { role: "system", content: buildSourcePrefix(built.lines, info.ctx).system },
           { role: "user", content: userTurn },
         ];
         await streamChat(info, messages, (delta) => { full += delta; setStream((s) => s + delta); }, ctrl.signal);
@@ -125,7 +129,7 @@ export function ReaderAnalysis({ transcriptPath, visible, selectedModelId, style
         const built = buildTranscriptForModel(raw, 32000, transcriptPath);
         if (!built) { setError("This transcript has no readable content to analyze."); setPhase("error"); return; }
         setPhase("generating");
-        const system = buildSystemPrompt(built.text, built.truncated, style ?? DEFAULT_STYLE, built.hasSpeakers);
+        const system = `${buildTaskInstruction(style ?? DEFAULT_STYLE, built.hasSpeakers)}\n\n${buildSourcePrefix(built.lines, 32000).system}`;
         full = await cloudChat(provider, system, [{ role: "user", content: userTurn }], ctrl.signal);
         if (ctrl.signal.aborted) { setPhase("idle"); return; }
         modelUsed = loadCloudModel(provider);

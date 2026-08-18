@@ -99,8 +99,16 @@ export function buildChapterPrompt(
   const durNote = durationSec != null
     ? `The video is ${chapterTimestamp(durationSec, long)} long — every timestamp must be before that.`
     : "";
-  const system = [
-    "You segment video transcripts into chapters. Follow these rules exactly:",
+  // The RULES are the user turn, not the system message.
+  //
+  // They used to sit above the transcript inside one system message, which put
+  // ten lines of chapter-specific instruction in front of ten thousand tokens
+  // of shared material — so the prefix diverged immediately and the transcript
+  // was re-ingested even though the summary had just read the same one. The
+  // system message is now `buildSourcePrefix` verbatim (see prompt-prefix.ts)
+  // and everything below rides after it.
+  const task = [
+    "Segment this transcript into chapters. Follow these rules exactly:",
     "- Output ONLY chapter lines — no intro, no explanation, no numbering, no markdown.",
     long
       ? '- One chapter per line in the exact form "H:MM:SS Title" (e.g. "0:00:00 Introduction").'
@@ -110,17 +118,13 @@ export function buildChapterPrompt(
     `- The first chapter must start at ${long ? "0:00:00" : "00:00"}.`,
     "- Timestamps must be strictly increasing and taken from the [time] markers in the transcript.",
     durNote,
-    sampled
-      ? "- NOTE: the transcript below is sampled evenly across the full video (some lines omitted for length)."
-      : "",
+    sampled ? "- The transcript is sampled evenly across the runtime; some lines are omitted." : "",
     "",
-    "=== TRANSCRIPT ===",
-    transcript,
-    "=== END TRANSCRIPT ===",
+    "List the chapters.",
   ].filter(Boolean).join("\n");
   return [
-    { role: "system", content: system },
-    { role: "user", content: "List the chapters." },
+    { role: "system", content: transcript },
+    { role: "user", content: task },
   ];
 }
 

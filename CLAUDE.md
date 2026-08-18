@@ -620,7 +620,7 @@ The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commi
 
 ## Enforced contracts
 
-Fifty-three rules in this file are checked by a test rather than remembered. If you
+Fifty-four rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -692,6 +692,7 @@ written after finding the rule already broken somewhere.
 | `rust-panic-contract` | No .unwrap()/.expect()/panic! in production Rust (two allowlisted, each with a stated reason). A panic in a command handler never resolves the invoke and poisons any Mutex it held |
 | `version-stamp-contract` | One semver across the three manifests, a dated CFBundleVersion, and a build number the About tab actually renders |
 | `hidden-notices-contract` | Every "don't show again" flag is listed in HIDDEN_NOTICE_KEYS and clearable from Settings |
+| `prompt-prefix-contract` | Every local-model feature sends the SAME system prefix, and nothing variable rides in front of the transcript |
 | `forbidden-dirs-contract` | The directory names CLAUDE.md forbids (utils/, helpers/, services/, store/ …) stay absent |
 | `no-any-contract` | No `any` in src, shipped or test; `@typescript-eslint` is registered with no rules so nothing else checks |
 | `important-contract` | `!important` stays at three explained sites, shrink-only |

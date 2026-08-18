@@ -13,6 +13,7 @@ import { IconAiSummary } from "./Icons";
 import { Markdown } from "./Markdown";
 import { AiChapters } from "./AiChapters";
 import type { LlmModel } from "../bindings/LlmModel";
+import { buildSourcePrefix } from "../lib/prompt-prefix";
 import type { LlmServerInfo } from "../bindings/LlmServerInfo";
 import type { DoneEvent } from "../bindings/DoneEvent";
 import type { ModelProgressEvent } from "../bindings/ModelProgressEvent";
@@ -67,9 +68,21 @@ const DEFAULT_STYLE: SummaryStyle = { format: "bullets", length: "standard" };
  *  transcript out of the context window. */
 const DESCRIPTION_BUDGET = 1_200;
 
-export function buildSystemPrompt(
-  transcript: string,
-  truncated: boolean,
+/**
+ * The task instruction for the summary/analysis chat — the USER turn.
+ *
+ * These rules used to live in the system message above the transcript, which
+ * meant a ten-thousand-token prefix that changed whenever the style changed:
+ * switching bullets to prose re-ingested the whole video. The transcript is now
+ * `buildSourcePrefix` (prompt-prefix.ts), shared verbatim with chapters and the
+ * analysis, and everything that varies rides here.
+ *
+ * The source description moved here too. It is stable per source but NOT shared
+ * across features — ReaderAnalysis has no access to it — so leaving it in the
+ * prefix would have given the same video two different prefixes depending on
+ * which pane asked.
+ */
+export function buildTaskInstruction(
   style: SummaryStyle,
   hasSpeakers: boolean,
   /** The source's own description, when the site published one. */
@@ -89,8 +102,8 @@ export function buildSystemPrompt(
         ? "- Be thorough: cover every significant topic and supporting detail."
         : "- Give a focused summary of the key points.";
   return [
-    "You are an assistant analyzing the transcript of a video. Follow these rules:",
-    "- Answer ONLY using the transcript below. Never invent facts, names, or numbers.",
+    "Answer using the transcript above. Follow these rules:",
+    "- Answer ONLY using the transcript. Never invent facts, names, or numbers.",
     "- When asked for quotes, copy the wording VERBATIM and include the [timestamp].",
     "- When you reference a moment, cite its [timestamp] (e.g. [7:23]).",
     "- If the transcript doesn't cover what's asked, say so plainly.",
@@ -102,15 +115,11 @@ export function buildSystemPrompt(
     "- Format in GitHub-flavoured Markdown. Put a blank line between paragraphs and before any list.",
     "- Write plain prose. Do NOT use bold or italics. Never output the * or _ characters for emphasis.",
     "- Use \"## \" headings only to separate major sections of a long answer.",
-    truncated
-      ? "- NOTE: the transcript was too long for the context window and has been truncated; say so if the answer might depend on the cut portion."
-      : "",
     "",
     "Example of the formatting expected:",
     "## Key points",
     "- The host introduces the topic and why it matters [0:42].",
     "- A demo follows, walking through the core workflow [4:10].",
-    "",
     // The creator's own description, when there is one. Worth the tokens
     // because it routinely carries the things a transcript cannot: the guests'
     // spelled-out names, the title of the thing being discussed, links, and
@@ -122,10 +131,6 @@ export function buildSystemPrompt(
       blurb,
       "=== END DESCRIPTION ===",
     ] : []),
-    "",
-    "=== TRANSCRIPT ===",
-    transcript,
-    "=== END TRANSCRIPT ===",
   ].filter(Boolean).join("\n");
 }
 
@@ -371,10 +376,19 @@ export function AiSummary({
     setStreaming(true);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    const system = buildSystemPrompt(transcriptForModel.text, transcriptForModel.truncated, style ?? DEFAULT_STYLE, transcriptForModel.hasSpeakers, sourceDescription);
+    // System = the shared source prefix, nothing else. Task rules ride on the
+    // FIRST user turn, so the ten-thousand-token transcript stays a prefix that
+    // chapters and the analysis already paid for.
+    const prefix = info
+      ? buildSourcePrefix(transcriptForModel.lines, info.ctx).system
+      : transcriptForModel.text;
+    const task = buildTaskInstruction(style ?? DEFAULT_STYLE, transcriptForModel.hasSpeakers, sourceDescription);
+    const withTask: ChatMessage[] = history.map((m, i) =>
+      i === 0 && m.role === "user" ? { ...m, content: `${task}\n\n${m.content}` } : m,
+    );
     try {
       if (provider === "local" && info) {
-        await streamChat(info, [{ role: "system", content: system }, ...history], (delta) => {
+        await streamChat(info, [{ role: "system", content: prefix }, ...withTask], (delta) => {
           setMessages((prev) => {
             const next = [...prev];
             const last = next[next.length - 1];
@@ -384,7 +398,12 @@ export function AiSummary({
         }, ctrl.signal);
       } else {
         // Cloud (Claude / ChatGPT) — one-shot via Rust; the reply lands at once.
-        const reply = await cloudChat(provider as Exclude<typeof provider, "local">, system, history, ctrl.signal);
+        // Cloud has no KV cache to protect, so it takes the old single-message
+        // shape: rules and transcript together, history untouched.
+        const reply = await cloudChat(
+          provider as Exclude<typeof provider, "local">,
+          `${task}\n\n${prefix}`, history, ctrl.signal,
+        );
         if (!ctrl.signal.aborted) {
           setMessages((prev) => {
             const next = [...prev];
