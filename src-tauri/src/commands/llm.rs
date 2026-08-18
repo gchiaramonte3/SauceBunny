@@ -138,6 +138,33 @@ pub struct LlmModel {
     pub downloaded: bool,
 }
 
+/// Performance-core count, which is the right thread count on Apple Silicon.
+///
+/// `available_parallelism()` counts every logical CPU, so on an M4 Max it
+/// returns 14 and llama.cpp spreads work across 10 performance and 4 efficiency
+/// cores. The batch synchronises at each step, so every fast thread then waits
+/// on the slow ones and the whole run drops to E-core pace. Measured on a 4B at
+/// 4.6k tokens of prompt: 37.7 tok/s of generation at 14 threads, 83.8 tok/s at
+/// 10. Same machine, same model, one flag.
+///
+/// `hw.perflevel0` is the performance cluster. A Mac with no such split reports
+/// nothing, and falls back to the old behaviour.
+fn performance_cores() -> usize {
+    let total = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let out = std::process::Command::new("/usr/sbin/sysctl")
+        .args(["-n", "hw.perflevel0.logicalcpu"])
+        .output();
+    match out {
+        Ok(o) => String::from_utf8_lossy(&o.stdout)
+            .trim()
+            .parse::<usize>()
+            .ok()
+            .filter(|n| *n > 0 && *n <= total)
+            .unwrap_or(total),
+        Err(_) => total,
+    }
+}
+
 #[tauri::command]
 pub fn list_llm_models(app: AppHandle) -> Result<Vec<LlmModel>, crate::AppError> {
     let dir = llm_models_dir(&app)?;
@@ -295,7 +322,7 @@ pub async fn start_llm_server(
 
     let port = free_loopback_port()?;
     let api_key = mint_api_key()?;
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let threads = performance_cores();
 
     let cmd = app
         .shell()
@@ -311,6 +338,22 @@ pub async fn start_llm_server(
             "-t".into(), threads.to_string(),
             "--no-webui".into(),                  // no built-in UI surface
             "--jinja".into(),                     // use the GGUF's chat template
+            // ONE slot. The app serialises model calls by design (AiSummary and
+            // AiChapters lock each other out through chatBusy), so the server's
+            // auto-chosen 4 slots each reserved a full n_ctx of KV cache for
+            // work that can never arrive. On a 27B at 40k context that is GBs
+            // held to no purpose, on the same unified memory the model and the
+            // video decode are competing for.
+            "-np".into(), "1".into(),
+            // NO CHAIN-OF-THOUGHT. Qwen3's template turns thinking on, and its
+            // default effort on a "summarise this into a few bullets" request
+            // spent 3,254 tokens reasoning without reaching an answer - roughly
+            // four minutes at this model's generation rate, all of it invisible
+            // because the thinking is stripped before display. Measured on the
+            // same request with a budget of 0: 119 tokens, 7.3 seconds.
+            // Summarising a transcript and cutting chapter marks are extraction
+            // tasks; the reasoning was buying nothing and costing everything.
+            "--reasoning-budget".into(), "0".into(),
         ]);
 
     let (mut rx, child) = cmd.spawn().map_err(|e| crate::AppError::internal(format!("spawn llama-server: {e}")))?;

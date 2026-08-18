@@ -1282,3 +1282,40 @@
   .cp-emoji-cell,
   .cp-react-pop-btn { transition-duration: 0s; }
 }
+
+/* ── AI chapters: fold the list once it has been read ───────────────────
+   A detected list is a dozen-plus rows in a drawer that also holds the
+   summary and the chat. Folding leaves the header, which keeps the count
+   and both actions reachable. */
+.cp-ai-chapters-title.as-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.cp-ai-chapters-title.as-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus-ring);
+  border-radius: var(--r-sm);
+}
+.cp-ai-chapters-caret {
+  display: inline-block;
+  color: var(--fg-4);
+  transform: rotate(90deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.cp-ai-chapters-caret.closed { transform: rotate(0deg); }
+.cp-ai-chapters-count {
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-ai-chapters-caret { transition: none; }
+}

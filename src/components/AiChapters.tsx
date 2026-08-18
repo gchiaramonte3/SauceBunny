@@ -7,6 +7,9 @@ import {
 } from "../lib/chapters";
 import type { LlmServerInfo } from "../bindings/LlmServerInfo";
 
+/** Namespaced like every other preference (storage-keys-contract). */
+const COLLAPSE_KEY = "saucebunny.aiChaptersCollapsed";
+
 type Props = {
   /** Source identity to persist under (App's reviewSourceKey), or null. */
   sourceKey: string | null;
@@ -44,6 +47,33 @@ export function AiChapters({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  /**
+   * Two-click confirm for Clear, rather than a confirm() dialog.
+   *
+   * Regenerate uses confirm() because it can fire from a keyboard-less path
+   * and replaces work silently; Clear is a button you are already looking at,
+   * so the confirmation belongs in it. Blur resets, which makes "I did not
+   * mean that" a matter of clicking anywhere else.
+   */
+  const [confirmClear, setConfirmClear] = useState(false);
+  /**
+   * Collapsed chapter list.
+   *
+   * A detected list is a dozen-plus rows in a drawer that also has to hold the
+   * summary and the chat, and once you have read it you mostly want it out of
+   * the way — but not gone, because it is also the seek index. So it folds to
+   * its header, which keeps the count and the two actions reachable.
+   *
+   * Remembered globally rather than per source: the reason to fold it is that
+   * the drawer is short, and that is true of the next video too.
+   */
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; }
+  });
+  const setCollapsedPersisted = (v: boolean) => {
+    setCollapsed(v);
+    try { localStorage.setItem(COLLAPSE_KEY, v ? "1" : "0"); } catch { /* private mode */ }
+  };
   // Any deletion since the last generate → Regenerate asks before replacing.
   const editedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -91,6 +121,11 @@ export function AiChapters({
         return; // keep the existing list, if any
       }
       editedRef.current = false;
+      // Always reveal a fresh result. Somebody who folds the list, then clicks
+      // Detect and watches the button say "Detecting…" and then nothing appear
+      // has been told the feature failed. The remembered preference is about
+      // reading room, not about hiding work that was just asked for.
+      setCollapsedPersisted(false);
       commit(parsed);
     } catch (e) {
       if (!abortRef.current?.signal.aborted) setError(formatError(e));
@@ -125,11 +160,43 @@ export function AiChapters({
   return (
     <div className="cp-ai-chapters">
       <div className="cp-ai-chapters-head">
-        <span className="cp-ai-chapters-title">Chapters</span>
+        {chapters.length > 0 ? (
+          // A toggle only once there is something to fold. With no chapters
+          // the header is a label, and a disclosure that reveals nothing is
+          // just a control that does not work.
+          <button
+            type="button"
+            className="cp-ai-chapters-title as-toggle"
+            onClick={() => setCollapsedPersisted(!collapsed)}
+            aria-expanded={!collapsed}
+            aria-controls="cp-ai-chapter-list"
+            title={collapsed ? "Show chapters" : "Hide chapters"}
+          >
+            <span className={"cp-ai-chapters-caret" + (collapsed ? " closed" : "")} aria-hidden="true">›</span>
+            Chapters
+            <span className="cp-ai-chapters-count">{chapters.length}</span>
+          </button>
+        ) : (
+          <span className="cp-ai-chapters-title">Chapters</span>
+        )}
         {busy ? (
-          <span className="cp-ai-chapters-busy">
-            Detecting <span className="cp-ai-typing"><span /><span /><span /></span>
-          </span>
+          <>
+            <span className="cp-ai-chapters-busy">
+              Detecting <span className="cp-ai-typing"><span /><span /><span /></span>
+            </span>
+            {/* A run against a feature-length transcript is minutes of prompt
+                ingestion before a single token comes back, and the abort
+                controller that could end it was only ever fired by unmount or
+                a source change. Somebody who started it by accident, or picked
+                the wrong model, had to sit through it or quit the app. */}
+            <button
+              className="btn btn-ghost cp-ai-chapters-btn"
+              onClick={() => abortRef.current?.abort()}
+              title="Stop detecting chapters"
+            >
+              Stop
+            </button>
+          </>
         ) : (
           <>
             {chapters.length > 0 && (
@@ -139,6 +206,24 @@ export function AiChapters({
                 title="Copy as YouTube-description chapter lines"
               >
                 {copied ? "Copied" : "Copy for YouTube"}
+              </button>
+            )}
+            {chapters.length > 0 && (
+              <button
+                className="btn btn-ghost cp-ai-chapters-btn"
+                onClick={() => {
+                  if (!confirmClear) { setConfirmClear(true); return; }
+                  setConfirmClear(false);
+                  editedRef.current = false;
+                  // Through commit, so the saved copy and the Timeline markers
+                  // clear with the list. Setting local state alone would leave
+                  // markers on the scrubber for chapters that no longer exist.
+                  commit([]);
+                }}
+                onBlur={() => setConfirmClear(false)}
+                title="Remove every chapter for this source"
+              >
+                {confirmClear ? "Click again to clear" : "Clear"}
               </button>
             )}
             <button
@@ -153,8 +238,8 @@ export function AiChapters({
         )}
       </div>
       {error && <div className="cp-ai-error" role="alert">{error}</div>}
-      {chapters.length > 0 && (
-        <ul className="cp-ai-chapter-list">
+      {chapters.length > 0 && !collapsed && (
+        <ul className="cp-ai-chapter-list" id="cp-ai-chapter-list">
           {chapters.map((c, i) => (
             <li key={`${c.time}-${c.title}`} className="cp-ai-chapter-row">
               <button
