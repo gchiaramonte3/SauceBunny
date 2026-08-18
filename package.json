@@ -1,7 +1,7 @@
 {
   "name": "sauce-bunny",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -27,7 +27,8 @@
     "set-version": "bash scripts/set-version.sh",
     "lint": "eslint src e2e --max-warnings 0",
     "verify:packaged": "bash scripts/verify-packaged.sh",
-    "verify": "bash scripts/verify-all.sh"
+    "verify": "bash scripts/verify-all.sh",
+    "build:dmg": "bash scripts/set-version.sh && tauri build"
   },
   "dependencies": {
     "@fontsource/nunito-sans": "^5.2.7",

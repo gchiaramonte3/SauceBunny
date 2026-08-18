@@ -404,7 +404,12 @@ export function SettingsModal(props: Props) {
   } = props;
   // Read from the bundle, never hardcoded: the About tab used to claim v0.1.0
   // while the app was 0.2.0. The build number distinguishes two DMGs of the
-  // same version (see scripts/set-version.sh).
+  // same version (see scripts/set-version.sh) — and it is RENDERED, which for
+  // a long time it was not: this comment described the build number as the
+  // thing telling two builds apart while the line below printed the semver
+  // alone, so every 0.2.0 build read identically in the one place a user can
+  // check what they are running. __BUILD_NUMBER__ comes from vite.config.ts,
+  // read out of the same tauri.conf.json the bundler stamps.
   const [appVersion, setAppVersion] = useState<string | null>(null);
   useEffect(() => {
     if (!open) return;
@@ -1759,7 +1764,7 @@ export function SettingsModal(props: Props) {
                   </div>
                   <div>
                     <div className="cp-about-name">
-                      Sauce Bunny <span className="ver">{appVersion ? `v${appVersion}` : ""}</span>
+                      Sauce Bunny <span className="ver">{appVersion ? `v${appVersion} (${__BUILD_NUMBER__})` : ""}</span>
                     </div>
                     <div className="cp-about-tag">
                       Local-first video section clipper. Tauri 2 + bundled yt-dlp + ffmpeg + whisper.cpp.
