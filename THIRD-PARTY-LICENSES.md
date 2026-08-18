@@ -13,6 +13,42 @@ ships inside a released `.dmg`.
 
 ---
 
+## Rust crates and npm packages
+
+Beyond the bundled binaries above, the app links ~750 Rust crates and ships a
+handful of npm runtime packages. They are **all permissive or weak copyleft** —
+there is no GPL or AGPL anywhere in either graph, which is what keeps Sauce
+Bunny's own source MIT.
+
+`npm run check:licenses` re-verifies that in a few seconds and fails on a
+strong-copyleft arrival, so the claim stays true rather than being a snapshot
+of the day it was written. CI runs it on every push.
+
+| graph | count | licences seen |
+|---|---|---|
+| Rust (`cargo metadata`) | ~750 crates | MIT, Apache-2.0, MIT/Apache dual, BSD-2/3, Zlib, Unicode-3.0, ISC, MPL-2.0, Unlicense |
+| npm (`node_modules`) | ~150 packages | MIT, ISC, Apache-2.0, BSD-2/3, MPL-2.0, BlueOak-1.0.0, CC0-1.0 |
+
+The MPL-2.0 entries are mediabunny and its extensions (already detailed above);
+MPL is file-level copyleft and does not reach the app around it.
+
+Shipped npm runtime dependencies, individually:
+
+| package | licence |
+|---|---|
+| `react`, `react-dom` | MIT |
+| `mediabunny`, `@mediabunny/mp3-encoder`, `@mediabunny/prores` | MPL-2.0 |
+| `@tauri-apps/api` and the dialog / notification plugins | MIT OR Apache-2.0 |
+| `@fontsource/nunito-sans` | OFL-1.1 |
+| `opus-decoder` | MIT |
+| `perfect-freehand` | MIT |
+
+The bundled **ffmpeg / ffprobe are the exception** and are GPLv3 by design —
+they run as separate subprocesses, are never linked, and the §6 written offer
+above covers redistributing them.
+
+---
+
 ## ⚠️ Bundled ffmpeg / ffprobe are GPL — compliance terms
 
 The ffmpeg and ffprobe binaries are the **GPLv3** static builds from

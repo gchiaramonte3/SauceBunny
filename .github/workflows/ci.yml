@@ -27,6 +27,12 @@ jobs:
       # dependency array nobody has read — not one of the old ones resurfacing.
       - run: npm run lint
       - run: npx vitest run
+      # CLAUDE.md's dependency rule allows permissive and weak copyleft and
+      # rules out GPL/AGPL, because strong copyleft would reach the app's own
+      # MIT source. That rule was written down and nothing checked it: a
+      # transitive crate is one `cargo update` away from arriving under GPL,
+      # and the first anyone would know is a licence audit after release.
+      - run: npm run check:licenses
 
   cargo-check:
     name: cargo check (src-tauri)

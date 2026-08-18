@@ -120,7 +120,24 @@ npx tsc --noEmit
 
 # 3. Build, sign, and notarize the DMG in one shot
 #    (Tauri reads APPLE_* env vars and calls codesign + notarytool for us)
-npm run tauri build
+#
+#    Use release:dmg, NOT `npm run tauri build` directly. It wraps the same
+#    build with the two steps that are easy to forget and silent when missed:
+#
+#      · It stamps the version first. Nothing about `tauri build` requires
+#        scripts/set-version.sh to have run, and four DMGs once shipped as
+#        "Sauce Bunny_0.2.0_aarch64.dmg" with a CFBundleVersion three weeks
+#        old — same filename, same build number, four different commits.
+#        Pass a semver to bump it; omit one to keep the semver and re-stamp
+#        only the build number.
+#      · It clears stale DMG staging volumes. bundle_dmg.sh attaches a
+#        scratch image at /Volumes/dmg.XXXXXX and an interrupted build leaves
+#        it mounted, after which every later build dies in bundle_dmg.sh with
+#        no useful message. `rm -rf target/release/bundle` does NOT fix it:
+#        the mount is at the device level.
+#
+#    It then verifies the artifact and prints an absolute path.
+npm run release:dmg -- 0.3.1      # or: npm run release:dmg (keep the semver)
 
 # 4. Output lands at:
 #    src-tauri/target/release/bundle/dmg/Sauce Bunny_<version>_aarch64.dmg

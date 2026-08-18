@@ -108,6 +108,44 @@ Generate transcript:
                              rename, search, history popover)
 ```
 
+## Local AI: one transcript ingestion, shared by every feature
+
+`llama-server` runs as a sidecar and the AI Summary, the auto-chapters and the
+reader Analysis all talk to it. The expensive part of any of those calls is not
+generation — it is reading the transcript in. On an M4 Max a feature-length
+transcript is ~10,000 tokens at ~180 tok/s: about a minute before the first
+token of an answer.
+
+llama-server will reuse the KV cache for whatever PREFIX a new prompt shares
+with the previous one, so that minute is payable **once**. Getting that reuse
+is the entire design:
+
+- **`src/lib/prompt-prefix.ts` owns the system message**, and every feature
+  sends it byte-for-byte identically. Nothing that varies may enter it — not
+  the summary style, not the source description, not the question.
+- **Task instructions ride in the user turn**, after it.
+- **The transcript is windowed one way** (`fitTranscript`, sampled evenly
+  across the runtime). Two different windowings of one transcript are two
+  different prompts and share nothing.
+
+Measured on one server, 28,335 tokens, three consecutive features: **60.92 s**
+for the first, then **0.13 s** and **0.15 s**.
+
+This used to be the other way round — each feature put its own rules above the
+transcript — so the prefix diverged in the first fifty tokens and every feature
+re-read the whole video. `prompt-prefix-contract.test.ts` pins it, because the
+regression breaks nothing: the app simply becomes slow again, and "slow again"
+is indistinguishable from "local models are slow".
+
+**Server flags that matter** (`src-tauri/src/commands/llm.rs`): threads are the
+PERFORMANCE core count, not `available_parallelism()` — the batch synchronises
+each step, so including efficiency cores drops the whole run to their pace
+(measured 37.7 → 83.8 tok/s on a 4B). `--reasoning-budget 0`, because Qwen3's
+template enables thinking and a "summarise this in a few bullets" request spent
+3,254 tokens reasoning without reaching an answer. `-np 1`, because the app
+serialises model calls and the auto-chosen 4 slots each reserved a full context
+of KV cache for work that cannot arrive.
+
 ## Sidecars
 
 Eight executables ship in `src-tauri/binaries/`, using the platform-tuple naming convention (`<name>-aarch64-apple-darwin`). The app invokes `yt-dlp`, `ffmpeg`, `whisper-cli`, `saucebunny-diarize`, `saucebunny-dictate`, `saucebunny-capture`, and `llama-server` directly (via `app.shell().sidecar(name)` / a resolved path). `ffprobe` is the exception — the app never spawns it; it ships beside `ffmpeg` so yt-dlp can discover it (yt-dlp derives `ffprobe-<triple>` from the `--ffmpeg-location` path it's given).
@@ -235,10 +273,11 @@ The one deliberate exception to "state lives in App" is the playhead. It ticks u
 
 ### What is left to extract, and what only looks extractable
 
-`App.tsx` is ~5,040 lines. The roadmap direction is one cohesive subsystem at a
+`App.tsx` is ~5,054 lines. The roadmap direction is one cohesive subsystem at a
 time into `src/hooks/use-*.ts` (done: `use-panel-bus`, `use-web-playback`,
 `use-co-review`, `use-library-scan`, `use-media-capture`, `use-transport`,
-`use-keyboard-shortcuts`, `use-clip-export`, `use-clip-queue`).
+`use-keyboard-shortcuts`, `use-clip-export`, `use-clip-queue`,
+`use-local-source`, `use-fetch-source`, `use-transcript-jobs`).
 Picking the next one by *name* is how the exercise goes wrong, so this records
 what the code actually shows.
 

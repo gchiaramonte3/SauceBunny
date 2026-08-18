@@ -29,7 +29,8 @@
     "verify:packaged": "bash scripts/verify-packaged.sh",
     "verify": "bash scripts/verify-all.sh",
     "build:dmg": "bash scripts/detach-stale-dmg.sh && bash scripts/set-version.sh && tauri build",
-    "release:dmg": "bash scripts/release-dmg.sh"
+    "release:dmg": "bash scripts/release-dmg.sh",
+    "check:licenses": "bash scripts/check-licenses.sh"
   },
   "dependencies": {
     "@fontsource/nunito-sans": "^5.2.7",

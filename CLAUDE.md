@@ -538,7 +538,7 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
    the second time one commit after the first was written up — because the
    write-up was a warning rather than a fix. Handle the empty case in the
    script, and grep the result for `[, ` before believing it.
-6. **Shrink `App.tsx`.** It is ~6,400 lines and the largest single risk in the
+6. **Shrink `App.tsx`.** It is ~5,054 lines and the largest single risk in the
    codebase: nothing can be tested without booting the whole app, and reviewing
    a change to it means reading around a dozen unrelated subsystems. The
    direction is the one already established — lift ONE cohesive subsystem at a
@@ -547,7 +547,11 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
    that were impossible before. Do NOT attempt a single sweeping split.
 
    Done so far: `use-panel-bus`, `use-web-playback`, `use-co-review`,
-   `use-library-scan`, `use-media-capture`, `use-clip-export` + `use-clip-queue`
+   `use-library-scan`, `use-media-capture`, `use-local-source` +
+   `use-fetch-source` (the two source-load paths, kept SEPARATE because
+   handleFetch must be declared before the extractor-rot retry effect that
+   calls it while the local path depends on runPlaybackPrep, declared after
+   it), `use-transcript-jobs`, `use-clip-export` + `use-clip-queue`
    (the single Export button and the six queue handlers; the queue takes
    `runLocalClipExport` from the export hook rather than owning it, so one
    cancel token still has one owner and two callers),

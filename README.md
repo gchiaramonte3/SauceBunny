@@ -5,7 +5,7 @@
 ![Platform: macOS 14+ · Apple Silicon](https://img.shields.io/badge/platform-macOS%2014%2B%20·%20Apple%20Silicon-black)
 ![Built with Tauri 2 · React 18](https://img.shields.io/badge/built%20with-Tauri%202%20·%20React%2018-24C8DB)
 
-**Local-first macOS app for pulling, transcribing, and clipping video — no cloud, no accounts, no telemetry.**
+**Local-first macOS app for pulling, transcribing, and clipping video — no accounts, no telemetry, and no cloud unless you explicitly opt in.**
 
 Paste a URL (YouTube, Vimeo, TikTok, X, Reddit, Instagram, or any page with embedded video) or import a local file. Watch it instantly, mark in/out points frame-accurately, export lossless clips or MP3s, and generate speaker-labeled transcripts — everything runs on your machine.
 
@@ -23,7 +23,24 @@ Paste a URL (YouTube, Vimeo, TikTok, X, Reddit, Instagram, or any page with embe
 
 ## Privacy & local-first
 
-Everything happens on your Mac. The only network traffic is the content **you** ask it to fetch (the video/captions) and model downloads **you** trigger. Optional: sign-in-gated sources can use your browser's cookies via yt-dlp's `--cookies-from-browser` — off by default, configured in Settings. See [SECURITY.md](SECURITY.md) for the threat model (including the loopback media proxy).
+Everything happens on your Mac by default. There are no accounts and no
+telemetry: nothing is ever sent about how you use the app. Every path that
+touches the network is listed here — if you find one that is not, that is a bug
+worth filing.
+
+| what | when | where it goes |
+|---|---|---|
+| The video, captions and page metadata | You paste a URL or press Fetch | The site you asked for, via yt-dlp |
+| Whisper / LLM / diarizer models | You choose to download one | Hugging Face, GitHub |
+| A yt-dlp update | You press Update in Settings | GitHub |
+| **Co-review session traffic** | You host or join a session | Directly to your peers over encrypted iroh QUIC. If a direct route cannot be found, *control* traffic (kilobytes: comments, playhead) falls back to n0's public relay. Media never uses the relay |
+| **Cloud AI** — *off unless you turn it on* | You configure your own Anthropic or OpenAI key in Settings ▸ AI APIs, and only for AI Summary / Analysis | Anthropic or OpenAI. The key is stored in the macOS Keychain, is never readable back by the app's frontend, and the request is made from Rust so it never touches the browser layer. The default is a local model, and the app works fully with no key at all |
+
+Optional: sign-in-gated sources can use your browser's cookies via yt-dlp's
+`--cookies-from-browser` — off by default, configured in Settings.
+
+See [SECURITY.md](SECURITY.md) for the threat model (including the loopback
+media proxy).
 
 Use it on content you have the rights to clip.
 
@@ -56,7 +73,7 @@ Before opening a PR, run the full gate (CI runs the same on every push):
 ```bash
 npx tsc --noEmit                                              # types
 npm test                                                     # frontend units
-( cd src-tauri && cargo check && cargo test --lib && cargo clippy --lib )
+( cd src-tauri && cargo check && cargo test --lib && cargo clippy --all-targets -- -D warnings )
 ( cd swift-sidecar && swift build )                          # diarizer
 ```
 

@@ -44,6 +44,47 @@ All notable changes to Sauce Bunny. Format loosely follows
 - A message the other machine can't read is reported as a version mismatch
   instead of being dropped silently.
 
+## [0.3.0] — 2026-08-18
+
+### Fixed
+- **The "Update yt-dlp & retry" offer now appears for the commonest YouTube
+  failure.** yt-dlp reports it as `unable to download video data: HTTP Error
+  403: Forbidden`, which names no host, and the detector required a YouTube
+  host in the message itself — so the branch written for stale YouTube URLs
+  could never fire on the error YouTube actually produces. It now takes the
+  source URL as context.
+- **A missing JavaScript runtime is no longer treated as a stale extractor.**
+  No yt-dlp version fixes it, so offering an update was a dead end.
+- **yt-dlp can be updated to nightly when stable has not caught up.** Extractor
+  fixes reach nightly days before stable; in that window an update returned the
+  identical version and the app claimed "engine is current". A stable update
+  that changes nothing now says so, and offers the nightly build.
+- **Every JS runtime yt-dlp supports is enabled**, not only deno. A Mac with
+  node or quickjs was falling back to a low-resolution player client while a
+  working runtime sat on its PATH (measured 360p → 2160p).
+
+## [0.2.9] — 2026-08-18
+
+### Fixed
+- **Local AI answers arrive in seconds instead of a minute.** Every feature now
+  shares one transcript prefix, so llama.cpp reuses the KV cache across the
+  summary, the chapters and each chat turn (measured 60.92 s → 0.13 s on the
+  second feature).
+- **The summary reads the whole video.** It used to truncate to the first
+  portion, so on a long video it answered from the beginning and could not know
+  the rest existed.
+- **Local models run at full speed.** Threads now match the performance-core
+  count rather than every logical CPU (37.7 → 83.8 tok/s), and chain-of-thought
+  is off for extraction tasks, which had been spending thousands of tokens
+  reasoning before answering.
+- **A running chapter detection can be stopped.**
+
+### Added
+- Chapters fold away and can be cleared.
+- Hidden warnings and tips can be restored from Settings ▸ Backup & reset.
+- The reader's transcript menu gained Reveal in Finder, and its rename dialog
+  no longer draws underneath the app.
+
 ## [0.2.3] — 2026-08-18
 
 ### Fixed
