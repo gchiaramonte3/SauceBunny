@@ -290,7 +290,19 @@ export function Sidebar(props: Props) {
   const filenameValid = sanitizeFilename(exportOpts.filename).length > 0;
   // Export is allowed when: source loaded, folder + filename set, marks are
   // either both unset (= full clip) or both valid with out > in.
-  const marksOk = hasMarks ? (selFrames ?? 0) > 0 : (inFrames == null && outFrames == null);
+  // ONE mark is a legal selection, and this used to refuse it.
+  //
+  // `hasMarks` needs BOTH, so with only an in-point set — the state you are in
+  // between pressing [ and ] — this fell to the else branch, which demands both
+  // be null, and returned false. canExport went false and the Export button
+  // greyed out with nothing said. The export path never had that limitation:
+  // handleExport computes startSec and endSec independently, and
+  // mediabunny-export builds `trim` from whichever bound exists, so "in to the
+  // end" and "start to out" both work and were simply unreachable.
+  //
+  // The real rule is only about the two-sided case: an out that is not after
+  // its in is not a clip.
+  const marksOk = hasMarks ? (selFrames ?? 0) > 0 : true;
   // Mark in/out carried a VISIBLE <label> that was a sibling with no htmlFor,
   // so the association was purely visual: `label[for]` matched nothing and the
   // input was not inside the label either. A screen reader read both as a bare

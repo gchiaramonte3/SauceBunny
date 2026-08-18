@@ -6,6 +6,14 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [Unreleased]
 
 ### Fixed
+- **A fresh link no longer opens with someone else's in/out marks.** The
+  timeline drew a band for every clip in the export queue, and the queue is
+  cross-source by design — so a clip queued from one video put its marks on the
+  next video's timeline, at frame numbers reinterpreted against a different
+  fps. It now draws only the queued clips belonging to the loaded source.
+- **Export works with only one mark set.** Pressing `[` without `]` disabled the
+  Export button with no explanation, even though the export path has always
+  supported an open-ended range ("in to the end", "start to out").
 - **The full-screen button works.** It had never been granted the window
   capability it needs, so every click was rejected and swallowed by a `catch`.
   The button looked simply inert: no error, no log, nothing to search for.

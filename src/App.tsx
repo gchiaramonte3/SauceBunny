@@ -115,6 +115,7 @@ import {
   durationToTc, framesToTc, tcToFrames,
   tcDigitsToDisplay,
 } from "./lib/timecode";
+import { currentQueueSource, queuedRangesForSource } from "./lib/queue-ranges";
 import { hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, looksLikeExtractorRot, prettyHost } from "./lib/validation";
 import { sanitizeFilename, suggestFilename } from "./lib/filename";
 import { decodeHtmlEntities } from "./lib/text";
@@ -1831,6 +1832,15 @@ export default function App() {
     publishPlayheadFrames(0);
     setInFrames(null);
     setOutFrames(null);
+    // The TIMECODE STRINGS are the same marks in another representation, and
+    // clearing only the frames left the previous source's in/out sitting in
+    // the fields. The TC-to-frames effect keys on those strings ALONE, so it
+    // could re-apply them to the new source, reinterpreted at the new fps.
+    // Two mirrors of one value have to be cleared together, or the survivor
+    // restores the other.
+    setExportOpts((prev) => (prev.inTc === "" && prev.outTc === ""
+      ? prev
+      : { ...prev, inTc: "", outTc: "" }));
     setIsPlaying(false);
     setSourceKind("youtube");
     setLocalFilePath(null);
@@ -4678,7 +4688,13 @@ export default function App() {
                     inFrames={inFrames}
                     outFrames={outFrames}
                     fps={fps}
-                    queuedRanges={clipQueue.map((c) => ({
+                    // Only the queued clips that belong to THIS source; see
+                    // lib/queue-ranges.ts for why drawing the rest is worse
+                    // than untidy.
+                    queuedRanges={queuedRangesForSource(
+                      clipQueue,
+                      currentQueueSource(sourceKind, localFilePath, metadata?.webpage_url),
+                    ).map((c) => ({
                       id: c.id,
                       inFrames: c.inFrames,
                       outFrames: c.outFrames,
