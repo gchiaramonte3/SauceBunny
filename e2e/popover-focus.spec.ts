@@ -46,8 +46,16 @@ for (const label of TRIGGERS) {
     await boot(page);
     const trigger = page.locator(`button[aria-label="${label}"]`).first();
     await expect(trigger).toBeVisible();
-    await trigger.focus();
-    expect(await activeLabel(page), "could not focus the trigger to begin with").toBe(label);
+    // Focus is asserted by POLLING a re-focus, for the same reason the press
+    // below goes through the locator: this toolbar re-renders constantly, and
+    // a node replaced between focus() and the read leaves activeElement on
+    // BODY forever. A plain expect() catches that once and fails; retrying the
+    // read alone cannot fix it either, because focus is genuinely gone. Only
+    // re-focusing each attempt recovers, which is why the closure does both.
+    await expect
+      .poll(async () => { await trigger.focus(); return activeLabel(page); },
+            { message: "could not focus the trigger to begin with" })
+      .toBe(label);
 
     // Pressed ON the locator, not on the page: focus() followed by a page-level
     // keypress races a re-render - this app re-renders the toolbar constantly

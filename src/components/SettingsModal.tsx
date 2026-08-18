@@ -38,6 +38,7 @@ import { formatBytes } from "../lib/library";
 import logoUrl from "../assets/saucebunny.svg";
 import { UpdateRow } from "./UpdateRow";
 import { getVersion } from "@tauri-apps/api/app";
+import { countHiddenNotices, restoreHiddenNotices } from "../lib/hidden-notices";
 import { EXPECTED_BACKEND_BUILD_ID } from "../lib/build-id";
 import { newJobId } from "../lib/job-id";
 import { DEFAULT_STUN_URL } from "../lib/ice-servers";
@@ -411,6 +412,15 @@ export function SettingsModal(props: Props) {
   // check what they are running. __BUILD_NUMBER__ comes from vite.config.ts,
   // read out of the same tauri.conf.json the bundler stamps.
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  /** How many "don't show again" flags are set, recounted each time the modal
+   *  opens so the row cannot claim a stale number. */
+  const [hiddenCount, setHiddenCount] = useState(0);
+  const [restored, setRestored] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    setHiddenCount(countHiddenNotices());
+    setRestored(0);
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     void getVersion().then(setAppVersion).catch(() => setAppVersion(null));
@@ -1059,6 +1069,31 @@ export function SettingsModal(props: Props) {
                     <div className="v cp-backup-actions">
                       <button className="btn btn-ghost" onClick={exportSettings}>Export…</button>
                       <button className="btn btn-ghost" onClick={importSettings}>Import…</button>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Hidden warnings and tips
+                      <span className="desc">
+                        Brings back everything you told the app not to show again: the rename
+                        warning, first-run tips, and per-transcript notices. Leaves the rest of
+                        your settings alone, unlike Reset to defaults.
+                      </span>
+                    </div>
+                    <div className="v">
+                      <button
+                        className="btn btn-ghost"
+                        disabled={hiddenCount === 0}
+                        onClick={() => {
+                          const n = restoreHiddenNotices();
+                          setHiddenCount(0);
+                          setRestored(n);
+                        }}
+                      >
+                        {hiddenCount === 0
+                          ? (restored > 0 ? `Restored ${restored}` : "Nothing hidden")
+                          : `Restore ${hiddenCount}`}
+                      </button>
                     </div>
                   </div>
                   <div className="cp-pane-row">

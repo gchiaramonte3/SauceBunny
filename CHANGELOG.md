@@ -44,6 +44,45 @@ All notable changes to Sauce Bunny. Format loosely follows
 - A message the other machine can't read is reported as a version mismatch
   instead of being dropped silently.
 
+## [0.2.3] — 2026-08-18
+
+### Fixed
+- **Hidden warnings can be brought back.** Four "don't show me this again"
+  flags — the rename-writes-to-disk warning, the first-run tips, and two
+  per-transcript notices — were one-way doors: ticked once, and the only route
+  back was deleting a key from localStorage by hand. Settings ▸ Backup & reset
+  now restores them all, and a contract test fails if a fifth is added without
+  one.
+
+## [0.2.2] — 2026-08-18
+
+### Fixed
+- **The cue right-click menu survives a big cast.** Past six reassignment
+  targets they collapse into an "Assign to speaker" submenu with a filter,
+  instead of one row per person running off the bottom of the screen and
+  pushing Play and Clear speaker out of reach.
+- **The reassign list is ordered by talk time**, like every other speaker
+  surface. It alone used the roster's first-appearance order, so it showed
+  Speaker 16 above Speaker 8 whenever 16 spoke first and scattered named
+  people among unnamed ones.
+
+## [0.2.1] — 2026-08-18
+
+### Fixed
+- **The WebCodecs decoder toggle works.** Its description has always said
+  "Disable if local files won't play"; it was read only for thumbnail
+  extraction, so turning it off changed the poster and not the playback. It now
+  routes local imports through ffmpeg-prep as promised — which is the way out
+  of a file that decodes with a perfect picture and no sound.
+- **Builds are distinguishable.** Four DMGs shipped as `0.2.0` with a build
+  number stamped in July. The version is stamped on every build and the About
+  tab shows the build number it always claimed was the distinguishing one.
+
+### Added
+- **The audio path reports whether it is audible.** A track that decodes and
+  never reaches the speakers used to log exactly like success. It now states
+  chunks scheduled vs dropped, context state and gain, once per playback.
+
 ## [0.2.0] — 2026-07-19
 
 ### Reliability
