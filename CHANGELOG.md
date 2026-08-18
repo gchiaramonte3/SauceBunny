@@ -5,6 +5,19 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+- **The full-screen button works.** It had never been granted the window
+  capability it needs, so every click was rejected and swallowed by a `catch`.
+  The button looked simply inert: no error, no log, nothing to search for.
+- **Answers stop instead of running for minutes.** Nothing capped generation, so
+  "give me the best quotes" produced 4,989 tokens — five and a half minutes of
+  text arriving on a 27B. Each surface now sets a ceiling, and the summary's
+  scales with the Length setting, so Brief cannot quietly cost what Detailed
+  does.
+- **The Summary Style controls fit their pane.** The "Detailed" pill was clipped
+  by the modal edge.
+
+
 ### Live media
 - **Screen sharing and camera video both work for someone who joins mid-share.**
   One half-finished mechanism broke both: the sender slot reserved for a track

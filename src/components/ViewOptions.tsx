@@ -79,7 +79,17 @@ export function ViewOptions({ aspect, onAspectChange, waveformVisible, onWavefor
       await w.setFullscreen(!cur);
       setFullscreen(!cur);
     } catch (err) {
-      console.warn("fullscreen toggle failed", err);
+      // LOUD, because quiet is how this shipped broken. The window capability
+      // for setFullscreen was never granted, so every click rejected, this
+      // catch swallowed it, and the button looked simply inert — no error, no
+      // log anyone would see, nothing to search for. A capability denial is a
+      // BUILD mistake, not a runtime condition, so it should be impossible to
+      // miss when it happens.
+      console.error(
+        "[fullscreen] window.setFullscreen failed. If this says 'not allowed', " +
+        "the capability is missing from src-tauri/capabilities/default.json.",
+        err,
+      );
     }
   }
 

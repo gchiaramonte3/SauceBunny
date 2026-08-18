@@ -11,6 +11,13 @@ export type ChatMessage = { role: ChatRole; content: string };
 export type ChatServer = { base_url: string; api_key: string };
 
 /**
+ * Ceiling when a caller does not set one. ~1,200 words, which is far more than
+ * any answer here should need and still bounded: without a cap the same
+ * question can cost thirty seconds or six minutes with nothing to say which.
+ */
+export const DEFAULT_MAX_TOKENS = 1600;
+
+/**
  * Stream a chat completion. Calls `onToken` with each delta chunk as it
  * arrives; resolves with the full text when done. Abort via `signal`.
  */
@@ -19,7 +26,7 @@ export async function streamChat(
   messages: ChatMessage[],
   onToken: (delta: string) => void,
   signal: AbortSignal,
-  opts: { temperature?: number } = {},
+  opts: { temperature?: number; maxTokens?: number } = {},
 ): Promise<string> {
   const resp = await fetch(`${server.base_url}/v1/chat/completions`, {
     method: "POST",
@@ -32,6 +39,16 @@ export async function streamChat(
       stream: true,
       temperature: opts.temperature ?? 0.3, // low: we want grounded, factual answers
       cache_prompt: true,                    // reuse the transcript prefix across turns (fast)
+      // A CEILING ON THE ANSWER. There was none, so generation ran until the
+      // model chose to stop: "give me the best quotes" produced 4,989 tokens,
+      // and at a 27B's ~15 tok/s that is five and a half minutes of watching
+      // text arrive. The prompt was already cached by then — the wait was
+      // entirely the answer's own length.
+      //
+      // The cap is per-caller because the right length is a property of the
+      // task, not of the server. It is generous by design: it exists to stop a
+      // runaway, not to trim a good answer.
+      max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
     }),
     signal,
   });

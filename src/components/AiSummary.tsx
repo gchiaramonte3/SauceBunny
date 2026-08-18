@@ -82,6 +82,20 @@ const DESCRIPTION_BUDGET = 1_200;
  * prefix would have given the same video two different prefixes depending on
  * which pane asked.
  */
+/**
+ * Answer ceiling for each Length setting, in tokens.
+ *
+ * The setting already tells the model how long to be; this makes the same
+ * promise to the server, so "Brief" cannot quietly cost what "Detailed" does.
+ * Roughly 150 / 450 / 1,400 words. Detailed stays generous — the cap is a
+ * runaway guard, not the thing that decides the length.
+ */
+export const LENGTH_MAX_TOKENS: Record<SummaryStyle["length"], number> = {
+  brief: 200,
+  standard: 600,
+  detailed: 1800,
+};
+
 export function buildTaskInstruction(
   style: SummaryStyle,
   hasSpeakers: boolean,
@@ -395,7 +409,7 @@ export function AiSummary({
             if (last?.role === "assistant") next[next.length - 1] = { ...last, content: last.content + delta };
             return next;
           });
-        }, ctrl.signal);
+        }, ctrl.signal, { maxTokens: LENGTH_MAX_TOKENS[(style ?? DEFAULT_STYLE).length] });
       } else {
         // Cloud (Claude / ChatGPT) — one-shot via Rust; the reply lands at once.
         // Cloud has no KV cache to protect, so it takes the old single-message

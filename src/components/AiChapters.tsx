@@ -115,7 +115,10 @@ export function AiChapters({
       abortRef.current = ctrl;
       const raw = await streamChat(
         info, buildChapterPrompt(system, durationSec, sampled),
-        () => {}, ctrl.signal, { temperature: 0.2 },
+        // Fifteen chapter lines is ~250 tokens; 600 is headroom, not a target.
+        // Before any cap a wandering model could generate for minutes and then
+        // have its output rejected by the 3-15 chapter parse anyway.
+        () => {}, ctrl.signal, { temperature: 0.2, maxTokens: 600 },
       );
       const parsed = parseChapters(raw, durationSec);
       if (parsed.length < 2) {

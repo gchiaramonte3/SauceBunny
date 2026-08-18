@@ -121,7 +121,12 @@ export function ReaderAnalysis({ transcriptPath, visible, selectedModelId, style
           { role: "system", content: buildSourcePrefix(built.lines, info.ctx).system },
           { role: "user", content: userTurn },
         ];
-        await streamChat(info, messages, (delta) => { full += delta; setStream((s) => s + delta); }, ctrl.signal);
+        await streamChat(
+          info, messages, (delta) => { full += delta; setStream((s) => s + delta); },
+          // The longest of the three answers by design (overview + topics +
+          // quotes), so the most headroom - still bounded.
+          ctrl.signal, { maxTokens: 2000 },
+        );
         modelUsed = info.model_id;
       } else {
         // Cloud provider (Claude / ChatGPT) — one-shot via Rust (non-streaming).
