@@ -6,6 +6,16 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [Unreleased]
 
 ### Fixed
+- **The Transcripts panel is searchable, sortable and filterable.** It was a
+  flat list grouped by folder, so finding one transcript among a hundred meant
+  scrolling past every month you had ever worked in. It now has a debounced
+  search (over the title and the folder), sort by newest / oldest / name /
+  largest, chips for Speakers and Analyzed, and an honest "3 of 105" count.
+  Searching collapses the month headings so matches are not scattered across
+  them.
+- **A folder you named yourself keeps its name.** Any folder that was not a
+  `YYYY-MM` month was labelled "Other", so a folder created with "Move to
+  folder…" looked like the app had lost it.
 - **Frame annotations draw a smooth line, not a blob.** Stroke width was driven
   by how fast your hand moved: only position was recorded, so the renderer
   invented pressure from velocity and a single circle came out as a lumpy

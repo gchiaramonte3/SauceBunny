@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { IconTranscript, IconPanelLeft } from "./Icons";
 import { ReaderRowThumb } from "./ReaderRowThumb";
 import { ReaderRowMenu, type RowMenuTarget } from "./ReaderRowMenu";
+import { organizeTranscripts, type TranscriptSort } from "../lib/transcript-organize";
 import {
-  loadTranscriptLibrary, groupTranscriptsByFolder, type LibraryTranscript,
+  loadTranscriptLibrary, type LibraryTranscript,
 } from "../lib/transcript-library";
 import { TRANSCRIPTS_CHANGED_EVENT, type TranscriptHistoryEntry } from "../lib/transcript-history";
 import { buildRecentIndex, transcriptArt } from "../lib/transcript-source-resolve";
@@ -89,7 +90,23 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
     return () => { alive = false; };
   }, [tick, transcriptLibraryPath]);
 
-  const groups = useMemo(() => groupTranscriptsByFolder(list), [list]);
+  // Search is debounced like the Library's (150ms): typing re-filters a
+  // hundred-plus rows on every keystroke otherwise.
+  const [query, setQuery] = useState("");
+  const [needle, setNeedle] = useState("");
+  const [sort, setSort] = useState<TranscriptSort>("recent");
+  const [speakersOnly, setSpeakersOnly] = useState(false);
+  const [analyzedOnly, setAnalyzedOnly] = useState(false);
+  useEffect(() => {
+    if (query === "") { setNeedle(""); return; }
+    const id = window.setTimeout(() => setNeedle(query), 150);
+    return () => window.clearTimeout(id);
+  }, [query]);
+  const organized = useMemo(
+    () => organizeTranscripts(list, { query: needle, sort, speakersOnly, analyzedOnly }),
+    [list, needle, sort, speakersOnly, analyzedOnly],
+  );
+  const groups = organized.groups;
 
   // Move-dialog destinations: the library root + each existing one-level folder.
   const folderOptions = useMemo(() => {
@@ -114,7 +131,55 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
         <div className="cp-reader-picker-head">
           <IconTranscript size={16} />
           <span>Transcripts</span>
-          <span className="cp-reader-count">{list.length}</span>
+          {/* "3 of 105" while narrowed — a bare count hides what was filtered
+              out, which is the Library status bar's rule too. */}
+          <span className="cp-reader-count">
+            {organized.shown === organized.total
+              ? organized.total
+              : `${organized.shown} of ${organized.total}`}
+          </span>
+        </div>
+        <div className="cp-reader-tools">
+          <input
+            className="cp-reader-search"
+            type="search"
+            value={query}
+            placeholder="Search transcripts…"
+            aria-label="Search transcripts"
+            spellCheck={false}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <select
+            className="cp-reader-sort"
+            value={sort}
+            aria-label="Sort transcripts"
+            onChange={(e) => setSort(e.target.value as TranscriptSort)}
+          >
+            <option value="recent">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="name">By name</option>
+            <option value="size">Largest</option>
+          </select>
+        </div>
+        <div className="cp-reader-chips">
+          {/* The two badges the rows already wear, as filters. Nothing else is
+              worth a chip: every transcript has a date and a format. */}
+          <button
+            type="button"
+            className={"cp-reader-chip" + (speakersOnly ? " on" : "")}
+            aria-pressed={speakersOnly}
+            onClick={() => setSpeakersOnly((v) => !v)}
+          >
+            Speakers
+          </button>
+          <button
+            type="button"
+            className={"cp-reader-chip" + (analyzedOnly ? " on" : "")}
+            aria-pressed={analyzedOnly}
+            onClick={() => setAnalyzedOnly((v) => !v)}
+          >
+            Analyzed
+          </button>
         </div>
         <div className="cp-reader-list">
           {groups.map((g) => (
