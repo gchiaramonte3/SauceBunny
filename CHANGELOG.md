@@ -5,6 +5,12 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- **Real drawing tools.** Pen, highlighter (translucent and broad, so the frame
+  underneath stays readable), arrow, rectangle and ellipse. Shapes rubber-band
+  from a drag instead of being traced freehand, which is why annotations used to
+  look scrawled.
+
 ### Fixed
 - **The Transcripts panel is searchable, sortable and filterable.** It was a
   flat list grouped by folder, so finding one transcript among a hundred meant

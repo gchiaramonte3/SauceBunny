@@ -1,6 +1,9 @@
 import { ColorSwatches } from "./ColorSwatches";
 import { useEffect, useRef, useState } from "react";
 import { getStroke } from "perfect-freehand";
+import {
+  DRAW_TOOLS, isShapeTool, shapePoints, toolOpacity, toolWidthScale, type DrawTool,
+} from "../lib/draw-tools";
 import { annotationHasContent, type AnnotationStrokes } from "../lib/review";
 import { AnnotationLabels } from "./review/AnnotationLabels";
 import { LabelInput } from "./review/LabelInput";
@@ -71,6 +74,9 @@ export function AnnotationOverlay({
   const [color, setColor] = useState(PEN_COLORS[0]);
   // A review mark should sit ON the picture, not replace it.
   const [size, setSize] = useState(5);
+  const [tool, setTool] = useState<DrawTool>("pen");
+  /** Where a shape drag started; shapes are two points, not a traced path. */
+  const shapeStart = useRef<[number, number, number] | null>(null);
   // In-progress label (label mode): anchor + text while the input is open.
   // Mirrored in a ref so the input's blur and a same-tick canvas click can't
   // both commit it (whichever runs second sees null and no-ops).
@@ -110,7 +116,7 @@ export function AnnotationOverlay({
         // `* dpr` is CORRECT and not a bug: the points above are in
         // backing-store pixels, so the size must be too, and multiplying by dpr
         // is what makes the slider value mean CSS pixels on screen.
-        size: Math.max(1, s.size) * dpr,
+        size: Math.max(1, s.size) * (s.widthScale ?? 1) * dpr,
         // NO SIMULATED PRESSURE. This was the blob.
         //
         // `norm` records position only, so with simulatePressure the width came
@@ -132,8 +138,13 @@ export function AnnotationOverlay({
         streamline: 0.68,
         last: s !== live.current,
       });
+      // Opacity rides the stroke, not the toolbar: a saved highlighter must
+      // still read as a highlighter when someone opens the note tomorrow.
+      const prev = ctx.globalAlpha;
+      ctx.globalAlpha = s.opacity ?? 1;
       ctx.fillStyle = s.color;
       ctx.fill(outlineToPath(outline));
+      ctx.globalAlpha = prev;
     };
     strokes.forEach(paint);
     if (live.current) paint(live.current);
@@ -204,7 +215,13 @@ export function AnnotationOverlay({
       return;
     }
     (e.target as Element).setPointerCapture(e.pointerId);
-    live.current = { color, size, pts: [norm(e)] };
+    const at = norm(e);
+    shapeStart.current = isShapeTool(tool) ? at : null;
+    live.current = {
+      color, size, pts: [at],
+      opacity: toolOpacity(tool),
+      widthScale: toolWidthScale(tool),
+    };
     redraw();
   };
   const onMove = (e: React.PointerEvent) => {
@@ -218,6 +235,13 @@ export function AnnotationOverlay({
     // "pixelated" edge on exactly the strokes drawn fastest. getCoalescedEvents
     // hands back the samples the OS already took and threw away, so a fast arc
     // curves instead of turning into a run of flats.
+    // A shape is a drag, not a trace: every move re-derives it from origin to
+    // cursor, so it rubber-bands instead of accumulating a scribble.
+    if (shapeStart.current) {
+      live.current.pts = shapePoints(tool, shapeStart.current, norm(e));
+      redraw();
+      return;
+    }
     const coalesced = e.nativeEvent.getCoalescedEvents?.() ?? [];
     if (coalesced.length > 1) {
       const r = (canvasRef.current as HTMLCanvasElement).getBoundingClientRect();
@@ -235,6 +259,7 @@ export function AnnotationOverlay({
     redraw();
   };
   const onUp = () => {
+    shapeStart.current = null;
     if (!drawing || !live.current) return;
     const finished = live.current;
     live.current = null;
@@ -285,6 +310,22 @@ export function AnnotationOverlay({
         <div className="cp-annot-tools">
           <div className="cp-annot-swatches">
             <ColorSwatches colors={PEN_COLORS} value={color} onPick={setColor} size={17} ariaLabel="Pen color" />
+          </div>
+          <span className="cp-annot-divider" />
+          <div className="cp-annot-tools-row" role="radiogroup" aria-label="Drawing tool">
+            {DRAW_TOOLS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="radio"
+                aria-checked={tool === t.id}
+                className={"cp-annot-tool" + (tool === t.id ? " on" : "")}
+                title={`${t.label}: ${t.hint}`}
+                onClick={() => setTool(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
           <span className="cp-annot-divider" />
           <div className="cp-annot-sizectl" title="Brush size">

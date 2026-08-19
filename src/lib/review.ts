@@ -42,6 +42,11 @@ export type AnnotationStrokes = {
      * required field.
      */
     pts: ([number, number] | [number, number, number])[];
+    /** 0..1, so a saved highlighter still reads as one. Optional: strokes drawn
+     *  before tools existed have none and paint fully opaque. */
+    opacity?: number;
+    /** Width multiplier for broad tools. Optional for the same reason. */
+    widthScale?: number;
   }[];
   /** Optional text labels riding the same annotation payload as the strokes.
    *  ADDITIVE + OPTIONAL on purpose: docs persisted (or peers running) before
