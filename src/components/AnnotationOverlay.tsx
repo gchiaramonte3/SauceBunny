@@ -209,7 +209,29 @@ export function AnnotationOverlay({
   };
   const onMove = (e: React.PointerEvent) => {
     if (!drawing || labelMode || !live.current) return;
-    live.current.pts.push(norm(e));
+    // EVERY point the OS actually sampled, not just the one it delivered.
+    //
+    // macOS coalesces pointermove events: move fast and a whole arc arrives as
+    // a single event, so a quick stroke was built from a handful of samples.
+    // perfect-freehand then outlines those few points as a polygon, and on a
+    // wide stroke its straight segments are plainly visible — the faceted,
+    // "pixelated" edge on exactly the strokes drawn fastest. getCoalescedEvents
+    // hands back the samples the OS already took and threw away, so a fast arc
+    // curves instead of turning into a run of flats.
+    const coalesced = e.nativeEvent.getCoalescedEvents?.() ?? [];
+    if (coalesced.length > 1) {
+      const r = (canvasRef.current as HTMLCanvasElement).getBoundingClientRect();
+      for (const c of coalesced) {
+        const pressure = c.pointerType === "pen" && c.pressure > 0 ? c.pressure : 0.5;
+        live.current.pts.push([
+          Math.min(1, Math.max(0, (c.clientX - r.left) / r.width)),
+          Math.min(1, Math.max(0, (c.clientY - r.top) / r.height)),
+          pressure,
+        ]);
+      }
+    } else {
+      live.current.pts.push(norm(e));
+    }
     redraw();
   };
   const onUp = () => {

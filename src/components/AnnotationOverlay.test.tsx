@@ -84,4 +84,12 @@ describe("annotation strokes", () => {
     const input = captured.calls.at(-1)?.input ?? [];
     expect(input.map((p) => p[2])).toEqual([0.9, 0.2]);
   });
+  // NOT TESTED HERE, deliberately: coalesced pointer samples.
+  //
+  // onMove reads e.nativeEvent.getCoalescedEvents(), which jsdom does not
+  // implement and React's synthetic event will not carry faithfully — a test
+  // would have to fake the very API under test and would pass whether or not
+  // the code read it. That is the false-pass shape this file already avoids
+  // elsewhere, so the behaviour is verified by drawing a fast stroke in the
+  // app instead, and the reason it exists is written at the call site.
 });
