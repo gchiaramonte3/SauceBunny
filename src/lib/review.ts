@@ -29,7 +29,20 @@ export type AnnotationLabel = { text: string; x: number; y: number };
 /** A free-hand drawing captured on a frame, stored with a comment. Points are
  *  normalized 0..1 against the canvas it was drawn on so it scales to any size. */
 export type AnnotationStrokes = {
-  strokes: { color: string; size: number; pts: [number, number][] }[];
+  strokes: {
+    color: string;
+    size: number;
+    /**
+     * Normalised points, with an OPTIONAL third element: pen pressure 0..1.
+     *
+     * Additive for the same reason `labels` is: strokes drawn before pressure
+     * existed are plain [x, y] pairs and must keep rendering, and a peer on an
+     * older build destructures only the first two — so a 3-tuple degrades to a
+     * constant-width line there instead of breaking. Never widen this to a
+     * required field.
+     */
+    pts: ([number, number] | [number, number, number])[];
+  }[];
   /** Optional text labels riding the same annotation payload as the strokes.
    *  ADDITIVE + OPTIONAL on purpose: docs persisted (or peers running) before
    *  labels existed simply lack the field, and old clients parsing a labeled

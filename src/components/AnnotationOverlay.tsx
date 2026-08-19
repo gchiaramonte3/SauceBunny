@@ -25,7 +25,10 @@ const PEN_COLORS = [
   "#007aff", "#af52de", "#ff2d92", "#ffffff", "#1c1c1e",
 ];
 const MIN_SIZE = 2;
-const MAX_SIZE = 40;
+// 40 was a marker, not a pen: at the top of the range one stroke covered a
+// third of the frame. 24 still reads clearly over 1080p and no longer hides
+// the thing being annotated.
+const MAX_SIZE = 24;
 
 type Stroke = AnnotationStrokes["strokes"][number];
 
@@ -66,7 +69,8 @@ export function AnnotationOverlay({
   const wrapRef = useRef<HTMLDivElement>(null);
   const live = useRef<Stroke | null>(null);
   const [color, setColor] = useState(PEN_COLORS[0]);
-  const [size, setSize] = useState(8);
+  // A review mark should sit ON the picture, not replace it.
+  const [size, setSize] = useState(5);
   // In-progress label (label mode): anchor + text while the input is open.
   // Mirrored in a ref so the input's blur and a same-tick canvas click can't
   // both commit it (whichever runs second sees null and no-ops).
@@ -99,13 +103,33 @@ export function AnnotationOverlay({
     ctx.clearRect(0, 0, w, h);
     const paint = (s: Stroke) => {
       if (s.pts.length === 0) return;
-      const input = s.pts.map(([nx, ny]) => [nx * w, ny * h]);
+      // Pressure rides along when the pen gave us one; 0.5 is the neutral
+      // middle for everything else, which keeps a mouse line even.
+      const input = s.pts.map((pt) => [pt[0] * w, pt[1] * h, pt[2] ?? 0.5]);
       const outline = getStroke(input, {
+        // `* dpr` is CORRECT and not a bug: the points above are in
+        // backing-store pixels, so the size must be too, and multiplying by dpr
+        // is what makes the slider value mean CSS pixels on screen.
         size: Math.max(1, s.size) * dpr,
-        thinning: 0.6,
-        smoothing: 0.5,
-        streamline: 0.5,
-        simulatePressure: true,
+        // NO SIMULATED PRESSURE. This was the blob.
+        //
+        // `norm` records position only, so with simulatePressure the width came
+        // from perfect-freehand's VELOCITY heuristic — drag fast and the stroke
+        // balloons, pause and it pinches. On a mouse that is not expression, it
+        // is a readout of how fast your hand moved, and at thinning 0.6 it
+        // swung the width across most of its range: one gesture came out as a
+        // lumpy sausage with bulbous ends. A review annotation wants to read as
+        // a deliberate mark, so an even line is the correct default and real
+        // pressure (pen only, captured in `norm`) is the only thing allowed to
+        // vary it.
+        simulatePressure: false,
+        // Gentle, so a pen still shows dynamics without the sausage.
+        thinning: 0.35,
+        // Higher than before: these are freehand circles and arrows drawn over
+        // video with a trackpad, where the input is jittery and the intent is
+        // smooth.
+        smoothing: 0.72,
+        streamline: 0.68,
         last: s !== live.current,
       });
       ctx.fillStyle = s.color;
@@ -151,11 +175,16 @@ export function AnnotationOverlay({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(redraw, [annotation]);
 
-  const norm = (e: React.PointerEvent): [number, number] => {
+  const norm = (e: React.PointerEvent): [number, number, number] => {
     const r = (canvasRef.current as HTMLCanvasElement).getBoundingClientRect();
+    // Only a PEN reports pressure worth having. A mouse reports a constant 0.5
+    // while down (and 0 in some browsers, which would collapse the stroke to
+    // nothing), so it is pinned to the neutral middle and the line stays even.
+    const pressure = e.pointerType === "pen" && e.pressure > 0 ? e.pressure : 0.5;
     return [
       Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
       Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+      pressure,
     ];
   };
 

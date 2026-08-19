@@ -6,6 +6,11 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [Unreleased]
 
 ### Fixed
+- **Frame annotations draw a line, not a blob.** Stroke width was driven by how
+  fast your hand moved: only position was recorded, so the renderer invented
+  pressure from velocity and a single circle came out as a lumpy sausage. Pen
+  pressure is now captured and used when there is any; everything else draws an
+  even line. The brush also starts finer and no longer goes marker-thick.
 - **A fresh link no longer opens with someone else's in/out marks.** The
   timeline drew a band for every clip in the export queue, and the queue is
   cross-source by design — so a clip queued from one video put its marks on the
