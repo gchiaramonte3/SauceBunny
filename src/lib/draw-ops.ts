@@ -102,3 +102,34 @@ export function lastStrokeBy(state: DrawState, author: string): DrawStroke | nul
   const mine = state.strokes.filter((s) => s.author === author).sort(order);
   return mine.length ? mine[mine.length - 1] : null;
 }
+
+// ── relay envelope ───────────────────────────────────────────────────────────
+// Draw ops ride the EXISTING `reviewOp` session message, whose payload is an
+// opaque string the Rust relay never inspects — the same trick the source
+// verdict used to ship with zero Rust changes. The tag keeps them apart, and a
+// peer on an older build hands the object to applyReviewOp, which documents
+// that unknown op shapes return the doc unchanged. So an old client ignores
+// live drawing instead of breaking on it.
+
+export type DrawRelay = { t: "draw"; op: DrawOp };
+
+export function isDrawRelay(x: unknown): x is DrawRelay {
+  if (typeof x !== "object" || x === null) return false;
+  const o = x as { t?: unknown; op?: { t?: unknown } };
+  if (o.t !== "draw" || typeof o.op !== "object" || o.op === null) return false;
+  return o.op.t === "strokeAdd" || o.op.t === "strokeErase";
+}
+
+/**
+ * Stamp the op with the sender the HOST identified, never the name the payload
+ * claims.
+ *
+ * The relay is payload-agnostic, so a peer can put anything in the envelope.
+ * Trusting `stroke.author` would let anyone draw on the frame signed as someone
+ * else — the same hole the review-op path already closes by attributing from
+ * the host-stamped member id, and it matters more here because a drawing has no
+ * body text to give the impersonation away.
+ */
+export function attributeDrawOp(op: DrawOp, author: string): DrawOp {
+  return op.t === "strokeAdd" ? { ...op, stroke: { ...op.stroke, author } } : op;
+}

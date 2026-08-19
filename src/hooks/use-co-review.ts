@@ -42,6 +42,10 @@ import type { PlayerHandle } from "../components/player-handle";
 import type { Participant } from "../components/PeoplePanel";
 import type { ToastKind } from "../components/CanvasToast";
 import { asLogTag, type LogTag, type Metadata } from "../types";
+import {
+  applyDrawOp, attributeDrawOp, EMPTY_DRAW_STATE, isDrawRelay,
+  type DrawOp, type DrawState,
+} from "../lib/draw-ops";
 import type { SessionMsg } from "../bindings/SessionMsg";
 import type { SessionState as CoSessionState } from "../bindings/SessionState";
 import { useRtcMesh, type TurnConfig } from "./use-rtc-mesh";
@@ -174,6 +178,12 @@ export type CoReview = {
   /** Apply a review op to the shared doc + relay it (called by the Review
    *  panel for every mutation while in session). */
   postSessionOp: (op: ReviewOp) => void;
+  /** The room's live shared drawing — the scratch surface before a note is
+   *  posted. Ephemeral: it dies with the session, while a posted comment
+   *  carries its finished strokes in the review doc like any other content. */
+  liveDraw: DrawState;
+  /** Draw locally and relay to the room. */
+  postDrawOp: (op: DrawOp) => void;
   /** Peer playheads in frames, tinted per name — the timeline ghost cursors. */
   coGhostMarkers: { name: string; frame: number; color: string }[];
   theater: boolean;
@@ -379,6 +389,23 @@ export function useCoReview({
    *  is a no-op. */
   const pendingOpsRef = useRef<ReviewOp[]>([]);
 
+  /**
+   * The room's live drawing, shared while a note is being composed.
+   *
+   * EPHEMERAL on purpose. A posted comment carries its finished strokes in the
+   * review doc like any other content; this is the shared scratch surface
+   * BEFORE anyone posts, so two people can point at the same frame at once. It
+   * dies with the session, which is why it is state here and not in the doc.
+   */
+  const [liveDraw, setLiveDraw] = useState<DrawState>(EMPTY_DRAW_STATE);
+
+  /** Draw locally + relay. Rides the reviewOp message, which the Rust relay
+   *  treats as an opaque string, so this needed no backend change. */
+  const postDrawOp = useCallback((op: DrawOp) => {
+    setLiveDraw((prev) => applyDrawOp(prev, op));
+    sendSessionMsg({ kind: "reviewOp", op: JSON.stringify({ t: "draw", op }), from: "" });
+  }, [sendSessionMsg]);
+
   const postSessionOp = useCallback((op: ReviewOp) => {
     if (!sessionDocRef.current) pendingOpsRef.current.push(op);
     else setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
@@ -514,7 +541,14 @@ export function useCoReview({
           // payload claims: the op names its own author, and the relay is
           // payload-agnostic, so trusting it let any peer sign review
           // content (including the source verdict) as somebody else.
-          const op = attributeReviewOp(JSON.parse(m.op) as ReviewOp, nameForMember(m.from));
+          const parsed: unknown = JSON.parse(m.op);
+          // Draw ops share this message and are NOT part of the persisted doc.
+          if (isDrawRelay(parsed)) {
+            const drawOp = attributeDrawOp(parsed.op, nameForMember(m.from));
+            setLiveDraw((prev) => applyDrawOp(prev, drawOp));
+            return;
+          }
+          const op = attributeReviewOp(parsed as ReviewOp, nameForMember(m.from));
           setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
           // Everyone's notes belong to the screening, not just ours.
           recordOpRef.current(op);
@@ -1258,6 +1292,8 @@ export function useCoReview({
 
   return {
     coSession, coSessionActive, sessionDoc, postSessionOp, coGhostMarkers,
+    // Live shared drawing: the room's scratch surface before anyone posts.
+    liveDraw, postDrawOp,
     theater, setTheater, theaterParticipants,
     meshStreams: mesh.remoteStreams, meshStates: mesh.peerStates,
     meshMutedForMe: mesh.peerMutedForMe, toggleMuteForMe: mesh.toggleMuteForMe,

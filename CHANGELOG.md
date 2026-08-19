@@ -6,6 +6,10 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **Live shared drawing in a co-review session.** Strokes relay to the room as
+  they are drawn, so two people can point at the same frame at once. Each stroke
+  carries its author, undo removes only your own, and the picture converges no
+  matter what order the network delivers ops in.
 - **Real drawing tools.** Pen, highlighter (translucent and broad, so the frame
   underneath stays readable), arrow, rectangle and ellipse. Shapes rubber-band
   from a drag instead of being traced freehand, which is why annotations used to

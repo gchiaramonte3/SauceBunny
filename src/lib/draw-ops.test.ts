@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyDrawOp, drawAuthors, EMPTY_DRAW_STATE, lastStrokeBy, mergeDrawOps,
+  attributeDrawOp, isDrawRelay,
   type DrawOp, type DrawStroke,
 } from "./draw-ops";
 
@@ -108,5 +109,30 @@ describe("attribution", () => {
     expect(lastStrokeBy(st, "Gasper")?.id).toBe("c");
     expect(lastStrokeBy(st, "David")?.id).toBe("b");
     expect(lastStrokeBy(st, "Nobody")).toBeNull();
+  });
+});
+
+describe("the relay envelope", () => {
+  it("recognises a draw op and nothing else", () => {
+    expect(isDrawRelay({ t: "draw", op: { t: "strokeAdd", stroke: s("a", "G", 1) } })).toBe(true);
+    expect(isDrawRelay({ t: "draw", op: { t: "strokeErase", id: "a", at: 1 } })).toBe(true);
+    // A review op must fall through to applyReviewOp untouched.
+    expect(isDrawRelay({ t: "add", comment: {} })).toBe(false);
+    for (const junk of [null, undefined, 3, "draw", {}, { t: "draw" }, { t: "draw", op: null }]) {
+      expect(isDrawRelay(junk), JSON.stringify(junk)).toBe(false);
+    }
+  });
+
+  it("overwrites the author with the host-stamped sender", () => {
+    // Security, not tidiness: the relay never inspects the payload, so a peer
+    // can claim any name. A drawing has no body text to give it away.
+    const spoofed: DrawOp = { t: "strokeAdd", stroke: s("a", "Gasper", 1) };
+    const fixed = attributeDrawOp(spoofed, "Mallory");
+    expect((fixed as { stroke: DrawStroke }).stroke.author).toBe("Mallory");
+  });
+
+  it("leaves an erase alone, since it carries no author to forge", () => {
+    const e = erase("a", 2);
+    expect(attributeDrawOp(e, "Mallory")).toEqual(e);
   });
 });
