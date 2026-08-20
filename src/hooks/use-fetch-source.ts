@@ -1,4 +1,4 @@
-import { useCallback, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useRef, type Dispatch, type SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppStatus, ClientLog, ExportOpts, Metadata, QueuedClip, SourceKind, WarmStart,
@@ -8,6 +8,8 @@ import type { CachedStream } from "../bindings/CachedStream";
 import type { RecentSource } from "../lib/recent-sources";
 import type { Defaults } from "../components/SettingsModal";
 import type { ToastKind } from "../components/CanvasToast";
+import { looksUnextractable, pickMediaUrl } from "../lib/media-sniff";
+import type { SniffResult } from "../bindings/SniffResult";
 import { formatError } from "../lib/error-format";
 import { setPlayheadFrames as publishPlayheadFrames } from "../lib/playhead-store";
 import { hostnameOf, isLikelyVideoUrl, normalizeUrl, youTubeThumbnailUrl } from "../lib/validation";
@@ -112,6 +114,11 @@ export function useFetchSource(p: FetchSourceProps) {
     classifyExtractorRot,
     cookiesBrowserOrNone,
   } = p;
+
+  /** URLs whose browser-resolve has already run, so a page that resolves to
+   *  something ALSO unextractable cannot loop between the two forever. */
+  const sniffedRef = useRef(new Set<string>());
+  const handleFetchRef = useRef<((u?: string) => void) | null>(null);
 
   const handleFetch = useCallback(async (urlOverride?: string) => {
     // `urlOverride` lets callers (e.g. paste-and-fetch) pass the URL directly
@@ -374,6 +381,28 @@ export function useFetchSource(p: FetchSourceProps) {
       // (rendered by the error overlay once playback also proves dead —
       // see the webPlayback `failed` escalation effect).
       classifyExtractorRot(msg);
+      // yt-dlp looked and there was nothing in the HTML — the one failure a
+      // BROWSER can fix, because the page fetches its video from script. Render
+      // it in an isolated webview, take the media URL it requests, and fetch
+      // that instead. Once per URL: a resolved URL that is itself unextractable
+      // must not bounce back here forever.
+      if (looksUnextractable(msg) && !sniffedRef.current.has(full)) {
+        sniffedRef.current.add(full);
+        appendLog("info", "resolve", "No video in the page source. Opening it to see what it loads…");
+        try {
+          const found = await invoke<SniffResult>("sniff_page_media", { url: full });
+          if (sourceSeqRef.current !== seq) return;
+          const media = pickMediaUrl(found.urls ?? []);
+          if (media) {
+            appendLog("ok", "resolve", `Found ${media.split("?")[0]}`);
+            void handleFetchRef.current?.(media);
+            return;
+          }
+          appendLog("warn", "resolve", "That page loaded no video we can play.");
+        } catch (e) {
+          appendLog("warn", "resolve", formatError(e));
+        }
+      }
       pushNotification("error", "Metadata fetch failed",
         "The player is still active, but export quality options may be limited until metadata loads.");
       maybePromptYtAuth(msg, seq);
@@ -382,6 +411,10 @@ export function useFetchSource(p: FetchSourceProps) {
     }
   }, [url, appendLog, defaults, fallbackFps, resetForNewSource, pushNotification, maybePromptYtAuth, classifyExtractorRot, loadWebPlayback, loadCachedWebPlayback, recordRecentSource,
       seedFilename, tryAutoLoadTranscript, cookiesBrowserOrNone, decodeMetaTitle, activeSourceUrlRef, metadataRef, setActiveSourceUrl, setClipQueue, setErrorDetail, setExportOpts, setFetchPhase, setInFrames, setMetadata, setMetadataLoading, setOutFrames, setSourceKind, setStatus, sourceSeqRef]);
+
+  // Mirrored so the retry above can call the LATEST handleFetch without making
+  // the callback depend on itself.
+  handleFetchRef.current = handleFetch;
 
   return { handleFetch };
 }

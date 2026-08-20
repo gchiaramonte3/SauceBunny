@@ -222,6 +222,7 @@ pub fn run() {
             commands::scan_library_folder,
             commands::scan_transcript_library,
             commands::rename_transcript,
+            commands::sniff_page_media,
             commands::create_transcript_folder,
             commands::move_transcript_to_folder,
             commands::save_transcript_analysis,

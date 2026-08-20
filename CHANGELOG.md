@@ -6,6 +6,14 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- **Pages that only reveal their video to JavaScript can now be imported.** A
+  modern site returns an empty shell and fetches its video from script, so
+  yt-dlp reads the HTML, finds nothing, and says "Unsupported URL" — measured on
+  one real page: zero media URLs in 306 KB of served HTML, and a playable
+  manifest the moment a browser ran it. When that specific failure happens, the
+  page is rendered in an isolated, invisible webview, the media it requests is
+  taken, and the import continues with that. The resolver window is granted no
+  capabilities and gets no IPC channel.
 - **Live shared drawing in a co-review session.** Strokes relay to the room as
   they are drawn, so two people can point at the same frame at once. Each stroke
   carries its author, undo removes only your own, and the picture converges no
