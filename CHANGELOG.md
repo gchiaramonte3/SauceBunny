@@ -24,6 +24,12 @@ All notable changes to Sauce Bunny. Format loosely follows
   look scrawled.
 
 ### Fixed
+- **YouTube downloads work again on the bundled downloader.** The pinned yt-dlp
+  was 2026.07.04, whose default player-client list still included `android_vr` —
+  the client YouTube started refusing with `HTTP Error 403`. Refreshed to
+  2026.08.19, which drops that client and adds `web_embedded` fallbacks.
+  Verified with no JS runtime on PATH: 2160p, and `android_vr` no longer
+  appears at all.
 - **The Transcripts panel is searchable, sortable and filterable.** It was a
   flat list grouped by folder, so finding one transcript among a hundred meant
   scrolling past every month you had ever worked in. It now has a debounced
