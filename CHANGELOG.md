@@ -5,6 +5,38 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-22
+
+Transcripts got somewhere to live. The panel that lists them now has projects
+you can name and recognise, and the follow-along player shows where the marks
+are instead of only what time it is.
+
+### Added
+- **Projects in the Transcripts panel.** The list grouped by whatever folder a
+  file sat in, which was almost always the `YYYY-MM` bucket the app made on the
+  day you hit transcribe. That is filing by accident. A project is a folder you
+  name, and its heading is a shelf: a picture, the name, the count, and a menu
+  to rename it, choose its picture, or delete it. Month buckets keep the quiet
+  label and get no menu, because offering Delete on `2026-08` is offering to bin
+  a month of work nobody chose to group.
+- **A picture for a project.** Any transcript in it can supply the picture;
+  without a choice the project shows its newest, which changes as you add to it.
+  The choice falls back automatically if that transcript is later moved out, so
+  a header never points at something filed elsewhere.
+- **Markers on the compact player.** The reader's follow-along panel now draws
+  the in/out band, chapter ticks and comment dots on its position bar, each one
+  a button that jumps to its exact time. It shows chapters and comments for
+  whatever transcript you opened, and in/out marks only when the reader is
+  looking at the source Clip has loaded — those marks belong to that source, and
+  drawn on another recording's bar they would be real marks about something
+  else.
+
+### Changed
+- A project folder can be renamed or deleted from inside the app. Deleting is
+  deliberately not recursive: it refuses while transcripts are still in there
+  and says how many, because a project holds hours of work and a one-click
+  recursive delete gets reported as data loss, not as a mis-click.
+
 ## [0.3.0] — 2026-08-22
 
 Local AI got dramatically faster, YouTube breakage became self-repairing, and

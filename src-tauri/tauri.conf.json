@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Sauce Bunny",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "identifier": "com.saucebunny.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -68,7 +68,7 @@
     "macOS": {
       "minimumSystemVersion": "14.0",
       "entitlements": "entitlements.plist",
-      "bundleVersion": "2026082202"
+      "bundleVersion": "2026082203"
     },
     "category": "public.app-category.video"
   },
