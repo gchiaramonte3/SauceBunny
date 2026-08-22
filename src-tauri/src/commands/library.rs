@@ -470,6 +470,107 @@ pub fn create_transcript_folder(library_path: String, name: String) -> Result<St
     dir.to_str().map(str::to_string).ok_or_else(|| crate::AppError::internal("Folder path isn't valid UTF-8."))
 }
 
+/// Rename a project folder. Returns its new path.
+///
+/// The DIRECTORY is a project's identity, so renaming one is a real move on
+/// disk rather than a label change in a JSON file — which is what keeps the
+/// transcripts findable in Finder under the name the user chose.
+#[tauri::command]
+pub fn rename_transcript_folder(
+    library_path: String,
+    folder: String,
+    new_name: String,
+) -> Result<String, crate::AppError> {
+    let stem = valid_stem(&new_name)?;
+    let root = PathBuf::from(&library_path);
+    let src = root.join(&folder);
+    if !src.is_dir() {
+        return Err(crate::AppError::not_found(folder.as_str()));
+    }
+    // A month bucket is the app's own filing, not something anyone named, and
+    // renaming one would strand every transcript the grouping expects to find
+    // there.
+    if is_month_folder(&folder) {
+        return Err(crate::AppError::invalid(
+            "That folder is one the app files into by date, so it can't be renamed.",
+        ));
+    }
+    let dest = root.join(&stem);
+    if dest == src {
+        return Ok(src.to_string_lossy().into_owned());
+    }
+    if dest.exists() {
+        return Err(crate::AppError::invalid(format!("A folder named \"{stem}\" already exists.")));
+    }
+    std::fs::rename(&src, &dest)
+        .map_err(|e| crate::AppError::internal(format!("Couldn't rename the folder: {e}")))?;
+    dest.to_str().map(str::to_string).ok_or_else(|| crate::AppError::internal("Folder path isn't valid UTF-8."))
+}
+
+/// Delete a project folder, but only once it is EMPTY of transcripts.
+///
+/// Deliberately not recursive. A project holds hours of someone's work, and a
+/// one-click recursive delete of a folder full of transcripts is the kind of
+/// thing that gets reported as data loss rather than a mis-click. The caller
+/// moves the transcripts out first, which makes the destructive step explicit
+/// and reversible up to that point.
+#[tauri::command]
+pub fn delete_transcript_folder(library_path: String, folder: String) -> Result<(), crate::AppError> {
+    let root = PathBuf::from(&library_path);
+    let dir = root.join(&folder);
+    if !dir.is_dir() {
+        return Err(crate::AppError::not_found(folder.as_str()));
+    }
+    if is_month_folder(&folder) {
+        return Err(crate::AppError::invalid(
+            "That folder is one the app files into by date, so it can't be deleted here.",
+        ));
+    }
+    let left = transcripts_in(&dir);
+    if left > 0 {
+        return Err(crate::AppError::invalid(format!(
+            "That project still holds {left} transcript{}. Move them out first.",
+            if left == 1 { "" } else { "s" }
+        )));
+    }
+    // Only the folder itself, and only when nothing but incidental files (a
+    // .DS_Store) remain — remove_dir refuses a non-empty directory, which is
+    // the backstop if the count above ever disagrees with reality.
+    for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    std::fs::remove_dir(&dir)
+        .map_err(|e| crate::AppError::internal(format!("Couldn't delete the folder: {e}")))?;
+    Ok(())
+}
+
+/// `YYYY-MM` — a bucket the app created, never a project someone named.
+pub(crate) fn is_month_folder(folder: &str) -> bool {
+    let b = folder.as_bytes();
+    b.len() == 7
+        && b[4] == b'-'
+        && b[..4].iter().all(u8::is_ascii_digit)
+        && b[5..].iter().all(u8::is_ascii_digit)
+}
+
+/// How many transcripts a folder holds, ignoring sidecars and dotfiles.
+pub(crate) fn transcripts_in(dir: &Path) -> usize {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            let n = e.file_name();
+            let n = n.to_string_lossy();
+            !n.starts_with('.')
+                && (n.ends_with(".srt") || n.ends_with(".vtt"))
+        })
+        .count()
+}
+
 /// Move a transcript (+ its sidecars) into `dest_dir`. Returns the new path.
 #[tauri::command]
 pub fn move_transcript_to_folder(srt_path: String, dest_dir: String) -> Result<String, crate::AppError> {
@@ -926,4 +1027,148 @@ mod tests {
         let err = scan_library_root(child.to_str().unwrap(), 3).unwrap_err();
         assert!(matches!(err, crate::AppError::Invalid(_)), "got {err:?}");
     }
+
+    // ---- project folders -------------------------------------------------
+
+    #[test]
+    fn month_buckets_are_recognised() {
+        for m in ["2026-08", "1999-12"] {
+            assert!(is_month_folder(m), "{m}");
+        }
+        for f in ["", "Marry Harry", "2026-8", "2026-08 pickups", "202608"] {
+            assert!(!is_month_folder(f), "{f}");
+        }
+    }
+
+    #[test]
+    fn renames_a_project_directory_on_disk() {
+        // The directory IS the identity, so a rename has to move it. That is
+        // what keeps the transcripts findable under the new name in Finder as
+        // well as in the app.
+        let t = TempTree::new("rename-project");
+        std::fs::create_dir(t.path().join("Old")).unwrap();
+        std::fs::write(t.path().join("Old/a.srt"), "x").unwrap();
+        let out = rename_transcript_folder(
+            t.path().to_string_lossy().into(),
+            "Old".into(),
+            "New".into(),
+        )
+        .unwrap();
+        assert!(out.ends_with("/New"), "{out}");
+        assert!(
+            t.path().join("New/a.srt").is_file(),
+            "the transcript did not come with it"
+        );
+        assert!(!t.path().join("Old").exists());
+    }
+
+    #[test]
+    fn refuses_to_rename_a_month_bucket() {
+        // Those are the app's own filing. Renaming one strands every
+        // transcript the date grouping expects to find inside it.
+        let t = TempTree::new("rename-month");
+        std::fs::create_dir(t.path().join("2026-08")).unwrap();
+        assert!(rename_transcript_folder(
+            t.path().to_string_lossy().into(),
+            "2026-08".into(),
+            "August".into(),
+        )
+        .is_err());
+        assert!(t.path().join("2026-08").is_dir());
+    }
+
+    #[test]
+    fn refuses_a_rename_onto_an_existing_folder() {
+        let t = TempTree::new("rename-collide");
+        std::fs::create_dir(t.path().join("A")).unwrap();
+        std::fs::create_dir(t.path().join("B")).unwrap();
+        std::fs::write(t.path().join("B/keep.srt"), "x").unwrap();
+        assert!(rename_transcript_folder(
+            t.path().to_string_lossy().into(),
+            "A".into(),
+            "B".into(),
+        )
+        .is_err());
+        assert!(
+            t.path().join("B/keep.srt").is_file(),
+            "the collision ate the target folder"
+        );
+    }
+
+    #[test]
+    fn refuses_to_delete_a_project_that_still_holds_work() {
+        // The whole reason delete is not recursive: a project holds hours of
+        // someone's transcription, and a one-click recursive delete gets
+        // reported as data loss, not as a mis-click.
+        //
+        // remove_dir would refuse a non-empty directory on its own, so the
+        // count is not what saves the files - it is what makes the refusal
+        // legible. Assert the SENTENCE, or this test passes against a build
+        // that says "Directory not empty (os error 66)" and leaves the person
+        // with no idea which folder holds what.
+        let t = TempTree::new("delete-full");
+        std::fs::create_dir(t.path().join("Show")).unwrap();
+        std::fs::write(t.path().join("Show/ep1.srt"), "x").unwrap();
+        std::fs::write(t.path().join("Show/ep2.srt"), "x").unwrap();
+        let err = delete_transcript_folder(t.path().to_string_lossy().into(), "Show".into())
+            .expect_err("it agreed to delete a project holding two transcripts");
+        let msg = format!("{err:?}");
+        assert!(msg.contains("still holds 2 transcripts"), "unhelpful refusal: {msg}");
+        assert!(t.path().join("Show/ep1.srt").is_file(), "it deleted a transcript");
+    }
+
+    #[test]
+    fn the_refusal_counts_one_transcript_in_the_singular() {
+        // "1 transcripts" in a dialog is the tell that nobody read the string.
+        let t = TempTree::new("delete-one");
+        std::fs::create_dir(t.path().join("Show")).unwrap();
+        std::fs::write(t.path().join("Show/ep1.srt"), "x").unwrap();
+        let err = delete_transcript_folder(t.path().to_string_lossy().into(), "Show".into())
+            .unwrap_err();
+        assert!(format!("{err:?}").contains("holds 1 transcript."), "{err:?}");
+    }
+
+    #[test]
+    fn deletes_an_empty_project() {
+        let t = TempTree::new("delete-empty");
+        std::fs::create_dir(t.path().join("Show")).unwrap();
+        delete_transcript_folder(t.path().to_string_lossy().into(), "Show".into()).unwrap();
+        assert!(!t.path().join("Show").exists());
+    }
+
+    #[test]
+    fn a_dotfile_does_not_count_as_work() {
+        // Finder drops .DS_Store into everything it looks at. Refusing to
+        // delete an otherwise-empty project because of one would be
+        // unexplainable to the person looking at an empty folder.
+        let t = TempTree::new("delete-dotfile");
+        std::fs::create_dir(t.path().join("Show")).unwrap();
+        std::fs::write(t.path().join("Show/.DS_Store"), "x").unwrap();
+        delete_transcript_folder(t.path().to_string_lossy().into(), "Show".into()).unwrap();
+        assert!(!t.path().join("Show").exists());
+    }
+
+    #[test]
+    fn refuses_to_delete_a_month_bucket() {
+        let t = TempTree::new("delete-month");
+        std::fs::create_dir(t.path().join("2026-08")).unwrap();
+        assert!(
+            delete_transcript_folder(t.path().to_string_lossy().into(), "2026-08".into()).is_err()
+        );
+        assert!(t.path().join("2026-08").is_dir());
+    }
+
+    #[test]
+    fn counts_transcripts_and_ignores_sidecars() {
+        // Sidecars are not work in their own right; counting them would make
+        // a project that holds no transcripts undeletable.
+        let t = TempTree::new("count");
+        let d = t.path().join("Show");
+        std::fs::create_dir(&d).unwrap();
+        for f in ["a.srt", "b.vtt", "a.diarization.json", ".DS_Store", "notes.txt"] {
+            std::fs::write(d.join(f), "x").unwrap();
+        }
+        assert_eq!(transcripts_in(&d), 2);
+    }
+
 }
