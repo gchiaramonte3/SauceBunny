@@ -574,16 +574,85 @@
 }
 /* A slim clickable position bar — "a time, not a timeline". */
 .cp-reader-scrub {
+  position: relative;
   height: 5px;
   border-radius: 3px;
   background: var(--bg-4);
   cursor: pointer;
-  overflow: hidden;
+  /* Was `overflow: hidden`, for the fill. The fill rounds itself, and the
+     marker pins have to stand PROUD of a 5px bar to be seeable and clickable
+     at all - clipped to 5px they are invisible pixels. */
+  margin: 7px 0 5px;
 }
 .cp-reader-scrub-fill {
   height: 100%;
   background: var(--fg-3);
   border-radius: 3px;
+}
+/* The in/out span, under the fill: the region, not an edit handle. */
+.cp-reader-scrub-band {
+  position: absolute;
+  top: 0; bottom: 0;
+  background: color-mix(in srgb, var(--marker) 30%, transparent);
+  border-left: 1px solid var(--marker);
+  border-right: 1px solid var(--marker);
+  pointer-events: none;
+}
+/* Marker pins. The button is a 24px target (WCAG 2.5.8); the visible pip is
+   drawn by ::before, so the thing you can hit is bigger than the thing you can
+   see - which is what a 5px bar needs. Colours deliberately echo the Clip
+   timeline: neutral ticks for chapters, the marker colour for in/out, the
+   reviewer accent for comments, so the vocabulary carries across. */
+.cp-reader-pin {
+  position: absolute;
+  top: 50%;
+  width: 24px;
+  height: 24px;
+  margin-left: -12px;
+  transform: translateY(-50%);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  z-index: 2;
+}
+.cp-reader-pin::before {
+  content: "";
+  width: 3px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--fg-2);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  transition: height var(--dur-fast) var(--ease-out);
+}
+.cp-reader-pin:hover::before { height: 15px; }
+.cp-reader-pin.in::before, .cp-reader-pin.out::before { background: var(--marker); }
+.cp-reader-pin.comment::before {
+  width: 9px;
+  height: 9px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+}
+/* A merged pin says how many it stands for, or the count is a lie the
+   tooltip has to correct. */
+.cp-reader-pin-count {
+  position: absolute;
+  top: -1px;
+  left: 13px;
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  color: var(--fg-3);
+  pointer-events: none;
+}
+.cp-reader-marker-note {
+  margin-top: 6px;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--fg-4);
 }
 .cp-reader-transport-row {
   display: flex;

@@ -64,6 +64,7 @@ import { QueueDrawer } from "./components/QueueDrawer";
 import { TranscriptReader } from "./components/TranscriptReader";
 import { TranscriptViewer } from "./components/TranscriptViewer";
 import { ReaderPlayerStage, type ReaderSource } from "./components/ReaderPlayerStage";
+import { useReaderMarkers } from "./hooks/use-reader-markers";
 import { ReaderAnalysis } from "./components/ReaderAnalysis";
 import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutSheet } from "./components/ShortcutSheet";
@@ -3891,6 +3892,19 @@ export default function App() {
   // (fired by lib/chapters saves in this window; the popped-out panel's
   // saves arrive as a panel:action:chaptersChanged → main re-dispatches the
   // same event, so this one listener covers both windows).
+  // The reader's own marker data. Keyed on the source the READER is playing,
+  // not the one Clip has loaded - see use-reader-markers for why the in/out
+  // marks are the one field that is gated on those being the same source.
+  const readerMarkers = useReaderMarkers({
+    // The transcript's RECORDED source identity, not the resolved playback
+    // path: that is the key chapters and review notes were written under, and
+    // it exists for web transcripts too, which have no playable local file.
+    readerPath: readerSourceKey,
+    clipPath: sourceKind === "file" ? localFilePath : null,
+    clipSourceKey: reviewSourceKey,
+    inFrames, outFrames, fps,
+  });
+
   const [chapterMarkers, setChapterMarkers] = useState<ChapterMarker[]>([]);
   useEffect(() => {
     if (!reviewSourceKey) { setChapterMarkers([]); return; }
@@ -4142,6 +4156,10 @@ export default function App() {
                   onPlayStateChange={setIsPlaying}
                   onError={handleReaderMediaError}
                   initialVolume={muted ? 0 : volume}
+                  markIn={readerMarkers.markIn}
+                  markOut={readerMarkers.markOut}
+                  chapters={readerMarkers.chapters}
+                  comments={readerMarkers.comments}
                 />
               }
             >

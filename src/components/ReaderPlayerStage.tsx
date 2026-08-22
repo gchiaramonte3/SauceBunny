@@ -1,4 +1,4 @@
-import { useState, type RefObject } from "react";
+import { useMemo, useState, type RefObject } from "react";
 import { LocalMediaPlayer } from "./LocalMediaPlayer";
 import { MediaBunnyPlayer } from "./MediaBunnyPlayer";
 import type { PlayerHandle } from "./player-handle";
@@ -6,6 +6,7 @@ import {
   IconPlay, IconPause, IconSkipBack, IconSkipForward, IconPanelRight, IconFilm, IconSpinnerArc,
 } from "./Icons";
 import { usePlayheadSeconds } from "../lib/playhead-store";
+import { markerSummary, stageMarkers } from "../lib/stage-markers";
 import { secondsToClock, secondsToHms } from "../lib/timecode";
 
 /**
@@ -53,6 +54,12 @@ type Props = {
   /** A native/WebCodecs load failure → App transcodes the original and retries. */
   onError: (message: string) => void;
   initialVolume: number;
+  /** In/out marks for THIS source, in absolute seconds. Null when unset. */
+  markIn?: number | null;
+  markOut?: number | null;
+  /** Chapters and comments on this source, for the position bar. */
+  chapters?: readonly { time: number; title: string }[];
+  comments?: readonly { time: number; resolved: boolean }[];
 };
 
 /**
@@ -66,6 +73,7 @@ type Props = {
 export function ReaderPlayerStage({
   source, preparing, note, playerRef, floating, active,
   onToggleFloat, onCollapse, onTimeUpdate, onPlayStateChange, onError, initialVolume,
+  markIn = null, markOut = null, chapters = [], comments = [],
 }: Props) {
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -91,6 +99,14 @@ export function ReaderPlayerStage({
   };
 
   const pct = duration ? Math.min(100, (cur / duration) * 100) : 0;
+  // What the bar carries besides the playhead. "A time, not a timeline" still
+  // holds - this is the timeline's DATA, not its editing surface: you can see
+  // where a mark or a note is and jump to it, and nothing here moves one.
+  const { pins, band } = useMemo(
+    () => stageMarkers({ duration, markIn, markOut, chapters, comments }),
+    [duration, markIn, markOut, chapters, comments],
+  );
+  const summary = markerSummary(pins);
   const headTitle = source?.title ?? (preparing ? "Preparing…" : "No video");
   // Same props feed either engine — they share the PlayerHandle interface. The
   // key remounts cleanly on a path/engine swap (mediabunny original → native copy).
@@ -177,7 +193,30 @@ export function ReaderPlayerStage({
               }}
               title="Click to jump, or focus and use the arrow keys"
             >
+              {band && (
+                <div
+                  className="cp-reader-scrub-band"
+                  style={{ left: `${band.startPct}%`, width: `${band.widthPct}%` }}
+                />
+              )}
               <div className="cp-reader-scrub-fill" style={{ width: `${pct}%` }} />
+              {/* Buttons, not decoration: a marker you can see and cannot go
+                  to is a worse tease than no marker. They sit above the bar's
+                  own click handler and stop it, so a pin jumps exactly rather
+                  than to wherever the pixel under the cursor happened to be. */}
+              {pins.map((m) => (
+                <button
+                  key={`${m.kind}:${m.time}`}
+                  type="button"
+                  className={`cp-reader-pin ${m.kind}`}
+                  style={{ left: `${m.pct}%` }}
+                  title={`${m.label}${m.count > 1 ? ` (+${m.count - 1} more)` : ""} · ${secondsToHms(m.time)}`}
+                  aria-label={`Jump to ${m.label} at ${secondsToHms(m.time)}`}
+                  onClick={(e) => { e.stopPropagation(); playerRef.current?.seekTo(m.time); }}
+                >
+                  {m.count > 1 && <span className="cp-reader-pin-count">{m.count}</span>}
+                </button>
+              ))}
             </div>
             <div className="cp-reader-transport-row">
               <button type="button" className="cp-reader-tbtn" onClick={() => skip(-10)} title="Back 10 seconds" aria-label="Back 10 seconds">
@@ -193,6 +232,10 @@ export function ReaderPlayerStage({
                 {secondsToClock(cur)}<span className="cp-reader-clock-sep"> / </span>{secondsToClock(duration)}
               </span>
             </div>
+            {/* Says what the dots are. Without it a row of coloured pips is a
+                puzzle, and the panel is often the only place someone sees that
+                this source HAS marks or notes at all. */}
+            {summary && <div className="cp-reader-marker-note">{summary}</div>}
           </div>
         </>
       ) : preparing ? (
