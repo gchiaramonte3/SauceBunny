@@ -24,6 +24,13 @@ All notable changes to Sauce Bunny. Format loosely follows
   look scrawled.
 
 ### Fixed
+- **The Safari sign-in prompt is no longer a dead end.** It asked for Full Disk
+  Access — a permission over every file on the Mac — when Safari is the only
+  browser that needs one. If Chrome, Brave, Firefox or Edge is signed in, it now
+  says so and points at the one-click switch instead. When there is no
+  alternative it tells the truth about the relaunch macOS requires, rather than
+  "load the video again", which sent people back to the same failure. And if
+  access does appear while the app is running, it says so.
 - **YouTube downloads work again on the bundled downloader.** The pinned yt-dlp
   was 2026.07.04, whose default player-client list still included `android_vr` —
   the client YouTube started refusing with `HTTP Error 403`. Refreshed to

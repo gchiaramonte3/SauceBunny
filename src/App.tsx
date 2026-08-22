@@ -116,6 +116,7 @@ import {
   tcDigitsToDisplay,
 } from "./lib/timecode";
 import { currentQueueSource, queuedRangesForSource } from "./lib/queue-ranges";
+import { FDA_GRANTED, NO_PERMISSION_BROWSERS, safariGuidance } from "./lib/safari-fallback";
 import { hostnameOf, youTubeThumbnailUrl, isYouTubeBotError, needsCookiesError, looksLikeExtractorRot, prettyHost } from "./lib/validation";
 import { sanitizeFilename, suggestFilename } from "./lib/filename";
 import { decodeHtmlEntities } from "./lib/text";
@@ -1531,6 +1532,8 @@ export default function App() {
   // aren't. Whenever the choice BECOMES safari (modal or Settings), probe
   // FDA; if missing, open the exact pane and say what to do in one line.
   const safariFdaPromptedRef = useRef(false);
+  /** Removes the grant-watch listener when the choice changes or we unmount. */
+  const fdaFocusCleanupRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (defaults.ytCookiesBrowser !== "safari") {
       safariFdaPromptedRef.current = false;
@@ -1538,12 +1541,50 @@ export default function App() {
     }
     if (safariFdaPromptedRef.current) return;
     safariFdaPromptedRef.current = true;
-    void invoke<boolean>("safari_fda_status").then((ok) => {
-      if (ok) return;
-      pushNotification("info", "One more step for Safari",
-        "Turn on Sauce Bunny in the settings window that just opened, then load the video again.");
-      void invoke("open_full_disk_access").catch(() => { /* best-effort */ });
-    }).catch(() => { /* stale backend - Settings still shows the banner */ });
+    let cancelled = false;
+    void (async () => {
+      const ok = await invoke<boolean>("safari_fda_status").catch(() => true);
+      if (cancelled || ok) return;
+
+      // Which OTHER browsers actually have cookies here. Safari is the only one
+      // that needs Full Disk Access, so if any of these is signed in the whole
+      // permission dance is avoidable — and never suggest one that is not
+      // installed, which is the lesson cookie_browser_ready already encodes.
+      const ready: string[] = [];
+      for (const b of NO_PERMISSION_BROWSERS) {
+        const has = await invoke<boolean>("cookie_browser_ready", { browser: b }).catch(() => false);
+        if (has) ready.push(b);
+      }
+      if (cancelled) return;
+
+      const g = safariGuidance(ready);
+      pushNotification("info", g.title, g.body);
+      // Only open System Settings when a permission is genuinely the answer.
+      // Throwing the pane at someone we just told to switch browsers is the
+      // dead end this replaces.
+      if (!g.suggestsAlternative) {
+        void invoke("open_full_disk_access").catch(() => { /* best-effort */ });
+      }
+
+      // CLOSE THE LOOP. Granting Full Disk Access usually means macOS quits and
+      // reopens the app, but not always — if access appears while we are still
+      // running, say so, rather than leaving someone to guess whether the
+      // toggle took. Same focus probe the Settings pane already uses.
+      const onFocus = () => {
+        void invoke<boolean>("safari_fda_status").then((now) => {
+          if (!now) return;
+          window.removeEventListener("focus", onFocus);
+          pushNotification("info", FDA_GRANTED.title, FDA_GRANTED.body);
+        }).catch(() => {});
+      };
+      window.addEventListener("focus", onFocus);
+      fdaFocusCleanupRef.current = () => window.removeEventListener("focus", onFocus);
+    })();
+    return () => {
+      cancelled = true;
+      fdaFocusCleanupRef.current?.();
+      fdaFocusCleanupRef.current = null;
+    };
   }, [defaults.ytCookiesBrowser, pushNotification]);
 
   // Pipeline-log channel label for transcription ("whisper" | "parakeet"), in a

@@ -6,12 +6,12 @@ import type { Defaults } from "./SettingsModal";
 import type { YtdlpStatus } from "../bindings/YtdlpStatus";
 
 
+import { browserLabel } from "../lib/safari-fallback";
+
 const BROWSERS = ["none", "chrome", "safari", "firefox", "brave", "edge"] as const;
 const PREVIEW_HEIGHTS = [480, 720, 1080] as const;
 
-function browserLabel(b: string): string {
-  return b === "none" ? "your default browser" : b[0].toUpperCase() + b.slice(1);
-}
+
 
 /**
  * The "Web sources" Settings tab — everything that applies to any web video you
