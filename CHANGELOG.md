@@ -5,6 +5,17 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-22
+
+Local AI got dramatically faster, YouTube breakage became self-repairing, and
+the app can finally tell you which build you are running.
+
+> Versions 0.2.1–0.2.9 were development builds produced during one working
+> session and were never released. Their changes are folded in here rather than
+> given entries of their own, because a version nobody received is not a
+> version. Build identity is carried by `CFBundleVersion` (`YYYYMMDDNN`), which
+> changes on every build; the semver moves only when the feature set does.
+
 ### Added
 - **Pages that only reveal their video to JavaScript can now be imported.** A
   modern site returns an empty shell and fetches its video from script, so
@@ -22,6 +33,15 @@ All notable changes to Sauce Bunny. Format loosely follows
   underneath stays readable), arrow, rectangle and ellipse. Shapes rubber-band
   from a drag instead of being traced freehand, which is why annotations used to
   look scrawled.
+
+- Chapters fold away and can be cleared.
+- Hidden warnings and tips can be restored from Settings ▸ Backup & reset.
+- The reader's transcript menu gained Reveal in Finder, and its rename dialog
+  no longer draws underneath the app.
+
+- **The audio path reports whether it is audible.** A track that decodes and
+  never reaches the speakers used to log exactly like success. It now states
+  chunks scheduled vs dropped, context state and gain, once per playback.
 
 ### Fixed
 - **The Safari sign-in prompt is no longer a dead end.** It asked for Full Disk
@@ -74,57 +94,6 @@ All notable changes to Sauce Bunny. Format loosely follows
   by the modal edge.
 
 
-### Live media
-- **Screen sharing and camera video both work for someone who joins mid-share.**
-  One half-finished mechanism broke both: the sender slot reserved for a track
-  that doesn't exist yet was never handed the live screen share, and never
-  given a stream identity — so a peer received each track separately and kept
-  only whichever arrived last. A newcomer saw a blank tile while the sharer's
-  screen said "sharing", or a camera with a permanent "muted" badge.
-- A late joiner now gets the share at full resolution instead of the camera's
-  tile-sized downscale, so shared text stays readable for everyone, not just
-  the people who were already connected.
-- **Turning the camera or mic on actually opens one.** With no capture running,
-  the room's buttons flipped their icon and did nothing while the toolbar
-  claimed the camera was on, with no way back short of leaving the session.
-- A camera or mic that refuses to open now says why. These failures used to be
-  written to a field nothing displayed, so a device held by another app failed
-  in complete silence. macOS ending a track (another app takes the camera,
-  sleep, unplug) is now noticed too, instead of showing a live camera that
-  isn't.
-- Editing the relay settings mid-session no longer kills every connection
-  permanently.
-
-### Reliability
-- **Comments made in a session are saved as you make them.** They previously
-  reached disk only when someone ended the session, so quitting the app — or
-  crashing — lost every note from that review, on every machine at once.
-- Loading a new source clears the identity of the old one, so a guest can no
-  longer ignore the presenter's next source as "already on it".
-- A guest is correctly recognised as themselves in the room roster; when their
-  own id arrived after the roster did, they saw their own tile as a stranger's.
-
-### Diagnostics
-- Co-review, the peer connections, and the camera now write to the pipeline
-  log, and **Export diagnostics includes a session block** — role, who holds
-  the floor, the roster with per-peer connection state, and what the camera is
-  doing. Comparing two exports shows which machine's picture is wrong; these
-  subsystems previously recorded nothing at all.
-- A message the other machine can't read is reported as a version mismatch
-  instead of being dropped silently.
-
-## [0.3.0] — 2026-08-18
-
-Local AI got dramatically faster, YouTube breakage became self-repairing, and
-the app can finally tell you which build you are running.
-
-> Versions 0.2.1–0.2.9 were development builds produced during one working
-> session and were never released. Their changes are folded in here rather than
-> given entries of their own, because a version nobody received is not a
-> version. Build identity is carried by `CFBundleVersion` (`YYYYMMDDNN`), which
-> changes on every build; the semver moves only when the feature set does.
-
-### Fixed
 - **The "Update yt-dlp & retry" offer now appears for the commonest YouTube
   failure.** yt-dlp reports it as `unable to download video data: HTTP Error
   403: Forbidden`, which names no host, and the detector required a YouTube
@@ -179,15 +148,44 @@ the app can finally tell you which build you are running.
   number stamped in July. The version is stamped on every build and the About
   tab shows the build number it always claimed was the distinguishing one.
 
-### Added
-- Chapters fold away and can be cleared.
-- Hidden warnings and tips can be restored from Settings ▸ Backup & reset.
-- The reader's transcript menu gained Reveal in Finder, and its rename dialog
-  no longer draws underneath the app.
+### Live media
+- **Screen sharing and camera video both work for someone who joins mid-share.**
+  One half-finished mechanism broke both: the sender slot reserved for a track
+  that doesn't exist yet was never handed the live screen share, and never
+  given a stream identity — so a peer received each track separately and kept
+  only whichever arrived last. A newcomer saw a blank tile while the sharer's
+  screen said "sharing", or a camera with a permanent "muted" badge.
+- A late joiner now gets the share at full resolution instead of the camera's
+  tile-sized downscale, so shared text stays readable for everyone, not just
+  the people who were already connected.
+- **Turning the camera or mic on actually opens one.** With no capture running,
+  the room's buttons flipped their icon and did nothing while the toolbar
+  claimed the camera was on, with no way back short of leaving the session.
+- A camera or mic that refuses to open now says why. These failures used to be
+  written to a field nothing displayed, so a device held by another app failed
+  in complete silence. macOS ending a track (another app takes the camera,
+  sleep, unplug) is now noticed too, instead of showing a live camera that
+  isn't.
+- Editing the relay settings mid-session no longer kills every connection
+  permanently.
 
-- **The audio path reports whether it is audible.** A track that decodes and
-  never reaches the speakers used to log exactly like success. It now states
-  chunks scheduled vs dropped, context state and gain, once per playback.
+### Reliability
+- **Comments made in a session are saved as you make them.** They previously
+  reached disk only when someone ended the session, so quitting the app — or
+  crashing — lost every note from that review, on every machine at once.
+- Loading a new source clears the identity of the old one, so a guest can no
+  longer ignore the presenter's next source as "already on it".
+- A guest is correctly recognised as themselves in the room roster; when their
+  own id arrived after the roster did, they saw their own tile as a stranger's.
+
+### Diagnostics
+- Co-review, the peer connections, and the camera now write to the pipeline
+  log, and **Export diagnostics includes a session block** — role, who holds
+  the floor, the roster with per-peer connection state, and what the camera is
+  doing. Comparing two exports shows which machine's picture is wrong; these
+  subsystems previously recorded nothing at all.
+- A message the other machine can't read is reported as a version mismatch
+  instead of being dropped silently.
 
 ## [0.2.0] — 2026-07-19
 
