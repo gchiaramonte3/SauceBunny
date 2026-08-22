@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  fallbackPosterSource, isProjectFolder, makeProject, parseProjects,
-  projectFor, reconcileProjects, updateProject, type TranscriptProject,
+  fallbackPosterSource, isProjectFolder, makeProject, parseProjects, projectFor, reconcileProjects, updateProject, type TranscriptProject, projectPosterSource,
 } from "./transcript-projects";
 
 /**
@@ -131,5 +130,35 @@ describe("editing", () => {
     const list = [P("Show")];
     expect(projectFor(list, "Show")!.folder).toBe("Show");
     expect(projectFor(list, "2026-08")).toBeNull();
+  });
+});
+
+describe("projectPosterSource", () => {
+  const items = [
+    { path: "/lib/Show/a.srt", modifiedMs: 100 },
+    { path: "/lib/Show/b.srt", modifiedMs: 300 },
+    { path: "/lib/Show/c.srt", modifiedMs: 200 },
+  ];
+
+  it("uses the transcript someone picked", () => {
+    expect(projectPosterSource({ posterFrom: "/lib/Show/a.srt" }, items)).toBe("/lib/Show/a.srt");
+  });
+
+  it("falls back to the newest when nothing was picked", () => {
+    expect(projectPosterSource({ posterFrom: null }, items)).toBe("/lib/Show/b.srt");
+  });
+
+  it("falls back when the picked transcript has left the project", () => {
+    // Moving a transcript out is an ordinary action. A header still pointing
+    // at it shows a broken tile, or the picture of something filed elsewhere.
+    expect(projectPosterSource({ posterFrom: "/lib/Other/gone.srt" }, items)).toBe("/lib/Show/b.srt");
+  });
+
+  it("has no picture for an empty project", () => {
+    expect(projectPosterSource({ posterFrom: "/lib/Show/a.srt" }, [])).toBeNull();
+  });
+
+  it("treats a project with no metadata as unchosen", () => {
+    expect(projectPosterSource(null, items)).toBe("/lib/Show/b.srt");
   });
 });

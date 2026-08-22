@@ -174,3 +174,53 @@ describe("the project store", () => {
     expect(hits).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("renaming a project keeps what was decorated onto it", () => {
+  it("carries the poster and colour to the new folder", async () => {
+    // Without the carry-over the folder key stops matching disk, so
+    // reconciliation swaps in a blank project and the poster someone chose is
+    // silently gone. The rename is the moment that is easiest to lose it and
+    // hardest to notice.
+    const s = await store();
+    await s.hydrateProjects(["Old Show"]);
+    s.editProject("Old Show", { color: "#f0f", posterFrom: "/lib/Old Show/ep1.srt" });
+    s.renameProject("Old Show", "Marry Harry");
+    s.syncProjectFolders(["Marry Harry"]);
+    const p = s.getProjects();
+    expect(p).toHaveLength(1);
+    expect(p[0].folder).toBe("Marry Harry");
+    expect(p[0].color).toBe("#f0f");
+    expect(p[0].posterFrom).toBe("/lib/Old Show/ep1.srt");
+  });
+
+  it("moves the display name along when it was just the folder name", async () => {
+    const s = await store();
+    await s.hydrateProjects(["Old Show"]);
+    s.renameProject("Old Show", "New Show");
+    expect(s.getProjects()[0].title).toBe("New Show");
+  });
+
+  it("leaves a title alone once someone has deliberately set one", async () => {
+    // A title that already differs from the folder was a choice. Overwriting
+    // it with the new folder name discards that choice on an unrelated action.
+    const s = await store();
+    await s.hydrateProjects(["ep-01"]);
+    s.editProject("ep-01", { title: "Episode One" });
+    s.renameProject("ep-01", "ep-001");
+    expect(s.getProjects()[0].title).toBe("Episode One");
+  });
+
+  it("does not leave two entries when renaming onto a name already listed", async () => {
+    const s = await store();
+    await s.hydrateProjects(["A", "B"]);
+    s.renameProject("A", "B");
+    expect(s.getProjects().map((p) => p.folder)).toEqual(["B"]);
+  });
+
+  it("forgets a project whose folder was deleted", async () => {
+    const s = await store();
+    await s.hydrateProjects(["Show"]);
+    s.forgetProject("Show");
+    expect(s.getProjects()).toEqual([]);
+  });
+});

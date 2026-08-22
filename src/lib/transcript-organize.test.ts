@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_TRANSCRIPT_FILTER, folderLabel, organizeTranscripts,
-  type TranscriptFilter,
+  DEFAULT_TRANSCRIPT_FILTER, folderLabel, organizeTranscripts, type TranscriptFilter, withEmptyProjects,
 } from "./transcript-organize";
 import type { LibraryTranscript } from "./transcript-library";
 
@@ -118,5 +117,34 @@ describe("organizing transcripts", () => {
     const before = list.map((i) => i.title);
     organizeTranscripts(list, f({ sort: "name" }));
     expect(list.map((i) => i.title)).toEqual(before);
+  });
+});
+
+describe("withEmptyProjects", () => {
+  const g = (folder: string) => ({ folder, label: folder, items: [] as never[] });
+
+  it("shows a project that holds nothing yet", () => {
+    // Otherwise "New project" makes a folder that never appears, which reads
+    // as a button that does nothing.
+    const out = withEmptyProjects([g("2026-08")], ["Marry Harry"], false);
+    expect(out.map((x) => x.folder)).toEqual(["Marry Harry", "2026-08"]);
+    expect(out[0].items).toEqual([]);
+  });
+
+  it("does not duplicate a project that already has transcripts", () => {
+    const out = withEmptyProjects([g("Marry Harry")], ["Marry Harry"], false);
+    expect(out.map((x) => x.folder)).toEqual(["Marry Harry"]);
+  });
+
+  it("stays out of the way of a search", () => {
+    // A query asks for matches. An empty project cannot be one, so listing it
+    // above the results is chrome burying the answer.
+    expect(withEmptyProjects([g("__results__")], ["Marry Harry"], true).map((x) => x.folder))
+      .toEqual(["__results__"]);
+  });
+
+  it("returns the same array when there is nothing to add", () => {
+    const groups = [g("2026-08")];
+    expect(withEmptyProjects(groups, [], false)).toBe(groups);
   });
 });

@@ -129,3 +129,22 @@ export function updateProject(
 ): TranscriptProject[] {
   return projects.map((p) => (p.folder === folder ? { ...p, ...patch } : p));
 }
+
+/**
+ * Which transcript's picture stands in for a project right now.
+ *
+ * The chosen one wins, but only while it is still IN the project. A transcript
+ * can be moved to another project or renamed on disk at any time, and a header
+ * that keeps pointing at it then shows a broken tile or, worse, the picture of
+ * something that now lives somewhere else. Falling back is not an error path
+ * here - it is the normal consequence of the files being the truth.
+ */
+export function projectPosterSource(
+  project: Pick<TranscriptProject, "posterFrom"> | null,
+  items: readonly { path: string; modifiedMs: number }[],
+): string | null {
+  if (project?.posterFrom && items.some((i) => i.path === project.posterFrom)) {
+    return project.posterFrom;
+  }
+  return fallbackPosterSource(items);
+}

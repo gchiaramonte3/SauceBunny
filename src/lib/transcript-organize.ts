@@ -111,3 +111,29 @@ export function organizeTranscripts(
   groups.sort((a, b) => compare(a.items[0], b.items[0], f.sort));
   return { groups, shown: sorted.length, total: list.length, searching: false };
 }
+
+/**
+ * Add the projects that exist on disk but hold nothing yet.
+ *
+ * A project is created empty and filled afterwards, so without this the Create
+ * button appears to do nothing: the folder is made, the scan finds no
+ * transcripts in it, and the grouping - which is built FROM transcripts - has
+ * nothing to hang a heading on. An empty shelf you can drop things onto is the
+ * whole point of making one.
+ *
+ * They go at the top, because an empty project is one you just made and are
+ * about to fill. Suppressed while searching, for the same reason grouping is:
+ * a query asks for matches, and an empty project can never be one.
+ */
+export function withEmptyProjects(
+  groups: TranscriptGroup[],
+  projectFolders: readonly string[],
+  searching: boolean,
+): TranscriptGroup[] {
+  if (searching) return groups;
+  const present = new Set(groups.map((g) => g.folder));
+  const empties = projectFolders
+    .filter((f) => !present.has(f))
+    .map((folder) => ({ folder, label: folderLabel(folder), items: [] as LibraryTranscript[] }));
+  return empties.length ? [...empties, ...groups] : groups;
+}

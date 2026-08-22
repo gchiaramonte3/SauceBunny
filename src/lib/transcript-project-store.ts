@@ -120,6 +120,38 @@ export function syncProjectFolders(foldersOnDisk: readonly string[]): void {
   notify();
 }
 
+/**
+ * Carry a project's metadata across a folder rename.
+ *
+ * Without this the poster and colour are lost the moment someone renames a
+ * project: the folder IS the key, so the old entry stops matching anything on
+ * disk and reconciliation replaces it with a blank one. The rename on disk has
+ * already happened by the time this is called - that is what makes it a
+ * carry-over rather than a request.
+ *
+ * `title` follows the folder unless the person had set a title that already
+ * diverged from it, which is the only case where the displayed name was a
+ * deliberate choice rather than a default.
+ */
+export function renameProject(from: string, to: string): void {
+  const p = projects.find((x) => x.folder === from);
+  if (!p || from === to) return;
+  const renamedTitle = p.title === from ? to : p.title;
+  projects = projects
+    .filter((x) => x.folder !== to)
+    .map((x) => (x.folder === from ? { ...x, folder: to, title: renamedTitle } : x));
+  save();
+  notify();
+}
+
+/** Drop a project's metadata once its folder is gone from disk. */
+export function forgetProject(folder: string): void {
+  if (!projects.some((p) => p.folder === folder)) return;
+  projects = projects.filter((p) => p.folder !== folder);
+  save();
+  notify();
+}
+
 export function editProject(
   folder: string,
   patch: Partial<Omit<TranscriptProject, "folder">>,

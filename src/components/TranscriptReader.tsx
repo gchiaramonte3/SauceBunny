@@ -1,8 +1,17 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { IconTranscript, IconPanelLeft } from "./Icons";
+import { invoke } from "@tauri-apps/api/core";
+import { IconTranscript, IconPanelLeft, IconPlus } from "./Icons";
+import { formatError } from "../lib/error-format";
 import { ReaderRowThumb } from "./ReaderRowThumb";
 import { ReaderRowMenu, type RowMenuTarget } from "./ReaderRowMenu";
-import { organizeTranscripts, type TranscriptSort } from "../lib/transcript-organize";
+import { ReaderProjectHeader } from "./ReaderProjectHeader";
+import { ProjectMenu, type ProjectMenuTarget } from "./ProjectMenu";
+import { isProjectFolder, projectFor, projectPosterSource } from "../lib/transcript-projects";
+import {
+  editProject, forgetProject, getProjects, hydrateProjects, renameProject,
+  subscribeProjects, syncProjectFolders,
+} from "../lib/transcript-project-store";
+import { organizeTranscripts, withEmptyProjects, type TranscriptSort } from "../lib/transcript-organize";
 import {
   loadTranscriptLibrary, type LibraryTranscript,
 } from "../lib/transcript-library";
@@ -68,6 +77,11 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   const [list, setList] = useState<LibraryTranscript[]>([]);
   const [tick, setTick] = useState(0);
   const [rowMenu, setRowMenu] = useState<RowMenuTarget | null>(null);
+  const [projectMenu, setProjectMenu] = useState<ProjectMenuTarget | null>(null);
+  const [newProject, setNewProject] = useState<string | null>(null);
+  const [projectTick, setProjectTick] = useState(0);
+  const [scanned, setScanned] = useState(false);
+  const [projectErr, setProjectErr] = useState<string | null>(null);
   const recentIndex = useMemo(() => buildRecentIndex(recents), [recents]);
 
   // Re-scan when the reader shows, a new transcript lands, or the library path
@@ -86,9 +100,34 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   useEffect(() => {
     void tick;
     let alive = true;
-    void loadTranscriptLibrary(transcriptLibraryPath).then((l) => { if (alive) setList(l); });
+    void loadTranscriptLibrary(transcriptLibraryPath).then((l) => {
+      if (!alive) return;
+      setList(l);
+      setScanned(true);
+    });
     return () => { alive = false; };
   }, [tick, transcriptLibraryPath]);
+
+  // Project metadata: hydrate once, then reconcile against whatever folders
+  // the scan actually found. The FILESYSTEM wins - a folder made or removed in
+  // Finder has to show up here, or the panel and the disk tell two different
+  // stories.
+  useEffect(() => subscribeProjects(() => setProjectTick((t) => t + 1)), []);
+  const folders = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of list) if (t.folder) set.add(t.folder);
+    return [...set];
+  }, [list]);
+  // Not until the first scan has actually returned. Hydrating against an empty
+  // folder list would reconcile every stored project away as "not on disk", and
+  // the next sync would write that back - posters and colours gone on every
+  // boot, from a list that only meant "the scan has not finished".
+  useEffect(() => {
+    if (!scanned) return;
+    void hydrateProjects(folders);
+  }, [scanned]);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (scanned) syncProjectFolders(folders); }, [scanned, folders]);
+  const projects = useMemo(() => { void projectTick; return getProjects(); }, [projectTick]);
 
   // Search is debounced like the Library's (150ms): typing re-filters a
   // hundred-plus rows on every keystroke otherwise.
@@ -106,7 +145,21 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
     () => organizeTranscripts(list, { query: needle, sort, speakersOnly, analyzedOnly }),
     [list, needle, sort, speakersOnly, analyzedOnly],
   );
-  const groups = organized.groups;
+  // Projects the scan found no transcripts in still belong on the shelf - see
+  // withEmptyProjects. `projects` is the reconciled list, so this is every
+  // project folder on disk, not only the ones that happen to hold something.
+  const groups = useMemo(
+    () => withEmptyProjects(organized.groups, projects.map((p) => p.folder), organized.searching),
+    [organized, projects],
+  );
+
+  /** The art for a project's picture: the chosen transcript's, else the newest
+   *  one's. Same `transcriptArt` the rows use, so nothing decodes twice. */
+  function posterArtFor(folder: string, items: LibraryTranscript[]) {
+    const path = projectPosterSource(projectFor(projects, folder), items);
+    const t = items.find((i) => i.path === path);
+    return t ? transcriptArt(t, recentIndex) : null;
+  }
 
   // Move-dialog destinations: the library root + each existing one-level folder.
   const folderOptions = useMemo(() => {
@@ -138,7 +191,46 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
               ? organized.total
               : `${organized.shown} of ${organized.total}`}
           </span>
+          <button
+            type="button"
+            className="cp-reader-newproject"
+            title="New project"
+            aria-label="New project"
+            aria-expanded={newProject !== null}
+            onClick={() => setNewProject((v) => (v === null ? "" : null))}
+          >
+            <IconPlus size={14} />
+          </button>
         </div>
+        {/* Inline, not a dialog: making a project is creating an empty folder,
+            and the thing you do next is drag transcripts into it. A modal for
+            that puts a ceremony in front of a `mkdir`. */}
+        {newProject !== null && (
+          <form
+            className="cp-reader-newproject-row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = newProject.trim();
+              if (!name) return;
+              void invoke("create_transcript_folder", { libraryPath: transcriptLibraryPath, name })
+                .then(() => { setNewProject(null); setTick((t) => t + 1); })
+                .catch((err) => setProjectErr(formatError(err)));
+            }}
+          >
+            <input
+              className="cp-reader-newproject-input"
+              value={newProject}
+              autoFocus
+              spellCheck={false}
+              placeholder="Project name…"
+              aria-label="New project name"
+              onChange={(e) => { setNewProject(e.target.value); setProjectErr(null); }}
+              onKeyDown={(e) => { if (e.key === "Escape") { setNewProject(null); setProjectErr(null); } }}
+            />
+            <button className="btn cp-tx-iconbtn" type="submit" disabled={!newProject.trim()}>Create</button>
+          </form>
+        )}
+        {projectErr && <p className="cp-reader-project-err">{projectErr}</p>}
         <div className="cp-reader-tools">
           <input
             className="cp-reader-search"
@@ -184,7 +276,25 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
         <div className="cp-reader-list">
           {groups.map((g) => (
             <section key={g.folder || "root"} className="cp-reader-group">
-              <h3 className="cp-reader-group-label">{g.label}</h3>
+              <ReaderProjectHeader
+                label={projectFor(projects, g.folder)?.title || g.label}
+                count={g.items.length}
+                art={posterArtFor(g.folder, g.items)}
+                isProject={isProjectFolder(g.folder)}
+                accent={projectFor(projects, g.folder)?.color ?? null}
+                requestThumb={requestThumb}
+                posterVersions={posterVersions}
+                onMenu={(x, y) => setProjectMenu({
+                  folder: g.folder,
+                  title: projectFor(projects, g.folder)?.title || g.label,
+                  items: g.items.map((t) => ({ path: t.path, title: t.title })),
+                  posterFrom: projectFor(projects, g.folder)?.posterFrom ?? null,
+                  x, y,
+                })}
+              />
+              {g.items.length === 0 && (
+                <p className="cp-reader-group-empty">Nothing here yet. Move a transcript in from its row menu.</p>
+              )}
               {g.items.map((t) => (
                 <button
                   key={t.path}
@@ -208,7 +318,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
               ))}
             </section>
           ))}
-          {list.length === 0 && (
+          {list.length === 0 && groups.length === 0 && (
             <div className="cp-reader-empty">No transcripts yet. Generate one from a source in Clip.</div>
           )}
         </div>
@@ -258,6 +368,16 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
               itself), so popping out never remounts / reloads the player. */}
           {(stageExpanded || stageFloating) && stage}
         </aside>
+      )}
+      {projectMenu && (
+        <ProjectMenu
+          target={projectMenu}
+          libraryPath={transcriptLibraryPath}
+          onClose={() => setProjectMenu(null)}
+          onRenamed={(from, to) => { renameProject(from, to); setTick((t) => t + 1); }}
+          onDeleted={(folder) => { forgetProject(folder); setTick((t) => t + 1); }}
+          onPickPoster={(folder, path) => editProject(folder, { posterFrom: path })}
+        />
       )}
       {rowMenu && (
         <ReaderRowMenu
