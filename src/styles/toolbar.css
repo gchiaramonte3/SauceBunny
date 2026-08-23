@@ -96,7 +96,7 @@
   flex-direction: column;
   background: #15151a;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--r-card);
   box-shadow: 0 8px 12px rgba(0,0,0,0.55);
   animation: cp-fade-in var(--dur-fast) var(--ease-out);
   overflow: hidden;
@@ -114,7 +114,7 @@
   flex-direction: column;
   gap: 2px;
   padding: 7px 28px 7px 10px;
-  border-radius: 7px;
+  border-radius: var(--r-md);
   cursor: pointer;
 }
 .cp-recents-row.active { background: rgba(255,255,255,0.06); }
@@ -164,7 +164,7 @@
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   background: transparent;
   font-size: 13px;
   line-height: 1;

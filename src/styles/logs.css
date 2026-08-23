@@ -55,7 +55,7 @@
   flex: 1;
   height: 2px;
   background: rgba(255,255,255,0.04);
-  border-radius: 1px;
+  border-radius: var(--r-2xs);
   position: relative;
   overflow: hidden;
   max-width: 240px;
@@ -64,7 +64,7 @@
   position: absolute;
   top: 0; left: 0; bottom: 0;
   background: var(--accent);
-  border-radius: 1px;
+  border-radius: var(--r-2xs);
   transition: width var(--dur-base) var(--ease-out);
   box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.4);
 }
@@ -95,7 +95,7 @@
   width: 8px;
   height: 8px;
   background: #ff5757;
-  border-radius: 2px;
+  border-radius: var(--r-2xs);
   box-shadow: 0 0 8px rgba(232,38,38, 0.5);
 }
 .cp-logs-header .actions {
@@ -117,7 +117,7 @@
 }
 .cp-logs-body::-webkit-scrollbar { width: 6px; height: 6px; }
 .cp-logs-body::-webkit-scrollbar-track { background: transparent; }
-.cp-logs-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 3px; }
+.cp-logs-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: var(--r-xs); }
 
 .log-line {
   display: grid;

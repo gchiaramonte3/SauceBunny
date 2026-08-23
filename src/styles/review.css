@@ -354,7 +354,7 @@
 
 .cp-review-comment {
   border: 1px solid var(--line-2);
-  border-radius: 11px;
+  border-radius: var(--r-lg);
   padding: 11px 12px;
   background: rgba(255,255,255,0.02);
   transition: opacity var(--dur-fast) var(--ease-out);
@@ -533,7 +533,7 @@
   padding: 22px 20px;
   background: #161619;
   border: 1px solid var(--line-2);
-  border-radius: 14px;
+  border-radius: var(--r-xl);
   box-shadow: 0 18px 50px rgba(0,0,0,0.55);
 }
 .cp-review-namegate-card h3 {
@@ -871,7 +871,7 @@
 .cp-dictwave-bar {
   width: 3px;
   height: 22px;
-  border-radius: 2px;
+  border-radius: var(--r-2xs);
   transform: scaleY(0.12);
   transform-origin: center;
   will-change: transform;
@@ -1106,7 +1106,7 @@
   color: var(--fg-1);
   background: rgba(255,255,255,0.07);
   border: 1px solid var(--line-2);
-  border-radius: 11px;
+  border-radius: var(--r-lg);
   cursor: pointer;
 }
 .cp-review-verpill:hover { background: rgba(255,255,255,0.12); }
@@ -1174,7 +1174,7 @@
   border: none;
   background: none;
   color: var(--fg-3);
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   font-size: 11px;
 }

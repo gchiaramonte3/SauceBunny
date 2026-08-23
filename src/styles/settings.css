@@ -152,7 +152,7 @@
 }
 .cp-modal-content::-webkit-scrollbar { width: 6px; }
 .cp-modal-content::-webkit-scrollbar-track { background: transparent; }
-.cp-modal-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 3px; }
+.cp-modal-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: var(--r-xs); }
 
 .cp-pane-title {
   font-family: var(--font-sans);
@@ -393,7 +393,7 @@
   flex: 1;
   height: 4px;
   background: rgba(255,255,255,0.05);
-  border-radius: 2px;
+  border-radius: var(--r-2xs);
   overflow: hidden;
   max-width: 280px;
 }
@@ -461,7 +461,7 @@
   padding: 2px 5px;
   min-width: 18px;
   text-align: center;
-  border-radius: 3.5px;
+  border-radius: var(--r-xs);
   line-height: 1.1;
 }
 .cp-shortcut-row .keys kbd.sym {
@@ -474,7 +474,7 @@
 .cp-about-hero {
   background: linear-gradient(180deg, #18181b 0%, #121214 100%);
   border: 1px solid var(--line-1);
-  border-radius: 10px;
+  border-radius: var(--r-card);
   padding: 22px 24px;
   display: flex;
   align-items: center;
@@ -1190,7 +1190,7 @@
   margin-top: 16px;
   padding: 14px 16px;
   border: 1px solid var(--line-1);
-  border-radius: 10px;
+  border-radius: var(--r-card);
   background: var(--bg-1);
 }
 .cp-aiapi-cardhead { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
@@ -1207,7 +1207,7 @@
   font-variant-numeric: tabular-nums;
   background: var(--bg-3);
   border: 1px solid var(--line-2);
-  border-radius: 7px;
+  border-radius: var(--r-md);
   color: var(--fg-1);
   font-family: var(--font-mono);
   font-size: 12.5px;

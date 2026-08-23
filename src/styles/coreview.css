@@ -374,7 +374,7 @@
 .cp-gr-meter-bar {
   flex: 1;
   height: 100%;
-  border-radius: 1.5px;
+  border-radius: var(--r-2xs);
   opacity: 0.16;
   transition: opacity var(--dur-instant) linear;
 }

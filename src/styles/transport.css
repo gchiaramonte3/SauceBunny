@@ -237,7 +237,7 @@
       transparent 4px
     ),
     linear-gradient(180deg, var(--bg-3), var(--bg-2));
-  border-radius: 2px;
+  border-radius: var(--r-2xs);
 }
 /* Timeline filmstrip — thumbnail scrubber. Frames tile edge-to-edge as the
    lowest track layer (mediabunny-decoded, rotation-correct); the fill above
@@ -247,7 +247,7 @@
 .cp-track.has-filmstrip { height: 44px; }
 .cp-filmstrip {
   position: absolute; inset: 0; z-index: 0;
-  display: flex; overflow: hidden; border-radius: 2px;
+  display: flex; overflow: hidden; border-radius: var(--r-2xs);
   pointer-events: none;
 }
 .cp-filmstrip-cell { flex: 1 1 0; min-width: 0; height: 100%; }
@@ -288,7 +288,7 @@
 .cp-track-lanes > div {
   position: absolute;
   top: 0; bottom: 0;
-  border-radius: 2px;
+  border-radius: var(--r-2xs);
   opacity: 0.85;
 }
 .cp-track-selection {
@@ -536,7 +536,7 @@
   position: absolute;
   bottom: 2px;
   height: 9px;
-  border-radius: 2px;
+  border-radius: var(--r-2xs);
   overflow: hidden; /* nothing paints outside the band */
   background:
     linear-gradient(
@@ -580,7 +580,7 @@
   position: absolute;
   bottom: 2px;
   height: 9px;
-  border-radius: 2px;
+  border-radius: var(--r-2xs);
   border: 1px dashed var(--marker-color, var(--accent));
   background:
     linear-gradient(
@@ -682,7 +682,7 @@
 .cp-playhead:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
-  border-radius: 2px;
+  border-radius: var(--r-2xs);
 }
 
 /* Reduced motion. Transitions here are stopped by DURATION, never by

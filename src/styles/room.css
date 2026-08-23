@@ -117,14 +117,14 @@
 .cp-transfer-bar {
   flex: 1;
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--r-2xs);
   background: var(--bg-3);
   overflow: hidden;
   min-width: 80px;
 }
 .cp-transfer-fill {
   height: 100%;
-  border-radius: 2px;
+  border-radius: var(--r-2xs);
   background: var(--accent);
   transition: width var(--dur-base) ease-out;
 }
@@ -699,7 +699,7 @@
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: cover;
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   background: var(--bg-0);
   display: block;
 }

@@ -319,7 +319,7 @@
   justify-content: center;
   background: rgba(255,255,255,0.03);
   border: 1px solid var(--line-2);
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   color: var(--fg-3);
   cursor: pointer;
   padding: 0;
@@ -464,7 +464,7 @@
 .cp-tx-cue {
   display: inline;
   cursor: pointer;
-  border-radius: 2px;
+  border-radius: var(--r-2xs);
   /* A cue with no break opportunity used to run straight off the panel. This
      is the surface that shows the MOST user-supplied text and it was the only
      text surface in the app without an unbreakable-string guard — the library
@@ -1520,7 +1520,7 @@
   position: relative;
   flex: 1;
   height: 14px;
-  border-radius: 7px;
+  border-radius: var(--r-md);
   cursor: pointer;
   touch-action: none;
   background: linear-gradient(to right,
@@ -1819,7 +1819,7 @@
   padding: 8px 10px 16px;
 }
 .cp-tx-group {
-  border-radius: 10px;
+  border-radius: var(--r-card);
   border: 1px solid transparent;
   transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
 }
@@ -1840,7 +1840,7 @@
   padding: 8px 10px;
   background: transparent;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--r-card);
   cursor: pointer;
   text-align: left;
 }
@@ -2057,7 +2057,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 8px;
-  border-radius: 10px;
+  border-radius: var(--r-card);
   border: 1px solid var(--line-2);
   background: var(--bg-1);
   box-shadow: var(--shadow-card);
@@ -2102,7 +2102,7 @@
   align-items: center;
   justify-content: center;
   height: 28px;
-  border-radius: 7px;
+  border-radius: var(--r-md);
   border: 1px solid transparent;
   background: rgba(255,255,255,0.04);
   color: var(--fg-2);
@@ -2232,7 +2232,7 @@
 .cp-txsearch-text mark {
   background: rgba(255,255,255,0.18);
   color: var(--fg-1);
-  border-radius: 2px;
+  border-radius: var(--r-2xs);
   padding: 0 1px;
 }
 

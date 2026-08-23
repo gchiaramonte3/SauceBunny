@@ -165,12 +165,28 @@ describe("no unreferenced design tokens", () => {
  * checked before substituting, since a scoped override would have made this a
  * behaviour change rather than a rename.
  *
- * What this does NOT enforce is the off-scale values, and that is deliberate.
- * 67 declarations use 2px, 5px, 7px and 10px, which is too many to be
- * mistakes: it says the scale (4 / 6 / 8 / 12 / 16) does not match what the UI
- * actually needs. Whether to add steps or to move those to the nearest rung is
- * a design decision with visible consequences, so it stays a decision rather
- * than becoming a rule enforced by a robot.
+ * The off-scale values used to be left alone here, with a note saying the 67
+ * declarations of 2px, 5px, 7px and 10px were too many to be mistakes and that
+ * choosing between adding steps and rounding them was a design decision rather
+ * than a rule for a robot. That decision has now been made, by looking at what
+ * each of them actually was (r162):
+ *
+ *   2px  x16  had no name at all      -> --r-2xs, a new step
+ *   10px x14  model card, notification popover, floating player panel, toast,
+ *             welcome row - ONE family, the radius of a surface that floats,
+ *             deliberately between a control's 8 and a container's 12
+ *                                     -> --r-card, a new step
+ *   5px  x12  small tiles, chips, thumbs, close buttons -> --r-sm (6)
+ *   7px  x10  inputs, rows, cells                       -> --r-md (8)
+ *   3px, 9px, 11px, 14px, 1px, 1.5px, 3.5px             -> nearest rung
+ *
+ * The two clusters were decisions with nowhere to live, and got names. The
+ * rest were nobody choosing 5 over 6 - a 1px difference on a small control is
+ * what eyeballing produces, not an intention, and rounding it is the drift
+ * being corrected rather than a redesign.
+ *
+ * Still not enforced: `50%`, `0`, and per-corner shorthands like
+ * `0 0 6px 6px`. Those are shape, not size.
  */
 describe("radius scale", () => {
   const RADIUS = /border-radius\s*:\s*([^;{}]+);/g;
@@ -348,5 +364,40 @@ describe("z-index: app layers are named, local stacking is left alone", () => {
       .flatMap(([, css]) => [...css.matchAll(/z-index\s*:\s*(-?\d+)\s*;/g)])
       .filter((m) => Number(m[1]) <= LOCAL_CEILING);
     expect(locals.length).toBeGreaterThan(30);
+  });
+});
+
+/**
+ * The radius scale is now COMPLETE, so an off-scale literal is drift.
+ *
+ * This could not be asserted until the two missing steps existed: before
+ * r162 a 10px corner had no token to point at, so failing it would have
+ * demanded a visible change with nowhere good to go. Now every real value
+ * has a name, and writing a number means reaching past all of them.
+ */
+describe("radius scale is complete", () => {
+  /** Shape, not size - these are exempt on purpose. */
+  const SHAPE = /^(50%|0|inherit)$/;
+
+  it("has no off-scale literal left", () => {
+    const offenders: string[] = [];
+    for (const [name, css] of cssFiles()) {
+      if (name === "tokens.css") continue;
+      css.split("\n").forEach((line, i) => {
+        const m = line.replace(/\/\*.*?\*\//g, "").match(/border-radius\s*:\s*([^;{}]+);/);
+        if (!m) return;
+        const v = m[1].trim();
+        if (v.includes("var(") || SHAPE.test(v) || v.includes(" ")) return;
+        offenders.push(`${name}:${i + 1} border-radius: ${v} - the scale has a rung for this`);
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("keeps the per-corner shorthands, which are shape", () => {
+    const shorthand = cssFiles().flatMap(([, css]) =>
+      [...css.matchAll(/border-radius\s*:\s*([^;{}]+);/g)].map((m) => m[1].trim()),
+    ).filter((v) => v.includes(" ") && !v.includes("var("));
+    expect(shorthand.length).toBeGreaterThan(2);
   });
 });

@@ -1495,7 +1495,7 @@
   pointer-events: none;
   border: 1px solid rgba(255,255,255,0.55);
   background: rgba(255,255,255,0.08);
-  border-radius: 2px;
+  border-radius: var(--r-2xs);
 }
 
 /* ── Rename dialog ───────────────────────────────────────────────────────────
@@ -1523,7 +1523,7 @@
   color: var(--fg-1);
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--line-2);
-  border-radius: 7px;
+  border-radius: var(--r-md);
 }
 .cp-rename-input:focus { outline: none; border-color: var(--focus-ring); }
 .cp-rename-tokens { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -1534,7 +1534,7 @@
   color: var(--fg-3);
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--line-2);
-  border-radius: 5px;
+  border-radius: var(--r-sm);
   cursor: pointer;
 }
 .cp-rename-token:hover { color: var(--fg-1); background: rgba(255,255,255,0.1); }
@@ -1553,7 +1553,7 @@
   padding: 4px 6px;
   font-size: 11.5px;
   color: var(--fg-2);
-  border-radius: 5px;
+  border-radius: var(--r-sm);
 }
 .cp-rename-from { color: var(--fg-4); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-rename-arrow { color: var(--fg-4); flex: 0 0 auto; }
@@ -1656,7 +1656,7 @@
   font-size: 13px;
   cursor: pointer;
   padding: 2px 6px;
-  border-radius: 5px;
+  border-radius: var(--r-sm);
 }
 .cp-ql-close:hover { color: var(--fg-1); background: rgba(255,255,255,0.08); }
 .cp-ql-video { display: block; width: 100%; max-height: calc(84vh - 44px); background: #000; outline: none; }

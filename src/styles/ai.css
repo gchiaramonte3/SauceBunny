@@ -32,7 +32,7 @@
   margin-top: 12px;
   padding: 12px;
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--r-card);
   background: rgba(255,255,255,0.02);
   display: flex;
   flex-direction: column;
@@ -72,7 +72,7 @@
 .cp-ai-model-alt:disabled { opacity: 0.5; cursor: default; }
 
 .cp-ai-dl { display: flex; align-items: center; gap: 8px; }
-.cp-ai-dl-bar { flex: 1; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.cp-ai-dl-bar { flex: 1; height: 6px; border-radius: var(--r-xs); background: rgba(255,255,255,0.08); overflow: hidden; }
 .cp-ai-dl-fill { height: 100%; background: var(--color-accent-green); transition: width var(--dur-fast) linear; }
 .cp-ai-dl-pct { font-size: 11px; color: var(--fg-3); font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
 
@@ -442,7 +442,7 @@
   padding: 4px;
   background: var(--bg-2);
   border: 1px solid var(--line-2);
-  border-radius: 10px;
+  border-radius: var(--r-card);
   box-shadow: 0 12px 32px rgba(0,0,0,0.5);
 }
 .cp-ai-slash-item {
