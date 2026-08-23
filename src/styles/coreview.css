@@ -65,7 +65,7 @@
   align-items: center;
   gap: var(--s-3);
   font-family: var(--font-ui);
-  font-size: 22px;
+  font-size: var(--text-4xl);
   font-weight: var(--weight-black);
   letter-spacing: -0.015em;
   color: var(--fg-0);
@@ -78,7 +78,7 @@
   display: flex;
   flex-direction: column;
   font-family: var(--font-ui);
-  font-size: 12.5px;
+  font-size: var(--text-md);
   line-height: 1.55;
   color: var(--fg-3);
 }
@@ -97,7 +97,7 @@
   margin: 0;
   text-align: center;
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-black);
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -120,7 +120,7 @@
   justify-content: center;
   gap: 5px;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   color: var(--fg-3);
 }
@@ -132,7 +132,7 @@
   border-radius: var(--r-sm);
   color: var(--fg-1);
   font-family: var(--font-ui);
-  font-size: 12.5px;
+  font-size: var(--text-md);
 }
 .cp-colobby-input::placeholder { color: var(--fg-5); }
 /* THE lobby action: the grey chip (user call 2026-07-19 - no green
@@ -171,7 +171,7 @@
   padding: 0 var(--s-2);
   text-align: center;
   font-family: var(--font-ui);
-  font-size: 11.5px;
+  font-size: var(--text-base);
   line-height: 1.5;
   color: var(--fg-4);
 }
@@ -206,7 +206,7 @@
   width: 100%;
   min-width: 0;
   padding: var(--s-3) var(--s-4);
-  font-size: 13px;
+  font-size: var(--text-lg);
   font-weight: var(--weight-bold);
   line-height: 1.45;
   letter-spacing: 0.02em;
@@ -227,7 +227,7 @@
 .cp-keycap.cp-colobby-code:active { transform: translateY(1px); }
 .cp-colobby-code-hint {
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   color: var(--fg-4);
 }
 /* "Copied" is live feedback — the one green moment in this block. */
@@ -265,7 +265,7 @@
   background: var(--co-color, var(--fg-4));
   box-shadow: 0 0 0 2px var(--bg-0);
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--text-lg);
   font-weight: var(--weight-black);
   letter-spacing: 0.01em;
   color: var(--bg-0);
@@ -290,7 +290,7 @@
 .cp-colobby-name {
   max-width: 100%;
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   color: var(--fg-2);
   white-space: nowrap;
@@ -300,7 +300,7 @@
 .cp-colobby-person-tag {
   min-height: 13px;
   font-family: var(--font-ui);
-  font-size: 9.5px;
+  font-size: var(--text-xs);
   font-weight: var(--weight-bold);
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -312,7 +312,7 @@
   margin: 0;
   text-align: center;
   font-family: var(--font-ui);
-  font-size: 11.5px;
+  font-size: var(--text-base);
   line-height: 1.5;
   color: var(--color-destructive);
 }
@@ -333,7 +333,7 @@
   padding: var(--s-1) var(--s-2);
   border-radius: var(--r-sm);
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   color: var(--fg-3);
   cursor: pointer;
@@ -413,7 +413,7 @@
   flex: 1;
   min-width: 0;
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--fg-2);
   white-space: nowrap;
   overflow: hidden;
@@ -424,7 +424,7 @@
   border: none;
   background: none;
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--fg-3);
   cursor: pointer;
   padding: var(--s-1);
@@ -448,13 +448,13 @@
 .cp-gr-state-line {
   margin: 0;
   font-family: var(--font-ui);
-  font-size: 12.5px;
+  font-size: var(--text-md);
   color: var(--fg-2);
 }
 .cp-gr-state-sub {
   margin: 0;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   line-height: 1.5;
   color: var(--fg-4);
   max-width: 40ch;
@@ -467,7 +467,7 @@
   justify-content: center;
   gap: 6px;
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-bold);
   letter-spacing: 0.06em;
   text-transform: uppercase;

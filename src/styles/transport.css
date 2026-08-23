@@ -27,7 +27,7 @@
 
 .cp-tc {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--text-lg);
   font-weight: var(--weight-normal);
   color: var(--fg-1);
   letter-spacing: 0.04em;
@@ -167,7 +167,7 @@
   transform: translateX(-50%);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 9px;
+  font-size: var(--text-xs);
   color: var(--fg-5);
   letter-spacing: 0.04em;
   /* The ruler sits above the track; clicks must pass through to the track
@@ -217,7 +217,7 @@
   background: var(--ghost-color, var(--accent));
   color: var(--bg-0);
   font-family: var(--font-ui);
-  font-size: 8.5px;
+  font-size: var(--text-2xs);
   font-weight: var(--weight-bold);
   letter-spacing: 0.02em;
   white-space: nowrap;
@@ -446,7 +446,7 @@
   background: var(--bg-3);
   color: var(--fg-1);
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   line-height: 1.5;
   box-shadow: var(--shadow-soft);
@@ -499,7 +499,7 @@
   z-index: 6;
   box-shadow: 0 4px 14px rgba(0,0,0,0.45), 0 0 0 1px var(--bg-1);
 }
-.cp-track-comment:hover .cp-track-comment-ini { font-size: 10px; opacity: 1; }
+.cp-track-comment:hover .cp-track-comment-ini { font-size: var(--text-sm); opacity: 1; }
 .cp-track-comment.resolved { opacity: 0.45; filter: saturate(0.6); }
 .cp-track-comment.resolved:hover { opacity: 1; filter: none; }
 /* The RANGE twin of the hollow dot below. Same idea, same reason: drop the
@@ -668,7 +668,7 @@
   margin-top: 8px;
   min-height: 16px;
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
   letter-spacing: 0.02em;
   text-align: center;

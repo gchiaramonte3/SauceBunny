@@ -61,7 +61,7 @@
 }
 .cp-bunny-loader-sub {
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--fg-4);
   text-align: center;
 }

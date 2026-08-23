@@ -71,7 +71,7 @@
 /* Tiny type under each icon. fg-4 at rest, fg-1 when the item is active. */
 .cp-nav-label {
   font-family: var(--font-ui);
-  font-size: 9px;
+  font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
   letter-spacing: 0.02em;
   line-height: 1;

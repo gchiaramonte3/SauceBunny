@@ -15,7 +15,7 @@
   padding: 0 14px;
   font-family: var(--font-sans);
   font-weight: var(--weight-semibold);
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--fg-1);
   /* Subtle vertical gradient — top edge fractionally lighter than the
      bottom — combined with the bevel shadow gives the "raised chip"
@@ -211,7 +211,7 @@
 .btn.btn-compact {
   height: 22px;
   padding: 0 10px;
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   font-weight: var(--weight-semibold);
@@ -237,7 +237,7 @@
   overflow: hidden;
   isolation: isolate;
   font-family: var(--font-ui);
-  font-size: 12.5px;
+  font-size: var(--text-md);
   font-weight: var(--weight-bold);
   letter-spacing: 0.01em;
   color: var(--fg-2);
@@ -582,7 +582,7 @@
 
 /* Per-usage width locks (no JS measurement). */
 .cp-sbtn-fetch { min-width: 86px; }
-.cp-sbtn-export { flex: 1; height: 36px; font-size: 13px; }
+.cp-sbtn-export { flex: 1; height: 36px; font-size: var(--text-lg); }
 /* Spinner-only loading (Fetch passes an empty loadingLabel — "Resolving…"
    won't fit the 86px lock): drop the empty label span so its flex gap doesn't
    nudge the spinner off-center. Non-empty labels (Export, etc.) are unaffected. */
@@ -603,7 +603,7 @@
   pointer-events: none;
   color: var(--success);
   font-family: var(--font-ui);
-  font-size: 12.5px;
+  font-size: var(--text-md);
   font-weight: var(--weight-bold);
   transition: opacity var(--dur-slow) var(--ease-out);
 }

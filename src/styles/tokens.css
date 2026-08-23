@@ -183,6 +183,35 @@
      etc.). Nunito Sans supports `font-variant-numeric: tabular-nums`
      so timecode columns still line up perfectly. The system-font tail
      is the load-failure fallback only. */
+  /* ── Type scale (r162) ────────────────────────────────────────────────
+     Eleven rungs, down from 29 distinct font-size values across 553
+     declarations. Eleven is more than a scale usually wants, and that is
+     deliberate: the alternative was moving heavily-used sizes by 1-3px to
+     reach a shorter list, which is a redesign of the whole app dressed up
+     as a cleanup. A scale's job here is to stop the thirtieth value
+     appearing, not to be short.
+
+     What DID collapse are the pairs half a pixel apart - 10/10.5, 11/11.5,
+     12/12.5, 13/13.5. Those are one intention written two ways: .cp-ai-
+     model-blurb at 11.5 and .cp-ai-chapters-title at 11 are the same kind
+     of label in the same file, and no comment anywhere explains a
+     difference. Each pair collapsed to its more-used member, so the fewest
+     sites move.
+
+     Pick by ROLE. --text-base is the app's body size; below it is chrome,
+     above it is titling, and there are only four rungs above on purpose. */
+  --text-2xs:  8.5px; /* dense badge numerals */
+  --text-xs:   9.5px; /* chip and pip labels */
+  --text-sm:    10px; /* metadata, all-caps group labels */
+  --text-base:  11px; /* body */
+  --text-md:    12px; /* control labels, row titles */
+  --text-lg:    13px; /* emphasised rows, section labels */
+  --text-xl:    14px; /* section headings */
+  --text-2xl:   15px; /* dialog titles, large inputs */
+  --text-3xl:   18px; /* pane titles, empty states, large glyphs */
+  --text-4xl:   22px; /* modal titles */
+  --text-5xl:   28px; /* the welcome screen, and nothing else */
+
   /* ── Weight ───────────────────────────────────────────────────────────
      ONLY the faces imported in src/main.tsx: 300, 400, 600, 700, 800.
 

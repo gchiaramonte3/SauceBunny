@@ -53,7 +53,7 @@
 .cp-section.collapsible.collapsed > .cp-section-head .chev { transform: rotate(-90deg); }
 .cp-section.collapsible > .cp-section-head .label {
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--fg-3);
   text-transform: uppercase;
@@ -62,7 +62,7 @@
 }
 .cp-section.collapsible > .cp-section-head .meta {
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-normal);
   color: var(--fg-5);
   letter-spacing: 0.04em;
@@ -72,7 +72,7 @@
 
 .cp-section-label {
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--fg-4);
   text-transform: uppercase;
@@ -109,7 +109,7 @@
 }
 .cp-thumb-empty-label {
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-sm);
   /* Status copy, so fg-4 or up per tokens.css. fg-5 measured 4.09:1. */
   color: var(--fg-4);
   letter-spacing: 0.08em;
@@ -120,7 +120,7 @@
   bottom: 6px; right: 6px;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-normal);
   color: var(--fg-1);
   background: rgba(0,0,0,0.75);
@@ -135,7 +135,7 @@
   margin: 0 0 6px;
   font-family: var(--font-sans);
   font-weight: var(--weight-bold);
-  font-size: 14px;
+  font-size: var(--text-xl);
   line-height: 1.35;
   color: var(--fg-1);
   letter-spacing: -0.01em;
@@ -157,7 +157,7 @@
   align-items: center;
   gap: 6px;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   color: var(--fg-3);
   margin-top: 4px;
   flex-wrap: wrap;
@@ -174,14 +174,14 @@
   row-gap: 7px;
   column-gap: 10px;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
 }
 .cp-kv .k {
   color: var(--fg-4);
   font-weight: var(--weight-normal);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 10px;
+  font-size: var(--text-sm);
   align-self: center;
 }
 .cp-kv .v {
@@ -206,7 +206,7 @@
 }
 .cp-source-hint {
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   line-height: 1.45;
   padding: 6px 8px;
   border-radius: var(--r-sm);
@@ -218,7 +218,7 @@
   border: 1px solid rgba(232,38,38,0.25);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   /* Long URLs and paths must wrap cleanly inside the sidebar. */
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -297,7 +297,7 @@
 }
 .cp-field label {
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--fg-4);
   text-transform: uppercase;
@@ -310,7 +310,7 @@
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--text-base);
   font-weight: var(--weight-normal);
   color: var(--fg-1);
   outline: none;
@@ -330,7 +330,7 @@
 .cp-input-tc {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: var(--text-md);
   letter-spacing: 0.02em;
   padding: 0 8px;
   text-align: left;
@@ -351,7 +351,7 @@
   padding: 0 10px;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  font-size: var(--text-base);
   color: var(--fg-2);
   white-space: nowrap;
   overflow: hidden;
@@ -370,7 +370,7 @@
   color: var(--fg-3);
   font-family: var(--font-sans);
   font-weight: var(--weight-semibold);
-  font-size: 10px;
+  font-size: var(--text-sm);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 0 10px;
@@ -385,7 +385,7 @@
   align-items: center;
   justify-content: space-between;
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-md);
   font-weight: var(--weight-normal);
   color: var(--fg-2);
   padding: 4px 0;
@@ -499,7 +499,7 @@
   border: 1px solid transparent;
   color: var(--fg-3);
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   letter-spacing: 0.02em;
   padding: 5px 0;
@@ -562,7 +562,7 @@
 .cp-recent .body { flex: 1; min-width: 0; }
 .cp-recent .body .title {
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   color: var(--fg-2);
   white-space: nowrap;
@@ -572,7 +572,7 @@
 }
 .cp-recent .body .meta {
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
   margin-top: 3px;
   display: flex;
@@ -603,7 +603,7 @@
 .cp-folder-nudge {
   margin-top: 8px;
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   color: var(--warning);
   text-align: center;
@@ -626,7 +626,7 @@
   margin-top: 5px;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 10px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
   white-space: nowrap;
   overflow: hidden;

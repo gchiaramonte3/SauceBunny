@@ -401,3 +401,48 @@ describe("radius scale is complete", () => {
     expect(shorthand.length).toBeGreaterThan(2);
   });
 });
+
+/**
+ * Sizes come from the scale.
+ *
+ * 553 font-size declarations used 29 distinct values. Half of the drift was
+ * pairs half a pixel apart - 10/10.5, 11/11.5, 12/12.5, 13/13.5 - and the
+ * giveaway was finding both members of a pair on the same kind of label in
+ * the same file, with no comment anywhere explaining a difference. Nobody
+ * chose 11.5 over 11; they typed a number that looked about right.
+ *
+ * Exempt, and each for a reason rather than by convenience:
+ *   `font-size: 0`  the hide-the-text idiom, not a size
+ *   em units        the reader deliberately scales with a user-set size
+ *   var(--cap-size) caption size is set at runtime
+ */
+describe("font-size comes from the type scale", () => {
+  it("has no stylesheet writing a pixel size", () => {
+    const offenders: string[] = [];
+    for (const [name, css] of cssFiles()) {
+      if (name === "tokens.css") continue;
+      css.split("\n").forEach((line, i) => {
+        const m = line.replace(/\/\*.*?\*\//g, "").match(/font-size\s*:\s*([^;{}]+);/);
+        if (!m) return;
+        const v = m[1].trim();
+        if (v.includes("var(") || v === "0" || v === "inherit" || /em$/.test(v)) return;
+        offenders.push(`${name}:${i + 1} font-size: ${v} - use a --text-* rung`);
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("keeps the em-relative reader sizes, which scale with the user's choice", () => {
+    const ems = cssFiles().flatMap(([, css]) =>
+      [...css.matchAll(/font-size\s*:\s*([\d.]+em)\s*;/g)],
+    );
+    expect(ems.length).toBeGreaterThan(2);
+  });
+
+  it("defines the scale once, at :root, in ascending order", () => {
+    const tokens = readFileSync(join(STYLES, "tokens.css"), "utf8");
+    const rungs = [...tokens.matchAll(/--text-[a-z0-9]+\s*:\s*([\d.]+)px\s*;/g)].map((m) => Number(m[1]));
+    expect(rungs.length).toBeGreaterThanOrEqual(8);
+    expect(rungs, "the file should read as the scale it is").toEqual([...rungs].sort((a, b) => a - b));
+  });
+});

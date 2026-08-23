@@ -32,7 +32,7 @@
 /* × glyph in iconbtns is visually a different baseline than the SVG
    icons; bump font-size + line-height to match. Replaces an inline
    style block on the dismiss button (r46). */
-.cp-tx-glyph-x { font-size: 13px; line-height: 1; }
+.cp-tx-glyph-x { font-size: var(--text-lg); line-height: 1; }
 
 /* Undo / redo pair. Grouped tight so they read as one control, and separated
    from the rest of the toolbar by a hairline — the same way a toolbar
@@ -52,7 +52,7 @@
 .cp-tx-iconbtn {
   height: 24px;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: var(--text-base);
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -78,7 +78,7 @@
 }
 .cp-tx-history-head {
   padding: 8px 12px;
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-bold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -90,7 +90,7 @@
   background: rgba(255,255,255,0.015);
 }
 .cp-tx-history-count {
-  font-size: 10px;
+  font-size: var(--text-sm);
   color: var(--fg-3);
   background: rgba(255,255,255,0.05);
   padding: 1px 6px;
@@ -99,7 +99,7 @@
 }
 .cp-tx-history-empty {
   padding: 20px 16px;
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--fg-4);
   line-height: 1.5;
   text-align: center;
@@ -125,7 +125,7 @@
 }
 .cp-tx-history-row-main { flex: 1; min-width: 0; }
 .cp-tx-history-row-title {
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--fg-2);
   font-weight: var(--weight-normal);
   white-space: nowrap;
@@ -136,7 +136,7 @@
   display: flex;
   gap: 5px;
   align-items: center;
-  font-size: 10px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
   margin-top: 2px;
 }
@@ -158,7 +158,7 @@
   background: transparent;
   border: none;
   color: var(--fg-3);
-  font-size: 14px;
+  font-size: var(--text-xl);
   line-height: 1;
   cursor: pointer;
   border-radius: var(--r-xs);
@@ -185,7 +185,7 @@
 }
 .cp-tx-insights-head {
   padding: 8px 12px;
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-bold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -195,7 +195,7 @@
 }
 .cp-tx-insights-empty {
   padding: 20px 16px;
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--fg-4);
   line-height: 1.5;
   text-align: center;
@@ -215,7 +215,7 @@
   gap: 8px;
 }
 .cp-tx-insights-name {
-  font-size: 12px;
+  font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   color: var(--fg-2);
   white-space: nowrap;
@@ -223,7 +223,7 @@
   text-overflow: ellipsis;
 }
 .cp-tx-insights-nums {
-  font-size: 11px;
+  font-size: var(--text-base);
   color: var(--fg-3);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
@@ -241,7 +241,7 @@
   transition: width var(--dur-base) var(--ease-out);
 }
 .cp-tx-insights-meta {
-  font-size: 11.5px;
+  font-size: var(--text-base);
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
 }
@@ -272,7 +272,7 @@
   border: 0;
   border-radius: var(--r-xs);
   font-family: var(--font-sans);
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--fg-3);
   cursor: pointer;
@@ -292,7 +292,7 @@
   border-radius: var(--r-sm);
   color: var(--fg-1);
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: var(--text-md);
   outline: none;
 }
 .cp-tx-search-input:focus {
@@ -300,7 +300,7 @@
   background: rgba(255, 255, 255, 0.03);
 }
 .cp-tx-search-count {
-  font-size: 10px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
   white-space: nowrap;
 }
@@ -335,7 +335,7 @@
 /* Empty-keybinding indicator inside the commands list (Settings ▸ Commands).
    Replaces an inline style block with hardcoded fallback hex (r46). */
 .cp-cmd-empty-key {
-  font-size: 11px;
+  font-size: var(--text-base);
   color: var(--color-text-secondary);
 }
 
@@ -387,7 +387,7 @@
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-bold);
   color: #0a0a0a;
   display: inline-flex;
@@ -397,7 +397,7 @@
   flex-shrink: 0;
 }
 .cp-tx-speaker-name {
-  font-size: 12px;
+  font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   color: var(--fg-2);
   flex: 1;
@@ -414,7 +414,7 @@
   white-space: nowrap;
 }
 .cp-tx-jump {
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--fg-4);
@@ -450,7 +450,7 @@
   background: rgba(255,255,255,0.025);
   border: 1px solid var(--line-1);
   border-radius: var(--r-md);
-  font-size: 13px;
+  font-size: var(--text-lg);
   line-height: 1.55;
   color: var(--fg-2);
   /* Use a more "prose" font hint — falls back to sans gracefully if
@@ -560,7 +560,7 @@
   border-bottom: 1px solid var(--line-1);
   background: var(--bg-2);
   color: var(--danger);
-  font-size: 11px;
+  font-size: var(--text-base);
   line-height: 1.35;
 }
 
@@ -569,12 +569,12 @@
 /* Icon-over-title, mirroring the AI pane's empty face (.cp-ai-icon tone). */
 .cp-tx-empty-icon { color: var(--fg-3); opacity: 0.85; }
 .cp-tx-empty-title {
-  font-size: 13px;
+  font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
   color: var(--fg-2);
 }
 .cp-tx-empty-body {
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--fg-4);
   line-height: 1.5;
   max-width: 280px;
@@ -583,7 +583,7 @@
 /* Why-is-the-button-disabled hint under the empty-state actions. */
 .cp-tx-empty-hint {
   margin-top: 8px;
-  font-size: 11px;
+  font-size: var(--text-base);
   color: var(--fg-4);
   line-height: 1.45;
   max-width: 280px;
@@ -610,7 +610,7 @@
   z-index: calc(var(--z-menu) + 10);
   font-family: var(--font-ui);
 }
-.cp-tx-tc-title { font-size: 12px; font-weight: var(--weight-bold); color: var(--fg-1); margin-bottom: 8px; }
+.cp-tx-tc-title { font-size: var(--text-md); font-weight: var(--weight-bold); color: var(--fg-1); margin-bottom: 8px; }
 .cp-tx-tc-input {
   width: 100%;
   box-sizing: border-box;
@@ -621,11 +621,11 @@
   color: var(--fg-1);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
+  font-size: var(--text-lg);
   letter-spacing: 0.02em;
 }
-.cp-tx-tc-hint { margin: 8px 0 0; font-size: 10.5px; line-height: 1.45; color: var(--fg-4); }
-.cp-tx-tc-err { margin: 6px 0 0; font-size: 10.5px; color: var(--danger); }
+.cp-tx-tc-hint { margin: 8px 0 0; font-size: var(--text-sm); line-height: 1.45; color: var(--fg-4); }
+.cp-tx-tc-err { margin: 6px 0 0; font-size: var(--text-sm); color: var(--danger); }
 .cp-tx-tc-row { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
 .cp-tx-tc-row .cp-tx-iconbtn { height: 26px; padding: 0 10px; }
 .cp-tx-dl-menu {
@@ -649,7 +649,7 @@
   border: none;
   color: var(--fg-2);
   font-family: var(--font-sans);
-  font-size: 12px;
+  font-size: var(--text-md);
   cursor: pointer;
 }
 .cp-tx-dl-menu button:hover {
@@ -684,7 +684,7 @@
   gap: 8px;
 }
 .cp-tx-rename-label {
-  font-size: 12px;
+  font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   color: var(--fg-3);
 }
@@ -712,7 +712,7 @@
    Chip-per-speaker row under the scope radios; pip colour mirrors the
    roster so the target is recognizable at a glance. */
 .cp-tx-rename-assign { padding: 2px 0 0; border-top: 1px solid var(--line-1); margin-top: 4px; }
-.cp-tx-rename-assign-label { font-size: 10.5px; color: var(--fg-4); padding: 4px 0 5px; }
+.cp-tx-rename-assign-label { font-size: var(--text-sm); color: var(--fg-4); padding: 4px 0 5px; }
 /* ROWS in a scroll box, not a wrapped cloud of pills.
    The cloud was fine at four speakers; at twenty-six it overflowed the popover
    with its last row sliced in half, in first-appearance order. Rows carry the
@@ -741,7 +741,7 @@
   border-radius: var(--r-sm);
   color: var(--fg-2);
   font-family: var(--font-sans);
-  font-size: 11.5px;
+  font-size: var(--text-base);
   cursor: pointer;
   text-align: left;
 }
@@ -763,7 +763,7 @@
   flex-shrink: 0;
   /* Same near-black the initials and kind icons are drawn in elsewhere. */
   color: #0a0a0a;
-  font-size: 8px;
+  font-size: var(--text-2xs);
   font-weight: var(--weight-black);
 }
 .cp-tx-rename-assign-name {
@@ -775,14 +775,14 @@
 }
 .cp-tx-rename-assign-talk {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
 }
 .cp-tx-rename-scope { display: flex; flex-direction: column; gap: 4px; padding: 2px 0; }
 .cp-tx-rename-scope label {
   display: flex; align-items: flex-start; gap: 6px;
-  font-size: 11px; color: var(--fg-3); cursor: pointer; line-height: 1.4;
+  font-size: var(--text-base); color: var(--fg-3); cursor: pointer; line-height: 1.4;
 }
 .cp-tx-rename-scope input[type="radio"] {
   margin-top: 2px; flex-shrink: 0; accent-color: var(--color-accent-green);
@@ -791,7 +791,7 @@
 .cp-tx-rename-actions {
   display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px;
 }
-.cp-tx-rename-actions .btn { height: 26px; padding: 0 12px; font-size: 11px; }
+.cp-tx-rename-actions .btn { height: 26px; padding: 0 12px; font-size: var(--text-base); }
 /* "Go to speaker" is a navigation action, not commit/cancel — sit it at the
    far left so Cancel/Rename stay grouped on the right. */
 .cp-tx-rename-goto { margin-right: auto; padding: 0 10px; }
@@ -804,7 +804,7 @@
   align-items: center;
   gap: 8px;
   padding: 6px 4px;
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--fg-2);
   cursor: pointer;
   user-select: none;
@@ -824,7 +824,7 @@
   gap: 6px;
 }
 .cp-toggle-row .beta {
-  font-size: 9px;
+  font-size: var(--text-xs);
   font-weight: var(--weight-bold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -874,7 +874,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.cp-folder-row .btn { height: 26px; padding: 0 10px; font-size: 11px; flex-shrink: 0; }
+.cp-folder-row .btn { height: 26px; padding: 0 10px; font-size: var(--text-base); flex-shrink: 0; }
 
 /* Inline diagnostic banner in the TranscriptViewer body — used when
    we want to nudge the user (e.g. "no speakers in this transcript"). */
@@ -889,7 +889,7 @@
   border: 1px solid var(--line-2);
   background: rgba(255,255,255,0.025);
   border-radius: var(--r-sm);
-  font-size: 11px;
+  font-size: var(--text-base);
   color: var(--fg-3);
 }
 .cp-tx-hint-ico { color: var(--fg-4); flex-shrink: 0; }
@@ -921,7 +921,7 @@
   background: transparent;
   border: none;
   color: var(--fg-3);
-  font-size: 15px;
+  font-size: var(--text-2xl);
   line-height: 1;
   cursor: pointer;
   border-radius: var(--r-xs);
@@ -978,7 +978,7 @@
   align-items: center;
   gap: 6px;
   padding: 6px 4px 2px;
-  font-size: 10px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1014,7 +1014,7 @@
   padding: 10px 12px 4px;
 }
 .cp-tx-roster-label {
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -1037,7 +1037,7 @@
   background: var(--bg-2);
   border: 1px solid var(--danger);
   color: var(--danger);
-  font-size: 11px;
+  font-size: var(--text-base);
   line-height: 1.35;
   z-index: 30;
   overflow: hidden;
@@ -1050,7 +1050,7 @@
   margin-left: 8px;
   padding: 2px 9px;
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   letter-spacing: 0.02em;
   color: var(--fg-2);
@@ -1099,13 +1099,13 @@
 }
 .cp-spk-title {
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: var(--text-xl);
   font-weight: var(--weight-bold);
   color: var(--fg-1);
 }
 .cp-spk-badge {
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-bold);
   color: var(--fg-3);
   background: rgba(255,255,255,0.07);
@@ -1119,7 +1119,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: var(--text-3xl);
   line-height: 1;
   color: var(--fg-3);
   background: transparent;
@@ -1138,7 +1138,7 @@
 .cp-spk-filter {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--text-md);
   padding: 5px 9px;
 }
 .cp-spk-sort {
@@ -1151,7 +1151,7 @@
 }
 .cp-spk-sortbtn {
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--fg-4);
   background: transparent;
@@ -1229,7 +1229,7 @@
   align-items: center;
   justify-content: center;
   font-family: var(--font-ui);
-  font-size: 8.5px;
+  font-size: var(--text-2xs);
   font-weight: var(--weight-black);
   letter-spacing: 0.01em;
   /* Near-black on a bright palette hue — the contrast the palette was
@@ -1240,7 +1240,7 @@
   flex: 1 1 auto;
   min-width: 0;
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--text-lg);
   color: var(--fg-1);
   background: transparent;
   border: 1px solid transparent;
@@ -1256,7 +1256,7 @@
 .cp-spk-count {
   flex-shrink: 0;
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
 }
@@ -1265,7 +1265,7 @@
   appearance: none;
   -webkit-appearance: none;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   color: var(--fg-2);
   /* Separate background-color so the custom chevron (background-image) survives. */
   background-color: rgba(255,255,255,0.05);
@@ -1293,7 +1293,7 @@
 .cp-spk-footcount {
   flex: 1 1 auto;
   font-family: var(--font-ui);
-  font-size: 11.5px;
+  font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   color: var(--fg-2);
   font-variant-numeric: tabular-nums;
@@ -1311,13 +1311,13 @@
 .cp-cast-newname {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--text-md);
   padding: 5px 9px;
 }
 .cp-cast-err {
   margin: 0 16px 8px;
   font-family: var(--font-ui);
-  font-size: 11.5px;
+  font-size: var(--text-base);
   line-height: 1.45;
   color: var(--danger-text);
 }
@@ -1325,7 +1325,7 @@
   margin: 0;
   padding: 0 16px 10px;
   font-family: var(--font-ui);
-  font-size: 11.5px;
+  font-size: var(--text-base);
   line-height: 1.5;
   color: var(--fg-3);
 }
@@ -1361,7 +1361,7 @@
 }
 .cp-cast-name {
   font-family: var(--font-ui);
-  font-size: 12.5px;
+  font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   color: var(--fg-1);
   overflow: hidden;
@@ -1370,13 +1370,13 @@
 }
 .cp-cast-count {
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
 }
 .cp-cast-confirm {
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   color: var(--fg-2);
 }
@@ -1387,7 +1387,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: var(--text-2xl);
   line-height: 1;
   color: var(--fg-4);
   background: transparent;
@@ -1414,7 +1414,7 @@
   flex: 1 1 0;
   min-width: 0;
   font-family: var(--font-ui);
-  font-size: 12.5px;
+  font-size: var(--text-md);
   color: var(--fg-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1422,7 +1422,7 @@
 }
 .cp-cast-arrow {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--text-base);
   color: var(--fg-4);
 }
 .cp-cast-select { flex: 1 1 0; min-width: 0; }
@@ -1553,7 +1553,7 @@
   border-radius: var(--r-md);
   padding: 5px 9px;
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--fg-3);
 }
 .cp-colorpick-hex:focus-within { border-color: var(--focus-ring); }
@@ -1565,12 +1565,12 @@
   outline: none;
   color: var(--fg-1);
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-md);
   letter-spacing: 0.04em;
   font-variant-numeric: tabular-nums;
   text-transform: lowercase;
 }
-.cp-colorpick-reset { height: 28px; padding: 0 10px; font-size: 11px; }
+.cp-colorpick-reset { height: 28px; padding: 0 10px; font-size: var(--text-base); }
 
 /* Follow playback beside Manage speakers (3d): the roster-button grammar
    with a lifted grey fill so the disengaged state is findable. */
@@ -1601,7 +1601,7 @@
   background: transparent;
   color: var(--fg-3);
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-bold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1626,7 +1626,7 @@
 }
 .cp-newspk-head {
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-md);
   font-weight: var(--weight-black);
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1649,7 +1649,7 @@
   align-items: center;
   gap: 6px;
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
   padding-top: var(--s-1);
 }
@@ -1694,7 +1694,7 @@
   background: var(--bg-3);
   color: var(--fg-2);
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
@@ -1720,7 +1720,7 @@
 }
 .cp-newspk-talk {
   flex-shrink: 0;
-  font-size: 9.5px;
+  font-size: var(--text-xs);
   color: var(--fg-4);
   background: rgba(255,255,255,0.05);
   border-radius: var(--r-pill);
@@ -1786,7 +1786,7 @@
   flex: 1 1 auto;
   min-width: 0;
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--fg-2);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1795,7 +1795,7 @@
 .cp-cast-facefail {
   flex-shrink: 0;
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
 }
 .cp-cast-member .cp-cast-del { opacity: 0; }
@@ -1866,7 +1866,7 @@
   height: 26px;
   border-radius: 50%;
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-black);
   letter-spacing: 0.02em;
   /* Same near-black the transcript bubbles use behind initials — the palette's
@@ -1877,7 +1877,7 @@
   flex: 1 1 auto;
   min-width: 0;
   font-family: var(--font-ui);
-  font-size: 13.5px;
+  font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
   color: var(--fg-1);
   overflow: hidden;
@@ -1887,7 +1887,7 @@
 .cp-tx-group-talk {
   flex-shrink: 0;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   font-weight: var(--weight-bold);
   color: var(--fg-2);
   font-variant-numeric: tabular-nums;
@@ -1897,7 +1897,7 @@
   min-width: 62px;
   text-align: right;
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
 }
@@ -1927,7 +1927,7 @@
 .cp-tx-group-tc {
   flex-shrink: 0;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
 }
@@ -1935,7 +1935,7 @@
   flex: 1 1 auto;
   min-width: 0;
   font-family: var(--font-ui);
-  font-size: 12.5px;
+  font-size: var(--text-md);
   line-height: 1.5;
   color: var(--fg-2);
 }
@@ -1960,7 +1960,7 @@
   background: var(--bg-3);
   color: var(--fg-2);
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
@@ -2028,7 +2028,7 @@
 }
 .cp-tx-rename-icon-initials {
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-black);
 }
 /* The glyph inside this row is drawn on a DARK chip, unlike the speaker badge
@@ -2040,7 +2040,7 @@
 .cp-tx-rename-iconhint {
   height: 13px;
   padding: 0 3px;
-  font-size: 10px;
+  font-size: var(--text-sm);
   line-height: 13px;
   color: var(--fg-3);
   white-space: nowrap;
@@ -2066,7 +2066,7 @@
   height: 26px;
   padding: 0 8px;
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--fg-1);
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--line-2);
@@ -2085,7 +2085,7 @@
 }
 .cp-badgesheet-group { display: flex; flex-direction: column; gap: 3px; }
 .cp-badgesheet-grouplabel {
-  font-size: 9.5px;
+  font-size: var(--text-xs);
   font-weight: var(--weight-bold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2126,13 +2126,13 @@
 }
 .cp-badgesheet-initials {
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   font-weight: var(--weight-black);
 }
-.cp-badgesheet-cell-label { font-size: 11.5px; }
+.cp-badgesheet-cell-label { font-size: var(--text-base); }
 .cp-badgesheet-empty {
   padding: 14px 4px;
-  font-size: 11.5px;
+  font-size: var(--text-base);
   color: var(--fg-3);
   text-align: center;
 }
@@ -2142,7 +2142,7 @@
   height: 21px;
   padding: 6px 3px 0;
   border-top: 1px solid var(--line-2);
-  font-size: 11px;
+  font-size: var(--text-base);
   line-height: 15px;
   color: var(--fg-2);
   white-space: nowrap;
@@ -2180,18 +2180,18 @@
   border: none;
   outline: none;
   font-family: var(--font-ui);
-  font-size: 15px;
+  font-size: var(--text-2xl);
   color: var(--fg-1);
 }
 .cp-txsearch-input::placeholder { color: var(--fg-4); }
 .cp-txsearch-scope {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: var(--text-base);
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
 }
 .cp-txsearch-body { overflow-y: auto; padding: 6px; }
-.cp-txsearch-note { padding: 22px 14px; color: var(--fg-3); font-size: 12.5px; text-align: center; }
+.cp-txsearch-note { padding: 22px 14px; color: var(--fg-3); font-size: var(--text-md); text-align: center; }
 .cp-txsearch-group { margin-bottom: 8px; }
 .cp-txsearch-source {
   display: flex;
@@ -2200,8 +2200,8 @@
   padding: 6px 8px 4px;
   color: var(--fg-3);
 }
-.cp-txsearch-title { font-size: 11.5px; font-weight: var(--weight-bold); color: var(--fg-2); }
-.cp-txsearch-n { font-size: 10.5px; color: var(--fg-4); margin-left: auto; }
+.cp-txsearch-title { font-size: var(--text-base); font-weight: var(--weight-bold); color: var(--fg-2); }
+.cp-txsearch-n { font-size: var(--text-sm); color: var(--fg-4); margin-left: auto; }
 .cp-txsearch-hit {
   display: flex;
   align-items: baseline;
@@ -2214,18 +2214,18 @@
   text-align: left;
   cursor: pointer;
   color: var(--fg-2);
-  font-size: 12.5px;
+  font-size: var(--text-md);
   line-height: 1.45;
 }
 .cp-txsearch-hit:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); }
 .cp-txsearch-hit:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
 .cp-txsearch-tc {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: var(--text-base);
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
 }
-.cp-txsearch-spk { flex: 0 0 auto; font-size: 11px; font-weight: var(--weight-bold); color: var(--fg-3); }
+.cp-txsearch-spk { flex: 0 0 auto; font-size: var(--text-base); font-weight: var(--weight-bold); color: var(--fg-3); }
 .cp-txsearch-text { flex: 1 1 auto; min-width: 0; }
 /* The match itself. Never the accent green: that means "selected" everywhere
    else in the app, and a search hit is not a selection. */
@@ -2258,7 +2258,7 @@
   margin-left: auto;
   padding-left: var(--s-2);
   color: var(--fg-4);
-  font-size: 14px;
+  font-size: var(--text-xl);
   line-height: 1;
 }
 .cp-cuemenu-flyout {
@@ -2281,7 +2281,7 @@
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
   font-family: var(--font-ui);
-  font-size: 12.5px;
+  font-size: var(--text-md);
   color: var(--fg-1);
 }
 /* Brightens toward white on focus, never the green accent (focus-contract). */
@@ -2295,5 +2295,5 @@
 .cp-cuemenu-flyout-empty {
   padding: var(--s-2) var(--s-3);
   color: var(--fg-4);
-  font-size: 12px;
+  font-size: var(--text-md);
 }

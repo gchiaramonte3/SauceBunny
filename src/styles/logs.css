@@ -24,7 +24,7 @@
   cursor: pointer;
   user-select: none;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   color: var(--fg-3);
   letter-spacing: 0.04em;
@@ -35,11 +35,11 @@
   transition: transform var(--dur-base) var(--ease-out);
   color: var(--fg-3);
 }
-.cp-logs-header .title { text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px; }
+.cp-logs-header .title { text-transform: uppercase; letter-spacing: 0.1em; font-size: var(--text-sm); }
 .cp-logs-header .status-pill {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 10px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-normal);
   color: var(--fg-3);
   background: rgba(255,255,255,0.04);
@@ -80,7 +80,7 @@
   border-radius: var(--r-xs);
   color: var(--danger-text);
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -111,7 +111,7 @@
   padding: 8px 16px 12px;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  font-size: var(--text-base);
   line-height: 1.55;
   color: var(--fg-3);
 }
@@ -127,8 +127,8 @@
   padding: 1px 0;
   font-variant-numeric: tabular-nums;
 }
-.log-line .ts { color: var(--fg-5); font-size: 10px; }
-.log-line .tag { font-size: 10px; font-weight: var(--weight-semibold); letter-spacing: 0.04em; text-transform: uppercase; }
+.log-line .ts { color: var(--fg-5); font-size: var(--text-sm); }
+.log-line .tag { font-size: var(--text-sm); font-weight: var(--weight-semibold); letter-spacing: 0.04em; text-transform: uppercase; }
 .log-line .tag.info  { color: var(--fg-3); }
 .log-line .tag.ok    { color: var(--accent); }
 .log-line .tag.warn  { color: var(--warning); }

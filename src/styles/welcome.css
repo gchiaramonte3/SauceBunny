@@ -35,7 +35,7 @@
 }
 .cp-welcome-title {
   margin: var(--s-2) 0 0;
-  font-size: 28px;
+  font-size: var(--text-5xl);
   font-weight: var(--weight-black);
   letter-spacing: -0.02em;
   color: var(--fg-1);
@@ -43,7 +43,7 @@
 }
 .cp-welcome-sub {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-xl);
   color: var(--fg-2);
   animation: cp-welcome-rise 520ms var(--ease-out) 120ms both;
 }
@@ -86,18 +86,18 @@
   min-width: 0;
 }
 .cp-welcome-row-text strong {
-  font-size: 13px;
+  font-size: var(--text-lg);
   font-weight: var(--weight-bold);
   color: var(--fg-1);
 }
 .cp-welcome-row-text span {
-  font-size: 12px;
+  font-size: var(--text-md);
   color: var(--fg-3);
 }
 .cp-welcome-cta {
   margin-top: var(--s-4);
   padding: 10px 26px;
-  font-size: 14px;
+  font-size: var(--text-xl);
   font-weight: var(--weight-bold);
   animation: cp-welcome-rise 520ms var(--ease-out) 560ms both;
 }

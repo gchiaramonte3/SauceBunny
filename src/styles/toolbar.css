@@ -42,7 +42,7 @@
   border: none;
   outline: none;
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--text-lg);
   color: var(--fg-1);
   letter-spacing: -0.005em;
 }
@@ -50,7 +50,7 @@
 .cp-url .scheme {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  font-size: var(--text-base);
   color: var(--fg-4);
 }
 /* In-field icon buttons (paste + history trigger): one shared size so the
@@ -131,7 +131,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   color: var(--fg-1);
 }
@@ -142,7 +142,7 @@
   border: 1px solid var(--line-2);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 9px;
+  font-size: var(--text-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--fg-4);
@@ -151,7 +151,7 @@
   display: flex;
   gap: 10px;
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: var(--text-sm);
   color: var(--fg-4);
 }
 .cp-recents-remove {
@@ -166,7 +166,7 @@
   border: none;
   border-radius: var(--r-sm);
   background: transparent;
-  font-size: 13px;
+  font-size: var(--text-lg);
   line-height: 1;
   color: var(--fg-4);
   cursor: pointer;
@@ -184,7 +184,7 @@
   border: none;
   background: transparent;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-base);
   color: var(--fg-4);
   cursor: pointer;
 }

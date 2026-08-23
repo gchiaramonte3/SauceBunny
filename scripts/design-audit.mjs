@@ -60,7 +60,10 @@ for (const f of files) {
     const l = raw.replace(/\/\*.*?\*\//g, "");
     const lit = (v) => v && !v.startsWith("var(") && v !== "inherit" && v !== "initial";
     let m;
-    if ((m = l.match(/font-size:\s*([^;]+);/)) && lit(m[1].trim()) && !/\dem\b/.test(m[1])) {
+    // `font-size: 0` is the hide-the-text idiom, not a size, and em units
+    // are deliberately relative to a user-set reader size.
+    if ((m = l.match(/font-size:\s*([^;]+);/)) && lit(m[1].trim())
+        && !/\dem\b/.test(m[1]) && m[1].trim() !== "0") {
       out.fontSize.push([at, m[1].trim()]);
     }
     if ((m = l.match(/font-weight:\s*([^;]+);/))) {
