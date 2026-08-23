@@ -120,11 +120,19 @@ const FORMATS: { id: FormatId; label: string }[] = [
  * percent during diarize (FluidAudio doesn't surface one) — the
  * compact phase tracker below the button shows where we are.
  */
-function phaseLabel(phase: string | null, percent: number): string {
+function phaseLabel(phase: string | null, percent: number, diarizerReady = true): string {
   switch (phase) {
     case "download":        return `Downloading audio… ${Math.round(percent)}%`;
     case "extract":         return percent > 0 ? `Preparing audio… ${Math.round(percent)}%` : "Preparing audio…";
-    case "diarize-prepare": return "Loading speaker models…";
+    // "Loading" is honest for a cached read and badly misleading for the
+    // first run, which fetches a few hundred megabytes and can sit here for
+    // minutes with no percent behind it - FluidAudio surfaces none. The app
+    // already knows which case it is in, so it says so rather than leaving
+    // someone watching an apparently-stuck bar decide the app has hung.
+    case "diarize-prepare":
+      return diarizerReady
+        ? "Loading speaker models…"
+        : "Downloading speaker models, a few hundred MB, one time…";
     case "diarize-process": return "Detecting speakers…";
     case "diarize-merge":   return "Merging speaker labels…";
     // Parakeet's transcribe() is one shot — no percent — so we label by phase
@@ -558,7 +566,7 @@ export function Sidebar(props: Props) {
                       : detectSpeakers ? "Generate transcript + speakers"
                       : "Generate transcript"
                     }
-                    loadingLabel={phaseLabel(transcriptPhase, transcriptProgress)}
+                    loadingLabel={phaseLabel(transcriptPhase, transcriptProgress, diarizerReady)}
                   />
                   {transcriptState === "running" && transcriptPhase?.startsWith("diarize") && (
                     /* Mini phase tracker so the user sees we're past

@@ -5033,7 +5033,16 @@ export default function App() {
                   // pen (stay in draw mode); otherwise toggle draw mode itself.
                   if (reviewDrawActive && reviewLabelMode) { setReviewLabelMode(false); return; }
                   setReviewLabelMode(false);
-                  setReviewDrawActive((on) => { if (on) { setReviewDraft(null); clearDraftHistory(); } return !on; });
+                  setReviewDrawActive((on) => {
+                    if (on) { setReviewDraft(null); clearDraftHistory(); }
+                    // Turning the pen ON pauses. Drawing over a still-playing
+                    // video means the frame moves out from under the stroke
+                    // while it is being made, so the mark ends up describing a
+                    // frame nobody chose. The composer latches its anchor time
+                    // on the same edge, so the note and the drawing agree.
+                    else playerRef.current?.pause();
+                    return !on;
+                  });
                 }}
                 reviewLabelActive={reviewLabelMode}
                 onToggleReviewLabel={() => {

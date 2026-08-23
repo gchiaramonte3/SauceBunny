@@ -145,6 +145,19 @@ async function resolveDir(): Promise<string | null> {
   }
 }
 
+/**
+ * The absolute path of one screening file, for revealing it in Finder.
+ *
+ * Only meaningful after `hydrateScreeningIndex` has resolved the directory;
+ * returns null before that, and for a name the index does not hold, so a
+ * caller can never be handed a path built from an unvalidated string.
+ */
+export function screeningPath(file: string): string | null {
+  if (!screeningsDir) return null;
+  if (!index.has(file)) return null;
+  return `${screeningsDir}/${file}`;
+}
+
 /** Read index.json once. Cheap: one small file, no documents. */
 export async function hydrateScreeningIndex(): Promise<void> {
   if (hydrated) return;

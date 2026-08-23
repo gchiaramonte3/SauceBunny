@@ -247,6 +247,36 @@ export function ReviewPanel({
   const [doc, setDoc] = useState<ReviewDoc | null>(null);
   const [sort, setSort] = useState<CommentSort>("time");
   const [text, setText] = useState("");
+  /**
+   * The moment the comment is ABOUT, latched when composing starts.
+   *
+   * `submit` used to read the live playhead at the instant Enter was pressed,
+   * so a note typed while the video kept rolling was stamped with wherever the
+   * playhead had drifted to by the time you finished - the composer's
+   * placeholder visibly counting up was the only warning. A comment is about
+   * the frame you were LOOKING at, and that is the frame you were looking at
+   * when you started to describe it.
+   *
+   * Latched on the first keystroke and on entering draw mode; released once
+   * the comment is posted or the composer is emptied.
+   */
+  const [anchorSec, setAnchorSec] = useState<number | null>(null);
+  const latchAnchor = () => setAnchorSec((prev) => prev ?? playheadAt() ?? 0);
+  /** Latch on the first character, release when the box goes back to empty. */
+  const setTextLatching = (next: string) => {
+    if (next.trim() && !text.trim()) latchAnchor();
+    else if (!next.trim() && !drawActive) setAnchorSec(null);
+    setText(next);
+  };
+
+  // Entering draw mode latches too: a drawing is unambiguously about the frame
+  // on screen when the pen came out, and App pauses playback at the same
+  // moment so that frame stops moving under the stroke.
+  useEffect(() => {
+    if (drawActive) latchAnchor();
+    else if (!text.trim()) setAnchorSec(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- latch on the EDGE
+  }, [drawActive]);
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyDraft, setReplyDraft] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
@@ -854,7 +884,10 @@ export function ReviewPanel({
     // range commits the live span the pill is showing — the SAME clamped
     // values the preview computes (scrubbing behind an armed IN / ahead of
     // an armed OUT collapses to the mark), degrading to a point comment.
-    const { timeStart, timeEnd } = rangeToPost({ in: rangeIn, out: rangeOut }, playheadAt() ?? 0);
+    // The latched moment, not the live playhead - see anchorSec.
+    const { timeStart, timeEnd } = rangeToPost(
+      { in: rangeIn, out: rangeOut }, anchorSec ?? playheadAt() ?? 0,
+    );
     const comment = buildComment({
       versionId,
       timeStart,
@@ -865,6 +898,7 @@ export function ReviewPanel({
     });
     dispatchUndoable("add comment", { t: "add", comment }, (d) => insertComment(d, comment));
     setText("");
+    setAnchorSec(null);
     clearRange();
     // Re-measure after React flushes the cleared text — collapses in auto
     // mode, holds the dragged height in manual mode.
@@ -1105,7 +1139,7 @@ export function ReviewPanel({
         dictNote={dictNote} clearDictNote={() => setDictNote(null)}
         toggleDictation={toggleDictation}
         levelRef={micLevelRef}
-        text={text} setText={setText}
+        text={text} setText={setTextLatching} anchorSec={anchorSec}
         composerRef={composerRef} autosize={autosizeComposer}
         onResizeStart={onComposerResizeStart}
         resizing={composerResizing}
@@ -1359,13 +1393,15 @@ function ReviewComposer({
   recording, transcribing,
   dictError, clearDictError, dictNote, clearDictNote,
   toggleDictation, levelRef,
-  text, setText, composerRef, autosize,
+  text, setText, anchorSec, composerRef, autosize,
   onResizeStart, resizing, onResizeReset,
   submit, hasDraft, playheadActive, fps,
   rangeIn, rangeOut, onRangeTap, onRangeClear, rangeColor,
   onPasteNotes,
 }: {
   drawActive: boolean;
+  /** The latched moment this comment is about, or null before composing. */
+  anchorSec: number | null;
   onToggleDraw?: () => void;
   labelActive: boolean;
   onToggleLabel?: () => void;
@@ -1555,7 +1591,11 @@ function ReviewComposer({
           // Placeholder uses coarse h:mm:ss (no frames, no zero-padded hour) so
           // it fits a narrow panel without wrapping; posted comments still
           // carry the full SMPTE timecode via secondsToTc.
-          placeholder={drawActive ? "Describe the drawing…" : `Comment at ${secondsToHms(currentSec ?? 0).replace(/^0(?=\d)/, "")}`}
+          placeholder={drawActive
+            ? "Describe the drawing…"
+            // Once latched this stops counting up, which is the only signal a
+            // user gets that the stamp is fixed rather than following them.
+            : `Comment at ${secondsToHms(anchorSec ?? currentSec ?? 0).replace(/^0(?=\d)/, "")}`}
           /* A NAME, not just a placeholder. The placeholder changes with the
              playhead ("Comment at 1:23"), so it is a hint rather than a label,
              and the form-label sweep deliberately refuses placeholders as

@@ -480,3 +480,65 @@
 .cp-gr-trail-step { display: inline-flex; align-items: center; gap: 6px; }
 .cp-gr-trail-step.here { color: var(--fg-1); }
 .cp-gr-trail-sep { color: var(--fg-5); }
+
+/* Past screenings — a list, not a viewer. Every session has always written a
+   record to Documents that nothing in the app could open; this is what makes
+   them reachable. Hidden entirely until one exists. */
+.cp-screenings {
+  width: 100%;
+  max-width: 520px;
+  margin-top: var(--s-3);
+}
+.cp-screenings-title {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--fg-4);
+  margin-bottom: var(--s-2);
+}
+.cp-screenings-list { display: flex; flex-direction: column; gap: var(--s-1); }
+.cp-screenings-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  color: var(--fg-3);
+}
+.cp-screenings-name {
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+.cp-screenings-meta {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+  white-space: nowrap;
+}
+.cp-screenings-reveal {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.cp-screenings-reveal:hover {
+  background: var(--bg-3);
+  border-color: var(--line-2);
+  color: var(--fg-1);
+}

@@ -39,7 +39,12 @@ export function deriveOnboardingSteps(s: OnboardingSignals): OnboardingStep[] {
       hint: "Settings → General → Default folder",
       done: !!s.exportFolder },
     { id: "transcript", label: "Generate a transcript",
-      hint: "Runs locally. Nothing leaves this Mac",
+      // "Nothing leaves this Mac" was true and told half the story: nothing
+      // leaves, but on the first run about 500 MB of Whisper model arrives,
+      // and nothing anywhere on the first-run path said so until the download
+      // had already started. Someone on a hotspot or a metered connection
+      // deserves to know before they press it, not after.
+      hint: "Runs on this Mac. First run fetches a ~500 MB model",
       done: s.transcriptCount > 0 },
   ];
 }

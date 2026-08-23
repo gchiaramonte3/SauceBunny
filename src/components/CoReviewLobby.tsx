@@ -11,6 +11,7 @@ import { GreenRoomDevices } from "./GreenRoomDevices";
 import type { Participant } from "./PeoplePanel";
 import type { SessionState } from "../bindings/SessionState";
 import { shortJoinCode } from "../lib/join-code";
+import { ScreeningShelf } from "./ScreeningShelf";
 
 /**
  * The Review lobby - the GREEN ROOM. Three calm steps in one tone-card
@@ -223,6 +224,12 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                     and each person chooses whether to watch it streamed or take a copy.
                   </p>
                 )}
+
+                {/* Past sessions, where someone would think to look for them.
+                    Every co-review has always written a full record to
+                    ~/Documents/Sauce Bunny/Screenings/ and nothing in the app
+                    could open one. Renders nothing until there is something. */}
+                <ScreeningShelf />
 
                 <section className="cp-colobby-card">
                   <h2 className="cp-colobby-card-title">Join</h2>
