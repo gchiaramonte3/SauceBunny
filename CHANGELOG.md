@@ -5,6 +5,8 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-08-23
+
 ### Changed
 - **Join codes read as join codes.** Every invite began `SAUC-endpo-intXX`,
   because every iroh ticket starts with the literal tag `endpoint` — and the
