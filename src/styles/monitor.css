@@ -953,7 +953,7 @@
   border: 1px solid var(--line-2);
   border-radius: 10px;
   box-shadow: 0 8px 12px rgba(0,0,0,0.55);
-  z-index: 9999;
+  z-index: var(--z-notify);
   display: flex;
   flex-direction: column;
   overflow: hidden;

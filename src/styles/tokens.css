@@ -193,6 +193,34 @@
   --font-ui:   'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 
+  /* ── Z ladder (r162) ──────────────────────────────────────────────────
+     The five app-level layers, replacing a block that ran 4000, 4500,
+     9998, 9999, 10000, 10001, 10002. Those numbers were never a design.
+     Their own comments give the game away - "one above the notification
+     popover (9999)", "above the thumbnail modal's tier" - each author
+     picked one higher than whatever they were losing to, and the ceiling
+     climbed. It is how a Rename dialog ended up rendering at 401 inside a
+     tree that stacks to 10002, invisible, reading as a button that did
+     nothing.
+
+     The ORDER here is the old order exactly; only the magnitudes shrank.
+     Gaps of 100 leave room to insert a layer without renumbering.
+
+     NOT everything with a z-index belongs here. Values from 0 to 60 are
+     LOCAL stacking inside one component - a fill under a pin, a ruler over
+     a track - and they are relative to their siblings, not to the app. A
+     token would tell you nothing about them and collapsing them would
+     destroy the ordering they exist for. If your value only has to beat
+     its own siblings, leave it a small integer. */
+  --z-modal:   100;   /* a modal scrim and the dialog it dims */
+  --z-menu:    200;   /* a menu or popover inside a panel */
+  --z-firstrun:300;   /* the welcome screen: nothing outranks first run */
+  --z-popover: 400;   /* a popover above everything in its own panel */
+  --z-notify:  500;   /* notifications, recents, badge sheet */
+  --z-palette: 600;   /* command palette and full-screen scrims */
+  --z-overlay: 700;   /* menus launched from a scrim; a live OS drag */
+  --z-top:     800;   /* a menu above its own scrim; nothing higher */
+
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --dur-fast: 120ms;

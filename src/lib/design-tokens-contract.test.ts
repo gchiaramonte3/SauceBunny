@@ -291,3 +291,62 @@ describe("font-weight only names a face that is actually loaded", () => {
     expect(offenders, "Use var(--weight-*) so the loaded-face check can see it.").toEqual([]);
   });
 });
+
+/**
+ * The app-level stacking order has names, and the ceiling stopped climbing.
+ *
+ * Before this there were 27 distinct z-index values from -1 to 10002, and
+ * the comments on the highest ones told the whole story: "one above the
+ * notification popover (9999)", "above the thumbnail modal's tier". Nobody
+ * designed that. Each author picked one higher than whatever they were
+ * losing to, and the number that wins today loses next month.
+ *
+ * The cost was not hypothetical. The transcript row menu rendered at 401
+ * inside a tree that stacks past 10000, so its Rename dialog opened
+ * underneath the app - present in the DOM, invisible on screen, and
+ * indistinguishable from a button that does nothing.
+ *
+ * The line this draws is between APP layers and LOCAL ones. A value that
+ * only has to beat its own siblings (a fill under a pin, a ruler over a
+ * track) is local, stays a small integer, and is none of this test's
+ * business - tokenizing those would destroy the ordering they exist for.
+ * A value that has to beat another COMPONENT is an app layer, and those
+ * are the ones that spiral, so those need a name.
+ */
+describe("z-index: app layers are named, local stacking is left alone", () => {
+  /** Above this, a value is competing with other components, not siblings. */
+  const LOCAL_CEILING = 99;
+
+  it("defines the ladder once, at :root, in ascending order", () => {
+    const tokens = readFileSync(join(STYLES, "tokens.css"), "utf8");
+    const rungs = [...tokens.matchAll(/(--z-[a-z]+)\s*:\s*(\d+)\s*;/g)].map((m) => [m[1], Number(m[2])] as const);
+    expect(rungs.length).toBeGreaterThanOrEqual(5);
+    const values = rungs.map(([, v]) => v);
+    expect(values, "the ladder should read in order, so the file is the diagram").toEqual([...values].sort((a, b) => a - b));
+    expect(new Set(values).size, "two rungs at one value is one rung").toBe(values.length);
+  });
+
+  it("has no stylesheet inventing its own app-level number", () => {
+    const offenders: string[] = [];
+    for (const [name, css] of cssFiles()) {
+      if (name === "tokens.css") continue;
+      css.split("\n").forEach((line, i) => {
+        const m = line.replace(/\/\*.*?\*\//g, "").match(/z-index\s*:\s*(-?\d+)\s*;/);
+        if (m && Number(m[1]) > LOCAL_CEILING) {
+          offenders.push(`${name}:${i + 1} z-index: ${m[1]} - above ${LOCAL_CEILING} is an app layer; use a --z-* rung`);
+        }
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("still allows the local small integers, which are not drift", () => {
+    // If this ever hits zero, someone has swept the local values into the
+    // ladder and thrown away the sibling ordering they encode.
+    const locals = cssFiles()
+      .filter(([n]) => n !== "tokens.css")
+      .flatMap(([, css]) => [...css.matchAll(/z-index\s*:\s*(-?\d+)\s*;/g)])
+      .filter((m) => Number(m[1]) <= LOCAL_CEILING);
+    expect(locals.length).toBeGreaterThan(30);
+  });
+});

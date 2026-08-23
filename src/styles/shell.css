@@ -750,7 +750,7 @@
 .cp-drop-overlay {
   position: fixed;
   inset: 0;
-  z-index: 10001; /* one above the command palette (10000) — nothing outranks a live OS drag */
+  z-index: var(--z-overlay); /* one above the command palette (10000) — nothing outranks a live OS drag */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -809,7 +809,7 @@
    to 10002, so the reader's rename menu drew underneath them - present, and
    invisible. Portaled to <body> as well, so no ancestor can re-anchor the
    fixed positioning or clip it. */
-.cp-rowmenu-scrim { position: fixed; inset: 0; z-index: 10001; }
+.cp-rowmenu-scrim { position: fixed; inset: 0; z-index: var(--z-overlay); }
 .cp-rowmenu-scrim.modal { background: rgba(10,10,13,0.55); display: flex; align-items: center; justify-content: center; }
 .cp-rowmenu {
   position: fixed;
@@ -819,7 +819,7 @@
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   box-shadow: 0 12px 36px rgba(0,0,0,0.5);
-  z-index: 10002;
+  z-index: var(--z-top);
 }
 .cp-rowmenu button {
   display: block;

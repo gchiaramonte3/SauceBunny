@@ -25,7 +25,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: var(--z-modal);
   animation: cp-fade-in var(--dur-base) var(--ease-out);
 }
 @keyframes cp-fade-in {
@@ -1057,7 +1057,7 @@
   width: 460px;
   max-height: 70vh;
   overflow-y: auto;
-  z-index: 10002;
+  z-index: var(--z-top);
   background: var(--bg-1);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);

@@ -592,7 +592,7 @@
    anchor (LibraryCardMenu). Tokens only.
    ============================================================ */
 .cp-lib-menu {
-  z-index: 10001; /* above the thumbnail modal's tier so a menu-launched flow reads on top */
+  z-index: var(--z-overlay); /* above the thumbnail modal's tier so a menu-launched flow reads on top */
   min-width: 190px;
   padding: var(--s-1);
   background: var(--bg-2);
@@ -695,7 +695,7 @@
 .cp-lib-thumb-scrim {
   position: fixed;
   inset: 0;
-  z-index: 10000; /* same tier as the command palette */
+  z-index: var(--z-palette); /* same tier as the command palette */
   display: flex;
   align-items: center;
   justify-content: center;

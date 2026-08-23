@@ -8,7 +8,7 @@
 .cp-welcome {
   position: fixed;
   inset: 0;
-  z-index: 300; /* above modals - nothing outranks first-run */
+  z-index: var(--z-firstrun);
   display: flex;
   align-items: center;
   justify-content: center;

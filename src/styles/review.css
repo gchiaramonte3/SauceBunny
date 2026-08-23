@@ -718,7 +718,7 @@
    Emoji on macOS; no font dependency. */
 .cp-emoji-pop {
   position: fixed;
-  z-index: 4500;
+  z-index: var(--z-popover);
   width: 324px;
   max-height: 360px;
   display: flex;
