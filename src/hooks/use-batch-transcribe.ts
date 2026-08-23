@@ -7,6 +7,7 @@ import {
 import { sanitizeFilename } from "../lib/filename";
 import { formatError } from "../lib/error-format";
 import { newJobId } from "../lib/job-id";
+import { watchJob } from "../lib/await-job";
 
 /**
  * Transcribe a set of files, one after another, without loading any of them
@@ -88,6 +89,15 @@ export function useBatchTranscribe(
             apply(markItem(stateRef.current, idx, "skipped"));
             break;
           }
+          // Registered BEFORE the work starts, because `transcribe_local_file`
+          // is fire-and-forget: it spawns the pipeline and returns the job id
+          // in milliseconds. Awaiting the invoke alone told us the job had
+          // STARTED - so every file was marked done the moment it began, the
+          // whole selection was reported finished in about fifty
+          // milliseconds, and N whisper processes ran at once, each loading
+          // its own copy of the model. This module's own header has always
+          // said "ONE AT A TIME"; this is what makes that true.
+          const done = await watchJob(jobId);
           await invoke<string>("transcribe_local_file", {
             args: {
               input_path: item.path,
@@ -105,6 +115,13 @@ export function useBatchTranscribe(
               duration_seconds: null,
             },
           });
+          // The pipeline itself, not the spawn. Cancelling emits a failed
+          // done, so Stop settles this rather than stranding the loop.
+          try {
+            await done.finished;
+          } finally {
+            done.stop();
+          }
           apply(markItem(stateRef.current, idx, "done"));
           onLog?.("info", `Transcribed ${item.name}`);
         } catch (err) {

@@ -6,19 +6,59 @@ import { useBatchTranscribe } from "./use-batch-transcribe";
 const h = vi.hoisted(() => ({
   calls: [] as string[],
   args: [] as unknown[],
-  /** Parks `transcribe_local_file` - the long await the loop actually has. */
-  gate: null as null | { release: () => void },
+  /** Job ids the loop has started, in order. */
+  waiting: [] as string[],
+  /** The live `transcript-done` subscriber, if the loop has one attached. */
+  sub: null as null | ((e: { payload: unknown }) => void),
+  /** When true, every started job completes on its own on the next tick. */
+  auto: true,
 }));
+
+/**
+ * The wait is on the EVENT now, not on the invoke, and that is why this file
+ * was rewritten.
+ *
+ * `transcribe_local_file` spawns the pipeline and returns in milliseconds, so
+ * the invoke never was "the long await the loop actually has" — the gate that
+ * used to sit here described a blocking command that does not exist. The loop
+ * marked each file done the instant it started one: a folder of twelve
+ * reported finished in about fifty milliseconds while twelve whisper
+ * processes fought over the machine, and Stop had nothing left to kill. These
+ * mocks drive `transcript-done`, which is what the loop actually waits for.
+ */
+function fireDone(jobId: string, ok = true, err?: string) {
+  h.sub?.({ payload: { job_id: jobId, success: ok, code: ok ? 0 : 1, path: null, error: err ?? null } });
+}
+
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (cmd: string, a?: unknown) => {
     h.calls.push(cmd);
     h.args.push(a);
-    if (cmd === "transcribe_local_file" && h.gate) {
-      await new Promise<void>((r) => { h.gate!.release = r; });
+    if (cmd === "transcribe_local_file") {
+      const job = (a as { args?: { job_id?: string } } | undefined)?.args?.job_id;
+      if (job) {
+        h.waiting.push(job);
+        // The real backend finishes some time later; "later" is a tick here.
+        if (h.auto) setTimeout(() => fireDone(job), 0);
+      }
     }
     return "";
   },
 }));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: async (name: string, cb: (e: { payload: unknown }) => void) => {
+    if (name !== "transcript-done") return () => {};
+    h.sub = cb;
+    return () => { if (h.sub === cb) h.sub = null; };
+  },
+}));
+
+/** Complete whichever job the loop is currently parked on. */
+function finishCurrent(ok = true, err?: string) {
+  const job = h.waiting.at(-1);
+  if (job) fireDone(job, ok, err);
+}
 
 /**
  * Cancelling a batch.
@@ -48,7 +88,7 @@ const SETTINGS = {
 
 /** Start the batch and let it park inside the first file's transcription. */
 async function startParked() {
-  h.gate = { release: () => {} };
+  h.auto = false;
   const { result } = renderHook(() => useBatchTranscribe());
   let started!: Promise<void>;
   await act(async () => {
@@ -60,7 +100,7 @@ async function startParked() {
 }
 
 describe("useBatchTranscribe cancel", () => {
-  beforeEach(() => { h.calls = []; h.args = []; h.gate = null; });
+  beforeEach(() => { h.calls = []; h.args = []; h.waiting = []; h.sub = null; h.auto = true; });
 
   it("never asks the backend for a job id", () => {
     // The id is local now. If this ever fails, the round trip is back and the
@@ -85,7 +125,7 @@ describe("useBatchTranscribe cancel", () => {
     const killed = h.args[h.calls.indexOf("cancel_job")] as { jobId?: string };
     expect(killed.jobId).toBeTruthy();
 
-    await act(async () => { h.gate!.release(); await started(); });
+    await act(async () => { finishCurrent(true); await started(); });
   });
 
   it("does not start the next file when Stop lands during the current one", async () => {
@@ -93,7 +133,7 @@ describe("useBatchTranscribe cancel", () => {
     expect(h.calls.filter((c) => c === "transcribe_local_file")).toHaveLength(1);
 
     await act(async () => { result.current.cancel(); });
-    await act(async () => { h.gate!.release(); await started(); });
+    await act(async () => { finishCurrent(true); await started(); });
 
     // b.mov must never have been picked up.
     expect(h.calls.filter((c) => c === "transcribe_local_file")).toHaveLength(1);
@@ -105,7 +145,7 @@ describe("useBatchTranscribe cancel", () => {
     // session.
     const { result, started } = await startParked();
     await act(async () => { result.current.cancel(); });
-    await act(async () => { h.gate!.release(); await started(); });
+    await act(async () => { finishCurrent(true); await started(); });
 
     const items = result.current.state.items;
     expect(items.every((i) => i.status !== "running")).toBe(true);
@@ -114,6 +154,38 @@ describe("useBatchTranscribe cancel", () => {
     expect(items[1].status).toBe("skipped");
     expect(result.current.progress.finished).toBe(true);
     expect(result.current.progress.failed).toBe(0);
+  });
+
+  it("does not start file 2 until file 1 has actually finished", async () => {
+    // THE bug this rewrite exists for. `transcribe_local_file` spawns and
+    // returns, so awaiting the invoke meant the loop moved straight on: all N
+    // files started at once, each loading its own copy of the whisper model,
+    // and a folder of twelve could bring an 8 GB Mac to its knees.
+    const { result } = await startParked();
+    const started = () => h.calls.filter((c) => c === "transcribe_local_file").length;
+    expect(started(), "the loop ran ahead before file 1 reported done").toBe(1);
+    await act(async () => { finishCurrent(true); await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(started()).toBe(2);
+    void result;
+  });
+
+  it("reports a file done only when its pipeline ended, not when it started", async () => {
+    // The visible half: the batch bar used to flash and vanish while nothing
+    // had been written yet.
+    const { result } = await startParked();
+    expect(result.current.state.items[0].status).toBe("running");
+    await act(async () => { finishCurrent(true); await Promise.resolve(); });
+    expect(result.current.state.items[0].status).toBe("done");
+  });
+
+  it("records a failed file as an error and carries on", async () => {
+    const { result } = await startParked();
+    await act(async () => { finishCurrent(false, "unsupported codec"); await Promise.resolve(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(result.current.state.items[0].status).toBe("error");
+    expect(result.current.state.items[0].error).toContain("unsupported codec");
+    expect(h.calls.filter((c) => c === "transcribe_local_file")).toHaveLength(2);
   });
 
   it("runs the whole batch when nobody cancels", async () => {
