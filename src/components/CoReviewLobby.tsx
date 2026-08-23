@@ -31,7 +31,9 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   localSource: boolean;
   participants: Participant[];
   onStart: (title?: string) => void;
-  onJoin: (ticket: string, name: string) => void;
+  /** Resolves when the attempt has ENDED, succeeded or not — the lobby
+   *  needs that to clear "Connecting…". */
+  onJoin: (ticket: string, name: string) => void | Promise<void>;
   onLeave: () => void;
 }) {
   const cap = useMediaCapture();
@@ -70,6 +72,14 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   }, [session.role, cap]);
 
   // Clear the transient "Connecting…" once the session resolves either way.
+  //
+  // This alone was NOT enough, and the gap locked people out. A failed join
+  // (a wrong or expired code — the ordinary first-run mistake) is caught
+  // inside joinCoReview, which only raises a notification; it never touches
+  // `role` or `error`, so neither dependency changes, this effect never
+  // re-runs, and the button stays disabled at "Connecting…" for the rest of
+  // the session. The only way back was quitting the app. joinSession now
+  // clears it in a `finally` as well, so the button always comes back.
   useEffect(() => { setJoining(false); }, [session.role, session.error]);
 
   const persistIdentity = (n: string, c: string) => {
@@ -90,12 +100,18 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
     saveJson("saucebunny.sessionTitle", sessionTitle.trim());
     onStart(sessionTitle.trim() || undefined);
   };
-  const joinSession = () => {
+  const joinSession = async () => {
     const v = name.trim(); const t = ticket.trim();
     if (!v || !t) return;
     persistIdentity(v, color);
     setJoining(true);
-    onJoin(t, v);
+    // Catch as well as finally. `joinCoReview` reports its own failure as a
+    // notification and resolves, but the lobby must not DEPEND on that: if the
+    // handler ever rejects, an uncaught rejection here is a console error the
+    // user cannot see and the button state is the only thing they can.
+    // Reporting stays the handler's job; clearing the button is this one's.
+    try { await onJoin(t, v); } catch { /* surfaced by the handler */ }
+    finally { setJoining(false); }
   };
   const copyCode = async () => {
     if (!session.code) return;
@@ -215,7 +231,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                       width jump while "Connecting…" is in flight. */}
                   <button type="button"
                     className="btn cp-colobby-cta join"
-                    disabled={!joinReady || joining} onClick={joinSession}>
+                    disabled={!joinReady || joining} onClick={() => { void joinSession(); }}>
                     <IconLink size={12} /> {joining ? "Connecting…" : "Join"}
                   </button>
                   {session.error && <p className="cp-colobby-err" role="alert">{session.error}</p>}

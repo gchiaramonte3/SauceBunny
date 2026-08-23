@@ -4969,7 +4969,7 @@ export default function App() {
               localSource={coLocalSourceLoaded}
               participants={theaterParticipants}
               onStart={(title) => { void startCoReview(title); }}
-              onJoin={(t, n) => { void joinCoReview(t, n); }}
+              onJoin={joinCoReview}
               onLeave={leaveCoReview}
             />
           </div>

@@ -1214,6 +1214,17 @@ fn decode_upstream(url_path: &str) -> Option<String> {
     }
     let bytes = URL_SAFE_NO_PAD.decode(b64.as_bytes()).ok()?;
     let url = String::from_utf8(bytes).ok()?;
+    // The same gate the other two decoders apply, and it was missing here.
+    // `parse_audio_query` and `decode_after` both end in `is_safe_upstream`;
+    // this route checked the SCHEME only, so a base64 payload naming
+    // http://127.0.0.1:<port>/ or a 192.168.x.x address, or one carrying
+    // embedded credentials, was fetched and streamed back. The capability
+    // token still stands in front of it, so this is defence in depth rather
+    // than an open door - but "the token holds" is exactly the assumption the
+    // other two routes decline to make.
+    if !is_safe_upstream(&url) {
+        return None;
+    }
     if url.starts_with("http://") || url.starts_with("https://") {
         Some(url)
     } else {
@@ -1460,6 +1471,26 @@ mod tests {
     #[test]
     fn safe_upstream_allows_public_and_blocks_local_private_and_credentials() {
         // The real shapes: googlevideo/CDN URLs pass.
+        // The raw /v1/ route must refuse everything is_safe_upstream refuses.
+        // It used to check the scheme only, so these all decoded happily.
+        for bad in [
+            "http://127.0.0.1:9999/secret",
+            "http://192.168.1.1/admin",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://localhost:1420/",
+            "https://user:pw@example.com/x.mp4",
+        ] {
+            let b64 = URL_SAFE_NO_PAD.encode(bad.as_bytes());
+            assert!(
+                decode_upstream(&format!("/v1/{b64}")).is_none(),
+                "raw route accepted {bad}",
+            );
+        }
+        // A real CDN URL still decodes.
+        let good = "https://rr3---sn-example.googlevideo.com/videoplayback?x=1";
+        let b64 = URL_SAFE_NO_PAD.encode(good.as_bytes());
+        assert_eq!(decode_upstream(&format!("/v1/{b64}")).as_deref(), Some(good));
+
         assert!(is_safe_upstream("https://rr3---sn-example.googlevideo.com/videoplayback?x=1"));
         assert!(is_safe_upstream("http://93.184.216.34/stream.mp4")); // public v4 literal
         // Everything the proxy must never be a bounce into:
