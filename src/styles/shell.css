@@ -754,7 +754,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(10, 10, 13, 0.72); /* --bg-0 at 72% — the tokens carry no alpha variants */
+  background: color-mix(in srgb, var(--bg-0) 72%, transparent); /* --bg-0 at 72% — the tokens carry no alpha variants */
   /* The OS drag session owns the pointer; this overlay is pure feedback and
      must never intercept the webview's drag events. */
   pointer-events: none;
@@ -810,7 +810,7 @@
    invisible. Portaled to <body> as well, so no ancestor can re-anchor the
    fixed positioning or clip it. */
 .cp-rowmenu-scrim { position: fixed; inset: 0; z-index: var(--z-overlay); }
-.cp-rowmenu-scrim.modal { background: rgba(10,10,13,0.55); display: flex; align-items: center; justify-content: center; }
+.cp-rowmenu-scrim.modal { background: color-mix(in srgb, var(--bg-0) 55.0%, transparent); display: flex; align-items: center; justify-content: center; }
 .cp-rowmenu {
   position: fixed;
   min-width: 176px;

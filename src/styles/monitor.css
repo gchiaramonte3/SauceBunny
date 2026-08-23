@@ -127,7 +127,7 @@
   font-weight: var(--weight-bold);
   letter-spacing: var(--track-caps);
   color: var(--fg-2);
-  background: rgba(10, 10, 12, 0.72);
+  background: color-mix(in srgb, var(--bg-0) 72%, transparent);
   border: 1px solid var(--line-2);
   backdrop-filter: blur(6px);
   pointer-events: none;
@@ -181,7 +181,7 @@
   gap: 3px;
   padding: 8px 16px;
   border-radius: var(--r-md);
-  background: rgba(10, 10, 12, 0.82);
+  background: color-mix(in srgb, var(--bg-0) 82%, transparent);
   border: 1px solid var(--line-2);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(6px);
@@ -386,7 +386,7 @@
   justify-content: center;
   gap: 10px;
   padding: 8px 12px 8px 12px;
-  background: rgba(15,15,18,0.86);
+  background: color-mix(in srgb, var(--bg-1) 86%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--line-2);
@@ -448,7 +448,7 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: rgba(10,10,12,0.55);
+  background: color-mix(in srgb, var(--bg-0) 55.0%, transparent);
   animation: cp-fade-in var(--dur-fast) var(--ease-out);
 }
 .cp-stream-loading-bg {
@@ -843,7 +843,7 @@
   gap: 10px;
   max-width: 80%;
   padding: 10px 14px 10px 12px;
-  background: rgba(20, 20, 22, 0.92);
+  background: color-mix(in srgb, var(--bg-2) 92%, transparent);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--line-2);
@@ -1141,7 +1141,7 @@
   gap: 8px;
   max-width: min(92%, 520px);
   padding: 7px 10px;
-  background: rgba(20,20,23,0.92);
+  background: color-mix(in srgb, var(--bg-2) 92%, transparent);
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
   box-shadow: 0 4px 12px rgba(0,0,0,0.5);
@@ -1170,7 +1170,7 @@
   top: 10px;
   right: 10px;
   border: 1px solid var(--line-2);
-  background: rgba(20,20,23,0.85);
+  background: color-mix(in srgb, var(--bg-2) 85%, transparent);
   color: var(--fg-2);
   font-family: var(--font-ui);
   font-size: var(--text-base);
@@ -1180,7 +1180,7 @@
   cursor: pointer;
   backdrop-filter: blur(8px);
 }
-.cp-annot-hide:hover { color: var(--fg-1); background: rgba(30,30,34,0.95); }
+.cp-annot-hide:hover { color: var(--fg-1); background: color-mix(in srgb, var(--bg-3) 95%, transparent); }
 
 /* Text labels — Frame.io-style callouts riding the annotation payload.
    Anchored at normalized coords (positions scale with the video box); the
@@ -1212,7 +1212,7 @@
   box-shadow: 0 0 0 1px rgba(0,0,0,0.45);
 }
 .cp-annot-label-text {
-  background: rgba(20,20,23,0.85);
+  background: color-mix(in srgb, var(--bg-2) 85%, transparent);
   border: 1px solid var(--label-color);
   color: var(--fg-1);
   font-family: var(--font-ui);
@@ -1228,7 +1228,7 @@
 }
 .cp-annot-label-editing { pointer-events: auto; z-index: 2; }
 .cp-annot-label-input {
-  background: rgba(20,20,23,0.92);
+  background: color-mix(in srgb, var(--bg-2) 92%, transparent);
   border: 1px solid var(--label-color);
   color: var(--fg-1);
   font-family: var(--font-ui);

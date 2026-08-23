@@ -588,10 +588,10 @@
 .cp-mediainfo-badge.open { border-color: currentColor; }
 .cp-mediainfo-badge.warn {
   color: var(--color-warning);
-  background: rgba(255,181,69,0.08);
-  border-color: rgba(255,181,69,0.22);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 22%, transparent);
 }
-.cp-mediainfo-badge.warn.open { border-color: rgba(255,181,69,0.55); }
+.cp-mediainfo-badge.warn.open { border-color: color-mix(in srgb, var(--color-warning) 55.0%, transparent); }
 
 .cp-mediainfo-section { margin-bottom: 14px; }
 .cp-mediainfo-section:last-child { margin-bottom: 0; }

@@ -304,7 +304,7 @@
   cursor: pointer;
   border-radius: var(--r-sm);
 }
-.cp-review-history-del:hover { background: rgba(255,138,138,0.14); color: var(--danger-text); }
+.cp-review-history-del:hover { background: color-mix(in srgb, var(--danger-text) 14.0%, transparent); color: var(--danger-text); }
 /* Bulk clear — a quiet text row pinned under the list, danger-tinted on hover
    (same treatment as the per-row ✕). Only rendered when the list is non-empty. */
 .cp-review-history-clear {
@@ -322,7 +322,7 @@
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.cp-review-history-clear:hover { background: rgba(255,138,138,0.14); color: var(--danger-text); }
+.cp-review-history-clear:hover { background: color-mix(in srgb, var(--danger-text) 14.0%, transparent); color: var(--danger-text); }
 .cp-review-export-msg {
   padding: 6px 14px;
   font-family: var(--font-ui);
@@ -519,7 +519,7 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(8,8,10,0.66);
+  background: color-mix(in srgb, var(--bg-0) 66%, transparent);
   backdrop-filter: blur(3px);
 }
 .cp-review-namegate-card {

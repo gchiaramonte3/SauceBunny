@@ -166,7 +166,7 @@
 }
 .cp-tx-history-row-remove:hover {
   color: var(--fg-1);
-  background: rgba(255,80,80,0.12);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 /* Speaker insights popover — opens from the header Insights button.

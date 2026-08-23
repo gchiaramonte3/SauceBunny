@@ -10,7 +10,7 @@
   align-items: center;
   gap: 14px;
   padding: 0 18px;
-  background: linear-gradient(180deg, rgba(20,20,21,0.5), rgba(14,14,16,0.3));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-2) 50%, transparent), color-mix(in srgb, var(--bg-1) 30%, transparent));
   border-bottom: 1px solid var(--line-1);
   backdrop-filter: blur(20px);
 }

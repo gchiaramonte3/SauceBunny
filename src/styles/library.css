@@ -43,7 +43,7 @@
    scrolling results. */
 .cp-lib-head.cp-lib-head-flat {
   margin-bottom: 0;
-  background: rgba(10, 10, 13, 0.72);
+  background: color-mix(in srgb, var(--bg-0) 72%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
@@ -56,7 +56,7 @@
   margin-left: auto;
   padding: 0 var(--s-2) 0 var(--s-3);
   pointer-events: auto;
-  background: rgba(10, 10, 13, 0.55); /* --bg-0 at 55% — tokens carry no alpha variants */
+  background: color-mix(in srgb, var(--bg-0) 55.0%, transparent); /* --bg-0 at 55% — tokens carry no alpha variants */
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--line-2);
@@ -164,8 +164,8 @@
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, var(--bg-0) 0%, var(--bg-0) max(32%, 600px), rgba(10, 10, 13, 0.66) max(52%, 740px), transparent max(78%, 900px)),
-    linear-gradient(180deg, transparent 42%, rgba(10, 10, 13, 0.5) 76%, var(--bg-0) 100%);
+    linear-gradient(90deg, var(--bg-0) 0%, var(--bg-0) max(32%, 600px), color-mix(in srgb, var(--bg-0) 66%, transparent) max(52%, 740px), transparent max(78%, 900px)),
+    linear-gradient(180deg, transparent 42%, color-mix(in srgb, var(--bg-0) 50%, transparent) 76%, var(--bg-0) 100%);
 }
 .cp-lib-hero-content {
   position: relative;
@@ -197,7 +197,7 @@
   color: var(--fg-0);
   /* Belt and braces under the shade's pixel floor — keeps the title legible
      even if a stop ever lands short of the text block. --bg-0 at 80%. */
-  text-shadow: 0 1px 12px rgba(10, 10, 13, 0.8);
+  text-shadow: 0 1px 12px color-mix(in srgb, var(--bg-0) 80%, transparent);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -272,7 +272,7 @@
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, var(--bg-0) 0%, rgba(10, 10, 13, 0.35) 24%, rgba(10, 10, 13, 0.4) 62%, var(--bg-0) 100%);
+    linear-gradient(180deg, var(--bg-0) 0%, color-mix(in srgb, var(--bg-0) 35%, transparent) 24%, color-mix(in srgb, var(--bg-0) 40%, transparent) 62%, var(--bg-0) 100%);
 }
 @media (prefers-reduced-motion: reduce) {
   .cp-lib-ambient-layer { transition: none; }
@@ -397,8 +397,8 @@
   opacity: 0;
   transition: opacity var(--dur-base) var(--ease-out);
 }
-.cp-lib-row-arrow.left  { left: 0;  background: linear-gradient(90deg, rgba(10, 10, 13, 0.85), transparent); }
-.cp-lib-row-arrow.right { right: 0; background: linear-gradient(270deg, rgba(10, 10, 13, 0.85), transparent); }
+.cp-lib-row-arrow.left  { left: 0;  background: linear-gradient(90deg, color-mix(in srgb, var(--bg-0) 85%, transparent), transparent); }
+.cp-lib-row-arrow.right { right: 0; background: linear-gradient(270deg, color-mix(in srgb, var(--bg-0) 85%, transparent), transparent); }
 /* Reveal on hover AND keyboard focus — a card focused via ←/→ roving keeps
    the paging arrows visible so keyboard users see where the shelf continues. */
 .cp-lib-row-body:hover .cp-lib-row-arrow,
@@ -498,7 +498,7 @@
   height: 38px;
   padding-left: 2px; /* optical center for the triangle */
   border-radius: var(--r-pill);
-  background: rgba(10, 10, 13, 0.62);
+  background: color-mix(in srgb, var(--bg-0) 62%, transparent);
   border: 1px solid var(--line-3);
   color: var(--fg-0);
   opacity: 0;
@@ -515,7 +515,7 @@
   left: var(--s-2);
   padding: 2px 6px;
   border-radius: var(--r-xs);
-  background: rgba(10, 10, 13, 0.72);
+  background: color-mix(in srgb, var(--bg-0) 72%, transparent);
   border: 1px solid var(--line-2);
   font-family: var(--font-ui);
   font-size: var(--text-xs);
@@ -570,7 +570,7 @@
   height: 26px;
   padding: 0;
   border-radius: var(--r-sm);
-  background: rgba(10, 10, 13, 0.72);
+  background: color-mix(in srgb, var(--bg-0) 72%, transparent);
   border: 1px solid var(--line-3);
   color: var(--fg-1);
   cursor: pointer;
@@ -583,7 +583,7 @@
 .cp-lib-more:focus-visible,
 .cp-lib-card:focus-visible ~ .cp-lib-more { opacity: 1; }
 .cp-lib-more:hover {
-  background: rgba(10, 10, 13, 0.9);
+  background: color-mix(in srgb, var(--bg-0) 90%, transparent);
   color: var(--fg-0);
 }
 
@@ -816,7 +816,7 @@
   right: var(--s-1);
   padding: 1px 5px;
   border-radius: var(--r-xs);
-  background: rgba(10, 10, 13, 0.78);
+  background: color-mix(in srgb, var(--bg-0) 78%, transparent);
   font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-sm);
@@ -1560,7 +1560,7 @@
 .cp-rename-to { flex: 1 1 auto; min-width: 0; color: var(--fg-1); overflow-wrap: anywhere; }
 /* A refused row states its own reason inline. A single count at the bottom
    would make the user hunt for which of forty is the problem. */
-.cp-rename-row.bad { background: rgba(255,90,90,0.08); }
+.cp-rename-row.bad { background: color-mix(in srgb, var(--danger) 8%, transparent); }
 .cp-rename-row.bad .cp-rename-to { color: var(--fg-3); text-decoration: none; }
 .cp-rename-why { flex: 0 0 auto; font-size: var(--text-sm); color: #ff8f8a; }
 /* The one-time on-disk warning. Replaces the footer rather than floating over
@@ -1801,7 +1801,7 @@
   bottom: 5px;
   padding: 1px 5px;
   border-radius: var(--r-xs);
-  background: rgba(10, 10, 12, 0.82);
+  background: color-mix(in srgb, var(--bg-0) 82%, transparent);
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
   color: var(--fg-2);
@@ -1840,7 +1840,7 @@
   padding: 0;
   border: none;
   border-radius: var(--r-sm);
-  background: rgba(10, 10, 12, 0.82);
+  background: color-mix(in srgb, var(--bg-0) 82%, transparent);
   color: var(--fg-3);
   cursor: pointer;
   opacity: 0;

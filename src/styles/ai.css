@@ -79,8 +79,8 @@
 .cp-ai-error {
   font-size: var(--text-base);
   color: var(--danger);
-  background: rgba(229,72,77,0.08);
-  border: 1px solid rgba(229,72,77,0.25);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
   border-radius: var(--r-md);
   padding: 8px 10px;
   margin-top: 10px;
