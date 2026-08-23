@@ -393,7 +393,7 @@
 .cp-review-badge {
   font-family: var(--font-ui); font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: var(--track-caps);
   text-transform: uppercase; color: var(--color-accent-green);
-  background: rgba(108,255,141,0.12); border-radius: var(--r-xs); padding: 1px 6px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: var(--r-xs); padding: 1px 6px;
 }
 .cp-review-actions { margin-left: auto; display: flex; gap: 2px; }
 .cp-review-actions button {
@@ -531,7 +531,7 @@
   width: 100%;
   max-width: 260px;
   padding: 22px 20px;
-  background: #161619;
+  background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-xl);
   box-shadow: 0 18px 50px rgba(0,0,0,0.55);

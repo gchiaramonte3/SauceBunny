@@ -106,10 +106,10 @@
   height: 7px;
   border-radius: 50%;
   background: var(--ella-green);
-  box-shadow: 0 0 0 2px var(--bg-1), 0 0 6px rgba(108, 255, 141, 0.5);
+  box-shadow: 0 0 0 2px var(--bg-1), 0 0 6px color-mix(in srgb, var(--accent) 50%, transparent);
   animation: cp-nav-badge-pulse 2s ease-in-out infinite;
 }
-.cp-nav-item.active .cp-nav-badge { box-shadow: 0 0 0 2px var(--bg-3), 0 0 6px rgba(108, 255, 141, 0.5); }
+.cp-nav-item.active .cp-nav-badge { box-shadow: 0 0 0 2px var(--bg-3), 0 0 6px color-mix(in srgb, var(--accent) 50%, transparent); }
 @keyframes cp-nav-badge-pulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.4; }

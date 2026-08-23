@@ -298,8 +298,8 @@ body.cp-tab-dragging { cursor: grabbing; }
   border-color: rgba(var(--accent-rgb), 0.2);
 }
 .cp-queue-item.error {
-  background: rgba(232,38,38,0.06);
-  border-color: rgba(232,38,38,0.25);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 25%, transparent);
 }
 .cp-queue-num {
   font-family: var(--font-mono);
@@ -346,7 +346,7 @@ body.cp-tab-dragging { cursor: grabbing; }
 }
 .cp-queue-status.running { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
 .cp-queue-status.done    { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
-.cp-queue-status.error   { color: var(--danger-text); background: rgba(232,38,38,0.14); }
+.cp-queue-status.error   { color: var(--danger-text); background: color-mix(in srgb, var(--danger) 14%, transparent); }
 
 .cp-queue-meta {
   display: flex;
@@ -400,7 +400,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   transition: all var(--dur-fast) var(--ease-out);
 }
 .cp-queue-iconbtn:hover { color: var(--fg-1); background: rgba(255,255,255,0.05); }
-.cp-queue-iconbtn.danger:hover { color: var(--danger-text); background: rgba(232,38,38,0.10); }
+.cp-queue-iconbtn.danger:hover { color: var(--danger-text); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 
 .cp-queue-foot {
   border-top: 1px solid var(--line-1);
@@ -420,11 +420,11 @@ body.cp-tab-dragging { cursor: grabbing; }
 .cp-queue-foot-row .btn { flex: 1; }
 .cp-queue-foot-row .btn-ghost { flex: 0 0 auto; padding: 0 14px; }
 .cp-queue-stop {
-  background: rgba(232,38,38,0.14);
-  border: 1px solid rgba(232,38,38,0.35);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   color: var(--danger-text);
 }
-.cp-queue-stop:hover { background: rgba(232,38,38,0.20); color: #fff; }
+.cp-queue-stop:hover { background: color-mix(in srgb, var(--danger) 20%, transparent); color: var(--fg-0); }
 
 /* Toolbar drawer toggle badge — neutral (color contract: panel toggles
    are chrome; green is reserved for the primary action + live states). */

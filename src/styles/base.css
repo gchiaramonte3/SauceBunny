@@ -49,7 +49,7 @@ body {
   -webkit-user-select: text;
 }
 
-::selection { background: rgba(108,255,141,0.3); color: var(--fg-1); }
+::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--fg-1); }
 
 /* ============================================================
    ACCENT
@@ -58,7 +58,7 @@ body {
   --accent: var(--ella-green);
   --accent-rgb: 108, 255, 141;
   /* Selection-marker color used for timeline ranges, mark in/out lines,
-     and the running-queue-item pulse. Was orange (#E87826) — too close
+     and the running-queue-item pulse. Was orange (var(--warning)) — too close
      to a "warning" semantic and clashed with the green accent on focus.
      Now uses the brand violet from the user's palette: signals
      "selected/active" without competing with the success-green CTAs. */

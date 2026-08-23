@@ -674,9 +674,9 @@
   gap: var(--s-3);
   margin: 0 var(--s-7);
   padding: var(--s-2) var(--s-3);
-  border: 1px solid rgba(232, 38, 38, 0.4); /* --danger at 40% */
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); /* --danger at 40% */
   border-radius: var(--r-md);
-  background: rgba(232, 38, 38, 0.08);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 .cp-lib-error-msg {
   flex: 1;

@@ -83,7 +83,7 @@
      are the fallback when no prefs are passed. `--cap-size` is the absolute
      px font size set by the Captions Size control. */
   background: rgba(0,0,0,0.75);
-  color: #fff;
+  color: var(--fg-0);
   font-size: var(--cap-size, 18px);
   font-weight: var(--weight-semibold);
   line-height: var(--leading-snug);
@@ -200,7 +200,7 @@
   font-size: var(--text-3xl);
   font-weight: var(--weight-bold);
   letter-spacing: var(--track-wide);
-  color: #fff;
+  color: var(--fg-0);
   font-variant-numeric: tabular-nums;
 }
 .cp-tc-hud-hint {
@@ -347,8 +347,8 @@
   border-radius: 50%;
 }
 .cp-getting-started-step.done .cp-getting-started-check {
-  border-color: rgba(108, 255, 141, 0.45);
-  background: rgba(108, 255, 141, 0.10);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 .cp-getting-started-text {
   display: flex;
@@ -522,7 +522,7 @@
   top: calc(100% + 6px);
   right: 0;
   width: 220px;
-  background: #15151a;
+  background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   box-shadow: 0 8px 12px rgba(0,0,0,0.5), 0 0 0 0.5px var(--line-1);
@@ -722,7 +722,7 @@
   position: absolute;
   bottom: calc(100% + 8px);
   right: -4px;
-  background: #15151a;
+  background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   box-shadow: 0 6px 12px rgba(0,0,0,0.55);
@@ -802,7 +802,7 @@
   position: absolute;
   bottom: calc(100% + 8px);
   right: -4px;
-  background: #15151a;
+  background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   box-shadow: 0 6px 12px rgba(0,0,0,0.55);
@@ -871,7 +871,7 @@
   flex-shrink: 0;
 }
 .cp-canvas-toast.success .icon { background: rgba(var(--accent-rgb), 0.18); color: var(--accent); }
-.cp-canvas-toast.error   .icon { background: rgba(232,38,38, 0.18);            color: var(--danger-text);      }
+.cp-canvas-toast.error   .icon { background: color-mix(in srgb, var(--danger) 18%, transparent);            color: var(--danger-text);      }
 .cp-canvas-toast.info    .icon { background: rgba(255,255,255,0.10);           color: var(--fg-1);  }
 .cp-canvas-toast .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .cp-canvas-toast .title {
@@ -949,7 +949,7 @@
      uses z 100 inside its own stacking context. */
   width: 360px;
   max-height: 440px;
-  background: #15151a;
+  background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-card);
   box-shadow: 0 8px 12px rgba(0,0,0,0.55);
@@ -1015,7 +1015,7 @@
   margin-top: 1px;
 }
 .cp-notif-item.success .cp-notif-icon { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); }
-.cp-notif-item.error   .cp-notif-icon { background: rgba(232,38,38, 0.16);            color: var(--danger-text);      }
+.cp-notif-item.error   .cp-notif-icon { background: color-mix(in srgb, var(--danger) 16%, transparent);            color: var(--danger-text);      }
 .cp-notif-item.info    .cp-notif-icon { background: rgba(255,255,255,0.08);           color: var(--fg-2);  }
 
 .cp-notif-body { flex: 1; min-width: 0; }
@@ -1078,7 +1078,7 @@
 .cp-error-overlay .icon {
   width: 36px; height: 36px;
   border-radius: 50%;
-  border: 1px solid rgba(232,38,38, 0.5);
+  border: 1px solid color-mix(in srgb, var(--danger) 50%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;

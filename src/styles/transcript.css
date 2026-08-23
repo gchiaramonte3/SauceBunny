@@ -59,8 +59,8 @@
 }
 .cp-tx-iconbtn.active {
   color: var(--color-accent-green);
-  background: rgba(108, 255, 141, 0.08);
-  border-color: rgba(108, 255, 141, 0.18);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 /* Transcript history popover — opens from the "History" header button.
@@ -120,7 +120,7 @@
 }
 .cp-tx-history-row:hover { background: rgba(255, 255, 255, 0.04); }
 .cp-tx-history-row.active {
-  background: rgba(108, 255, 141, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   border-left-color: var(--color-accent-green);
 }
 .cp-tx-history-row-main { flex: 1; min-width: 0; }
@@ -389,7 +389,7 @@
   border-radius: 50%;
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
-  color: #0a0a0a;
+  color: var(--bg-0);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -508,16 +508,16 @@
 }
 
 .cp-tx-cue.active {
-  background: rgba(108, 255, 141, 0.18);
-  color: #fff;
-  box-shadow: 0 0 0 1px rgba(108, 255, 141, 0.28);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--fg-0);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 .cp-tx-cue.match {
   background: rgba(247, 184, 74, 0.12);
 }
 .cp-tx-cue.match-active {
   background: rgba(247, 184, 74, 0.28);
-  color: #fff;
+  color: var(--fg-0);
   box-shadow: 0 0 0 1px rgba(247, 184, 74, 0.42);
 }
 .cp-tx-mark {
@@ -539,8 +539,8 @@
   width: 100%;
   margin: 2px 0;
   padding: 4px 6px;
-  background: rgba(108, 255, 141, 0.05);
-  border: 1px solid rgba(108, 255, 141, 0.45);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   border-radius: var(--r-xs);
   color: var(--fg-1);
   font-family: inherit;
@@ -762,7 +762,7 @@
   border-radius: 50%;
   flex-shrink: 0;
   /* Same near-black the initials and kind icons are drawn in elsewhere. */
-  color: #0a0a0a;
+  color: var(--bg-0);
   font-size: var(--text-2xs);
   font-weight: var(--weight-black);
 }
@@ -905,14 +905,14 @@
   align-items: center;
   height: 22px;
   padding: 0 9px;
-  background: rgba(108, 255, 141, 0.10);
-  border: 1px solid rgba(108, 255, 141, 0.22);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: var(--r-xs);
   color: var(--color-accent-green);
   font: 600 11px var(--font-sans);
   cursor: pointer;
 }
-.cp-tx-hint-action:hover { background: rgba(108, 255, 141, 0.18); }
+.cp-tx-hint-action:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .cp-tx-hint-action:disabled { opacity: 0.6; cursor: not-allowed; }
 .cp-tx-hint-close {
   flex-shrink: 0;
@@ -995,7 +995,7 @@
 .cp-phase-track .step.active {
   opacity: 1;
   color: var(--color-accent-green);
-  text-shadow: 0 0 6px rgba(108, 255, 141, 0.5);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 .cp-phase-track .sep { opacity: 0.3; }
 
@@ -1081,7 +1081,7 @@
   max-height: min(80vh, 760px);
   display: flex;
   flex-direction: column;
-  background: #15151a;
+  background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
   box-shadow: 0 24px 64px rgba(0,0,0,0.55), 0 0 0 0.5px rgba(255,255,255,0.04);
@@ -1234,7 +1234,7 @@
   letter-spacing: var(--track-slight);
   /* Near-black on a bright palette hue — the contrast the palette was
      measured against. */
-  color: #0a0a0a;
+  color: var(--bg-0);
 }
 .cp-spk-name {
   flex: 1 1 auto;
@@ -1429,7 +1429,7 @@
 /* Matches the queue drawer's destructive treatment rather than inventing a
    second red: tint on hover, never a permanently loud button. */
 .cp-cast-danger { color: var(--danger-text); }
-.cp-cast-danger:hover { color: var(--danger-text); background: rgba(232,38,38,0.14); }
+.cp-cast-danger:hover { color: var(--danger-text); background: color-mix(in srgb, var(--danger) 14%, transparent); }
 
 /* Clickable colour pip in the Speakers modal — the trigger for the picker. */
 .cp-spk-pip-btn {
@@ -1444,7 +1444,7 @@
 }
 .cp-spk-pip-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px #15151a, 0 0 0 3px var(--focus-ring);
+  box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 3px var(--focus-ring);
 }
 
 /* ── SpeakerColorPicker — hand-rolled premium picker (see SpeakerColorPicker.tsx) ── */
@@ -1489,7 +1489,7 @@
   touch-action: none;
   background:
     linear-gradient(to top, #000, transparent),
-    linear-gradient(to right, #fff, transparent),
+    linear-gradient(to right, var(--fg-0), transparent),
     hsl(var(--cp-hue) 100% 50%);
 }
 .cp-colorpick-thumb {
@@ -1498,7 +1498,7 @@
   height: 14px;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  border: 2px solid #fff;
+  border: 2px solid var(--fg-0);
   box-shadow: 0 0 0 1px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.5);
   pointer-events: none;
 }
@@ -1533,8 +1533,8 @@
   height: 14px;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  background: #fff;
-  border: 2px solid #fff;
+  background: var(--fg-0);
+  border: 2px solid var(--fg-0);
   box-shadow: 0 0 0 1px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.5);
   pointer-events: none;
 }
@@ -1871,7 +1871,7 @@
   letter-spacing: var(--track-wide);
   /* Same near-black the transcript bubbles use behind initials — the palette's
      contrast test is measured against this exact value. */
-  color: #0a0a0a;
+  color: var(--bg-0);
 }
 .cp-tx-group-name {
   flex: 1 1 auto;

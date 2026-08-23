@@ -424,7 +424,7 @@
   line-height: var(--leading-none);
   cursor: pointer;
 }
-.cp-ai-chapter-del:hover { color: var(--danger); background: rgba(232, 38, 38, 0.10); }
+.cp-ai-chapter-del:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 
 /* ── Slash commands in the composer (lib/transcript-prompts.ts) ───────── */
 /* Anchored to the composer (which is position:relative above), opening

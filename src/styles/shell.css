@@ -13,7 +13,7 @@
 
 .cp-titlebar {
   height: 36px;
-  background: linear-gradient(180deg, #18181b 0%, #131316 100%);
+  background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-2) 100%);
   border-bottom: 1px solid var(--line-1);
   display: flex;
   align-items: center;
