@@ -2657,11 +2657,36 @@ mod member_id_tests {
 // prefixed or raw, dashed or not, wrapped across chat-app line breaks.
 // ============================================================
 
-/// Shareable invite: "SAUC-" + the ticket in dash groups of 5.
+/// The literal prefix every iroh `EndpointTicket` starts with.
+///
+/// It is a format tag, identical on every ticket ever minted, and the parser
+/// requires it back - so it is stripped for DISPLAY and restored on parse
+/// rather than shown to a human eleven times a day.
+const TICKET_TAG: &str = "endpoint";
+
+/// Shareable invite: `SAUC-` + the ticket, uppercased, in dash groups of 5.
+///
+/// Two things this does that the first version did not, both about the code
+/// looking like a code:
+///
+/// **The `endpoint` tag is dropped.** Every ticket begins with those eight
+/// characters, so every invite began `SAUC-endpo-intXX`. The host's chip
+/// truncates at 26 characters, which meant eleven of the twenty-one visible
+/// characters were the same on every session in the app's history - the part
+/// a person actually reads carried almost no information, and it read as a
+/// URL fragment rather than something to share.
+///
+/// **It is uppercased.** z-base-32 is lowercase, and lowercase runs of it
+/// look like a mangled word (`endpo-intac-2hweh`). Uppercase is the shape
+/// people already recognise as a code. Safe because the alphabet is
+/// case-insensitive in one direction: `parse_invite` lowercases before the
+/// ticket parser sees it, and an uppercase round-trip is asserted in the
+/// tests below rather than assumed.
 pub(crate) fn format_invite(ticket: &str) -> String {
-    let mut out = String::with_capacity(ticket.len() + ticket.len() / 5 + 5);
+    let body = ticket.strip_prefix(TICKET_TAG).unwrap_or(ticket).to_uppercase();
+    let mut out = String::with_capacity(body.len() + body.len() / 5 + 5);
     out.push_str("SAUC-");
-    for (i, c) in ticket.chars().enumerate() {
+    for (i, c) in body.chars().enumerate() {
         if i > 0 && i % 5 == 0 {
             out.push('-');
         }
@@ -2670,50 +2695,168 @@ pub(crate) fn format_invite(ticket: &str) -> String {
     out
 }
 
-/// Recover the raw ticket from any pasted form. Whitespace (incl. the
-/// newlines chat apps wrap long pastes with) and group dashes are display
-/// sugar; the SAUC prefix is optional and case-insensitive. A legacy raw
-/// ticket passes through untouched (base32 - it contains neither).
+/// Recover the raw ticket from any pasted form.
+///
+/// Deliberately permissive, because the failure is a person who cannot join a
+/// call: whitespace (including the newlines chat apps wrap long pastes with)
+/// and group dashes are display sugar, the `SAUC` handle is optional, and
+/// case is irrelevant. Every form the app has ever produced still works -
+/// dressed or raw, uppercase or lower, with the `endpoint` tag or without -
+/// which matters because a host on one build shares a code with a guest on
+/// another.
+///
+/// The tag is restored by checking whether it is already there. A ticket body
+/// could in principle begin with the letters `endpoint` on its own (they are
+/// all in the z-base-32 alphabet) and be left un-prefixed, at a probability
+/// of 32^-8, or about one in a trillion. Named rather than hidden; the
+/// alternative is a length heuristic, and ticket length varies with how many
+/// addresses the endpoint advertises, so that would fail far more often.
 pub(crate) fn parse_invite(input: &str) -> String {
-    let stripped: String = input.chars().filter(|c| !c.is_whitespace() && *c != '-').collect();
+    let stripped: String = input
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .collect::<String>()
+        .to_lowercase();
     // is_char_boundary guards the slice - a paste with multibyte chars at the
     // seam (emoji, smart quotes) must not panic the command.
-    if stripped.len() > 4 && stripped.is_char_boundary(4) && stripped[..4].eq_ignore_ascii_case("sauc") {
-        stripped[4..].to_string()
+    let body = if stripped.len() > 4 && stripped.is_char_boundary(4) && &stripped[..4] == "sauc" {
+        &stripped[4..]
     } else {
-        stripped
+        &stripped[..]
+    };
+    if body.starts_with(TICKET_TAG) {
+        body.to_string()
+    } else {
+        format!("{TICKET_TAG}{body}")
     }
 }
 
 #[cfg(test)]
 mod invite_tests {
     use super::*;
+    use std::str::FromStr;
 
-    const TICKET: &str = "endpointadkp7j4e4l3knzhmk4ze6iyke4ejiuv4otpugpg3ku5aenz5tikrgc";
-
-    #[test]
-    fn invite_round_trips() {
-        let invite = format_invite(TICKET);
-        assert!(invite.starts_with("SAUC-"));
-        assert_eq!(parse_invite(&invite), TICKET);
+    /// A REAL ticket, minted the way `session_host` mints one.
+    ///
+    /// This used to be a hand-typed constant, and it did not parse - it was
+    /// not a ticket at all, just a plausible-looking string. Every test here
+    /// passed against it, and none of them could have caught a change that
+    /// broke the actual format, because the actual parser was never involved.
+    /// The round-trip test below is the one that matters and it was the one
+    /// the fake constant made impossible.
+    fn real_ticket() -> String {
+        let secret = iroh::SecretKey::generate();
+        EndpointTicket::new(iroh::EndpointAddr::from(secret.public())).to_string()
     }
 
     #[test]
-    fn parse_survives_chat_wrapping_and_case() {
-        let invite = format_invite(TICKET);
+    fn the_fixture_is_a_ticket_the_parser_accepts() {
+        // Guards every other test in this module.
+        let t = real_ticket();
+        assert!(EndpointTicket::from_str(&t).is_ok(), "fixture is not a real ticket: {t}");
+        assert!(t.starts_with(TICKET_TAG));
+    }
+
+    #[test]
+    fn a_dressed_invite_parses_back_into_a_working_ticket() {
+        // The whole contract, end to end: what the host copies, a guest can
+        // paste, and iroh can dial. Not "the strings match" - the ticket
+        // parser accepts the result.
+        let t = real_ticket();
+        let invite = format_invite(&t);
+        let recovered = parse_invite(&invite);
+        assert_eq!(recovered, t);
+        assert!(EndpointTicket::from_str(&recovered).is_ok());
+    }
+
+    #[test]
+    fn the_code_shows_no_characters_that_are_the_same_every_time() {
+        // The defect this change exists for. Every ticket starts with the
+        // literal tag "endpoint", so every invite began SAUC-endpo-intXX, and
+        // the host's chip truncates at 26 characters - eleven of the twenty-one
+        // visible characters carried no information about WHICH session.
+        let invite = format_invite(&real_ticket());
+        assert!(!invite.to_lowercase().contains("endpo"), "the format tag is back: {invite}");
+        let visible = &invite[..26.min(invite.len())];
+        assert!(!visible.to_lowercase().contains("endpo"), "wasted characters up front: {visible}");
+    }
+
+    #[test]
+    fn it_reads_as_a_code_rather_than_a_word() {
+        // Letters, digits and group dashes - the shape people recognise from
+        // every other service that hands out a join code.
+        let invite = format_invite(&real_ticket());
+        assert!(invite.starts_with("SAUC-"));
+        for (i, group) in invite.split('-').skip(1).enumerate() {
+            assert!(!group.is_empty(), "empty group {i} in {invite}");
+            assert!(group.len() <= 5, "group {i} is {} chars: {invite}", group.len());
+            assert!(
+                group.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
+                "group {i} is not upper-alphanumeric: {group}",
+            );
+        }
+    }
+
+    #[test]
+    fn every_form_the_app_has_ever_produced_still_joins() {
+        // A host on one build shares a code with a guest on another. All four
+        // of these have been the shipped format at some point, and each must
+        // still recover the same ticket.
+        let t = real_ticket();
+        let body = t.strip_prefix(TICKET_TAG).unwrap();
+        let legacy_dressed = {
+            // "SAUC-" + lowercase ticket WITH the tag, in groups of 5.
+            let mut out = String::from("SAUC-");
+            for (i, c) in t.chars().enumerate() {
+                if i > 0 && i % 5 == 0 { out.push('-'); }
+                out.push(c);
+            }
+            out
+        };
+        for (label, form) in [
+            ("current", format_invite(&t)),
+            ("legacy dressed", legacy_dressed),
+            ("raw ticket", t.clone()),
+            ("raw body, no tag", body.to_string()),
+            ("uppercased raw", t.to_uppercase()),
+        ] {
+            assert_eq!(parse_invite(&form), t, "{label} did not recover the ticket");
+        }
+    }
+
+    #[test]
+    fn parse_survives_chat_wrapping_and_stray_spacing() {
+        // Slack and iMessage wrap long codes; people paste with a trailing
+        // newline and a leading space. None of that may cost someone a call.
+        let t = real_ticket();
+        let invite = format_invite(&t);
         let wrapped = invite
             .chars()
             .enumerate()
             .flat_map(|(i, c)| if i > 0 && i % 20 == 0 { vec!['\n', c] } else { vec![c] })
             .collect::<String>();
-        assert_eq!(parse_invite(&format!("  {wrapped}  \n")), TICKET);
-        assert_eq!(parse_invite(&invite.to_lowercase()), TICKET);
+        assert_eq!(parse_invite(&format!("  {wrapped}  \n")), t);
+        assert_eq!(parse_invite(&invite.to_lowercase()), t);
+        assert_eq!(parse_invite(&format!("\t{invite}\r\n")), t);
     }
 
     #[test]
-    fn legacy_raw_ticket_passes_through() {
-        assert_eq!(parse_invite(TICKET), TICKET);
-        assert_eq!(parse_invite(&format!("{TICKET}\n")), TICKET);
+    fn a_multibyte_paste_does_not_panic() {
+        // Smart quotes and emoji arrive when someone copies out of a chat app
+        // with formatting. The command must reject, not crash.
+        for junk in ["\u{201c}SAUC-ABCDE\u{201d}", "🐰SAUC-ABCDE", "…", "\u{201c}\u{201d}"] {
+            let _ = parse_invite(junk);
+        }
+    }
+
+    #[test]
+    fn the_invite_is_shorter_than_it_was() {
+        // Dropping the tag is 8 characters plus a group dash off every code.
+        let t = real_ticket();
+        assert!(
+            format_invite(&t).len() < t.len() + t.len() / 5 + 5,
+            "the dressed invite should be shorter than the old dressed form",
+        );
     }
 }
 

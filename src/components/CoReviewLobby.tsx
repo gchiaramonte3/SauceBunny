@@ -10,6 +10,7 @@ import { useMediaCapture } from "../hooks/use-media-capture";
 import { GreenRoomDevices } from "./GreenRoomDevices";
 import type { Participant } from "./PeoplePanel";
 import type { SessionState } from "../bindings/SessionState";
+import { shortJoinCode } from "../lib/join-code";
 
 /**
  * The Review lobby - the GREEN ROOM. Three calm steps in one tone-card
@@ -242,9 +243,11 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
               <div className="cp-colobby-share">
                 <button type="button" className="cp-keycap cp-colobby-code"
                   onClick={copyCode} aria-label="Copy the full invite" title="Copy the full invite">
-                  {/* 13a: the invite renders COLLAPSED (SAUC- handle + first
-                      groups); the click copies the full dressed ticket. */}
-                  {session.code.length > 26 ? session.code.slice(0, 26) + "…" : session.code}
+                  {/* The invite renders COLLAPSED (SAUC- handle + first
+                      groups); the click copies the full dressed ticket. Cut on
+                      a GROUP boundary - a character cut left a fragment that
+                      reads as a typo. */}
+                  {shortJoinCode(session.code)}
                 </button>
                 <span className={"cp-colobby-code-hint" + (copied ? " copied" : "")} aria-live="polite">
                   {copied ? "Invite copied" : "Copy invite"}

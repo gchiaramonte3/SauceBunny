@@ -5,6 +5,28 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+- **Join codes read as join codes.** Every invite began `SAUC-endpo-intXX`,
+  because every iroh ticket starts with the literal tag `endpoint` — and the
+  host's chip truncates, so eleven of the twenty-one characters actually on
+  screen were identical in every session the app has ever hosted. The tag is
+  dropped for display and restored when a code is pasted, the body is shown
+  uppercase in groups of five, and the chip now cuts on a group boundary
+  instead of mid-group. A code went from 79 characters to 70, and all 70 of
+  them say which session.
+
+  Pasting is unchanged and still accepts everything: dashed or not, upper or
+  lower, with or without the `SAUC` handle, wrapped across the line breaks
+  chat apps add.
+
+  **One compatibility note.** A code produced by this build will not be
+  accepted by a build older than it — the previous parser did not lowercase,
+  so it hands the uppercased body to iroh unchanged and the dial fails. Codes
+  from older builds still work here. No release has been published, so this
+  affects only locally-built copies, but it is the sort of thing that is
+  cheap to say now and expensive to discover later.
+
+
 ## [0.4.0] — 2026-08-22
 
 Transcripts got somewhere to live. The panel that lists them now has projects
