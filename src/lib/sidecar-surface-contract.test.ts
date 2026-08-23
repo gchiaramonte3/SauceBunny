@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 /**
- * The sidecars, across the four places that have to agree.
+ * The sidecars, across the five places that have to agree.
  *
  * `tauri.conf.json` decides what SHIPS. Rust decides what is SPAWNED. package.json
  * decides how each one is REBUILT. CLAUDE.md's table is what a human reads
@@ -11,6 +11,14 @@ import { join, resolve } from "node:path";
  * dictation and screen capture landed: both shipped in every build, both had
  * working build scripts, and neither appeared in the docs that state the
  * self-contained-binary rule and each binary's update path.
+ *
+ * SIDECAR-VERSIONS.md is the fifth, added after an open-source documentation
+ * audit found its table listing five of the eight shipped binaries. It was
+ * left out when this test was written, and it drifted for exactly the reason
+ * the file above it did — which is the argument for guarding a document
+ * rather than trusting it. The two tables are checked separately because
+ * they are written differently: CLAUDE.md names the binary (`yt-dlp`),
+ * SIDECAR-VERSIONS.md names the shipped file (`yt-dlp-aarch64-apple-darwin`).
  *
  * That drift is invisible from any single file. Every one of them was
  * internally consistent; only the comparison shows it. Same shape as the
@@ -69,6 +77,17 @@ describe("the sidecar surface", () => {
     // update path and is invisible to anyone auditing what the app ships.
     const undocumented = shipped.filter((n) => !new RegExp(`\\|\\s*\`?${n}\`?\\s*\\|`).test(claude));
     expect(undocumented, "shipped but missing from the sidecar table").toEqual([]);
+  });
+
+  it("documents every shipped sidecar in SIDECAR-VERSIONS.md's table", () => {
+    // That table carries each binary's UPDATE path, so a missing row means a
+    // shipped binary nobody knows how to refresh - which for yt-dlp is the
+    // difference between a working app and a broken one two months later.
+    const versions = readFileSync(join(ROOT, "SIDECAR-VERSIONS.md"), "utf8");
+    const undocumented = shipped.filter(
+      (n) => !new RegExp(`\\|\\s*\`?${n}(-[a-z0-9_]+)*\`?\\s*\\|`).test(versions),
+    );
+    expect(undocumented, "shipped but missing from SIDECAR-VERSIONS.md").toEqual([]);
   });
 
   it("gives every sidecar we build ourselves an npm script", () => {

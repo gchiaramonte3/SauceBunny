@@ -68,14 +68,17 @@ npm test                 # vitest: SRT/timecode/proxy/validation units
 npm run check:release    # audit sidecars + entitlements + signing before a build
 ```
 
-Before opening a PR, run the full gate (CI runs the same on every push):
+Before opening a PR, run the full gate:
 
 ```bash
-npx tsc --noEmit                                              # types
-npm test                                                     # frontend units
-( cd src-tauri && cargo check && cargo test --lib && cargo clippy --all-targets -- -D warnings )
-( cd swift-sidecar && swift build )                          # diarizer
+npm run verify
 ```
+
+That is every check CI runs — types, units, lint, `cargo check` / tests /
+clippy, the Swift sidecar, the licence scan and the Playwright smoke — in one
+command, and it keeps going after a failure so you see the whole picture
+rather than the first thing that broke. It is not a substitute for launching
+the app: see [HAND-TEST.md](docs/HAND-TEST.md) for what only a human can check.
 
 `cargo test --lib` also regenerates the `ts-rs` TypeScript bindings in
 `src/bindings/` from the Rust structs — keep it green when you touch a

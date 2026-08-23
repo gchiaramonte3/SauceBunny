@@ -39,6 +39,11 @@ run "Rust tests"    cargo test --lib --manifest-path src-tauri/Cargo.toml
 # gate that tells you the wrong thing.
 run "Clippy"        cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 run "Swift sidecar" swift build --package-path swift-sidecar
+# CI runs this too, and this script did not - the same subset bug as clippy
+# below, found the same way. It takes a second and it is the check that stops
+# a strong-copyleft dependency being LINKED into an MIT app, which is the one
+# licensing mistake that cannot be undone after a release.
+run "Licenses"      npm run check:licenses --silent
 run "E2E"           npx playwright test e2e/
 
 printf '\n'

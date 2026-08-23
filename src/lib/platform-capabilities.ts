@@ -155,7 +155,7 @@ export async function probePlatformCapabilities(): Promise<PlatformCapabilities>
   // platformSupports() at EXPORT time, long after startup, so a corrected
   // cache makes that path degrade properly instead of parking. Startup
   // registration in main.tsx has already run on the optimistic value and
-  // cannot be rescued from here - see loop-notes.md.
+  // cannot be rescued from here - see docs/DECISIONS.md.
   const confirmed = await confirmBlobWorker();
   if (base.blobWorker && !confirmed.ok && sync) {
     sync = {

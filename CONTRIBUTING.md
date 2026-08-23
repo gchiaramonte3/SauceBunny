@@ -89,17 +89,28 @@ automatically.
 ## Running checks before opening a PR
 
 ```bash
-npx tsc --noEmit                   # type-check frontend
-npm test                           # vitest — parser/timecode/scoring units
-(cd src-tauri && cargo test --lib) # Rust units + ts-rs binding freshness
-npm run build:diarizer             # ensure the Swift sidecar still builds
+npm run verify
 ```
 
-CI runs all of these on every PR. Unit tests cover the pure logic (SRT/VTT
-parsing, timecode math, proxy request parsing); playback and pipeline flows
-are still verified manually, so please also describe the smoke-test you ran
-in the PR body (e.g. "Pulled a YouTube clip, generated a transcript with
-diarization on, dragged two speaker bubbles to merge — no regressions").
+One command, every automated gate, in the order CI runs them: `tsc --noEmit`,
+vitest, lint, `cargo check`, `cargo test --lib` (which also regenerates the
+`ts-rs` bindings in `src/bindings/`), `cargo clippy -D warnings`,
+`swift build`, `npm run check:licenses`, and the Playwright UI smoke. It keeps
+going after a failure so you see every broken gate rather than the first one.
+
+This list used to be written out by hand here, and it had drifted to four of
+the nine — a contributor could follow it, pass, and still be rejected by CI on
+lint or clippy. If you find `npm run verify` and CI disagreeing, that is a bug
+in `scripts/verify-all.sh` worth reporting on its own.
+
+**None of it launches the app.** The units cover pure logic (SRT/VTT parsing,
+timecode math, proxy request parsing), and the Playwright suite is a *shell*
+smoke — it boots the frontend with the Tauri IPC layer mocked, because
+tauri-driver has no macOS/WKWebView support. Real playback, transcription and
+co-review are still human work: run the parts you touched (`docs/HAND-TEST.md`
+is the checklist) and describe the smoke-test in the PR body, e.g. "Pulled a
+YouTube clip, generated a transcript with diarization on, dragged two speaker
+bubbles to merge — no regressions".
 
 ### Testing a component
 

@@ -43,20 +43,32 @@ Shipped npm runtime dependencies, individually:
 | `opus-decoder` | MIT |
 | `perfect-freehand` | MIT |
 
-The bundled **ffmpeg / ffprobe are the exception** and are GPLv3 by design —
-they run as separate subprocesses, are never linked, and the §6 written offer
-above covers redistributing them.
+The bundled **ffmpeg / ffprobe are the exception** and are GPL — they run as
+separate subprocesses, are never linked, and the written offer below covers
+redistributing them.
 
 ---
 
 ## ⚠️ Bundled ffmpeg / ffprobe are GPL — compliance terms
 
-The ffmpeg and ffprobe binaries are the **GPLv3** static builds from
-[osxexperts.net](https://www.osxexperts.net/) (see `scripts/fetch-ffmpeg.sh` /
-`scripts/fetch-ffprobe.sh`). They run as isolated subprocesses, so they do
+The ffmpeg and ffprobe binaries are static builds from
+[osxexperts.net](https://www.osxexperts.net/) and
+[ffmpeg.martin-riedl.de](https://ffmpeg.martin-riedl.de/) (see
+`scripts/fetch-ffmpeg.sh` / `scripts/fetch-ffprobe.sh`).
+
+**They are GPL v2 or later, not GPLv3.** That is checkable rather than
+remembered — `ffmpeg -version` reports `--enable-gpl --enable-libx264
+--enable-libx265` and does NOT report `--enable-version3`, which is exactly
+what puts an ffmpeg build at "GPLv2 or later" instead of v3. This file
+previously called them "the GPLv3 static builds", which overstated the
+upstream terms. Nothing about the compliance below changes: "or later" lets a
+redistributor pass the work on under v3, which is what Sauce Bunny does and
+why the v3 text is what ships.
+
+They run as isolated subprocesses over argv and are never linked, so they do
 **not** relicense Sauce Bunny's own MIT source. Because the GPL binaries are
-redistributed inside the released `.dmg`, that distribution complies with GPLv3
-as follows:
+redistributed inside the released `.dmg`, that distribution complies as
+follows:
 
 - **License text** — the full GNU GPL v3 ships with the app at
   `Sauce Bunny.app/Contents/Resources/licenses/GPLv3.txt` (source:

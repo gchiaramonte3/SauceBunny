@@ -52,6 +52,9 @@ guard rail and refuses to install a leaky binary.
 | `ffprobe-aarch64-apple-darwin` | `npm run refresh:ffprobe` | ffmpeg.martin-riedl.de (static arm64) — yt-dlp finds it beside ffmpeg for HLS fixup |
 | `whisper-cli-aarch64-apple-darwin` | `npm run build:whisper` | whisper.cpp source, CMake `-DBUILD_SHARED_LIBS=OFF` |
 | `saucebunny-diarize-aarch64-apple-darwin` | `npm run build:diarizer` | `swift-sidecar/` (SPM, owned by us) |
+| `llama-server-aarch64-apple-darwin` | `npm run build:llama` | llama.cpp source, static + Metal |
+| `saucebunny-dictate-aarch64-apple-darwin` | `npm run build:dictate` | `swift-sidecar/` (SPM, owned by us) |
+| `saucebunny-capture-aarch64-apple-darwin` | `npm run build:capture` | `swift-sidecar/` (SPM, owned by us) |
 
 
 ## whisper-cli

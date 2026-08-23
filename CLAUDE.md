@@ -548,7 +548,7 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
    the second time one commit after the first was written up — because the
    write-up was a warning rather than a fix. Handle the empty case in the
    script, and grep the result for `[, ` before believing it.
-6. **Shrink `App.tsx`.** It is ~5,054 lines and the largest single risk in the
+6. **Shrink `App.tsx`.** It is ~5,100 lines and the largest single risk in the
    codebase: nothing can be tested without booting the whole app, and reviewing
    a change to it means reading around a dozen unrelated subsystems. The
    direction is the one already established — lift ONE cohesive subsystem at a
@@ -612,29 +612,30 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
 
 ## Before every change
 
-Run and confirm all pass:
-
 ```bash
-# 1. TypeScript type check + unit tests
-npx tsc --noEmit
-npm test             # vitest (srt/timecode/commands/validation)
-
-# 2. Rust compilation + unit tests
-cargo check          # from src-tauri/
-cargo test --lib     # proxy parsing, short_err + ts-rs binding freshness
-
-# 3. Swift sidecar
-swift build          # from swift-sidecar/
-
-# 4. Full app launch
-npm run tauri dev    # confirm no console errors
+npm run verify       # every automated gate, in one command
+npm run tauri dev    # then launch it — the gate cannot open a file
 ```
 
-The CI (`.github/workflows/ci.yml`) runs steps 1–3 on every push. Do not commit if any fail.
+`npm run verify` (`scripts/verify-all.sh`) runs, in order: `tsc --noEmit`,
+vitest, lint, `cargo check`, `cargo test --lib`, `cargo clippy -D warnings`,
+`swift build`, `npm run check:licenses`, and the Playwright smoke. It keeps
+going after a failure so you see every broken gate rather than the first one,
+and exits non-zero if any failed.
+
+**It is deliberately the same set `.github/workflows/ci.yml` runs.** Keep it
+that way. A local gate that is a SUBSET of the CI gate reports "all gates
+passed" for work that CI will reject, and this has happened twice: clippy ran
+in CI and not here for 98 commits, and `check:licenses` was missing until an
+open-source audit went looking. If you add a job to CI, add it here in the
+same commit.
+
+Neither one launches the app. `docs/HAND-TEST.md` is the list of things only a
+human can check.
 
 ## Enforced contracts
 
-Fifty-five rules in this file are checked by a test rather than remembered. If you
+Fifty-six rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -677,7 +678,8 @@ written after finding the rule already broken somewhere.
 | `invoke-contract` | Invoke type args come from `src/bindings/`; byte payloads use the raw IPC body; every `write_text_to_path` is atomic |
 | `ipc-surface-contract` | Every registered command is called, and every invoked command is registered |
 | `event-surface-contract` | Every event Rust emits has a listener, every listened event is emitted (`panel:*` is the frontend-only bus), and each handler is named after its event so a mis-wire is visible |
-| `sidecar-surface-contract` | Everything `externalBin` ships is spawnable, documented in the table above, and (for ours) has a build script |
+| `sidecar-surface-contract` | Everything `externalBin` ships is spawnable, documented in the table above AND in SIDECAR-VERSIONS.md, and (for ours) has a build script |
+| `docs-contract` | `npm run verify` runs every gate CI runs; the bundled ffmpeg's licence is stated the same way in CLAUDE.md, README and THIRD-PARTY-LICENSES |
 | `menu-surface-contract` | Every native menu item has a handler (React binding or a native arm), and no binding points at an item that does not exist |
 | `settings-pointer-contract` | "Settings → X" in user-facing copy names a tab or section that exists (labels read from SettingsModal, never retyped) |
 | `command-coverage-contract` | Every rebindable action has a ⌘K entry, and `onNavigateView` accepts every view that has one |
@@ -797,13 +799,31 @@ npm run tauri build      # produces signed + notarized .dmg
 - **No secrets.** No API keys, tokens, credentials, or personal paths in any committed file.
 - **Dependencies:** must carry a licence compatible with shipping inside an
   MIT-licensed app. Permissive (MIT / Apache-2.0 / BSD / ISC / OFL) is the
-  default, and **weak-copyleft is fine when the dependency stays a separate
-  library or binary** — the app already ships MPL-2.0 (mediabunny, its
-  extensions, turbores), LGPL (the ffmpeg build; LAME inside the MP3 encoder)
-  and OFL-1.1 (Nunito Sans), all recorded in `THIRD-PARTY-LICENSES.md`. What
-  is genuinely out is strong copyleft that would reach the whole app (GPL,
-  AGPL). This rule previously said "MIT, Apache-2.0, or BSD" and so forbade
-  five things the app already shipped; it was the rule that was wrong.
+  default, and **copyleft is fine when the dependency stays a separate
+  library or subprocess** — the app already ships MPL-2.0 (mediabunny, its
+  extensions, turbores), LGPL (LAME inside the MP3 encoder), OFL-1.1 (Nunito
+  Sans) and **GPL** (the bundled ffmpeg/ffprobe), all recorded in
+  `THIRD-PARTY-LICENSES.md`.
+
+  **The ffmpeg entry is GPL, not LGPL, and this rule said the opposite while
+  also saying GPL was "genuinely out" — a rule that forbade something two
+  files away describe in detail, including a §6 written offer.** The binary
+  settles it: `ffmpeg -version` reports `--enable-gpl --enable-libx264
+  --enable-libx265`. What makes that acceptable is not the licence tier, it
+  is the BOUNDARY: ffmpeg runs as a subprocess over argv and is never linked,
+  so its copyleft does not reach this app's MIT source. See
+  THIRD-PARTY-LICENSES.md for the compliance terms that follow from that.
+
+  So the real line is not "no GPL". It is: **anything that would be LINKED
+  into the app must be permissive or weak-copyleft; strong copyleft is only
+  ever acceptable behind a process boundary,** and shipping it brings
+  obligations (licence text in the bundle, a written offer for source) that
+  are already met for ffmpeg and must be met again for anything new.
+
+  This rule has now been wrong twice in the same place. It first said "MIT,
+  Apache-2.0, or BSD", forbidding five things the app already shipped; the
+  fix that replaced it invented an LGPL ffmpeg to keep "no GPL" true. Both
+  times the code was right and the rule was written from memory.
 - **Docs:** Update `docs/ARCHITECTURE.md` when structural changes are made. Keep `CONTRIBUTING.md` accurate.
 - **Commits:** Imperative mood, max 72 chars first line. Format: `area: change` (e.g., `diarizer: switch to SpeakerKit primary backend`, `ui: add volume slider to player controls`).
 
