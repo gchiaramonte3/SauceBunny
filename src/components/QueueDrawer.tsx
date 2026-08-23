@@ -52,6 +52,9 @@ type Props = {
   onRemove: (id: string) => void;
   /** Put a failed row back in the queue, marks and all. */
   onRetry: (id: string) => void;
+  /** Turn a transcript selection into in/out marks, or a queued clip. */
+  onMarkRange: (startSeconds: number, endSeconds: number) => void;
+  onQueueRange: (startSeconds: number, endSeconds: number) => void;
   onClearAll: () => void;
   onExportAll: () => void;
   onStop: () => void;
@@ -81,6 +84,15 @@ type Props = {
    * doesn't have to hunt for the result of the action they just took.
    */
   transcriptArrivedTick: number;
+  /**
+   * Bump to jump to the Review tab, the way `transcriptArrivedTick` jumps to
+   * Transcript. Exists so the marker export is reachable from the command
+   * palette: it lived behind an unlabelled 14px glyph, inside a tab, inside a
+   * drawer, and was in neither the palette, the File menu nor the shortcut
+   * sheet - so an editor looking for Premiere markers concluded the app did
+   * not do it and retyped timecodes by hand.
+   */
+  reviewRequestTick?: number;
   /** Dismiss the active transcript (App clears the path). */
   onClearTranscript: () => void;
   /** Load a previous transcript (from the History popover). */
@@ -238,10 +250,10 @@ function loadDrawerWidth(): number {
 
 export function QueueDrawer({
   open, viewActive = true, onClose, queue, fps, running, hasFolder,
-  onRemove, onRetry, onClearAll, onExportAll, onStop,
+  onRemove, onRetry, onMarkRange, onQueueRange, onClearAll, onExportAll, onStop,
   transcriptPath, transcriptOrigin, playheadAvailable, transcriptFps,
   sourceStartTimecode, onSetSourceTimecode, onGrabFace,
-  onTranscriptSeek, transcriptArrivedTick,
+  onTranscriptSeek, transcriptArrivedTick, reviewRequestTick = 0,
   onClearTranscript, onLoadFromHistory,
   onRegenerateTranscript, regenerateBusy, canRegenerate,
   onRedetectSpeakers, canRedetect,
@@ -383,6 +395,13 @@ export function QueueDrawer({
   // floating panel through the panel-bus snapshot, so this one effect covers
   // BOTH windows; the old embedded-only "switch once a transcript path exists"
   // fallback is gone — it overrode the restored tab on every pop-out.
+  const lastReviewTickRef = useRef(reviewRequestTick);
+  useEffect(() => {
+    if (reviewRequestTick === lastReviewTickRef.current) return;
+    lastReviewTickRef.current = reviewRequestTick;
+    setActiveTab("review");
+  }, [reviewRequestTick]);
+
   const lastArrivedTickRef = useRef(transcriptArrivedTick);
   useEffect(() => {
     if (transcriptArrivedTick === lastArrivedTickRef.current) return;
@@ -872,6 +891,8 @@ export function QueueDrawer({
           onSetSourceTimecode={onSetSourceTimecode}
           onGrabFace={onGrabFace}
           onSeek={onTranscriptSeek}
+          onMarkRange={onMarkRange}
+          onQueueRange={onQueueRange}
           origin={transcriptOrigin}
           onClearTranscript={onClearTranscript}
           onLoadFromHistory={onLoadFromHistory}

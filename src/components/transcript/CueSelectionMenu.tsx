@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { IconPlay, IconScissors, IconTranscript, IconUndo } from "../Icons";
+import {
+  IconMarkIn, IconPlay, IconScissors, IconStack, IconTranscript, IconUndo,
+} from "../Icons";
 import { SpeakerAssignFlyout } from "./SpeakerAssignFlyout";
 
 /**
@@ -48,6 +50,18 @@ type Props = {
   /** The speaker the selection currently belongs to, so it can be skipped. */
   currentTag: string | null;
   onAssign: (tag: string) => void;
+  /**
+   * Turn the selection into an in/out range, and optionally straight into a
+   * queued clip.
+   *
+   * "I found the quote, now cut it" is the move an editor makes most, and it
+   * had no path: every cue click called `onSeek(cue.start)` and nothing else,
+   * so marking the end meant clicking the LAST cue (which seeks to its start,
+   * not its end) and then scrubbing by hand. Absent when the host has no
+   * transport to mark against.
+   */
+  onMarkRange?: () => void;
+  onQueueRange?: () => void;
   onNewSpeaker: () => void;
   onPlay: () => void;
   onClose: () => void;
@@ -83,7 +97,7 @@ type Item = {
 
 export function CueSelectionMenu({
   anchor, cueCount, speakers, currentTag, onAssign, onNewSpeaker, onPlay, onClose,
-  phrase, onUnsplit,
+  phrase, onUnsplit, onMarkRange, onQueueRange,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const btnRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -111,6 +125,23 @@ export function CueSelectionMenu({
 
   const lines = cueCount === 1 ? "1 line" : `${cueCount} lines`;
   const items: Item[] = [
+    // Marking leads when a transport is there to mark against. The selection
+    // already describes a range in time; every other item here reinterprets it
+    // as a range of SPEAKERS, which is the less common thing to want.
+    ...(onMarkRange
+      ? [{
+          icon: <IconMarkIn size={13} />,
+          label: `Mark in/out from ${lines}`,
+          onSelect: onMarkRange,
+        }]
+      : []),
+    ...(onQueueRange
+      ? [{
+          icon: <IconStack size={13} />,
+          label: "Add to queue",
+          onSelect: onQueueRange,
+        }]
+      : []),
     // The cut leads when there is one, because it is what the user's selection
     // actually described. Quoting the phrase back is the confirmation: this
     // action divides a line, and the only way to be sure it divides it in the

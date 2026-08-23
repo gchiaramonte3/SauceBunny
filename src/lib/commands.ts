@@ -139,6 +139,8 @@ export type CommandDeps = {
   onRedo: () => void;
   // ── setters used directly in run handlers ──
   setQueueOpen: Dispatch<SetStateAction<boolean>>;
+  /** Bump to open the drawer on the Review tab. */
+  setReviewRequestTick: Dispatch<SetStateAction<number>>;
   setTranscriptArrivedTick: Dispatch<SetStateAction<number>>;
   setCaptionsOn: Dispatch<SetStateAction<boolean>>;
   setLogsOpen: Dispatch<SetStateAction<boolean>>;
@@ -231,6 +233,19 @@ export function buildCommands(d: CommandDeps): Command[] {
     { id: "export.snapshot", label: "Snapshot frame", group: "Export",
       description: "Save the current frame as a JPEG",
       disabled: !d.hasSource, run: () => d.handleSnapshot() },
+    // The marker export is the reason an editor would use this app at all,
+    // and it had no name anywhere a person looks: not here, not in File, not
+    // in the shortcut sheet - only an unlabelled glyph inside a tab inside a
+    // drawer. Every NLE it can write for is a keyword, because that is what
+    // someone types when they are looking for it.
+    { id: "export.review", label: "Export review markers…", group: "Export",
+      description: "Notes as Avid, Premiere, Resolve, FCP XML, EDL, CSV or Markdown",
+      keywords: ["avid", "premiere", "resolve", "fcpxml", "edl", "csv",
+                 "markers", "notes", "locators", "comments"],
+      run: () => {
+        d.setQueueOpen(true);
+        d.setReviewRequestTick((n) => n + 1);
+      } },
     // ── Queue ───────────────────────────────────────────────────
     { id: "queue.add",    label: "Add selection to queue", group: "Queue",
       hotkey: "⌘⇧A",

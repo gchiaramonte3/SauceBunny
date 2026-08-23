@@ -73,6 +73,16 @@ type Props = {
   /** Click-to-seek callback. Called with seconds — the App converts to frames. */
   onSeek: (seconds: number) => void;
   /**
+   * Turn a selected cue range into in/out marks, and optionally a queued clip.
+   *
+   * The viewer used to expose `onSeek` and nothing else, so "find the quote,
+   * cut the quote" - the move an editor makes most - had no path through the
+   * transcript at all. Absent when the host has no transport (the reader
+   * before a source resolves).
+   */
+  onMarkRange?: (startSeconds: number, endSeconds: number) => void;
+  onQueueRange?: (startSeconds: number, endSeconds: number) => void;
+  /**
    * Origin tag — preserved as a prop because future features (e.g. a
    * "regenerate" button that should only show when the source was
    * Whisper, not a downloaded caption) need to discriminate. The header
@@ -215,7 +225,7 @@ const VTT_DROPPED_RE = /^\s*(?:NOTE\b|STYLE\b|REGION\b)|-->\s*[\d:.,]+[ \t]+\S/m
  * etc. The rename UI works identically in both worlds.
  */
 export function TranscriptViewer({
-  path, reloadToken, playheadActive, onSeek, origin,
+  path, reloadToken, playheadActive, onSeek, onMarkRange, onQueueRange, origin,
   onClearTranscript, onLoadFromHistory, onUndo, onRedo,
   onRegenerate, regenerateBusy, canRegenerate, fps = 30, startTimecode, onSetSourceTimecode, onGrabFace,
   onRedetectSpeakers, canRedetect,
@@ -2273,6 +2283,18 @@ export function TranscriptViewer({
           onAssign={(tag) => assignCueRange(cueMenu.from, cueMenu.to, tag === "Speaker" ? "" : tag)}
           onNewSpeaker={() => splitToNewSpeaker(cueMenu.from, cueMenu.to)}
           onPlay={() => { const c = flatCues[cueMenu.from]?.cue; if (c) onSeek(c.start); }}
+          {...(() => {
+            // The END of the last cue, not its start - clicking the last line
+            // seeks to where it BEGINS, which is what made marking the out
+            // point by hand necessary in the first place.
+            const a = flatCues[cueMenu.from]?.cue;
+            const b = flatCues[cueMenu.to]?.cue;
+            if (!a || !b) return {};
+            return {
+              onMarkRange: onMarkRange && (() => onMarkRange(a.start, b.end)),
+              onQueueRange: onQueueRange && (() => onQueueRange(a.start, b.end)),
+            };
+          })()}
           phrase={cueMenu.phrase && {
             text: cueMenu.phrase.text,
             onSplitOut: () => splitPhraseToNewSpeaker(

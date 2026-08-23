@@ -1174,6 +1174,29 @@ pub fn default_transcript_library_path(app: AppHandle) -> Result<String, crate::
     Ok(library.to_string_lossy().to_string())
 }
 
+/// Where clips land when the user has not chosen a folder.
+///
+/// The export folder was the ONE setting with no default: `canExport` requires
+/// it, so the primary button in the app sat disabled on a fresh install until
+/// the user went and browsed for a folder, with only a nudge line pointing at
+/// Settings. Every sibling setting has a default, and the transcript library
+/// resolves one exactly this way.
+///
+/// `~/Movies/Sauce Bunny`, because clips are movies and Movies is where macOS
+/// puts them. Resolved through Tauri's path API rather than built from a
+/// string so a localized home folder works.
+#[tauri::command]
+pub fn default_export_path(app: AppHandle) -> Result<String, crate::AppError> {
+    let base = app
+        .path()
+        .video_dir()
+        // A machine with no Movies folder still has Documents; falling back
+        // keeps the button enabled rather than reintroducing the dead end.
+        .or_else(|_| app.path().document_dir())
+        .map_err(|e| format!("video_dir: {e}"))?;
+    Ok(base.join("Sauce Bunny").to_string_lossy().to_string())
+}
+
 // ============================================================
 // BUILD ID HANDSHAKE
 // Stamped into the Rust binary at compile time. The frontend embeds the

@@ -87,6 +87,7 @@ import {
 } from "./lib/onboarding";
 import type { Command } from "./lib/commands";
 import { buildCommands } from "./lib/commands";
+import { markRangeFromSeconds as markRange } from "./lib/mark-range";
 import { useBatchTranscribe } from "./hooks/use-batch-transcribe";
 import { TranscriptSearchModal } from "./components/TranscriptSearchModal";
 import { batchSummary } from "./lib/batch-queue";
@@ -385,6 +386,23 @@ export default function App() {
         // meanwhile (e.g. the hybrid-migration latch or a Settings toggle).
         if (p) setDefaults((prev) => prev.transcriptLibrary ? prev : { ...prev, transcriptLibrary: p });
       } catch { /* user can still set it manually from Settings */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The export folder, seeded the same way and for a sharper reason: it was
+  // the only setting with no default, and `canExport` requires it — so the
+  // primary button in the app sat disabled on a fresh install until the user
+  // went and browsed for a folder. A first export should not need a detour
+  // through Settings. Only applied when nothing is stored, so Browse and the
+  // Settings default keep working exactly as they did.
+  useEffect(() => {
+    if (exportOpts.folder) return;
+    (async () => {
+      try {
+        const p = await invoke<string>("default_export_path");
+        if (p) setExportOpts((prev) => (prev.folder ? prev : { ...prev, folder: p }));
+      } catch { /* user can still pick one from Settings or Browse */ }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -715,6 +733,24 @@ export default function App() {
       redo: () => { setInFrames(nextIn); setOutFrames(nextOut); },
     });
   }, []);
+
+  /**
+   * Turn a span of transcript seconds into in/out marks.
+   *
+   * The arithmetic lives in lib/mark-range because every way it can be wrong
+   * is silent - a truncation lands half a frame early on every mark, an
+   * unclamped value marks past the end, and an inverted range fails much later
+   * in the export with no obvious cause. Undoable like a mark made with I and
+   * O: from the user's side it is the same act, and the only difference is
+   * that they pointed at words instead of scrubbing.
+   */
+  const markRangeFromSeconds = useCallback((startSec: number, endSec: number) => {
+    const r = markRange(startSec, endSec, fps, durationFrames);
+    if (!r) return;
+    pushMarksUndo("Mark from transcript", inFrames, outFrames, r.inFrames, r.outFrames);
+    setInFrames(r.inFrames);
+    setOutFrames(r.outFrames);
+  }, [fps, durationFrames, inFrames, outFrames, pushMarksUndo]);
 
   const [exportOpts, setExportOpts] = useState<ExportOpts>(() => ({
     inTc: "",
@@ -1148,6 +1184,8 @@ export default function App() {
   const activeTranscriptRef = useRef(activeTranscript);
   activeTranscriptRef.current = activeTranscript;
   const [transcriptArrivedTick, setTranscriptArrivedTick] = useState(0);
+  /** Bumped by the Export-review command to open the drawer on Review. */
+  const [reviewRequestTick, setReviewRequestTick] = useState(0);
   // Open the right drawer the first time a transcript arrives in this
   // session, so the user actually sees the new tab populate. Subsequent
   // arrivals don't re-open it (respects a user who hid the panel on
@@ -3322,7 +3360,8 @@ export default function App() {
     handleDownloadCaptions, handleStop,
     // The palette's queue.toggle is a user choice — route it through the
     // persisting setter (mechanical opens elsewhere use the raw setter).
-    setQueueOpen: setQueueOpenChoice, setTranscriptArrivedTick, setCaptionsOn, setLogsOpen,
+    setQueueOpen: setQueueOpenChoice, setTranscriptArrivedTick, setReviewRequestTick,
+    setCaptionsOn, setLogsOpen,
     setSettingsOpen, setPaletteOpen,
     onShowShortcuts: () => setShortcutsOpen(true),
     canUndo: undoSnap.canUndo, canRedo: undoSnap.canRedo,
@@ -3954,6 +3993,10 @@ export default function App() {
     handlers: {
       onRemove: handleQueueRemove,
       onRetry: handleQueueRetry,
+      // Same seam as the in-window drawer below: seconds from the transcript,
+      // frames to the transport, undoable like a manual mark.
+      onMarkRange: (a: number, b: number) => markRangeFromSeconds(a, b),
+      onQueueRange: (a: number, b: number) => { markRangeFromSeconds(a, b); handleAddToQueue(); },
       onClearAll: handleQueueClearAll,
       onExportAll: () => { void handleExportQueue(); },
       onStop: () => { void handleStop(); },
@@ -4895,6 +4938,9 @@ export default function App() {
                 hasFolder={!!exportOpts.folder}
                 onRemove={handleQueueRemove}
                 onRetry={handleQueueRetry}
+                reviewRequestTick={reviewRequestTick}
+                onMarkRange={markRangeFromSeconds}
+                onQueueRange={(a, b) => { markRangeFromSeconds(a, b); handleAddToQueue(); }}
                 onClearAll={handleQueueClearAll}
                 onExportAll={handleExportQueue}
                 onStop={handleStop}

@@ -273,6 +273,8 @@ export function LibraryView({
         title={t.title}
         detail={detail}
         art={art}
+        // The .srt, not the video whose poster this card is wearing.
+        revealPath={t.path}
         badge={t.format}
         onOpen={() => onOpenTranscriptHistory(t.entry)}
         requestThumb={requestThumb}

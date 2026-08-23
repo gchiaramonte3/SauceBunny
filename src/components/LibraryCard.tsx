@@ -30,6 +30,9 @@ type Props = {
    *  Revealed on hover/focus along with the play glyph. */
   detail: string;
   art: LibraryCardArt;
+  /** The file Reveal in Finder should highlight, when it is not the
+   *  artwork's own path (a transcript card wears its source's poster). */
+  revealPath?: string | null;
   /** Small corner tag, e.g. "web" on Continue-row URLs, "srt" on transcripts. */
   badge?: string;
   /** Featured size — the Continue row's large landscape cards (~2x width). */
@@ -81,7 +84,7 @@ type Props = {
  * Open in Clip. The menu never triggers the card's open.
  */
 export function LibraryCard({
-  title, detail, art, badge, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
+  title, detail, art, revealPath: revealPathProp, badge, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   onSelect, onContextSelect, onRename, selected, tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -120,7 +123,13 @@ export function LibraryCard({
   const posterPath = art.kind === "local" && art.media === "video" ? art.path : null;
   const canPick = !!posterPath && !!onChoosePoster;
   // Any local source has a path to reveal; web sources don't.
-  const revealPath = art.kind === "local" ? art.path : null;
+  // Art and identity are two different things, and this used to conflate
+  // them. A transcript card borrows its SOURCE VIDEO's poster (that is what
+  // transcriptArt is for), so deriving reveal from the art meant right-
+  // clicking a card badged "srt" and choosing Reveal in Finder highlighted the
+  // .mp4 — while the identical item in the Transcripts reader revealed the
+  // .srt. Same menu, same object, two different files.
+  const revealPath = revealPathProp ?? (art.kind === "local" ? art.path : null);
   // Corner verdict chip - only when this source has an explicit approval
   // status (review-store's hydrated map; best-effort for fingerprint keys).
   const reviewVerdict = reviewStatusForKey(art.kind === "local" ? art.path : art.url ?? "");

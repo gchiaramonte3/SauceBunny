@@ -41,6 +41,8 @@ const INITIAL: PanelState = INITIAL_SNAPSHOT;
 type ActionKind =
   | "remove"
   | "retry"
+  | "markRange"
+  | "queueRange"
   | "clearAll"
   | "exportAll"
   | "stop"
@@ -173,6 +175,8 @@ export default function PanelApp() {
         hasFolder={state.hasFolder}
         onRemove={(id) => sendAction("remove", { id })}
         onRetry={(id) => sendAction("retry", { id })}
+        onMarkRange={(a, b) => sendAction("markRange", { a, b })}
+        onQueueRange={(a, b) => sendAction("queueRange", { a, b })}
         onClearAll={() => sendAction("clearAll")}
         onExportAll={() => sendAction("exportAll")}
         onStop={() => sendAction("stop")}
