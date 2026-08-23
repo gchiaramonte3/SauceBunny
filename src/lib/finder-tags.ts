@@ -108,7 +108,22 @@ export function toggleTagColor(
   const color = tagColor(index);
   if (!color) return [...tags];
   const has = tags.some((t) => t.color === index);
-  if (has) return tags.filter((t) => t.color !== index);
+  if (has) {
+    // Toggling a colour OFF removes the COLOUR, not every tag wearing it.
+    //
+    // This used to be `tags.filter((t) => t.color !== index)`, which deleted
+    // any tag with that index — so a user whose "Invoices" tag happened to be
+    // red lost it, permanently and from their real file in Finder, by
+    // clicking the red swatch to turn red off. Nothing in this app put that
+    // tag there and nothing here should take it away.
+    //
+    // Same rule clearTagColors states directly below: a tag NAMED after the
+    // colour carried nothing beyond the colour and can go; anything the user
+    // named survives with its colour cleared.
+    return tags
+      .filter((t) => !(t.color === index && t.name === color.label))
+      .map((t) => (t.color === index ? { ...t, color: 0 as TagColorIndex } : t));
+  }
   return [...tags, { name: color.label, color: index }];
 }
 

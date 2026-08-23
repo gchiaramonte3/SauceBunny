@@ -527,9 +527,34 @@ async fn spawn_audio_clip(
             "-id3v2_version", "3",
             &output_for,
         ];
-        let ff_out = ff.args(ff_args).output().await;
+        // REGISTERED, like phase 1. `.output()` gives no handle, so Stop had
+        // nothing to kill for the whole encode: phase 1's yt-dlp child is
+        // taken out of the registry the moment it terminates, and nothing
+        // replaced it. Pressing Stop during the mp3 encode did nothing
+        // visible, the encode ran to the end, and the job then reported
+        // SUCCESS - a file the user had explicitly cancelled, written and
+        // announced as done.
+        let ff_out = match ff.args(ff_args).spawn() {
+            Ok((mut rx, child)) => {
+                app_for.state::<JobRegistry>().insert(job_for.clone(), child);
+                let mut code: Option<i32> = None;
+                let mut stderr = String::new();
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        CommandEvent::Stderr(b) | CommandEvent::Stdout(b) => {
+                            stderr.push_str(&String::from_utf8_lossy(&b));
+                        }
+                        CommandEvent::Terminated(payload) => { code = payload.code; }
+                        _ => {}
+                    }
+                }
+                let _ = app_for.state::<JobRegistry>().take(&job_for);
+                Ok((code, stderr))
+            }
+            Err(e) => Err(e),
+        };
         let _ = std::fs::remove_file(&raw_path);
-        let ff_out = match ff_out {
+        let (ff_code, ff_stderr) = match ff_out {
             Ok(o) => o,
             Err(e) => {
                 emit_clip_done(
@@ -539,12 +564,24 @@ async fn spawn_audio_clip(
                 return;
             }
         };
-        if !ff_out.status.success() {
-            let stderr = String::from_utf8_lossy(&ff_out.stderr);
+        if ff_code != Some(0) {
+            // A SIGTERM from Stop lands here too, and must be reported as the
+            // cancellation it is rather than as an encoding failure - or as
+            // the success it used to be reported as.
+            let stderr = ff_stderr.as_str();
             let _ = std::fs::remove_file(&output_for);
+            // Cancelled is not failed. Stop sends SIGTERM, so the encode exits
+            // non-zero with nothing useful on stderr; calling that an encode
+            // failure sends the user hunting a problem with their file.
+            let cancelled = app_for.state::<JobRegistry>().is_cancelled(&job_for)
+                || stderr.trim().is_empty();
             emit_clip_done(
-                &app_for, &job_for, false, ff_out.status.code(), None,
-                Some(format!("MP3 encode failed — {}", short_err(&stderr))),
+                &app_for, &job_for, false, ff_code, None,
+                Some(if cancelled {
+                    "Cancelled".to_string()
+                } else {
+                    format!("MP3 encode failed — {}", short_err(stderr))
+                }),
             );
             return;
         }

@@ -145,3 +145,36 @@ describe("Finder writes the name, not the index", () => {
       .toEqual(["Red", "Blue"]);
   });
 });
+
+describe("toggling a colour off keeps tags the user named", () => {
+  const RED = 6 as const;
+
+  it("removes the colour-named tag, which carried nothing else", () => {
+    const out = toggleTagColor([{ name: "Red", color: RED }], RED);
+    expect(out).toEqual([]);
+  });
+
+  it("does NOT delete a user's own tag that happens to wear that colour", () => {
+    // The data loss: this used to filter out every tag with the index, so
+    // clicking red OFF deleted "Invoices" from the user's real file in Finder.
+    // Nothing in this app created that tag.
+    const out = toggleTagColor([{ name: "Invoices", color: RED }], RED);
+    expect(out.map((t) => t.name), "a user-named tag was deleted").toEqual(["Invoices"]);
+    expect(out[0].color, "the colour should be cleared, the tag kept").toBe(0);
+  });
+
+  it("leaves tags of other colours completely alone", () => {
+    const out = toggleTagColor(
+      [{ name: "Invoices", color: RED }, { name: "Delivered", color: 2 }],
+      RED,
+    );
+    expect(out).toEqual([
+      { name: "Invoices", color: 0 },
+      { name: "Delivered", color: 2 },
+    ]);
+  });
+
+  it("still adds the colour when it is not there", () => {
+    expect(toggleTagColor([], RED)).toEqual([{ name: "Red", color: RED }]);
+  });
+});
