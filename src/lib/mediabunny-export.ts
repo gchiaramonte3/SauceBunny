@@ -1,3 +1,5 @@
+import { invoke } from "@tauri-apps/api/core";
+import { isBufferCeilingError, willExceedBufferTarget } from "./export-capacity";
 import {
   Input, ALL_FORMATS,
   Output, Mp4OutputFormat, Mp3OutputFormat, BufferTarget,
@@ -24,6 +26,16 @@ export type LocalExportOptions = {
   format: LocalExportFormat;
   /** Called repeatedly with progress 0..1 + the source time we've reached. */
   onProgress?: (progress: number, processedSeconds: number) => void;
+  /**
+   * Full source duration, when the caller knows it.
+   *
+   * Only used to predict output size against the in-memory target's 4 GB
+   * ceiling — a 30-second cut out of a 6 GB file fits easily, and without the
+   * duration that cannot be told from the file size alone. Optional because
+   * missing it costs nothing: the check declines to guess, and the catch
+   * around the Conversion still routes an overflow to ffmpeg.
+   */
+  sourceDurationSeconds?: number | null;
 };
 
 export type LocalExportResult =
@@ -46,8 +58,21 @@ export type LocalExportResult =
  * Output is buffered in memory via `BufferTarget` then handed back as
  * raw bytes; caller writes to disk via `write_raw_to_path` (the bytes ARE
  * the IPC body — never the JSON number-array route, which decimal-prints
- * every byte and froze the UI ~2s per 100 MB). For very long clips (>1GB)
- * this would still benefit from a streaming target later.
+ * every byte and froze the UI ~2s per 100 MB).
+ *
+ * That target is capped by mediabunny at 2**32 bytes, and this used to report
+ * the overflow as `kind: "error"` — so a long ProRes cut ran the whole
+ * conversion and then showed the user "ArrayBuffer exceeded maximum size of
+ * 4294967296 bytes". A size that does not fit is now `unsupported`, which
+ * routes it to the ffmpeg pipeline: that one streams, has no ceiling, and is
+ * performing the same lossless stream copy. Checked twice — a pre-flight
+ * estimate from the file size and trim span (so minutes of conversion are not
+ * wasted first), and a catch around the Conversion for when the estimate had
+ * no duration to work from. See `export-capacity.ts`.
+ *
+ * A streaming target would remove the ceiling rather than route around it,
+ * and remains the better answer; it needs an incremental write on the Rust
+ * side and changes the MP4 `fastStart` bargain, so it is its own change.
  *
  * Returns a tagged result so the caller can branch:
  *  • "ok"          → write the bytes, done.
@@ -101,6 +126,34 @@ export async function exportLocalClipViaMediabunny(
   // initialises.
   if (opts.format === "audio-mp3") await ensureMp3Encoder();
 
+  // Refuse jobs the in-memory target cannot hold, BEFORE converting.
+  //
+  // BufferTarget is capped at 2**32 bytes by mediabunny, and past it the
+  // Conversion throws. That used to come back as `kind: "error"`, so a long
+  // ProRes cut ran the whole conversion and then showed the user the sentence
+  // "ArrayBuffer exceeded maximum size of 4294967296 bytes". The ffmpeg
+  // pipeline beside this one streams, has no ceiling, and is doing the same
+  // lossless stream copy — so a size that does not fit is a reason to use the
+  // OTHER path, exactly like a codec WebCodecs cannot decode, and belongs on
+  // `unsupported` rather than on `error`.
+  try {
+    const inputBytes = await invoke<number>("get_file_size", { path: opts.inputPath });
+    if (willExceedBufferTarget({
+      inputBytes,
+      durationSeconds: opts.sourceDurationSeconds ?? null,
+      startSeconds: opts.startSeconds ?? null,
+      endSeconds: opts.endSeconds ?? null,
+    })) {
+      return {
+        kind: "unsupported",
+        reason: "Larger than the in-memory export target can hold; using ffmpeg instead.",
+      };
+    }
+  } catch {
+    // Could not size it — carry on. The catch around the Conversion is the
+    // backstop, and guessing "too big" would push work to the slower pipeline.
+  }
+
   const input = new Input({ source: mediabunnySource(opts.inputPath), formats: ALL_FORMATS });
   const target = new BufferTarget();
   // Output container picks based on requested format.
@@ -134,6 +187,15 @@ export async function exportLocalClipViaMediabunny(
     conversion = await Conversion.init(conversionOpts);
   } catch (err) {
     void input.dispose();
+    // The ceiling is a routing signal, not a failure: fall through to ffmpeg.
+    // The pre-flight check above catches most of these, but it depends on a
+    // duration the caller may not have, so this is the one that actually holds.
+    if (isBufferCeilingError(err)) {
+      return {
+        kind: "unsupported",
+        reason: "Output exceeded the in-memory export target; using ffmpeg instead.",
+      };
+    }
     return { kind: "error", message: err instanceof Error ? err.message : String(err) };
   }
 

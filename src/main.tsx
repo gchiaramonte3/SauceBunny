@@ -47,7 +47,7 @@ if (platform.wasm) registerLocalDecoders(platform.blobWorker);
 import "./styles/app.css";
 
 import { hydrateReviewStore } from "./lib/review-store";
-import { hydrateCastStore } from "./lib/cast-store";
+import { hydrateCastStore, listenForCastChanges } from "./lib/cast-store";
 
 // Single-bundle multi-window: the floating side-panel window loads the
 // same `index.html?window=panel` URL, and we route here based on the
@@ -76,6 +76,11 @@ const hydrateDeadline = new Promise<void>((resolve) => setTimeout(resolve, 2000)
 // blocking paint on a second file read would buy nothing. The store's own
 // pre-hydration write guard is what keeps an early save from clobbering the
 // file while this is still in flight.
+// Both windows run this file, and both can edit casts (the speaker roster
+// lives in TranscriptViewer, which each of them renders). Listening is what
+// makes the other window SHOW an edit; the merge in the store is what stops
+// the two of them erasing each other.
+listenForCastChanges();
 void hydrateCastStore().catch((err) => {
   console.warn("cast-store hydration failed; starting empty:", err);
 });

@@ -23,11 +23,17 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { emit, listen } from "@tauri-apps/api/event";
 import { sanitizeCastFile, MAX_CASTS, type Cast } from "./cast";
+import { mergeCasts } from "./cast-merge";
 
 const FILE = "casts.json";
 const READ_CAP = 8 * 1024 * 1024;
 const WRITE_DEBOUNCE_MS = 400;
+/** How long the pre-write merge read may take before we give up on it
+ *  and write what we have. A local file read is milliseconds; this only
+ *  exists so a stalled read cannot strand a user's edit. */
+const MERGE_READ_TIMEOUT_MS = 2000;
 
 let casts: Cast[] = [];
 let dir: string | null = null;
@@ -36,6 +42,19 @@ let hydrated = false;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 /** A write is owed. Survives a flush that had to bail for hydration. */
 let pendingWrite = false;
+/**
+ * What THIS window has changed since it last wrote, so a merge can tell "I
+ * never had this" from "I deleted this".
+ *
+ * Both windows edit casts — the speaker roster lives in TranscriptViewer,
+ * which the main window and the popped-out panel both render — and each held
+ * its own in-memory list and wrote the WHOLE file. Whichever saved last
+ * erased everything the other had added since. Silently: no error, no
+ * conflict, no way back, and a cast is thirty names, colours and faces built
+ * over a season.
+ */
+let touched = new Map<string, number>();
+let tombstones = new Map<string, number>();
 const listeners = new Set<() => void>();
 
 /** Last persist error, surfaced by the manager rather than only console-warned
@@ -58,6 +77,72 @@ export function getCastError(): string | null {
   return lastError;
 }
 
+/**
+ * Fired after a successful write so the OTHER window re-reads.
+ *
+ * Two buses under one name, the same shape `saucebunny:speakers-changed`
+ * uses: a Tauri event crosses webviews (that is the one that matters here),
+ * and a window CustomEvent covers the same-window case where a second
+ * subscriber wants to know without waiting for a round trip.
+ *
+ * The merge in `flush` is what makes concurrent edits converge; this is what
+ * makes the other window SHOW them without the user reopening the shelf.
+ */
+export const CASTS_CHANGED_EVENT = "saucebunny:casts-changed";
+
+/** Our own id, so the echo of our own write is ignored. */
+const WRITER_ID = Math.random().toString(36).slice(2);
+
+function announceChange(): void {
+  void emit(CASTS_CHANGED_EVENT, { from: WRITER_ID }).catch(() => { /* no Tauri in tests */ });
+  try {
+    window.dispatchEvent(new CustomEvent(CASTS_CHANGED_EVENT, { detail: { from: WRITER_ID } }));
+  } catch { /* non-DOM context */ }
+}
+
+/**
+ * Re-read the file because the other window wrote it.
+ *
+ * Deliberately NOT a merge: the disk copy has already been merged by whoever
+ * wrote it, and anything of ours it does not contain is still sitting in
+ * `touched`/`tombstones` waiting for our own next flush to fold in.
+ */
+export async function refreshCastsFromDisk(): Promise<void> {
+  if (!hydrated || !dir) return;
+  try {
+    const text = await invoke<string>("read_text_file_capped", {
+      path: `${dir}/${FILE}`, maxBytes: READ_CAP,
+    });
+    const loaded = sanitizeCastFile(JSON.parse(text));
+    const same = loaded.length === casts.length
+      && loaded.every((c, i) => c.id === casts[i]?.id && c.updatedAt === casts[i]?.updatedAt);
+    if (same) return;
+    casts = mergeCasts(loaded, casts, touched, tombstones).slice(0, MAX_CASTS);
+    notify();
+  } catch {
+    /* unreadable — keep what we have */
+  }
+}
+
+/** Attach the cross-window listeners. Returns a detach function. */
+export function listenForCastChanges(): () => void {
+  const onLocal = (e: Event) => {
+    const from = (e as CustomEvent<{ from?: string }>).detail?.from;
+    if (from === WRITER_ID) return;
+    void refreshCastsFromDisk();
+  };
+  try { window.addEventListener(CASTS_CHANGED_EVENT, onLocal); } catch { /* non-DOM */ }
+  let un: (() => void) | null = null;
+  void listen<{ from?: string }>(CASTS_CHANGED_EVENT, (e) => {
+    if (e.payload?.from === WRITER_ID) return;
+    void refreshCastsFromDisk();
+  }).then((f) => { un = f; }).catch(() => { /* no Tauri in tests */ });
+  return () => {
+    try { window.removeEventListener(CASTS_CHANGED_EVENT, onLocal); } catch { /* non-DOM */ }
+    un?.();
+  };
+}
+
 function notify(): void {
   for (const fn of listeners) fn();
 }
@@ -70,6 +155,8 @@ function commit(next: Cast[]): void {
 
 export function saveCast(cast: Cast): void {
   const stamped = { ...cast, updatedAt: Date.now() };
+  touched.set(stamped.id, stamped.updatedAt);
+  tombstones.delete(stamped.id);
   const at = casts.findIndex((c) => c.id === cast.id);
   commit(at >= 0
     ? casts.map((c, i) => (i === at ? stamped : c))
@@ -78,6 +165,8 @@ export function saveCast(cast: Cast): void {
 
 export function deleteCast(id: string): void {
   if (!casts.some((c) => c.id === id)) return;
+  tombstones.set(id, Date.now());
+  touched.delete(id);
   commit(casts.filter((c) => c.id !== id));
 }
 
@@ -103,8 +192,42 @@ async function flush(): Promise<void> {
       await invoke("ensure_dir_exists", { path: dir });
       dirEnsured = true;
     }
-    const text = JSON.stringify({ version: 1, casts }, null, 2);
+    // Re-read and MERGE before overwriting. The window between our last read
+    // and this write is exactly where the other window's additions live, and
+    // writing `casts` straight out is what erased them.
+    //
+    // Bounded, and with a preserving fallback. Two ways this could make things
+    // WORSE if written naively, both found by an existing test:
+    //   · a read that never settles would strand the write forever, and
+    //     `pendingWrite` has already been cleared by this point;
+    //   · merging against an EMPTY disk list keeps only the casts this window
+    //     touched, dropping the rest of our own hydrated list.
+    // So a failed or slow read falls back to writing what we have, which is
+    // exactly the old behaviour: no worse than before, and correct whenever
+    // the read works, which is approximately always.
+    let merged: Cast[];
+    try {
+      const cur = await Promise.race([
+        invoke<string>("read_text_file_capped", { path: `${dir}/${FILE}`, maxBytes: READ_CAP }),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error("merge read timed out")), MERGE_READ_TIMEOUT_MS)),
+      ]);
+      merged = mergeCasts(sanitizeCastFile(JSON.parse(cur)), casts, touched, tombstones).slice(0, MAX_CASTS);
+    } catch {
+      // No file yet, unreadable, or too slow — preserve rather than merge.
+      merged = casts;
+    }
+    const text = JSON.stringify({ version: 1, casts: merged }, null, 2);
     await invoke("write_text_to_path", { path: `${dir}/${FILE}`, text, atomic: true });
+    // Only after the write lands: until then those edits are still owed, and
+    // clearing them early would drop them from the NEXT merge if this write
+    // failed and re-armed.
+    touched = new Map();
+    tombstones = new Map();
+    if (merged.length !== casts.length || merged.some((c, i) => c.id !== casts[i]?.id)) {
+      casts = merged;
+      notify();
+    }
+    announceChange();
     if (lastError) { lastError = null; notify(); }
   } catch (err) {
     // Re-arm rather than dropping the edit: a transient write failure (a
@@ -177,6 +300,8 @@ export async function hydrateCastStore(): Promise<void> {
 
 /** Test seam: drop all state so a suite can hydrate again from a fresh mock. */
 export function __resetCastStore(): void {
+  touched = new Map();
+  tombstones = new Map();
   if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
   casts = [];
   dir = null;

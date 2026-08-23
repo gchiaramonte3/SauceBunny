@@ -70,10 +70,20 @@ describe("the clobber guard", () => {
     // already on disk — that erases the file with a subset of itself.
     let releaseRead: (v: string) => void = () => {};
     const writes: string[] = [];
+    // Only the HYDRATION read is held. Later reads are the pre-write merge
+    // read, which in reality returns promptly — holding those too would park
+    // the write on a stall this test is not about, and quietly turn it into a
+    // test of the merge-read timeout instead of the hydration clobber guard.
+    let held = false;
+    let diskNow = "";
     invoke.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
       if (cmd === "default_transcript_library_path") return LIB;
       if (cmd === "read_text_file_capped") {
-        return new Promise<string>((res) => { releaseRead = res; });
+        if (held) return diskNow || Promise.reject(new Error("no file"));
+        held = true;
+        return new Promise<string>((res) => {
+          releaseRead = (v: string) => { diskNow = v; res(v); };
+        });
       }
       if (cmd === "ensure_dir_exists") return null;
       if (cmd === "write_text_to_path") { writes.push(String(args.text)); return null; }
@@ -220,5 +230,68 @@ describe("subscribers", () => {
     expect(getCasts()).not.toBe(before);
     // …and a STABLE one between changes, or the hook re-renders forever.
     expect(getCasts()).toBe(getCasts());
+  });
+});
+
+describe("two windows editing the same file", () => {
+  /**
+   * A backend whose file CHANGES underneath us, which is what the other
+   * window doing its own write looks like from here.
+   */
+  type DiskCast = { id: string; name: string; updatedAt: number; members: unknown[] };
+  function liveBackend(initial: DiskCast[]) {
+    let disk: DiskCast[] = [...initial];
+    const writes: string[] = [];
+    invoke.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
+      if (cmd === "default_transcript_library_path") return LIB;
+      if (cmd === "read_text_file_capped") return JSON.stringify({ version: 1, casts: disk });
+      if (cmd === "ensure_dir_exists") return null;
+      if (cmd === "write_text_to_path") {
+        writes.push(String(args.text));
+        disk = JSON.parse(String(args.text)).casts;
+        return null;
+      }
+      throw new Error(`unexpected ${cmd}`);
+    });
+    return { writes, poke: (c: DiskCast) => { disk = [c, ...disk]; }, read: () => disk };
+  }
+
+  it("does not erase a cast the other window added after we hydrated", async () => {
+    // THE bug. Both windows render TranscriptViewer, so both can open the
+    // speaker roster and save. Each held its own list and wrote the whole
+    // file, so whichever saved last erased the other's work — silently, with
+    // no error, and a cast is a season's worth of names, colours and faces.
+    const be = liveBackend([]);
+    await hydrateCastStore();
+
+    // The other window saves "Theirs" while we are idle.
+    be.poke({ id: "theirs", name: "Theirs", updatedAt: 5000, members: [] });
+
+    // We then save ours, which used to overwrite the whole file.
+    saveCast({ ...newCast("Ours"), id: "ours" });
+    await vi.advanceTimersByTimeAsync(1000);
+
+    const names = be.read().map((c) => c.name).sort();
+    expect(names, "the other window's cast was erased").toEqual(["Ours", "Theirs"]);
+  });
+
+  it("still lets our delete win over the copy it was aimed at", async () => {
+    const be = liveBackend([{ id: "doomed", name: "Doomed", updatedAt: 1000, members: [] }]);
+    await hydrateCastStore();
+    expect(getCasts().map((c) => c.id)).toContain("doomed");
+    deleteCast("doomed");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(be.read().map((c) => c.id)).not.toContain("doomed");
+  });
+
+  it("does not resurrect a deleted cast on the next unrelated save", async () => {
+    // The failure a naive union produces: the disk copy comes back every time.
+    const be = liveBackend([{ id: "doomed", name: "Doomed", updatedAt: 1000, members: [] }]);
+    await hydrateCastStore();
+    deleteCast("doomed");
+    await vi.advanceTimersByTimeAsync(1000);
+    saveCast({ ...newCast("Later"), id: "later" });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(be.read().map((c) => c.id).sort()).toEqual(["later"]);
   });
 });

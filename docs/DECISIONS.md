@@ -71,6 +71,33 @@ literal. Strip comments before believing a match, and exclude the guard's own fi
 
 ---
 
+## Reviewed and left alone: QUIC writes under the session mutex
+
+`session_send`, `session_broadcast` and `relay_to_others` each await a QUIC
+`write_all` while holding the `SessionManager` mutex (and, on the broadcast
+paths, the host `peers` mutex too). A review flagged this as a hang: one peer
+that stops reading freezes Leave and End for everyone in the room.
+
+The shape is real. The failure is not, and three independent passes each
+failed to reach it:
+
+- **The write is bounded by the transport.** iroh's QUIC connection carries an
+  idle timeout, so a peer that stops reading fails its stream rather than
+  blocking indefinitely. Whatever wedge exists is bounded by that timeout.
+- **The obvious fix is worse than the problem.** Cloning the peer list and
+  writing outside the lock lets a peer be removed mid-broadcast, so a write
+  lands on a connection the roster no longer holds — which is how a ghost
+  participant tile gets stuck at "Connecting" and never clears. The lock is
+  what makes "who is in the room" and "who we are writing to" the same answer.
+- **These are control frames, not media.** Comments, playhead ticks,
+  reactions: kilobytes. Media never travels this path at all, by the rule in
+  CLAUDE.md.
+
+Recorded because the code reads alarmingly and will be re-reported. If a
+session genuinely hangs, look at the idle timeout before the lock. Anyone who
+does want to drop the guard before the write has to solve the removal race
+first; the contract note lives at the top of `SessionManager` in session.rs.
+
 ## Untested pure modules
 
 ### Outcome

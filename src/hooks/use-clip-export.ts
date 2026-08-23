@@ -94,6 +94,10 @@ export function useClipExport(p: ClipExportDeps) {
         startSeconds: args.startSeconds,
         endSeconds: args.endSeconds,
         format: args.format,
+        // Lets the export tell a 30-second cut out of a 6 GB file (fine, and
+        // ~3x faster here than ffmpeg) from a whole-file export that cannot
+        // fit the in-memory target at all.
+        sourceDurationSeconds: metadataRef.current?.duration ?? null,
         onProgress: (p) => args.onProgress(p * 100),
       }, cancelToken);
       if (result.kind !== "ok") return result;
@@ -123,7 +127,7 @@ export function useClipExport(p: ClipExportDeps) {
       // installed ITS token; blindly nulling would strand its Stop button.
       if (localExportCancelRef.current === cancelToken) localExportCancelRef.current = null;
     }
-  }, [localExportCancelRef]);
+  }, [localExportCancelRef, metadataRef]);
 
   const handleExport = useCallback(async () => {
     if (!metadata || !exportOpts.folder) return;

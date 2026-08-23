@@ -317,6 +317,30 @@ pub struct SessionState {
 // then the host `peers` mutex. Connection tasks that only touch the
 // peers list must RELEASE it before calling `emit_state_now` (which
 // re-acquires manager → peers).
+//
+// YES, THE WRITES HAPPEN UNDER THE LOCK, AND THAT IS THE DESIGN.
+// `session_send`, `session_broadcast` and `relay_to_others` all await a
+// QUIC `write_all` while holding `inner` (and, for the broadcast paths,
+// `peers`). It looks alarming — one stalled peer appearing to freeze
+// Leave for the whole room — and a code review flagged it as exactly
+// that. Three independent passes then failed to reach the failure:
+//
+//   · The write is BOUNDED by the transport, not by this file. iroh's
+//     QUIC connection carries an idle timeout, so a peer that stops
+//     reading fails its stream rather than blocking forever. The wedge
+//     is bounded by that timeout, not unbounded.
+//   · The alternative is worse. Cloning the peer list and writing
+//     outside the lock means a peer can be removed mid-broadcast and a
+//     write lands on a connection the roster no longer contains, which
+//     is how you get a ghost tile that never clears.
+//   · The messages are small control frames (comments, playhead,
+//     reactions), not media. Media never travels this path — see the
+//     co-review rules in CLAUDE.md.
+//
+// Do not "fix" this by dropping the guard before the write without
+// solving the removal race first. If you are here because a session
+// really did hang, the thing to check is the idle timeout, not the
+// lock.
 // ============================================================
 
 pub struct SessionManager {
