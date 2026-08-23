@@ -54,7 +54,7 @@
   font-size: var(--text-xl);
   color: var(--fg-4);
   font-weight: var(--weight-semibold);
-  letter-spacing: 0.02em;
+  letter-spacing: var(--track-wide);
   flex-shrink: 0;
 }
 .cp-palette-input {
@@ -66,14 +66,14 @@
   font-family: var(--font-sans);
   font-size: var(--text-2xl);
   font-weight: var(--weight-normal);
-  letter-spacing: -0.01em;
+  letter-spacing: var(--track-tight);
 }
 .cp-palette-input::placeholder { color: var(--fg-5); }
 .cp-palette-count {
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-caps-loose);
   text-transform: uppercase;
   /* fg-4, not fg-5. tokens.css reserves fg-5 for decorative or duplicated
      text, and a result count, the group headings and the footer's key legend
@@ -100,7 +100,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
-  letter-spacing: 0.10em;
+  letter-spacing: var(--track-caps-wide);
   text-transform: uppercase;
   color: var(--fg-4);
 }
@@ -133,7 +133,7 @@
   font-size: var(--text-lg);
   font-weight: var(--weight-semibold);
   color: var(--fg-1);
-  letter-spacing: -0.005em;
+  letter-spacing: var(--track-tight);
 }
 .cp-palette-row.active .cp-palette-row-label { color: var(--fg-0); }
 .cp-palette-row-desc {
@@ -218,7 +218,7 @@
   font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
   color: var(--fg-1);
-  letter-spacing: -0.01em;
+  letter-spacing: var(--track-tight);
 }
 .cp-shortcuts-grid {
   flex: 1;
@@ -240,14 +240,14 @@
   font-family: var(--font-ui);
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
-  letter-spacing: 0.10em;
+  letter-spacing: var(--track-caps-wide);
   text-transform: uppercase;
   color: var(--fg-5);
 }
 .cp-shortcuts-ctx-tag {
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-caps-loose);
   color: var(--fg-5);
   border: 1px solid var(--line-1);
   border-radius: var(--r-xs);

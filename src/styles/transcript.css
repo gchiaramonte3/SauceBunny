@@ -32,7 +32,7 @@
 /* × glyph in iconbtns is visually a different baseline than the SVG
    icons; bump font-size + line-height to match. Replaces an inline
    style block on the dismiss button (r46). */
-.cp-tx-glyph-x { font-size: var(--text-lg); line-height: 1; }
+.cp-tx-glyph-x { font-size: var(--text-lg); line-height: var(--leading-none); }
 
 /* Undo / redo pair. Grouped tight so they read as one control, and separated
    from the rest of the toolbar by a hairline — the same way a toolbar
@@ -80,7 +80,7 @@
   padding: 8px 12px;
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-caps-loose);
   text-transform: uppercase;
   color: var(--fg-4);
   display: flex;
@@ -101,7 +101,7 @@
   padding: 20px 16px;
   font-size: var(--text-md);
   color: var(--fg-4);
-  line-height: 1.5;
+  line-height: var(--leading-normal);
   text-align: center;
 }
 .cp-tx-history-list {
@@ -144,13 +144,13 @@
   font-weight: var(--weight-semibold);
   color: var(--fg-3);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-caps);
 }
 .cp-tx-history-active-pill {
   color: var(--color-accent-green);
   font-weight: var(--weight-semibold);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-caps);
 }
 .cp-tx-history-row-remove {
   width: 20px;
@@ -159,7 +159,7 @@
   border: none;
   color: var(--fg-3);
   font-size: var(--text-xl);
-  line-height: 1;
+  line-height: var(--leading-none);
   cursor: pointer;
   border-radius: var(--r-xs);
   flex-shrink: 0;
@@ -187,7 +187,7 @@
   padding: 8px 12px;
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-caps-loose);
   text-transform: uppercase;
   color: var(--fg-4);
   border-bottom: 1px solid var(--line-1);
@@ -197,7 +197,7 @@
   padding: 20px 16px;
   font-size: var(--text-md);
   color: var(--fg-4);
-  line-height: 1.5;
+  line-height: var(--leading-normal);
   text-align: center;
 }
 .cp-tx-insights-list {
@@ -393,7 +393,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--track-tight);
   flex-shrink: 0;
 }
 .cp-tx-speaker-name {
@@ -451,7 +451,7 @@
   border: 1px solid var(--line-1);
   border-radius: var(--r-md);
   font-size: var(--text-lg);
-  line-height: 1.55;
+  line-height: var(--leading-normal);
   color: var(--fg-2);
   /* Use a more "prose" font hint — falls back to sans gracefully if
      the host doesn't have a serif loaded. The transcript is content
@@ -561,7 +561,7 @@
   background: var(--bg-2);
   color: var(--danger);
   font-size: var(--text-base);
-  line-height: 1.35;
+  line-height: var(--leading-tight);
 }
 
 /* Geometry lives in .cp-pane-empty (base.css). */
@@ -576,7 +576,7 @@
 .cp-tx-empty-body {
   font-size: var(--text-md);
   color: var(--fg-4);
-  line-height: 1.5;
+  line-height: var(--leading-normal);
   max-width: 280px;
 }
 .cp-tx-empty-actions { margin-top: 12px; display: flex; gap: 8px; }
@@ -585,7 +585,7 @@
   margin-top: 8px;
   font-size: var(--text-base);
   color: var(--fg-4);
-  line-height: 1.45;
+  line-height: var(--leading-snug);
   max-width: 280px;
 }
 
@@ -622,9 +622,9 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-lg);
-  letter-spacing: 0.02em;
+  letter-spacing: var(--track-wide);
 }
-.cp-tx-tc-hint { margin: 8px 0 0; font-size: var(--text-sm); line-height: 1.45; color: var(--fg-4); }
+.cp-tx-tc-hint { margin: 8px 0 0; font-size: var(--text-sm); line-height: var(--leading-snug); color: var(--fg-4); }
 .cp-tx-tc-err { margin: 6px 0 0; font-size: var(--text-sm); color: var(--danger); }
 .cp-tx-tc-row { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
 .cp-tx-tc-row .cp-tx-iconbtn { height: 26px; padding: 0 10px; }
@@ -782,7 +782,7 @@
 .cp-tx-rename-scope { display: flex; flex-direction: column; gap: 4px; padding: 2px 0; }
 .cp-tx-rename-scope label {
   display: flex; align-items: flex-start; gap: 6px;
-  font-size: var(--text-base); color: var(--fg-3); cursor: pointer; line-height: 1.4;
+  font-size: var(--text-base); color: var(--fg-3); cursor: pointer; line-height: var(--leading-snug);
 }
 .cp-tx-rename-scope input[type="radio"] {
   margin-top: 2px; flex-shrink: 0; accent-color: var(--color-accent-green);
@@ -826,7 +826,7 @@
 .cp-toggle-row .beta {
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   padding: 1px 5px;
   border-radius: var(--r-xs);
@@ -896,7 +896,7 @@
 .cp-tx-hint-text {
   flex: 1;
   min-width: 0;
-  line-height: 1.4;
+  line-height: var(--leading-snug);
 }
 .cp-tx-hint-text em { font-style: normal; color: var(--fg-2); font-weight: var(--weight-semibold); }
 .cp-tx-hint-action {
@@ -922,7 +922,7 @@
   border: none;
   color: var(--fg-3);
   font-size: var(--text-2xl);
-  line-height: 1;
+  line-height: var(--leading-none);
   cursor: pointer;
   border-radius: var(--r-xs);
 }
@@ -981,7 +981,7 @@
   font-size: var(--text-sm);
   color: var(--fg-4);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-caps);
   font-weight: var(--weight-semibold);
 }
 .cp-phase-track .step {
@@ -1016,7 +1016,7 @@
 .cp-tx-roster-label {
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   color: var(--fg-4);
   display: flex;
@@ -1038,7 +1038,7 @@
   border: 1px solid var(--danger);
   color: var(--danger);
   font-size: var(--text-base);
-  line-height: 1.35;
+  line-height: var(--leading-tight);
   z-index: 30;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1052,7 +1052,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
-  letter-spacing: 0.02em;
+  letter-spacing: var(--track-wide);
   color: var(--fg-2);
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--line-2);
@@ -1120,7 +1120,7 @@
   align-items: center;
   justify-content: center;
   font-size: var(--text-3xl);
-  line-height: 1;
+  line-height: var(--leading-none);
   color: var(--fg-3);
   background: transparent;
   border: none;
@@ -1231,7 +1231,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-2xs);
   font-weight: var(--weight-black);
-  letter-spacing: 0.01em;
+  letter-spacing: var(--track-slight);
   /* Near-black on a bright palette hue — the contrast the palette was
      measured against. */
   color: #0a0a0a;
@@ -1318,7 +1318,7 @@
   margin: 0 16px 8px;
   font-family: var(--font-ui);
   font-size: var(--text-base);
-  line-height: 1.45;
+  line-height: var(--leading-snug);
   color: var(--danger-text);
 }
 .cp-cast-lead {
@@ -1326,7 +1326,7 @@
   padding: 0 16px 10px;
   font-family: var(--font-ui);
   font-size: var(--text-base);
-  line-height: 1.5;
+  line-height: var(--leading-normal);
   color: var(--fg-3);
 }
 .cp-cast-lead strong { color: var(--fg-1); font-weight: var(--weight-bold); }
@@ -1388,7 +1388,7 @@
   align-items: center;
   justify-content: center;
   font-size: var(--text-2xl);
-  line-height: 1;
+  line-height: var(--leading-none);
   color: var(--fg-4);
   background: transparent;
   border: none;
@@ -1566,7 +1566,7 @@
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: var(--text-md);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-caps);
   font-variant-numeric: tabular-nums;
   text-transform: lowercase;
 }
@@ -1603,7 +1603,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   font-weight: var(--weight-bold);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   cursor: pointer;
 }
@@ -1628,7 +1628,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-md);
   font-weight: var(--weight-black);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   color: var(--fg-3);
 }
@@ -1868,7 +1868,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   font-weight: var(--weight-black);
-  letter-spacing: 0.02em;
+  letter-spacing: var(--track-wide);
   /* Same near-black the transcript bubbles use behind initials — the palette's
      contrast test is measured against this exact value. */
   color: #0a0a0a;
@@ -1936,7 +1936,7 @@
   min-width: 0;
   font-family: var(--font-ui);
   font-size: var(--text-md);
-  line-height: 1.5;
+  line-height: var(--leading-normal);
   color: var(--fg-2);
 }
 .cp-tx-group-line.live .cp-tx-group-text { color: var(--fg-1); }
@@ -2041,7 +2041,7 @@
   height: 13px;
   padding: 0 3px;
   font-size: var(--text-sm);
-  line-height: 13px;
+  line-height: var(--leading-tight);
   color: var(--fg-3);
   white-space: nowrap;
   overflow: hidden;
@@ -2087,7 +2087,7 @@
 .cp-badgesheet-grouplabel {
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-caps-loose);
   text-transform: uppercase;
   color: var(--fg-3);
   padding: 2px 2px 0;
@@ -2143,7 +2143,7 @@
   padding: 6px 3px 0;
   border-top: 1px solid var(--line-2);
   font-size: var(--text-base);
-  line-height: 15px;
+  line-height: var(--leading-snug);
   color: var(--fg-2);
   white-space: nowrap;
   overflow: hidden;
@@ -2215,7 +2215,7 @@
   cursor: pointer;
   color: var(--fg-2);
   font-size: var(--text-md);
-  line-height: 1.45;
+  line-height: var(--leading-snug);
 }
 .cp-txsearch-hit:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); }
 .cp-txsearch-hit:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
@@ -2259,7 +2259,7 @@
   padding-left: var(--s-2);
   color: var(--fg-4);
   font-size: var(--text-xl);
-  line-height: 1;
+  line-height: var(--leading-none);
 }
 .cp-cuemenu-flyout {
   position: absolute;

@@ -446,3 +446,47 @@ describe("font-size comes from the type scale", () => {
     expect(rungs, "the file should read as the scale it is").toEqual([...rungs].sort((a, b) => a - b));
   });
 });
+
+/**
+ * Leading and tracking come from the scale too.
+ *
+ * The find worth recording: four rules set a PIXEL line-height on text
+ * whose size is a token - `line-height: 15px` on 12px type, `16px` on 10px.
+ * A pixel leading does not scale with the text it sits on, so the moment
+ * the type grows the line does not, and a chip clips its own descenders.
+ * Unitless is not a style preference here, it is the thing that keeps
+ * working.
+ */
+describe("leading and tracking come from tokens", () => {
+  it("never sets a pixel line-height", () => {
+    const offenders: string[] = [];
+    for (const [name, css] of cssFiles()) {
+      if (name === "tokens.css") continue;
+      css.split("\n").forEach((line, i) => {
+        const m = line.replace(/\/\*.*?\*\//g, "").match(/line-height\s*:\s*([^;{}]+);/);
+        if (m && /\d(px|rem|em)\s*$/.test(m[1].trim())) {
+          offenders.push(`${name}:${i + 1} line-height: ${m[1].trim()} - use a unitless --leading-* so it scales with its text`);
+        }
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("writes leading and tracking through their tokens", () => {
+    const offenders: string[] = [];
+    for (const [name, css] of cssFiles()) {
+      if (name === "tokens.css") continue;
+      css.split("\n").forEach((line, i) => {
+        const l = line.replace(/\/\*.*?\*\//g, "");
+        for (const prop of ["line-height", "letter-spacing"]) {
+          const m = l.match(new RegExp(`${prop}\\s*:\\s*([^;{}]+);`));
+          if (!m) continue;
+          const v = m[1].trim();
+          if (v.includes("var(") || v === "inherit" || v === "normal") continue;
+          offenders.push(`${name}:${i + 1} ${prop}: ${v}`);
+        }
+      });
+    }
+    expect(offenders, "Use var(--leading-*) / var(--track-*).").toEqual([]);
+  });
+});

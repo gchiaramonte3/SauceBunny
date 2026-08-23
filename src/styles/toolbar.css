@@ -44,7 +44,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-lg);
   color: var(--fg-1);
-  letter-spacing: -0.005em;
+  letter-spacing: var(--track-tight);
 }
 .cp-url input::placeholder { color: var(--fg-4); }
 .cp-url .scheme {
@@ -143,7 +143,7 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-xs);
-  letter-spacing: 0.08em;
+  letter-spacing: var(--track-caps-wide);
   text-transform: uppercase;
   color: var(--fg-4);
 }
@@ -167,7 +167,7 @@
   border-radius: var(--r-sm);
   background: transparent;
   font-size: var(--text-lg);
-  line-height: 1;
+  line-height: var(--leading-none);
   color: var(--fg-4);
   cursor: pointer;
 }

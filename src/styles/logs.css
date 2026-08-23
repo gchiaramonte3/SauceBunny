@@ -27,7 +27,7 @@
   font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   color: var(--fg-3);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-caps);
 }
 .cp-logs-header:hover { color: var(--fg-1); }
 .cp-logs-header .chev {
@@ -35,7 +35,7 @@
   transition: transform var(--dur-base) var(--ease-out);
   color: var(--fg-3);
 }
-.cp-logs-header .title { text-transform: uppercase; letter-spacing: 0.1em; font-size: var(--text-sm); }
+.cp-logs-header .title { text-transform: uppercase; letter-spacing: var(--track-caps-wide); font-size: var(--text-sm); }
 .cp-logs-header .status-pill {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -45,7 +45,7 @@
   background: rgba(255,255,255,0.04);
   padding: 2px 7px;
   border-radius: var(--r-xs);
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-caps);
   text-transform: none;
 }
 .cp-logs-header .status-pill.success { color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
@@ -82,7 +82,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-base);
   font-weight: var(--weight-semibold);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out);
@@ -112,7 +112,7 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-base);
-  line-height: 1.55;
+  line-height: var(--leading-normal);
   color: var(--fg-3);
 }
 .cp-logs-body::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -128,7 +128,7 @@
   font-variant-numeric: tabular-nums;
 }
 .log-line .ts { color: var(--fg-5); font-size: var(--text-sm); }
-.log-line .tag { font-size: var(--text-sm); font-weight: var(--weight-semibold); letter-spacing: 0.04em; text-transform: uppercase; }
+.log-line .tag { font-size: var(--text-sm); font-weight: var(--weight-semibold); letter-spacing: var(--track-caps); text-transform: uppercase; }
 .log-line .tag.info  { color: var(--fg-3); }
 .log-line .tag.ok    { color: var(--accent); }
 .log-line .tag.warn  { color: var(--warning); }

@@ -30,7 +30,7 @@
   font-size: var(--text-lg);
   font-weight: var(--weight-normal);
   color: var(--fg-1);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-caps);
   font-variant-numeric: tabular-nums;
   padding: 5px 9px;
   background: rgba(0,0,0,0.4);
@@ -169,7 +169,7 @@
   font-variant-numeric: tabular-nums;
   font-size: var(--text-xs);
   color: var(--fg-5);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-caps);
   /* The ruler sits above the track; clicks must pass through to the track
      for scrub, and the cursor must never flip to a text caret while
      dragging across the labels. */
@@ -219,7 +219,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-2xs);
   font-weight: var(--weight-bold);
-  letter-spacing: 0.02em;
+  letter-spacing: var(--track-wide);
   white-space: nowrap;
   max-width: 90px;
   overflow: hidden;
@@ -448,7 +448,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
-  line-height: 1.5;
+  line-height: var(--leading-normal);
   box-shadow: var(--shadow-soft);
   pointer-events: none;
 }
@@ -489,8 +489,8 @@
   font-weight: var(--weight-black);
   font-size: 0;
   opacity: 0;
-  line-height: 1;
-  letter-spacing: 0.02em;
+  line-height: var(--leading-none);
+  letter-spacing: var(--track-wide);
   user-select: none;
   transition: font-size var(--dur-base) var(--ease-spring), opacity var(--dur-fast) ease-out var(--dur-instant);
 }
@@ -670,9 +670,9 @@
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   color: var(--fg-4);
-  letter-spacing: 0.02em;
+  letter-spacing: var(--track-wide);
   text-align: center;
-  line-height: 16px;
+  line-height: var(--leading-normal);
 }
 
 

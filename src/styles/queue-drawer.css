@@ -143,7 +143,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-base);
   font-weight: var(--weight-semibold);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--track-caps);
   color: var(--fg-4);
   cursor: pointer;
   transition: color var(--dur-fast) var(--ease-out),
@@ -232,7 +232,7 @@ body.cp-tab-dragging { cursor: grabbing; }
 .cp-tab-soon {
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-caps-loose);
   text-transform: uppercase;
   padding: 1px 5px;
   border-radius: var(--r-xs);
@@ -254,7 +254,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   border: none;
   color: var(--fg-3);
   font-size: var(--text-3xl);
-  line-height: 1;
+  line-height: var(--leading-none);
   cursor: pointer;
   border-radius: var(--r-xs);
   transition: background var(--dur-fast) var(--ease-out),
@@ -274,7 +274,7 @@ body.cp-tab-dragging { cursor: grabbing; }
 .cp-queue-empty-body {
   font-family: var(--font-ui);
   font-size: var(--text-base);
-  line-height: 1.5;
+  line-height: var(--leading-normal);
   color: var(--fg-4);
   max-width: 260px;
 }
@@ -323,7 +323,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   color: var(--fg-1);
-  letter-spacing: -0.005em;
+  letter-spacing: var(--track-tight);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -338,7 +338,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-caps-loose);
   padding: 2px 6px;
   border-radius: var(--r-xs);
   color: var(--fg-4);
@@ -370,7 +370,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   font-family: var(--font-ui);
   font-size: var(--text-xs);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--track-caps-wide);
   color: var(--fg-3);
   flex-shrink: 0;
   margin-left: auto;

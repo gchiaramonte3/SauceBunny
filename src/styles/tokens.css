@@ -212,6 +212,26 @@
   --text-4xl:   22px; /* modal titles */
   --text-5xl:   28px; /* the welcome screen, and nothing else */
 
+  /* ── Leading ──────────────────────────────────────────────────────────
+     Unitless, always. Four pixel line-heights existed and each was wrong
+     the moment its text changed size - a 15px line on 12px type stays 15px
+     when the type grows, which is how a chip clips its own descenders. */
+  --leading-none:   1;    /* single-line controls, chips, pills */
+  --leading-tight:  1.3;  /* headings and dense hints */
+  --leading-snug:   1.4;  /* list rows, compact body */
+  --leading-normal: 1.5;  /* reading text */
+
+  /* ── Tracking ─────────────────────────────────────────────────────────
+     18 values became six. Uppercase needs air and gets more of it the
+     smaller it is, which is what the three caps rungs are for; body text
+     needs almost none. */
+  --track-tight:      -0.01em; /* large display text */
+  --track-slight:      0.01em; /* body */
+  --track-wide:        0.02em; /* small body, button labels */
+  --track-caps:        0.04em; /* uppercase labels */
+  --track-caps-loose:  0.06em; /* uppercase at 10px */
+  --track-caps-wide:   0.10em; /* uppercase at 9px and below */
+
   /* ── Weight ───────────────────────────────────────────────────────────
      ONLY the faces imported in src/main.tsx: 300, 400, 600, 700, 800.
 

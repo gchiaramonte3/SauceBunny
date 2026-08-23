@@ -37,7 +37,7 @@
   margin: var(--s-2) 0 0;
   font-size: var(--text-5xl);
   font-weight: var(--weight-black);
-  letter-spacing: -0.02em;
+  letter-spacing: var(--track-tight);
   color: var(--fg-1);
   animation: cp-welcome-rise 520ms var(--ease-out) 60ms both;
 }

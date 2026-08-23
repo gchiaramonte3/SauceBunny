@@ -51,7 +51,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-md);
   font-weight: var(--weight-black);
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-caps);
   text-transform: uppercase;
   color: var(--fg-3);
 }
@@ -64,7 +64,7 @@
 }
 .cp-room-title .cp-room-name {
   text-transform: none;
-  letter-spacing: 0;
+  letter-spacing: normal;
   font-size: var(--text-md);
   font-weight: var(--weight-bold);
   color: var(--fg-1);
@@ -193,7 +193,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-md);
   font-weight: var(--weight-black);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-caps-loose);
   text-transform: uppercase;
   color: var(--fg-3);
 }
@@ -406,7 +406,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
-  letter-spacing: 0.03em;
+  letter-spacing: var(--track-wide);
   text-transform: uppercase;
 }
 
@@ -810,7 +810,7 @@
   color: var(--accent);
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
-  letter-spacing: 0.02em;
+  letter-spacing: var(--track-wide);
   text-transform: uppercase;
 }
 /* Hover-revealed, like the rest of the tile affordances. */
