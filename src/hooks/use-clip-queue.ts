@@ -142,6 +142,29 @@ export function useClipQueue(p: ClipQueueDeps) {
     setClipQueue((prev) => prev.filter((c) => c.id !== id));
   }, [setClipQueue]);
 
+  /**
+   * Put a failed row back in the queue.
+   *
+   * A failed item's only control used to be the trash, and `handleExportQueue`
+   * filters eligibility to `status === "queued"`, so pressing Export again
+   * skipped it forever — while `saveClipQueue` persists only queued rows, so
+   * quitting dropped it silently too. A row IS a range somebody marked by
+   * hand, which this file's own persistence test calls the one thing in the
+   * workspace that cannot be recreated by pressing a button again. Deleting it
+   * meant re-finding the moment and re-marking in and out.
+   *
+   * Everything the runner needs is still on the item — source, fps, in/out,
+   * filename, format, reencode, captions — so this only has to clear the
+   * failure.
+   */
+  const handleQueueRetry = useCallback((id: string) => {
+    setClipQueue((prev) => prev.map((c) => (
+      c.id === id && c.status === "error"
+        ? { ...c, status: "queued" as const, error: undefined, path: undefined }
+        : c
+    )));
+  }, [setClipQueue]);
+
   /** Rename one queued clip (double-click in the drawer). Sanitizes; empty →
    *  no-op; a collision with a sibling bumps a numeric suffix until unique so
    *  Export All can't overwrite one file with another. */
@@ -341,7 +364,7 @@ export function useClipQueue(p: ClipQueueDeps) {
   }, [exportOpts.folder, queueRunning, runLocalClipExport, appendLog, pushNotification, cookiesBrowserOrNone, clipQueueRef, localExportCancelRef, metadataRef, queueResolverRef, setClipQueue, setJobId, setProgress, setQueueRunning, setRecents, setStatus]);
 
   return {
-    handleAddToQueue, handleQueueRemove, handleQueueRename,
+    handleAddToQueue, handleQueueRemove, handleQueueRetry, handleQueueRename,
     handleQueueRenameAll, handleQueueClearAll, handleExportQueue,
   };
 }

@@ -141,7 +141,12 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                   wraps on its own if the window gets narrow. */}
               <p className="cp-colobby-sub">
                 <span>Watch the same source and comment in sync.</span>
-                <span>Media never leaves each machine.</span>
+                {/* NOT "media never leaves each machine": this is the screen
+                    where you are about to send media to another machine, and
+                    on a relayed path it travels through n0's relay too
+                    (encrypted, capped at the lowest rung). The true and still
+                    reassuring claim is the one about servers. */}
+                <span>No server sees it. No account, no upload.</span>
               </p>
             </header>
 

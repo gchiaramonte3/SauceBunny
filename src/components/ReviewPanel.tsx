@@ -1683,7 +1683,7 @@ function CommentRow({
           <ReactionBar c={c} myName={myName} onReact={onLike} />
           <button onClick={onResolve} title={c.resolved ? "Reopen" : "Resolve"}>{c.resolved ? "Reopen" : "Resolve"}</button>
           <button onClick={() => { setEditing(true); setEditDraft(c.body); }} title="Edit">Edit</button>
-          <button onClick={onDelete} title="Delete">✕</button>
+          <button onClick={onDelete} title="Delete" aria-label="Delete comment">✕</button>
         </div>
       </div>
 
@@ -1796,7 +1796,7 @@ function ReplyRow({
           <div className="cp-review-actions">
             <ReactionBar c={r} myName={myName} onReact={onLike} />
             <button onClick={() => { setDraft(r.body); setEditing(true); }} title="Edit">Edit</button>
-            <button onClick={onDelete} title="Delete">✕</button>
+            <button onClick={onDelete} title="Delete" aria-label="Delete comment">✕</button>
           </div>
         </div>
         {editing ? (

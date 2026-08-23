@@ -40,6 +40,7 @@ const INITIAL: PanelState = INITIAL_SNAPSHOT;
 
 type ActionKind =
   | "remove"
+  | "retry"
   | "clearAll"
   | "exportAll"
   | "stop"
@@ -171,6 +172,7 @@ export default function PanelApp() {
         running={state.running}
         hasFolder={state.hasFolder}
         onRemove={(id) => sendAction("remove", { id })}
+        onRetry={(id) => sendAction("retry", { id })}
         onClearAll={() => sendAction("clearAll")}
         onExportAll={() => sendAction("exportAll")}
         onStop={() => sendAction("stop")}

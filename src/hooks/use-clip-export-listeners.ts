@@ -127,7 +127,6 @@ export function useClipExportListeners(d: UseClipExportListenersDeps): void {
           appendLog("warn", "ffmpeg", "Export cancelled");
           pushNotification("info", "Export cancelled", "");
         } else {
-          setStatus("error");
           setExportPhase("error"); // Export button → cross flash
           // Humanize AFTER classifyExtractorRot sees the raw text (the
           // humanizer only rewrites EACCES spawn failures, but keep the

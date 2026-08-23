@@ -80,6 +80,7 @@ export type PanelSnapshot = {
 
 export type PanelHandlers = {
   onRemove: (id: string) => void;
+  onRetry: (id: string) => void;
   onClearAll: () => void;
   onExportAll: () => void;
   onStop: () => void;
@@ -346,6 +347,8 @@ export function usePanelBus({
         }),
         listen<{ id: string }>("panel:action:remove",
           (e) => handlersRef.current.onRemove(e.payload.id)),
+        listen<{ id: string }>("panel:action:retry",
+          (e) => handlersRef.current.onRetry(e.payload.id)),
         listen("panel:action:clearAll",
           () => handlersRef.current.onClearAll()),
         listen("panel:action:exportAll",

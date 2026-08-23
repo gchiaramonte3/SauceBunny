@@ -276,10 +276,6 @@ export function buildCommands(d: CommandDeps): Command[] {
     // B.1 scaffolding only: runs `saucebunny-diarize --version` via the
     // probe command and shows the result in a toast. Confirms the Swift
     // binary is built and reachable through the Tauri sidecar plumbing.
-    { id: "tx.probe-diarizer", label: "Probe diarizer (dev)", group: "Transcript",
-      description: "Smoke-test the saucebunny-diarize Swift sidecar",
-      keywords: ["fluidaudio", "speakers", "swift"],
-      run: () => d.onProbeDiarizer() },
     // ── View ────────────────────────────────────────────────────
     // Top-level view switch — same ids as the KEY_ACTIONS entries, so the
     // hotkey literals below are overlaid with the live bindings in App.

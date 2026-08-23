@@ -120,8 +120,22 @@ describe("a single export", () => {
   it("does NOT absorb a crash as a cancel", async () => {
     const { d } = await mount();
     fire("clip-done", { job_id: JOB, success: false, error: "exited with code 1" });
-    expect(d.setStatus).toHaveBeenCalledWith("error");
     expect(d.setExportPhase).toHaveBeenCalledWith("error");
+    expect(d.setErrorDetail).toHaveBeenCalled();
+  });
+
+  it("leaves the SOURCE's status alone when an export fails", async () => {
+    // An export fault is not a source fault. This used to call
+    // setStatus("error"), and Monitor's error branch returns before the player
+    // branch — so the running video unmounted and was replaced by an overlay
+    // reading "Couldn't resolve source" over a file that had resolved fine,
+    // with no Dismiss and no Retry. The only way back to the picture was
+    // reloading the source, which clears the in/out marks that produced the
+    // failed export in the first place.
+    const { d } = await mount();
+    fire("clip-done", { job_id: JOB, success: false, error: "exited with code 1" });
+    expect(d.setStatus, "an export failure must not change the source status")
+      .not.toHaveBeenCalledWith("error");
   });
 
   it("shows the rot classifier the RAW text, before the humanizer rewrites it", async () => {

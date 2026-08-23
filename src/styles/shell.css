@@ -157,6 +157,24 @@
   border-radius: var(--r-pill);
   padding: 1px 8px;
 }
+/* The empty Transcripts pane: a sentence and two things to press. It used to
+   be a sentence under a search field, a sort dropdown and two filter chips,
+   none of which could do anything with an empty list. */
+.cp-reader-empty {
+  padding: var(--s-4) var(--s-3);
+  text-align: center;
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  color: var(--fg-4);
+  line-height: var(--leading-snug);
+}
+.cp-reader-empty-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+
 .cp-reader-list {
   flex: 1;
   overflow-y: scroll;             /* permanent scrollbar, like the transcript body */

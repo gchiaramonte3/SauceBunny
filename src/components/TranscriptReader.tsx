@@ -70,12 +70,16 @@ type Props = {
   onRenameTranscript: (entry: TranscriptHistoryEntry, newStem: string) => Promise<void>;
   /** Move a transcript (+ sidecars) into a folder. Throws on failure. */
   onMoveTranscript: (entry: TranscriptHistoryEntry, destDir: string) => Promise<void>;
+  /** Import an .srt/.vtt from disk. Works with no source loaded. */
+  onImportTranscript: () => void;
+  /** Take the user to Clip, where a transcript gets generated. */
+  onGoToClip: () => void;
   /** The embedded <TranscriptViewer>, fed by App. Rendered only once a
    *  transcript is selected. */
   children: ReactNode;
 };
 
-export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, recents, stage, stageAvailable, stageExpanded, stageFloating, onExpandStage, docTab, onDocTab, analysis, onRenameTranscript, onMoveTranscript, children }: Props) {
+export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTranscript, visible, requestThumb, posterVersions, recents, stage, stageAvailable, stageExpanded, stageFloating, onExpandStage, docTab, onDocTab, analysis, onRenameTranscript, onMoveTranscript, onImportTranscript, onGoToClip, children }: Props) {
   const [list, setList] = useState<LibraryTranscript[]>([]);
   const [tick, setTick] = useState(0);
   const [rowMenu, setRowMenu] = useState<RowMenuTarget | null>(null);
@@ -248,7 +252,10 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
           </form>
         )}
         {projectErr && <p className="cp-reader-project-err">{projectErr}</p>}
-        <div className="cp-reader-tools">
+        {/* Search, sort and the two chips are hidden when the list is empty.
+            Filtering nothing is chrome that cannot do anything, and on a fresh
+            install it was the bulk of what this pane showed. */}
+        {organized.total > 0 && <div className="cp-reader-tools">
           <input
             className="cp-reader-search"
             type="search"
@@ -269,8 +276,8 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
             <option value="name">By name</option>
             <option value="size">Largest</option>
           </select>
-        </div>
-        <div className="cp-reader-chips">
+        </div>}
+        {organized.total > 0 && <div className="cp-reader-chips">
           {/* The two badges the rows already wear, as filters. Nothing else is
               worth a chip: every transcript has a date and a format. */}
           <button
@@ -289,7 +296,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
           >
             Analyzed
           </button>
-        </div>
+        </div>}
         <div className="cp-reader-list">
           {groups.map((g) => (
             <section key={g.folder || "root"} className="cp-reader-group">
@@ -336,7 +343,22 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
             </section>
           ))}
           {list.length === 0 && groups.length === 0 && (
-            <div className="cp-reader-empty">No transcripts yet. Generate one from a source in Clip.</div>
+            <div className="cp-reader-empty">
+              <p>No transcripts yet.</p>
+              {/* Two buttons, because there are two ways to get one and the
+                  view named Transcripts previously offered neither. Import
+                  works with no source loaded - the reader just never wired it
+                  up - and a folder of .srt from a transcription service is a
+                  normal way to arrive here. */}
+              <div className="cp-reader-empty-actions">
+                <button type="button" className="btn cp-tx-iconbtn" onClick={onImportTranscript}>
+                  Import a transcript…
+                </button>
+                <button type="button" className="btn btn-ghost cp-tx-iconbtn" onClick={onGoToClip}>
+                  Make one in Clip
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </aside>
@@ -363,7 +385,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
         ) : (
           <div className="cp-reader-hint">
             <IconTranscript size={28} />
-            <p>Pick a transcript to read.</p>
+            <p>{list.length === 0 ? "Nothing to read yet." : "Pick a transcript to read."}</p>
           </div>
         )}
       </main>

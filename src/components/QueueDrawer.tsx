@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { inertWhen } from "../lib/inert";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  IconStack, IconReveal, IconTrash, IconCheck, IconAlert, IconTranscript, IconAiSummary, IconReview,
+  IconAiSummary, IconAlert, IconCheck, IconRefresh, IconReveal, IconReview, IconStack, IconTranscript, IconTrash,
 } from "./Icons";
 import type { QueuedClip , ReviewRangeDraft } from "../types";
 import { secondsToHms } from "../lib/timecode";
@@ -50,6 +50,8 @@ type Props = {
   running: boolean;
   hasFolder: boolean;
   onRemove: (id: string) => void;
+  /** Put a failed row back in the queue, marks and all. */
+  onRetry: (id: string) => void;
   onClearAll: () => void;
   onExportAll: () => void;
   onStop: () => void;
@@ -236,7 +238,7 @@ function loadDrawerWidth(): number {
 
 export function QueueDrawer({
   open, viewActive = true, onClose, queue, fps, running, hasFolder,
-  onRemove, onClearAll, onExportAll, onStop,
+  onRemove, onRetry, onClearAll, onExportAll, onStop,
   transcriptPath, transcriptOrigin, playheadAvailable, transcriptFps,
   sourceStartTimecode, onSetSourceTimecode, onGrabFace,
   onTranscriptSeek, transcriptArrivedTick,
@@ -763,6 +765,16 @@ export function QueueDrawer({
                     onClick={() => invoke("reveal_in_finder", { path: c.path }).catch(() => {})}
                   >
                     <IconReveal size={13} />
+                  </button>
+                )}
+                {c.status === "error" && (
+                  <button
+                    className="cp-queue-iconbtn"
+                    title="Try again"
+                    aria-label={`Try ${c.filename} again`}
+                    onClick={() => onRetry(c.id)}
+                  >
+                    <IconRefresh size={13} />
                   </button>
                 )}
                 {c.status !== "running" && (

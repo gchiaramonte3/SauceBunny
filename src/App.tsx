@@ -2335,7 +2335,7 @@ export default function App() {
   // running single export makes the queue wait instead of starting a second
   // writer.
   const {
-    handleAddToQueue, handleQueueRemove, handleQueueRename,
+    handleAddToQueue, handleQueueRemove, handleQueueRetry, handleQueueRename,
     handleQueueRenameAll, handleQueueClearAll, handleExportQueue,
   } = useClipQueue({
     metadata, metadataRef, sourceKind, localFilePath, exportOpts, fps,
@@ -3953,6 +3953,7 @@ export default function App() {
     },
     handlers: {
       onRemove: handleQueueRemove,
+      onRetry: handleQueueRetry,
       onClearAll: handleQueueClearAll,
       onExportAll: () => { void handleExportQueue(); },
       onStop: () => { void handleStop(); },
@@ -4129,6 +4130,8 @@ export default function App() {
               self-hides via hasSource=false since the reader can't regenerate. */}
           <div ref={readerViewRef} tabIndex={-1} className="cp-view cp-view-reader" hidden={activeView !== "reader"}>
             <TranscriptReader
+              onImportTranscript={() => { void handleImportTranscript(); }}
+              onGoToClip={handleSwitchToClip}
               transcriptLibraryPath={defaults.transcriptLibrary}
               activePath={transcriptPath}
               onOpenTranscript={handleReaderOpenTranscript}
@@ -4891,6 +4894,7 @@ export default function App() {
                 running={queueRunning}
                 hasFolder={!!exportOpts.folder}
                 onRemove={handleQueueRemove}
+                onRetry={handleQueueRetry}
                 onClearAll={handleQueueClearAll}
                 onExportAll={handleExportQueue}
                 onStop={handleStop}

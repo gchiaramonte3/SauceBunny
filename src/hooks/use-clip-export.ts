@@ -190,7 +190,14 @@ export function useClipExport(p: ClipExportDeps) {
         // Future: fall back to a Rust ffmpeg-based local-clip command.
         // For now surface clearly so the user knows what happened.
         appendLog("err", "mediabunny", `Unsupported for mediabunny export: ${result.reason}`);
-        setStatus("error");
+        // Deliberately NOT setStatus("error"). That is the SOURCE's status, and
+        // Monitor's error branch returns before the player branch — so an
+        // export fault unmounted the running video and replaced it with an
+        // overlay reading "Couldn't resolve source", blaming source resolution
+        // for a file that resolved fine. The overlay carried no Dismiss and no
+        // Retry, so the only way back to the picture was reloading the source,
+        // which clears the in/out marks that produced the failed export. The
+        // toast and this phase flash already report it, where the user clicked.
         setExportPhase("error");
         setErrorDetail(result.reason);
         pushNotification("error", "Local export not supported",
@@ -200,7 +207,6 @@ export function useClipExport(p: ClipExportDeps) {
       if (result.kind === "error") {
         setErrorDetail(result.message);
         appendLog("err", "mediabunny", result.message);
-        setStatus("error");
         setExportPhase("error");
         pushNotification("error", "Local export failed", result.message);
         return;
@@ -301,7 +307,6 @@ export function useClipExport(p: ClipExportDeps) {
       // reject synchronously with yt-dlp's extractor error.
       classifyExtractorRot(msg);
       appendLog("err", "ffmpeg", msg);
-      setStatus("error");
       setExportPhase("error"); // create_clip rejected synchronously → cross flash
     }
   }, [metadata, sourceKind, localFilePath, exportOpts, fps, inFrames, outFrames,
