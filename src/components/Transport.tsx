@@ -90,13 +90,13 @@ export function Transport({
       <div className="cp-transport-side right">
         <div className="cp-icon-group">
           <button className="cp-icon-btn" title="Mark in (I)" aria-label="Mark in" onClick={onMarkIn}>
-            <IconMarkIn size={15} />
+            <IconMarkIn size={16} />
           </button>
           <button className="cp-icon-btn" title="Mark out (O)" aria-label="Mark out" onClick={onMarkOut}>
-            <IconMarkOut size={15} />
+            <IconMarkOut size={16} />
           </button>
           <button className="cp-icon-btn" title="Clear in/out (G)" aria-label="Clear in/out" onClick={onClearMarks}>
-            <IconClearMarks size={15} />
+            <IconClearMarks size={16} />
           </button>
         </div>
         <button

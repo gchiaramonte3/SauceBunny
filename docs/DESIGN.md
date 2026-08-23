@@ -101,6 +101,14 @@ one.** A test fails the build on an unreferenced token, so the pile cannot
 quietly rebuild itself, but nothing stops a fourth synonym for a colour that
 already has three.
 
+The in/out mark is a stem with one chevron wing at the waist, pointing away
+from the marked region. The wing is `--mark-wing-l` / `--mark-wing-r` (a
+clip-path, in `base.css` beside `--marker`), and the same drawing is the
+path inside `IconMarkIn` / `IconMarkOut`, so the button and the mark it
+leaves on the timeline are one shape. `IconRange` stays a `[` / `]` bracket
+on purpose: a review comment range is not a clip range, and it is drawn on
+the same track.
+
 Also live and not covered above: `--danger-2` (the solid danger for fills, as
 against `--danger-text` for glyphs), `--gold` (host crown and winner accents —
 no status meaning), and `--marker` (the in/out marker violet).

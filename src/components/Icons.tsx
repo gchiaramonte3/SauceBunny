@@ -213,34 +213,58 @@ export const IconCoReview = (p: IconProps) => (
     <path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
   </Icon>
 );
-// NLE mark pair — the bracket glyphs every editor's muscle memory expects:
-// Mark In is "[" (bar LEFT, arms opening right), Mark Out is "]". The pair is
-// an exact pixel mirror (x → 24−x: bar 9↔15, arm tips 15↔9), not two freehand
-// drawings. Same bar-plus-arms stroke style as IconClearMarks / IconRange.
+// NLE mark pair. A filled stem capped top and bottom, with one chevron wing
+// at the waist pointing AWAY from the marked region: "in" points left off the
+// start, "out" points right off the end, so the pair frames the range instead
+// of enclosing it the way a "[" / "]" would. The two paths are an exact pixel
+// mirror (x → 24−x) of one source glyph, scaled from a 16px drawing, so the
+// 2.625 stem, 0.875 cap radius and 4.87 wing are identical in both.
+// Geometry note: the wing's near edge is notched, which is what keeps it
+// reading as a chevron rather than an arrowhead glued to a bar. A mitred
+// polyline does not reproduce it (the apex lands ~0.5 short), so this is the
+// drawn path transformed, not a redrawing of it.
 export const IconMarkIn = (p: IconProps) => (
-  <Icon {...p} strokeWidth={2}>
-    <path d="M9 5v14" strokeLinecap="square" />
-    <path d="M9 5h6" />
-    <path d="M9 19h6" />
+  <Icon {...p}>
+    <path
+      d="M10.875 15.6504V21.1875C10.875 21.9123 11.4626 22.5 12.1875 22.5C12.9124 22.5 13.5 21.9123 13.5 21.1875V14.3496L10.415 12L13.5 9.6504V2.8125C13.5 2.0876 12.9124 1.5 12.1875 1.5C11.4626 1.5 10.875 2.0876 10.875 2.8125V8.3496L6.0849 12L10.875 15.6504Z"
+      fill="currentColor"
+      stroke="none"
+    />
   </Icon>
 );
 export const IconMarkOut = (p: IconProps) => (
-  <Icon {...p} strokeWidth={2}>
-    <path d="M15 5v14" strokeLinecap="square" />
-    <path d="M15 5h-6" />
-    <path d="M15 19h-6" />
+  <Icon {...p}>
+    <path
+      d="M13.125 15.6504V21.1875C13.125 21.9123 12.5374 22.5 11.8125 22.5C11.0876 22.5 10.5 21.9123 10.5 21.1875V14.3496L13.585 12L10.5 9.6504V2.8125C10.5 2.0876 11.0876 1.5 11.8125 1.5C12.5374 1.5 13.125 2.0876 13.125 2.8125V8.3496L17.9151 12L13.125 15.6504Z"
+      fill="currentColor"
+      stroke="none"
+    />
   </Icon>
 );
+// Clear both marks. The same mirrored pair at 0.6 scale, pushed 3.8 apart to
+// open a 5.8-wide gap, with the X in it. Scaling is uniform so the cap stays
+// a circle: squashing the glyph vertically to make room would turn the round
+// ends into ellipses and stop it matching the two icons beside it.
 export const IconClearMarks = (p: IconProps) => (
   <Icon {...p} strokeWidth={1.8}>
-    <path d="M5 5v14M5 5h3M5 19h3" />
-    <path d="M19 5v14M19 5h-3M19 19h-3" />
-    <path d="M9 9l6 6M15 9l-6 6" />
+    <path
+      d="M7.525 14.1902V17.5125C7.525 17.9474 7.8776 18.3 8.3125 18.3C8.7474 18.3 9.1 17.9474 9.1 17.5125V13.4098L7.249 12L9.1 10.5902V6.4875C9.1 6.0526 8.7474 5.7 8.3125 5.7C7.8776 5.7 7.525 6.0526 7.525 6.4875V9.8098L4.6509 12L7.525 14.1902Z"
+      fill="currentColor"
+      stroke="none"
+    />
+    <path
+      d="M16.475 14.1902V17.5125C16.475 17.9474 16.1224 18.3 15.6875 18.3C15.2526 18.3 14.9 17.9474 14.9 17.5125V13.4098L16.751 12L14.9 10.5902V6.4875C14.9 6.0526 15.2526 5.7 15.6875 5.7C16.1224 5.7 16.475 6.0526 16.475 6.4875V9.8098L19.3491 12L16.475 14.1902Z"
+      fill="currentColor"
+      stroke="none"
+    />
+    <path d="M10.1 10.1l3.8 3.8M13.9 10.1l-3.8 3.8" />
   </Icon>
 );
-// In/out span — the review comment-range tool. Same bracket language as
-// IconMarkIn / IconMarkOut / IconClearMarks; the duration bar with endpoint
-// dots between the brackets reads as "a span", not a mark.
+// In/out span — the review comment-range tool. Deliberately STILL the "[" /
+// "]" bracket dialect the clip marks used to share: a comment range is a
+// different thing from a clip range, drawn in a different colour
+// (--marker-color, the reviewer's) on the same track, and after the clip
+// marks became chevrons this is the glyph that keeps the two apart.
 export const IconRange = (p: IconProps) => (
   <Icon {...p} strokeWidth={2}>
     <path d="M5 5v14" strokeLinecap="square" />

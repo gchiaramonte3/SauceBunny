@@ -64,6 +64,28 @@ body {
      "selected/active" without competing with the success-green CTAs. */
   --marker: var(--novella-violet);
   --marker-rgb: 109, 82, 237;
+  /* The mark's chevron wing, as a clip-path. Every in/out marker is a stem
+     plus ONE of these at the waist, pointing away from the marked region:
+     -l off an in mark, -r off an out mark. Traced from the drawn glyph the
+     transport icons use, so the button you press and the mark it leaves are
+     the same shape at two sizes.
+     The fourth point is the notch on the wing's near edge (9.6% of its
+     width); without it the wing reads as an arrowhead stuck on a bar rather
+     than a chevron.
+     ONE deliberate simplification from the drawing: there, the notch is a
+     wedge that keeps cutting past the stem's far edge, so the stem is pinched
+     nearly through at the waist. IconMarkIn / IconMarkOut reproduce that
+     exactly, because they are a path. A line mark cannot: punching the wedge
+     out of a 2px stem needs the stem gapped by a mask and the waist redrawn
+     as a second mask layer, per marker, and .cp-track-selection's stems are
+     borders on a backdrop-filtered element, where that does not work at all.
+     At 2px the wedge is a sub-pixel pinch; the wing is the part that carries
+     the shape. If the pinch is ever wanted here, the honest fix is to stop
+     drawing these in CSS, not to grow the mask stack.
+     Named because six rules need it and a re-typed polygon is how the two
+     halves drift apart. */
+  --mark-wing-l: polygon(100% 0, 0 50%, 100% 100%, 90.4% 50%);
+  --mark-wing-r: polygon(0 0, 100% 50%, 0 100%, 9.6% 50%);
   /* Focus indicator. HOUSE RULE (2026-07-18, user directive): focus NEVER
      shows the green accent, and never draws a ring INSIDE a composed field.
      A focused control brightens its outline toward white instead. Composed

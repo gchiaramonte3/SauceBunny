@@ -308,22 +308,37 @@
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -1px 0 rgba(255,255,255,0.14);
   z-index: 2;
 }
-/* Bracket caps on the selection edges — the same "[" / "]" dialect as the
-   transport's IconMarkIn / IconMarkOut: short arms at top and bottom opening
-   INTO the selection. Pseudo-elements only (pointer-events: none), so the
-   scrub hit area and drag behavior are untouched. */
+/* Chevron wings on the selection edges — the same glyph as the transport's
+   IconMarkIn / IconMarkOut, so the button you press and the mark it leaves on
+   the track are one shape. The band's own 2px borders are the stems; each
+   wing hangs off the OUTSIDE of its stem, pointing away from the selection,
+   which is why the offsets are calc(100% + 2px): an absolutely positioned
+   child measures from the padding box, so plain 100% would bury the wing
+   under the border instead of butting against its outer edge.
+   drop-shadow, not box-shadow, for the dark outline: clip-path clips a
+   box-shadow away with the box, but a filter runs after the clip and so
+   traces the wing's actual silhouette.
+   Pseudo-elements only (pointer-events: none), so the scrub hit area and drag
+   behavior are untouched. */
 .cp-track-selection::before,
 .cp-track-selection::after {
   content: "";
   position: absolute;
-  top: 0; bottom: 0;
-  width: 5px;
-  border-top: 2px solid var(--marker);
-  border-bottom: 2px solid var(--marker);
+  top: 50%;
+  /* Glyph geometry, not spacing: the source drawing's 3.19 x 4.87 wing,
+     rounded to whole pixels for the 2px stem this track uses — a fractional
+     wing on a 2px bar buys accuracy nobody can see and loses a crisp edge.
+     Raw px for the same reason border-radius: 50% is: it is a shape, and the
+     spacing scale has nothing to say about it. */
+  width: 4px;
+  height: 6px;
+  transform: translateY(-50%);
+  background: var(--marker);
+  filter: drop-shadow(0 0 0.5px rgba(0,0,0,0.9));
   pointer-events: none;
 }
-.cp-track-selection::before { left: 0; }
-.cp-track-selection::after  { right: 0; }
+.cp-track-selection::before { right: calc(100% + 2px); clip-path: var(--mark-wing-l); }
+.cp-track-selection::after  { left:  calc(100% + 2px); clip-path: var(--mark-wing-r); }
 /* Already-queued ranges — the section visibly RECEDES: the film beneath goes
    dark + desaturated (backdrop-filter) under a scrim + faint hatching, with
    bright edge posts. The old 10%-white wash was invisible over a filmstrip.
@@ -379,25 +394,27 @@
   width: 2px;
   margin-left: -1px;
   background: var(--marker);
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.55);
+  /* One filter on the parent outlines the stem AND its wing as a single
+     silhouette. The stem used to carry its own box-shadow, but a box-shadow
+     on the clipped wing would be clipped away with it, and two different
+     outline mechanisms on one glyph do not line up at the join. */
+  filter: drop-shadow(0 0 0.6px rgba(0,0,0,0.85));
 }
-/* Solo-mark bracket caps — arms open toward where the selection will grow:
-   right from an in mark ("["), left from an out mark ("]"). Same 2px weight
-   and dark outline as the bar so they hold up over bright filmstrip frames. */
-.cp-track-mark::before,
-.cp-track-mark::after {
+/* Solo-mark wing — points AWAY from where the selection will grow, matching
+   the icon on the button that set it: left off an in mark, right off an out
+   mark. One wing at the waist, not arms at both ends. */
+.cp-track-mark::before {
   content: "";
   position: absolute;
-  width: 5px;
-  height: 2px;
+  top: 50%;
+  width: 4px;
+  height: 6px;
+  transform: translateY(-50%);
   background: var(--marker);
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.55);
   pointer-events: none;
 }
-.cp-track-mark::before { top: 0; }
-.cp-track-mark::after  { bottom: 0; }
-.cp-track-mark.in::before,  .cp-track-mark.in::after  { left: 100%; }
-.cp-track-mark.out::before, .cp-track-mark.out::after { right: 100%; }
+.cp-track-mark.in::before  { right: 100%; clip-path: var(--mark-wing-l); }
+.cp-track-mark.out::before { left:  100%; clip-path: var(--mark-wing-r); }
 /* Chapter markers — thin NEUTRAL ticks hugging the TOP edge of the track
    (auto-chapters, AI Summary tab). Deliberately unlike the reviewer-tinted
    comment dots: short, quiet, and top-anchored so they never obscure the

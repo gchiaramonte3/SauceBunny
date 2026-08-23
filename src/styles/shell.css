@@ -647,6 +647,28 @@
 }
 .cp-reader-pin:hover::before { height: 15px; }
 .cp-reader-pin.in::before, .cp-reader-pin.out::before { background: var(--marker); }
+/* ...and only in/out get the chevron wing, so they read as clip marks rather
+   than as two more of the neutral ticks beside them. Scoped to .in/.out on
+   purpose: .cp-reader-pin and its ::before are SHARED with chapter and
+   comment pins, and a wing on those would claim a range that does not exist.
+   Absolutely positioned rather than left to the pin's place-items: center,
+   which would stack it on top of the pip; offset by half the 3px pip so it
+   butts against the stem's outer edge. Same 4x6 wing and drop-shadow
+   outline as the Clip timeline. */
+.cp-reader-pin.in::after,
+.cp-reader-pin.out::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 6px;
+  transform: translateY(-50%);
+  background: var(--marker);
+  filter: drop-shadow(0 0 0.5px rgba(0,0,0,0.9));
+  pointer-events: none;
+}
+.cp-reader-pin.in::after  { right: calc(50% + 1.5px); clip-path: var(--mark-wing-l); }
+.cp-reader-pin.out::after { left:  calc(50% + 1.5px); clip-path: var(--mark-wing-r); }
 .cp-reader-pin.comment::before {
   width: 9px;
   height: 9px;
