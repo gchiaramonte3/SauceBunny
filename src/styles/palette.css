@@ -53,7 +53,7 @@
 .cp-palette-search-icon {
   font-size: 14px;
   color: var(--fg-4);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.02em;
   flex-shrink: 0;
 }
@@ -65,14 +65,14 @@
   color: var(--fg-1);
   font-family: var(--font-sans);
   font-size: 15px;
-  font-weight: 500;
+  font-weight: var(--weight-normal);
   letter-spacing: -0.01em;
 }
 .cp-palette-input::placeholder { color: var(--fg-5); }
 .cp-palette-count {
   font-family: var(--font-ui);
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   /* fg-4, not fg-5. tokens.css reserves fg-5 for decorative or duplicated
@@ -99,7 +99,7 @@
   padding: 6px 12px 4px;
   font-family: var(--font-ui);
   font-size: 9.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.10em;
   text-transform: uppercase;
   color: var(--fg-4);
@@ -131,7 +131,7 @@
 .cp-palette-row-label {
   font-family: var(--font-sans);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-1);
   letter-spacing: -0.005em;
 }
@@ -153,7 +153,7 @@
   padding: 0 6px;
   font-family: var(--font-sans);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-3);
   background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
   border: 1px solid var(--line-2);
@@ -216,7 +216,7 @@
   margin: 0;
   font-family: var(--font-sans);
   font-size: 15px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-1);
   letter-spacing: -0.01em;
 }
@@ -239,14 +239,14 @@
   gap: 8px;
   font-family: var(--font-ui);
   font-size: 9.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.10em;
   text-transform: uppercase;
   color: var(--fg-5);
 }
 .cp-shortcuts-ctx-tag {
   font-size: 9px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.06em;
   color: var(--fg-5);
   border: 1px solid var(--line-1);
@@ -277,7 +277,7 @@
   padding: 1px 6px;
   font-family: var(--font-sans);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-3);
   background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
   border: 1px solid var(--line-2);

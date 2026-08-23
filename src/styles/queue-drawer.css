@@ -90,7 +90,7 @@
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .cp-queue-rename:focus { outline: none; border-color: var(--focus-ring); box-shadow: none; }
 .cp-queue-renameall {
@@ -142,7 +142,7 @@
   border-top-right-radius: 6px;
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.04em;
   color: var(--fg-4);
   cursor: pointer;
@@ -222,7 +222,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   border-radius: var(--r-pill);
   font-family: var(--font-mono);
   font-size: 9.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
 }
 .cp-tab:not(.active) .cp-tab-badge {
@@ -231,7 +231,7 @@ body.cp-tab-dragging { cursor: grabbing; }
 }
 .cp-tab-soon {
   font-size: 9px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 1px 5px;
@@ -268,7 +268,7 @@ body.cp-tab-dragging { cursor: grabbing; }
 .cp-queue-empty-title {
   font-family: var(--font-sans);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-2);
 }
 .cp-queue-empty-body {
@@ -321,7 +321,7 @@ body.cp-tab-dragging { cursor: grabbing; }
 .cp-queue-name {
   font-family: var(--font-sans);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-1);
   letter-spacing: -0.005em;
   overflow: hidden;
@@ -336,7 +336,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   gap: 4px;
   font-family: var(--font-ui);
   font-size: 9.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 2px 6px;
@@ -445,7 +445,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 9.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   display: flex;
   align-items: center;
   justify-content: center;

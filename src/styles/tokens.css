@@ -173,6 +173,22 @@
      etc.). Nunito Sans supports `font-variant-numeric: tabular-nums`
      so timecode columns still line up perfectly. The system-font tail
      is the load-failure fallback only. */
+  /* ── Weight ───────────────────────────────────────────────────────────
+     ONLY the faces imported in src/main.tsx: 300, 400, 600, 700, 800.
+
+     There is deliberately no --weight-medium. No 500 face is loaded, so
+     `font-weight: 500` never rendered as medium - CSS font matching
+     substitutes the nearest available weight below it, which is 400.
+     Fifteen declarations across seven files were asking for medium and
+     quietly getting regular, and they are now --weight-normal, which is
+     what the screen has always shown. A token for 500 would promote that
+     bug to an API. If medium is genuinely wanted, import the face first
+     (@fontsource/nunito-sans/500.css) and the token can follow. */
+  --weight-normal:   400;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+  --weight-black:    800;
+
   --font-sans: 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-ui:   'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'Nunito Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;

@@ -215,3 +215,79 @@ describe("radius scale", () => {
     expect(all.length).toBeGreaterThan(200);
   });
 });
+
+/**
+ * A weight the app has not loaded is a weight the browser invents.
+ *
+ * Nunito Sans ships as separate WOFF2 faces and src/main.tsx imports five of
+ * them: 300, 400, 400-italic, 600, 700, 800. Ask for anything else and CSS
+ * font matching silently substitutes the nearest available face - no error,
+ * no warning, just type that is not the weight the stylesheet asked for.
+ *
+ * `font-weight: 500` appeared fifteen times across seven files and every one
+ * of them rendered as 400. The intent had been written down repeatedly and
+ * had never once reached the screen, which is the exact failure mode a
+ * convention with no enforcement has: it looks decided and it is not.
+ *
+ * This is the guard for that, and it is about the IMPORTS as much as the
+ * CSS - if someone adds the 500 face, --weight-medium becomes legitimate and
+ * this test should be updated to allow it, deliberately, rather than the CSS
+ * quietly starting to work.
+ */
+describe("font-weight only names a face that is actually loaded", () => {
+  const MAIN = resolve(__dirname, "../main.tsx");
+
+  /** The weights src/main.tsx imports, read rather than assumed. */
+  function loadedWeights(): Set<string> {
+    const main = readFileSync(MAIN, "utf8");
+    return new Set(
+      [...main.matchAll(/@fontsource\/nunito-sans\/(\d+)(?:-italic)?\.css/g)].map((m) => m[1]),
+    );
+  }
+
+  it("imports the faces this app claims to use", () => {
+    // Guards the guard: a refactor that moved the imports would otherwise
+    // leave this suite passing against an empty set.
+    expect([...loadedWeights()].sort()).toEqual(["300", "400", "600", "700", "800"]);
+  });
+
+  it("defines a weight token for every loaded face worth naming, and no others", () => {
+    const tokens = readFileSync(join(STYLES, "tokens.css"), "utf8");
+    const declared = [...tokens.matchAll(/--weight-[a-z]+\s*:\s*(\d+)\s*;/g)].map((m) => m[1]);
+    const loaded = loadedWeights();
+    for (const w of declared) {
+      expect(loaded.has(w), `--weight token for ${w}, which no @fontsource import loads`).toBe(true);
+    }
+    // 300 is loaded but has no token: nothing in the app uses a light weight,
+    // and a token with no use fails the unreferenced check above.
+    expect(declared.sort()).toEqual(["400", "600", "700", "800"]);
+  });
+
+  it("has no stylesheet asking for a face that was never loaded", () => {
+    const loaded = loadedWeights();
+    const offenders: string[] = [];
+    for (const [name, css] of cssFiles()) {
+      if (name === "tokens.css") continue;
+      css.split("\n").forEach((line, i) => {
+        const m = line.replace(/\/\*.*?\*\//g, "").match(/font-weight\s*:\s*(\d+)\s*;/);
+        if (m && !loaded.has(m[1])) {
+          offenders.push(`${name}:${i + 1} font-weight: ${m[1]} - no such face is imported, so it renders as another weight`);
+        }
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("writes weights through the token, not as a number", () => {
+    const offenders: string[] = [];
+    for (const [name, css] of cssFiles()) {
+      if (name === "tokens.css") continue;
+      css.split("\n").forEach((line, i) => {
+        if (/font-weight\s*:\s*\d/.test(line.replace(/\/\*.*?\*\//g, ""))) {
+          offenders.push(`${name}:${i + 1}`);
+        }
+      });
+    }
+    expect(offenders, "Use var(--weight-*) so the loaded-face check can see it.").toEqual([]);
+  });
+});

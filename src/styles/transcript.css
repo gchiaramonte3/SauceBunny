@@ -79,7 +79,7 @@
 .cp-tx-history-head {
   padding: 8px 12px;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--fg-4);
@@ -95,7 +95,7 @@
   background: rgba(255,255,255,0.05);
   padding: 1px 6px;
   border-radius: var(--r-xs);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .cp-tx-history-empty {
   padding: 20px 16px;
@@ -127,7 +127,7 @@
 .cp-tx-history-row-title {
   font-size: 12px;
   color: var(--fg-2);
-  font-weight: 500;
+  font-weight: var(--weight-normal);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -141,14 +141,14 @@
   margin-top: 2px;
 }
 .cp-tx-history-origin {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-3);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 .cp-tx-history-active-pill {
   color: var(--color-accent-green);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -186,7 +186,7 @@
 .cp-tx-insights-head {
   padding: 8px 12px;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--fg-4);
@@ -216,7 +216,7 @@
 }
 .cp-tx-insights-name {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-2);
   white-space: nowrap;
   overflow: hidden;
@@ -273,7 +273,7 @@
   border-radius: var(--r-xs);
   font-family: var(--font-sans);
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-3);
   cursor: pointer;
   white-space: nowrap;
@@ -388,7 +388,7 @@
   height: 22px;
   border-radius: 50%;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: #0a0a0a;
   display: inline-flex;
   align-items: center;
@@ -398,7 +398,7 @@
 }
 .cp-tx-speaker-name {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-2);
   flex: 1;
   min-width: 0;
@@ -522,7 +522,7 @@
 .cp-tx-mark {
   background: transparent;
   color: inherit;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-decoration: underline;
   text-decoration-color: rgba(247, 184, 74, 0.7);
   text-underline-offset: 2px;
@@ -569,7 +569,7 @@
 .cp-tx-empty-icon { color: var(--fg-3); opacity: 0.85; }
 .cp-tx-empty-title {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-2);
 }
 .cp-tx-empty-body {
@@ -607,7 +607,7 @@
   z-index: 210;
   font-family: var(--font-ui);
 }
-.cp-tx-tc-title { font-size: 12px; font-weight: 700; color: var(--fg-1); margin-bottom: 8px; }
+.cp-tx-tc-title { font-size: 12px; font-weight: var(--weight-bold); color: var(--fg-1); margin-bottom: 8px; }
 .cp-tx-tc-input {
   width: 100%;
   box-sizing: border-box;
@@ -682,14 +682,14 @@
 }
 .cp-tx-rename-label {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-3);
 }
 /* The speaker being renamed, called out above the input so it's always clear
    which one you're editing (e.g. "Rename Speaker 1" / "Rename Tom Jonathan"). */
 .cp-tx-rename-target {
   color: var(--fg-1);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 .cp-tx-rename-input {
   height: 28px;
@@ -761,7 +761,7 @@
   /* Same near-black the initials and kind icons are drawn in elsewhere. */
   color: #0a0a0a;
   font-size: 8px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
 }
 .cp-tx-rename-assign-name {
   flex: 1 1 auto;
@@ -784,7 +784,7 @@
 .cp-tx-rename-scope input[type="radio"] {
   margin-top: 2px; flex-shrink: 0; accent-color: var(--color-accent-green);
 }
-.cp-tx-rename-scope strong { color: var(--fg-2); font-weight: 600; }
+.cp-tx-rename-scope strong { color: var(--fg-2); font-weight: var(--weight-semibold); }
 .cp-tx-rename-actions {
   display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px;
 }
@@ -822,7 +822,7 @@
 }
 .cp-toggle-row .beta {
   font-size: 9px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   padding: 1px 5px;
@@ -894,7 +894,7 @@
   min-width: 0;
   line-height: 1.4;
 }
-.cp-tx-hint-text em { font-style: normal; color: var(--fg-2); font-weight: 600; }
+.cp-tx-hint-text em { font-style: normal; color: var(--fg-2); font-weight: var(--weight-semibold); }
 .cp-tx-hint-action {
   flex-shrink: 0;
   display: inline-flex;
@@ -978,7 +978,7 @@
   color: var(--fg-4);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .cp-phase-track .step {
   opacity: 0.45;
@@ -1011,7 +1011,7 @@
 }
 .cp-tx-roster-label {
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--fg-4);
@@ -1047,7 +1047,7 @@
   padding: 2px 9px;
   font-family: var(--font-ui);
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.02em;
   color: var(--fg-2);
   background: rgba(255,255,255,0.05);
@@ -1096,13 +1096,13 @@
 .cp-spk-title {
   font-family: var(--font-ui);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-1);
 }
 .cp-spk-badge {
   font-family: var(--font-ui);
   font-size: 10.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-3);
   background: rgba(255,255,255,0.07);
   border-radius: var(--r-pill);
@@ -1148,7 +1148,7 @@
 .cp-spk-sortbtn {
   font-family: var(--font-ui);
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-4);
   background: transparent;
   border: none;
@@ -1226,7 +1226,7 @@
   justify-content: center;
   font-family: var(--font-ui);
   font-size: 8.5px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: 0.01em;
   /* Near-black on a bright palette hue — the contrast the palette was
      measured against. */
@@ -1290,7 +1290,7 @@
   flex: 1 1 auto;
   font-family: var(--font-ui);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-2);
   font-variant-numeric: tabular-nums;
 }
@@ -1325,7 +1325,7 @@
   line-height: 1.5;
   color: var(--fg-3);
 }
-.cp-cast-lead strong { color: var(--fg-1); font-weight: 700; }
+.cp-cast-lead strong { color: var(--fg-1); font-weight: var(--weight-bold); }
 .cp-cast-row {
   display: flex;
   align-items: center;
@@ -1358,7 +1358,7 @@
 .cp-cast-name {
   font-family: var(--font-ui);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-1);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1373,7 +1373,7 @@
 .cp-cast-confirm {
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-2);
 }
 .cp-cast-del {
@@ -1587,7 +1587,7 @@
    follow-along rule: a transcript never attaches to someone else's video). */
 .cp-tx-history-gone {
   color: var(--warning);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .cp-tx-history-clear {
   margin-left: auto;
@@ -1598,7 +1598,7 @@
   color: var(--fg-3);
   font-family: var(--font-ui);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   cursor: pointer;
@@ -1623,7 +1623,7 @@
 .cp-newspk-head {
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--fg-3);
@@ -1650,7 +1650,7 @@
   padding-top: var(--s-1);
 }
 .cp-newspk-count {
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-3);
   background: rgba(255,255,255,0.07);
   border-radius: var(--r-pill);
@@ -1863,7 +1863,7 @@
   border-radius: 50%;
   font-family: var(--font-ui);
   font-size: 10px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: 0.02em;
   /* Same near-black the transcript bubbles use behind initials — the palette's
      contrast test is measured against this exact value. */
@@ -1874,7 +1874,7 @@
   min-width: 0;
   font-family: var(--font-ui);
   font-size: 13.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-1);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1884,7 +1884,7 @@
   flex-shrink: 0;
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-2);
   font-variant-numeric: tabular-nums;
 }
@@ -2025,7 +2025,7 @@
 .cp-tx-rename-icon-initials {
   font-family: var(--font-ui);
   font-size: 10px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
 }
 /* The glyph inside this row is drawn on a DARK chip, unlike the speaker badge
    where it sits on a bright palette colour, so it inherits currentColor. */
@@ -2082,7 +2082,7 @@
 .cp-badgesheet-group { display: flex; flex-direction: column; gap: 3px; }
 .cp-badgesheet-grouplabel {
   font-size: 9.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--fg-3);
@@ -2123,7 +2123,7 @@
 .cp-badgesheet-initials {
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
 }
 .cp-badgesheet-cell-label { font-size: 11.5px; }
 .cp-badgesheet-empty {
@@ -2196,7 +2196,7 @@
   padding: 6px 8px 4px;
   color: var(--fg-3);
 }
-.cp-txsearch-title { font-size: 11.5px; font-weight: 700; color: var(--fg-2); }
+.cp-txsearch-title { font-size: 11.5px; font-weight: var(--weight-bold); color: var(--fg-2); }
 .cp-txsearch-n { font-size: 10.5px; color: var(--fg-4); margin-left: auto; }
 .cp-txsearch-hit {
   display: flex;
@@ -2221,7 +2221,7 @@
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
 }
-.cp-txsearch-spk { flex: 0 0 auto; font-size: 11px; font-weight: 700; color: var(--fg-3); }
+.cp-txsearch-spk { flex: 0 0 auto; font-size: 11px; font-weight: var(--weight-bold); color: var(--fg-3); }
 .cp-txsearch-text { flex: 1 1 auto; min-width: 0; }
 /* The match itself. Never the accent green: that means "selected" everywhere
    else in the app, and a search hit is not a selection. */

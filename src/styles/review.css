@@ -74,7 +74,7 @@
   color: var(--fg-3);
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   padding: 3px 8px;
   border-radius: var(--r-sm);
   cursor: pointer;
@@ -85,7 +85,7 @@
 .cp-review-filter .n {
   font-variant-numeric: tabular-nums;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-4);
 }
 .cp-review-filter button.active .n { color: var(--accent); }
@@ -180,7 +180,7 @@
   padding: 6px 10px 3px;
   font-family: var(--font-ui);
   font-size: 9.5px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--fg-4);
@@ -287,7 +287,7 @@
 .cp-review-history-title {
   font-family: var(--font-ui);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-1);
   white-space: nowrap;
   overflow: hidden;
@@ -317,7 +317,7 @@
   text-align: left;
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-4);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
@@ -375,7 +375,7 @@
   box-shadow: 0 1px 4px rgba(0,0,0,0.45);
   color: #1a1410;
   font-family: var(--font-ui);
-  font-weight: 800;
+  font-weight: var(--weight-black);
   line-height: 1;
   letter-spacing: 0.02em;
   user-select: none;
@@ -387,11 +387,11 @@
   gap: 9px;
 }
 .cp-review-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.cp-review-author { font-family: var(--font-ui); font-size: 12.5px; font-weight: 700; color: var(--fg-1); }
+.cp-review-author { font-family: var(--font-ui); font-size: 12.5px; font-weight: var(--weight-bold); color: var(--fg-1); }
 .cp-review-ago { font-family: var(--font-ui); font-size: 10.5px; color: var(--fg-4); }
 
 .cp-review-badge {
-  font-family: var(--font-ui); font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em;
+  font-family: var(--font-ui); font-size: 9.5px; font-weight: var(--weight-bold); letter-spacing: 0.04em;
   text-transform: uppercase; color: var(--color-accent-green);
   background: rgba(108,255,141,0.12); border-radius: var(--r-xs); padding: 1px 6px;
 }
@@ -408,7 +408,7 @@
 .cp-review-actions .cp-review-like .cp-review-like-n {
   font-variant-numeric: tabular-nums;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 .cp-review-actions .cp-review-like.liked { color: var(--accent); }
 .cp-review-actions .cp-review-like.liked:hover { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
@@ -423,7 +423,7 @@
   font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: #6db3ff;
   background: rgba(77,171,247,0.14);
   border: none;
@@ -445,7 +445,7 @@
   color: var(--fg-3);
   font-family: var(--font-ui);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   padding: 0;
   cursor: pointer;
 }
@@ -483,7 +483,7 @@
   color: var(--fg-4);
   font-family: var(--font-ui);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   cursor: pointer;
   transition: color var(--dur-fast) var(--ease-out);
 }
@@ -540,7 +540,7 @@
   margin: 4px 0 0;
   font-family: var(--font-ui);
   font-size: 15px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-1);
 }
 .cp-review-namegate-card p {
@@ -656,7 +656,7 @@
   gap: 3px;
   padding: 3px 9px;
   border-radius: var(--r-pill);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
   color: var(--marker-color, var(--accent));
   background: color-mix(in srgb, var(--marker-color, var(--accent)) 16%, transparent);
@@ -781,7 +781,7 @@
   margin: 0;
   padding: 8px 6px 4px;
   font-size: 10.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--fg-4);
@@ -899,7 +899,7 @@
   border-radius: var(--r-pill);
   font-family: var(--font-ui);
   font-size: 10px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -918,7 +918,7 @@
   color: var(--fg-3);
 }
 .cp-status-chip-who {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-transform: none;
   letter-spacing: normal;
   color: inherit;
@@ -1101,7 +1101,7 @@
   padding: 0 8px;
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-1);
   background: rgba(255,255,255,0.07);
   border: 1px solid var(--line-2);
@@ -1141,7 +1141,7 @@
 .cp-review-verlabel {
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-1);
 }
 .cp-review-vermeta { font-size: 10.5px; color: var(--fg-3); white-space: nowrap; }
@@ -1187,7 +1187,7 @@
   padding: 6px 4px 4px;
   border-top: 1px solid var(--line-2);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--fg-3);
@@ -1215,7 +1215,7 @@
 .cp-review-carried-ver {
   flex-shrink: 0;
   font-size: 9.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-3);
   border: 1px solid var(--line-2);
   border-radius: var(--r-xs);
@@ -1228,7 +1228,7 @@
   line-height: 1.4;
   color: var(--fg-2);
 }
-.cp-review-carried-author { font-weight: 700; color: var(--fg-1); }
+.cp-review-carried-author { font-weight: var(--weight-bold); color: var(--fg-1); }
 .cp-review-carried-resolve {
   flex-shrink: 0;
   align-self: center;

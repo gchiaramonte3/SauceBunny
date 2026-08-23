@@ -132,7 +132,7 @@
   white-space: nowrap;
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-1);
 }
 .cp-recents-badge {

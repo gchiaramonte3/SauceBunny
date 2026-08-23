@@ -50,7 +50,7 @@
   min-width: 0;
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--fg-3);
@@ -66,7 +66,7 @@
   text-transform: none;
   letter-spacing: 0;
   font-size: 12.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-1);
   white-space: nowrap;
   overflow: hidden;
@@ -76,7 +76,7 @@
 .cp-room-source {
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: normal;
   text-transform: none;
   color: var(--fg-2);
@@ -192,7 +192,7 @@
 .cp-people-title {
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--fg-3);
@@ -201,7 +201,7 @@
   flex: 1;
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
 }
@@ -254,7 +254,7 @@
   justify-content: center;
   font-family: var(--font-ui);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   color: var(--fg-0);
   background: color-mix(in srgb, var(--pr-color, var(--accent)) 22%, var(--bg-3));
   box-shadow: inset 0 0 0 2px var(--pr-color, var(--accent));
@@ -281,7 +281,7 @@
   text-overflow: ellipsis;
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-0);
   text-shadow: 0 1px 2px rgba(0,0,0,0.8);
 }
@@ -349,7 +349,7 @@
   color: var(--fg-3);
   font-family: var(--font-ui);
   font-size: 11.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   cursor: pointer;
   transition: all var(--dur-fast) var(--ease-out);
 }
@@ -376,7 +376,7 @@
   height: 30px;
   padding: 0 16px;
   font-size: 12.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--danger);
   background: transparent;
   border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
@@ -405,7 +405,7 @@
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 9.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
@@ -524,7 +524,7 @@
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 .cp-react-pick-hand:hover { background: rgba(255,255,255,0.06); }
@@ -560,7 +560,7 @@
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   white-space: nowrap;
   /* This is a REMOTE peer's display name, and it was the only name rule in the
      app with nowrap and no bound: 35 of the other 36 clamp with an ellipsis.
@@ -627,7 +627,7 @@
   margin: 0;
   font-family: var(--font-ui);
   font-size: 15px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   color: var(--fg-0);
 }
 .cp-share-dialog-line {
@@ -666,7 +666,7 @@
   color: var(--fg-3);
   font-family: var(--font-ui);
   font-size: 11.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   cursor: pointer;
 }
 .cp-share-tab:hover:not(:disabled) { background: rgba(255,255,255,0.06); color: var(--fg-1); }
@@ -706,7 +706,7 @@
 .cp-share-card-label {
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-2);
   white-space: nowrap;
   overflow: hidden;
@@ -809,7 +809,7 @@
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   color: var(--accent);
   font-size: 9px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
@@ -838,7 +838,7 @@
   border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
   color: var(--color-warning);
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   white-space: nowrap;
 }
 

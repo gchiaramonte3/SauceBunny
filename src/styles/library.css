@@ -182,7 +182,7 @@
 .cp-lib-hero-kicker {
   font-family: var(--font-ui);
   font-size: 10px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--fg-3);
@@ -191,7 +191,7 @@
   margin: 0;
   font-family: var(--font-ui);
   font-size: 28px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: -0.015em;
   line-height: 1.2;
   color: var(--fg-0);
@@ -301,7 +301,7 @@
   margin: 0;
   font-family: var(--font-ui);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: -0.01em;
   color: var(--fg-1);
   /* A folder name with no spaces or hyphens has nowhere to wrap, so its
@@ -317,7 +317,7 @@
 .cp-lib-row-count {
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
 }
@@ -477,7 +477,7 @@
   max-width: 100%;
   font-family: var(--font-ui);
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-align: center;
   overflow-wrap: anywhere;
   display: -webkit-box;
@@ -519,7 +519,7 @@
   border: 1px solid var(--line-2);
   font-family: var(--font-ui);
   font-size: 9px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--fg-2);
@@ -529,7 +529,7 @@
   padding: 0 2px;
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-1);
   white-space: nowrap;
   overflow: hidden;
@@ -542,7 +542,7 @@
   padding: 0 2px;
   font-family: var(--font-ui);
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-3);
   white-space: nowrap;
   overflow: hidden;
@@ -612,7 +612,7 @@
   border-radius: var(--r-sm);
   font-family: var(--font-ui);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-1);
   text-align: left;
   cursor: pointer;
@@ -727,7 +727,7 @@
   margin: 0;
   font-family: var(--font-ui);
   font-size: 15px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   color: var(--fg-1);
 }
 .cp-lib-thumb-close {
@@ -775,7 +775,7 @@
   font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-2);
 }
 /* Preset fallback — three ffmpeg-rendered sample frames for undecodable files. */
@@ -820,7 +820,7 @@
   font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-1);
 }
 .cp-lib-thumb-actions {
@@ -901,7 +901,7 @@
   margin: 0;
   font-family: var(--font-ui);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: -0.01em;
   color: var(--fg-1);
 }
@@ -953,7 +953,7 @@
   color: var(--fg-3);
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   cursor: pointer;
   transition: color var(--dur-fast) var(--ease-out),
               background var(--dur-fast) var(--ease-out),
@@ -984,7 +984,7 @@
   color: var(--fg-2);
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-align: left;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out);
@@ -1057,13 +1057,13 @@
   color: var(--fg-3);
   font-family: var(--font-ui);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   white-space: nowrap;
   cursor: pointer;
 }
 .cp-lib-bcrumbs button:hover { color: var(--fg-1); background: rgba(255, 255, 255, 0.06); }
 .cp-lib-bcrumbs .sep { color: var(--fg-5); }
-.cp-lib-bcrumbs .cur { color: var(--fg-1); font-weight: 800; white-space: nowrap; }
+.cp-lib-bcrumbs .cur { color: var(--fg-1); font-weight: var(--weight-black); white-space: nowrap; }
 .cp-lib-bar-controls {
   display: flex;
   align-items: center;
@@ -1106,12 +1106,12 @@
   color: var(--fg-2);
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 .cp-lib-select:hover { border-color: var(--line-3); }
 .cp-lib-select:focus-visible { outline: none; border-color: var(--line-3); }
-.cp-lib-bar-dir { width: 28px; height: 28px; font-size: 14px; font-weight: 700; color: var(--fg-2); }
+.cp-lib-bar-dir { width: 28px; height: 28px; font-size: 14px; font-weight: var(--weight-bold); color: var(--fg-2); }
 .cp-lib-viewtoggle {
   display: flex;
   gap: 2px;
@@ -1224,7 +1224,7 @@
   border-bottom: 1px solid var(--line-1);
   font-family: var(--font-ui);
   font-size: 10px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--fg-4);
@@ -1260,7 +1260,7 @@
   color: var(--fg-4);
 }
 .cp-lib-lrow-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.cp-lib-lrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--fg-1); }
+.cp-lib-lrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--weight-semibold); color: var(--fg-1); }
 .cp-lib-lrow-kind { color: var(--fg-4); text-transform: capitalize; }
 .cp-lib-lrow-size,
 .cp-lib-lrow-date { color: var(--fg-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -1317,7 +1317,7 @@
   margin: var(--s-1) 0 0;
   font-family: var(--font-ui);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   line-height: 1.35;
   color: var(--fg-1);
   overflow-wrap: anywhere;
@@ -1326,7 +1326,7 @@
   margin: 0;
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-3);
   font-variant-numeric: tabular-nums;
 }
@@ -1351,7 +1351,7 @@
   color: var(--fg-2);
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out),
               color var(--dur-fast) var(--ease-out);
@@ -1419,7 +1419,7 @@
 .cp-lib-selbar-count {
   font-family: var(--font-ui);
   font-size: 11.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-1);
   font-variant-numeric: tabular-nums;
 }
@@ -1514,7 +1514,7 @@
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
 }
-.cp-rename-head { font-family: var(--font-ui); font-size: 13px; font-weight: 700; color: var(--fg-1); }
+.cp-rename-head { font-family: var(--font-ui); font-size: 13px; font-weight: var(--weight-bold); color: var(--fg-1); }
 .cp-rename-input {
   height: 32px;
   padding: 0 10px;
@@ -1579,7 +1579,7 @@
   margin: 0;
   font-family: var(--font-ui);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-1);
 }
 .cp-rename-confirm-sub {
@@ -1639,7 +1639,7 @@
 .cp-ql-name {
   font-family: var(--font-ui);
   font-size: 12.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-1);
   min-width: 0;
   overflow: hidden;
@@ -1740,7 +1740,7 @@
   gap: var(--s-2);
   margin: 0 0 var(--s-3);
   font-size: 12.5px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: -0.01em;
   color: var(--fg-1);
 }
@@ -1750,7 +1750,7 @@
   background: var(--bg-3);
   color: var(--fg-4);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 .cp-web-grid {
   display: grid;
@@ -1803,7 +1803,7 @@
   border-radius: var(--r-xs);
   background: rgba(10, 10, 12, 0.82);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-2);
 }
 .cp-web-dur { right: 5px; }
@@ -1817,7 +1817,7 @@
 }
 .cp-web-title {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-1);
   line-height: 1.3;
   display: -webkit-box;
@@ -1859,7 +1859,7 @@
   background: var(--danger);
   color: var(--fg-0);
   font-size: 10.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   white-space: nowrap;
 }
 .cp-web-forget:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--focus-ring); }

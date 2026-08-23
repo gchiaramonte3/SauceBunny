@@ -22,7 +22,7 @@
   color: var(--fg-3);
 }
 .cp-ai-icon { color: var(--fg-3); opacity: 0.85; }
-.cp-ai-empty-title { font-size: 14px; font-weight: 700; color: var(--fg-1); margin-top: 4px; }
+.cp-ai-empty-title { font-size: 14px; font-weight: var(--weight-bold); color: var(--fg-1); margin-top: 4px; }
 .cp-ai-empty-sub { font-size: 12px; line-height: 1.5; color: var(--fg-4); max-width: 320px; }
 
 /* ── Model download card ─────────────────────────────────────────── */
@@ -41,7 +41,7 @@
 }
 .cp-ai-model-name {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-1);
   display: flex;
   align-items: center;
@@ -49,7 +49,7 @@
 }
 .cp-ai-rec {
   font-size: 9px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--fg-3);
@@ -138,7 +138,7 @@
 .cp-ai-msg { display: flex; flex-direction: column; gap: 5px; }
 .cp-ai-msg-role {
   font-size: 9.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--fg-5);
@@ -286,7 +286,7 @@
 /* ── Rendered markdown (AI answers) ───────────────────────────────── */
 .cp-md { display: flex; flex-direction: column; gap: 8px; }
 .cp-md-p { margin: 0; line-height: 1.6; }
-.cp-md-h { margin: 6px 0 0; font-family: var(--font-ui); font-weight: 700; color: var(--fg-1); line-height: 1.35; }
+.cp-md-h { margin: 6px 0 0; font-family: var(--font-ui); font-weight: var(--weight-bold); color: var(--fg-1); line-height: 1.35; }
 .cp-md h2 { font-size: 14px; }
 .cp-md h3 { font-size: 13px; }
 .cp-md h4 { font-size: 12.5px; color: var(--fg-2); }
@@ -294,7 +294,7 @@
 .cp-md-ul { list-style: disc; }
 .cp-md-ol { list-style: decimal; }
 .cp-md-ul li, .cp-md-ol li { line-height: 1.55; padding-left: 2px; }
-.cp-md strong { font-weight: 700; color: var(--fg-1); }
+.cp-md strong { font-weight: var(--weight-bold); color: var(--fg-1); }
 .cp-md-code {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.9em;
@@ -349,7 +349,7 @@
 .cp-ai-chapters-title {
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--fg-4);
@@ -465,7 +465,7 @@
   min-width: 88px;
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-1);
 }
 .cp-ai-slash-hint {

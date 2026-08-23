@@ -36,7 +36,7 @@
 .cp-welcome-title {
   margin: var(--s-2) 0 0;
   font-size: 28px;
-  font-weight: 800;
+  font-weight: var(--weight-black);
   letter-spacing: -0.02em;
   color: var(--fg-1);
   animation: cp-welcome-rise 520ms var(--ease-out) 60ms both;
@@ -87,7 +87,7 @@
 }
 .cp-welcome-row-text strong {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   color: var(--fg-1);
 }
 .cp-welcome-row-text span {
@@ -98,7 +98,7 @@
   margin-top: var(--s-4);
   padding: 10px 26px;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   animation: cp-welcome-rise 520ms var(--ease-out) 560ms both;
 }
 @keyframes cp-welcome-rise {

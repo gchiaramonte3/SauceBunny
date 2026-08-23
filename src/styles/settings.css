@@ -73,7 +73,7 @@
 .cp-modal-header h2 {
   margin: 0;
   font-family: var(--font-sans);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   font-size: 14px;
   color: var(--fg-1);
   letter-spacing: -0.005em;
@@ -129,7 +129,7 @@
   color: var(--fg-3);
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--weight-normal);
   text-align: left;
   cursor: pointer;
   transition: all var(--dur-fast) var(--ease-out);
@@ -156,7 +156,7 @@
 
 .cp-pane-title {
   font-family: var(--font-sans);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   font-size: 18px;
   margin: 0 0 4px;
   color: var(--fg-1);
@@ -202,14 +202,14 @@
 .cp-pane-row .k {
   font-family: var(--font-sans);
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: var(--weight-normal);
   color: var(--fg-2);
 }
 .cp-pane-row .k .desc {
   display: block;
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 400;
+  font-weight: var(--weight-normal);
   color: var(--fg-4);
   margin-top: 3px;
   line-height: 1.45;
@@ -293,7 +293,7 @@
   font-family: var(--font-sans);
   font-size: 12.5px;
   color: var(--fg-1);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .cp-model-head .name { letter-spacing: -0.005em; }
 .cp-model-head .size {
@@ -301,12 +301,12 @@
   font-variant-numeric: tabular-nums;
   font-size: 10.5px;
   color: var(--fg-4);
-  font-weight: 500;
+  font-weight: var(--weight-normal);
 }
 .cp-model-head .badge {
   font-family: var(--font-ui);
   font-size: 9.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   padding: 2px 6px;
@@ -358,7 +358,7 @@
 .cp-model-info-popover .tag {
   font-family: var(--font-sans);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-1);
   margin-bottom: 8px;
 }
@@ -373,7 +373,7 @@
 }
 .cp-model-info-popover dt {
   color: var(--fg-4);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-size: 9.5px;
@@ -427,7 +427,7 @@
 .cp-shortcut-cat-title {
   font-family: var(--font-ui);
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-4);
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -453,7 +453,7 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-2);
   background: rgba(255,255,255,0.05);
   border: 1px solid var(--line-2);
@@ -466,7 +466,7 @@
 }
 .cp-shortcut-row .keys kbd.sym {
   font-family: var(--font-sans);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   padding: 2px 6px;
 }
 
@@ -500,7 +500,7 @@
 }
 .cp-about-name {
   font-family: var(--font-sans);
-  font-weight: 800;
+  font-weight: var(--weight-black);
   font-size: 22px;
   color: var(--fg-1);
   letter-spacing: -0.02em;
@@ -512,7 +512,7 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: var(--weight-normal);
   color: var(--fg-4);
   letter-spacing: 0.02em;
 }
@@ -575,7 +575,7 @@
 .cp-mediainfo-badge {
   font-family: inherit;
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.02em;
   padding: 3px 9px;
   border-radius: var(--r-pill);
@@ -598,7 +598,7 @@
 .cp-mediainfo-section h3 {
   margin: 0 0 6px;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--fg-4);
@@ -653,7 +653,7 @@
   font-family: inherit;
   font-size: 9px;
   font-style: italic;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   line-height: 1;
   cursor: help;
   opacity: 0.45;
@@ -703,7 +703,7 @@
   line-height: 1.5;
   color: var(--fg-2);
 }
-.cp-ytauth-lead strong { color: var(--fg-1); font-weight: 700; }
+.cp-ytauth-lead strong { color: var(--fg-1); font-weight: var(--weight-bold); }
 .cp-ytauth-browsers {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -719,7 +719,7 @@
   padding: 13px 8px;
   font-family: var(--font-ui);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-2);
   background: rgba(255,255,255,0.025);
   border: 1px solid var(--line-2);
@@ -744,7 +744,7 @@
 }
 .cp-ytauth-browser-tag {
   font-size: 9.5px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-accent-green);
@@ -757,7 +757,7 @@
   line-height: 1.5;
   color: var(--fg-4);
 }
-.cp-ytauth-note strong { color: var(--fg-3); font-weight: 600; }
+.cp-ytauth-note strong { color: var(--fg-3); font-weight: var(--weight-semibold); }
 .cp-ytauth-foot {
   display: flex;
   justify-content: flex-end;
@@ -766,7 +766,7 @@
 .cp-ytauth-dismiss {
   font-family: var(--font-ui);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-3);
   background: transparent;
   border: 1px solid var(--line-2);
@@ -781,7 +781,7 @@
 /* r72: per-browser keychain hint + Safari "recommended" highlight */
 .cp-ytauth-browser-hint {
   font-size: 9px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.03em;
   color: var(--fg-4);
 }
@@ -836,7 +836,7 @@
   display: inline-block;
   padding: 3px 11px;
   border-radius: var(--r-sm);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   line-height: 1.4;
   text-align: center;
   text-shadow: 0 1px 3px rgba(0,0,0,0.95);
@@ -904,7 +904,7 @@
 .cp-keybind-group-title {
   font-family: var(--font-ui);
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-4);
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -940,7 +940,7 @@
 .cp-keybind-chip {
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg-1);
   background: rgba(255,255,255,0.06);
   border: 1px solid var(--line-2);
@@ -948,8 +948,8 @@
   padding: 2px 8px;
   box-shadow: inset 0 -1px 0 rgba(0,0,0,0.25);
 }
-.cp-keybind-capture { font-size: 11.5px; color: var(--accent); font-weight: 600; }
-.cp-keybind-capture .hint { color: var(--fg-4); font-weight: 400; margin-left: 6px; }
+.cp-keybind-capture { font-size: 11.5px; color: var(--accent); font-weight: var(--weight-semibold); }
+.cp-keybind-capture .hint { color: var(--fg-4); font-weight: var(--weight-normal); margin-left: 6px; }
 .cp-keybind-unbound { font-size: 11.5px; color: var(--fg-4); font-style: italic; }
 .cp-keybind-actions { display: flex; gap: 6px; min-width: 130px; justify-content: flex-end; }
 .cp-keybind-note {
@@ -1064,13 +1064,13 @@
   padding: var(--s-4);
 }
 .cp-spike-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--s-3); }
-.cp-spike-title { font-family: var(--font-ui); font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-3); }
+.cp-spike-title { font-family: var(--font-ui); font-size: 12px; font-weight: var(--weight-black); letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-3); }
 .cp-spike-videos { display: flex; gap: var(--s-2); margin: var(--s-3) 0; }
 .cp-spike-video { width: 50%; aspect-ratio: 16/9; background: var(--bg-0); border-radius: var(--r-md); object-fit: cover; }
 .cp-spike-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
 .cp-spike-row { display: flex; gap: var(--s-2); align-items: baseline; font-family: var(--font-mono);
  font-variant-numeric: tabular-nums; font-size: 10.5px; color: var(--fg-2); }
-.cp-spike-verdict { flex-shrink: 0; width: 52px; font-weight: 700; }
+.cp-spike-verdict { flex-shrink: 0; width: 52px; font-weight: var(--weight-bold); }
 .cp-spike-row.pass .cp-spike-verdict { color: var(--success); }
 .cp-spike-row.fail .cp-spike-verdict { color: var(--danger); }
 .cp-spike-row.skip .cp-spike-verdict, .cp-spike-row.manual .cp-spike-verdict { color: var(--fg-4); }
@@ -1118,7 +1118,7 @@
   border-radius: var(--r-pill);
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   border: 1px solid var(--line-2);
   color: var(--fg-3);
 }
@@ -1148,7 +1148,7 @@
   margin: 14px 0 6px;
   font-family: var(--font-ui);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--fg-4);
@@ -1162,7 +1162,7 @@
   color: var(--fg-2);
   font-family: var(--font-ui);
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 .cp-aiapi-choice:hover { color: var(--fg-1); background: var(--bg-4); }
@@ -1189,10 +1189,10 @@
   background: var(--bg-1);
 }
 .cp-aiapi-cardhead { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-.cp-aiapi-name { font-family: var(--font-ui); font-size: 13px; font-weight: 700; color: var(--fg-1); }
+.cp-aiapi-name { font-family: var(--font-ui); font-size: 13px; font-weight: var(--weight-bold); color: var(--fg-1); }
 .cp-aiapi-set {
   display: inline-flex; align-items: center; gap: 4px;
-  font-size: 11px; font-weight: 600; color: var(--color-accent-green);
+  font-size: 11px; font-weight: var(--weight-semibold); color: var(--color-accent-green);
 }
 .cp-aiapi-row { display: flex; gap: 6px; align-items: center; }
 .cp-aiapi-input {
