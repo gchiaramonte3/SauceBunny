@@ -21,7 +21,7 @@ async function bootLibrary(page: Page): Promise<void> {
   });
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Control+2");
+  await page.keyboard.press("Meta+2");
   await expect(page.locator(".cp-view-library")).toBeVisible();
   await page.locator(".cp-lib-statusbar").first().waitFor({ timeout: 10_000 });
 }

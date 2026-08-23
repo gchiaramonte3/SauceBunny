@@ -65,7 +65,7 @@ async function openTranscript(page: Page, cues: number) {
 
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 20_000 });
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await page.getByTitle("Recent sources", { exact: true }).click();
 
   const started = Date.now();
@@ -90,7 +90,7 @@ test("a 3-hour transcript opens and stays navigable", async ({ page }) => {
 
   // Switching away must not hang. Measured at ~311ms.
   const t = Date.now();
-  await page.keyboard.press("Control+2");
+  await page.keyboard.press("Meta+2");
   await expect(page.locator(".cp-view-library")).toBeVisible({ timeout: 20_000 });
   const switchMs = Date.now() - t;
   expect(switchMs, `view switch took ${switchMs}ms`).toBeLessThan(6_000);

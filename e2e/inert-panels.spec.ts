@@ -19,7 +19,7 @@ async function boot(page: Page): Promise<void> {
   });
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-toolbar")).toBeVisible();
 }
 
@@ -39,7 +39,7 @@ test("a collapsed queue drawer has no focusable controls", async ({ page }) => {
   const drawer = page.locator(".cp-queue-drawer").first();
   // The drawer opens with the Clip view; close it the way a user would.
   await expect(drawer).toHaveClass(/open/);
-  await page.keyboard.press("Control+Shift+Q");
+  await page.keyboard.press("Meta+Shift+Q");
   await expect(drawer).not.toHaveClass(/open/);
 
   await expect(drawer).toHaveAttribute("aria-hidden", "true");
@@ -54,9 +54,9 @@ test("reopening the drawer restores its controls", async ({ page }) => {
   // permanently while looking perfectly correct in the JSX.
   await boot(page);
   const drawer = page.locator(".cp-queue-drawer").first();
-  await page.keyboard.press("Control+Shift+Q");   // close
+  await page.keyboard.press("Meta+Shift+Q");   // close
   await expect(drawer).toHaveAttribute("inert", "");
-  await page.keyboard.press("Control+Shift+Q");   // and open again
+  await page.keyboard.press("Meta+Shift+Q");   // and open again
   await expect(drawer).toHaveClass(/open/);
   await expect(drawer).not.toHaveAttribute("inert", /.*/);
   expect(await focusableIn(page, ".cp-queue-drawer")).toBeGreaterThan(0);
@@ -106,14 +106,14 @@ test("a closed drawer seals a LOADED transcript's controls too", async ({ page }
 
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await page.getByTitle("Recent sources", { exact: true }).click();
   await page.locator(".cp-recents-row").first().click();
   await expect(page.locator("[data-cue-idx]")).toHaveCount(4, { timeout: 15_000 });
 
   const drawer = page.locator(".cp-queue-drawer").first();
   await expect(drawer).toHaveClass(/open/);
-  await page.keyboard.press("Control+Shift+Q");
+  await page.keyboard.press("Meta+Shift+Q");
   await expect(drawer).not.toHaveClass(/open/);
   await expect(drawer).toHaveAttribute("inert", "");
 

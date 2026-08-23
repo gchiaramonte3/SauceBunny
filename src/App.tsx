@@ -87,6 +87,7 @@ import {
 } from "./lib/onboarding";
 import type { Command } from "./lib/commands";
 import { buildCommands } from "./lib/commands";
+import { marksFor, setSourceMarks } from "./lib/source-marks";
 import { markRangeFromSeconds as markRange } from "./lib/mark-range";
 import { useBatchTranscribe } from "./hooks/use-batch-transcribe";
 import { TranscriptSearchModal } from "./components/TranscriptSearchModal";
@@ -3499,6 +3500,43 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fpIndexBump tracks the localStorage index the linter can't see
     [sourceKind, localFilePath, metadata, localFileSize, fpIndexBump],
   );
+
+  /**
+   * Marks, remembered per source.
+   *
+   * They were the only hand-made thing in the workspace that did not survive a
+   * quit or a source switch, while posters, source timecodes, chapters, review
+   * docs and the whole clip queue all persist - keyed exactly like this.
+   *
+   * Restore and save are sequenced through one ref rather than run as two
+   * independent effects, because independently they fight: the save effect
+   * fires on the render where marks are still null for a source whose stored
+   * marks have not been read yet, and writes that null straight over them. The
+   * ref is what makes "we have not restored this source yet" distinguishable
+   * from "this source has no marks", which is the same distinction the project
+   * store's hydration guard turns on.
+   */
+  const restoredMarksForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!reviewSourceKey || restoredMarksForRef.current === reviewSourceKey) return;
+    restoredMarksForRef.current = reviewSourceKey;
+    const stored = marksFor(reviewSourceKey);
+    if (stored.inFrames === null && stored.outFrames === null) return;
+    // Clamp to THIS source: a stored mark can outlive a re-encode that made
+    // the file shorter, and a mark past the end is one the export refuses.
+    const max = durationFrames > 0 ? durationFrames - 1 : Infinity;
+    const inF = stored.inFrames !== null ? Math.min(stored.inFrames, max) : null;
+    const outF = stored.outFrames !== null ? Math.min(stored.outFrames, max) : null;
+    if (inF !== null && outF !== null && outF <= inF) return;
+    setInFrames(inF);
+    setOutFrames(outF);
+  }, [reviewSourceKey, durationFrames]);
+
+  useEffect(() => {
+    // Only once this source's stored marks have been accounted for.
+    if (!reviewSourceKey || restoredMarksForRef.current !== reviewSourceKey) return;
+    setSourceMarks(reviewSourceKey, { inFrames, outFrames });
+  }, [reviewSourceKey, inFrames, outFrames]);
 
   /**
    * Version stacks: absorb the OPEN file into `oldKey`'s review doc as its

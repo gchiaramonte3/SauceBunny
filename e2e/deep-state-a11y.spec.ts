@@ -92,7 +92,7 @@ async function bootWithSource(page: Page): Promise<void> {
 
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-toolbar")).toBeVisible();
   await page.getByTitle("Recent sources", { exact: true }).click();
   await page.locator(".cp-recents-row").first().click();

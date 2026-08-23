@@ -44,7 +44,7 @@ async function boot(page: Page, urlOnly = false): Promise<void> {
   }, urlOnly);
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-toolbar")).toBeVisible();
 }
 
@@ -61,7 +61,7 @@ test("the command palette closes the popover it covers", async ({ page }) => {
   await boot(page);
   const pop = await openRecents(page);
 
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press("Meta+k");
   await expect(page.locator(".cp-palette")).toBeVisible();
 
   await expect(pop, "the recents popover survived under the palette").toHaveCount(0);
@@ -76,7 +76,7 @@ test("Enter in the palette does not load a recent source behind it", async ({ pa
   await expect(url).toHaveValue("");
 
   const pop = await openRecents(page);
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press("Meta+k");
   // Wait for BOTH halves of the state this test depends on, not just the
   // palette appearing. Waiting on the palette alone still flaked about one run
   // in four: the dismiss event runs synchronously, but RecentSources' listener
@@ -102,7 +102,7 @@ test("the shortcut sheet dismisses it too, and a mouse-opened palette is unaffec
   // is the way this fix could plausibly break something.
   await boot(page);
   const pop = await openRecents(page);
-  await page.keyboard.press("Control+/");
+  await page.keyboard.press("Meta+/");
   await expect(pop, "the shortcut sheet left the popover live underneath").toHaveCount(0);
 
   await page.keyboard.press("Escape");

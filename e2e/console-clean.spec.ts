@@ -90,7 +90,7 @@ test("opening settings and the command palette stays quiet", async ({ page }) =>
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
 
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press("Meta+k");
   await page.keyboard.press("Escape");
 
   expect(noise, `console noise:\n${noise.join("\n")}`).toEqual([]);

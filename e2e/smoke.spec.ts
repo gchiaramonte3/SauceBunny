@@ -29,7 +29,7 @@ async function boot(page: Page): Promise<void> {
   // workbench, so boot() walks there the way a user would (mod+3) and hands
   // back the same starting state as before: Clip view, toolbar up.
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-toolbar")).toBeVisible();
 }
 
@@ -105,14 +105,14 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   // Library detail browser is now ⌘2 (between Home and Clip); Clip shifted to ⌘3.
   // Rootless profile → the browser is JUST the invite: one centered line + the
   // primary button, no panel/bar chrome.
-  await page.keyboard.press("Control+2");
+  await page.keyboard.press("Meta+2");
   await expect(page.locator(".cp-view-library")).toBeVisible();
   await expect(page.getByText("Add a folder to build your library.")).toBeVisible();
   await expect(page.locator(".cp-lib-browse-zero").getByRole("button", { name: "Add folder" })).toBeVisible();
   await expect(page.getByRole("tree", { name: "Library folders" })).toHaveCount(0);
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-view-clip")).toBeVisible();
-  await page.keyboard.press("Control+1");
+  await page.keyboard.press("Meta+1");
   await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
   // Co-Review is a first-class destination: the rail item reads "Review" (short
   // rail label) + ⌘4 → the lobby, a centered green room titled "Review together"
@@ -129,9 +129,9 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   // The identity step gates Continue until a name is present (Join lives on
   // the READY step, covered by the green-room spec below).
   await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeDisabled();
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-view-clip")).toBeVisible();
-  await page.keyboard.press("Control+1");
+  await page.keyboard.press("Meta+1");
   await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
   // Relaunch always lands on Home (r140) - the view is session state now.
   await page.reload();
@@ -215,7 +215,7 @@ test("side panel boots open; Clip arrival re-presents the workbench", async ({ p
   // reload the drawer is back open regardless of the last toggle.
   await page.reload();
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-toolbar")).toBeVisible();
   await expect(page.locator(".cp-queue-drawer.open")).toBeVisible();
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
@@ -267,7 +267,7 @@ test("drag-and-drop: overlay tracks hover, transcript-without-media drop toasts"
 test("shortcut cheat-sheet: opens on mod+/, lists live bindings, Customize deep-links", async ({ page }) => {
   await boot(page);
   // mod+/ (ctrl serializes to the same "mod" as ⌘ — lib/keybindings eventToCombo).
-  await page.keyboard.press("Control+/");
+  await page.keyboard.press("Meta+/");
   const sheet = page.locator(".cp-shortcuts");
   await expect(sheet).toBeVisible();
   // Registry-driven rows (grouped) + the hardcoded contextual group.
@@ -279,7 +279,7 @@ test("shortcut cheat-sheet: opens on mod+/, lists live bindings, Customize deep-
   await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);
   // Customize… routes to Settings → Commands with the tab preselected.
-  await page.keyboard.press("Control+/");
+  await page.keyboard.press("Meta+/");
   await page.getByRole("button", { name: "Customize…" }).click();
   await expect(page.locator(".cp-modal-tab.active")).toContainText("Shortcuts");
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
@@ -302,7 +302,7 @@ test("first-run checklist: pending steps render, folder step opens Settings, dis
   await page.reload();
   // Relaunch lands on Home (r140) - walk back into Clip like boot() does.
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-toolbar")).toBeVisible();
   await expect(page.locator(".cp-getting-started")).toHaveCount(0);
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);

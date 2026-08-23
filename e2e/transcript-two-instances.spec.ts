@@ -84,7 +84,7 @@ async function bootWithTranscript(page: Page): Promise<void> {
 
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-toolbar")).toBeVisible();
 
   await page.getByTitle("Recent sources", { exact: true }).click();
@@ -130,15 +130,15 @@ test("Cmd+F focuses the VISIBLE search box in EITHER view", async ({ page }) => 
   await bootWithTranscript(page);
 
   // Clip view: the drawer's copy is on screen, the reader's is hidden.
-  await page.keyboard.press("Control+f");
+  await page.keyboard.press("Meta+f");
   const inClip = await focusLanding(page);
   expect(inClip.ok, `Clip view: Cmd+F put focus ${inClip.why} (${inClip.tag})`).toBe(true);
 
   // Transcripts view: the roles swap, and so does the registration order that
   // was silently rescuing the ungated version.
-  await page.keyboard.press("Control+5");
+  await page.keyboard.press("Meta+5");
   await expect(page.locator(".cp-view-reader")).toBeVisible();
-  await page.keyboard.press("Control+f");
+  await page.keyboard.press("Meta+f");
   const inReader = await focusLanding(page);
   expect(inReader.ok, `Transcripts view: Cmd+F put focus ${inReader.why} (${inReader.tag})`).toBe(true);
 
@@ -172,7 +172,7 @@ test("Cmd+F does not focus the CLOSED drawer's copy", async ({ page }) => {
   // detector: if ⌘F is ungated it must MOVE focus into the hidden copy.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 
-  await page.keyboard.press("Control+f");
+  await page.keyboard.press("Meta+f");
 
   const landed = await focusLanding(page);
   expect(landed.ok, `Cmd+F put focus ${landed.why} (${landed.tag}) with the drawer closed`).toBe(true);
@@ -188,7 +188,7 @@ test("Cmd+F is inert while a modal dialog holds focus", async ({ page }) => {
   const dialog = page.locator('[role="dialog"][aria-modal="true"]').first();
   await expect(dialog, "no modal dialog opened, so this asserted nothing").toBeVisible();
 
-  await page.keyboard.press("Control+f");
+  await page.keyboard.press("Meta+f");
 
   const insideDialog = await page.evaluate(() => {
     const el = document.activeElement as HTMLElement | null;
@@ -283,7 +283,7 @@ test("a committed cue edit is NOT undoable, which is the deliberate boundary", a
 
   // Outside a text field, so the app claims ⌘Z rather than the native undo.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  await page.keyboard.press("Control+z");
+  await page.keyboard.press("Meta+z");
 
   await expect(
     page.locator("[data-cue-idx]", { hasText: "UNDO SENTINEL" }),

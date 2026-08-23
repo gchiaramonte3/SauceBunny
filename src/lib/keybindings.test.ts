@@ -25,9 +25,14 @@ describe("eventToCombo", () => {
     expect(eventToCombo(ev({ code: "KeyJ", key: "j" }))).toBe("j");
     expect(eventToCombo(ev({ code: "KeyJ", key: "J", shiftKey: true }))).toBe("shift+j");
   });
-  it("treats meta and ctrl as the same 'mod'", () => {
+  it("reads ⌘ as 'mod', and Ctrl as nothing", () => {
+    // This used to assert that ctrl was an ALIAS for mod, which pinned a
+    // collision rather than a feature: macOS binds the emacs line-editing keys
+    // in every text field, so Ctrl+K is "delete to end of line". The alias
+    // meant Ctrl+K in the URL bar or a comment box opened the command palette
+    // on top of what the user was typing.
     expect(eventToCombo(ev({ code: "KeyK", key: "k", metaKey: true }))).toBe("mod+k");
-    expect(eventToCombo(ev({ code: "KeyK", key: "k", ctrlKey: true }))).toBe("mod+k");
+    expect(eventToCombo(ev({ code: "KeyK", key: "k", ctrlKey: true }))).toBe("k");
   });
   it("orders modifiers mod+alt+shift", () => {
     expect(eventToCombo(ev({ code: "KeyA", key: "a", metaKey: true, shiftKey: true }))).toBe("mod+shift+a");
@@ -162,5 +167,24 @@ describe("the view gate on transport and marking", () => {
       const scoped = isPlaybackScoped(a.id);
       expect(scoped).toBe(a.group === "Transport" || a.group === "Marking");
     }
+  });
+});
+
+describe("Ctrl is not ⌘, on the one platform this app runs on", () => {
+  it("does not turn a Ctrl combo into a mod combo", () => {
+    // macOS binds the emacs line-editing keys in EVERY text field: Ctrl+K is
+    // "delete to end of line", Ctrl+A "start of line", Ctrl+E "end of line",
+    // Ctrl+D "delete forward". Accepting Ctrl as an alias for ⌘ meant Ctrl+K
+    // in the URL bar or a comment box opened the command palette on top of
+    // what you were typing instead of trimming the line.
+    expect(eventToCombo(ev({ code: "KeyK", key: "k", ctrlKey: true }))).toBe("k");
+    expect(eventToCombo(ev({ code: "KeyA", key: "a", ctrlKey: true }))).toBe("a");
+    expect(eventToCombo(ev({ code: "KeyE", key: "e", ctrlKey: true }))).toBe("e");
+  });
+
+  it("leaves ⌘ combos alone when Ctrl is also held", () => {
+    // A stuck Ctrl must not change what ⌘K means.
+    expect(eventToCombo(ev({ code: "KeyK", key: "k", metaKey: true, ctrlKey: true })))
+      .toBe("mod+k");
   });
 });

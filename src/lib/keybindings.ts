@@ -209,7 +209,18 @@ export function eventToCombo(e: Keyish): string | null {
   const token = keyToken(e.code, e.key);
   if (!token) return null;
   const parts: string[] = [];
-  if (e.metaKey || e.ctrlKey) parts.push("mod");
+  // ⌘ ONLY. This used to accept Ctrl as an alias, and on the one platform this
+  // app runs on that is not a convenience, it is a collision: macOS binds the
+  // emacs line-editing keys in every text field, so Ctrl+K is "delete to end
+  // of line", Ctrl+A "start of line", Ctrl+E "end of line", Ctrl+D "delete
+  // forward". Ctrl+K in the URL bar or a comment box opened the command
+  // palette on top of what you were typing instead of trimming the line.
+  //
+  // Nothing is lost by dropping it: every binding this app publishes is
+  // written and displayed as ⌘, and macOS 14+ / Apple Silicon is the only
+  // target (CLAUDE.md). A Ctrl combo reaching here now falls through to the
+  // system, which is where it was always meant to go.
+  if (e.metaKey) parts.push("mod");
   if (e.altKey) parts.push("alt");
   if (e.shiftKey) parts.push("shift");
   parts.push(token);

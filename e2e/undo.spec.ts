@@ -29,13 +29,13 @@ async function boot(page: Page): Promise<void> {
   await page.goto("/");
   // Launches land on Home (r140); these specs exercise Clip-view shortcuts.
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-toolbar")).toBeVisible();
 }
 
 test("cheat-sheet lists Undo ⌘Z / Redo ⇧⌘Z from the registry", async ({ page }) => {
   await boot(page);
-  await page.keyboard.press("Control+/");
+  await page.keyboard.press("Meta+/");
   const sheet = page.locator(".cp-shortcuts");
   await expect(sheet).toBeVisible();
   await expect(sheet.getByText("Undo", { exact: true })).toBeVisible();
@@ -47,7 +47,7 @@ test("cheat-sheet lists Undo ⌘Z / Redo ⇧⌘Z from the registry", async ({ pa
 
 test("palette shows Undo/Redo disabled on an empty stack", async ({ page }) => {
   await boot(page);
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press("Meta+k");
   const pal = page.locator("input[type=text], input").last();
   await pal.fill("undo");
   await expect(page.getByText("Nothing to undo")).toBeVisible();

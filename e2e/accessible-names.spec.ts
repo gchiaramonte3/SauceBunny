@@ -30,7 +30,7 @@ async function boot(page: Page): Promise<void> {
   });
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-toolbar")).toBeVisible();
 }
 
@@ -116,11 +116,11 @@ test("the settings modal names its controls too", async ({ page }) => {
  * that never renders on Clip is exactly the one nobody has looked at.
  */
 const VIEWS: ReadonlyArray<readonly [key: string, label: string, root: string]> = [
-  ["Control+1", "Home", "cp-view-home"],
-  ["Control+2", "Library", "cp-view-library"],
-  ["Control+3", "Clip", "cp-view-clip"],
-  ["Control+4", "Review", "cp-view-coreview"],
-  ["Control+5", "Transcripts", "cp-view-reader"],
+  ["Meta+1", "Home", "cp-view-home"],
+  ["Meta+2", "Library", "cp-view-library"],
+  ["Meta+3", "Clip", "cp-view-clip"],
+  ["Meta+4", "Review", "cp-view-coreview"],
+  ["Meta+5", "Transcripts", "cp-view-reader"],
 ];
 
 for (const [key, label, root] of VIEWS) {

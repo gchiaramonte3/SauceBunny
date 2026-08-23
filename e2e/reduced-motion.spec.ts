@@ -230,7 +230,7 @@ test("nothing animates in the transcript or review under reduced motion", async 
     "reduced motion was not actually emulated",
   ).toBe(true);
 
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await page.getByTitle("Recent sources", { exact: true }).click();
   await page.locator(".cp-recents-row").first().click();
   await expect(page.locator("[data-cue-idx]")).toHaveCount(4, { timeout: 15_000 });

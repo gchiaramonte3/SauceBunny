@@ -126,11 +126,11 @@ test("the harness renders text to measure", async ({ page }) => {
 });
 
 for (const [key, label, root] of [
-  ["Control+1", "Home", "cp-view-home"],
-  ["Control+2", "Library", "cp-view-library"],
-  ["Control+3", "Clip", "cp-view-clip"],
-  ["Control+4", "Review", "cp-view-coreview"],
-  ["Control+5", "Transcripts", "cp-view-reader"],
+  ["Meta+1", "Home", "cp-view-home"],
+  ["Meta+2", "Library", "cp-view-library"],
+  ["Meta+3", "Clip", "cp-view-clip"],
+  ["Meta+4", "Review", "cp-view-coreview"],
+  ["Meta+5", "Transcripts", "cp-view-reader"],
 ] as const) {
   test(`${label} text meets WCAG AA contrast`, async ({ page }) => {
     await boot(page);
@@ -210,7 +210,7 @@ test("the command palette meets AA", async ({ page }) => {
   // palette.css carries seven fg-5 text rules and the view tests never open
   // it, so it was the largest surface this measurement had not seen.
   await boot(page);
-  await page.keyboard.press("Control+k");
+  await page.keyboard.press("Meta+k");
   // Wait for the palette itself. Counting after a fixed wait would report
   // "did not open" on a slow run, and - worse - measure the page behind it.
   await expect(page.locator('.cp-palette, [role="dialog"]').first(),

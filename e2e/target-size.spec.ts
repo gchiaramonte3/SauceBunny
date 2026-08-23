@@ -38,7 +38,7 @@ async function boot(page: Page): Promise<void> {
   // and measuring there found NINE targets, and two of these tests passed over
   // essentially nothing - which the count assertion below is here to catch.
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press("Control+3");
+  await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-toolbar")).toBeVisible();
 }
 
