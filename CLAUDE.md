@@ -173,6 +173,12 @@ Do not add new Tauri plugins without explaining what existing capability is insu
   either.
 
 ### CSS
+> **`docs/DESIGN.md` is the design system reference** — the type scale, colour
+> roles, radii, the z ladder, motion, targets and voice, on one page, written
+> for someone who has never seen the app. Read it before adding a style. What
+> follows here is only the part that needs the project's own history to make
+> sense; the reference is not duplicated.
+
 - All styles live in `src/styles/app.css`, organized by component name in comment blocks.
 - Use tokens from `tokens.css` for colors, spacing, font sizes, radii.
   **Colours: never hardcode a hex that a token already holds** — enforced by
@@ -207,10 +213,14 @@ Do not add new Tauri plugins without explaining what existing capability is insu
   **Do not mass-convert spacing to the current scale**: rounding 6px to 4 or 8
   moves nearly every dense control in the app. The decision worth making is
   whether to give the scale its real 2px base or to re-space the UI onto 4px,
-  and that wants someone looking at it. Radii have the same split, smaller:
-  ~56 of 272 off-scale, with 10px appearing 14 times between `--r-md` and
-  `--r-lg`. (1px `padding`/`gap` is excluded from all of this — 44 uses, and it
-  is hairline work rather than spacing.)
+  and that wants someone looking at it. (1px `padding`/`gap` is excluded from
+  all of this — 44 uses, and it is hairline work rather than spacing.)
+  **Radii no longer have this split** (r162). They used to: ~56 of 272 were
+  off-scale, with 10px appearing 14 times between `--r-md` and `--r-lg`. Those
+  14 turned out to be one family — every floating surface in the app — so the
+  scale gained `--r-card`, 2px gained `--r-2xs`, and the rest rounded. The
+  difference from spacing is that the radius question had an answer that cost
+  nobody anything; the spacing one still does not.
 
 - **Focus styles: never the green accent.** A focused control brightens its existing outline toward white (`--focus-ring`, defined in `base.css`); composed fields (wrapper + borderless inner input, e.g. `.cp-url`) brighten the wrapper via `:focus-within` and suppress the inner input's ring. Guarded by `src/lib/focus-contract.test.ts` — do not allowlist around it.
 
@@ -661,7 +671,7 @@ written after finding the rule already broken somewhere.
 | `voice-contract` | No em/en dashes in user-facing copy |
 | `focus-contract` | A focus ring never uses the green accent |
 | `hit-target-contract` | Declared pointer-target sizes (see also `e2e/target-size.spec.ts`, which measures the rendered ones) |
-| `design-tokens-contract` | `--font-mono` always brings `tabular-nums`; no unreferenced token; the radius scale is used, not re-typed |
+| `design-tokens-contract` | `--font-mono` always brings `tabular-nums`; no unreferenced token; the radius scale is used, not re-typed, and is complete so an off-scale literal fails; `font-weight` names only a face `main.tsx` actually imports; `font-size` comes from `--text-*`; `line-height` is unitless and from `--leading-*`; `letter-spacing` from `--track-*`; app-level `z-index` (above 99) comes from a `--z-*` rung while local stacking stays a small integer |
 | `path-identity-contract` | One NFC path normaliser, in `lib/repath` |
 | `storage-keys-contract` | New prefs use the `saucebunny.` namespace; nine legacy `cp-` keys are pinned by name |
 | `invoke-contract` | Invoke type args come from `src/bindings/`; byte payloads use the raw IPC body; every `write_text_to_path` is atomic |
