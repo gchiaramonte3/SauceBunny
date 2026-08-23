@@ -8,6 +8,18 @@ All notable changes to Sauce Bunny. Format loosely follows
 ## [0.4.1] — 2026-08-23
 
 ### Changed
+- **One design system, applied everywhere.** The interface used 29 font sizes,
+  14 line heights, 18 letter-spacings, 27 z-index values and 22 transition
+  speeds, most of them one-offs nobody chose. They are now a named scale, and
+  the visible effect is small but real: a few sizes shift by half a pixel,
+  some corners by one, and a handful of animations settle onto a shared speed.
+  Nothing was redesigned — the drift was corrected toward what the majority of
+  the app already did.
+
+  One fix you may notice: fifteen labels asked for a medium font weight the
+  app never loaded, so the browser silently substituted regular. They now say
+  regular, which is what they always rendered as.
+
 - **Join codes read as join codes.** Every invite began `SAUC-endpo-intXX`,
   because every iroh ticket starts with the literal tag `endpoint` — and the
   host's chip truncates, so eleven of the twenty-one characters actually on
@@ -91,7 +103,6 @@ the app can finally tell you which build you are running.
   look scrawled.
 
 - Chapters fold away and can be cleared.
-- Hidden warnings and tips can be restored from Settings ▸ Backup & reset.
 - The reader's transcript menu gained Reveal in Finder, and its rename dialog
   no longer draws underneath the app.
 
@@ -286,7 +297,10 @@ the app can finally tell you which build you are running.
   builds are never indistinguishable. (Every prior build reported `1.0.0`.)
 - Bundled yt-dlp refreshed to 2026.07.04.
 
-### Co-review (P2P watch party) — new
+### Co-review (P2P watch party) — new, continued
+
+*(The fixes to this feature are under "Co-review" further up in this
+release; the two sections were written at different times.)*
 - **Watch and review together, peer-to-peer** — host a session and share a
   one-line join code; up to 3 guests connect over iroh QUIC (end-to-end
   encrypted, no accounts, no cloud). Guests follow the host's playhead.

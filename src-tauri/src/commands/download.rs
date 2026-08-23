@@ -729,13 +729,13 @@ fn pick_thumbnail(v: &serde_json::Value) -> Option<String> {
         // nothing, so a source offering only a 4K still gets a poster.
         let score = if known && w > 1920 { -area } else { area };
         let cand = (pref, score, url.to_string());
-        // `map_or(true, …)`, not `is_none_or`: the latter is stable since 1.82
-        // and this crate declares rust-version 1.77.2. Clippy used to want the
-        // swap regardless, which cost an `#[allow]` here; it is MSRV-aware now
-        // (verified against the 0.1.97 CI runs on) and stays quiet on its own.
-        // Raising the declared MSRV would also work, but that is a policy
-        // change about who can build this, not a cleanup.
-        if best.as_ref().map_or(true, |b| (b.0, b.1) < (cand.0, cand.1)) {
+        // `is_none_or`, stable since 1.82. This was `map_or(true, …)` while the
+        // crate declared rust-version 1.77.2, with a comment saying raising the
+        // MSRV "would also work, but that is a policy change about who can
+        // build this". The policy changed, and not as a preference: iroh and
+        // its family declare 1.91, so 1.77.2 was never a floor anyone could
+        // actually build at - it was a number the docs quoted at contributors.
+        if best.as_ref().is_none_or(|b| (b.0, b.1) < (cand.0, cand.1)) {
             best = Some(cand);
         }
     }

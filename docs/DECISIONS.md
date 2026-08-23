@@ -209,6 +209,16 @@ The comment stayed, trimmed. Its core claim — use `map_or(true, …)` rather t
 `is_none_or` because of the MSRV — is still true and still the reason the code
 is shaped that way. Only the sentence about needing an attribute was stale.
 
+**Superseded (2026-08-23).** That whole premise was resting on a number nobody
+had checked. `cargo metadata` says iroh and its family declare **1.91**, so
+`rust-version = "1.77.2"` was never a floor anyone could build at — it was a
+figure README and CONTRIBUTING quoted at contributors, telling someone on 1.77
+they were fine when the graph would refuse them. With the declared MSRV
+corrected to 1.91, clippy immediately asked for `is_none_or` (correctly, it is
+stable at 1.82), and the call site now uses it. The lesson is not about the
+lint: a declared MSRV that nothing verifies drifts from the real one silently,
+and the docs inherit the error.
+
 ### Surveyed and not adopted: `clippy::pedantic`
 
 With the default set at zero, the obvious next question is whether a stricter

@@ -53,9 +53,12 @@ Prerequisites:
 - **macOS 14+** (the diarizer’s FluidAudio Core ML dependency
   models, which platform-pin at 14)
 - **Xcode Command Line Tools** (`xcode-select --install`)
-- **Rust 1.77+** (`rustup default stable`)
-- **Node 20+**
-- **Swift 5.9+** — confirm with `swift --version`
+- **Rust 1.91+** (`rustup default stable`)
+- **Node 20.19+ / 22.13+ / 24+**
+- **Swift 6.0+** — confirm with `swift --version`
+- **cmake** (`brew install cmake`) — `npm run setup` compiles whisper.cpp and
+  llama.cpp from source, and `scripts/build-llama.sh` exits with
+  "cmake not found" without it. Easy to miss because nothing else needs it.
 
 First `tauri dev` cold-builds the Rust crate (~3 min) and downloads the
 FluidAudio Core ML models on first diarization run (~300 MB, one-time, cached

@@ -90,6 +90,21 @@ last is danger as TEXT or an icon on a dark surface, because full-saturation
 `rgba(108,255,141,0.2)`. Ninety-plus hand-written tints meant retuning a brand
 colour left ninety copies of the old one behind.
 
+**Three naming generations coexist, and that is the thing to know before
+minting a name.** `--bg-N` / `--fg-N` / `--stroke-N` came first, `--novella-*`
+and `--gold` carry brand colours, and `--color-*` was a semantic-alias pass
+that stalled halfway — some aliases were adopted (`--color-accent-green` beats
+both its older synonyms in usage), the unreferenced ones were deleted, and
+what is left sits beside the other two. Several colours still answer to more
+than one name. **Before adding a token, check whether the value already has
+one.** A test fails the build on an unreferenced token, so the pile cannot
+quietly rebuild itself, but nothing stops a fourth synonym for a colour that
+already has three.
+
+Also live and not covered above: `--danger-2` (the solid danger for fills, as
+against `--danger-text` for glyphs), `--gold` (host crown and winner accents —
+no status meaning), and `--marker` (the in/out marker violet).
+
 Two literals are correct and are not drift: `#000` inside a `mask-image`
 (black there is the alpha channel, not paint), and a colour no token holds —
 whether the palette should grow is a design call, and naming a colour used

@@ -18,6 +18,7 @@ What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Ever
 ```
 .
 ├── src/                       # React + TypeScript frontend
+│   ├── main.tsx               # Entry point — reads ?window= and mounts App or PanelApp
 │   ├── App.tsx                # Big-state component (will be split — see roadmap)
 │   ├── PanelApp.tsx           # Root of the floating side-panel window (?window=panel)
 │   ├── components/            # UI, mostly one concern per file
@@ -30,7 +31,9 @@ What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Ever
 │   ├── src/
 │   │   ├── lib.rs             # Tauri command registration + cache-sweep startup hook
 │   │   ├── main.rs            # tiny entrypoint shim → sauce_bunny_lib::run()
-│   │   ├── commands/          # Tauri commands by domain (download, media, transcript, system, llm)
+│   │   ├── commands/          # Tauri commands by domain — twelve modules:
+│   │   │                     #   download, media, transcript, library, tags, system,
+│   │   │                     #   session, peer_stream, rung, llm, cloud_ai, sniff
 │   │   └── stream_proxy.rs    # loopback fMP4 media proxy for web playback
 │   ├── binaries/              # Bundled sidecar executables (gitignored; fetched by `npm run setup`)
 │   ├── capabilities/          # Tauri permission lists
@@ -48,7 +51,7 @@ What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Ever
 ├── harness-real/              #   "
 ├── licenses/                  # GPLv3 text, bundled because ffmpeg requires it
 ├── docs/                      # This file, DESIGN, DISTRIBUTION, HAND-TEST, DECISIONS
-└── .github/                   # Issue templates + CI workflow
+└── .github/                   # Issue templates + two workflows (ci, nightly-sidecars)
 ```
 
 ### The three `harness-*` directories
@@ -125,7 +128,7 @@ Export clip:
 Generate transcript:
       │
       ├─► Whisper (whisper-cli sidecar)        ┐
-      └─► yt-dlp captions                       ├─► SRT in ~/Documents/Sauce Bunny/Transcripts/YYYY-MM/
+      └─► yt-dlp captions                       ├─► SRT in ~/Documents/Sauce Bunny/Transcripts/<project or YYYY-MM>/
                                                 ┘
                                                 │
                               if Detect speakers is on:
@@ -179,6 +182,50 @@ template enables thinking and a "summarise this in a few bullets" request spent
 3,254 tokens reasoning without reaching an answer. `-np 1`, because the app
 serialises model calls and the auto-chosen 4 slots each reserved a full context
 of KV cache for work that cannot arrive.
+
+## Transcript projects
+
+A transcript lands in `Transcripts/YYYY-MM/` — a bucket the app makes on the
+day you hit transcribe. That is filing by accident, so a transcript can be
+moved into a **project**: a directory you name under the same root.
+
+The choice worth knowing is that **the filesystem is the truth**. A project IS
+a directory. Moving a transcript into one is `mv`, the files stay browsable in
+Finder, and deleting the metadata costs posters and nothing else.
+
+```
+~/Documents/Sauce Bunny/Transcripts/
+├── 2026-08/            ← auto, a month bucket: plain label, no menu
+├── Marry Harry/        ← a project: named, poster, rename/delete
+│   ├── ep1.srt
+│   └── ep1.diarization.json
+└── projects.json       ← metadata ONLY (title, poster, colour)
+```
+
+| piece | what it does |
+|---|---|
+| `src/lib/transcript-projects.ts` | pure model: what a project is, which transcript supplies its picture, reconciling stored metadata against the folders that actually exist |
+| `src/lib/transcript-project-store.ts` | debounced atomic write-through to `projects.json`, on the existing invoke surface — no new Rust command |
+| `src-tauri/src/commands/library.rs` | `create` / `rename` / `delete` of the directory itself |
+| `src/components/ReaderProjectHeader.tsx` | the group heading: picture, name, count, menu |
+| `src/components/ProjectMenu.tsx` | rename / choose picture / delete, each a dialog because each touches disk |
+
+Three rules that are easy to get wrong and are pinned by tests:
+
+- **Hydration waits for the first scan.** Reconciling against an empty folder
+  list drops every stored project as "not on disk", and the next sync writes
+  that back — posters gone on every boot, from a list that only meant the scan
+  had not finished.
+- **Rename carries the metadata, and only after the disk rename lands.** The
+  folder is the key, so a rename orphans the entry otherwise.
+- **Delete is not recursive.** It refuses while transcripts remain and says how
+  many. `remove_dir` would refuse anyway; the count is what makes the refusal
+  an instruction rather than `Directory not empty (os error 66)`.
+
+Month buckets are deliberately not projects: they are the app's own filing, so
+they get a plain label and no menu. Offering "Delete" on `2026-08` is offering
+to bin a month of work nobody chose to group.
+
 
 ## Sidecars
 
@@ -302,6 +349,9 @@ The one deliberate exception to "state lives in App" is the playhead. It ticks u
 
 - **Writers** — the active player's `onTimeUpdate`, every seek/step/reset path in `App.tsx`, and `PanelApp` (the floating panel is a separate webview with its own store instance; it feeds its store from the two cross-window channels below).
 - **Render subscribers** (`useSyncExternalStore`, full tick rate) — the Transport timecode, the Timeline scrub cursor, `CaptionOverlay`'s cue lookup, `TranscriptViewer`'s karaoke highlight, `ReviewPanel`'s composer timestamp, and Monitor's annotation proximity fade. All leaves — a playback tick re-renders a handful of tiny components, never the tree.
+  `ReaderPlayerStage` joins that list: the reader's follow-along player reads
+  the same store at full tick rate for its clock, its scrub fill and the
+  marker positions on its position bar. One clock, no second source of time.
 - **Action-time readers** — mark in/out, frame snapshot, seek-by-seconds, and the co-review heartbeat/presence/chase call `getPlayheadFrames()` when they fire; the shuttle edge-stop watches via a plain subscription (no re-render at all).
 - **Cross-window feed** — the popped-out panel can't subscribe across webviews, so the playhead reaches it as data, without re-rendering App: the change-driven `panel:state` snapshot carries the position as of its publish (the boot seed + the pause/seek truth), and `use-panel-bus` emits a lightweight `panel:playhead` heartbeat (4 Hz, only while a panel is detached and the playhead actually moved) that PanelApp writes into its window's store. The live clock deliberately stays OUT of the snapshot so playback never re-serializes it.
 
@@ -397,9 +447,13 @@ its own StrictMode tail sweep and its own cleanup. Verified the way the naming
 pass was: every handler body hashed before and after, all 14 byte-identical, all
 14 still on their own event, and each effect cleaning up exactly what it pushes.
 
-What is left in App.tsx is now four readable blocks instead of one wall, and an
-extraction that owns an event lifts one small effect rather than carving a
-listener out of a shared one.
+That split is now finished: all four live in `src/hooks/` as
+`use-clip-export-listeners`, `use-captions-listeners`,
+`use-transcript-listeners` and `use-playback-prep-listeners`, each with its own
+test file. App.tsx registers almost nothing directly any more. The paragraph
+above describes the step that made this possible, not the current state — an
+extraction that owns an event now lifts a whole hook rather than carving a
+listener out of a shared effect.
 
 ## Build-ID handshake
 
@@ -486,7 +540,7 @@ repeat open skips yt-dlp entirely when possible:
 
 ## Tone-card design grammar (shell v3)
 
-Panels (sidebar, queue drawer, library tree/detail, prail) are uniform
+Panels (sidebar, queue drawer, library tree/detail, the co-review participant rail) are uniform
 tone cards: `--bg-1` surfaces on the `--bg-0` canvas, `--r-lg` radius,
 8px gutters with 4px half-gaps, and NO borders — tonal contrast does the
 separation. The flat tier (nav rail, Home, Library hero/grid) and the
