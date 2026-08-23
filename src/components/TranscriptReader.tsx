@@ -15,7 +15,9 @@ import { organizeTranscripts, withEmptyProjects, type TranscriptSort } from "../
 import {
   loadTranscriptLibrary, type LibraryTranscript,
 } from "../lib/transcript-library";
-import { TRANSCRIPTS_CHANGED_EVENT, type TranscriptHistoryEntry } from "../lib/transcript-history";
+import { TRANSCRIPTS_CHANGED_EVENT, renameEntryPath, type TranscriptHistoryEntry } from "../lib/transcript-history";
+import { renameSpeakerOverridesPath } from "./transcript/helpers";
+import { carriedPaths } from "../lib/project-rename-carry";
 import { buildRecentIndex, transcriptArt } from "../lib/transcript-source-resolve";
 import type { RecentSource } from "../lib/recent-sources";
 import { WEB_POSTERS_CHANGED_EVENT } from "../lib/web-poster-store";
@@ -80,7 +82,6 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   const [projectMenu, setProjectMenu] = useState<ProjectMenuTarget | null>(null);
   const [newProject, setNewProject] = useState<string | null>(null);
   const [projectTick, setProjectTick] = useState(0);
-  const [scanned, setScanned] = useState(false);
   const [projectErr, setProjectErr] = useState<string | null>(null);
   const recentIndex = useMemo(() => buildRecentIndex(recents), [recents]);
 
@@ -103,7 +104,6 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
     void loadTranscriptLibrary(transcriptLibraryPath).then((l) => {
       if (!alive) return;
       setList(l);
-      setScanned(true);
     });
     return () => { alive = false; };
   }, [tick, transcriptLibraryPath]);
@@ -113,20 +113,37 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   // Finder has to show up here, or the panel and the disk tell two different
   // stories.
   useEffect(() => subscribeProjects(() => setProjectTick((t) => t + 1)), []);
-  const folders = useMemo(() => {
-    const set = new Set<string>();
-    for (const t of list) if (t.folder) set.add(t.folder);
-    return [...set];
-  }, [list]);
-  // Not until the first scan has actually returned. Hydrating against an empty
-  // folder list would reconcile every stored project away as "not on disk", and
-  // the next sync would write that back - posters and colours gone on every
-  // boot, from a list that only meant "the scan has not finished".
+  // Read from DISK, not from the scan.
+  //
+  // This used to collect `t.folder` off the scanned transcripts, which meant a
+  // folder existed only while something was already filed in it. Two bugs fell
+  // out of that, and they are the same bug: New Project created a directory
+  // the shelf could never show (so the button did nothing), and moving the
+  // last transcript out of a project reconciled it away, taking its title,
+  // poster and colour with it on the next write.
+  //
+  // A project IS a directory, so the directory listing is the truth.
+  const [folders, setFolders] = useState<string[] | null>(null);
   useEffect(() => {
-    if (!scanned) return;
-    void hydrateProjects(folders);
-  }, [scanned]);  // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (scanned) syncProjectFolders(folders); }, [scanned, folders]);
+    void tick;
+    let alive = true;
+    void invoke<string[]>("list_transcript_folders", { libraryPath: transcriptLibraryPath })
+      .then((f) => { if (alive) setFolders(f); })
+      .catch(() => { if (alive) setFolders([]); });
+    return () => { alive = false; };
+  }, [tick, transcriptLibraryPath]);
+  // Not until the folder listing has actually returned, which is why `folders`
+  // is `null` until then rather than `[]`. Hydrating against an empty list
+  // reconciles every stored project away as "not on disk", and the next sync
+  // writes that back - posters and colours gone on every boot, from a list
+  // that only meant "the read has not finished". The two states have to be
+  // distinguishable or the guard is guessing.
+  useEffect(() => {
+    if (folders === null) return;
+    void hydrateProjects(transcriptLibraryPath, folders);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate once, on the first real list
+  }, [folders !== null]);
+  useEffect(() => { if (folders !== null) syncProjectFolders(folders); }, [folders]);
   const projects = useMemo(() => { void projectTick; return getProjects(); }, [projectTick]);
 
   // Search is debounced like the Library's (150ms): typing re-filters a
@@ -374,7 +391,25 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
           target={projectMenu}
           libraryPath={transcriptLibraryPath}
           onClose={() => setProjectMenu(null)}
-          onRenamed={(from, to) => { renameProject(from, to); setTick((t) => t + 1); }}
+          onRenamed={(from, to) => {
+            // The directory moved, so every transcript inside it has a new
+            // absolute path - and history entries and speaker overrides are
+            // both keyed by that path. Carrying them is what makes the
+            // dialog's promise ("the transcripts inside it move with it and
+            // keep working") true: without it the source link and every
+            // speaker name someone typed are orphaned, and the stale history
+            // entries re-render as duplicate rows pointing at files that are
+            // no longer there.
+            const root = transcriptLibraryPath.replace(/\/+$/, "");
+            for (const { from: was, to: now } of carriedPaths(
+              list.map((t) => t.path), `${root}/${from}`, `${root}/${to}`,
+            )) {
+              renameEntryPath(was, now);
+              renameSpeakerOverridesPath(was, now);
+            }
+            renameProject(from, to);
+            setTick((t) => t + 1);
+          }}
           onDeleted={(folder) => { forgetProject(folder); setTick((t) => t + 1); }}
           onPickPoster={(folder, path) => editProject(folder, { posterFrom: path })}
         />

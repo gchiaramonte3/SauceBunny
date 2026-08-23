@@ -51,16 +51,29 @@ function clampPct(time: number, duration: number): number {
   return Math.max(0, Math.min(100, (time / duration) * 100));
 }
 
-/** Merge same-kind pins that would land on the same pixel, keeping the first. */
+/**
+ * Merge same-kind pins that would land on the same pixel, keeping the first.
+ *
+ * The comparison is against the last pin OF THAT KIND, not the last pin
+ * emitted. Comparing against the tail of the output looks equivalent and is
+ * not: a pin of another kind falling between two same-kind pins becomes the
+ * tail, the chain breaks, and both same-kind pins draw on the same pixel -
+ * which is precisely the smudge this function exists to prevent. Two chapters
+ * four seconds apart in a two-hour recording merge fine until somebody leaves
+ * a comment between them.
+ */
 function merge(pins: StageMarker[]): StageMarker[] {
   const out: StageMarker[] = [];
+  const lastOfKind = new Map<StageMarkerKind, StageMarker>();
   for (const p of [...pins].sort((a, b) => a.time - b.time)) {
-    const prev = out[out.length - 1];
-    if (prev && prev.kind === p.kind && p.pct - prev.pct < MERGE_PCT) {
+    const prev = lastOfKind.get(p.kind);
+    if (prev && p.pct - prev.pct < MERGE_PCT) {
       prev.count += p.count;
       continue;
     }
-    out.push({ ...p });
+    const kept = { ...p };
+    out.push(kept);
+    lastOfKind.set(p.kind, kept);
   }
   return out;
 }

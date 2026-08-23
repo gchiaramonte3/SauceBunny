@@ -22,7 +22,13 @@ export function ReaderRowThumb({
   posterVersions: Record<string, number>;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
-  const [broken, setBroken] = useState(false);
+  // Which poster failed, not "a poster failed". A bare boolean LATCHES: once
+  // an image errored the component showed its glyph for the rest of its life,
+  // so choosing a new picture for a project - the whole point of the menu -
+  // left it pictureless until the panel remounted. Keying the failure to the
+  // image that produced it resets on its own when the key changes, with no
+  // effect to keep in sync.
+  const [brokenKey, setBrokenKey] = useState<string | null>(null);
 
   const isLocalVideo = art.kind === "local" && art.media === "video";
   // Only video paths request a poster; audio/remote/source-less request nothing.
@@ -33,6 +39,7 @@ export function ReaderRowThumb({
   // Re-key the local <img> on the poster version so a "Set thumbnail…" change
   // made in the Library refreshes this row too.
   const key = art.kind === "local" ? `${art.path}#${posterVersions[art.path] ?? 0}` : art.url ?? "none";
+  const broken = brokenKey === key;
   const glyph = art.kind === "local" && art.media === "audio"
     ? <IconVolume size={14} />
     : <IconFilm size={14} />;
@@ -40,7 +47,7 @@ export function ReaderRowThumb({
   return (
     <span ref={ref} className="cp-reader-row-thumb" aria-hidden="true">
       {url && !broken
-        ? <img key={key} src={url} loading="lazy" alt="" draggable={false} onError={() => setBroken(true)} />
+        ? <img key={key} src={url} loading="lazy" alt="" draggable={false} onError={() => setBrokenKey(key)} />
         : glyph}
     </span>
   );

@@ -470,6 +470,38 @@ pub fn create_transcript_folder(library_path: String, name: String) -> Result<St
     dir.to_str().map(str::to_string).ok_or_else(|| crate::AppError::internal("Folder path isn't valid UTF-8."))
 }
 
+/// Every one-level subfolder of the transcript library, whether or not it
+/// holds any transcripts.
+///
+/// The projects panel used to derive its folder list from the SCAN, which
+/// returns transcript files — so a folder existed, as far as the app was
+/// concerned, only while something was already filed in it. That made the New
+/// Project button a no-op: it created the directory, the scan found no files
+/// inside it, and the shelf never showed it. It also meant moving the last
+/// transcript out of a project silently erased that project's title, poster
+/// and colour on the next write.
+///
+/// A project IS a directory, so the directory listing is the truth. Hidden
+/// entries are skipped: `.DS_Store` is a file, but a stray dot-directory is
+/// not something anybody made here.
+#[tauri::command]
+pub fn list_transcript_folders(library_path: String) -> Result<Vec<String>, crate::AppError> {
+    let root = PathBuf::from(&library_path);
+    let Ok(entries) = std::fs::read_dir(&root) else {
+        // A library that does not exist yet is not an error — it is a fresh
+        // install, and the answer is honestly "no folders".
+        return Ok(Vec::new());
+    };
+    let mut out: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|n| !n.starts_with('.'))
+        .collect();
+    out.sort();
+    Ok(out)
+}
+
 /// Rename a project folder. Returns its new path.
 ///
 /// The DIRECTORY is a project's identity, so renaming one is a real move on
@@ -499,7 +531,16 @@ pub fn rename_transcript_folder(
     if dest == src {
         return Ok(src.to_string_lossy().into_owned());
     }
-    if dest.exists() {
+    // A case-only rename ("rushes" -> "Rushes") is a real rename people make,
+    // and on the default macOS filesystem it is not a collision - APFS is
+    // case-INSENSITIVE, so `dest.exists()` is true for the very directory
+    // being renamed and a bare existence check refuses the operation as a
+    // clash with itself. Canonicalising both sides answers the question that
+    // was actually being asked: is something ELSE already there?
+    // `rename_transcript` next door already does this; the folder path did not.
+    let same_dir = dest.exists()
+        && std::fs::canonicalize(&dest).ok() == std::fs::canonicalize(&src).ok();
+    if dest.exists() && !same_dir {
         return Err(crate::AppError::invalid(format!("A folder named \"{stem}\" already exists.")));
     }
     std::fs::rename(&src, &dest)
@@ -1031,6 +1072,46 @@ mod tests {
     // ---- project folders -------------------------------------------------
 
     #[test]
+    fn lists_folders_that_hold_no_transcripts() {
+        // The bug this command exists for: the panel derived its folder list
+        // from the transcript SCAN, so a project only existed once something
+        // was filed in it - and New Project, which creates an empty one, did
+        // nothing visible.
+        let t = TempTree::new("list-empty");
+        std::fs::create_dir(t.path().join("Empty Project")).unwrap();
+        std::fs::create_dir(t.path().join("Has Work")).unwrap();
+        std::fs::write(t.path().join("Has Work/a.srt"), "x").unwrap();
+        let got = list_transcript_folders(t.path().to_string_lossy().into()).unwrap();
+        assert_eq!(got, vec!["Empty Project", "Has Work"]);
+    }
+
+    #[test]
+    fn lists_no_files_and_no_dotfolders() {
+        let t = TempTree::new("list-filter");
+        std::fs::create_dir(t.path().join("Show")).unwrap();
+        std::fs::create_dir(t.path().join(".hidden")).unwrap();
+        std::fs::write(t.path().join("loose.srt"), "x").unwrap();
+        std::fs::write(t.path().join(".DS_Store"), "x").unwrap();
+        assert_eq!(
+            list_transcript_folders(t.path().to_string_lossy().into()).unwrap(),
+            vec!["Show"],
+        );
+    }
+
+    #[test]
+    fn a_library_that_does_not_exist_yet_is_not_an_error() {
+        // First run: the folder is created lazily. Returning Err here would
+        // surface a scary message on an empty install, and the honest answer
+        // is that there are no folders.
+        let t = TempTree::new("list-missing");
+        let missing = t.path().join("not-created-yet");
+        assert_eq!(
+            list_transcript_folders(missing.to_string_lossy().into()).unwrap(),
+            Vec::<String>::new(),
+        );
+    }
+
+    #[test]
     fn month_buckets_are_recognised() {
         for m in ["2026-08", "1999-12"] {
             assert!(is_month_folder(m), "{m}");
@@ -1075,6 +1156,27 @@ mod tests {
         )
         .is_err());
         assert!(t.path().join("2026-08").is_dir());
+    }
+
+    #[test]
+    fn allows_a_case_only_rename() {
+        // macOS ships case-INSENSITIVE APFS, so dest.exists() is true for the
+        // directory being renamed. A bare existence check refused "rushes" ->
+        // "Rushes" as a collision with itself, which is a rename people
+        // actually make after naming a project in a hurry.
+        let t = TempTree::new("rename-case");
+        std::fs::create_dir(t.path().join("rushes")).unwrap();
+        std::fs::write(t.path().join("rushes/a.srt"), "x").unwrap();
+        let out = rename_transcript_folder(
+            t.path().to_string_lossy().into(),
+            "rushes".into(),
+            "Rushes".into(),
+        )
+        .expect("a case-only rename was refused");
+        assert!(out.ends_with("/Rushes"), "{out}");
+        // The transcript is still there under whichever spelling the
+        // filesystem reports.
+        assert!(t.path().join("Rushes/a.srt").is_file());
     }
 
     #[test]

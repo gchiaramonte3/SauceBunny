@@ -80,11 +80,26 @@ async function flush(): Promise<void> {
  * the library for its grouping — asking Rust again would be a second walk of
  * the same directory for the same answer.
  */
-export async function hydrateProjects(foldersOnDisk: readonly string[]): Promise<void> {
+/**
+ * @param libraryPath The transcript library actually in use.
+ *
+ * This used to ask Rust for `default_transcript_library_path`, which returns
+ * `~/Documents/Sauce Bunny/Transcripts` unconditionally - it is the DEFAULT,
+ * and the frontend holds the user's override (Settings picks a directory and
+ * stores it in `defaults.transcriptLibrary`). So anyone who pointed their
+ * library at an external drive got their project folders in one place and
+ * `projects.json` written to another, where it described folders that were
+ * not there: every project reconciled away, every poster and colour lost, and
+ * a metadata file left behind in a directory the app no longer reads.
+ */
+export async function hydrateProjects(
+  libraryPath: string,
+  foldersOnDisk: readonly string[],
+): Promise<void> {
   if (hydrated || hydrating) return;
   hydrating = true;
   try {
-    dir = await invoke<string>("default_transcript_library_path");
+    dir = libraryPath.replace(/\/+$/, "");
     let stored: TranscriptProject[] = [];
     try {
       const text = await invoke<string>("read_text_file_capped", {

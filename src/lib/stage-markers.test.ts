@@ -144,3 +144,34 @@ describe("markerSummary", () => {
     expect(markerSummary([])).toBe("");
   });
 });
+
+describe("stageMarkers — merging is not defeated by a pin of another kind", () => {
+  it("merges two chapters that have a comment between them", () => {
+    // The bug: merge compared against the last pin EMITTED, so the comment
+    // became the tail, the chapter chain broke, and both chapters drew on the
+    // same pixel - exactly the smudge merging exists to prevent.
+    const { pins } = stageMarkers({
+      duration: 7200,
+      markIn: null, markOut: null,
+      chapters: [{ time: 100, title: "a" }, { time: 102, title: "b" }],
+      comments: [{ time: 101, resolved: false }],
+    });
+    const chapters = pins.filter((p) => p.kind === "chapter");
+    expect(chapters, "the two chapters did not merge").toHaveLength(1);
+    expect(chapters[0].count).toBe(2);
+    // The comment is a different thing to know about and still gets its pin.
+    expect(pins.filter((p) => p.kind === "comment")).toHaveLength(1);
+  });
+
+  it("still merges a long run broken up by several other kinds", () => {
+    const { pins } = stageMarkers({
+      duration: 7200,
+      markIn: 100, markOut: 104,
+      chapters: [{ time: 100, title: "a" }, { time: 101, title: "b" }, { time: 103, title: "c" }],
+      comments: [{ time: 100.5, resolved: false }, { time: 102, resolved: false }],
+    });
+    expect(pins.filter((p) => p.kind === "chapter")).toHaveLength(1);
+    expect(pins.filter((p) => p.kind === "chapter")[0].count).toBe(3);
+    expect(pins.filter((p) => p.kind === "comment")).toHaveLength(1);
+  });
+});

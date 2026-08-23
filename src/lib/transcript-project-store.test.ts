@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+/** The configured library path the store now takes from its caller. */
+const LIB = "/lib/Transcripts";
+
 const h = vi.hoisted(() => ({
   writes: [] as { path: string; text: string }[],
   fileText: null as string | null,
@@ -70,7 +73,7 @@ describe("the project store", () => {
       return real(c, a ?? {});
     }) as typeof core.invoke);
 
-    const hydration = s.hydrateProjects(["Show"]);
+    const hydration = s.hydrateProjects(LIB, ["Show"]);
     await vi.advanceTimersByTimeAsync(0);      // dir is set; the read is pending
     s.editProject("Show", { title: "mid-flight" });
     await settle();
@@ -88,14 +91,14 @@ describe("the project store", () => {
     const s = await store();
     s.editProject("Show", { title: "nope" });
     await settle();
-    await s.hydrateProjects(["Show"]);
+    await s.hydrateProjects(LIB, ["Show"]);
     await settle();
     expect(h.writes.length).toBeGreaterThan(0);
   });
 
   it("adopts folders on disk when there is no file yet", async () => {
     const s = await store();
-    await s.hydrateProjects(["Marry Harry", "2026-08"]);
+    await s.hydrateProjects(LIB, ["Marry Harry", "2026-08"]);
     // The month bucket is the app's own filing, not a project.
     expect(s.getProjects().map((p) => p.folder)).toEqual(["Marry Harry"]);
   });
@@ -106,7 +109,7 @@ describe("the project store", () => {
       projects: [{ folder: "Show", title: "The Show", color: "#0f0" }],
     });
     const s = await store();
-    await s.hydrateProjects(["Show"]);
+    await s.hydrateProjects(LIB, ["Show"]);
     expect(s.getProjects()[0].title).toBe("The Show");
     expect(s.getProjects()[0].color).toBe("#0f0");
   });
@@ -114,7 +117,7 @@ describe("the project store", () => {
   it("drops a project whose folder was deleted outside the app", async () => {
     h.fileText = JSON.stringify({ version: 1, projects: [{ folder: "Gone" }] });
     const s = await store();
-    await s.hydrateProjects([]);
+    await s.hydrateProjects(LIB, []);
     expect(s.getProjects()).toEqual([]);
   });
 
@@ -122,23 +125,50 @@ describe("the project store", () => {
     // It sits in the user's Documents and is hand-editable.
     h.fileText = "{ not json";
     const s = await store();
-    await s.hydrateProjects(["Show"]);
+    await s.hydrateProjects(LIB, ["Show"]);
     expect(s.getProjects().map((p) => p.folder)).toEqual(["Show"]);
   });
 
   it("writes atomically, beside the transcripts it describes", async () => {
     const s = await store();
-    await s.hydrateProjects(["Show"]);
+    await s.hydrateProjects(LIB, ["Show"]);
     s.editProject("Show", { title: "Renamed" });
     await settle();
     const w = h.writes.at(-1)!;
-    expect(w.path).toBe(`${h.libDir}/projects.json`);
+    expect(w.path).toBe(`${LIB}/projects.json`);
     expect(JSON.parse(w.text).projects[0].title).toBe("Renamed");
+  });
+
+  it("follows the CONFIGURED library, not the default one", async () => {
+    // The store used to ask Rust for `default_transcript_library_path`, which
+    // returns ~/Documents/Sauce Bunny/Transcripts unconditionally - the
+    // frontend holds the user's override. Anyone who pointed their library at
+    // an external drive got their folders in one place and projects.json
+    // written to another, describing folders that were not there: every
+    // project reconciled away and every poster lost.
+    const s = await store();
+    const elsewhere = "/Volumes/Media/Transcripts";
+    expect(elsewhere).not.toBe(h.libDir);
+    await s.hydrateProjects(elsewhere, ["Show"]);
+    s.editProject("Show", { color: "#f0f" });
+    await settle();
+    const w = h.writes.at(-1)!;
+    expect(w.path, "projects.json followed the default instead of the configured library").toBe(
+      `${elsewhere}/projects.json`,
+    );
+  });
+
+  it("does not care whether the caller's path has a trailing slash", async () => {
+    const s = await store();
+    await s.hydrateProjects("/Volumes/Media/Transcripts/", ["Show"]);
+    s.editProject("Show", { color: "#0f0" });
+    await settle();
+    expect(h.writes.at(-1)!.path).toBe("/Volumes/Media/Transcripts/projects.json");
   });
 
   it("debounces a burst into one write", async () => {
     const s = await store();
-    await s.hydrateProjects(["Show"]);
+    await s.hydrateProjects(LIB, ["Show"]);
     h.writes = [];
     s.editProject("Show", { title: "a" });
     s.editProject("Show", { title: "b" });
@@ -150,14 +180,14 @@ describe("the project store", () => {
 
   it("notices a folder made in Finder after boot", async () => {
     const s = await store();
-    await s.hydrateProjects(["Show"]);
+    await s.hydrateProjects(LIB, ["Show"]);
     s.syncProjectFolders(["Show", "New Show"]);
     expect(s.getProjects().map((p) => p.folder)).toEqual(["Show", "New Show"]);
   });
 
   it("does not write when a re-scan changed nothing", async () => {
     const s = await store();
-    await s.hydrateProjects(["Show"]);
+    await s.hydrateProjects(LIB, ["Show"]);
     await settle();
     h.writes = [];
     s.syncProjectFolders(["Show"]);
@@ -169,7 +199,7 @@ describe("the project store", () => {
     const s = await store();
     let hits = 0;
     s.subscribeProjects(() => { hits += 1; });
-    await s.hydrateProjects(["Show"]);
+    await s.hydrateProjects(LIB, ["Show"]);
     s.editProject("Show", { color: "#f00" });
     expect(hits).toBeGreaterThanOrEqual(2);
   });
@@ -182,7 +212,7 @@ describe("renaming a project keeps what was decorated onto it", () => {
     // silently gone. The rename is the moment that is easiest to lose it and
     // hardest to notice.
     const s = await store();
-    await s.hydrateProjects(["Old Show"]);
+    await s.hydrateProjects(LIB, ["Old Show"]);
     s.editProject("Old Show", { color: "#f0f", posterFrom: "/lib/Old Show/ep1.srt" });
     s.renameProject("Old Show", "Marry Harry");
     s.syncProjectFolders(["Marry Harry"]);
@@ -195,7 +225,7 @@ describe("renaming a project keeps what was decorated onto it", () => {
 
   it("moves the display name along when it was just the folder name", async () => {
     const s = await store();
-    await s.hydrateProjects(["Old Show"]);
+    await s.hydrateProjects(LIB, ["Old Show"]);
     s.renameProject("Old Show", "New Show");
     expect(s.getProjects()[0].title).toBe("New Show");
   });
@@ -204,7 +234,7 @@ describe("renaming a project keeps what was decorated onto it", () => {
     // A title that already differs from the folder was a choice. Overwriting
     // it with the new folder name discards that choice on an unrelated action.
     const s = await store();
-    await s.hydrateProjects(["ep-01"]);
+    await s.hydrateProjects(LIB, ["ep-01"]);
     s.editProject("ep-01", { title: "Episode One" });
     s.renameProject("ep-01", "ep-001");
     expect(s.getProjects()[0].title).toBe("Episode One");
@@ -212,14 +242,14 @@ describe("renaming a project keeps what was decorated onto it", () => {
 
   it("does not leave two entries when renaming onto a name already listed", async () => {
     const s = await store();
-    await s.hydrateProjects(["A", "B"]);
+    await s.hydrateProjects(LIB, ["A", "B"]);
     s.renameProject("A", "B");
     expect(s.getProjects().map((p) => p.folder)).toEqual(["B"]);
   });
 
   it("forgets a project whose folder was deleted", async () => {
     const s = await store();
-    await s.hydrateProjects(["Show"]);
+    await s.hydrateProjects(LIB, ["Show"]);
     s.forgetProject("Show");
     expect(s.getProjects()).toEqual([]);
   });
