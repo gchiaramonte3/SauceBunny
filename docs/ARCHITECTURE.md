@@ -19,10 +19,13 @@ What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Ever
 .
 ├── src/                       # React + TypeScript frontend
 │   ├── App.tsx                # Big-state component (will be split — see roadmap)
+│   ├── PanelApp.tsx           # Root of the floating side-panel window (?window=panel)
 │   ├── components/            # UI, mostly one concern per file
-│   ├── lib/                   # Pure modules: parsers, helpers, storage, future api client
+│   ├── hooks/                 # Subsystems lifted out of App.tsx, + shared stateful logic
+│   ├── lib/                   # Pure modules: parsers, helpers, storage, and the *-contract tests
+│   ├── bindings/              # GENERATED from the Rust structs by ts-rs — do not hand-edit
 │   ├── styles/                # Global CSS + tokens
-│   └── types.ts               # Shared TS types (mirrors Rust serde structs)
+│   └── types.ts               # Shared TS types (re-exports bindings/ + frontend-only types)
 ├── src-tauri/                 # Rust backend (Tauri shell + sidecar orchestration)
 │   ├── src/
 │   │   ├── lib.rs             # Tauri command registration + cache-sweep startup hook
@@ -32,12 +35,43 @@ What Sauce Bunny **is not**: a full NLE, a streaming service, a cloud tool. Ever
 │   ├── binaries/              # Bundled sidecar executables (gitignored; fetched by `npm run setup`)
 │   ├── capabilities/          # Tauri permission lists
 │   └── tauri.conf.json        # Bundle config + window settings
-├── swift-sidecar/             # Swift package that builds saucebunny-diarize
-│   ├── Package.swift
-│   └── Sources/saucebunny-diarize/main.swift
+├── swift-sidecar/             # One SPM package, THREE sidecars
+│   ├── Package.swift          # the source of truth for Swift deps — no .xcodeproj in git
+│   └── Sources/
+│       ├── saucebunny-diarize/  # speaker diarization (SpeakerKit, FluidAudio fallback)
+│       ├── saucebunny-dictate/  # live on-device dictation (Apple Speech)
+│       └── saucebunny-capture/  # ScreenCaptureKit screen sharing for co-review
 ├── scripts/                   # Build + maintenance scripts
+├── e2e/                       # Playwright UI smoke — boots the frontend with Tauri IPC mocked
+├── harness-audio/             # Decode probes (see below)
+├── harness-csp/               #   "
+├── harness-real/              #   "
+├── licenses/                  # GPLv3 text, bundled because ffmpeg requires it
+├── docs/                      # This file, DESIGN, DISTRIBUTION, HAND-TEST, DECISIONS
 └── .github/                   # Issue templates + CI workflow
 ```
+
+### The three `harness-*` directories
+
+Not tests, and not dead code: **standalone probes that answer a question the
+test suite structurally cannot.** Each boots Vite and drives a real browser
+engine through Playwright, then prints observed numbers.
+
+They exist because the app's hardest bugs have been environmental rather than
+logical — a decoder that PARKS instead of throwing, a WASM step that a CSP
+blocks on one engine and not another — and a mocked unit test cannot see any
+of it. Run them by hand when touching the decode path; nothing in CI does.
+
+| directory | the question it answers |
+|---|---|
+| `harness-audio/` | does the real mediabunny path decode this Opus/AV1 file, and at what rate |
+| `harness-csp/` | which WASM and blob-Worker steps a given CSP actually blocks, per engine |
+| `harness-real/` | does the REAL player component play a real MP4 over Range requests |
+
+`ENGINE=webkit` runs any of them in Playwright WebKit, which is the closest
+available stand-in for the WKWebView the app actually ships in. See
+`harness-audio/README.md` for flags, and `docs/DECISIONS.md` for what these
+probes have already overturned.
 
 ## Data flow
 

@@ -1,6 +1,25 @@
-# `swift-sidecar/` — Sauce Bunny diarizer
+# `swift-sidecar/` — Sauce Bunny's native sidecars
 
-Single-purpose Swift package that builds **`saucebunny-diarize`**, the speaker-diarization sidecar binary shipped alongside `yt-dlp`, `ffmpeg`, and `whisper-cli`.
+One Swift package, **three** binaries. It began as the diarizer alone, which
+is why the build script, the docs and this heading all used to say
+"single-purpose"; dictation and screen capture landed later and belong here
+for the same reason — each needs an Apple framework that only Swift can
+reach, behind an argv interface the Rust shell invokes like any other sidecar.
+
+| binary | what it does | build |
+|---|---|---|
+| `saucebunny-diarize` | speaker diarization (SpeakerKit, FluidAudio fallback) | `npm run build:diarizer` |
+| `saucebunny-dictate` | live on-device dictation, partial results while you speak (Apple Speech) | `npm run build:dictate` |
+| `saucebunny-capture` | display list + capture for co-review screen sharing (ScreenCaptureKit) | `npm run build:capture` |
+
+The last two hold the most sensitive permissions in the app: each is spawned
+only in response to a direct user action, and macOS gates both behind its own
+TCC prompt. See `SECURITY.md`.
+
+The rest of this file is about the diarizer, which is the one with a
+non-trivial interface.
+
+## Diarizer
 
 The CLI wraps [FluidAudio](https://github.com/FluidInference/FluidAudio)'s `OfflineDiarizerManager` (VAD → speaker embeddings → clustering, all via Core ML on the Apple Neural Engine) behind a tiny argv interface so the Tauri Rust shell can invoke it the same way it invokes any other sidecar.
 
