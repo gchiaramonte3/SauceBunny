@@ -1927,6 +1927,18 @@ export default function App() {
     const staleClip = jobIdRef.current;
     if (staleClip) invoke("cancel_job", { jobId: staleClip }).catch(() => { /* best-effort */ });
     setJobId(null);
+    // Settle the queue runner too, for the same reason as the two resolvers
+    // above - and this one was missed. A queued WEB item's promise is resolved
+    // only by `clip-done` reaching queueResolverRef, so cancelling the job it
+    // was waiting on left the runner awaiting a resolver that nothing would
+    // ever call: the export queue stopped, mid-run, with no error and no way
+    // to restart it short of relaunching. Loading a different source while a
+    // queue is running is an ordinary thing to do, and nothing prevents it.
+    if (queueResolverRef.current) {
+      const settle = queueResolverRef.current;
+      queueResolverRef.current = null;
+      settle({ success: false, error: "Cancelled - a different source was loaded" });
+    }
   }, [resetWebPlayback]);
 
   // Moved ABOVE handleFetch deliberately. It used to sit ~1,500 lines below,
