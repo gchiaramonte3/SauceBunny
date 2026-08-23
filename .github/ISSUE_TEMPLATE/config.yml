@@ -1,0 +1,17 @@
+# The issue chooser is where people actually land — SECURITY.md is not.
+#
+# That file asks reporters not to open a public issue for a vulnerability, but
+# nothing led them to it: the two templates below were the whole chooser, so
+# someone with a security finding met "Bug report" first and had no reason to
+# look further. A policy that depends on reading a file nobody is pointed at
+# is a policy that gets bypassed politely.
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/gchiaramonte3/SauceBunny/security/advisories/new
+    about: Please do NOT open a public issue. Use private vulnerability reporting; see SECURITY.md for the threat model.
+
+# A Discussions link belonged here too, and is deliberately absent: the repo
+# does not have Discussions enabled, and a chooser entry pointing at a
+# disabled feature is a 404 offered to someone trying to be helpful. Turn it
+# on in Settings ▸ General ▸ Features first, then add the link.

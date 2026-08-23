@@ -1,8 +1,24 @@
 # CLAUDE.md — Sauce Bunny Project Constitution
 
-> Claude Code reads this file automatically on every session.
+> **This is the engineering guide, for people and for agents alike.** README
+> links here as "the project's engineering rules" and means it: the reasoning
+> below is written for whoever is about to change something, and roughly fifty
+> of its rules are enforced by a test rather than trusted (see the contract
+> register near the end). Claude Code happens to read it automatically on
+> every session, which is why it is named this — not because it is addressed
+> to a machine.
 > It is the single source of truth for how this codebase should be maintained, refactored, and extended.
-> Current revision: r156 (2026-07-28)
+> Current revision: r162 (2026-08-22)
+
+**On the `rNNN` markers.** They appear ~40 times across this file,
+ARCHITECTURE.md and CONTRIBUTING.md and are not a git tag, a release, or
+anything you can look up — they number the working sessions this codebase was
+built in. Their only job is to say *"this paragraph was written at a
+particular point, and the reasoning attached to it is from then"*, which is
+what lets a later entry say "r99 decided X, and here is why that is now
+wrong" instead of silently contradicting it. Ignore the numbers; read them as
+"an earlier pass" and "a later pass". Nothing depends on them and nothing
+should.
 
 ---
 
