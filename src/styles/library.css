@@ -1685,7 +1685,7 @@
   border-radius: var(--r-pill);
   background: var(--fg-4);
   opacity: 0;
-  transition: opacity 140ms var(--ease-out);
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 .cp-lib-coldiv:hover::after { opacity: 0.55; }
 .cp-lib-coldiv.dragging::after { opacity: 1; background: var(--fg-1); }

@@ -126,7 +126,7 @@
   height: 100%;
   border-radius: 2px;
   background: var(--accent);
-  transition: width 240ms ease-out;
+  transition: width var(--dur-base) ease-out;
 }
 .cp-transfer-cancel {
   background: none;
@@ -206,7 +206,7 @@
   font-variant-numeric: tabular-nums;
 }
 .cp-people-collapse { width: 22px; height: 22px; border: none; }
-.cp-people-collapse { transform: rotate(180deg); transition: transform 160ms var(--ease-out); }
+.cp-people-collapse { transform: rotate(180deg); transition: transform var(--dur-base) var(--ease-out); }
 .cp-people.spine .cp-people-collapse { transform: rotate(0deg); }
 .cp-people-list {
   flex: 1;

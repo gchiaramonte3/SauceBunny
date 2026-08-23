@@ -154,7 +154,7 @@
   letter-spacing: 0.04em;
   pointer-events: auto;
   cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
+  transition: color var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 
 .cp-stream-keep.is-action:hover {
@@ -196,7 +196,7 @@
   color: var(--fg-4);
 }
 .cp-tc-hud-value {
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 18px;
   font-weight: var(--weight-bold);
   letter-spacing: 0.03em;
@@ -1121,7 +1121,7 @@
   position: absolute;
   inset: 0;
   z-index: 6;
-  transition: opacity 110ms linear;
+  transition: opacity var(--dur-fast) linear;
 }
 .cp-annot.drawing { cursor: crosshair; transition: none; }
 .cp-annot-canvas {

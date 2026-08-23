@@ -223,9 +223,22 @@
 
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-  --dur-fast: 120ms;
-  --dur-base: 180ms;
-  --dur-slow: 280ms;
+  /* ── Motion (r162) ────────────────────────────────────────────────────
+     Five speeds, replacing 22 distinct transition durations. The eye reads
+     about three; twenty-two was nobody choosing, just each rule guessing.
+
+     TRANSITIONS use these. @keyframes timings do NOT - a spinner, a
+     shimmer and a marquee are each tuned to their own motion and a shared
+     token for them would mean nothing. Neither do the library hero's
+     ambient crossfades (450ms, 2500ms, 10s): those are atmosphere, not a
+     response to a click, and pulling them onto a 350ms ceiling would be a
+     redesign of the hero rather than a correction. */
+  --dur-instant: 80ms;   /* hover tints - the fastest thing that still reads */
+  --dur-fast:   120ms;   /* small state changes on a control */
+  --dur-base:   180ms;   /* the default: most things that move */
+  --dur-slow:   280ms;   /* something entering or leaving */
+  --dur-slower: 350ms;   /* panel and drawer travel */
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1); /* the app's overshoot */
 
   /* Shared side-panel collapse/expand slide. Both the left sidebar
      (.cp-sidebar) and the right drawer (.cp-queue-drawer) reference this so

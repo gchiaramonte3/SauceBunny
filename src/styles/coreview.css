@@ -376,7 +376,7 @@
   height: 100%;
   border-radius: 1.5px;
   opacity: 0.16;
-  transition: opacity 70ms linear;
+  transition: opacity var(--dur-instant) linear;
 }
 .cp-gr-meter-bar.zone-green  { background: var(--success); }
 .cp-gr-meter-bar.zone-yellow { background: var(--color-warning); }

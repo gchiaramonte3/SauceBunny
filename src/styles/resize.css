@@ -27,7 +27,7 @@
   pointer-events: none;
   border-radius: var(--r-pill);
   opacity: 0;
-  transition: opacity 140ms var(--ease-out);
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 
 /* Vertical rail — spans top↔bottom, drag changes a width. */

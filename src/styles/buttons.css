@@ -288,7 +288,7 @@
     color-mix(in srgb, var(--novella-violet) 16%, transparent) 76%,
     color-mix(in srgb, var(--novella-violet) 32%, transparent) 100%
   );
-  transition: opacity 0.35s var(--ease-out);
+  transition: opacity var(--dur-slower) var(--ease-out);
 }
 .cp-gen-btn:hover:not(:disabled)::before { opacity: 1; }
 .cp-gen-btn:disabled:not(.loading)::before { opacity: 0.25; }
@@ -308,7 +308,7 @@
     rgba(var(--accent-rgb), 0.55),
     rgba(var(--accent-rgb), 0) 24%
   );
-  transition: opacity 0.35s var(--ease-out);
+  transition: opacity var(--dur-slower) var(--ease-out);
 }
 .cp-gen-btn:hover:not(:disabled) {
   border-color: rgba(var(--accent-rgb), 0.45);
@@ -421,7 +421,7 @@
     color-mix(in srgb, var(--novella-violet) 14%, transparent) 100%
   );
   box-shadow: inset -1px 0 8px rgba(var(--accent-rgb), 0.35);
-  transition: width 0.35s var(--ease-out);
+  transition: width var(--dur-slower) var(--ease-out);
 }
 
 /* Sparkles — three of them, each on its own clock. */
@@ -432,7 +432,7 @@
   z-index: 2;
   overflow: visible;
   color: var(--fg-2);
-  transition: color 0.35s var(--ease-out);
+  transition: color var(--dur-slower) var(--ease-out);
 }
 .cp-gen-btn:hover:not(:disabled) .cp-gen-svg,
 .cp-gen-btn.loading .cp-gen-svg {
@@ -472,7 +472,7 @@
   justify-content: center;
   min-height: 1.2em;
 }
-.cp-gen-idle { transition: opacity 0.3s var(--ease-out); }
+.cp-gen-idle { transition: opacity var(--dur-slow) var(--ease-out); }
 .cp-gen-load {
   position: absolute;
   inset: 0;
@@ -480,7 +480,7 @@
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transition: opacity 0.3s var(--ease-out);
+  transition: opacity var(--dur-slow) var(--ease-out);
 }
 .cp-gen-btn.loading .cp-gen-idle { opacity: 0; }
 .cp-gen-btn.loading .cp-gen-load { opacity: 1; }
@@ -605,7 +605,7 @@
   font-family: var(--font-ui);
   font-size: 12.5px;
   font-weight: var(--weight-bold);
-  transition: opacity 0.3s var(--ease-out);
+  transition: opacity var(--dur-slow) var(--ease-out);
 }
 .cp-gen-btn[data-phase="error"] .cp-gen-result { color: var(--danger); }
 .cp-gen-btn[data-phase="success"] .cp-gen-result,

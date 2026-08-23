@@ -116,7 +116,7 @@
   padding: 8px 12px;
   cursor: pointer;
   border-left: 2px solid transparent;
-  transition: background 80ms ease;
+  transition: background var(--dur-instant) ease;
 }
 .cp-tx-history-row:hover { background: rgba(255, 255, 255, 0.04); }
 .cp-tx-history-row.active {
@@ -415,7 +415,8 @@
 }
 .cp-tx-jump {
   font-size: 10px;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   color: var(--fg-4);
   background: transparent;
   border: none;
@@ -483,7 +484,7 @@
    intent gate so skimming the prose doesn't flicker blocks; reduced
    motion swaps instantly. */
 .cp-tx-cue {
-  transition: background 100ms var(--ease-out), box-shadow 100ms var(--ease-out);
+  transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 .cp-tx-cue:hover {
   transition-delay: 150ms;
@@ -618,7 +619,7 @@
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
   color: var(--fg-1);
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 13px;
   letter-spacing: 0.02em;
@@ -663,7 +664,7 @@
 
 /* Renamed speaker chip — subtle outline so the user can see at a glance
    which speakers they've customised vs the model defaults. */
-.cp-tx-speaker { cursor: pointer; transition: transform 80ms ease, box-shadow 80ms ease; }
+.cp-tx-speaker { cursor: pointer; transition: transform var(--dur-instant) ease, box-shadow var(--dur-instant) ease; }
 .cp-tx-speaker:hover { transform: scale(1.05); }
 .cp-tx-speaker.renamed {
   box-shadow: 0 0 0 2px var(--bg-0), 0 0 0 3px var(--fg-4);
@@ -866,7 +867,8 @@
 .cp-folder-path {
   flex: 1;
   min-width: 0;
-  font: 12px var(--font-mono, ui-monospace, monospace);
+  font: 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
   color: var(--fg-2);
   white-space: nowrap;
   overflow: hidden;
@@ -984,7 +986,7 @@
 }
 .cp-phase-track .step {
   opacity: 0.45;
-  transition: opacity 120ms ease, color 120ms ease;
+  transition: opacity var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 .cp-phase-track .step.done {
   opacity: 1;
@@ -1434,7 +1436,7 @@
   border: none;
   padding: 0;
   cursor: pointer;
-  transition: transform 90ms ease, box-shadow 120ms ease;
+  transition: transform var(--dur-instant) ease, box-shadow var(--dur-fast) ease;
 }
 .cp-spk-pip-btn:hover {
   transform: scale(1.18);
@@ -1924,7 +1926,7 @@
 .cp-tx-group-line.live { background: rgba(255,255,255,0.07); }
 .cp-tx-group-tc {
   flex-shrink: 0;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 10px;
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;

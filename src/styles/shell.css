@@ -678,7 +678,7 @@
 }
 .cp-reader-clock {
   margin-left: auto;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
   color: var(--fg-3);

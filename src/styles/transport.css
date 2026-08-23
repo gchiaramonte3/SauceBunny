@@ -205,7 +205,7 @@
   opacity: 0.7;
   pointer-events: none;
   z-index: 2;
-  transition: left 200ms linear;
+  transition: left var(--dur-base) linear;
 }
 .cp-ghost-chip {
   position: absolute;
@@ -466,8 +466,8 @@
   border: 1px solid var(--bg-1);
   box-shadow: 0 0 6px color-mix(in srgb, var(--marker-color, var(--accent)) 60%, transparent);
   /* Grow/shrink glides instead of snapping (hover expands 11 → 26px). */
-  transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1),
-              height 220ms cubic-bezier(0.22, 1, 0.36, 1),
+  transition: width var(--dur-base) var(--ease-spring),
+              height 220ms var(--ease-spring),
               box-shadow 180ms ease-out;
   color: #1a1410;
   cursor: pointer;
@@ -479,9 +479,9 @@
   /* translate keeps the CENTRE pinned on the timecode as width/height grow. */
   transform: translate(-50%, -50%);
   /* ease-out-quint — quick, smooth, no bounce. */
-  transition: width 190ms cubic-bezier(0.22, 1, 0.36, 1),
-              height 190ms cubic-bezier(0.22, 1, 0.36, 1),
-              box-shadow 190ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: width var(--dur-base) var(--ease-spring),
+              height 190ms var(--ease-spring),
+              box-shadow 190ms var(--ease-spring);
   z-index: 3;
 }
 .cp-track-comment-ini {
@@ -492,7 +492,7 @@
   line-height: 1;
   letter-spacing: 0.02em;
   user-select: none;
-  transition: font-size 190ms cubic-bezier(0.22, 1, 0.36, 1), opacity 130ms ease-out 60ms;
+  transition: font-size var(--dur-base) var(--ease-spring), opacity var(--dur-fast) ease-out var(--dur-instant);
 }
 .cp-track-comment:hover {
   width: 26px; height: 26px;
@@ -548,7 +548,7 @@
   cursor: pointer;
   pointer-events: auto;
   z-index: 2;
-  transition: background 140ms ease-out, box-shadow 140ms ease-out;
+  transition: background var(--dur-fast) ease-out, box-shadow var(--dur-fast) ease-out;
 }
 .cp-track-comment-range::before,
 .cp-track-comment-range::after {

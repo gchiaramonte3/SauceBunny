@@ -465,7 +465,7 @@ body.cp-tab-dragging { cursor: grabbing; }
 /* Timeline-range click lands here: a brief lift so the eye finds the item. */
 .cp-queue-item.flash {
   background: var(--bg-5);
-  transition: background 200ms var(--ease-out);
+  transition: background var(--dur-base) var(--ease-out);
 }
 
 /* Reduced motion. Transitions here are stopped by DURATION, never by
