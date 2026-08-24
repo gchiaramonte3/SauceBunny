@@ -290,3 +290,33 @@ right bar. Recorded so this is a decision rather than an omission.
 - **A clippy run that reports zero twice in a row proves nothing** — the second
   is cached and re-emits no diagnostics for an unchanged crate. Every baseline
   in this pass was taken after `touch src/lib.rs` or `cargo clean -p`.
+
+## Web collections: the four calls behind the store (2026-08-24)
+
+The parity audit ended in product questions and the user's directive ("give
+the user the ability to organize everything") answered the WHETHER. The HOW is
+these four decisions, each the audit's own recommendation:
+
+- **Organisation is virtual and keyed by raw URL.** Moving a web item never
+  moves its cached file: a copy moved out of `saucebunny-media/` severs
+  `find_cached_download`, goes cold on the warm start, and orphans the LRU
+  cap. Raw URL over the canonical hash because every satellite store
+  (recents, posters, transcript history, review docs) already keys on it, and
+  the canonicaliser exists only in Rust.
+- **Documents-class, one file.** `~/Documents/Sauce Bunny/Collections/
+  collections.json` beside Casts and Reviews. Cache-class would be destroyed
+  by Forget/cap/Clear-all; localStorage is DATA-MODEL.md's named F2 hole.
+- **Web-only for now.** A unified collections concept spanning local files
+  would duplicate what real directories already do for them, and every
+  path-verb would need a URL story. Revisit only if mixed groups are asked
+  for.
+- **Membership survives a cache forget.** Pruning the cache must not silently
+  edit curation; the pane renders what it can and says how many clips are
+  waiting to be re-fetched.
+
+Also chosen, smaller: collections fold ABOVE the site shelves and a filed
+clip leaves its site shelf (it has been filed - showing it twice would read
+as search results); the LIST view stays flat because Site is a column there;
+no colours on web items (real Finder tags need real paths, and a lookalike
+that Finder cannot see would break the app's "real macOS tags" promise); no
+batch forget from a selection until the summed-size confirm exists.

@@ -192,14 +192,15 @@ describe("every file store consults the version it writes", () => {
     ).toEqual([]);
   });
 
-  it("covers the four stores that exist today, so the sweep is not vacuous", () => {
+  it("covers the five stores that exist today, so the sweep is not vacuous", () => {
     const dir = new URL(".", import.meta.url).pathname;
     const wired = readdirSync(dir).filter(
       (n) => n.endsWith(".ts") && !n.includes(".test.") && n !== "store-schema.ts"
         && readFileSync(join(dir, n), "utf8").includes("futureVersionIn"),
     );
     expect(wired.sort()).toEqual([
-      "cast-store.ts", "review-store.ts", "screening-store.ts", "transcript-project-store.ts",
+      "cast-store.ts", "review-store.ts", "screening-store.ts",
+      "transcript-project-store.ts", "web-collection-store.ts",
     ]);
   });
 });

@@ -2,6 +2,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { CachedWebPane } from "./CachedWebPane";
+import { __resetWebCollectionStore } from "../lib/web-collection-store";
 
 const h = vi.hoisted(() => ({ calls: [] as Array<[string, unknown]>, items: [] as unknown[] }));
 vi.mock("@tauri-apps/api/core", () => ({
@@ -167,5 +168,89 @@ describe("CachedWebPane browser parity", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("web collections (organize everything)", () => {
+  beforeEach(() => {
+    h.calls = []; h.items = []; document.body.innerHTML = "";
+    localStorage.clear();
+    __resetWebCollectionStore();
+  });
+
+  const fireEvent = async () => (await import("@testing-library/react")).fireEvent;
+
+  it("filing a clip creates the fold and removes it from its site shelf", async () => {
+    h.items = [
+      item({ url: "https://youtube.com/watch?v=a", title: "Keeper" }),
+      item({ url: "https://youtube.com/watch?v=b", title: "Other" }),
+    ];
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findByText("Keeper");
+
+    // Open the card's + menu and create a collection through its inline form.
+    const fe = await fireEvent();
+    screen.getAllByRole("button", { name: "Add to a collection" })[0].click();
+    const nameBox = await screen.findByLabelText("New collection name");
+    fe.change(nameBox, { target: { value: "Selects" } });
+    fe.submit(nameBox.closest("form")!);
+
+    // The fold appears above the site shelves, holding the filed clip...
+    await screen.findByText("Selects");
+    const shelves = [...document.querySelectorAll(".cp-web-shelf")];
+    expect(shelves[0].className).toContain("collection");
+    expect(shelves[0].textContent).toContain("Keeper");
+    // ...and the site shelf keeps only the unfiled one.
+    const site = shelves.find((el) => !el.className.includes("collection"))!;
+    expect(site.textContent).toContain("Other");
+    expect(site.textContent).not.toContain("Keeper");
+  });
+
+  it("unchecking the collection puts the clip back on its site shelf", async () => {
+    h.items = [item({ url: "https://youtube.com/watch?v=a", title: "Keeper" })];
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findByText("Keeper");
+    const fe = await fireEvent();
+    screen.getAllByRole("button", { name: "Add to a collection" })[0].click();
+    const nameBox = await screen.findByLabelText("New collection name");
+    fe.change(nameBox, { target: { value: "Selects" } });
+    fe.submit(nameBox.closest("form")!);
+    await screen.findByText("Selects");
+
+    // Filing moved the card into the collection shelf, which unmounted the
+    // open menu with it - re-open from the card's new home and uncheck.
+    screen.getAllByRole("button", { name: "Add to a collection" })[0].click();
+    const check = (await screen.findByRole("checkbox")) as HTMLInputElement;
+    expect(check.checked).toBe(true);
+    fe.click(check);
+    await waitFor(() => {
+      const shelves = [...document.querySelectorAll(".cp-web-shelf")];
+      const site = shelves.find((el) => !el.className.includes("collection"))!;
+      expect(site.textContent).toContain("Keeper");
+    });
+    // The emptied collection stays, with its hint - curation is not deleted
+    // by unfiling its last clip.
+    expect(screen.getByText(/Use the \+ on any card/)).toBeTruthy();
+  });
+
+  it("deleting a collection is armed, and keeps the clips", async () => {
+    h.items = [item({ url: "https://youtube.com/watch?v=a", title: "Keeper" })];
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findByText("Keeper");
+    const fe = await fireEvent();
+    screen.getAllByRole("button", { name: "Add to a collection" })[0].click();
+    const nameBox = await screen.findByLabelText("New collection name");
+    fe.change(nameBox, { target: { value: "Selects" } });
+    fe.submit(nameBox.closest("form")!);
+    await screen.findByText("Selects");
+
+    const del = screen.getByRole("button", { name: "Delete the collection Selects" });
+    fe.click(del);
+    // First click arms; the collection is still there.
+    expect(screen.getByText("Selects")).toBeTruthy();
+    fe.click(screen.getByRole("button", { name: "Confirm deleting the collection Selects" }));
+    await waitFor(() => expect(screen.queryByText("Selects")).toBeNull());
+    // The clip returns to its site shelf - nothing was lost but the label.
+    expect(screen.getByText("Keeper")).toBeTruthy();
   });
 });

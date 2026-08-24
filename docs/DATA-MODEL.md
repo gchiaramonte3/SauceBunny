@@ -43,6 +43,8 @@ Reviews/
 Screenings/
   index.json               screeningId -> row
   <date>-<slug>-<hash>.json  one ScreeningDoc
+Collections/
+  collections.json         web-source collections (virtual, keyed by URL)
 ```
 
 `~/Movies/Sauce Bunny/` is the default export folder. The app writes finished
@@ -111,6 +113,7 @@ Not all of these are preferences. Sorted by what losing them would cost:
 | Queued clip | queue item id | `localStorage.clipQueue` | `storage.ts` |
 | In/out marks | source `pathKey` | `localStorage.sourceMarks` | `source-marks.ts` |
 | API key / TURN password | provider name | Keychain | `cloud_ai.rs` |
+| Web collection | generated id; members keyed by raw URL | `Collections/collections.json` | `web-collection-store.ts` |
 
 **The directories are the truth about what a project is.** `projects.json`
 only decorates them; `reconcileProjects` re-derives the list from disk on

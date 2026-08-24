@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   filterCachedWeb, groupBySite, siteName, sortCachedWeb, type CachedWebItem,
@@ -8,6 +8,11 @@ import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { secondsToClock } from "../lib/timecode";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
 import { WebListRows } from "./WebListRows";
+import { WebCollectionMenu } from "./WebCollectionMenu";
+import {
+  deleteWebCollection, flushWebCollections, getWebCollections, hydrateWebCollections,
+  subscribeWebCollections, type WebCollection,
+} from "../lib/web-collection-store";
 import { IconCircleX, IconDownload, IconLink } from "./Icons";
 
 /** View prefs for the web pane, persisted separately from the folder pane's:
@@ -99,6 +104,14 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
       .catch(() => setItems([]));
   }, []);
   useEffect(load, [load]);
+  // Collections hydrate once (idempotent, latched); the store notifies this
+  // subscription for every membership change.
+  useEffect(() => { void hydrateWebCollections(); }, []);
+  // Unmount = leaving the web view; push the debounced write out so the last
+  // 400ms of curation is not lost to a quick tab switch (CastShelf's rule).
+  useEffect(() => () => { void flushWebCollections(); }, []);
+  const collections = useSyncExternalStore(subscribeWebCollections, getWebCollections);
+  const [armedCollection, setArmedCollection] = useState<string | null>(null);
 
   // A confirm step, but only where there is something to lose. CLAUDE.md's
   // co-review rule is that a multi-GB consequence gets named in the control
@@ -142,65 +155,32 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
   // tables would repeat the header four times down the page.
   const filtered = filterCachedWeb(items, needle);
   const sortedFlat = sortCachedWeb(filtered, prefs.sort, prefs.dir);
+  // A collected item leaves its site shelf - it has been FILED, and showing
+  // it twice would make the fold read as a search result rather than an
+  // organisation. A collection may hold URLs the cache has since forgotten;
+  // those simply have nothing to render until the source is fetched again.
+  // Search and the list view ignore the fold entirely and stay flat.
+  const byUrl = new Map(items.map((i) => [i.url, i]));
+  const collected = new Set(collections.flatMap((c) => c.urls));
+  const collectionGroups: { collection: WebCollection; items: CachedWebItem[] }[] =
+    prefs.view === "grid" && !needle
+      ? collections.map((c) => ({
+          collection: c,
+          items: sortCachedWeb(
+            c.urls.map((u) => byUrl.get(u)).filter((i): i is CachedWebItem => !!i),
+            prefs.sort, prefs.dir,
+          ),
+        }))
+      : [];
+  const unfiled = prefs.view === "grid" && !needle
+    ? items.filter((i) => !collected.has(i.url))
+    : items;
   const groups = prefs.view === "list"
     ? (sortedFlat.length ? [{ site: "", items: sortedFlat }] : [])
     : needle
       ? (filtered.length ? [{ site: "Results", items: sortedFlat }] : [])
-      : groupBySite(items).map((g) => ({ site: g.site, items: sortCachedWeb(g.items, prefs.sort, prefs.dir) }));
-  const withCopy = items.filter((i) => i.path).length;
-  const bytes = items.reduce((n, i) => n + (i.size_bytes ?? 0), 0);
-
-  return (
-    <div className="cp-web-view">
-      <LibraryBrowserBar
-        chain={null}
-        onCrumb={() => { /* location is fixed; the crumb slot shows it */ }}
-        location="From the web"
-        dateLabel="Date fetched"
-        searchLabel="Search cached clips"
-        query={query}
-        onQuery={setQuery}
-        sort={prefs.sort}
-        dir={prefs.dir}
-        view={prefs.view}
-        onPrefs={patchPrefs}
-        treeOpen={treeOpen}
-        onShowTree={onShowTree}
-      />
-      <div className="cp-web-pane">
-      <div className="cp-web-summary">
-        {items.length} cached · {withCopy} downloaded
-        {bytes > 0 ? ` · ${formatBytes(bytes)} on disk` : ""}
-      </div>
-      {needle && groups.length === 0 && (
-        <div className="cp-web-empty">Nothing cached matches "{needle.trim()}".</div>
-      )}
-      {groups.map((g) => (
-        <section key={g.site || "list"} className="cp-web-shelf">
-          {g.site !== "" && (
-            <h3 className="cp-web-shelf-head">
-              {g.site}
-              <span className="cp-web-count">{g.items.length}</span>
-            </h3>
-          )}
-          {prefs.view === "list" ? (
-            <WebListRows
-              items={g.items}
-              sort={prefs.sort}
-              dir={prefs.dir}
-              onSort={onSort}
-              armedUrl={armed}
-              onOpenUrl={onOpenUrl}
-              onForget={(url) => {
-                const it = g.items.find((x) => x.url === url);
-                if (!it?.path) { forget(url); return; }
-                if (armed === url) { setArmed(null); forget(url); return; }
-                setArmed(url);
-              }}
-            />
-          ) : (
-          <ul className="cp-web-grid">
-            {g.items.map((it) => {
+      : groupBySite(unfiled).map((g) => ({ site: g.site, items: sortCachedWeb(g.items, prefs.sort, prefs.dir) }));
+  const webCard = (it: CachedWebItem) => {
               const isArmed = armed === it.url;
               const size = it.size_bytes ? formatBytes(it.size_bytes) : "the copy";
               return (
@@ -233,6 +213,7 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
                     {it.size_bytes ? ` · ${formatBytes(it.size_bytes)}` : ""}
                   </span>
                 </button>
+                <WebCollectionMenu url={it.url} />
                 <button
                   type="button"
                   className={"cp-web-forget" + (isArmed ? " armed" : "")}
@@ -255,8 +236,96 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
                     : <IconCircleX size={13} />}
                 </button>
               </li>
-              );
-            })}
+              );};
+
+  const withCopy = items.filter((i) => i.path).length;
+  const bytes = items.reduce((n, i) => n + (i.size_bytes ?? 0), 0);
+
+  return (
+    <div className="cp-web-view">
+      <LibraryBrowserBar
+        chain={null}
+        onCrumb={() => { /* location is fixed; the crumb slot shows it */ }}
+        location="From the web"
+        dateLabel="Date fetched"
+        searchLabel="Search cached clips"
+        query={query}
+        onQuery={setQuery}
+        sort={prefs.sort}
+        dir={prefs.dir}
+        view={prefs.view}
+        onPrefs={patchPrefs}
+        treeOpen={treeOpen}
+        onShowTree={onShowTree}
+      />
+      <div className="cp-web-pane">
+      <div className="cp-web-summary">
+        {items.length} cached · {withCopy} downloaded
+        {bytes > 0 ? ` · ${formatBytes(bytes)} on disk` : ""}
+      </div>
+      {needle && groups.length === 0 && (
+        <div className="cp-web-empty">Nothing cached matches "{needle.trim()}".</div>
+      )}
+      {collectionGroups.map(({ collection: c, items: cItems }) => {
+        const missing = c.urls.length - cItems.length;
+        const colArmed = armedCollection === c.id;
+        return (
+          <section key={"col-" + c.id} className="cp-web-shelf collection">
+            <h3 className="cp-web-shelf-head">
+              {c.name}
+              <span className="cp-web-count">{cItems.length}</span>
+              <button
+                type="button"
+                className={"cp-web-col-delete" + (colArmed ? " armed" : "")}
+                title="Delete this collection. The clips and their files stay."
+                aria-label={colArmed
+                  ? `Confirm deleting the collection ${c.name}`
+                  : `Delete the collection ${c.name}`}
+                onClick={() => {
+                  if (colArmed) { setArmedCollection(null); deleteWebCollection(c.id); }
+                  else setArmedCollection(c.id);
+                }}
+              >
+                {colArmed ? "Delete collection" : "×"}
+              </button>
+            </h3>
+            {cItems.length === 0 && (
+              <div className="cp-web-shelf-note">
+                {missing > 0
+                  ? `${missing} ${missing === 1 ? "clip is" : "clips are"} no longer in the cache. Fetch ${missing === 1 ? "it" : "one"} again and it will reappear here.`
+                  : "Empty. Use the + on any card to file clips here."}
+              </div>
+            )}
+            <ul className="cp-web-grid">{cItems.map(webCard)}</ul>
+          </section>
+        );
+      })}
+      {groups.map((g) => (
+        <section key={g.site || "list"} className="cp-web-shelf">
+          {g.site !== "" && (
+            <h3 className="cp-web-shelf-head">
+              {g.site}
+              <span className="cp-web-count">{g.items.length}</span>
+            </h3>
+          )}
+          {prefs.view === "list" ? (
+            <WebListRows
+              items={g.items}
+              sort={prefs.sort}
+              dir={prefs.dir}
+              onSort={onSort}
+              armedUrl={armed}
+              onOpenUrl={onOpenUrl}
+              onForget={(url) => {
+                const it = g.items.find((x) => x.url === url);
+                if (!it?.path) { forget(url); return; }
+                if (armed === url) { setArmed(null); forget(url); return; }
+                setArmed(url);
+              }}
+            />
+          ) : (
+          <ul className="cp-web-grid">
+            {g.items.map(webCard)}
           </ul>
           )}
         </section>
