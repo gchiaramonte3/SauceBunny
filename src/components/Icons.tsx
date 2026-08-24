@@ -252,17 +252,20 @@ export const IconMarkOut = (p: IconProps) => (
 // glyphs are holes in it. That is what "inverted" means here, and it is why
 // this cannot be three separate paths.
 //
-// Sized by looking at it, not by arithmetic. The glyph is 21 of the 24 box, so
-// putting it inside a plate costs height, and a knockout thinner than about
-// 1.3px at the 16px this renders at turns to mud on a non-retina display.
-// Uniform 0.78 with a 20.8-tall plate was the balance: tall like the two
+// Sized by looking at it, then CHECKED with arithmetic - because looking at
+// it is exactly what missed this the first time. The plate was placed at
+// y 3.6 with a height of 20.8, so it ran to 24.4: overflowing the 24
+// viewBox, clipped along the bottom, and centred at y 14 while the glyphs
+// inside it were centred at 12. That two-unit offset is what read as
+// top-heavy. Centred now (1.6..22.4), with 2.19 of padding left and right
+// and 2.21 above and below.
+// The 0.78 scale is still the balance it was chosen for: tall like the two
 // glyphs beside it (a squat wide plate reads as a different family) with a
-// slit thick enough to survive. Verified at true 1:1 in the real button
-// cluster, not at a zoom.
+// knockout thick enough to survive at the 16px this renders at.
 export const IconClearMarks = (p: IconProps) => (
   <Icon {...p}>
     <path
-      d="M6.5 3.6H17.5A3.5 3.5 0 0 1 21 7.1V20.900000000000002A3.5 3.5 0 0 1 17.5 24.400000000000002H6.5A3.5 3.5 0 0 1 3 20.900000000000002V7.1A3.5 3.5 0 0 1 6.5 3.6Z M8.9225 14.8473V19.1663C8.9225 19.7316 9.3808 20.19 9.9462 20.19C10.5117 20.19 10.97 19.7316 10.97 19.1663V13.8327L8.5637 12L10.97 10.1673V4.8337C10.97 4.2683 10.5117 3.81 9.9462 3.81C9.3808 3.81 8.9225 4.2683 8.9225 4.8337V9.1527L5.1862 12L8.9225 14.8473Z M15.0775 14.8473V19.1663C15.0775 19.7316 14.6192 20.19 14.0538 20.19C13.4883 20.19 13.03 19.7316 13.03 19.1663V13.8327L15.4363 12L13.03 10.1673V4.8337C13.03 4.2683 13.4883 3.81 14.0538 3.81C14.6192 3.81 15.0775 4.2683 15.0775 4.8337V9.1527L18.8138 12L15.0775 14.8473Z"
+      d="M6.5 1.6H17.5A3.5 3.5 0 0 1 21 5.1V18.9A3.5 3.5 0 0 1 17.5 22.4H6.5A3.5 3.5 0 0 1 3 18.9V5.1A3.5 3.5 0 0 1 6.5 1.6Z M8.9225 14.8473V19.1663C8.9225 19.7316 9.3808 20.19 9.9462 20.19C10.5117 20.19 10.97 19.7316 10.97 19.1663V13.8327L8.5637 12L10.97 10.1673V4.8337C10.97 4.2683 10.5117 3.81 9.9462 3.81C9.3808 3.81 8.9225 4.2683 8.9225 4.8337V9.1527L5.1862 12L8.9225 14.8473Z M15.0775 14.8473V19.1663C15.0775 19.7316 14.6192 20.19 14.0538 20.19C13.4883 20.19 13.03 19.7316 13.03 19.1663V13.8327L15.4363 12L13.03 10.1673V4.8337C13.03 4.2683 13.4883 3.81 14.0538 3.81C14.6192 3.81 15.0775 4.2683 15.0775 4.8337V9.1527L18.8138 12L15.0775 14.8473Z"
       fill="currentColor"
       stroke="none"
       fillRule="evenodd"

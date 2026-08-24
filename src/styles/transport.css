@@ -309,12 +309,18 @@
   background: rgba(var(--marker-rgb), 0.32);
   backdrop-filter: brightness(0.45) saturate(1.15);
   -webkit-backdrop-filter: brightness(0.45) saturate(1.15);
+  /* Closed, for the same reason as the queued band below: coloured sides
+     with nothing across the top and bottom reads as a cropped band. The
+     top and bottom are lighter than the sides here because the sides are
+     where the marks themselves are. */
+  border-top: 1px solid color-mix(in srgb, var(--marker) 70%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--marker) 70%, transparent);
   border-left: 2px solid var(--marker);
   border-right: 2px solid var(--marker);
   /* Kept, but halved: these were edge-lighting a band that used to be
      brighter than the strip. Over a dimmed band the old values read as two
      stray bright lines rather than as an edge. */
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 0 -1px 0 rgba(255,255,255,0.07);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), inset 0 -1px 0 rgba(255,255,255,0.10);
   z-index: 2;
 }
 /* Chevron wings on the selection edges — the same glyph as the transport's
@@ -361,6 +367,12 @@
   top: 0; bottom: 0;
   --range-c: var(--gold);
   background: color-mix(in srgb, var(--range-c) 18%, transparent);
+  /* A CLOSED box. This had a bottom border, two side posts and no top at
+     all, which did not read as a deliberate underline - it read as a band
+     whose top had been cropped off, and it was the same on every range in
+     the app. All four edges now, the sides staying softer than the top and
+     bottom so the range still reads as horizontal. */
+  border-top: 2px solid var(--range-c);
   border-bottom: 2px solid var(--range-c);
   border-left: 2px solid color-mix(in srgb, var(--range-c) 70%, transparent);
   border-right: 2px solid color-mix(in srgb, var(--range-c) 70%, transparent);

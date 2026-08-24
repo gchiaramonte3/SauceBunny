@@ -612,6 +612,11 @@
   position: absolute;
   top: 0; bottom: 0;
   background: color-mix(in srgb, var(--marker) 30%, transparent);
+  /* Closed like the Clip timeline's bands. This bar is only 5px tall, so
+     the top and bottom edges are hairlines - enough to shut the shape
+     without swallowing the fill. */
+  border-top: 1px solid color-mix(in srgb, var(--marker) 60%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--marker) 60%, transparent);
   border-left: 1px solid var(--marker);
   border-right: 1px solid var(--marker);
   pointer-events: none;
