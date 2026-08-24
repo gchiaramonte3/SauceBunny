@@ -2263,3 +2263,12 @@
   border-color: var(--fg-2);
   background: var(--bg-3);
 }
+
+/* A collection shelf under a dragged clip. A collection is a TAG rather than
+   a directory, so the drop ADDS membership and nothing is taken out of
+   wherever it already sits. */
+.cp-web-shelf.collection.dropping {
+  outline: 1px solid var(--fg-2);
+  outline-offset: 4px;
+  border-radius: var(--r-md);
+}

@@ -11,11 +11,11 @@ import { LibraryCard } from "./LibraryCard";
 import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { useGridSelection } from "../hooks/use-grid-selection";
 import { useMarquee } from "../hooks/use-marquee";
+import { useCardDrag } from "../hooks/use-card-drag";
 import { WebListRows } from "./WebListRows";
 import { WebCollectionMenu } from "./WebCollectionMenu";
 import {
-  deleteWebCollection, flushWebCollections, getWebCollections, hydrateWebCollections,
-  subscribeWebCollections, type WebCollection,
+  addToWebCollection, deleteWebCollection, flushWebCollections, getWebCollections, hydrateWebCollections, subscribeWebCollections, type WebCollection,
 } from "../lib/web-collection-store";
 
 /** View prefs for the web pane, persisted separately from the folder pane's:
@@ -242,6 +242,21 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
     onSelect: grid.onMarquee,
     onEnd: grid.onMarqueeEnd,
   });
+  // A collection is a TAG, not a directory: a clip may belong to several at
+  // once, so a drop ADDS membership rather than moving anything, and nothing
+  // leaves the collection it was already in. That is the same promise the
+  // card's + menu makes with its checkboxes.
+  const cardDrag = useCardDrag({
+    itemSelector: ".cp-lib-card",
+    targetSelector: ".cp-web-shelf.collection",
+    targetAttr: "data-drop",
+    pathsFor: (url) => (grid.selected.has(url) ? grid.selectedPaths : [url]),
+    onDrop: (id, urls) => {
+      for (const u of urls) addToWebCollection(id, u);
+      grid.clear();
+    },
+  });
+
   const band = marquee.band && (
     <div
       className="cp-lib-marquee"
@@ -302,8 +317,23 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
         className="cp-web-pane"
         onClick={(e) => { if (!marquee.dragging() && e.target === e.currentTarget) grid.clear(); }}
         {...marquee.handlers}
+        onPointerDown={(e) => { marquee.handlers.onPointerDown(e); cardDrag.handlers.onPointerDown(e); }}
+        onPointerMove={(e) => { marquee.handlers.onPointerMove(e); cardDrag.handlers.onPointerMove(e); }}
+        onPointerUp={() => { marquee.handlers.onPointerUp(); cardDrag.handlers.onPointerUp(); }}
+        onPointerCancel={() => { marquee.handlers.onPointerCancel(); cardDrag.handlers.onPointerCancel(); }}
+        onClickCapture={cardDrag.handlers.onClickCapture}
       >
       {band}
+      {cardDrag.drag && (
+        <div
+          className="cp-card-ghost"
+          aria-hidden="true"
+          style={{ left: cardDrag.drag.x, top: cardDrag.drag.y }}
+        >
+          {cardDrag.drag.paths.length}
+          {cardDrag.drag.paths.length === 1 ? " clip" : " clips"}
+        </div>
+      )}
       <div className="cp-web-summary">
         {all.length} cached · {withCopy} downloaded
         {bytes > 0 ? ` · ${formatBytes(bytes)} on disk` : ""}
@@ -315,7 +345,11 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
         const missing = c.urls.length - cItems.length;
         const colArmed = armedCollection === c.id;
         return (
-          <section key={"col-" + c.id} className="cp-web-shelf collection">
+          <section
+            key={"col-" + c.id}
+            className={"cp-web-shelf collection" + (cardDrag.drag?.over === c.id ? " dropping" : "")}
+            data-drop={c.id}
+          >
             <h3 className="cp-web-shelf-head">
               {c.name}
               <span className="cp-web-count">{cItems.length}</span>
