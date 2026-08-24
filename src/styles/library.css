@@ -2232,3 +2232,34 @@
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45.0%, transparent);
 }
+
+/* ── Dragging cards onto a folder ────────────────────────────────────────────
+   Pointer-driven rather than HTML5 drag-and-drop: the app needs Tauri's OS
+   drag handler for importing files from Finder, and pointer events do not go
+   near that layer. See use-card-drag.ts. */
+.cp-card-ghost {
+  position: fixed;
+  z-index: var(--z-overlay);
+  /* Offset from the pointer so it never covers the tile being aimed at, and
+     never becomes its own elementFromPoint hit. */
+  transform: translate(14px, 14px);
+  pointer-events: none;
+  padding: 5px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  background: var(--bg-3);
+  box-shadow: var(--shadow-card);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
+  color: var(--fg-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* The tile under the pointer. Brightening the existing outline, never the
+   green accent - the focus contract's rule, for the same reason: accent
+   means "this is on", not "this is where it lands". */
+.cp-lib-card.cp-lib-foldercard.dropping {
+  border-color: var(--fg-2);
+  background: var(--bg-3);
+}

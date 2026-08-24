@@ -222,7 +222,13 @@ export function tauriMockInit(expectedBuildId: string): void {
 
   // Test-only hook: emit a Tauri event into the app exactly the way the Rust
   // side would (the handler receives the { event, id, payload } envelope).
+  // Every invoke, in order, so a spec can assert what the UI actually asked
+  // the backend to do. Reading a command's ARGUMENTS is the only way to tell
+  // "the drop filed these three frames into Selects" from "something moved".
+  const invoked: { cmd: string; args: unknown }[] = [];
+
   (window as unknown as Record<string, unknown>).__TAURI_MOCK__ = {
+    invoked: () => invoked,
     emitTauriEvent: (event: string, payload: unknown) => {
       for (const id of listeners.get(event) ?? []) {
         callbacks.get(id)?.({ event, id, payload });
@@ -232,6 +238,9 @@ export function tauriMockInit(expectedBuildId: string): void {
 
   (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
     invoke: (cmd: string, args?: unknown) => {
+      if (cmd !== "plugin:event|listen" && cmd !== "plugin:event|unlisten") {
+        invoked.push({ cmd, args });
+      }
       if (cmd === "plugin:event|listen") {
         const a = args as { event: string; handler: number };
         let set = listeners.get(a.event);

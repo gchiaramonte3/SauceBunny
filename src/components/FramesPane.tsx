@@ -14,6 +14,7 @@ import { FrameMoveDialog } from "./FrameMoveDialog";
 import { FramePreview, revealFrame } from "./FramePreview";
 import { useGridSelection } from "../hooks/use-grid-selection";
 import { useMarquee } from "../hooks/use-marquee";
+import { useCardDrag } from "../hooks/use-card-drag";
 import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { IconPlus } from "./Icons";
 import { FrameListRows } from "./FrameListRows";
@@ -119,6 +120,17 @@ export function FramesPane({ treeOpen, onShowTree }: {
     return () => window.clearTimeout(id);
   }, [query]);
 
+  /** File a set of frames into a folder, then re-read the shelf. */
+  const moveMany = useCallback(async (dest: string, paths: readonly string[]) => {
+    for (const path of paths) {
+      // The command takes the frame's NAME-with-folder, the same relative
+      // form list_frames reports, so pass what the item carries.
+      try { await invoke("move_frame_to_folder", { path, dest }); }
+      catch { /* one refusal must not abandon the rest of the batch */ }
+    }
+    load();
+  }, [load]);
+
   const remove = useCallback((path: string) => {
     setPreview((p) => (p === path ? null : p));
     // Optimistic: the card goes now, because the disk work is one unlink and
@@ -173,6 +185,19 @@ export function FramesPane({ treeOpen, onShowTree }: {
     onSelect: grid.onMarquee,
     onEnd: grid.onMarqueeEnd,
   });
+  const cardDrag = useCardDrag({
+    itemSelector: ".cp-lib-card:not(.cp-lib-foldercard)",
+    targetSelector: ".cp-lib-foldercard",
+    targetAttr: "data-drop",
+    // Finder's rule: dragging a card that is part of the selection drags the
+    // whole selection; dragging one outside it drags only that one.
+    pathsFor: (path) => (grid.selected.has(path) ? grid.selectedPaths : [path]),
+    onDrop: (dest, paths) => {
+      void moveMany(dest, paths);
+      grid.clear();
+    },
+  });
+
   const band = marquee.band && (
     <div
       className="cp-lib-marquee"
@@ -262,6 +287,16 @@ export function FramesPane({ treeOpen, onShowTree }: {
         treeOpen={treeOpen}
         onShowTree={onShowTree}
       />
+      {cardDrag.drag && (
+        <div
+          className="cp-card-ghost"
+          aria-hidden="true"
+          style={{ left: cardDrag.drag.x, top: cardDrag.drag.y }}
+        >
+          {cardDrag.drag.paths.length}
+          {cardDrag.drag.paths.length === 1 ? " frame" : " frames"}
+        </div>
+      )}
       {preview && (
         <FramePreview
           items={shown}
@@ -300,6 +335,14 @@ export function FramesPane({ treeOpen, onShowTree }: {
         className="cp-web-pane"
         onClick={(e) => { if (!marquee.dragging() && e.target === e.currentTarget) grid.clear(); }}
         {...marquee.handlers}
+        // The two gestures do not overlap: the band starts only on blank
+        // space, the drag only on a card. Both need the same three pointer
+        // handlers, so they are composed rather than stacked.
+        onPointerDown={(e) => { marquee.handlers.onPointerDown(e); cardDrag.handlers.onPointerDown(e); }}
+        onPointerMove={(e) => { marquee.handlers.onPointerMove(e); cardDrag.handlers.onPointerMove(e); }}
+        onPointerUp={() => { marquee.handlers.onPointerUp(); cardDrag.handlers.onPointerUp(); }}
+        onPointerCancel={() => { marquee.handlers.onPointerCancel(); cardDrag.handlers.onPointerCancel(); }}
+        onClickCapture={cardDrag.handlers.onClickCapture}
       >
         {band}
         <div className="cp-web-summary">
@@ -348,6 +391,8 @@ export function FramesPane({ treeOpen, onShowTree }: {
                 // asset-URL wrapper rather than the video thumbnailer.
                 posterPaths={f.covers}
                 requestThumb={async (p) => assetUrl(p)}
+                dropKey={f.path}
+                dropActive={cardDrag.drag?.over === f.path}
                 onOpen={() => setOpen(f.path)}
               />
             ))}

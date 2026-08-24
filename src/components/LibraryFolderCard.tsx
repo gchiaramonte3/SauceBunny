@@ -11,6 +11,11 @@ type Props = {
   /** Drill in: LibraryView pushes this folder onto the breadcrumb chain. */
   onOpen: () => void;
   requestThumb: (path: string) => Promise<string | null>;
+  /** Makes this tile a drop container for dragged cards. The value is what
+   *  the drop handler receives - for frames, the folder's relative path. */
+  dropKey?: string;
+  /** A drag is currently over this tile. */
+  dropActive?: boolean;
 };
 
 /**
@@ -20,7 +25,7 @@ type Props = {
  * treatment cover both card kinds; audio-only folders keep the folder
  * glyph placeholder.
  */
-export function LibraryFolderCard({ name, count, posterPaths, onOpen, requestThumb }: Props) {
+export function LibraryFolderCard({ name, count, posterPaths, onOpen, requestThumb, dropKey, dropActive }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const urls = useLazyThumbnails(btnRef, posterPaths, requestThumb);
   // Poster URLs that failed to load (dead remote / evicted blob) — hide that
@@ -34,7 +39,8 @@ export function LibraryFolderCard({ name, count, posterPaths, onOpen, requestThu
       <button
         ref={btnRef}
         type="button"
-        className="cp-lib-card cp-lib-foldercard"
+        className={"cp-lib-card cp-lib-foldercard" + (dropActive ? " dropping" : "")}
+        data-drop={dropKey}
         onClick={onOpen}
         title={`${name} · ${items}`}
       >
