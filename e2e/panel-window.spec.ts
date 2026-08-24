@@ -128,3 +128,35 @@ test("a seeded snapshot reaches the UI without waiting for an event", async ({ p
   await expect(page.locator(".cp-panel-window-root")).toBeVisible();
   expect(noise, `console noise:\n${noise.join("\n")}`).toEqual([]);
 });
+
+/**
+ * The panel does not hydrate the review store, and this is why it is allowed
+ * not to.
+ *
+ * `main.tsx` skips `hydrateReviewStore` entirely in this window: reading
+ * index.json plus every review doc through a worker pool, with first paint
+ * racing it, for a store nothing here can ask about. That is only safe while
+ * the Review tab stays out of the panel, which QueueDrawer enforces three
+ * ways (tab list is `embedded ? [] : [review]`, an active "review" tab is
+ * redirected to "transcript", and the tick that selects it is a prop only App
+ * passes).
+ *
+ * If this test ever fails, the tab came back and the hydration has to come
+ * back with it, at the tab. `hydrateReviewStore` is idempotent and latched, so
+ * calling it from wherever the tab is mounted is enough.
+ */
+test("the panel offers no Review tab, which is what lets it skip review hydration", async ({ page }) => {
+  const noise: string[] = [];
+  await openPanel(page, noise);
+
+  const tabs = page.locator('[role="tab"]');
+  await expect(tabs.first()).toBeVisible();
+  const names = await tabs.allInnerTexts();
+  expect(
+    names.map((n) => n.trim().toLowerCase()),
+    "the panel grew a Review tab; main.tsx must hydrate the review store again",
+  ).not.toContain("review");
+
+  // And no review panel body was mounted behind the scenes either.
+  await expect(page.locator("#cp-tabpanel-review")).toHaveCount(0);
+});

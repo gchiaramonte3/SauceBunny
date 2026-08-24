@@ -242,8 +242,36 @@ they have no per-record version, not because their shape is wrong.
 | **F1** | Schema version written but never read: a newer build's file is silently rewritten with its unknown fields stripped | **data loss** | **fixed** |
 | **F2** | Speaker renames, in/out marks, source timecodes and the export queue are work product living only in evictable `localStorage` | **data loss** | open, needs a product call |
 | F3 | `projects.json` `posterPath` and a review index entry have no defined behaviour when the target file is gone | silent drift | open |
-| F4 | `localStorage` is last-write-wins across two windows with nothing enforcing that they write disjoint keys | silent drift | open |
-| F5 | The panel window hydrates the whole review store at boot and never writes it | inefficiency | open |
+| F4 | `localStorage` is last-write-wins across two windows, coordinated by convention and one event rather than by anything enforced | silent drift | open |
+| F5 | The panel window hydrated the whole review store at boot for a store it cannot reach | inefficiency | **fixed** |
+
+### F4 is smaller than it first looked, and worth writing down
+
+The two windows do NOT write disjoint `localStorage` keys: `TranscriptViewer`
+renders in both, so both write `speakerNames.<path>` and `chapters.<key>`.
+That is coordinated, by the `saucebunny:speakers-changed` event which makes the
+other window re-read. It works. What is missing is enforcement: nothing fails
+if a third feature starts writing a shared key without an event, which is
+exactly how the casts cross-window clobber happened at the file layer. A test
+for this would have to reason about which components each window's tree
+mounts, so it is a real piece of work rather than a one-liner, and it is
+recorded here rather than half-built.
+
+### F5, for the record, was nearly a much worse finding
+
+`QueueDrawer` is what the panel renders, and it imports `ReviewPanel`, which
+calls `saveReview`. On that reading the panel is a second WRITER of review
+docs, and `review-store` has none of the merge-and-announce machinery that
+`cast-store` grew for exactly that situation. It would have been the same
+data-loss bug in a second store.
+
+It is not: the Review tab is dropped from the tab list when `embedded`, an
+active `"review"` tab is redirected to `"transcript"`, and the only thing that
+can select it is a prop App alone passes. Three barriers, one of them an
+explicit design decision. So the panel can neither read nor write a review,
+and hydrating one at boot was pure cost. `e2e/panel-window.spec.ts` now pins
+the tab's absence, because that absence is what makes skipping the hydration
+safe.
 
 ### F2 needs a decision, not a patch
 
