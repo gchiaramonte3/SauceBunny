@@ -375,6 +375,15 @@ pub fn run() {
             // non-fatal — worst case the user's cache is a bit larger.
             let handle = app.handle().clone();
             std::thread::spawn(move || {
+                // Layout migration FIRST: the sweep's scratch pass reads the
+                // new directory, and an old install has nothing there until
+                // this has run.
+                if let Ok(cache) = handle.path().app_cache_dir() {
+                    let moved = commands::migrate_cache_layout(&cache);
+                    if moved > 0 {
+                        eprintln!("[startup] tidied {moved} cache entries into the new layout");
+                    }
+                }
                 match commands::cleanup_stale_cache(handle) {
                     Ok(n) if n > 0 => eprintln!("[startup] swept {} stale cache files", n),
                     Ok(_) => {}

@@ -192,7 +192,89 @@ pub(crate) fn ensure_sidecars_executable(app: &AppHandle) -> usize {
 const CACHE_TTL_SECONDS: u64 = 24 * 60 * 60;
 
 /// Directory name of the sweep-exempt media cache under `app_cache_dir()`.
-pub(crate) const MEDIA_CACHE_DIRNAME: &str = "saucebunny-media";
+///
+/// The cache root used to be one organized subtree plus a flat pile of
+/// `saucebunny-`prefixed FILES, which is what a user saw on Reveal. Inside
+/// the app's own cache directory that prefix says nothing - the folder is
+/// already `…/Caches/com.saucebunny.desktop/` - so the layout is three
+/// named directories now:
+///
+///   app_cache_dir()/
+///     media/        downloads/ audio/ meta/   never swept, "download once"
+///     thumbnails/   poster JPEGs              never swept, Settings purges
+///     scratch/      job temps, prep copies,   swept at 24h
+///                   whisper wavs
+///
+/// `migrate_cache_layout` moves an old install over, once, at startup.
+pub(crate) const MEDIA_CACHE_DIRNAME: &str = "media";
+/// What the media cache was called before the layout tidy.
+const LEGACY_MEDIA_DIRNAME: &str = "saucebunny-media";
+pub(crate) const THUMBS_DIRNAME: &str = "thumbnails";
+pub(crate) const SCRATCH_DIRNAME: &str = "scratch";
+
+/// Where regenerable, job-scoped artifacts go.
+///
+/// ENSURES the directory, which is why it is not a pure join: its callers
+/// are spread across four modules and every one of them is about to write
+/// into the result, so a helper that only computed the path would need a
+/// matching `create_dir_all` at each site - five today, and one forgotten
+/// next year surfaces as a yt-dlp template failing on a directory that does
+/// not exist. Best-effort: the write that follows reports the real error
+/// with the real context, and duplicating it here would only make the
+/// failure arrive twice.
+pub(crate) fn scratch_dir(cache_root: &std::path::Path) -> PathBuf {
+    let dir = cache_root.join(SCRATCH_DIRNAME);
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Where poster JPEGs go. Ensures the directory, for the reason above.
+pub(crate) fn thumbs_dir(cache_root: &std::path::Path) -> PathBuf {
+    let dir = cache_root.join(THUMBS_DIRNAME);
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Move an old cache layout to the new one. Idempotent, best-effort, and
+/// deliberately NOT fatal: a cache that fails to migrate costs a re-download,
+/// while refusing to start over it would cost the whole app.
+///
+/// The multi-GB media subtree is RENAMED rather than copied - same
+/// filesystem, so it is a metadata operation and nobody re-downloads a
+/// season. Thumbnails move file by file (they are small, and the prefix is
+/// stripped because the directory now carries that meaning). Loose scratch
+/// files at the root are deliberately left where they are: they are
+/// regenerable, some may be in flight from a previous run, and the legacy
+/// arm of the sweep clears them within a day.
+pub(crate) fn migrate_cache_layout(cache_root: &std::path::Path) -> u32 {
+    let mut moved = 0u32;
+    let legacy_media = cache_root.join(LEGACY_MEDIA_DIRNAME);
+    let media = cache_root.join(MEDIA_CACHE_DIRNAME);
+    if legacy_media.is_dir() && !media.exists() {
+        match std::fs::rename(&legacy_media, &media) {
+            Ok(()) => moved += 1,
+            Err(e) => eprintln!("[cache-migrate] media: {e}"),
+        }
+    }
+    let thumbs = thumbs_dir(cache_root);
+    if let Ok(entries) = std::fs::read_dir(cache_root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+            let Some(rest) = name.strip_prefix("saucebunny-thumb-") else { continue };
+            if !path.is_file() {
+                continue;
+            }
+            if std::fs::create_dir_all(&thumbs).is_err() {
+                break;
+            }
+            if std::fs::rename(&path, thumbs.join(rest)).is_ok() {
+                moved += 1;
+            }
+        }
+    }
+    moved
+}
 
 /// A subdirectory of the persistent media cache ("downloads" / "audio" /
 /// "meta"). Does not create it — writers `create_dir_all` before writing.
@@ -533,6 +615,31 @@ pub fn cleanup_stale_cache(app: AppHandle) -> Result<u32, crate::AppError> {
     Ok(sweep_stale_files(&cache, std::time::SystemTime::now()))
 }
 
+/// Delete every FILE in `dir` older than the TTL. Used for `scratch/`, whose
+/// entire contents are job-scoped temporaries; a missing directory is the
+/// normal state on a fresh install and yields zero rather than an error.
+fn sweep_dir_by_age(dir: &std::path::Path, now: std::time::SystemTime) -> u32 {
+    let mut removed = 0u32;
+    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        let stale = meta
+            .modified()
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .map(|age| age.as_secs() > CACHE_TTL_SECONDS)
+            .unwrap_or(false);
+        if stale && std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 /// Core of the startup sweep, parameterised on `now` so the >24h cutoff is
 /// unit-testable without faking file mtimes. Deletes stale `saucebunny-*`
 /// FILES in the cache root only; `saucebunny-media/` (the persistent
@@ -541,10 +648,15 @@ pub fn cleanup_stale_cache(app: AppHandle) -> Result<u32, crate::AppError> {
 /// deliberately reused across sessions, so aging them out would just make
 /// the user re-pay yt-dlp's full extraction cost.
 fn sweep_stale_files(cache: &std::path::Path, now: std::time::SystemTime) -> u32 {
-    let mut removed: u32 = 0;
+    // The scratch directory is the sweep's real subject now: everything in
+    // it is job-scoped and regenerable by construction. The root pass below
+    // is kept as the LEGACY arm - it clears the loose `saucebunny-*` files an
+    // install from before the layout tidy still has, and costs one read_dir
+    // on a directory that is now three entries wide.
+    let mut removed: u32 = sweep_dir_by_age(&scratch_dir(cache), now);
     let entries = match std::fs::read_dir(cache) {
         Ok(it) => it,
-        Err(_) => return 0, // missing cache dir is fine
+        Err(_) => return removed, // missing cache dir is fine
     };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -1653,4 +1765,106 @@ pub(crate) fn watch_window_frame(win: &tauri::WebviewWindow) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod cache_layout_tests {
+    use super::*;
+    use std::io::Write;
+
+    fn tmp() -> PathBuf {
+        let d = std::env::temp_dir().join(format!("sb-cache-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+    fn touch(p: &std::path::Path, body: &[u8]) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        let mut f = std::fs::File::create(p).unwrap();
+        f.write_all(body).unwrap();
+    }
+
+    #[test]
+    fn the_media_subtree_is_renamed_not_recopied_and_keeps_every_file() {
+        // The thing that must not break: this subtree is "download once,
+        // reuse forever" and can be tens of gigabytes. A migration that
+        // lost it would make every user re-pay yt-dlp's full extraction.
+        let cache = tmp();
+        let legacy = cache.join("saucebunny-media");
+        touch(&legacy.join("downloads").join("saucebunny-download-abc.mp4"), b"movie");
+        touch(&legacy.join("meta").join("abc.json"), b"{}");
+
+        let moved = migrate_cache_layout(&cache);
+        assert!(moved >= 1);
+        assert!(!legacy.exists(), "the old directory is still there");
+        assert_eq!(
+            std::fs::read(cache.join("media").join("downloads").join("saucebunny-download-abc.mp4")).unwrap(),
+            b"movie",
+        );
+        assert!(cache.join("media").join("meta").join("abc.json").is_file());
+    }
+
+    #[test]
+    fn thumbnails_move_into_their_folder_and_shed_the_prefix() {
+        let cache = tmp();
+        touch(&cache.join("saucebunny-thumb-KEY1.jpg"), b"jpg");
+        migrate_cache_layout(&cache);
+        assert!(cache.join("thumbnails").join("KEY1.jpg").is_file());
+        assert!(!cache.join("saucebunny-thumb-KEY1.jpg").exists());
+    }
+
+    #[test]
+    fn migration_is_idempotent_and_never_clobbers_a_new_layout() {
+        let cache = tmp();
+        // Both present: the NEW one is authoritative and must survive.
+        touch(&cache.join("saucebunny-media").join("downloads").join("old.mp4"), b"old");
+        touch(&cache.join("media").join("downloads").join("new.mp4"), b"new");
+        migrate_cache_layout(&cache);
+        assert_eq!(
+            std::fs::read(cache.join("media").join("downloads").join("new.mp4")).unwrap(),
+            b"new",
+            "the migration overwrote a live media cache",
+        );
+        // Running it again on a tidy cache changes nothing.
+        let cache2 = tmp();
+        touch(&cache2.join("media").join("downloads").join("x.mp4"), b"x");
+        assert_eq!(migrate_cache_layout(&cache2), 0);
+    }
+
+    #[test]
+    fn the_sweep_clears_stale_scratch_and_spares_the_named_folders() {
+        let cache = tmp();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(CACHE_TTL_SECONDS + 60);
+        touch(&scratch_dir(&cache).join("playback-job1.mp4"), b"tmp");
+        touch(&thumbs_dir(&cache).join("KEY.jpg"), b"jpg");
+        touch(&cache.join("media").join("downloads").join("keep.mp4"), b"movie");
+
+        // `now` far in the future makes every file stale without faking mtimes.
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(CACHE_TTL_SECONDS * 2);
+        let removed = sweep_stale_files(&cache, later);
+
+        assert_eq!(removed, 1, "expected exactly the scratch file");
+        assert!(!scratch_dir(&cache).join("playback-job1.mp4").exists());
+        // Both persistent folders survive, which is the whole point of them.
+        assert!(thumbs_dir(&cache).join("KEY.jpg").is_file());
+        assert!(cache.join("media").join("downloads").join("keep.mp4").is_file());
+        let _ = old;
+    }
+
+    #[test]
+    fn fresh_scratch_survives_the_sweep() {
+        let cache = tmp();
+        touch(&scratch_dir(&cache).join("playback-live.mp4"), b"tmp");
+        assert_eq!(sweep_stale_files(&cache, std::time::SystemTime::now()), 0);
+        assert!(scratch_dir(&cache).join("playback-live.mp4").is_file());
+    }
+
+    #[test]
+    fn the_legacy_arm_still_clears_an_un_migrated_install() {
+        // An install from before the tidy has loose root files; the sweep's
+        // legacy pass is what stops them lingering forever.
+        let cache = tmp();
+        touch(&cache.join("saucebunny-webcache-oldjob.mp4"), b"tmp");
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(CACHE_TTL_SECONDS * 2);
+        assert_eq!(sweep_stale_files(&cache, later), 1);
+    }
 }

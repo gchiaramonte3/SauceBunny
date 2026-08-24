@@ -340,7 +340,7 @@ with the ones still open. The table below is the index into it.
 
 | What | Where |
 |------|-------|
-| App cache (temp files) | `app_cache_dir()` prefixed `saucebunny-*`, swept on startup (>24h) |
+| App cache | `app_cache_dir()/{media,thumbnails,scratch}/`; only `scratch/` is swept (>24h). `migrate_cache_layout` moves an older install over once |
 | Whisper models | `app_data_dir()/whisper-models/` |
 | Diarizer models | Bundled or downloaded on first run, cached locally |
 | Transcript library | `~/Documents/Sauce Bunny/Transcripts/YYYY-MM/` |

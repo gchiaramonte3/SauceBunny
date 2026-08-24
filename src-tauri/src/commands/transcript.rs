@@ -513,7 +513,7 @@ pub async fn dictate_start(
 
     let cache = app.path().app_cache_dir().map_err(|e| format!("app_cache_dir: {e}"))?;
     std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
-    let wav = cache.join(dictate_wav_name(&job_id)?);
+    let wav = super::scratch_dir(&cache).join(dictate_wav_name(&job_id)?);
     let wav_str = wav.to_string_lossy().to_string();
 
     // avfoundation input: ":default" (system default) or ":<index>" for a
@@ -1199,7 +1199,7 @@ pub async fn generate_transcript(
     // (whisper's native input — skips an internal conversion pass), then
     // whisper-cli reads the WAV. Decoupling these steps means a yt-dlp
     // failure won't masquerade as an ffmpeg "Invalid data" error.
-    let raw_prefix = format!("saucebunny-{}-raw", args.job_id);
+    let raw_prefix = format!("{}-raw", args.job_id);
     let raw_template = cache
         .join(format!("{}.%(ext)s", raw_prefix))
         .to_string_lossy()
@@ -2084,13 +2084,13 @@ pub struct TranscribeLocalArgs {
 /// than trusted: only the shape crypto.randomUUID actually produces survives,
 /// and anything else cannot walk out of the cache directory.
 pub(crate) fn job_wav_name(job_id: &str) -> Result<String, crate::AppError> {
-    Ok(format!("saucebunny-{}.wav", safe_job_id(job_id, "prepared WAV")?))
+    Ok(format!("{}.wav", safe_job_id(job_id, "prepared WAV")?))
 }
 
 /// Dictation's WAV. A sibling of `job_wav_name`, not the same file: the prefix
 /// differs so a dictation capture and a prepared WAV for one job cannot collide.
 pub(crate) fn dictate_wav_name(job_id: &str) -> Result<String, crate::AppError> {
-    Ok(format!("saucebunny-dictate-{}.wav", safe_job_id(job_id, "dictation WAV")?))
+    Ok(format!("dictate-{}.wav", safe_job_id(job_id, "dictation WAV")?))
 }
 
 /// The filter itself, so a second caller cannot get it subtly different.
@@ -2123,7 +2123,7 @@ pub(crate) fn job_wav_path(
         .app_cache_dir()
         .map_err(|e| format!("app_cache_dir: {e}"))?;
     std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
-    Ok(cache.join(name))
+    Ok(super::scratch_dir(&cache).join(name))
 }
 
 /// Land the frontend's prepared WAV on disk as a RAW IPC body, keyed by job
@@ -3006,7 +3006,7 @@ async fn run_diarize_and_merge(
         .app_cache_dir()
         .map_err(|e| format!("app_cache_dir: {e}"))?;
     std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
-    let diar_json = cache.join(format!("saucebunny-diarize-{}.json", job_id));
+    let diar_json = super::scratch_dir(&cache).join(format!("diarize-{}.json", job_id));
     let diar_json_str = diar_json.to_string_lossy().to_string();
     let wav_str = wav_path.to_string_lossy().to_string();
 
@@ -3513,7 +3513,7 @@ mod prepared_wav_tests {
         // crypto.randomUUID output, which is all production ever sends.
         assert_eq!(
             job_wav_name("6f1c2b7a-9d3e-4a55-8b21-0c7d5e9f1a34").unwrap(),
-            "saucebunny-6f1c2b7a-9d3e-4a55-8b21-0c7d5e9f1a34.wav",
+            "6f1c2b7a-9d3e-4a55-8b21-0c7d5e9f1a34.wav",
         );
     }
 
@@ -3522,10 +3522,14 @@ mod prepared_wav_tests {
         // The id arrives in an IPC HEADER now, not a typed field, so it is
         // filtered rather than trusted. None of these may produce a separator.
         for hostile in ["../../etc/passwd", "a/b", "a\\b", "..", "./x", "a\0b"] {
-            let name = job_wav_name(hostile).unwrap_or_else(|_| "saucebunny-.wav".into());
+            let name = job_wav_name(hostile).unwrap_or_else(|_| ".wav".into());
             assert!(!name.contains('/'), "{hostile} produced {name}");
             assert!(!name.contains('\\'), "{hostile} produced {name}");
-            assert!(name.starts_with("saucebunny-"), "{hostile} produced {name}");
+            // The prefix used to double as the marker that a name was ours;
+            // the SCRATCH DIRECTORY carries that now, so what has to hold
+            // here is exactly that the name cannot leave whatever directory
+            // it is joined to.
+            assert!(!name.contains(".."), "{hostile} produced {name}");
             assert!(name.ends_with(".wav"), "{hostile} produced {name}");
         }
     }
@@ -3538,10 +3542,10 @@ mod prepared_wav_tests {
         // prefix stays distinct so a dictation WAV cannot land on a prepared
         // one for the same job.
         use super::dictate_wav_name;
-        assert_eq!(dictate_wav_name("abc-123").unwrap(), "saucebunny-dictate-abc-123.wav");
+        assert_eq!(dictate_wav_name("abc-123").unwrap(), "dictate-abc-123.wav");
         assert_ne!(dictate_wav_name("abc-123").unwrap(), job_wav_name("abc-123").unwrap());
         for hostile in ["../../etc/passwd", "a/b", "a\\b", "..", "./x", "a\0b"] {
-            let name = dictate_wav_name(hostile).unwrap_or_else(|_| "saucebunny-dictate-.wav".into());
+            let name = dictate_wav_name(hostile).unwrap_or_else(|_| "dictate-.wav".into());
             assert!(!name.contains(['/', '\\']), "{hostile} produced {name}");
             assert!(name.ends_with(".wav"), "{hostile} produced {name}");
             assert_eq!(name.matches('.').count(), 1, "{hostile} produced {name}");
@@ -3552,9 +3556,9 @@ mod prepared_wav_tests {
 
     #[test]
     fn dots_are_dropped_so_no_id_can_re_extension_the_file() {
-        // "x.sh" must not become saucebunny-x.sh.wav's neighbour, and more to
+        // "x.sh" must not become x.sh.wav's neighbour, and more to
         // the point must not end in anything but .wav.
-        assert_eq!(job_wav_name("x.sh").unwrap(), "saucebunny-xsh.wav");
+        assert_eq!(job_wav_name("x.sh").unwrap(), "xsh.wav");
     }
 
     #[test]

@@ -1600,8 +1600,8 @@ pub async fn download_web_preview(
     // abandoned partial is swept by the 24h cleanup), then atomically renames
     // into the persistent downloads cache on success — a file there is
     // complete by construction.
-    let prefix = format!("saucebunny-webcache-{}", args.job_id);
-    let template = cache
+    let prefix = format!("webcache-{}", args.job_id);
+    let template = super::scratch_dir(&cache)
         .join(format!("{}.%(ext)s", prefix))
         .to_string_lossy()
         .to_string();
@@ -2170,8 +2170,8 @@ pub async fn download_audio_track(
     // final prefix) AND distinct from any concurrent call (so two downloads
     // can't write the same temp). Rename to the final name only on a clean
     // exit, making the cache hit atomic.
-    let dl_prefix = format!("saucebunny-audiodl-{}", args.job_id);
-    let template = cache
+    let dl_prefix = format!("audiodl-{}", args.job_id);
+    let template = super::scratch_dir(&cache)
         .join(format!("{}.%(ext)s", dl_prefix))
         .to_string_lossy()
         .to_string();

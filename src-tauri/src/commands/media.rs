@@ -368,10 +368,10 @@ async fn spawn_audio_clip(
         .path()
         .app_cache_dir()
         .map_err(|e| crate::AppError::internal(format!("app_cache_dir: {e}")))?;
-    std::fs::create_dir_all(&cache)
+    std::fs::create_dir_all(super::scratch_dir(&cache))
         .map_err(|e| crate::AppError::internal(format!("mkdir cache: {e}")))?;
-    let raw_prefix = format!("saucebunny-{}-raw", job_id);
-    let raw_template = cache
+    let raw_prefix = format!("{}-raw", job_id);
+    let raw_template = super::scratch_dir(&cache)
         .join(format!("{}.%(ext)s", raw_prefix))
         .to_string_lossy()
         .to_string();
@@ -413,7 +413,8 @@ async fn spawn_audio_clip(
 
     let app_for = app.clone();
     let job_for = job_id.clone();
-    let cache_for = cache.clone();
+    // The raw file goes to scratch/, so the scanner must look there too.
+    let cache_for = super::scratch_dir(&cache);
     let raw_prefix_for = raw_prefix.clone();
     let output_for = output_str.clone();
     // yt-dlp's [download] % is the download progress for this phase. We map
@@ -1309,7 +1310,8 @@ fn poster_cache_path(cache: &std::path::Path, input_path: &str, chosen: Option<f
     let time_bucket: i64 = chosen.map(|t| (t * 1000.0) as i64).unwrap_or(-1);
     time_bucket.hash(&mut hasher);
     let key = format!("{:016x}", hasher.finish());
-    cache.join(format!("saucebunny-thumb-{key}.jpg"))
+    // The directory carries what the `saucebunny-thumb-` prefix used to say.
+    super::thumbs_dir(cache).join(format!("{key}.jpg"))
 }
 
 /// Persist a poster JPEG the frontend already decoded (mediabunny/WebCodecs)
@@ -1349,7 +1351,7 @@ pub async fn save_poster_to_cache(
         .path()
         .app_cache_dir()
         .map_err(|e| format!("app_cache_dir: {e}"))?;
-    std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
+    std::fs::create_dir_all(super::thumbs_dir(&cache)).map_err(|e| format!("mkdir cache: {e}"))?;
     let out_path = poster_cache_path(&cache, &src, chosen);
     std::fs::write(&out_path, bytes).map_err(|e| format!("write failed: {e}"))?;
     Ok(out_path.to_string_lossy().to_string())
@@ -1398,7 +1400,7 @@ pub async fn generate_local_thumbnail(
         .path()
         .app_cache_dir()
         .map_err(|e| format!("app_cache_dir: {e}"))?;
-    std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
+    std::fs::create_dir_all(super::thumbs_dir(&cache)).map_err(|e| format!("mkdir cache: {e}"))?;
     // A chosen poster (valid, finite, ≥0) forces an exact-frame grab; anything
     // else is the representative auto-thumbnail.
     let chosen: Option<f64> = match args.time_seconds {
@@ -1841,9 +1843,9 @@ pub async fn prepare_local_for_playback(
         .path()
         .app_cache_dir()
         .map_err(|e| format!("app_cache_dir: {e}"))?;
-    std::fs::create_dir_all(&cache).map_err(|e| format!("mkdir cache: {e}"))?;
+    std::fs::create_dir_all(super::scratch_dir(&cache)).map_err(|e| format!("mkdir cache: {e}"))?;
     let ext = if args.has_video { "mp4" } else { "mp3" };
-    let out_path = cache.join(format!("saucebunny-playback-{}.{}", args.job_id, ext));
+    let out_path = super::scratch_dir(&cache).join(format!("playback-{}.{}", args.job_id, ext));
     let out_str = out_path
         .to_str()
         .ok_or_else(|| crate::AppError::internal("playback path not utf-8"))?

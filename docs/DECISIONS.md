@@ -298,7 +298,7 @@ the user the ability to organize everything") answered the WHETHER. The HOW is
 these four decisions, each the audit's own recommendation:
 
 - **Organisation is virtual and keyed by raw URL.** Moving a web item never
-  moves its cached file: a copy moved out of `saucebunny-media/` severs
+  moves its cached file: a copy moved out of `media/` severs
   `find_cached_download`, goes cold on the warm start, and orphans the LRU
   cap. Raw URL over the canonical hash because every satellite store
   (recents, posters, transcript history, review docs) already keys on it, and

@@ -60,14 +60,33 @@ clips there and never reads them back; it is output, not a store.
 clear-on-quit, deliberately a file because it is read at shutdown after the
 webview and its `localStorage` are already gone.
 
-### `app_cache_dir()` — two halves with different rules
+### `app_cache_dir()` — three named directories
 
-- `saucebunny-media/` is **sweep-exempt**: downloaded sources and their audio,
-  which are "download once, reuse forever". Bounded by a user-set cap
+The root used to be one organized subtree plus a flat pile of
+`saucebunny-`prefixed FILES, which is what a user saw on Reveal. Inside the
+app's own cache folder that prefix says nothing, so:
+
+```
+app_cache_dir()/
+  media/        downloads/ audio/ meta/      never swept
+  thumbnails/   poster JPEGs                 never swept
+  scratch/      job temps, playback prep,    swept at 24h
+                Whisper WAVs, diarizer JSON
+```
+
+- `media/` is **sweep-exempt**: downloaded sources and their audio, which are
+  "download once, reuse forever". Bounded by a user-set cap
   (`mediaCacheCapGb`, `enforce_media_cache_cap`) and clearable from Settings.
-- Everything else prefixed `saucebunny-*` (`-capture`, `-diarize`, `-dictate`,
-  `-thumb-*`, playback prep copies, Whisper WAVs) is swept at startup once it
-  is older than 24h, on a background thread, failures non-fatal.
+- `thumbnails/` is sweep-exempt too: posters are cheap to keep and expensive
+  to regenerate daily. Settings' thumbnails bucket is the manual purge.
+- `scratch/` is swept at startup, on a background thread, failures non-fatal.
+
+`migrate_cache_layout` moves an old install over once, at startup, before the
+sweep runs. The media subtree is RENAMED rather than copied (same filesystem,
+so it is a metadata operation and nobody re-downloads a season); thumbnails
+move file by file and shed the prefix the directory now carries; loose scratch
+files at the root are left for the sweep's legacy arm, because some may be in
+flight from the previous run and all of them regenerate.
 
 ### Keychain — the only secrets
 

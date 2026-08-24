@@ -514,7 +514,7 @@ repeat open skips yt-dlp entirely when possible:
 - `media/meta/<urlhash>.json` in the app cache — source metadata + the last
   resolved signed stream URLs (with their expiry), read by `get_warm_start`
   (async command) BEFORE the optimistic mount.
-- `saucebunny-media/downloads/` — completed download-fallback copies, exempt
+- `media/downloads/` — completed download-fallback copies, exempt
   from the 24h cache sweep. A complete copy short-circuits to
   `LOAD_CACHED` → LocalMediaPlayer; still-valid signed URLs short-circuit
   the resolve (`RESOLVED fromCache: true`) into the same proxy/MSE path.
