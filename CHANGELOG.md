@@ -5,6 +5,87 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-08-24
+
+An adversarial verification of 0.4.2's own release notes found 18 claims
+that were ahead of the build; the real ones are fixed below. Beyond that: a
+CTO-level audit of the live co-review path (35 verified findings, ranked in
+`docs/LIVE-REVIEW-AUDIT.md`), the first performance pass from it, the
+in/out marks becoming one glyph everywhere, and the web section learning
+the Library's language.
+
+### Fixed
+
+- **A paused frame-step now reaches the whole room.** Stepping to a frame
+  while paused is the core review gesture, and it never crossed the wire: a
+  24-30fps step is an order of magnitude under the scrub threshold the
+  paused chase keyed on, so guests froze on the previous frame while notes
+  were made about one they were not seeing. The chase now distinguishes
+  "the host moved" from "the host moved far"; a motionless presenter still
+  never yanks a browsing guest.
+- **The first drawing on a video was blocky and fat.** The annotation
+  canvas sizing effect ran once, before the canvas existed, so the first
+  draw rasterized into the HTML default 300x150 buffer stretched across the
+  whole monitor (~8x upscale on retina). All the correct DPR math was
+  already there; it just never ran on the first-use path.
+- **"Add to queue" from a transcript selection queued the PREVIOUS marks**
+  (a same-tick stale closure); **Reveal in Past screenings was dead on
+  every row** (filename looked up in an id-keyed index); **a source switch
+  marked the in-flight export "Failed"** instead of cancelled; **the label
+  tool drew over a moving frame** (only the pen paused playback); **an
+  export failure left the Export button disabled** until the source was
+  reloaded; **re-opening the same source erased its stored in/out marks**
+  (the restore latch never cleared); **a locked review store warned
+  nobody** (its report fired before anyone subscribed and was dropped);
+  **Ctrl still meant ⌘ in two hand-coded listeners** (transcript find,
+  Library select-all).
+
+### Changed
+
+- **The in/out mark is one glyph everywhere.** The transport buttons, the
+  timeline solo marks, the selection band, the reader bar pins and the
+  queued ranges all wear the same chevron; the queued range keeps its
+  status colour. Clear in/out is the Avid dialect (the pair side by side,
+  inverted). The film inside a selection dims so the marker colour reads
+  over bright footage.
+- **The annotation toolbar is a 34px pill instead of a 290px sheet.** Icon
+  tools, one colour well with a popover palette, and a size preview that
+  shows the EFFECTIVE stroke for the active tool - width multiplier,
+  opacity and colour - with the numeric value beside it.
+- **"From the web" learned the Library's language.** The same browser bar
+  (fixed location label, "Date fetched", scoped search), a real list view
+  with sortable NAME / Site / SIZE / FETCHED columns and drag-resizable
+  widths, and sorting/search with the folder pane's exact semantics.
+
+### Added
+
+- **Web collections.** File any cached web clip into named collections from
+  a "+" on its card; collections fold above the automatic site shelves. A
+  filed clip leaves its site shelf; deleting a collection costs only the
+  label. Organisation is virtual (nothing moves on disk), stored beside
+  Casts and Reviews in Documents, and survives a cache prune - an emptied
+  collection says how many clips are waiting to be re-fetched.
+- **`docs/LIVE-REVIEW-AUDIT.md`** - the live co-review build review: every
+  verified gap ranked by harm, and a 12-item performance plan with proof
+  methods.
+
+### Performance
+
+All from the audit, each with its measurement recorded in the commit:
+
+- Offer hashing is parallel (8.4x measured on 2 GiB; a 60 GB master drops
+  from ~42s of "Preparing the file…" to ~5s) and re-offering the same cut
+  costs a stat instead of a rehash.
+- Peer playhead ticks and reaction bursts no longer re-render the whole
+  app: ghosts and reactions live in external stores subscribed by the two
+  leaves that paint them. A host alone in a paused room went from ~3 full
+  App renders a second, forever, to zero.
+- Presence traffic drops ~7x while parked (movement-gated with a keepalive).
+- Tier B streamed bytes cross userspace once instead of three times (the
+  pump forwards the transport's own buffers).
+- The review composer re-renders once a second instead of once a frame;
+  captions re-render once per cue instead of per frame.
+
 ## [0.4.2] — 2026-08-23
 
 Thirteen commits of bug-fixing, led by four ways the app could lose work you
