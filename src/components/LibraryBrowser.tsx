@@ -131,7 +131,9 @@ export function LibraryBrowser({
   const lastFocusRef = useRef<HTMLElement | null>(null);
   const openDetail = useCallback((item: LibraryItem, e?: React.MouseEvent) => {
     lastFocusRef.current = document.activeElement as HTMLElement | null;
-    const mods = { shift: !!e?.shiftKey, meta: !!(e?.metaKey || e?.ctrlKey) };
+    // metaKey only: on macOS Ctrl+click is the right-click convention, not a
+    // ⌘ synonym - treating it as ⌘-click fought the context menu.
+    const mods = { shift: !!e?.shiftKey, meta: !!e?.metaKey };
     setSel((cur) => clickSelect(cur, itemPathsRef.current, item.path, mods));
     // A modified click is a SELECTION gesture, not a "show me this one"
     // gesture: opening the detail panel on ⌘-click would fight the batch the
@@ -273,7 +275,7 @@ export function LibraryBrowser({
         // ⌘A selects every file ON SCREEN — the filtered, sorted list, not the
         // whole library. Selecting things the user has filtered away is how a
         // batch action ends up touching files they cannot see.
-        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a"
+        if (e.metaKey && !e.ctrlKey && e.key.toLowerCase() === "a"
             && !(e.target instanceof HTMLInputElement)) {
           e.preventDefault();
           e.stopPropagation();

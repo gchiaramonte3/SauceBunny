@@ -694,7 +694,11 @@ export function TranscriptViewer({
   const searchInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      // metaKey ONLY. Ctrl is not a ⌘ alias anywhere in this app (macOS
+      // binds Ctrl+F to forward-char in every text field), and this listener
+      // is on window with no text-field gate - accepting ctrlKey stole the
+      // emacs cursor keys whenever a transcript was visible.
+      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       if (e.key.toLowerCase() !== "f") return;
       const root = wrapRef.current;
       if (!root || root.closest("[hidden]") || root.closest('[aria-hidden="true"]')) return;
