@@ -204,3 +204,25 @@ test("a drag that starts and ends on the same card changes nothing", async ({ pa
   expect(await moves(page)).toEqual([]);
   await expect(page.locator(SHELF + " .cp-lib-card.selected")).toHaveCount(0);
 });
+
+test("a drag released OUTSIDE the pane ends, rather than leaving a stuck ghost", async ({ page }) => {
+  // Without setPointerCapture the handlers live on the pane, so the moment
+  // the pointer leaves it the moves stop arriving and the pointerup lands
+  // somewhere else entirely. The drag never ends: the ghost stays painted on
+  // screen and the next click is swallowed by a gesture that is still
+  // notionally running.
+  await bootFrames(page);
+  const card = page.locator(SHELF + " .cp-lib-card:not(.cp-lib-foldercard)").first();
+  const c = centre((await card.boundingBox())!);
+
+  await page.mouse.move(c.x, c.y);
+  await page.mouse.down();
+  await page.mouse.move(c.x - 30, c.y - 30, { steps: 4 });
+  await expect(page.locator(".cp-card-ghost")).toBeVisible();
+  // Out over the nav rail, well clear of the shelf.
+  await page.mouse.move(8, 8, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(page.locator(".cp-card-ghost")).toHaveCount(0);
+  expect(await moves(page)).toEqual([]);
+});

@@ -187,3 +187,30 @@ test("the search results heading is not a destination", async ({ page }) => {
   await page.waitForTimeout(200);
   expect(await movesFor(page)).toEqual([]);
 });
+
+test("a refused move is reported, not swallowed as an unhandled rejection", async ({ page }) => {
+  // ensure_dest_clear refuses a move into a folder that already holds a
+  // transcript of that name. The row menu catches and shows it; the drag
+  // used to `void` the promise, which reports nothing to the user and trips
+  // the console-clean gate.
+  const rejections: string[] = [];
+  page.on("pageerror", (e) => rejections.push(String(e)));
+
+  await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
+  await page.addInitScript(() => {
+    localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
+    localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("e2e.transcripts", "1");
+    localStorage.setItem("e2e.refuseMove", "1");
+  });
+  await page.goto("/");
+  await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press("Meta+5");
+  await expect(page.locator(".cp-reader-row").first()).toBeVisible({ timeout: 10_000 });
+
+  const row = page.locator(".cp-reader-row").first();
+  await dragTo(page, centre((await row.boundingBox())!), centre((await projectHead(page).boundingBox())!));
+
+  await expect(page.locator(".cp-reader-project-err")).toContainText(/already there/i);
+  expect(rejections, "the refusal escaped as an unhandled rejection").toEqual([]);
+});

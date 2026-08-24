@@ -196,6 +196,11 @@ export function tauriMockInit(expectedBuildId: string): void {
     },
     move_transcript_to_folder: (args: unknown) => {
       const a = args as { srtPath: string; destDir: string };
+      // A destination seeded as refusing lets a spec exercise the failure
+      // path - a name collision is the ordinary way this command says no.
+      let refuse = false;
+      try { refuse = localStorage.getItem("e2e.refuseMove") !== null; } catch { /* denied */ }
+      if (refuse) return Promise.reject({ kind: "Invalid", data: "A transcript with that name is already there." });
       return `${a.destDir}/${a.srtPath.split("/").pop()}`;
     },
     // The Frames shelf. Six stills across two films, one of them filed into

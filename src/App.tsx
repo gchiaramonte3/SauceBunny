@@ -75,6 +75,7 @@ import {
   findForSource,
   touchEntry,
   renameEntryPath as renameTranscriptEntryPath,
+  notifyTranscriptsChanged,
   getHistory as getTranscriptHistory,
   type TranscriptHistoryEntry,
 } from "./lib/transcript-history";
@@ -2925,6 +2926,12 @@ export default function App() {
     if (activeTranscriptRef.current?.path === oldPath) {
       setActiveTranscript((prev) => (prev ? { ...prev, path: newPath } : prev));
     }
+    // Unconditionally, because the FILE moved whether or not history knew
+    // about it. renameTranscriptEntryPath only notifies when it rewrote an
+    // entry, and history holds just the transcripts opened in this app, so
+    // moving any of the others left the picker showing it in the folder it
+    // had just left - through the row menu as much as through a drag.
+    notifyTranscriptsChanged();
   }, []);
 
   // THE single-clock gate (r88): exactly one media element is ever unpaused.

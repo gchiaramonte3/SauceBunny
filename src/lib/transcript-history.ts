@@ -25,6 +25,19 @@ const MAX_ENTRIES = 50;
  *  must not poll. Listeners re-read via getHistory(). */
 export const TRANSCRIPTS_CHANGED_EVENT = "saucebunny:transcripts-changed";
 
+/**
+ * Tell every listener the transcript library changed on disk.
+ *
+ * Exported because a MOVE is not always a history edit. renameEntryPath only
+ * notifies when it actually rewrote an entry, and history holds just the
+ * transcripts this app has opened - so moving any of the others fired
+ * nothing at all and the picker went on showing the file in the folder it
+ * had left. The move site has to say so itself.
+ */
+export function notifyTranscriptsChanged(): void {
+  notifyChanged();
+}
+
 function notifyChanged(): void {
   // Guarded: this module also runs under vitest's node environment (no DOM).
   if (typeof window !== "undefined") {

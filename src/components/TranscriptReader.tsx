@@ -280,7 +280,14 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
       // a move. The command returns early on its own, but a rescan would
       // still churn the picker for nothing.
       if (!hit || hit.folder === folder) return;
-      void onMoveTranscript(hit.entry, `${transcriptLibraryPath}/${folder}`);
+      // CAUGHT, like the row menu's copy of this call. The move can be
+      // refused - a name collision in the destination is the ordinary case -
+      // and a bare `void` on a rejecting promise is an unhandled rejection
+      // that the user never sees and console-clean fails on. A drag has no
+      // dialog to report into, so it borrows the picker's error line.
+      setProjectErr(null);
+      void onMoveTranscript(hit.entry, `${transcriptLibraryPath}/${folder}`)
+        .catch((e) => setProjectErr(formatError(e)));
     },
   });
 

@@ -82,6 +82,15 @@ export function useCardDrag({
     if (!draggingRef.current) {
       if (Math.hypot(e.clientX - start.x, e.clientY - start.y) < THRESHOLD_PX) return;
       draggingRef.current = true;
+      // CAPTURE, or the gesture cannot end. The handlers live on the pane, so
+      // the moment the pointer leaves it the moves stop arriving and the
+      // pointerup lands on some other element: the drag never finishes, the
+      // ghost stays painted, and the click after it is swallowed by a gesture
+      // that is still notionally running. Capture retargets every later
+      // pointer event here, so releasing anywhere - over the nav rail, off
+      // the window - still ends it. The marquee band next door does the same.
+      try { (e.currentTarget as Element).setPointerCapture(e.pointerId); }
+      catch { /* pointer already gone; pointerup/cancel still resets */ }
     }
     // elementFromPoint rather than the event target: once a drag is running
     // the pointer is over the ghost as often as the page, and the ghost must
