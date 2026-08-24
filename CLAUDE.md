@@ -656,7 +656,7 @@ human can check.
 
 ## Enforced contracts
 
-Fifty-seven rules in this file are checked by a test rather than remembered. If you
+Fifty-nine rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -711,6 +711,8 @@ written after finding the rule already broken somewhere.
 | `duplicated-tables-contract` | The caption-font map and the export-format list agree between the two files that each hold a copy |
 | `job-id` | Job ids are minted locally and never awaited |
 | `updater-purity-contract` | No `setX(prev => …)` writes, invokes, persists or touches a ref |
+| `component-reachable-contract` | Every component in `src/components` is imported by something. A component written, styled, tested and then never mounted passes tsc and the suite while being absent from the running app |
+| `selection-bar-contract` | The library's multi-select bar is out of the browse row's flow. In flow inside a `display: flex` row it renders as a full-height column beside the grid rather than as a bar |
 | `pure-updater-contract` | Reducer-style updaters stay pure |
 | `hidden-instance-contract` | Every Cmd-chord in TranscriptViewer checks it is not inside a [hidden]/aria-hidden subtree. The component is mounted twice (reader + drawer keep-alive), and without the gate a Cmd-G advanced the HIDDEN copy and killed its auto-scroll |
 | `rust-panic-contract` | No `unwrap`/`expect`/`panic!` in production Rust |

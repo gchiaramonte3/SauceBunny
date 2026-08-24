@@ -1123,7 +1123,9 @@
 .cp-lib-viewtoggle .btn-icon.active { background: var(--bg-3); color: var(--fg-1); }
 
 /* ── Body: scrolling content pane beside the detail panel. ── */
-.cp-lib-browse-body { flex: 1; display: flex; min-height: 0; min-width: 0; }
+/* `position: relative` is load-bearing, not decoration: the selection bar is
+   absolutely positioned against this box. See the .cp-lib-selbar note. */
+.cp-lib-browse-body { flex: 1; display: flex; min-height: 0; min-width: 0; position: relative; }
 .cp-lib-pane {
   flex: 1;
   min-width: 0;
@@ -1405,16 +1407,45 @@
 /* ── Multi-select batch bar ──────────────────────────────────────────────────
    Appears only at two or more. One selected file is ordinary browsing and
    already has the detail panel; a batch bar for it would put a second,
-   competing set of actions on screen for every single click. */
+   competing set of actions on screen for every single click.
+
+   IT FLOATS, and that is a correctness requirement rather than a style
+   choice. Its parent .cp-lib-browse-body is a flex ROW, so an in-flow bar
+   here is not a bar at all - it becomes a second COLUMN beside the grid,
+   stretched to full height, with its buttons floating at the vertical
+   middle of a tall empty box. That is what shipped, and it read as a
+   rendering fault. Taking it out of flow is what makes it a bar.
+
+   Anchored bottom-centre over the grid, the way Finder and Photos put a
+   selection's verbs: the grid never reflows when the count changes, and the
+   pane's --s-10 bottom padding keeps the last row clear of it. */
 .cp-lib-selbar {
+  position: absolute;
+  left: 50%;
+  bottom: var(--s-5);
+  transform: translateX(-50%);
+  z-index: var(--z-menu);
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  margin: 0 0 6px;
+  gap: 4px;
+  max-width: calc(100% - var(--s-8));
+  padding: 5px 6px 5px 14px;
   border: 1px solid var(--line-2);
-  border-radius: var(--r-md);
-  background: rgba(255,255,255,0.04);
+  /* Pill, not a rectangle - it is a transient object above the content, not
+     a region of the layout. */
+  border-radius: var(--r-pill);
+  /* Opaque: it sits ON the grid, so a translucent fill would show thumbnail
+     edges through the verbs. */
+  background: var(--bg-3);
+  box-shadow: var(--shadow-card);
+  animation: cp-selbar-in 120ms ease-out;
+}
+@keyframes cp-selbar-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-lib-selbar { animation: none; }
 }
 .cp-lib-selbar-count {
   font-family: var(--font-ui);
@@ -1422,9 +1453,20 @@
   font-weight: var(--weight-bold);
   color: var(--fg-1);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.cp-lib-selbar-spacer { flex: 1 1 auto; }
-.cp-lib-selbar .btn { display: inline-flex; align-items: center; gap: 5px; }
+/* A hairline, not a flex spacer. In the old full-width bar this pushed the
+   verbs to the far edge; in a pill that is centred on its own content there
+   is no far edge to push to, and the job is just to separate the count from
+   the verbs. */
+.cp-lib-selbar-spacer {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 1px;
+  margin: 3px 5px 3px 8px;
+  background: var(--line-2);
+}
+.cp-lib-selbar .btn { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 
 /* ── Finder tag colours ──────────────────────────────────────────────────────
    Real macOS tags: a colour set here is written to the file's own xattr, so it
@@ -2043,3 +2085,127 @@
   font-family: var(--font-ui);
   font-size: var(--text-md);
 }
+
+/* ── Frame viewer ────────────────────────────────────────────────────────────
+   A grabbed still, full size, with the shelf's other frames one arrow away.
+   Opening a frame used to reveal it in Finder, which sent the user to
+   another app to answer the only question a still is grabbed to answer. */
+.cp-framepv-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-palette);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-5);
+  /* Darker than the app's other scrims on purpose: this one exists so a
+     picture can be judged, and a bright surround drags the eye's white
+     point with it. */
+  background: color-mix(in srgb, var(--bg-0) 88.0%, transparent);
+}
+.cp-framepv {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(1400px, 100%);
+  max-height: 100%;
+  outline: none;
+}
+.cp-framepv-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.cp-framepv-img {
+  display: block;
+  max-width: 100%;
+  /* Room for the caption row under it, whatever the window height. */
+  max-height: calc(100vh - 140px);
+  object-fit: contain;
+  border-radius: var(--r-sm);
+  /* No border and no shadow: any frame drawn around a picture is a colour
+     reference the picture did not ask for. */
+  background: var(--bg-0);
+}
+.cp-framepv-failed {
+  max-width: 30ch;
+  margin: 0;
+  padding: var(--s-8);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--fg-3);
+  text-align: center;
+}
+.cp-framepv-step {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--bg-2) 82.0%, transparent);
+  color: var(--fg-2);
+  cursor: pointer;
+}
+.cp-framepv-step:hover { background: var(--bg-3); color: var(--fg-1); }
+.cp-framepv-step.prev { left: -52px; }
+.cp-framepv-step.next { right: -52px; }
+/* On a narrow window there is no gutter outside the picture, so the steps
+   sit over its edges instead of being pushed off screen. */
+@media (max-width: 1180px) {
+  .cp-framepv-step.prev { left: 8px; }
+  .cp-framepv-step.next { right: 8px; }
+}
+.cp-framepv-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  background: var(--bg-2);
+}
+.cp-framepv-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.cp-framepv-name {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-framepv-facts {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-framepv-count {
+  flex: 0 0 auto;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cp-framepv-foot .btn { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
