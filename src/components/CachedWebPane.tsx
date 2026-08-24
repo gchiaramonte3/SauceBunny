@@ -14,7 +14,6 @@ import {
   deleteWebCollection, flushWebCollections, getWebCollections, hydrateWebCollections,
   subscribeWebCollections, type WebCollection,
 } from "../lib/web-collection-store";
-import { IconCircleX } from "./Icons";
 
 /** View prefs for the web pane, persisted separately from the folder pane's:
  *  the two views are different rooms, and flipping the web cache to a list
@@ -114,23 +113,6 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
   const collections = useSyncExternalStore(subscribeWebCollections, getWebCollections);
   const [armedCollection, setArmedCollection] = useState<string | null>(null);
 
-  // A confirm step, but only where there is something to lose. CLAUDE.md's
-  // co-review rule is that a multi-GB consequence gets named in the control
-  // the user clicks and never only in a tooltip; deleting one is the same
-  // bargain in reverse, and this button was breaking the rule it was written
-  // under. Resolve-only rows keep their single click: the whole cost of
-  // forgetting one is the ten seconds of extraction it was saving.
-  const [armed, setArmed] = useState<string | null>(null);
-  useEffect(() => {
-    if (!armed) return;
-    // An armed row disarms itself. A confirm that stays hot is a mine: the
-    // next ordinary click on this card would be the destructive one.
-    const t = setTimeout(() => setArmed(null), 4000);
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setArmed(null); };
-    window.addEventListener("keydown", esc);
-    return () => { clearTimeout(t); window.removeEventListener("keydown", esc); };
-  }, [armed]);
-
   const forget = useCallback((url: string) => {
     // Optimistic: the row goes now, because the disk work is a file delete and
     // waiting on it makes a instant action feel broken.
@@ -194,14 +176,24 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
    * add-to-collection controls ride in the cell slot, where they can be
    * positioned against the card and revealed with it.
    */
+  /**
+   * One cached web source on the LIBRARY's card, with its verbs in the
+   * card's own ⋯ menu rather than as buttons floating over the art. The
+   * bespoke controls this replaces put a forget button and a collection
+   * button beside the ⋯ that already exists to hold exactly those - three
+   * affordances fighting for one corner, in two idioms.
+   *
+   * Collections keep their own control because the menu has no submenu and
+   * "file this under one of N" is not a verb, it is a picker; it sits in
+   * the cell as a single quiet affordance rather than two.
+   */
   const webCard = (it: CachedWebItem) => {
-    const isArmed = armed === it.url;
-    const size = it.size_bytes ? formatBytes(it.size_bytes) : "the copy";
+    const size = it.size_bytes ? formatBytes(it.size_bytes) : null;
     return (
       <LibraryCard
         key={it.url}
         title={it.title ?? it.url}
-        detail={`${it.uploader ?? siteName(it.url)}${it.size_bytes ? ` · ${formatBytes(it.size_bytes)}` : ""}`}
+        detail={`${it.uploader ?? siteName(it.url)}${size ? ` · ${size}` : ""}`}
         art={{ kind: "remote", url: it.thumbnail }}
         badge="web"
         duration={it.duration_seconds != null ? secondsToClock(it.duration_seconds) : null}
@@ -209,32 +201,20 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
         revealPath={it.path}
         onOpen={() => onOpenUrl(it.url)}
         requestThumb={async () => null}
-        cellControls={
-          <>
-            <WebCollectionMenu url={it.url} />
-            <button
-              type="button"
-              className={"cp-web-forget" + (isArmed ? " armed" : "")}
-              title={it.path
-                ? "Delete the downloaded copy from this Mac. The source stays online."
-                : "Forget this resolve. Nothing is on disk; re-opening extracts again."}
-              aria-label={isArmed
-                ? `Confirm deleting the ${size} copy of ${it.title ?? it.url}`
-                : it.path
-                  ? `Delete the ${size} copy of ${it.title ?? it.url}`
-                  : `Forget ${it.title ?? it.url}`}
-              onClick={() => {
-                if (!it.path) { forget(it.url); return; }
-                if (isArmed) { setArmed(null); forget(it.url); return; }
-                setArmed(it.url);
-              }}
-            >
-              {isArmed
-                ? <span className="cp-web-forget-label">Delete {size}</span>
-                : <IconCircleX size={13} />}
-            </button>
-          </>
-        }
+        // The verb differs by what there is to lose, and so does the ask: a
+        // downloaded copy is minutes of fetching and names its size, while a
+        // resolve-only entry costs ten seconds of extraction and goes
+        // without ceremony. That distinction was worth keeping when the
+        // control moved into the menu.
+        deleteLabel={it.path ? "Delete the copy…" : "Forget this source"}
+        onDelete={() => {
+          if (it.path && !confirm(
+            `Delete the ${size ?? ""} copy of ${it.title ?? it.url} from this Mac? `
+            + "The source stays online.",
+          )) return;
+          forget(it.url);
+        }}
+        cellControls={<WebCollectionMenu url={it.url} />}
       />
     );
   };
@@ -315,13 +295,14 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
               sort={prefs.sort}
               dir={prefs.dir}
               onSort={onSort}
-              armedUrl={armed}
               onOpenUrl={onOpenUrl}
               onForget={(url) => {
-                const it = g.items.find((x) => x.url === url);
-                if (!it?.path) { forget(url); return; }
-                if (armed === url) { setArmed(null); forget(url); return; }
-                setArmed(url);
+                const row = g.items.find((x) => x.url === url);
+                const sz = row?.size_bytes ? formatBytes(row.size_bytes) : "";
+                if (row?.path && !confirm(
+                  `Delete the ${sz} copy of ${row.title ?? url} from this Mac? The source stays online.`,
+                )) return;
+                forget(url);
               }}
             />
           ) : (

@@ -37,12 +37,11 @@ function grabbedLabel(unixSeconds: number): string {
   });
 }
 
-export function FrameListRows({ items, sort, dir, onSort, armedPath, onDelete, onOpenFrame }: {
+export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame }: {
   items: readonly FrameItem[];
   sort: LibrarySortKey;
   dir: LibrarySortDir;
   onSort: (key: LibrarySortKey) => void;
-  armedPath: string | null;
   onDelete: (path: string) => void;
   onOpenFrame: (path: string) => void;
 }) {
@@ -115,7 +114,6 @@ export function FrameListRows({ items, sort, dir, onSort, armedPath, onDelete, o
         <SortHeader className="cp-lib-lrow-date" label="Grabbed" col="date" sort={sort} dir={dir} onSort={onSort} />
       </div>
       {items.map((it) => {
-        const isArmed = armedPath === it.path;
         const tc = formatFrameTimecode(it.timecode);
         return (
           <div key={it.path} role="listitem" className="cp-web-lrow-wrap">
@@ -136,16 +134,17 @@ export function FrameListRows({ items, sort, dir, onSort, armedPath, onDelete, o
               <span className="cp-lib-lrow-size">{formatBytes(it.size_bytes)}</span>
               <span className="cp-lib-lrow-date">{grabbedLabel(it.created_at)}</span>
             </button>
+            {/* A list ROW has no ⋯ menu, so the verb is inline here - but
+                it asks before it deletes, the same confirm the grid's menu
+                item shows. */}
             <button
               type="button"
-              className={"cp-web-forget list" + (isArmed ? " armed" : "")}
+              className="cp-web-forget list"
               title="Delete this frame from this Mac."
-              aria-label={isArmed ? `Confirm deleting ${it.name}` : `Delete ${it.name}`}
+              aria-label={`Delete ${it.name}`}
               onClick={() => onDelete(it.path)}
             >
-              {isArmed
-                ? <span className="cp-web-forget-label">Delete</span>
-                : <IconCircleX size={13} />}
+              <IconCircleX size={13} />
             </button>
           </div>
         );

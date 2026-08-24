@@ -1794,19 +1794,6 @@
 .cp-web-card:hover .cp-web-forget,
 .cp-web-forget:focus-visible { opacity: 1; }
 .cp-web-forget:hover { color: var(--fg-1); }
-/* An armed delete names what it removes and STAYS visible while armed: a
-   confirm that vanishes when the pointer drifts off the card is a confirm the
-   user cannot finish. */
-.cp-web-forget.armed {
-  opacity: 1;
-  width: auto;
-  padding: 0 8px;
-  background: var(--danger);
-  color: var(--fg-0);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-bold);
-  white-space: nowrap;
-}
 .cp-web-forget:focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--focus-ring); }
 
 /* Reduced motion. Transitions here are stopped by DURATION, never by
@@ -2003,9 +1990,18 @@
   background: rgba(0, 0, 0, 0.72);
   color: var(--fg-2);
 }
-/* The web shelf's per-card controls sit in the library cell now. The ⋯ owns
-   the top-right, so these stack leftward from it. */
-.cp-web-grid .cp-web-forget { position: absolute; top: var(--s-1); right: 62px; }
+/* Only the collection control lives in the cell now - delete moved into the
+   card's ⋯ menu, where a card's verbs belong. It sits immediately left of
+   the ⋯ rather than dodging a second floating button. */
 .cp-web-grid .cp-web-collect { position: absolute; top: var(--s-1); right: 34px; }
-.cp-web-grid .cp-lib-cell:hover .cp-web-forget,
-.cp-web-grid .cp-lib-cell:focus-within .cp-web-forget { opacity: 1; }
+
+/* A destructive menu item reads as destructive. --danger-text, not the solid
+   --danger, because this is TEXT on a dark surface and the full-saturation
+   token fails contrast there (see DESIGN.md). Hover tints rather than
+   inverting: the row is still a row. */
+.cp-lib-menu-item.danger { color: var(--danger-text); }
+.cp-lib-menu-item.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger-text);
+}
+.cp-lib-menu-item.danger .cp-lib-menu-icon { color: inherit; }

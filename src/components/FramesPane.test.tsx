@@ -89,18 +89,34 @@ describe("the frames shelf", () => {
     expect(screen.getByRole("button", { name: /Grabbed/ }).getAttribute("aria-sort")).toBe("descending");
   });
 
-  it("deleting is armed, and only the second click reaches disk", async () => {
+  it("puts delete in the card menu, not on the card, and asks first", async () => {
+    // The verb belongs where a card's other verbs already live. A button
+    // floating beside the ⋯ that opens that menu is the same action twice.
+    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(true);
     h.items = [frame()];
     mount();
     await screen.findAllByText("Bear_00012304.jpg");
-    const del = screen.getByRole("button", { name: "Delete Bear_00012304.jpg" });
-    del.click();
-    await screen.findByRole("button", { name: "Confirm deleting Bear_00012304.jpg" });
-    expect(h.calls.filter(([c]) => c === "delete_frame")).toHaveLength(0);
+    expect(document.querySelector(".cp-web-grid .cp-web-forget")).toBeNull();
 
-    screen.getByRole("button", { name: "Confirm deleting Bear_00012304.jpg" }).click();
+    screen.getAllByRole("button", { name: "More actions" })[0].click();
+    (await screen.findByRole("menuitem", { name: /Delete frame/ })).click();
+
     await waitFor(() => {
       expect(h.calls.filter(([c]) => c === "delete_frame")).toHaveLength(1);
     });
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    confirmSpy.mockRestore();
+  });
+
+  it("declining the ask deletes nothing", async () => {
+    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(false);
+    h.items = [frame()];
+    mount();
+    await screen.findAllByText("Bear_00012304.jpg");
+    screen.getAllByRole("button", { name: "More actions" })[0].click();
+    (await screen.findByRole("menuitem", { name: /Delete frame/ })).click();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.calls.filter(([c]) => c === "delete_frame")).toHaveLength(0);
+    confirmSpy.mockRestore();
   });
 });

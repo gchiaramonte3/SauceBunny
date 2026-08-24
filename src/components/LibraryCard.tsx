@@ -75,6 +75,10 @@ type Props = {
   onClearTagColors?: () => void;
   /** Highlights the card as the current browser selection. */
   selected?: boolean;
+  /** Remove this item; surfaces as the LAST menu item, in danger text.
+   *  Cards without it (files) show no delete verb at all. */
+  onDelete?: () => void;
+  deleteLabel?: string;
 };
 
 /**
@@ -95,7 +99,7 @@ type Props = {
  * Open in Clip. The menu never triggers the card's open.
  */
 export function LibraryCard({
-  title, detail, art, revealPath: revealPathProp, badge, duration, haveCopy, cellControls, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
+  title, detail, art, revealPath: revealPathProp, badge, duration, haveCopy, cellControls, onDelete, deleteLabel, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   onSelect, onContextSelect, onRename, selected, tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -298,6 +302,8 @@ export function LibraryCard({
           onChooseThumbnail={() => { if (posterPath) onChoosePoster?.(posterPath); }}
           onResetThumbnail={() => { if (posterPath) onResetPoster?.(posterPath); }}
           onRename={onRename}
+          onDelete={onDelete}
+          deleteLabel={deleteLabel}
           tags={tags}
           onToggleTagColor={onToggleTagColor}
           onClearTagColors={onClearTagColors}

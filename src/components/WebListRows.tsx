@@ -41,13 +41,11 @@ function fetchedLabel(unixSeconds: number): string {
   });
 }
 
-export function WebListRows({ items, sort, dir, onSort, armedUrl, onForget, onOpenUrl }: {
+export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl }: {
   items: readonly CachedWebItem[];
   sort: LibrarySortKey;
   dir: LibrarySortDir;
   onSort: (key: LibrarySortKey) => void;
-  /** The URL whose forget button is in its armed confirm state. */
-  armedUrl: string | null;
   onForget: (url: string) => void;
   onOpenUrl: (url: string) => void;
 }) {
@@ -120,7 +118,6 @@ export function WebListRows({ items, sort, dir, onSort, armedUrl, onForget, onOp
         <SortHeader className="cp-lib-lrow-date" label="Fetched" col="date" sort={sort} dir={dir} onSort={onSort} />
       </div>
       {items.map((it) => {
-        const isArmed = armedUrl === it.url;
         const size = it.size_bytes ? formatBytes(it.size_bytes) : "the copy";
         return (
           <div key={it.url} role="listitem" className="cp-web-lrow-wrap">
@@ -150,22 +147,21 @@ export function WebListRows({ items, sort, dir, onSort, armedUrl, onForget, onOp
               <span className="cp-lib-lrow-size">{it.size_bytes ? formatBytes(it.size_bytes) : ""}</span>
               <span className="cp-lib-lrow-date">{fetchedLabel(it.fetched_at)}</span>
             </button>
+            {/* A list ROW has no ⋯ menu, so the verb is inline - and the
+                caller asks before deleting a downloaded copy, the same
+                confirm the grid's menu item shows. */}
             <button
               type="button"
-              className={"cp-web-forget list" + (isArmed ? " armed" : "")}
+              className="cp-web-forget list"
               title={it.path
                 ? "Delete the downloaded copy from this Mac. The source stays online."
                 : "Forget this resolve. Nothing is on disk; re-opening extracts again."}
-              aria-label={isArmed
-                ? `Confirm deleting the ${size} copy of ${it.title ?? it.url}`
-                : it.path
-                  ? `Delete the ${size} copy of ${it.title ?? it.url}`
-                  : `Forget ${it.title ?? it.url}`}
+              aria-label={it.path
+                ? `Delete the ${size} copy of ${it.title ?? it.url}`
+                : `Forget ${it.title ?? it.url}`}
               onClick={() => onForget(it.url)}
             >
-              {isArmed
-                ? <span className="cp-web-forget-label">Delete {size}</span>
-                : <IconCircleX size={13} />}
+              <IconCircleX size={13} />
             </button>
           </div>
         );

@@ -13,18 +13,20 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 /**
- * The forget affordance.
+ * The forget affordance, now in the card's ⋯ menu.
  *
- * CLAUDE.md's co-review rule is that a multi-GB consequence gets named in the
- * control the user clicks, never only in a tooltip. Deleting a downloaded copy
- * is that same bargain in reverse, and this button was originally a bare icon
- * with the consequence in a `title` and no confirm at all: one click removed a
- * file that may have taken a quarter of an hour to fetch.
+ * It began as a bare icon on the card with the consequence in a `title`, and
+ * grew an armed two-click confirm. Both were wrong in the same way: the card
+ * already HAS the place for its verbs, and a button floating beside the ⋯
+ * that opens that menu is the same action twice, in two idioms, fighting for
+ * one corner. The verb lives in the menu now and asks with a dialog, which
+ * is what every other destructive action in this app does.
  *
- * The confirm is deliberately NOT uniform. Most rows in this pane are
- * resolve-only - that is the whole design of the shelf - and the entire cost
- * of forgetting one is the ten seconds of extraction it was saving. Making
- * those rows confirm would train the confirm away on the rows that matter.
+ * The distinction that survived the move is the one worth keeping: a
+ * downloaded copy is minutes of fetching and names its size in the ask,
+ * while a resolve-only entry costs ten seconds of extraction and goes
+ * without ceremony. Making those rows confirm would train the confirm away
+ * on the rows that matter.
  */
 const item = (over: Record<string, unknown> = {}) => ({
   url: "https://youtube.com/watch?v=a", title: "Reel", thumbnail: null,
@@ -34,51 +36,56 @@ const item = (over: Record<string, unknown> = {}) => ({
 
 const forgetCalls = () => h.calls.filter(([c]) => c === "forget_cached_web").length;
 
+/** Open the card's ⋯ menu and return the delete item. */
+async function openDeleteItem() {
+  screen.getAllByRole("button", { name: "More actions" })[0].click();
+  return await screen.findByRole("menuitem", { name: /Delete the copy|Forget this source/ });
+}
+
 describe("CachedWebPane forget", () => {
   beforeEach(() => { h.calls = []; h.items = []; document.body.innerHTML = ""; });
 
-  it("forgets a resolve-only row on one click", async () => {
+  it("puts the verb in the card menu, not on the card", async () => {
     h.items = [item()];
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
-    (await screen.findByLabelText("Forget Reel")).click();
+    await screen.findAllByText("Reel");
+    // Nothing floating over the art any more.
+    expect(document.querySelector(".cp-web-grid .cp-web-forget")).toBeNull();
+    expect(await openDeleteItem()).toBeTruthy();
+  });
+
+  it("forgets a resolve-only row without asking", async () => {
+    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(true);
+    h.items = [item()];
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findAllByText("Reel");
+    (await openDeleteItem()).click();
     await waitFor(() => expect(forgetCalls()).toBe(1));
+    expect(confirmSpy, "a resolve-only row asked, which trains the confirm away").not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 
-  it("does NOT delete a downloaded copy on the first click", async () => {
-    h.items = [item({ path: "/tmp/a.mp4", size_bytes: 2_400_000_000 })];
+  it("asks before deleting a downloaded copy, and names its size", async () => {
+    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(true);
+    h.items = [item({ path: "/cache/a.mp4", size_bytes: 1024 * 1024 * 12 })];
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
-    (await screen.findByLabelText(/^Delete the .* copy of Reel$/)).click();
-    // The click arms; nothing has been asked of the backend yet.
-    await waitFor(() => expect(screen.getByLabelText(/^Confirm deleting/)).toBeTruthy());
-    expect(forgetCalls()).toBe(0);
-  });
-
-  it("names the size in the button, not in a tooltip", async () => {
-    h.items = [item({ path: "/tmp/a.mp4", size_bytes: 2_400_000_000 })];
-    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
-    (await screen.findByLabelText(/^Delete the/)).click();
-    const btn = await screen.findByLabelText(/^Confirm deleting/);
-    // The visible text carries the number. A user who never hovers still
-    // learns what this costs before the second click.
-    expect(btn.textContent).toMatch(/2\.\d+ GB|2 GB/);
-  });
-
-  it("deletes on the second click", async () => {
-    h.items = [item({ path: "/tmp/a.mp4", size_bytes: 2_400_000_000 })];
-    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
-    (await screen.findByLabelText(/^Delete the/)).click();
-    (await screen.findByLabelText(/^Confirm deleting/)).click();
+    await screen.findAllByText("Reel");
+    (await openDeleteItem()).click();
     await waitFor(() => expect(forgetCalls()).toBe(1));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(String(confirmSpy.mock.calls[0][0])).toMatch(/12(\.0)? MB/);
+    confirmSpy.mockRestore();
   });
 
-  it("disarms on Escape, so an armed row is not a mine", async () => {
-    h.items = [item({ path: "/tmp/a.mp4", size_bytes: 2_400_000_000 })];
+  it("declining the ask deletes nothing", async () => {
+    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(false);
+    h.items = [item({ path: "/cache/a.mp4", size_bytes: 900 })];
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
-    (await screen.findByLabelText(/^Delete the/)).click();
-    await screen.findByLabelText(/^Confirm deleting/);
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    await waitFor(() => expect(screen.getByLabelText(/^Delete the/)).toBeTruthy());
+    await screen.findAllByText("Reel");
+    (await openDeleteItem()).click();
+    await new Promise((r) => setTimeout(r, 10));
     expect(forgetCalls()).toBe(0);
+    confirmSpy.mockRestore();
   });
 });
 

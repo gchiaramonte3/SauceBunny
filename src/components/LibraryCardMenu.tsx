@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview, IconPencil } from "./Icons";
+import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview, IconPencil, IconTrash } from "./Icons";
 import { TagColorRow } from "./TagColorRow";
 import type { TagColorIndex } from "../lib/finder-tags";
 import type { FinderTag } from "../bindings/FinderTag";
@@ -38,6 +38,19 @@ type Props = {
   hasChosenThumbnail: boolean;
   /** Filesystem path when the source is local → "Reveal in Finder" appears. */
   revealPath: string | null;
+  /**
+   * Remove this item. Rendered LAST and in danger text, and only when a
+   * caller passes it, so file cards are untouched.
+   *
+   * It lives here rather than as a control on the card because the card
+   * already HAS the place for per-item verbs - this menu - and a floating
+   * button beside the ⋯ that opens it is the same action twice, in two
+   * idioms, fighting for the same corner. The shelves that own deletable
+   * items (frames, cached web sources) pass it; everything else does not.
+   */
+  onDelete?: () => void;
+  /** The verb, since it differs by shelf ("Delete", "Forget"). */
+  deleteLabel?: string;
   /** Finder tags on this file, and the two ways to change them. Absent for
    *  sources with no path on disk (web), which cannot carry an xattr. */
   tags?: readonly FinderTag[];
@@ -54,12 +67,16 @@ type Props = {
   onClose: () => void;
 };
 
-type Item = { icon: ReactNode; label: string; disabled?: boolean; onSelect: () => void };
+type Item = {
+  icon: ReactNode; label: string; disabled?: boolean; onSelect: () => void;
+  /** Destructive: rendered in danger text, and last. */
+  danger?: boolean;
+};
 
 export function LibraryCardMenu({
   anchor, align = "left", canPickThumbnail, hasChosenThumbnail, revealPath,
   onChooseThumbnail, onResetThumbnail, onOpen, onReview, onClose,
-  tags, onToggleTagColor, onClearTagColors, onRename,
+  tags, onToggleTagColor, onClearTagColors, onRename, onDelete, deleteLabel,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const btnRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -81,6 +98,16 @@ export function LibraryCardMenu({
   items.push({ icon: <IconPlay size={13} />, label: "Open in Clip", onSelect: onOpen });
   if (onReview) {
     items.push({ icon: <IconReview size={13} />, label: "Review this clip", onSelect: onReview });
+  }
+  // Last, always: a destructive verb should never sit where a muscle-memory
+  // click for the item above it lands.
+  if (onDelete) {
+    items.push({
+      icon: <IconTrash size={13} />,
+      label: deleteLabel ?? "Delete…",
+      danger: true,
+      onSelect: onDelete,
+    });
   }
 
   // Clamp the fixed anchor so the menu never spills off the right/bottom edge.
@@ -155,7 +182,7 @@ export function LibraryCardMenu({
           ref={(el) => { btnRefs.current[i] = el; }}
           type="button"
           role="menuitem"
-          className="cp-lib-menu-item"
+          className={"cp-lib-menu-item" + (it.danger ? " danger" : "")}
           disabled={it.disabled}
           onClick={() => { it.onSelect(); onClose(); }}
         >

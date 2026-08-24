@@ -9,7 +9,6 @@ import { assetUrl } from "../lib/asset-url";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
 import { LibraryCard } from "./LibraryCard";
 import { FrameListRows } from "./FrameListRows";
-import { IconCircleX } from "./Icons";
 
 /**
  * Frames — every still grabbed during a review, bundled by the film it came
@@ -98,18 +97,6 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
     return () => window.clearTimeout(id);
   }, [query]);
 
-  // Deleting a frame deletes a FILE, so it is armed - the same bargain the
-  // web shelf strikes for a downloaded copy, and the same reason: the cost
-  // is not recoverable by re-doing the gesture.
-  const [armed, setArmed] = useState<string | null>(null);
-  useEffect(() => {
-    if (!armed) return;
-    const t = setTimeout(() => setArmed(null), 4000);
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setArmed(null); };
-    window.addEventListener("keydown", esc);
-    return () => { clearTimeout(t); window.removeEventListener("keydown", esc); };
-  }, [armed]);
-
   const remove = useCallback((path: string) => {
     // Optimistic: the card goes now, because the disk work is one unlink and
     // waiting on it makes an instant action feel broken.
@@ -140,7 +127,6 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
   const bytes = items.reduce((n, i) => n + i.size_bytes, 0);
 
   const frameCard = (it: FrameItem) => {
-    const isArmed = armed === it.path;
     const tc = formatFrameTimecode(it.timecode);
     return (
       <LibraryCard
@@ -155,24 +141,16 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
         revealPath={it.path}
         onOpen={() => onOpenFrame?.(it.path)}
         requestThumb={async () => null}
-        cellControls={
-          <button
-            type="button"
-            className={"cp-web-forget" + (isArmed ? " armed" : "")}
-            title="Delete this frame from this Mac."
-            aria-label={isArmed
-              ? `Confirm deleting ${it.name}`
-              : `Delete ${it.name}`}
-            onClick={() => {
-              if (isArmed) { setArmed(null); remove(it.path); return; }
-              setArmed(it.path);
-            }}
-          >
-            {isArmed
-              ? <span className="cp-web-forget-label">Delete</span>
-              : <IconCircleX size={13} />}
-          </button>
-        }
+        // Delete lives in the card's ⋯ menu, beside Reveal in Finder and
+        // Open in Clip, because that is where a card's verbs live. It asks
+        // first: one file, and every other destructive action in this app
+        // asks. No armed second click - that pattern belongs to a control
+        // you can press twice, and a menu closes on the first.
+        deleteLabel="Delete frame…"
+        onDelete={() => {
+          if (!confirm(`Delete ${it.name}? It is removed from this Mac.`)) return;
+          remove(it.path);
+        }}
       />
     );
   };
@@ -216,11 +194,12 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
                 sort={prefs.sort}
                 dir={prefs.dir}
                 onSort={onSort}
-                armedPath={armed}
                 onOpenFrame={(p) => onOpenFrame?.(p)}
                 onDelete={(p) => {
-                  if (armed === p) { setArmed(null); remove(p); return; }
-                  setArmed(p);
+                  const row = g.items.find((x) => x.path === p);
+                  if (!row) return;
+                  if (!confirm(`Delete ${row.name}? It is removed from this Mac.`)) return;
+                  remove(p);
                 }}
               />
             ) : (
