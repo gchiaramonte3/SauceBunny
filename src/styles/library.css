@@ -2118,6 +2118,12 @@
   justify-content: center;
   min-height: 0;
   flex: 1 1 auto;
+  /* Gutters for the steppers, as PADDING rather than negative offsets. The
+     picture is max-width:100% of the content box, so it can never run under
+     a stepper, and a stepper can never be pushed off screen - which is what
+     `left: -52px` did between 1181px and 1400px, where the dialog was
+     already at its cap but the escape hatch had not opened yet. */
+  padding: 0 52px;
 }
 .cp-framepv-img {
   display: block;
@@ -2157,11 +2163,12 @@
   cursor: pointer;
 }
 .cp-framepv-step:hover { background: var(--bg-3); color: var(--fg-1); }
-.cp-framepv-step.prev { left: -52px; }
-.cp-framepv-step.next { right: -52px; }
-/* On a narrow window there is no gutter outside the picture, so the steps
-   sit over its edges instead of being pushed off screen. */
-@media (max-width: 1180px) {
+.cp-framepv-step.prev { left: 4px; }
+.cp-framepv-step.next { right: 4px; }
+/* Below this the gutters cost more picture than the steppers are worth, so
+   they give up their lane and sit over the edges of the image instead. */
+@media (max-width: 900px) {
+  .cp-framepv-stage { padding: 0; }
   .cp-framepv-step.prev { left: 8px; }
   .cp-framepv-step.next { right: 8px; }
 }
