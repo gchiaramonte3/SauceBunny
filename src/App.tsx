@@ -3727,7 +3727,7 @@ export default function App() {
   // (a render-mirrored value would go stale now that playback ticks don't
   // re-render App).
   const {
-    coSession, coSessionActive, sessionDoc, postSessionOp, coGhostMarkers,
+    coSession, coSessionActive, sessionDoc, postSessionOp,
     liveReactions, raisedHands, handRaised, sendReaction, toggleHand,
     theater, setTheater, theaterParticipants,
     meshStreams, meshStates, meshMutedForMe, toggleMuteForMe,
@@ -4852,7 +4852,6 @@ export default function App() {
                     filmstripPath={sourceKind === "file" ? (playbackPath ?? localFilePath) : null}
                     waveformOn={waveformVisible}
                     speakerLanes={speakerLaneData}
-                    ghosts={coGhostMarkers}
                     onSeek={onSeek}
                   />
                   {/* Status line under the timeline (9a): the no-marks helper

@@ -28,6 +28,9 @@ import {
 } from "../lib/screening";
 import { saveScreening } from "../lib/screening-store";
 import { getLastUserSeekAt, getPlayheadFrames } from "../lib/playhead-store";
+import {
+  clearGhosts, pruneGhosts, shouldSendPresence, upsertGhost,
+} from "../lib/ghost-store";
 import { useStreamKeep } from "./use-stream-keep";
 import { acceptTransport, createClockEstimator, expectedPosition } from "../lib/session-clock";
 import {
@@ -185,7 +188,6 @@ export type CoReview = {
   /** Draw locally and relay to the room. */
   postDrawOp: (op: DrawOp) => void;
   /** Peer playheads in frames, tinted per name — the timeline ghost cursors. */
-  coGhostMarkers: { name: string; frame: number; color: string }[];
   theater: boolean;
   setTheater: Dispatch<SetStateAction<boolean>>;
   theaterParticipants: Participant[];
@@ -297,7 +299,6 @@ export function useCoReview({
   const sessionDocRef = useRef<ReviewDoc | null>(null); sessionDocRef.current = sessionDoc;
   // Live peer playheads → ghost cursors on the timeline (excludes self; the
   // relay never echoes your own presence back).
-  const [coGhosts, setCoGhosts] = useState<{ name: string; position: number; at: number }[]>([]);
   const coSeqRef = useRef(0);
   const coPlayingRef = useRef(false); coPlayingRef.current = isPlaying;
   const coFpsRef = useRef(30); coFpsRef.current = fps;
@@ -580,14 +581,11 @@ export function useCoReview({
           return next;
         });
         return;
-      case "presence": {
-        const now = Date.now();
-        setCoGhosts((prev) => [
-          ...prev.filter((g) => g.name !== m.name && now - g.at < 5000),
-          { name: m.name, position: m.position, at: now },
-        ]);
+      case "presence":
+        // Straight into the ghost store - App must not re-render for a
+        // peer's playhead tick. Only the Timeline leaf subscribes.
+        upsertGhost(m.name, m.position, Date.now());
         return;
-      }
       case "transport": {
         const p = playerRef.current;
         // Session-first: hold the playhead chase until OUR player has actually
@@ -747,7 +745,7 @@ export function useCoReview({
       }
       prevDocKeyRef.current = null;
       setSessionDoc(null);
-      setCoGhosts([]);
+      clearGhosts();
       setLiveReactions([]);
       setRaisedHands(new Set());
       // Source state is per-session too. Left behind, the "waiting for the
@@ -902,18 +900,30 @@ export function useCoReview({
     const iv = window.setInterval(send, 500);
     return () => window.clearInterval(iv);
   }, [isPresenter, sendSessionMsg]);
-  // Everyone broadcasts their own playhead ~3 Hz for ghost cursors + prunes
-  // stale ghosts (someone who stopped sending).
+  // Everyone broadcasts their own playhead for ghost cursors: every 350ms
+  // tick WHILE IT MOVES, a quiet keepalive beat while parked. The always-on
+  // 3 Hz version meant a host alone in a paused room still sent (and every
+  // receiver still processed) three messages a second for the whole session.
+  // The prune rides the same tick and bails allocation-free when nothing
+  // expired - see ghost-store.ts for the receive-side half of this.
   useEffect(() => {
     if (!coSessionActive) return;
-    const send = () => {
-      const me = loadReviewer().name || (coRoleRef.current === "host" ? "Host" : "Guest");
-      const r = Math.max(1, Math.round(coFpsRef.current));
-      sendSessionMsg({ kind: "presence", name: me, position: getPlayheadFrames() / r });
+    let lastSentPos = Number.NaN;
+    let lastSentAt = 0;
+    const tick = () => {
       const now = Date.now();
-      setCoGhosts((prev) => prev.filter((g) => now - g.at < 5000));
+      const r = Math.max(1, Math.round(coFpsRef.current));
+      const pos = getPlayheadFrames() / r;
+      if (shouldSendPresence(lastSentPos, pos, lastSentAt, now)) {
+        lastSentPos = pos;
+        lastSentAt = now;
+        const me = loadReviewer().name || (coRoleRef.current === "host" ? "Host" : "Guest");
+        sendSessionMsg({ kind: "presence", name: me, position: pos });
+      }
+      pruneGhosts(now);
     };
-    const iv = window.setInterval(send, 350);
+    tick();
+    const iv = window.setInterval(tick, 350);
     return () => window.clearInterval(iv);
   }, [coSessionActive, sendSessionMsg]);
   // Local echo + relay: the sender renders its own reaction immediately
@@ -1018,16 +1028,6 @@ export function useCoReview({
     // listing them costs nothing and stops the array drifting out of date.
   }, [sessionDoc, setReviewMarkers, setReviewAnnotations]);
 
-  // Ghost cursors for the timeline — peer playheads in frames, tinted per name.
-  const coGhostMarkers = useMemo(() => {
-    const r = Math.max(1, Math.round(fps));
-    const me = loadReviewer();
-    return coGhosts.map((g) => ({
-      name: g.name,
-      frame: Math.floor(g.position * r),
-      color: reviewerColorFor(g.name, me),
-    }));
-  }, [coGhosts, fps]);
 
   // ── Webcam mesh (use-rtc-mesh) ──────────────────────────────────
   // Runs while the session is live and we know our member id; signaling
@@ -1291,7 +1291,7 @@ export function useCoReview({
   }, [coSessionActive]);
 
   return {
-    coSession, coSessionActive, sessionDoc, postSessionOp, coGhostMarkers,
+    coSession, coSessionActive, sessionDoc, postSessionOp,
     // Live shared drawing: the room's scratch surface before anyone posts.
     liveDraw, postDrawOp,
     theater, setTheater, theaterParticipants,

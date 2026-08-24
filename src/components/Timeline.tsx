@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { AppStatus, ReviewRangeDraft } from "../types";
 import { secondsToHms } from "../lib/timecode";
 import { filmstripCount, filmstripTimestamps } from "../lib/filmstrip";
@@ -6,6 +6,8 @@ import { extractFilmstrip } from "../lib/mediabunny-helpers";
 import { extractWaveformPeaks, lruSet, type WaveformPeaks } from "../lib/waveform";
 import { TimelineWaveform } from "./TimelineWaveform";
 import { usePlayheadFrames } from "../lib/playhead-store";
+import { getGhosts, subscribeGhosts } from "../lib/ghost-store";
+import { loadReviewer, reviewerColorFor } from "../lib/review";
 import { isRealSpan } from "../lib/review-range";
 
 /** Scrub-track height (px) when a filmstrip is shown — matches
@@ -184,7 +186,6 @@ type Props = {
   speakerLanes?: { startMs: number; endMs: number; color: string; speaker: string | null }[];
   /** Co-review ghost cursors — other participants' live playheads, one faint
    *  tinted line + name chip each (empty when not in a session). */
-  ghosts?: { name: string; frame: number; color: string }[];
   /** Auto-detected chapters (seconds) — thin neutral ticks at the TOP edge of
    *  the track, a title chip on hover, click → seek. Deliberately unlike the
    *  reviewer-tinted comment dots (which sit mid-track). */
@@ -192,9 +193,33 @@ type Props = {
   onSeek: (f: number) => void;
 };
 
+/** The one piece of the timeline that re-renders on a peer's playhead tick.
+ *  Private leaf, same file: it exists to fence a subscription, not for
+ *  reuse, and it renders nothing outside a live session (empty store). */
+function TimelineGhosts({ fps, pct }: { fps: number; pct: (f: number) => number }) {
+  const ghosts = useSyncExternalStore(subscribeGhosts, getGhosts);
+  if (ghosts.length === 0) return null;
+  const me = loadReviewer();
+  const r = Math.max(1, Math.round(fps));
+  return (
+    <>
+      {ghosts.map((g) => (
+        <div
+          key={"ghost-" + g.name}
+          className="cp-ghost-playhead"
+          style={{ left: `${pct(Math.floor(g.position * r))}%`, ["--ghost-color" as string]: reviewerColorFor(g.name, me) }}
+          title={`${g.name} is here`}
+        >
+          <span className="cp-ghost-chip">{g.name}</span>
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function Timeline({
   status, durationFrames, inFrames, outFrames, fps,
-  queuedRanges, onRangeClick, commentMarkers, reviewRangeDraft, filmstripPath, waveformOn, speakerLanes, ghosts,
+  queuedRanges, onRangeClick, commentMarkers, reviewRangeDraft, filmstripPath, waveformOn, speakerLanes,
   chapterMarkers, onSeek,
 }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
@@ -527,17 +552,11 @@ export function Timeline({
               );
             })}
             {/* Co-review ghost cursors — other participants' live playheads.
-                Faint tinted lines with a name chip; behind the real playhead. */}
-            {ghosts?.map((g) => (
-              <div
-                key={"ghost-" + g.name}
-                className="cp-ghost-playhead"
-                style={{ left: `${pct(g.frame)}%`, ["--ghost-color" as string]: g.color }}
-                title={`${g.name} is here`}
-              >
-                <span className="cp-ghost-chip">{g.name}</span>
-              </div>
-            ))}
+                Faint tinted lines with a name chip; behind the real playhead.
+                A self-subscribing leaf: presence ticks at up to 3 Hz per
+                peer, and as a prop threaded from App that rate re-rendered
+                the entire keep-alive App tree for the life of a session. */}
+            <TimelineGhosts fps={fps} pct={pct} />
             <PlayheadCursor
               durationFrames={durationFrames}
               fps={fps}
