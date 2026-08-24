@@ -333,6 +333,11 @@ When adding a new cross-window interaction, use this event pattern. Do not intro
 
 ## Storage layout
 
+`docs/DATA-MODEL.md` is the full account: every store, its durability class,
+its writers and readers, the nine-point scorecard, and the ranked findings
+with the ones still open. The table below is the index into it.
+
+
 | What | Where |
 |------|-------|
 | App cache (temp files) | `app_cache_dir()` prefixed `saucebunny-*`, swept on startup (>24h) |
@@ -651,7 +656,7 @@ human can check.
 
 ## Enforced contracts
 
-Fifty-six rules in this file are checked by a test rather than remembered. If you
+Fifty-seven rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -692,6 +697,7 @@ written after finding the rule already broken somewhere.
 | `path-identity-contract` | One NFC path normaliser, in `lib/repath` |
 | `storage-keys-contract` | New prefs use the `saucebunny.` namespace; nine legacy `cp-` keys are pinned by name |
 | `invoke-contract` | Invoke type args come from `src/bindings/`; byte payloads use the raw IPC body; every `write_text_to_path` is atomic |
+| `store-version-contract` | Every file store that stamps a schema version also refuses to write a file stamped with a NEWER one (see `docs/DATA-MODEL.md`) |
 | `ipc-surface-contract` | Every registered command is called, and every invoked command is registered |
 | `event-surface-contract` | Every event Rust emits has a listener, every listened event is emitted (`panel:*` is the frontend-only bus), and each handler is named after its event so a mis-wire is visible |
 | `sidecar-surface-contract` | Everything `externalBin` ships is spawnable, documented in the table above AND in SIDECAR-VERSIONS.md, and (for ours) has a build script |

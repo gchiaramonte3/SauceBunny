@@ -20,6 +20,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ScreeningDoc } from "./screening";
 import { screeningCommentCount } from "./screening";
+import { futureVersionIn, reportFutureVersion } from "./store-schema";
 
 /** One row in the index: everything a library card needs WITHOUT opening the
  *  full document. */
@@ -39,12 +40,17 @@ const INDEX_FILE = "index.json";
 let screeningsDir: string | null = null;
 let index: Map<string, ScreeningIndexEntry> = new Map();
 let hydrated = false;
+/** Set if index.json is newer than this build. A screening is the memory of
+ *  a review session and nothing regenerates it, so this store refuses to
+ *  write rather than rewrite an index it only half understands. */
+let futureVersion: number | null = null;
 
 /** Test-only: drop the module-level index + hydration latch so each case
  *  starts from a cold launch (mirrors resetReviewStoreForTests). */
 export function resetScreeningStoreForTests(): void {
   index = new Map();
   hydrated = false;
+  futureVersion = null;
 }
 
 /** FNV-1a 32-bit hex — same helper the review store uses, kept local so the
@@ -169,6 +175,8 @@ export async function hydrateScreeningIndex(): Promise<void> {
       path: `${dir}/${INDEX_FILE}`,
       maxBytes: 512 * 1024,
     });
+    const fv = futureVersionIn(text);
+    if (fv !== null) { futureVersion = fv; reportFutureVersion("screenings", fv); }
     index = parseScreeningIndex(text);
   } catch {
     index = new Map(); // no folder yet is the normal first-run case
@@ -211,6 +219,9 @@ export async function saveScreening(doc: ScreeningDoc): Promise<void> {
   // per launch. (review-store.ts:214 carries an explicit indexReady guard
   // against exactly this hazard; this store was missing its half.)
   await hydrateScreeningIndex();
+  // Refuse the whole save, not just the index write: a document written
+  // beside an index we must not touch is an orphan nothing can list.
+  if (futureVersion !== null) return;
   const file = screeningFileName(doc);
   const json = JSON.stringify(doc, null, 2);
   try {

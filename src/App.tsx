@@ -126,6 +126,7 @@ import { decodeHtmlEntities } from "./lib/text";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
 import { capabilitySummary, probePlatformCapabilities } from "./lib/platform-capabilities";
 import { onReviewStoreProblem } from "./lib/review-store";
+import { onFutureStoreVersion } from "./lib/store-schema";
 import { assetUrl } from "./lib/asset-url";
 import { buildDiagnosticsReport, diagnosticsFilename, type SessionDiagnostics } from "./lib/diagnostics";
 import { extractFrameAsBlob, canMediabunnyDecode } from "./lib/mediabunny-helpers";
@@ -1413,9 +1414,18 @@ export default function App() {
       appendLog("err", "review", message);
       pushNotification("error", "Couldn't save review notes", message);
     });
+    // A store file written by a NEWER Sauce Bunny. The store has already shut
+    // its own write path; this is the half that tells the user, because the
+    // alternative reading of a shelf that silently stops saving is that the
+    // app is broken. Fires at most once per store, at hydration.
+    const unsubFuture = onFutureStoreVersion(({ label, message }) => {
+      appendLog("warn", "media", message);
+      pushNotification("error", `Not saving ${label}`, message);
+    });
     return () => {
       window.removeEventListener("unhandledrejection", onRejection);
       unsubReview();
+      unsubFuture();
     };
   }, [appendLog, pushNotification]);
 

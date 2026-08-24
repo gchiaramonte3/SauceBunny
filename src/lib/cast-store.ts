@@ -26,6 +26,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { sanitizeCastFile, MAX_CASTS, type Cast } from "./cast";
 import { mergeCasts } from "./cast-merge";
+import { futureVersionIn, futureVersionMessage, reportFutureVersion } from "./store-schema";
 
 const FILE = "casts.json";
 const READ_CAP = 8 * 1024 * 1024;
@@ -61,6 +62,25 @@ const listeners = new Set<() => void>();
  *  — a cast that never reached disk is exactly what a user must be told about
  *  while they can still act on it. */
 let lastError: string | null = null;
+
+/** Set once if the file on disk is newer than this build understands. It
+ *  never clears: the only cure is a newer app, and until then every write
+ *  path here is closed. See store-schema.ts for why read-only beats the
+ *  alternative. */
+let futureVersion: number | null = null;
+
+function lockToFutureVersion(found: number): void {
+  if (futureVersion !== null) return;
+  futureVersion = found;
+  lastError = futureVersionMessage("casts", found);
+  reportFutureVersion("casts", found);
+  notify();
+}
+
+/** True when the casts file may be read but must not be written. */
+export function castsAreReadOnly(): boolean {
+  return futureVersion !== null;
+}
 
 export function subscribeCasts(fn: () => void): () => void {
   listeners.add(fn);
@@ -113,6 +133,8 @@ export async function refreshCastsFromDisk(): Promise<void> {
     const text = await invoke<string>("read_text_file_capped", {
       path: `${dir}/${FILE}`, maxBytes: READ_CAP,
     });
+    const fv = futureVersionIn(text);
+    if (fv !== null) { lockToFutureVersion(fv); return; }
     const loaded = sanitizeCastFile(JSON.parse(text));
     const same = loaded.length === casts.length
       && loaded.every((c, i) => c.id === casts[i]?.id && c.updatedAt === casts[i]?.updatedAt);
@@ -187,6 +209,8 @@ async function flush(): Promise<void> {
   // a write is owed once the disk copy has been accounted for.
   if (!hydrated || !dir) return;
   pendingWrite = false;
+  // A file we cannot fully understand is a file we must not overwrite.
+  if (futureVersion !== null) return;
   try {
     if (!dirEnsured) {
       await invoke("ensure_dir_exists", { path: dir });
@@ -211,6 +235,10 @@ async function flush(): Promise<void> {
         invoke<string>("read_text_file_capped", { path: `${dir}/${FILE}`, maxBytes: READ_CAP }),
         new Promise<never>((_, rej) => setTimeout(() => rej(new Error("merge read timed out")), MERGE_READ_TIMEOUT_MS)),
       ]);
+      // Last look at disk before we clobber it: the other window may have
+      // been a newer build that upgraded the file since we hydrated.
+      const fv = futureVersionIn(cur);
+      if (fv !== null) { lockToFutureVersion(fv); return; }
       merged = mergeCasts(sanitizeCastFile(JSON.parse(cur)), casts, touched, tombstones).slice(0, MAX_CASTS);
     } catch {
       // No file yet, unreadable, or too slow — preserve rather than merge.
@@ -270,6 +298,11 @@ export async function hydrateCastStore(): Promise<void> {
 
     try {
       const text = await invoke<string>("read_text_file_capped", { path: `${dir}/${FILE}`, maxBytes: READ_CAP });
+      const fv = futureVersionIn(text);
+      if (fv !== null) lockToFutureVersion(fv);
+      // Still loaded, deliberately: the sanitizer is field-tolerant, so the
+      // user sees the casts this build understands instead of an empty shelf
+      // that reads as data loss. The banner says why they cannot be edited.
       const loaded = sanitizeCastFile(JSON.parse(text));
       if (loaded.length > 0) {
         // Anything created while the read was in flight wins over the disk
@@ -310,5 +343,6 @@ export function __resetCastStore(): void {
   hydrating = false;
   pendingWrite = false;
   lastError = null;
+  futureVersion = null;
   listeners.clear();
 }

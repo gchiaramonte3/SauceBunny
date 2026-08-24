@@ -51,6 +51,8 @@ export type ReviewIndexEntry = {
   bytes: number;
 };
 
+import { futureVersionIn, reportFutureVersion } from "./store-schema";
+
 const INDEX_FILE = "index.json";
 const WRITE_DEBOUNCE_MS = 500;
 /** Per-file read cap. `read_text_file_capped`'s cap is caller-supplied (the
@@ -81,6 +83,11 @@ let hydrated = false;
  *  then, because the shrink/empty-over-content clobber guards compare against
  *  index entries: a write that races ahead of the index bypasses them all. */
 let indexReady = false;
+/** Set if Reviews/index.json is newer than this build. Review docs are the
+ *  densest user work this app holds (comments, strokes, versions), and the
+ *  index is what finds them, so an index we half understand closes every
+ *  write path rather than being rewritten from a partial reading. */
+let futureVersion: number | null = null;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
@@ -127,6 +134,7 @@ export function resetReviewStoreForTests(): void {
   dirEnsured = false;
   hydrated = false;
   indexReady = false;
+  futureVersion = null;
   if (flushTimer !== null) clearTimeout(flushTimer);
   flushTimer = null;
   writeBackoffMs = 0;
@@ -283,6 +291,10 @@ async function flushDirtyDocs(): Promise<void> {
   // on it, so hold the write and re-arm — the edit stays dirty, nothing is
   // lost, and the flush lands the moment hydration finishes.
   if (!indexReady) { scheduleFlush(); return; }
+  // A newer build wrote this index. Hold the edits in memory (they stay
+  // dirty and stay visible) rather than rewriting an index, and docs beside
+  // it, from a reading we know is incomplete.
+  if (futureVersion !== null) return;
   const keys = [...dirty];
   dirty.clear();
   try {
@@ -438,6 +450,8 @@ export async function hydrateReviewStore(opts?: { migrate?: boolean }): Promise<
   } catch {
     /* no index yet — fresh store */
   }
+  const fv = futureVersionIn(indexText);
+  if (fv !== null) { futureVersion = fv; reportFutureVersion("reviews", fv); }
   const entries = [...parseReviewIndex(indexText)];
   // Keep every index entry — filename + shrink guard survive even unloaded.
   for (const [key, entry] of entries) index.set(key, entry);

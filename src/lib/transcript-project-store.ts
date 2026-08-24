@@ -3,6 +3,7 @@ import {
   parseProjects, reconcileProjects, updateProject,
   type TranscriptProject,
 } from "./transcript-projects";
+import { futureVersionIn, reportFutureVersion } from "./store-schema";
 
 /**
  * Where a project's metadata lives, and the one rule that matters.
@@ -32,6 +33,10 @@ let hydrated = false;
 let hydrating = false;
 let pendingWrite = false;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+/** Set if projects.json is newer than this build. Closes every write path;
+ *  see store-schema.ts. Losing this file costs posters and titles, but it
+ *  costs them just as permanently as anything else in Documents. */
+let futureVersion: number | null = null;
 const listeners = new Set<() => void>();
 
 function notify(): void {
@@ -58,6 +63,8 @@ async function flush(): Promise<void> {
   // See the header. `pendingWrite` deliberately STAYS set so hydration knows a
   // write is owed once the disk copy has been accounted for.
   if (!hydrated || !dir) return;
+  // Newer file on disk: read it, never overwrite it.
+  if (futureVersion !== null) { pendingWrite = false; return; }
   pendingWrite = false;
   try {
     if (!dirEnsured) {
@@ -105,6 +112,8 @@ export async function hydrateProjects(
       const text = await invoke<string>("read_text_file_capped", {
         path: `${dir}/${FILE}`, maxBytes: READ_CAP,
       });
+      const fv = futureVersionIn(text);
+      if (fv !== null) { futureVersion = fv; reportFutureVersion("projects", fv); }
       const doc: unknown = JSON.parse(text);
       stored = parseProjects((doc as { projects?: unknown })?.projects);
     } catch {
@@ -184,6 +193,7 @@ export function __resetProjectStore(): void {
   hydrated = false;
   hydrating = false;
   pendingWrite = false;
+  futureVersion = null;
   if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
   listeners.clear();
 }
