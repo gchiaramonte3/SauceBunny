@@ -100,6 +100,11 @@ export function AnnotationOverlay({
     setPendingLabel(null);
   };
 
+  // The sizing effect below re-arms on visibility, not on every render, so
+  // its ResizeObserver would otherwise repaint through the redraw closure
+  // captured at arm time - a mid-draft window resize would erase every
+  // stroke drawn since. The ref always points at this render's redraw.
+  const redrawRef = useRef<() => void>(() => {});
   const redraw = () => {
     const cv = canvasRef.current;
     const ctx = cv?.getContext("2d");
@@ -149,16 +154,36 @@ export function AnnotationOverlay({
     strokes.forEach(paint);
     if (live.current) paint(live.current);
   };
+  redrawRef.current = redraw;
+
+  // Whether anything renders at all - the early return below uses this, and
+  // so does the sizing effect's dependency list. A BOOLEAN, deliberately:
+  // depping on raw `opacity` would tear down and re-arm the ResizeObserver
+  // on every proximity-fade tick, up to 60 times a second during playback.
+  const visible = drawing || (annotationHasContent(annotation) && opacity > 0);
 
   // Keep the backing store sized to the displayed canvas (DPR-aware) + redraw.
+  //
+  // Re-armed on `visible`, and that dependency IS the feature. With deps []
+  // this ran exactly once, on an instance whose first render had returned
+  // null - both refs were empty, the guard bailed, and nothing ever sized
+  // the canvas. When the user then clicked Draw, the canvas mounted with no
+  // width/height attributes: the HTML default 300x150 backing store,
+  // stretched by CSS across the whole monitor. On a retina display that is
+  // an ~8x upscale, which is the "pixelated and big even at the smallest
+  // level" every first-time drawing session saw. The DPR math below was
+  // correct the whole time; it just never executed on the first-use path -
+  // the component test always rendered with drawing already true, which is
+  // exactly how the path went untested.
   useEffect(() => {
+    if (!visible) return;
     const cv = canvasRef.current, wrap = wrapRef.current;
     if (!cv || !wrap) return;
     const fit = () => {
       const dpr = window.devicePixelRatio || 1;
       cv.width = Math.max(1, Math.round(wrap.clientWidth * dpr));
       cv.height = Math.max(1, Math.round(wrap.clientHeight * dpr));
-      redraw();
+      redrawRef.current();
     };
     fit();
     const ro = new ResizeObserver(fit);
@@ -175,8 +200,7 @@ export function AnnotationOverlay({
     };
     arm();
     return () => { ro.disconnect(); mq?.removeEventListener("change", onDpr); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [visible]);
 
   // Redraw when the committed strokes change (annotation swapped / cleared).
   // The live draft is repainted imperatively from onDown/onMove/onUp, and the
@@ -275,7 +299,7 @@ export function AnnotationOverlay({
   }, [drawing, labelMode]);
 
   // Read-only with nothing to show (or fully faded) → render nothing.
-  if (!drawing && (!annotationHasContent(annotation) || opacity <= 0)) return null;
+  if (!visible) return null;
 
   return (
     <div
