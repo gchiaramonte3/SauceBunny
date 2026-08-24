@@ -174,3 +174,47 @@ describe("a run that proceeds", () => {
     expect(h.calls, "the runner exported an item that had been removed").toHaveLength(1);
   });
 });
+
+describe("handleAddToQueue takes the range it is given", () => {
+  /**
+   * "Add to queue" from a transcript selection sets the marks and queues in the
+   * SAME tick, so this callback cannot read them out of its own closure - it
+   * still holds the previous range until React re-renders. It queued the wrong
+   * clip, silently, and the queued row looked perfectly plausible.
+   */
+  it("queues the passed range, not the stale closure marks", async () => {
+    const d = deps([], { inFrames: 0, outFrames: 50 });
+    const { result } = renderHook(() => useClipQueue(d));
+    result.current.handleAddToQueue({ inFrames: 300, outFrames: 425 });
+    const added = (d.clipQueueRef as { current: { inFrames: number; outFrames: number }[] }).current;
+    expect(added).toHaveLength(1);
+    expect(added[0].inFrames, "queued the closure's marks instead of the selection").toBe(300);
+    expect(added[0].outFrames).toBe(425);
+  });
+
+  it("falls back to the closure marks when called with no range", async () => {
+    const d = deps([], { inFrames: 10, outFrames: 60 });
+    const { result } = renderHook(() => useClipQueue(d));
+    result.current.handleAddToQueue();
+    const added = (d.clipQueueRef as { current: { inFrames: number }[] }).current;
+    expect(added[0].inFrames).toBe(10);
+  });
+
+  /**
+   * The reason the range is type-checked and not merely truthy: this callback
+   * is handed straight to onClick in several places, so React calls it with a
+   * MouseEvent as the first argument. That object is truthy and has no
+   * inFrames, so trusting it made the Add to queue BUTTON report that no marks
+   * were set.
+   */
+  it("ignores a MouseEvent, which is what onClick hands it", async () => {
+    const d = deps([], { inFrames: 10, outFrames: 60 });
+    const { result } = renderHook(() => useClipQueue(d));
+    const evt = { type: "click", currentTarget: null, preventDefault() {} };
+    (result.current.handleAddToQueue as (x: unknown) => void)(evt);
+    const added = (d.clipQueueRef as { current: { inFrames: number }[] }).current;
+    expect(added, "a click event was treated as a range, so nothing queued").toHaveLength(1);
+    expect(added[0].inFrames).toBe(10);
+    expect(d.pushNotification).not.toHaveBeenCalled();
+  });
+});

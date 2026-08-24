@@ -62,7 +62,7 @@ export function ScreeningShelf() {
                 title="Reveal in Finder"
                 aria-label={`Reveal ${r.title} in Finder`}
                 onClick={() => {
-                  const path = screeningPath(r.file);
+                  const path = screeningPath(r.id);
                   if (path) void invoke("reveal_in_finder", { path }).catch(() => {});
                 }}
               >

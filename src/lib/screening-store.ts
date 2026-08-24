@@ -158,10 +158,17 @@ async function resolveDir(): Promise<string | null> {
  * returns null before that, and for a name the index does not hold, so a
  * caller can never be handed a path built from an unvalidated string.
  */
-export function screeningPath(file: string): string | null {
+export function screeningPath(id: string): string | null {
   if (!screeningsDir) return null;
-  if (!index.has(file)) return null;
-  return `${screeningsDir}/${file}`;
+  // Keyed by the screening's ID, because that is what `index` is keyed by
+  // (saveScreening does `index.set(doc.id, ...)`). This took a FILENAME and
+  // asked `index.has(file)`, which is never true, so Reveal in the Past
+  // screenings list returned null on every row and the button did nothing.
+  // The filename still comes from the entry, never from the caller, so a
+  // caller still cannot make us build a path out of an unvalidated string.
+  const entry = index.get(id);
+  if (!entry) return null;
+  return `${screeningsDir}/${entry.file}`;
 }
 
 /** Read index.json once. Cheap: one small file, no documents. */

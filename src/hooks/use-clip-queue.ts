@@ -83,7 +83,7 @@ export function useClipQueue(p: ClipQueueDeps) {
    *  The item captures its SOURCE (web URL or local path), fps, and title at
    *  add time, so the queue survives source switches and mixed queues export
    *  each clip from the right place. */
-  const handleAddToQueue = useCallback(() => {
+  const handleAddToQueue = useCallback((range?: { inFrames: number; outFrames: number }) => {
     if (sourceKind === "file" && !localFilePath) {
       pushNotification("error", "Local file missing", "Re-import the file and try again.");
       return;
@@ -93,12 +93,27 @@ export function useClipQueue(p: ClipQueueDeps) {
         "Fetch a URL or import a file, then mark the section you want to queue.");
       return;
     }
-    if (inFrames == null || outFrames == null) {
+    // An explicit range wins over the closure's. A caller that just set the
+    // marks in this same tick (the transcript selection's "Add to queue")
+    // cannot see them here yet, so it hands them over instead.
+    //
+    // TYPE-CHECKED, not just truthy. This callback is handed straight to
+    // onClick in several places (`onAddToQueue={handleAddToQueue}`), so React
+    // calls it with a MouseEvent as the first argument - which is truthy, has
+    // no inFrames, and therefore made the Add to queue BUTTON claim no marks
+    // were set. Caught by e2e/smoke.spec.ts:669 within a minute of being
+    // written; a positional first parameter on a callback that also serves as
+    // an event handler has to defend itself.
+    const explicit = range && typeof range.inFrames === "number" && typeof range.outFrames === "number"
+      ? range : null;
+    const inF = explicit ? explicit.inFrames : inFrames;
+    const outF = explicit ? explicit.outFrames : outFrames;
+    if (inF == null || outF == null) {
       pushNotification("info", "Set Mark in and Mark out first",
         "Mark the section with I and O.");
       return;
     }
-    if (outFrames <= inFrames) {
+    if (outF <= inF) {
       pushNotification("error", "Invalid range", "Mark out must be after Mark in.");
       return;
     }
@@ -118,8 +133,8 @@ export function useClipQueue(p: ClipQueueDeps) {
       fps,
       title: metadata?.title ?? nameFor(nextIndex),
       thumbnail: metadata?.thumbnail ?? null,
-      inFrames,
-      outFrames,
+      inFrames: inF,
+      outFrames: outF,
       filename: nameFor(nextIndex),
       format: exportOpts.format,
       // reencode/captions are yt-dlp features — meaningless for the
@@ -131,7 +146,7 @@ export function useClipQueue(p: ClipQueueDeps) {
     setClipQueue((prev) => [...prev, item]);
     // Queueing consumes the selection — record the clear so ⌘Z restores the
     // marks (the queued item itself stays put; queue ops aren't undoable).
-    pushMarksUndo("clear in/out", inFrames, outFrames, null, null);
+    pushMarksUndo("clear in/out", inF, outF, null, null);
     setInFrames(null);
     setOutFrames(null);
     setQueueOpen(true);
@@ -329,7 +344,12 @@ export function useClipQueue(p: ClipQueueDeps) {
         appendLog("info", "queue", "create_clip failed with sign-in cookies. Retrying without…");
         result = await runClip(undefined);
       }
-      if (result.error === "Cancelled") {
+      // startsWith, not ===: resetForNewSource settles the in-flight clip with
+      // "Cancelled - a different source was loaded" so the reason survives to
+      // the log, and an exact match sent that straight to the generic failure
+      // branch. The row said "Failed" with an alert icon for something the app
+      // itself had just done on purpose.
+      if (result.error?.startsWith("Cancelled")) {
         cancelled = true;
         setClipQueue((prev) => prev.map((c) => c.id === item.id ? { ...c, status: "queued" } : c));
         break;

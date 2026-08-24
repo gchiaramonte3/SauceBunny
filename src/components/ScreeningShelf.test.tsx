@@ -14,7 +14,17 @@ vi.mock("../lib/screening-store", () => ({
     if (h.hydrateThrows) throw new Error("no folder yet");
   },
   listScreenings: () => h.rows,
-  screeningPath: (file: string) => `/Docs/Sauce Bunny/Screenings/${file}`,
+  // A FAITHFUL stand-in: the real store keys its index by the screening's ID
+  // and reads the filename out of the entry. This used to be
+  // `(file) => dir + file`, an identity function, so the test asserted the
+  // mock's own behaviour and passed while the shipping Reveal button was
+  // dead - screeningPath was being handed a filename and looking it up in an
+  // id-keyed Map, which never hits. A mock that resolves anything it is given
+  // cannot tell you which argument the call site passes.
+  screeningPath: (id: string) => {
+    const r = (h.rows as { id: string; file: string }[]).find((x) => x.id === id);
+    return r ? `/Docs/Sauce Bunny/Screenings/${r.file}` : null;
+  },
 }));
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (cmd: string, args: { path?: string }) => {

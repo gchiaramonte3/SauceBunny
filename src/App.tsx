@@ -748,10 +748,16 @@ export default function App() {
    */
   const markRangeFromSeconds = useCallback((startSec: number, endSec: number) => {
     const r = markRange(startSec, endSec, fps, durationFrames);
-    if (!r) return;
+    if (!r) return null;
     pushMarksUndo("Mark from transcript", inFrames, outFrames, r.inFrames, r.outFrames);
     setInFrames(r.inFrames);
     setOutFrames(r.outFrames);
+    // RETURNED, not just set. "Add to queue" from a transcript selection runs
+    // in the same tick as this, and handleAddToQueue reads inFrames/outFrames
+    // out of its own closure - which still holds the PREVIOUS marks until
+    // React re-renders. So it queued the last range instead of the selection.
+    // Handing the range back is what lets that call site be correct.
+    return r;
   }, [fps, durationFrames, inFrames, outFrames, pushMarksUndo]);
 
   const [exportOpts, setExportOpts] = useState<ExportOpts>(() => ({
@@ -4044,7 +4050,7 @@ export default function App() {
       // Same seam as the in-window drawer below: seconds from the transcript,
       // frames to the transport, undoable like a manual mark.
       onMarkRange: (a: number, b: number) => markRangeFromSeconds(a, b),
-      onQueueRange: (a: number, b: number) => { markRangeFromSeconds(a, b); handleAddToQueue(); },
+      onQueueRange: (a: number, b: number) => { const r = markRangeFromSeconds(a, b); if (r) handleAddToQueue(r); },
       onClearAll: handleQueueClearAll,
       onExportAll: () => { void handleExportQueue(); },
       onStop: () => { void handleStop(); },
@@ -4988,7 +4994,7 @@ export default function App() {
                 onRetry={handleQueueRetry}
                 reviewRequestTick={reviewRequestTick}
                 onMarkRange={markRangeFromSeconds}
-                onQueueRange={(a, b) => { markRangeFromSeconds(a, b); handleAddToQueue(); }}
+                onQueueRange={(a, b) => { const r = markRangeFromSeconds(a, b); if (r) handleAddToQueue(r); }}
                 onClearAll={handleQueueClearAll}
                 onExportAll={handleExportQueue}
                 onStop={handleStop}
@@ -5059,7 +5065,14 @@ export default function App() {
                   setAnnotationDisplay(null);
                   // Label click enters draw mode if needed; inside draw mode it
                   // toggles between the label tool and the pen.
-                  if (!reviewDrawActive) { setReviewDrawActive(true); setReviewLabelMode(true); return; }
+                  // Pauses on the same edge the pen does. ReviewPanel latches
+                  // the comment's timestamp on the drawActive edge either way,
+                  // so entering annotation by the LABEL tool used to latch a
+                  // time under a frame that was still moving.
+                  if (!reviewDrawActive) {
+                    playerRef.current?.pause();
+                    setReviewDrawActive(true); setReviewLabelMode(true); return;
+                  }
                   setReviewLabelMode((v) => !v);
                 }}
                 onReviewDraftConsumed={() => { setReviewDraft(null); clearDraftHistory(); setReviewDrawActive(false); setReviewLabelMode(false); }}

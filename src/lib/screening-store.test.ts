@@ -5,7 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 import { invoke } from "@tauri-apps/api/core";
 import {
   parseScreeningIndex, screeningFileName, indexEntryFor,
-  saveScreening, listScreenings, loadScreening, resetScreeningStoreForTests,
+  saveScreening, listScreenings, loadScreening, resetScreeningStoreForTests, screeningPath,
 } from "./screening-store";
 
 const LIB = "/docs/Sauce Bunny/Transcripts";
@@ -240,5 +240,49 @@ describe("a failed save is not swallowed", () => {
     });
     await expect(saveScreening(newScreening("s-ok", "Friday", "host", 1000))).resolves.toBeUndefined();
     expect(fs.has(`${DIR}/${screeningFileName(newScreening("s-ok", "Friday", "host", 1000))}`)).toBe(true);
+  });
+});
+
+describe("screeningPath", () => {
+  /**
+   * The real lookup, unmocked, because the component test can only prove which
+   * ARGUMENT the call site passes - not that the store resolves it. Reveal in
+   * the Past screenings list was dead on every row for the whole life of the
+   * feature: the button handed screeningPath a filename and screeningPath
+   * looked it up in a Map keyed by the screening's id, so it returned null and
+   * the click did nothing. Nothing caught it because the only test in front of
+   * it mocked the store with an identity function.
+   */
+  it("resolves an id to its file, and refuses anything else", async () => {
+    const fs = new Map<string, string>();
+    vi.mocked(invoke).mockImplementation(async (cmd: string, a?: unknown) => {
+      const args = (a ?? {}) as Record<string, string>;
+      if (cmd === "default_transcript_library_path") return LIB;
+      if (cmd === "ensure_dir_exists") return null;
+      if (cmd === "write_text_to_path") { fs.set(args.path, args.text); return null; }
+      if (cmd === "read_text_file_capped") {
+        const t = fs.get(args.path);
+        if (t == null) throw new Error("ENOENT");
+        return t;
+      }
+      throw new Error(`unexpected ${cmd}`);
+    });
+
+    resetScreeningStoreForTests();
+    const doc = newScreening("s-reveal", "Friday review", "host", Date.UTC(2026, 7, 1, 12));
+    await saveScreening(doc);
+
+    const path = screeningPath(doc.id);
+    expect(path, "an id the index holds must resolve").toBeTruthy();
+    expect(path!.startsWith(DIR + "/")).toBe(true);
+    expect(path!.endsWith(".json")).toBe(true);
+
+    // The filename is NOT the key. Passing it is the bug this test exists for.
+    const byFile = screeningPath(path!.split("/").pop()!);
+    expect(byFile, "a filename must not resolve - the index is keyed by id").toBeNull();
+
+    // And an id nobody stored resolves to nothing, so a caller can never make
+    // us build a path out of a string we did not put in the index ourselves.
+    expect(screeningPath("../../etc/passwd")).toBeNull();
   });
 });
