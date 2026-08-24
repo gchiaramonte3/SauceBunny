@@ -68,7 +68,10 @@ sha2 = "0.10"
 log = "0.4"
 # Tier C transfer verification. Already in the lock file as a transitive dep
 # of the iroh stack, so this adds zero new crates. MIT OR Apache-2.0.
-blake3 = "1"
+# mmap + rayon: update_mmap_rayon hashes a multi-GB offer memory-bandwidth
+# bound across every core instead of one core through a 64 KiB read loop -
+# measured 3-5x on the files people actually screen (b3sum ships this way).
+blake3 = { version = "1", features = ["mmap", "rayon"] }
 # Cloud AI (opt-in Claude/ChatGPT): the user's API key lives in the macOS
 # Keychain, never plaintext localStorage and never in the webview. keyring 2.x
 # ships the Apple keystore in its default features.

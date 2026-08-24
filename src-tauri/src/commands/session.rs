@@ -1976,6 +1976,42 @@ fn fetch_cancels() -> &'static std::sync::Mutex<HashMap<String, Arc<tokio::sync:
 /// Host: hash the CURRENT source file and offer it to the room (Tier C).
 /// The click that invokes this IS the sender's consent. Returns
 /// `{ name, size, blake3 }` so the host UI can mirror the offer.
+
+/// Whole-file BLAKE3, mmap'd and hashed across every core. The serial
+/// `update_reader` loop this replaces hashed a 60 GB master on ONE core
+/// through 64 KiB reads - minutes of "Preparing the file..." for something
+/// the memory bus can do in a fraction of the time.
+fn hash_file_parallel(path: &std::path::Path) -> Result<blake3::Hasher, String> {
+    let mut h = blake3::Hasher::new();
+    h.update_mmap_rayon(path).map_err(|e| e.to_string())?;
+    Ok(h)
+}
+
+/// (size, mtime) -> hex memo for offer hashing. Re-offering the same cut
+/// after a withdraw, or after a source switch and back, used to re-hash the
+/// whole file; the pair changes on any rewrite (and this app's own writers
+/// are atomic temp+rename, which always bumps both), so a hit is safe to
+/// trust and a warm re-offer costs a stat.
+static OFFER_HASH_MEMO: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, (u64, std::time::SystemTime, String)>>,
+> = std::sync::OnceLock::new();
+
+fn memoized_file_hash(path: &std::path::Path, size: u64, mtime: Option<std::time::SystemTime>) -> Result<String, String> {
+    let memo = OFFER_HASH_MEMO.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    if let (Some(mt), Ok(map)) = (mtime, memo.lock()) {
+        if let Some((s, t, hex)) = map.get(path) {
+            if *s == size && *t == mt {
+                return Ok(hex.clone());
+            }
+        }
+    }
+    let hex = hash_file_parallel(path)?.finalize().to_hex().to_string();
+    if let (Some(mt), Ok(mut map)) = (mtime, memo.lock()) {
+        map.insert(path.to_path_buf(), (size, mt, hex.clone()));
+    }
+    Ok(hex)
+}
+
 #[tauri::command]
 pub async fn session_offer_file(
     app: AppHandle,
@@ -2017,12 +2053,8 @@ pub async fn session_offer_file(
     // this is a multi-GB sequential read; blake3 itself runs multiple GB/s.
     let hash = tokio::task::spawn_blocking({
         let path_buf = path_buf.clone();
-        move || -> Result<String, String> {
-            let mut hasher = blake3::Hasher::new();
-            let file = std::fs::File::open(&path_buf).map_err(|e| e.to_string())?;
-            hasher.update_reader(file).map_err(|e| e.to_string())?;
-            Ok(hasher.finalize().to_hex().to_string())
-        }
+        let mtime = meta.modified().ok();
+        move || memoized_file_hash(&path_buf, size, mtime)
     })
     .await
     .map_err(|e| format!("hash task: {e}"))?
@@ -2138,12 +2170,7 @@ pub async fn session_fetch_file(
                 "phase": "checking", "name": display, "received": offset as f64, "total": 0.0,
             }));
             let p2 = part.clone();
-            hasher = tokio::task::spawn_blocking(move || -> Result<blake3::Hasher, String> {
-                let mut h = blake3::Hasher::new();
-                let f = std::fs::File::open(&p2).map_err(|e| e.to_string())?;
-                h.update_reader(f).map_err(|e| e.to_string())?;
-                Ok(h)
-            })
+            hasher = tokio::task::spawn_blocking(move || hash_file_parallel(&p2))
             .await
             .map_err(|e| format!("rehash task: {e}"))?
             .map_err(|e| format!("rehash partial: {e}"))?;
@@ -2953,5 +2980,62 @@ mod transfer_tests {
         assert_eq!(sanitize_transfer_filename("\u{7}\u{8}"), "transfer");
         let long = "x".repeat(400);
         assert!(sanitize_transfer_filename(&long).len() <= 120);
+    }
+}
+
+#[cfg(test)]
+mod offer_hash_tests {
+    use super::*;
+    use std::io::Write;
+
+    fn temp_file(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("sb-hash-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(name);
+        let mut f = std::fs::File::create(&p).unwrap();
+        f.write_all(bytes).unwrap();
+        f.sync_all().unwrap();
+        p
+    }
+
+    /// The parallel path must produce byte-identical hashes to the serial
+    /// reader it replaced - a guest verifies a transfer against this hex, so
+    /// a divergence would refuse every completed download.
+    #[test]
+    fn parallel_hash_matches_the_serial_reader() {
+        let p = temp_file("clip.bin", &vec![0xABu8; 3 * 1024 * 1024 + 17]);
+        let mut serial = blake3::Hasher::new();
+        serial.update_reader(std::fs::File::open(&p).unwrap()).unwrap();
+        let fast = hash_file_parallel(&p).unwrap().finalize().to_hex().to_string();
+        assert_eq!(fast, serial.finalize().to_hex().to_string());
+    }
+
+    #[test]
+    fn empty_file_hashes_cleanly() {
+        let p = temp_file("empty.bin", b"");
+        let hex = hash_file_parallel(&p).unwrap().finalize().to_hex().to_string();
+        assert_eq!(hex, blake3::Hasher::new().finalize().to_hex().to_string());
+    }
+
+    /// The memo returns the cached hex while (size, mtime) match, and drops
+    /// it the moment the file is rewritten - which this app's atomic writers
+    /// always surface as a new mtime.
+    #[test]
+    fn memo_hits_on_same_stat_and_misses_on_rewrite() {
+        let p = temp_file("memo.bin", b"first contents");
+        let meta = std::fs::metadata(&p).unwrap();
+        let h1 = memoized_file_hash(&p, meta.len(), meta.modified().ok()).unwrap();
+        let h2 = memoized_file_hash(&p, meta.len(), meta.modified().ok()).unwrap();
+        assert_eq!(h1, h2);
+
+        // Rewrite with different bytes AND a different length; stat changes.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&p, b"second, longer contents").unwrap();
+        let meta2 = std::fs::metadata(&p).unwrap();
+        let h3 = memoized_file_hash(&p, meta2.len(), meta2.modified().ok()).unwrap();
+        assert_ne!(h1, h3, "a rewritten file served the stale hash");
+        // And the new value verifies against a fresh direct hash.
+        let direct = hash_file_parallel(&p).unwrap().finalize().to_hex().to_string();
+        assert_eq!(h3, direct);
     }
 }
