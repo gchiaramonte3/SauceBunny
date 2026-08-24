@@ -15,7 +15,7 @@ import { useCardDrag } from "../hooks/use-card-drag";
 import { WebListRows } from "./WebListRows";
 import { WebCollectionMenu } from "./WebCollectionMenu";
 import {
-  addToWebCollection, deleteWebCollection, flushWebCollections, getWebCollections, hydrateWebCollections, subscribeWebCollections, type WebCollection,
+  createWebCollection, addToWebCollection, deleteWebCollection, flushWebCollections, getWebCollections, hydrateWebCollections, subscribeWebCollections, type WebCollection,
 } from "../lib/web-collection-store";
 
 /** View prefs for the web pane, persisted separately from the folder pane's:
@@ -305,6 +305,13 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
         onPrefs={patchPrefs}
         treeOpen={treeOpen}
         onShowTree={onShowTree}
+        // The web shelf's container is a COLLECTION, not a directory - a clip
+        // may sit in several at once - so the label says so while the control
+        // stays the one every other shelf mounts.
+        newFolderLabel="New collection"
+        onNewFolder={(name) => (createWebCollection(name)
+          ? null
+          : "Could not make that collection. You may have reached the limit.")}
       />
       <LibrarySelectionBar
         count={selectedUrls.length}

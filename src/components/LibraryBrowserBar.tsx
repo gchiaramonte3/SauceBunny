@@ -114,13 +114,13 @@ export function LibraryBrowserBar({
       <div className="cp-lib-bar-controls">
         {onNewFolder && (naming ? (
           <form
-            className="cp-lib-bar-newfolder-form"
+            className="cp-newfolder-form"
             onSubmit={(e) => { e.preventDefault(); void submitName(); }}
           >
             <input
               ref={inputRef}
               type="text"
-              className="cp-lib-bar-newfolder-input"
+              className="cp-newfolder-input"
               value={name}
               placeholder={`${newFolderLabel ?? "New folder"} name`}
               aria-label={`${newFolderLabel ?? "New folder"} name`}
@@ -131,12 +131,12 @@ export function LibraryBrowserBar({
             />
             <button type="submit" className="btn cp-tx-iconbtn" disabled={busy || !name.trim()}>Create</button>
             <button type="button" className="btn btn-ghost cp-tx-iconbtn" onClick={closeNaming} disabled={busy}>Cancel</button>
-            {err && <span className="cp-lib-bar-newfolder-err" role="alert">{err}</span>}
+            {err && <span className="cp-newfolder-err" role="alert">{err}</span>}
           </form>
         ) : (
           <button
             type="button"
-            className="cp-lib-bar-newfolder"
+            className="cp-newfolder-btn"
             title={newFolderLabel ?? "New folder"}
             aria-label={newFolderLabel ?? "New folder"}
             onClick={() => setNaming(true)}

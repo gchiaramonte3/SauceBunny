@@ -296,17 +296,6 @@
   gap: 6px;
   padding: 0 16px 8px;
 }
-.cp-reader-newproject-input {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
-  color: var(--fg-1);
-  background: var(--bg-3);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  padding: 5px 8px;
-}
 .cp-reader-project-err {
   margin: 0 16px 8px;
   font-family: var(--font-ui);

@@ -205,6 +205,7 @@ export function tauriMockInit(expectedBuildId: string): void {
     },
     // The Frames shelf. Six stills across two films, one of them filed into
     // a folder, so the shelf has both loose cards and a container tile.
+    list_frames_folders: () => ["Selects", ...madeFolders],
     list_frames: () => {
       const f = (n: number, source: string, folder: string) => ({
         path: `/e2e-mock/Frames/${folder ? folder + "/" : ""}${source}_${String(n).padStart(8, "0")}.jpg`,
@@ -221,7 +222,21 @@ export function tauriMockInit(expectedBuildId: string): void {
       ];
     },
     delete_frame: null,
-    create_frames_folder: "/e2e-mock/Frames/New",
+    // STATEFUL, because the bug is the round trip. A folder that has just
+    // been made holds nothing, and list_frames only reports FILES - so unless
+    // the folder listing remembers the creation, "New folder" looks like it
+    // did nothing, which is exactly what shipped.
+    create_frames_folder: (args: unknown) => {
+      const a = args as { parent?: string; name?: string };
+      const rel = [a?.parent, a?.name].filter(Boolean).join("/");
+      // Refuses a duplicate, as the real command does - that refusal is the
+      // ordinary failure a user meets, and it has to reach the screen.
+      if (!rel || rel === "Selects" || madeFolders.includes(rel)) {
+        return Promise.reject({ kind: "Invalid", data: `A folder named "${a?.name}" already exists.` });
+      }
+      madeFolders.push(rel);
+      return `/e2e-mock/Frames/${rel}`;
+    },
     move_frame_to_folder: null,
     // The web shelf.
     list_cached_web: () => ([
@@ -273,6 +288,8 @@ export function tauriMockInit(expectedBuildId: string): void {
   // the backend to do. Reading a command's ARGUMENTS is the only way to tell
   // "the drop filed these three frames into Selects" from "something moved".
   const invoked: { cmd: string; args: unknown }[] = [];
+  /** Folders created during this run, so the frames shelf can show them. */
+  const madeFolders: string[] = [];
 
   (window as unknown as Record<string, unknown>).__TAURI_MOCK__ = {
     invoked: () => invoked,

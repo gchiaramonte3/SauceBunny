@@ -317,15 +317,21 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
               ? organized.total
               : `${organized.shown} of ${organized.total}`}
           </span>
+          {/* The SAME control the Library and the shelves mount, down to the
+              class, so "make a container here" looks and behaves identically
+              wherever you are. It said only "+" before, which is the one
+              place in the app where that verb had no name on it. A project
+              IS a folder here, so the label says so. */}
           <button
             type="button"
-            className="cp-reader-newproject"
+            className="cp-newfolder-btn"
             title="New project"
             aria-label="New project"
             aria-expanded={newProject !== null}
             onClick={() => setNewProject((v) => (v === null ? "" : null))}
           >
-            <IconPlus size={14} />
+            <IconPlus size={12} />
+            New project
           </button>
         </div>
         {/* Inline, not a dialog: making a project is creating an empty folder,
@@ -344,7 +350,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
             }}
           >
             <input
-              className="cp-reader-newproject-input"
+              className="cp-newfolder-input"
               value={newProject}
               autoFocus
               spellCheck={false}

@@ -2241,7 +2241,7 @@
    once for the frames shelf and put in that pane's COUNT LINE, which is a
    status readout rather than a place verbs live - and the Library, which had
    no way to make a folder at all, could not have shared it there. */
-.cp-lib-bar-newfolder {
+.cp-newfolder-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -2257,14 +2257,14 @@
   white-space: nowrap;
   cursor: pointer;
 }
-.cp-lib-bar-newfolder:hover { background: var(--bg-3); color: var(--fg-1); }
-.cp-lib-bar-newfolder-form {
+.cp-newfolder-btn:hover { background: var(--bg-3); color: var(--fg-1); }
+.cp-newfolder-form {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
 }
-.cp-lib-bar-newfolder-input {
+.cp-newfolder-input {
   width: 160px;
   height: 24px;
   padding: 0 8px;
@@ -2275,9 +2275,12 @@
   font-family: var(--font-ui);
   font-size: var(--text-base);
 }
-.cp-lib-bar-newfolder-err {
+.cp-newfolder-err {
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   color: var(--danger);
   white-space: nowrap;
 }
+/* The reader's inline row gives the shared input the full width it has there;
+   in the browser bar it keeps its fixed width beside the other controls. */
+.cp-reader-newproject-row .cp-newfolder-input { flex: 1; min-width: 0; width: auto; }
