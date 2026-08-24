@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useReactionFlashes } from "../lib/reaction-store";
 import { IconCrown, IconMic, IconMicOff, IconVideo, IconVideoOff, IconChevronRight } from "./Icons";
 import { initialsOf } from "../lib/review";
 import { subscribeSessionCapture, getSessionCapture } from "../hooks/use-media-capture";
@@ -34,7 +35,7 @@ function rosterAnnouncement(joined: readonly string[], left: readonly string[]):
   return [phrase(joined, "joined"), phrase(left, "left")].filter(Boolean).join(". ");
 }
 
-export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream, raisedHands, reactionFlashes, strip = false, presenter = "m0", canGrantPresenter = false, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic, mutedForMe, onToggleMuteForMe }: {
+export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream, raisedHands, strip = false, presenter = "m0", canGrantPresenter = false, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic, mutedForMe, onToggleMuteForMe }: {
   active: boolean;
   participants: Participant[];
   /** Member id currently driving source + transport. */
@@ -59,11 +60,12 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
   /** Members with a raised hand (persistent ✋ tile badge). */
   raisedHands: ReadonlySet<string>;
   /** Latest transient reaction per member (short-lived tile badge). */
-  reactionFlashes: ReadonlyMap<string, string>;
   /** Theater bottom strip: horizontal row under the stage instead of the
    *  side column (the column hides in theater; this fills the space). */
   strip?: boolean;
 }) {
+  // Self-subscribed: the flash map changing re-renders these tiles, not App.
+  const reactionFlashes = useReactionFlashes();
   const [selfStream, setSelfStream] = useState<MediaStream | null>(() => getSessionCapture());
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => subscribeSessionCapture(setSelfStream), []);

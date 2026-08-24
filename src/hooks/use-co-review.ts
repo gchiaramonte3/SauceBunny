@@ -31,6 +31,7 @@ import { getLastUserSeekAt, getPlayheadFrames } from "../lib/playhead-store";
 import {
   clearGhosts, pruneGhosts, shouldSendPresence, upsertGhost,
 } from "../lib/ghost-store";
+import { clearReactions, pushReaction } from "../lib/reaction-store";
 import { useStreamKeep } from "./use-stream-keep";
 import { acceptTransport, createClockEstimator, expectedPosition } from "../lib/session-clock";
 import {
@@ -144,18 +145,9 @@ type Args = {
   stunUrl: string;
 };
 
-/** One transient on-screen reaction (floater + tile badge, ~5s). */
-export type LiveReaction = {
-  id: number;
-  /** Member id of the sender (m0 = host). */
-  from: string;
-  /** Sender's display name, snapshotted at fire time so a floater keeps
-   *  the right name even if that peer leaves during its ~5s life. */
-  name: string;
-  /** applause | confetti | thumbsup | question */
-  emote: string;
-  at: number;
-};
+// LiveReaction moved to lib/reaction-store with the feed itself; re-exported
+// so the components that type against it keep one import path.
+export type { LiveReaction } from "../lib/reaction-store";
 
 /** One `session:transfer` progress event (either direction, r143). */
 export type TransferProgress = {
@@ -206,7 +198,6 @@ export type CoReview = {
   startShare: (source: ShareSourceArg) => void;
   stopShare: () => void;
   /** Transient reactions currently on screen (auto-pruned after ~5s). */
-  liveReactions: LiveReaction[];
   /** Member ids with a raised hand (persistent until lowered). */
   raisedHands: ReadonlySet<string>;
   /** True when WE drive source + transport (the host, until the floor moves). */
@@ -276,9 +267,7 @@ export function useCoReview({
   const [coSession, setCoSession] = useState<CoSessionState>({ role: "off", code: null, peers: [], selfId: null, title: null, error: null, presenter: "m0", presenterEpoch: 0 });
   // Live reactions: fire-and-forget, never persisted, pruned after ~5s
   // (the Zoom/Meet grammar - late joiners never see past reactions).
-  const [liveReactions, setLiveReactions] = useState<LiveReaction[]>([]);
   const [raisedHands, setRaisedHands] = useState<ReadonlySet<string>>(new Set());
-  const reactionIdRef = useRef(0);
   const lastReactionSendRef = useRef(0);
   const coSessionRef = useRef(coSession);
   coSessionRef.current = coSession;
@@ -563,11 +552,9 @@ export function useCoReview({
             return next;
           });
         } else if (m.on) {
-          const r: LiveReaction = { id: ++reactionIdRef.current, from: m.from, name: nameForMember(m.from), emote: m.emote, at: Date.now() };
-          setLiveReactions((prev) => [...prev.slice(-23), r]);
-          window.setTimeout(() => {
-            setLiveReactions((prev) => prev.filter((x) => x.id !== r.id));
-          }, 5200);
+          // Straight into the reaction store - an applause burst must move
+          // two leaves, not the App tree. It prunes itself.
+          pushReaction({ from: m.from, name: nameForMember(m.from), emote: m.emote, at: Date.now() });
         }
         return;
       }
@@ -750,7 +737,7 @@ export function useCoReview({
       prevDocKeyRef.current = null;
       setSessionDoc(null);
       clearGhosts();
-      setLiveReactions([]);
+      clearReactions();
       setRaisedHands(new Set());
       // Source state is per-session too. Left behind, the "waiting for the
       // host" overlay is an opaque full-bleed panel that reappears the moment
@@ -937,9 +924,7 @@ export function useCoReview({
     if (now - lastReactionSendRef.current < 250) return; // per-sender throttle
     lastReactionSendRef.current = now;
     const selfId = coSessionRef.current.selfId ?? "m0";
-    const r: LiveReaction = { id: ++reactionIdRef.current, from: selfId, name: nameForMember(selfId), emote, at: now };
-    setLiveReactions((prev) => [...prev.slice(-23), r]);
-    window.setTimeout(() => setLiveReactions((prev) => prev.filter((x) => x.id !== r.id)), 5200);
+    pushReaction({ from: selfId, name: nameForMember(selfId), emote, at: now });
     sendSessionMsg({ kind: "reaction", from: selfId, emote, on: true });
   }, [sendSessionMsg, nameForMember]);
 
@@ -1302,7 +1287,6 @@ export function useCoReview({
     meshStreams: mesh.remoteStreams, meshStates: mesh.peerStates,
     meshMutedForMe: mesh.peerMutedForMe, toggleMuteForMe: mesh.toggleMuteForMe,
     shareState, shareStream, sharingMembers, startShare, stopShare,
-    liveReactions,
     raisedHands,
     /** True when WE drive source + transport (host by default). */
     isPresenter,

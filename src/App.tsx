@@ -32,7 +32,6 @@ import { Timeline } from "./components/Timeline";
 import { ViewOptions } from "./components/ViewOptions";
 import { LogsPanel } from "./components/LogsPanel";
 import { RoomControlBar } from "./components/RoomControlBar";
-import { reactionGlyph } from "./lib/reactions";
 import { ReviewStatusChip } from "./components/ReviewStatusChip";
 import { useMediaCapture, subscribeCaptureError, setCaptureLogSink } from "./hooks/use-media-capture";
 import { SettingsModal, type Defaults } from "./components/SettingsModal";
@@ -3728,7 +3727,7 @@ export default function App() {
   // re-render App).
   const {
     coSession, coSessionActive, sessionDoc, postSessionOp,
-    liveReactions, raisedHands, handRaised, sendReaction, toggleHand,
+    raisedHands, handRaised, sendReaction, toggleHand,
     theater, setTheater, theaterParticipants,
     meshStreams, meshStates, meshMutedForMe, toggleMuteForMe,
     shareState, shareStream, sharingMembers, startShare, stopShare,
@@ -3798,11 +3797,6 @@ export default function App() {
   }, [sourceStatus, coSession.peers, coSession.selfId]);
   // Latest transient reaction per member: tile badges (pruning rides the
   // liveReactions feed itself).
-  const reactionFlashes = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const r of liveReactions) m.set(r.from, reactionGlyph(r.emote));
-    return m;
-  }, [liveReactions]);
   // Room bar device toggles ride the same capture singleton the green room
   // opened; enabled-bit flips propagate to every mesh sender live.
   const capture = useMediaCapture();
@@ -4316,7 +4310,6 @@ export default function App() {
                 sharingMembers={sharingMembers}
                 shareStream={shareStream}
                 raisedHands={raisedHands}
-                reactionFlashes={reactionFlashes}
                 presenter={coSession.presenter}
                 canGrantPresenter={coSession.role === "host"}
                 onMakePresenter={makePresenter}
@@ -4781,7 +4774,7 @@ export default function App() {
                     annotationLabelMode={annDrawing && reviewLabelMode}
                     annotationLabelColor={annLabelColor}
                   />
-                  {roomActive && <ReactionLayer reactions={liveReactions} />}
+                  {roomActive && <ReactionLayer />}
                   <Transport
                     status={status}
                     isPlaying={isPlaying}
@@ -4871,7 +4864,6 @@ export default function App() {
                       sharingMembers={sharingMembers}
                       shareStream={shareStream}
                       raisedHands={raisedHands}
-                      reactionFlashes={reactionFlashes}
                     />
                   )}
                   {!roomActive && (() => {
