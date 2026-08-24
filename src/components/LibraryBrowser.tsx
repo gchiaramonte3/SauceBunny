@@ -212,14 +212,32 @@ export function LibraryBrowser({
     // Only the real "All" view (selected === null) aggregates every root. A
     // concrete selection whose node is momentarily absent (its root mid-rescan)
     // shows nothing until the scan lands — never another folder's media.
+    // A concrete selection shows THAT folder's own files; its subfolders are
+    // rendered as tiles above them (see `folders` below). This used to
+    // collectLibraryItems the whole subtree, which is why the app scanned a
+    // folder tree and then had "no deep organisation": the structure was
+    // read, held in memory, and flattened away on the last step to the
+    // screen. Searching still reaches everything - see the needle branch.
+    //
+    // "All" keeps aggregating every root, because there is no single folder
+    // to be inside.
     const base = selected
-      ? (selectedNode ? collectLibraryItems(selectedNode) : [])
+      ? (selectedNode
+          ? (needle.trim() ? collectLibraryItems(selectedNode) : selectedNode.items)
+          : [])
       : trees.flatMap(collectLibraryItems);
     const byKind = prefs.kind === "all" ? base : base.filter((i) => i.kind === prefs.kind);
     const q = needle.trim().toLowerCase();
     const bySearch = q ? byKind.filter((i) => i.name.toLowerCase().includes(q)) : byKind;
     return sortLibraryItems(bySearch, prefs.sort, prefs.dir);
   }, [selected, selectedNode, trees, prefs, needle]);
+
+  /** Subfolders of the current selection, as container tiles. Empty in the
+   *  "All" view and while searching, both of which are flat answers. */
+  const folders = useMemo(() => {
+    if (!selected || !selectedNode || needle.trim()) return [];
+    return selectedNode.folders;
+  }, [selected, selectedNode, needle]);
 
   const itemPaths = useMemo(() => items.map((i) => i.path), [items]);
   itemPathsRef.current = itemPaths;
@@ -375,6 +393,12 @@ export function LibraryBrowser({
           />
           <LibraryBrowserPane
             items={shown}
+            folders={folders}
+            onOpenFolder={(f) => {
+              setSelected([...(selected ?? []), { name: f.name, path: f.path }]);
+              setDetailItem(null);
+              setSel(EMPTY_SELECTION);
+            }}
             sort={prefs.sort}
             dir={prefs.dir}
             /* Clicking the active column flips it; a different column starts

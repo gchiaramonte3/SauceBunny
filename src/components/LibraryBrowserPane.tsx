@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LibraryCard } from "./LibraryCard";
 import { LibraryListRow } from "./LibraryListRow";
+import { LibraryFolderCard } from "./LibraryFolderCard";
 import type { LibraryViewMode } from "./LibraryBrowserBar";
-import { formatBytes, formatModifiedDate } from "../lib/library";
+import { countLibraryItems, formatBytes, formatModifiedDate, libraryPosterPaths } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { useRovingGrid } from "../hooks/use-roving-grid";
 import { useMarquee } from "../hooks/use-marquee";
-import type { LibraryItem } from "../types";
+import type { LibraryFolder, LibraryItem } from "../types";
 
 type Props = {
   items: LibraryItem[];
+  /** Subfolders of the current selection, shown as container tiles above
+   *  the files. Empty in "All" and while searching. */
+  folders?: LibraryFolder[];
+  onOpenFolder?: (f: LibraryFolder) => void;
   view: LibraryViewMode;
   /** Path of the current DETAIL selection — the one whose info panel shows. */
   selectedPath: string | null;
@@ -48,7 +53,12 @@ type Props = {
  * click-selects / double-click-opens semantics and the shared thumbnail loader.
  * A click on the blank gutter clears the detail selection.
  */
+/** Stable empty default: a fresh [] each render would re-run the names
+ *  memo, and through it the roving grid, on every parent render. */
+const EMPTY_FOLDERS: LibraryFolder[] = [];
+
 export function LibraryBrowserPane({
+  folders = EMPTY_FOLDERS, onOpenFolder,
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
   onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, emptyText,
   sort, dir, onSort,
@@ -59,7 +69,16 @@ export function LibraryBrowserPane({
   // two dimensions, Home/End, and type-ahead to jump to a name. The card and
   // the row are different elements, so the selector follows the view.
   const paneRef = useRef<HTMLDivElement>(null);
-  const names = useMemo(() => items.map((i) => i.name), [items]);
+  // Folder names FIRST, matching the render order below. useRovingGrid takes
+  // its names from here but reads its elements from
+  // querySelectorAll(".cp-lib-card") - and LibraryFolderCard deliberately
+  // shares that class - so a folder tile in the grid without its name here
+  // puts the two lists out of sync BY INDEX, and type-ahead silently jumps to
+  // the wrong tile. Nothing throws; it just goes subtly wrong.
+  const names = useMemo(
+    () => [...folders.map((f) => f.name), ...items.map((i) => i.name)],
+    [folders, items],
+  );
   const roving = useRovingGrid({
     containerRef: paneRef,
     itemSelector: view === "grid" ? ".cp-lib-card" : ".cp-lib-lrow",
@@ -144,7 +163,11 @@ export function LibraryBrowserPane({
     if (e.target === e.currentTarget) onClearSelection();
   };
 
-  if (items.length === 0) {
+  // FOLDERS COUNT AS CONTENT. A folder holding only subfolders is not empty,
+  // and gating this on items alone hid every one of its containers behind
+  // "nothing here" - the mirror of the bug where a root showed folder tiles
+  // and none of its films.
+  if (items.length === 0 && folders.length === 0) {
     return <div className="cp-lib-pane"><p className="cp-lib-note cp-lib-browse-empty">{emptyText}</p></div>;
   }
 
@@ -161,6 +184,19 @@ export function LibraryBrowserPane({
         {...marquee.handlers}
       >
         {bandEl}
+        {/* Containers first, then this folder's own files - Finder's order,
+            and the order `names` above assumes. The cover is derived from the
+            folder's contents (libraryPosterPaths), never stored. */}
+        {folders.map((f) => (
+          <LibraryFolderCard
+            key={f.path}
+            name={f.name}
+            count={countLibraryItems(f)}
+            posterPaths={libraryPosterPaths(f, 3)}
+            requestThumb={requestThumb}
+            onOpen={() => onOpenFolder?.(f)}
+          />
+        ))}
         {items.map((it) => (
           <LibraryCard
             key={`${it.path}#${posterVersions[it.path] ?? 0}`}
