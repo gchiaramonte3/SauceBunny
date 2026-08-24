@@ -542,3 +542,36 @@
   border-color: var(--line-2);
   color: var(--fg-1);
 }
+
+/* The heading IS the control — the whole row folds the list, rather than a
+   12px glyph being the only hit target. Same chevron idiom as the transcript
+   picker's groups. */
+.cp-screenings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cp-screenings-toggle:hover { color: var(--fg-2); }
+.cp-screenings-chev {
+  flex: 0 0 auto;
+  transition: transform 120ms ease;
+}
+.cp-screenings-chev.open { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) {
+  .cp-screenings-chev { transition: none; }
+}
+.cp-screenings-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-4);
+}

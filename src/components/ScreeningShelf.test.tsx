@@ -33,7 +33,17 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 
-beforeEach(() => { h.rows = []; h.hydrateThrows = false; h.revealed = []; });
+beforeEach(() => {
+  h.rows = []; h.hydrateThrows = false; h.revealed = [];
+  localStorage.clear();
+});
+
+/** The shelf folds by default - it is history on a screen whose job is to
+ *  start or join a session - so a test that reads a row opens it first. */
+async function openShelf(): Promise<void> {
+  const toggle = await screen.findByRole("button", { name: /Past screenings/ });
+  toggle.click();
+}
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const row = (over: Record<string, unknown> = {}) => ({
@@ -48,6 +58,7 @@ describe("the screenings shelf", () => {
     // the app's own read functions had no callers outside their tests.
     h.rows = [row()];
     render(<ScreeningShelf />);
+    await openShelf();
     expect(await screen.findByText("Friday review")).toBeTruthy();
     expect(screen.getByText(/2 people/)).toBeTruthy();
     expect(screen.getByText(/7 notes/)).toBeTruthy();
@@ -56,12 +67,14 @@ describe("the screenings shelf", () => {
   it("says 'note' for one, because '1 notes' is the tell nobody read the string", async () => {
     h.rows = [row({ commentCount: 1 })];
     render(<ScreeningShelf />);
+    await openShelf();
     expect(await screen.findByText(/1 note(?!s)/)).toBeTruthy();
   });
 
   it("names the single participant rather than counting to one", async () => {
     h.rows = [row({ participants: ["Ada"] })];
     render(<ScreeningShelf />);
+    await openShelf();
     expect(await screen.findByText(/Ada/)).toBeTruthy();
   });
 
@@ -82,8 +95,36 @@ describe("the screenings shelf", () => {
   it("reveals the record's real path", async () => {
     h.rows = [row()];
     render(<ScreeningShelf />);
+    await openShelf();
     (await screen.findByLabelText(/Reveal Friday review/)).click();
     await waitFor(() => expect(h.revealed)
       .toEqual(["/Docs/Sauce Bunny/Screenings/2026-08-01-review-abc.json"]));
+  });
+
+  it("folds by default, so a growing history cannot bury the Join card", async () => {
+    // The lobby's job is to start or join a session. This list grows without
+    // limit, and unfolded it pushed the second of those two verbs off the
+    // bottom of the screen.
+    h.rows = [row(), row({ id: "b", title: "Older" })];
+    render(<ScreeningShelf />);
+    const toggle = await screen.findByRole("button", { name: /Past screenings/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Friday review")).toBeNull();
+    // The count is visible while folded, so it still says there is history.
+    expect(toggle.textContent).toContain("2");
+
+    toggle.click();
+    expect(await screen.findByText("Friday review")).toBeTruthy();
+  });
+
+  it("remembers that it was opened", async () => {
+    h.rows = [row()];
+    const first = render(<ScreeningShelf />);
+    await openShelf();
+    await screen.findByText("Friday review");
+    first.unmount();
+
+    render(<ScreeningShelf />);
+    expect(await screen.findByText("Friday review")).toBeTruthy();
   });
 });

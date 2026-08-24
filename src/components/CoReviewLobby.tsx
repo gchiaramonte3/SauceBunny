@@ -225,11 +225,6 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                   </p>
                 )}
 
-                {/* Past sessions, where someone would think to look for them.
-                    Every co-review has always written a full record to
-                    ~/Documents/Sauce Bunny/Screenings/ and nothing in the app
-                    could open one. Renders nothing until there is something. */}
-                <ScreeningShelf />
 
                 <section className="cp-colobby-card">
                   <h2 className="cp-colobby-card-title">Join</h2>
@@ -248,6 +243,12 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                   </button>
                   {session.error && <p className="cp-colobby-err" role="alert">{session.error}</p>}
                 </section>
+
+                {/* AFTER both verbs, not between them. Past sessions are
+                    history; Host and Join are what this screen is for, and a
+                    list that grows without limit sat in the middle of them and
+                    pushed Join off the bottom. */}
+                <ScreeningShelf />
 
                 <button type="button" className="cp-gr-editname"
                   onClick={() => { steppedRef.current = true; setStep("identity"); }}>

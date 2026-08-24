@@ -4,7 +4,7 @@ import {
   hydrateScreeningIndex, listScreenings, screeningPath, type ScreeningIndexEntry,
 } from "../lib/screening-store";
 import { formatTimeAgo } from "../lib/transcript-history";
-import { IconReveal, IconReview } from "./Icons";
+import { IconChevronRight, IconReveal, IconReview } from "./Icons";
 
 /**
  * Past screenings, listed where someone would think to look for them.
@@ -22,8 +22,29 @@ import { IconReveal, IconReview } from "./Icons";
  * the source back with the comments on the timeline — is a bigger piece of
  * work than making them reachable.
  */
+const OPEN_KEY = "saucebunny.screeningsOpen";
+
 export function ScreeningShelf() {
   const [rows, setRows] = useState<(ScreeningIndexEntry & { id: string })[] | null>(null);
+  /**
+   * FOLDED BY DEFAULT. This is a history list on a screen whose job is to
+   * start or join a session, and it grows without limit - a dozen past
+   * sessions pushed the Join card off the bottom, so the lobby's second verb
+   * was below the fold behind a list of things already finished.
+   *
+   * The preference is remembered, so someone who does live out of their
+   * screening history only opens it once.
+   */
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(OPEN_KEY) === "1"; } catch { return false; }
+  });
+  const toggle = () => {
+    const next = !open;
+    // Outside the updater: a setState updater must be pure, and React may run
+    // it more than once.
+    try { localStorage.setItem(OPEN_KEY, next ? "1" : "0"); } catch { /* quota */ }
+    setOpen(next);
+  };
 
   useEffect(() => {
     let alive = true;
@@ -42,7 +63,22 @@ export function ScreeningShelf() {
 
   return (
     <section className="cp-screenings" aria-label="Past screenings">
-      <h2 className="cp-screenings-title">Past screenings</h2>
+      <h2 className="cp-screenings-title">
+        <button
+          type="button"
+          className="cp-screenings-toggle"
+          aria-expanded={open}
+          onClick={toggle}
+        >
+          <IconChevronRight
+            size={12}
+            className={"cp-screenings-chev" + (open ? " open" : "")}
+          />
+          Past screenings
+          <span className="cp-screenings-count">{rows.length}</span>
+        </button>
+      </h2>
+      {open && (
       <ul className="cp-screenings-list">
         {rows.map((r) => {
           const people = r.participants.length === 1
@@ -72,6 +108,7 @@ export function ScreeningShelf() {
           );
         })}
       </ul>
+      )}
     </section>
   );
 }
