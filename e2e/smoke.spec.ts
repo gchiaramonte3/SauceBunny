@@ -330,12 +330,18 @@ test("library: seeded root scans into a shelf; search filters a flat grid; Esc r
   await expect(page.locator(".cp-lib-head").getByRole("button", { name: "Add Folder" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Rescan library" })).toHaveCount(0);
   await expect(page.locator(".cp-lib-hero")).toBeVisible();
-  // The mocked scan renders one shelf: folder collection + video + audio cards.
+  // The shelf is ASSETS, at every depth, and no folder cards: Home is a
+  // launcher and folders live in the Library tab. The flattening is the
+  // load-bearing half - without it a root whose media sits in subfolders
+  // would show folder tiles and none of its films, and removing the tiles
+  // alone would have left the row empty. intro.mp4 lives inside
+  // Footage/Interviews and must appear here directly.
   const row = page.getByRole("list", { name: "Footage" });
   await expect(row).toBeVisible();
-  await expect(row.getByRole("button", { name: /Interviews/ })).toBeVisible();
+  await expect(row.getByRole("button", { name: /Interviews/ })).toHaveCount(0);
   await expect(row.getByRole("button", { name: /clip-a\.mp4/ })).toBeVisible();
   await expect(row.getByRole("button", { name: /voice-memo\.m4a/ })).toBeVisible();
+  await expect(row.getByRole("button", { name: /intro\.mp4/ })).toBeVisible();
   // Search (debounced 150ms) replaces shelves with a flat grid — the nested
   // intro.mp4 is findable across the whole tree.
   await page.getByLabel("Search library").fill("intro");
