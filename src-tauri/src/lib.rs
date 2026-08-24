@@ -267,6 +267,8 @@ pub fn run() {
             commands::get_warm_start,
             commands::frames_dir_path,
             commands::list_frames,
+            commands::create_frames_folder,
+            commands::move_frame_to_folder,
             commands::delete_frame,
             commands::list_cached_web,
             commands::forget_cached_web,

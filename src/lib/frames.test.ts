@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  filterFrames, formatFrameTimecode, groupBySource, sortFrames, type FrameItem,
+  filterFrames, formatFrameTimecode, frameCrumbs, frameLevel, groupBySource,
+  sortFrames, type FrameItem,
 } from "./frames";
 
 const f = (over: Partial<FrameItem>): FrameItem => ({
   path: "/Docs/Sauce Bunny/Frames/a.jpg", name: "a.jpg", source: "A",
-  timecode: null, created_at: 0, size_bytes: 0, ...over,
+  folder: "", timecode: null, created_at: 0, size_bytes: 0, ...over,
 });
 
 describe("groupBySource", () => {
@@ -88,5 +89,62 @@ describe("formatFrameTimecode", () => {
     expect(formatFrameTimecode(null)).toBeNull();
     expect(formatFrameTimecode("0001230")).toBe("0001230"); // odd length
     expect(formatFrameTimecode("0100")).toBe("0100"); // too short
+  });
+});
+
+describe("frameLevel — one level of a real directory tree", () => {
+  const tree = [
+    f({ name: "root1.jpg", folder: "", created_at: 10 }),
+    f({ name: "sel1.jpg", folder: "Selects", created_at: 20 }),
+    f({ name: "sel2.jpg", folder: "Selects", created_at: 30 }),
+    f({ name: "deep.jpg", folder: "Selects/Day 2", created_at: 40 }),
+    f({ name: "other.jpg", folder: "Rejects", created_at: 5 }),
+  ];
+
+  it("at the root: loose frames here, and the folders directly beneath", () => {
+    const { here, folders } = frameLevel(tree, "");
+    expect(here.map((x) => x.name)).toEqual(["root1.jpg"]);
+    expect(folders.map((x) => x.name)).toEqual(["Rejects", "Selects"]);
+  });
+
+  it("a folder's count includes everything beneath it, the way Finder counts", () => {
+    const { folders } = frameLevel(tree, "");
+    expect(folders.find((x) => x.name === "Selects")!.count).toBe(3);
+  });
+
+  it("the cover is the three NEWEST stills beneath it, derived not stored", () => {
+    const { folders } = frameLevel(tree, "");
+    const sel = folders.find((x) => x.name === "Selects")!;
+    expect(sel.covers).toHaveLength(3);
+    expect(sel.covers[0]).toContain("a.jpg"); // fixture path; newest first
+  });
+
+  it("drilling in shows that level's frames and its own subfolders", () => {
+    const { here, folders } = frameLevel(tree, "Selects");
+    expect(here.map((x) => x.name).sort()).toEqual(["sel1.jpg", "sel2.jpg"]);
+    expect(folders.map((x) => x.name)).toEqual(["Day 2"]);
+    expect(folders[0].path).toBe("Selects/Day 2");
+  });
+
+  it("a sibling folder with a shared name PREFIX is not swallowed", () => {
+    // "Selects" must not capture "SelectsOld" - the split has to be on the
+    // separator, not on the string.
+    const items = [
+      f({ name: "a.jpg", folder: "Selects" }),
+      f({ name: "b.jpg", folder: "SelectsOld" }),
+    ];
+    const { folders } = frameLevel(items, "");
+    expect(folders.map((x) => x.name)).toEqual(["Selects", "SelectsOld"]);
+    expect(frameLevel(items, "Selects").here.map((x) => x.name)).toEqual(["a.jpg"]);
+  });
+});
+
+describe("frameCrumbs", () => {
+  it("the root has none, and a nested path builds up", () => {
+    expect(frameCrumbs("")).toEqual([]);
+    expect(frameCrumbs("Selects/Day 2")).toEqual([
+      { name: "Selects", path: "Selects" },
+      { name: "Day 2", path: "Selects/Day 2" },
+    ]);
   });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview, IconPencil, IconTrash } from "./Icons";
+import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview, IconPencil, IconTrash, IconFolderSolid } from "./Icons";
 import { TagColorRow } from "./TagColorRow";
 import type { TagColorIndex } from "../lib/finder-tags";
 import type { FinderTag } from "../bindings/FinderTag";
@@ -51,6 +51,9 @@ type Props = {
   onDelete?: () => void;
   /** The verb, since it differs by shelf ("Delete", "Forget"). */
   deleteLabel?: string;
+  /** File this item somewhere. Shelves whose items live in real folders
+   *  pass it; everything else shows no such verb. */
+  onMove?: () => void;
   /** Finder tags on this file, and the two ways to change them. Absent for
    *  sources with no path on disk (web), which cannot carry an xattr. */
   tags?: readonly FinderTag[];
@@ -76,7 +79,7 @@ type Item = {
 export function LibraryCardMenu({
   anchor, align = "left", canPickThumbnail, hasChosenThumbnail, revealPath,
   onChooseThumbnail, onResetThumbnail, onOpen, onReview, onClose,
-  tags, onToggleTagColor, onClearTagColors, onRename, onDelete, deleteLabel,
+  tags, onToggleTagColor, onClearTagColors, onRename, onDelete, deleteLabel, onMove,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const btnRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -95,6 +98,7 @@ export function LibraryCardMenu({
     });
   }
   if (onRename) items.push({ icon: <IconPencil size={14} />, label: "Rename…", onSelect: onRename });
+  if (onMove) items.push({ icon: <IconFolderSolid size={13} />, label: "Move to folder…", onSelect: onMove });
   items.push({ icon: <IconPlay size={13} />, label: "Open in Clip", onSelect: onOpen });
   if (onReview) {
     items.push({ icon: <IconReview size={13} />, label: "Review this clip", onSelect: onReview });

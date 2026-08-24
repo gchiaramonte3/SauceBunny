@@ -23,6 +23,7 @@ const frame = (over: Record<string, unknown> = {}) => ({
   path: "/Docs/Sauce Bunny/Frames/Bear_00012304.jpg",
   name: "Bear_00012304.jpg",
   source: "Bear",
+  folder: "",
   timecode: "00012304",
   created_at: 100,
   size_bytes: 4096,
@@ -118,5 +119,131 @@ describe("the frames shelf", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(h.calls.filter(([c]) => c === "delete_frame")).toHaveLength(0);
     confirmSpy.mockRestore();
+  });
+});
+
+describe("folders as containers", () => {
+  beforeEach(() => { h.calls = []; h.items = []; document.body.innerHTML = ""; localStorage.clear(); });
+
+  const tree = () => [
+    frame({ path: "/f/root.jpg", name: "Bear_00000100.jpg", folder: "", created_at: 10 }),
+    frame({ path: "/f/s/a.jpg", name: "Bear_00000200.jpg", folder: "Selects", created_at: 20 }),
+    frame({ path: "/f/s/b.jpg", name: "Bear_00000300.jpg", folder: "Selects", created_at: 30 }),
+  ];
+
+  it("shows a folder as a tile with a derived cover, and its own frames beside it", async () => {
+    h.items = tree();
+    mount();
+    await screen.findByText("Selects");
+    // The container tile is the library's own folder card, not a new idiom.
+    const tile = document.querySelector(".cp-lib-foldercard");
+    expect(tile, "the folder is not rendered as the shared folder card").toBeTruthy();
+    // The root's own loose frame is still shown beside it.
+    expect(screen.getAllByText("Bear_00000100.jpg").length).toBeGreaterThan(0);
+    // A filed frame is NOT also shown at the root.
+    expect(screen.queryAllByText("Bear_00000200.jpg")).toHaveLength(0);
+  });
+
+  it("opening a folder drills in, and the crumb walks back out", async () => {
+    h.items = tree();
+    mount();
+    (await screen.findByRole("button", { name: /Selects/ })).click();
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Bear_00000200.jpg").length).toBeGreaterThan(0);
+    });
+    // The root's loose frame is gone; we are one level down.
+    expect(screen.queryAllByText("Bear_00000100.jpg")).toHaveLength(0);
+    // And "Frames" is now a crumb BUTTON that walks back.
+    screen.getByRole("button", { name: "Frames" }).click();
+    await waitFor(() => {
+      expect(screen.getAllByText("Bear_00000100.jpg").length).toBeGreaterThan(0);
+    });
+  });
+
+  it("New folder is an inline form, and creates inside the open folder", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    h.items = tree();
+    mount();
+    (await screen.findByRole("button", { name: /Selects/ })).click();
+    await waitFor(() => expect(screen.getAllByText("Bear_00000200.jpg").length).toBeGreaterThan(0));
+
+    screen.getByRole("button", { name: /New folder/ }).click();
+    const box = await screen.findByLabelText("New folder name");
+    fireEvent.change(box, { target: { value: "Day 2" } });
+    fireEvent.submit(box.closest("form")!);
+
+    await waitFor(() => {
+      const call = h.calls.find(([c]) => c === "create_frames_folder");
+      expect(call, "no folder was created").toBeTruthy();
+      // Created INSIDE the folder that is open, not at the root.
+      expect((call![1] as { parent: string; name: string })).toMatchObject({
+        parent: "Selects", name: "Day 2",
+      });
+    });
+  });
+
+  it("search flattens the whole tree, folders included", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    h.items = tree();
+    mount();
+    await screen.findByText("Selects");
+    fireEvent.change(screen.getByLabelText("Search frames"), { target: { value: "00000300" } });
+    await waitFor(() => {
+      expect(screen.getAllByText("Bear_00000300.jpg").length).toBeGreaterThan(0);
+    });
+    // No folder tiles in a search result - it is a flat answer.
+    expect(document.querySelector(".cp-lib-foldercard")).toBeNull();
+  });
+});
+
+describe("filing a frame into a folder", () => {
+  beforeEach(() => { h.calls = []; h.items = []; document.body.innerHTML = ""; localStorage.clear(); });
+
+  it("Move to folder… is a menu item, and moving calls the scoped command", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    h.items = [
+      frame({ path: "/f/root.jpg", name: "Bear_00000100.jpg", folder: "" }),
+      frame({ path: "/f/s/a.jpg", name: "Bear_00000200.jpg", folder: "Selects" }),
+    ];
+    mount();
+    await screen.findAllByText("Bear_00000100.jpg");
+
+    screen.getAllByRole("button", { name: "More actions" })[0].click();
+    (await screen.findByRole("menuitem", { name: /Move to folder/ })).click();
+
+    // The dialog offers the root AND every existing folder - a frame needs a
+    // way back out as much as a way in.
+    const dialog = await screen.findByRole("dialog", { name: "Move frame" });
+    expect(dialog).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Frames \(top level\)/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Selects" }));
+    await waitFor(() => {
+      const call = h.calls.find(([c]) => c === "move_frame_to_folder");
+      expect(call, "the move never reached the backend").toBeTruthy();
+      expect((call![1] as { dest: string }).dest).toBe("Selects");
+    });
+  });
+
+  it("Create & move makes the folder then moves, in that order", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    h.items = [frame({ path: "/f/root.jpg", name: "Bear_00000100.jpg", folder: "" })];
+    mount();
+    await screen.findAllByText("Bear_00000100.jpg");
+    screen.getAllByRole("button", { name: "More actions" })[0].click();
+    (await screen.findByRole("menuitem", { name: /Move to folder/ })).click();
+
+    const box = await screen.findByPlaceholderText("New folder name…");
+    fireEvent.change(box, { target: { value: "Keepers" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create & move/ }));
+
+    await waitFor(() => {
+      const names = h.calls.map(([c]) => c);
+      expect(names.indexOf("create_frames_folder")).toBeGreaterThan(-1);
+      expect(names.indexOf("move_frame_to_folder")).toBeGreaterThan(
+        names.indexOf("create_frames_folder"),
+      );
+    });
   });
 });

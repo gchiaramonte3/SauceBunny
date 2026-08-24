@@ -78,3 +78,59 @@ export function formatFrameTimecode(tc: string | null): string | null {
   if (!tc || tc.length % 2 !== 0 || tc.length < 6) return tc;
   return (tc.match(/.{2}/g) ?? []).join(":");
 }
+
+/**
+ * The frames at ONE level of the tree, plus the folders directly beneath it.
+ *
+ * A container here is a real directory, so both halves are derived from the
+ * `folder` path each frame carries - there is no index to consult and none
+ * to fall out of step with the directory.
+ *
+ * `open` is the folder being viewed, "" for the root.
+ */
+export function frameLevel(items: readonly FrameItem[], open: string): {
+  here: FrameItem[];
+  folders: { name: string; path: string; count: number; covers: string[] }[];
+} {
+  const prefix = open ? open + "/" : "";
+  const here: FrameItem[] = [];
+  const bySub = new Map<string, FrameItem[]>();
+  for (const it of items) {
+    // `?? ""` because this crosses IPC: the binding promises a string, but a
+    // backend from before the field existed sends none, and reading
+    // .startsWith off undefined white-screens the whole pane. The build-id
+    // handshake warns about a stale binary; it should not also crash.
+    const folder = it.folder ?? "";
+    if (folder === open) { here.push(it); continue; }
+    if (!folder.startsWith(prefix)) continue;
+    // Everything deeper counts toward the CHILD folder it descends from, so
+    // a tile's count is "what is in here", the way Finder counts.
+    const name = folder.slice(prefix.length).split("/")[0];
+    if (!name) continue;
+    const list = bySub.get(name) ?? [];
+    list.push(it);
+    bySub.set(name, list);
+  }
+  const folders = [...bySub.entries()]
+    .map(([name, list]) => ({
+      name,
+      path: prefix + name,
+      count: list.length,
+      // The cover is DERIVED, never stored: the three newest stills beneath
+      // it. A still is its own poster, so this needs no thumbnailer and no
+      // sidecar, and it follows the files through a rename or a move.
+      covers: [...list]
+        .sort((a, b) => b.created_at - a.created_at)
+        .slice(0, 3)
+        .map((f) => f.path),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+  return { here, folders };
+}
+
+/** Crumbs for a folder path relative to the Frames root. */
+export function frameCrumbs(open: string): { name: string; path: string }[] {
+  if (!open) return [];
+  const parts = open.split("/").filter(Boolean);
+  return parts.map((name, i) => ({ name, path: parts.slice(0, i + 1).join("/") }));
+}

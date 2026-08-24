@@ -79,6 +79,8 @@ type Props = {
    *  Cards without it (files) show no delete verb at all. */
   onDelete?: () => void;
   deleteLabel?: string;
+  /** File this item into a folder; surfaces as a menu item. */
+  onMove?: () => void;
 };
 
 /**
@@ -99,7 +101,7 @@ type Props = {
  * Open in Clip. The menu never triggers the card's open.
  */
 export function LibraryCard({
-  title, detail, art, revealPath: revealPathProp, badge, duration, haveCopy, cellControls, onDelete, deleteLabel, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
+  title, detail, art, revealPath: revealPathProp, badge, duration, haveCopy, cellControls, onDelete, deleteLabel, onMove, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   onSelect, onContextSelect, onRename, selected, tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -304,6 +306,7 @@ export function LibraryCard({
           onRename={onRename}
           onDelete={onDelete}
           deleteLabel={deleteLabel}
+          onMove={onMove}
           tags={tags}
           onToggleTagColor={onToggleTagColor}
           onClearTagColors={onClearTagColors}

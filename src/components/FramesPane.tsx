@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  filterFrames, formatFrameTimecode, groupBySource, sortFrames, type FrameItem,
+  filterFrames, formatFrameTimecode, frameCrumbs, frameLevel, groupBySource,
+  sortFrames, type FrameItem,
 } from "../lib/frames";
 import { formatBytes } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { assetUrl } from "../lib/asset-url";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
 import { LibraryCard } from "./LibraryCard";
+import { LibraryFolderCard } from "./LibraryFolderCard";
+import { FrameMoveDialog } from "./FrameMoveDialog";
+import { IconPlus } from "./Icons";
 import { FrameListRows } from "./FrameListRows";
 
 /**
@@ -89,6 +93,19 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
     setPrefs(next);
   }, []);
 
+  // Which folder is open, "" for the Frames root. A container here is a real
+  // directory, so this is just a relative path - there is nothing to look up.
+  const [open, setOpen] = useState("");
+  const [newFolder, setNewFolder] = useState<string | null>(null);
+  const [moving, setMoving] = useState<FrameItem | null>(null);
+  const createFolder = useCallback(async (name: string) => {
+    try {
+      await invoke("create_frames_folder", { parent: open, name });
+      setNewFolder(null);
+      load();
+    } catch { /* the command's own message surfaces through the caller */ }
+  }, [open, load]);
+
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
   useEffect(() => {
@@ -114,13 +131,23 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
     );
   }
 
-  const filtered = filterFrames(items, needle);
+  // ONE level at a time. Search and the list view flatten the whole tree
+  // instead - the web pane's rule, and the reason is the same: a needle that
+  // matched four folders as four one-row shelves would read as clutter.
+  const level = frameLevel(items, open);
+  const scoped = needle || prefs.view === "list" ? items : level.here;
+  const filtered = filterFrames(scoped, needle);
   const sortedFlat = sortFrames(filtered, prefs.sort, prefs.dir);
+  const showFolders = prefs.view === "grid" && !needle && level.folders.length > 0;
   const groups = prefs.view === "list"
     ? (sortedFlat.length ? [{ source: "", items: sortedFlat }] : [])
     : needle
       ? (filtered.length ? [{ source: "Results", items: sortedFlat }] : [])
-      : groupBySource(items).map((g) => ({
+      // A frame filed into a folder leaves the stem shelves: it has been
+      // filed, and showing it in both places makes the fold read as a search
+      // result rather than an organisation. So stem-grouping serves whatever
+      // sits loose at THIS level.
+      : groupBySource(level.here).map((g) => ({
           source: g.source,
           items: sortFrames(g.items, prefs.sort, prefs.dir),
         }));
@@ -146,6 +173,7 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
         // first: one file, and every other destructive action in this app
         // asks. No armed second click - that pattern belongs to a control
         // you can press twice, and a menu closes on the first.
+        onMove={() => setMoving(it)}
         deleteLabel="Delete frame…"
         onDelete={() => {
           if (!confirm(`Delete ${it.name}? It is removed from this Mac.`)) return;
@@ -158,8 +186,8 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
   return (
     <div className="cp-web-view">
       <LibraryBrowserBar
-        chain={null}
-        onCrumb={() => { /* location is fixed */ }}
+        chain={frameCrumbs(open)}
+        onCrumb={(c) => setOpen(c === null ? "" : (c.at(-1)?.path ?? ""))}
         location="Frames"
         dateLabel="Date grabbed"
         searchLabel="Search frames"
@@ -172,11 +200,70 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
         treeOpen={treeOpen}
         onShowTree={onShowTree}
       />
+      {moving && (
+        <FrameMoveDialog
+          name={moving.path}
+          currentFolder={moving.folder ?? ""}
+          // Every folder in the tree, so a frame can be filed anywhere -
+          // derived from the items themselves, since the directories ARE the
+          // index here.
+          folders={[...new Set(items.map((i) => i.folder ?? "").filter(Boolean))].sort()}
+          onMoved={load}
+          onClose={() => setMoving(null)}
+        />
+      )}
       <div className="cp-web-pane">
         <div className="cp-web-summary">
           {items.length} {items.length === 1 ? "frame" : "frames"}
           {bytes > 0 ? ` · ${formatBytes(bytes)} on disk` : ""}
+          {/* Inline, not a dialog: making a folder is creating an empty
+              directory, and a modal puts ceremony in front of a mkdir. The
+              transcript reader's New project form is the same shape. */}
+          {newFolder === null ? (
+            <button
+              type="button"
+              className="cp-frames-newfolder"
+              onClick={() => setNewFolder("")}
+            >
+              <IconPlus size={12} />
+              New folder
+            </button>
+          ) : (
+            <form
+              className="cp-frames-newfolder-form"
+              onSubmit={(e) => { e.preventDefault(); void createFolder(newFolder); }}
+            >
+              <input
+                autoFocus
+                type="text"
+                value={newFolder}
+                placeholder="Folder name"
+                aria-label="New folder name"
+                spellCheck={false}
+                onChange={(e) => setNewFolder(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") setNewFolder(null); }}
+              />
+              <button type="submit" disabled={!newFolder.trim()}>Create</button>
+            </form>
+          )}
         </div>
+        {showFolders && (
+          <div className="cp-web-grid" role="list" aria-label="Folders">
+            {level.folders.map((f) => (
+              <LibraryFolderCard
+                key={f.path}
+                name={f.name}
+                count={f.count}
+                // Derived cover: the three newest stills beneath it. A still
+                // is its own poster, so requestThumb is a synchronous
+                // asset-URL wrapper rather than the video thumbnailer.
+                posterPaths={f.covers}
+                requestThumb={async (p) => assetUrl(p)}
+                onOpen={() => setOpen(f.path)}
+              />
+            ))}
+          </div>
+        )}
         {needle && groups.length === 0 && (
           <div className="cp-web-empty">No frames match "{needle.trim()}".</div>
         )}

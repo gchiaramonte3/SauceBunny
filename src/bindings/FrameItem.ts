@@ -18,6 +18,12 @@ name: string,
  */
 source: string, 
 /**
+ * Which folder this frame sits in, RELATIVE to the Frames root; empty
+ * for the root itself. A container here is a real directory, so this is
+ * read off the path rather than stored anywhere.
+ */
+folder: string, 
+/**
  * The timecode tail, when the name carries one ("00012304").
  */
 timecode: string | null, 

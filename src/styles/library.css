@@ -2005,3 +2005,41 @@
   color: var(--danger-text);
 }
 .cp-lib-menu-item.danger .cp-lib-menu-icon { color: inherit; }
+
+/* New folder, inline in the Frames summary line. Making a folder is creating
+   an empty directory; a modal would put ceremony in front of a mkdir. */
+.cp-frames-newfolder,
+.cp-frames-newfolder-form button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  margin-left: var(--s-3);
+  padding: 0 var(--s-2);
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+.cp-frames-newfolder:hover,
+.cp-frames-newfolder-form button:hover:not(:disabled) { color: var(--fg-1); }
+.cp-frames-newfolder:focus-visible,
+.cp-frames-newfolder-form button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+.cp-frames-newfolder-form { display: inline-flex; align-items: center; gap: var(--s-1); margin-left: var(--s-3); }
+.cp-frames-newfolder-form button { margin-left: 0; }
+.cp-frames-newfolder-form button:disabled { opacity: 0.4; cursor: not-allowed; }
+.cp-frames-newfolder-form input {
+  min-height: 24px;
+  width: 150px;
+  padding: 0 var(--s-2);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+}

@@ -8,10 +8,11 @@ type Props = {
   /** Selection chain (null = "All") — drives the breadcrumb. */
   chain: LibraryCrumb[] | null;
   onCrumb: (chain: LibraryCrumb[] | null) => void;
-  /** A fixed location name replacing the breadcrumb entirely — the web view
-   *  has no folder chain, and crumbs over a list of URLs would be chrome
-   *  pretending to navigate. The bar is otherwise identical, which is the
-   *  point: one header to learn. */
+  /** The ROOT crumb's label, replacing "All" — "From the web", "Frames".
+   *  It is a crumb, not a crumb SUPPRESSOR: the bar used to have two modes
+   *  (a fixed label OR a chain), and collapsing them to one is what lets a
+   *  shelf with real folders navigate out of the same header the folder
+   *  pane already mounts. A shelf with no chain simply passes none. */
   location?: string;
   /** What "date" means here: "Date modified" for files, "Date fetched" for
    *  the web cache. A wrong label is worse than a new prop. */
@@ -56,10 +57,10 @@ export function LibraryBrowserBar({
         </button>
       )}
       <nav className="cp-lib-bcrumbs" aria-label="Location">
-        {location != null ? <span className="cur" aria-current="page">{location}</span> : chain === null
-          ? <span className="cur" aria-current="page">All</span>
-          : <button type="button" onClick={() => onCrumb(null)}>All</button>}
-        {location == null && chain?.map((c, i) => (
+        {chain === null || chain.length === 0
+          ? <span className="cur" aria-current="page">{location ?? "All"}</span>
+          : <button type="button" onClick={() => onCrumb(null)}>{location ?? "All"}</button>}
+        {chain?.map((c, i) => (
           <Fragment key={c.path}>
             <span className="sep" aria-hidden="true">/</span>
             {i === last
