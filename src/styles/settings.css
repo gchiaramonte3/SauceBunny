@@ -1273,3 +1273,120 @@
   .cp-model-info-btn { transition-duration: 0s; }
   .cp-model-info-popover { animation: none; }
 }
+
+/* ── Built on: open-source credits + sponsor links ──────────────────────
+   A list, not a card grid: these are names and one-liners, and boxing each
+   one would make twelve rows of chrome out of twelve rows of text. Sits
+   under the About facts, quieter than them, so it reads as a footer rather
+   than competing with the version and the paths above it. */
+.cp-credits {
+  margin-top: var(--s-6);
+  padding-top: var(--s-5);
+  border-top: 1px solid var(--line-1);
+}
+.cp-credits-title {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--fg-2);
+}
+.cp-credits-sub {
+  margin: var(--s-1) 0 var(--s-4);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+  color: var(--fg-4);
+  max-width: 62ch;
+}
+.cp-credits-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-3);
+}
+/* Each credit is a two-column row: text, then the Sponsor action pinned
+   right so the actions line up down the list instead of ragging with the
+   prose. */
+.cp-credit {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  column-gap: var(--s-4);
+  row-gap: 2px;
+}
+.cp-credit-main {
+  grid-column: 1;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+.cp-credit-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+.cp-credit-name:hover { text-decoration: underline; }
+.cp-credit-name:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); border-radius: var(--r-2xs); }
+.cp-credit-name svg { color: var(--fg-5); }
+.cp-credit-by {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--fg-3);
+}
+.cp-credit-lic {
+  /* NOT --font-mono: that token means "digits matter here" and the contract
+     makes any rule using it ask for tabular figures. An SPDX string has no
+     figures to align. */
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--track-wide);
+  color: var(--fg-5);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-2xs);
+  padding: 0 4px;
+}
+.cp-credit-role {
+  grid-column: 1;
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--fg-4);
+  max-width: 68ch;
+}
+/* Grey, not the green accent: the accent means "primary action" in this
+   app and a donation prompt is an offer, not the thing you came here to
+   do. It brightens on hover like every other quiet control. */
+.cp-credit-fund {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 var(--s-2);
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: color var(--dur-instant) var(--ease-out), border-color var(--dur-instant) var(--ease-out);
+}
+.cp-credit-fund:hover { color: var(--fg-1); border-color: var(--line-3); }
+.cp-credit-fund:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }

@@ -376,6 +376,11 @@ export const IconToolEllipse = (p: IconProps) => (
     <ellipse cx="12" cy="12" rx="8" ry="6" />
   </Icon>
 );
+export const IconHeart = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M20.8 5.6a5 5 0 0 0-7.1 0L12 7.3l-1.7-1.7a5 5 0 1 0-7.1 7.1l1.7 1.7L12 21.4l7.1-7.1 1.7-1.7a5 5 0 0 0 0-7z" />
+  </Icon>
+);
 export const IconTrash = (p: IconProps) => (
   <Icon {...p}>
     <polyline points="3 6 5 6 21 6" />
