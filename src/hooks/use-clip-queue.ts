@@ -1,3 +1,4 @@
+import { applyOrderToSlots } from "../lib/reorder";
 import { useCallback, type Dispatch, type SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
@@ -152,6 +153,29 @@ export function useClipQueue(p: ClipQueueDeps) {
     setQueueOpen(true);
     appendLog("info", "queue", `Queued ${item.filename} (${framesToTc(item.inFrames, fps)} → ${framesToTc(item.outFrames, fps)})`);
   }, [sourceKind, localFilePath, metadata, inFrames, outFrames, fps, exportOpts.filename, exportOpts.format, exportOpts.reencode, exportOpts.captions, appendLog, pushNotification, pushMarksUndo, clipQueueRef, setClipQueue, setInFrames, setOutFrames, setQueueOpen]);
+
+  /**
+   * Put the QUEUED clips in a given order.
+   *
+   * Order is load-bearing here and was unchangeable by any means: the export
+   * walks the queued items in array order one at a time, "Rename all" numbers
+   * them base-1..N in that same order, and the row paints its position on
+   * screen. Three promises about an order with nothing to set it.
+   *
+   * Only waiting clips move. A running one is mid-subprocess and a finished
+   * one is a receipt, so applyOrderToSlots permutes just the slots the
+   * waiting clips already occupy and leaves every other row where it is.
+   *
+   * Refused while the queue is running: handleExportQueue snapshots the
+   * eligible list ONCE before its loop, so a reorder mid-run would rearrange
+   * what is on screen without changing what is actually about to happen.
+   */
+  const handleQueueReorder = useCallback((orderedIds: readonly string[]) => {
+    if (queueRunning) return;
+    setClipQueue((prev) => applyOrderToSlots(
+      prev, (c) => c.status === "queued", (c) => c.id, orderedIds,
+    ));
+  }, [queueRunning, setClipQueue]);
 
   const handleQueueRemove = useCallback((id: string) => {
     setClipQueue((prev) => prev.filter((c) => c.id !== id));
@@ -405,5 +429,6 @@ export function useClipQueue(p: ClipQueueDeps) {
   return {
     handleAddToQueue, handleQueueRemove, handleQueueRetry, handleQueueRename,
     handleQueueRenameAll, handleQueueClearAll, handleQueueClearDone, handleExportQueue,
+    handleQueueReorder,
   };
 }

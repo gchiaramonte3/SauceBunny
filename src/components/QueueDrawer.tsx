@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { inertWhen } from "../lib/inert";
+import { dropIndexAt, moveItem } from "../lib/reorder";
 import { invoke } from "@tauri-apps/api/core";
 import {
   IconAiSummary, IconAlert, IconCheck, IconRefresh, IconReveal, IconReview, IconStack, IconTranscript, IconTrash,
+  IconChevronDown,
 } from "./Icons";
 import type { QueuedClip , ReviewRangeDraft } from "../types";
 import { secondsToHms } from "../lib/timecode";
@@ -190,6 +192,15 @@ type Props = {
   /** Bulk rename: every QUEUED item becomes base-1..N in queue order. */
   onRenameAll?: (base: string) => void;
   /**
+   * Put the QUEUED clips in this order.
+   *
+   * Docked drawer only, exactly as onRenameClip is: the floating panel talks
+   * to main through `panel:action:<kind>`, whose union carries no reorder, so
+   * without the prop the panel would show a drag that looks like it works and
+   * silently does nothing.
+   */
+  onReorderQueue?: (orderedIds: readonly string[]) => void;
+  /**
    * Pop the drawer out into its own native OS window (r44.B). When
    * undefined, the pop-out button doesn't render — the floating window
    * itself sets this to undefined so it can't infinitely pop-itself-out.
@@ -267,7 +278,7 @@ export function QueueDrawer({
   reviewDrawActive, reviewDraft, onToggleReviewDraw, reviewLabelActive, onToggleReviewLabel, onReviewDraftConsumed, onShowAnnotation,
   onOpenReviewSource, onReviewLinkAsVersion, onReviewUnlinkVersion, reviewSourcePath, onReviewRangeDraft, onRegisterRangeHotkeys, onUndo, onRedo,
   reviewSessionActive, reviewSessionDoc, onReviewSessionOp,
-  onRenameClip, onRenameAll,
+  onRenameClip, onRenameAll, onReorderQueue,
   onPopOut, embedded = false, roomFace = false, focusItem = null,
 }: Props) {
   const counts = queue.reduce(
@@ -439,6 +450,70 @@ export function QueueDrawer({
     { id: "ai", label: "AI Summary", icon: IconAiSummary },
     ...(embedded ? [] : [{ id: "review" as const, label: "Review", icon: IconReview }]),
   ];
+
+  // ── Reordering the export queue ────────────────────────────────
+  // The order the export actually runs in, and until now the one thing on
+  // this panel nobody could change. Only WAITING clips move: a running one
+  // is mid-subprocess, a finished one is a receipt.
+  //
+  // The index arithmetic lives in lib/reorder.ts, because "dropped between
+  // these two rows" is a boundary counted BEFORE the dragged row leaves its
+  // slot, and committing that naively is off by one in exactly one direction.
+  const canReorder = !!onReorderQueue && !running;
+  const queuedIds = queue.filter((c) => c.status === "queued").map((c) => c.id);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropAt, setDropAt] = useState<number | null>(null);
+  const midsRef = useRef<number[]>([]);
+
+  const commitOrder = (from: number, to: number) => {
+    const next = moveItem(queuedIds, from, to);
+    if (next.join("\u0000") !== queuedIds.join("\u0000")) onReorderQueue?.(next);
+  };
+
+  const pressRef = useRef<{ id: string; y: number } | null>(null);
+
+  const onRowPointerDown = (id: string) => (e: React.PointerEvent) => {
+    if (!canReorder || e.button !== 0) return;
+    if (!queuedIds.includes(id)) return;
+    // A press that lands on a control is that control's press. Without this
+    // the row swallows its own buttons: capturing the pointer below retargets
+    // the click that follows, so Move earlier / Remove never fire.
+    if (e.target instanceof Element && e.target.closest("button, input")) return;
+    // Measure once, at press: the rows do not move until we move them, and a
+    // getBoundingClientRect per row per pointermove is a layout thrash.
+    midsRef.current = queuedIds.map((qid) => {
+      const el = document.querySelector(`[data-queue-item="${qid}"]`);
+      const r = el?.getBoundingClientRect();
+      return r ? r.top + r.height / 2 : Number.POSITIVE_INFINITY;
+    });
+    pressRef.current = { id, y: e.clientY };
+  };
+
+  const onRowPointerMove = (e: React.PointerEvent) => {
+    const press = pressRef.current;
+    if (!press) return;
+    if (!dragId) {
+      // A PRESS IS NOT YET A DRAG. Below the threshold this is still a click,
+      // and the row has to stay clickable; capturing sooner would retarget
+      // that click to the row.
+      if (Math.abs(e.clientY - press.y) < 6) return;
+      setDragId(press.id);
+      try { (e.currentTarget as Element).setPointerCapture(e.pointerId); }
+      catch { /* pointer already gone; up/cancel still resets */ }
+    }
+    setDropAt(dropIndexAt(midsRef.current, e.clientY));
+  };
+
+  const endRowDrag = () => {
+    const id = dragId;
+    const to = dropAt;
+    pressRef.current = null;
+    setDragId(null);
+    setDropAt(null);
+    if (!id || to == null) return;
+    const from = queuedIds.indexOf(id);
+    if (from >= 0) commitOrder(from, to);
+  };
 
   // ── User-reorderable tab order ─────────────────────────────────
   // Drag a tab onto another to swap. Order persists per-machine via
@@ -737,8 +812,24 @@ export function QueueDrawer({
           const dur   = secondsToHms(durS);
           const Icon = c.status === "done" ? IconCheck : c.status === "error" ? IconAlert : null;
           return (
-            <div key={c.id} data-queue-item={c.id} className={"cp-queue-item " + c.status}>
-              <div className="cp-queue-num">{i + 1}</div>
+            <div
+              key={c.id}
+              data-queue-item={c.id}
+              className={"cp-queue-item " + c.status
+                + (dragId === c.id ? " dragging" : "")
+                + (dropAt != null && queuedIds[dropAt] === c.id ? " drop-before" : "")}
+              onPointerDown={onRowPointerDown(c.id)}
+              onPointerMove={onRowPointerMove}
+              onPointerUp={endRowDrag}
+              onPointerCancel={endRowDrag}
+            >
+              {/* The position the export will actually use. It doubles as the
+                  drag handle for a queued row, which is why it carries the
+                  grab cursor rather than the whole row: the row's own body
+                  holds a rename field and a remove button. */}
+              <div className={"cp-queue-num" + (canReorder && c.status === "queued" ? " grab" : "")}>
+                {i + 1}
+              </div>
               <div className="cp-queue-body">
                 <div className="cp-queue-row">
                   {renamingId === c.id ? (
@@ -808,6 +899,35 @@ export function QueueDrawer({
                     <IconRefresh size={13} />
                   </button>
                 )}
+                {/* The keyboard route to the same thing the drag does. A
+                    reorder that exists only as a pointer gesture is
+                    unreachable without one, and this list decides the order
+                    the export actually runs in. */}
+                {canReorder && c.status === "queued" && (() => {
+                  const at = queuedIds.indexOf(c.id);
+                  return (
+                    <>
+                      <button
+                        className="cp-queue-iconbtn"
+                        title="Move earlier in the queue"
+                        aria-label={`Move ${c.filename} earlier in the queue`}
+                        disabled={at <= 0}
+                        onClick={() => commitOrder(at, at - 1)}
+                      >
+                        <IconChevronDown size={13} className="cp-queue-up" />
+                      </button>
+                      <button
+                        className="cp-queue-iconbtn"
+                        title="Move later in the queue"
+                        aria-label={`Move ${c.filename} later in the queue`}
+                        disabled={at < 0 || at >= queuedIds.length - 1}
+                        onClick={() => commitOrder(at, at + 2)}
+                      >
+                        <IconChevronDown size={13} />
+                      </button>
+                    </>
+                  );
+                })()}
                 {c.status !== "running" && (
                   <button
                     className="cp-queue-iconbtn danger"

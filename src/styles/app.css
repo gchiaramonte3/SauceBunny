@@ -31,3 +31,17 @@
 @import "./coreview.css";
 @import "./loader.css";
 @import "./welcome.css";
+
+/* ── Reordering the export queue ─────────────────────────────────────────────
+   The order the export actually runs in. The position number doubles as the
+   drag handle, so the row's own body keeps its rename field and buttons. */
+.cp-queue-num.grab { cursor: grab; }
+.cp-queue-item.dragging { opacity: 0.5; }
+.cp-queue-item.dragging .cp-queue-num.grab { cursor: grabbing; }
+/* Where the row will land, drawn as a rule ABOVE the row it would push down.
+   A line rather than a gap: a gap reflows the list under the pointer and the
+   target moves while you are aiming at it. */
+.cp-queue-item.drop-before { box-shadow: inset 0 2px 0 0 var(--fg-2); }
+/* The pair of chevrons is one glyph rotated, so "earlier" and "later" cannot
+   drift apart the way two hand-drawn arrows would. */
+.cp-queue-up { transform: rotate(180deg); }

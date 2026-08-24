@@ -2387,6 +2387,7 @@ export default function App() {
   const {
     handleAddToQueue, handleQueueRemove, handleQueueRetry, handleQueueRename,
     handleQueueRenameAll, handleQueueClearAll, handleQueueClearDone, handleExportQueue,
+    handleQueueReorder,
   } = useClipQueue({
     metadata, metadataRef, sourceKind, localFilePath, exportOpts, fps,
     inFrames, outFrames, queueRunning, clipQueueRef, queueResolverRef,
@@ -4970,6 +4971,7 @@ export default function App() {
                 onExportAll={handleExportQueue}
                 onStop={handleStop}
                 onRenameClip={handleQueueRename}
+                onReorderQueue={handleQueueReorder}
                 onRenameAll={handleQueueRenameAll}
                 transcriptPath={clipTxPath}
                 transcriptOrigin={activeTranscript?.origin ?? "unknown"}
