@@ -12,7 +12,7 @@ import {
   editProject, forgetProject, getProjects, hydrateProjects, renameProject,
   subscribeProjects, syncProjectFolders,
 } from "../lib/transcript-project-store";
-import { organizeTranscripts, withEmptyProjects, type TranscriptSort } from "../lib/transcript-organize";
+import { folderLabel, organizeTranscripts, withEmptyProjects, type TranscriptSort } from "../lib/transcript-organize";
 import {
   loadTranscriptLibrary, type LibraryTranscript,
 } from "../lib/transcript-library";
@@ -213,15 +213,34 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
     return t ? transcriptArt(t, recentIndex) : null;
   }
 
-  // Move-dialog destinations: the library root + each existing one-level folder.
+  /**
+   * Folders a transcript can actually be moved INTO: the real one-level
+   * listing from disk, never the display groups.
+   *
+   * Groups are the wrong source and were being used as one. A group's key is
+   * whatever the scan reported as the transcript's IMMEDIATE parent, so a
+   * folder nested two deep yields a bare name that does not exist at the
+   * root - and `${root}/${name}` then addresses a DIFFERENT directory that
+   * might well exist, which is a silent misfile rather than an error. While
+   * a search is running the single group's key is the pseudo-value
+   * `__results__`, so the move dialog was offering "3 matches" as a
+   * destination pointing at a directory that has never existed.
+   *
+   * `list_transcript_folders` returns exactly the one-level subfolders, which
+   * is exactly the set that `${root}/${name}` addresses correctly.
+   */
+  const moveTargets = useMemo(
+    () => new Set(folders ?? []),
+    [folders],
+  );
   const folderOptions = useMemo(() => {
     const root = transcriptLibraryPath.replace(/\/+$/, "");
-    const opts = [{ label: "Library root", dir: root }];
-    for (const g of groups) {
-      if (g.folder) opts.push({ label: g.label, dir: `${root}/${g.folder}` });
-    }
-    return opts;
-  }, [groups, transcriptLibraryPath]);
+    return [
+      { label: "Library root", dir: root },
+      ...[...moveTargets].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+        .map((folder) => ({ label: folderLabel(folder), dir: `${root}/${folder}` })),
+    ];
+  }, [moveTargets, transcriptLibraryPath]);
 
   // The third grid track sizes to the stage: full when docked-open, a thin rail
   // when collapsed, zero when floating (the panel lifts to a fixed card) or when
@@ -396,7 +415,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
                 })}
                 collapsed={collapsed.has(g.folder)}
                 onToggle={() => toggleGroup(g.folder)}
-                dropKey={g.folder}
+                dropKey={moveTargets.has(g.folder) ? g.folder : undefined}
                 dropActive={rowDrag.drag?.over === g.folder}
               />
               {!collapsed.has(g.folder) && g.items.length === 0 && (

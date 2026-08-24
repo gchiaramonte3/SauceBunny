@@ -147,3 +147,43 @@ test("an ordinary click still opens the transcript", async ({ page }) => {
   expect(await movesFor(page)).toEqual([]);
   await expect(row).toHaveAttribute("aria-current", "true");
 });
+
+test("a nested folder is NOT a drop target, because its key is only a name", async ({ page }) => {
+  // The scan reports a transcript's IMMEDIATE parent, so a folder two deep
+  // arrives as a bare name with no matching directory at the library root.
+  // Reconstructing `<root>/<name>` from it would address a different
+  // directory that might well exist - a silent misfile, not an error - so
+  // only folders in the real one-level listing accept a drop.
+  await bootReader(page);
+  const nested = page.locator(".cp-reader-group-label, .cp-reader-project")
+    .filter({ hasText: "Season 2" });
+  await expect(nested).toHaveCount(1);
+  await expect(nested).not.toHaveAttribute("data-drop", /.+/);
+
+  const row = page.locator(".cp-reader-row").first();
+  await dragTo(page, centre((await row.boundingBox())!), centre((await nested.boundingBox())!));
+  await page.waitForTimeout(200);
+  expect(await movesFor(page)).toEqual([]);
+});
+
+test("the search results heading is not a destination", async ({ page }) => {
+  // While a search runs, organizeTranscripts collapses everything into ONE
+  // group keyed `__results__`, which is not a directory and never was.
+  await bootReader(page);
+  await page.getByLabel(/Search transcripts/i).fill("interview");
+  // WAIT FOR THE RESULTS GROUP ITSELF. The needle is debounced 150ms, so
+  // asserting straight after fill() reads the pre-search groups and the test
+  // passes without ever entering the state it is about - which is exactly
+  // what it did until a mutant showed it surviving.
+  const heads = page.locator(".cp-reader-group-label, .cp-reader-project");
+  await expect(heads.filter({ hasText: /match/ })).toHaveCount(1);
+  await expect(page.locator(".cp-reader-row")).not.toHaveCount(0);
+  const keys = await heads.evaluateAll((els) => els.map((e) => e.getAttribute("data-drop")));
+  expect(keys).not.toContain("__results__");
+
+  const row = page.locator(".cp-reader-row").first();
+  const head = heads.first();
+  await dragTo(page, centre((await row.boundingBox())!), centre((await head.boundingBox())!));
+  await page.waitForTimeout(200);
+  expect(await movesFor(page)).toEqual([]);
+});

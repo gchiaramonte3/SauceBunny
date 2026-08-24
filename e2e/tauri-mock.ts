@@ -181,6 +181,11 @@ export function tauriMockInit(expectedBuildId: string): void {
         t("first-interview", "2026-08", 1_754_000_300_000),
         t("second-interview", "2026-08", 1_754_000_200_000),
         t("already-filed", "Marry Harry", 1_754_000_100_000),
+        // Two deep. The scan reports only the IMMEDIATE parent, so this
+        // arrives with folder "Season 2" - a name that does NOT exist at the
+        // library root, which is what makes it dangerous to reconstruct a
+        // destination from.
+        t("nested-ep", "Season 2", 1_754_000_050_000),
       ];
     },
     list_transcript_folders: () => {
