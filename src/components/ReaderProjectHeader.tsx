@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useLazyThumbnails } from "../hooks/use-lazy-thumbnails";
-import { IconFilm, IconMore, IconVolume } from "./Icons";
+import { IconChevronRight, IconFilm, IconMore, IconVolume } from "./Icons";
 import type { LibraryCardArt } from "./LibraryCard";
 
 /**
@@ -12,11 +12,17 @@ import type { LibraryCardArt } from "./LibraryCard";
  * gets a plain label and nothing to act on - offering "Delete" on 2026-08 would
  * be offering to bin a month of work that nobody chose to group.
  *
+ * BOTH collapse. A hundred transcripts under a handful of headings is a list
+ * you scroll past, not one you navigate, and the disclosure chevron is how
+ * every other tree in this app says "there is more inside" - the library tree
+ * uses the same glyph and the same rotation.
+ *
  * The picture reuses the row thumbnail pipeline exactly (lazy, shared cache),
  * so a project poster costs no decode the list was not already paying for.
  */
 export function ReaderProjectHeader({
   label, count, art, isProject, accent, requestThumb, posterVersions, onMenu,
+  collapsed, onToggle,
 }: {
   label: string;
   count: number;
@@ -28,6 +34,8 @@ export function ReaderProjectHeader({
   requestThumb: (path: string) => Promise<string | null>;
   posterVersions: Record<string, number>;
   onMenu: (x: number, y: number) => void;
+  collapsed: boolean;
+  onToggle: () => void;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   // Which poster failed, not "a poster failed". A bare boolean LATCHES: once
@@ -46,11 +54,24 @@ export function ReaderProjectHeader({
 
   const broken = brokenKey === key;
 
+  // The chevron IS the control on a month bucket: the whole heading toggles,
+  // so the hit target is the row rather than a 13px glyph.
   if (!isProject) {
     return (
       <h3 className="cp-reader-group-label">
-        {label}
-        <span className="cp-reader-group-count">{count}</span>
+        <button
+          type="button"
+          className="cp-reader-group-toggle"
+          aria-expanded={!collapsed}
+          onClick={onToggle}
+        >
+          <IconChevronRight
+            size={12}
+            className={"cp-reader-group-chev" + (collapsed ? "" : " open")}
+          />
+          {label}
+          <span className="cp-reader-group-count">{count}</span>
+        </button>
       </h3>
     );
   }
@@ -64,6 +85,18 @@ export function ReaderProjectHeader({
       style={accent ? { "--project-accent": accent } as React.CSSProperties : undefined}
       onContextMenu={(e) => { e.preventDefault(); onMenu(e.clientX, e.clientY); }}
     >
+      <button
+        type="button"
+        className="cp-reader-project-chevbtn"
+        aria-expanded={!collapsed}
+        aria-label={`${collapsed ? "Expand" : "Collapse"} ${label}`}
+        onClick={onToggle}
+      >
+        <IconChevronRight
+          size={12}
+          className={"cp-reader-group-chev" + (collapsed ? "" : " open")}
+        />
+      </button>
       <span ref={ref} className="cp-reader-project-thumb" aria-hidden="true">
         {url && !broken
           ? <img key={key} src={url} loading="lazy" alt="" draggable={false} onError={() => setBrokenKey(key)} />

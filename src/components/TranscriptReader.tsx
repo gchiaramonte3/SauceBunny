@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { IconTranscript, IconPanelLeft, IconPlus } from "./Icons";
 import { formatError } from "../lib/error-format";
@@ -149,6 +149,36 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   }, [folders !== null]);
   useEffect(() => { if (folders !== null) syncProjectFolders(folders); }, [folders]);
   const projects = useMemo(() => { void projectTick; return getProjects(); }, [projectTick]);
+
+  /**
+   * Which groups are collapsed, by folder key ("" is the loose root).
+   *
+   * Persisted, because a collapse is a filing decision rather than a scroll
+   * position: someone who folds away six months of old work expects it folded
+   * tomorrow. Stored as a list of the CLOSED ones, so a new project or a new
+   * month arrives open - the opposite default would hide work the moment it
+   * appeared.
+   */
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("saucebunny.readerCollapsed") ?? "[]");
+      return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
+    } catch { return new Set(); }
+  });
+  // The write lives OUTSIDE the updater. A setState updater has to be pure -
+  // React may run it more than once, and StrictMode does so deliberately to
+  // surface exactly this - so persisting in there makes the stored value
+  // depend on which invocation React kept. Same mistake, same fix, as the
+  // web pane's view prefs. The ref mirrors state so reading it here is
+  // race-free rather than a stale closure.
+  const collapsedRef = useRef(collapsed);
+  collapsedRef.current = collapsed;
+  const toggleGroup = useCallback((folder: string) => {
+    const next = new Set(collapsedRef.current);
+    if (next.has(folder)) next.delete(folder); else next.add(folder);
+    try { localStorage.setItem("saucebunny.readerCollapsed", JSON.stringify([...next])); } catch { /* quota */ }
+    setCollapsed(next);
+  }, []);
 
   // Search is debounced like the Library's (150ms): typing re-filters a
   // hundred-plus rows on every keystroke otherwise.
@@ -315,11 +345,13 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
                   posterFrom: projectFor(projects, g.folder)?.posterFrom ?? null,
                   x, y,
                 })}
+                collapsed={collapsed.has(g.folder)}
+                onToggle={() => toggleGroup(g.folder)}
               />
-              {g.items.length === 0 && (
+              {!collapsed.has(g.folder) && g.items.length === 0 && (
                 <p className="cp-reader-group-empty">Nothing here yet. Move a transcript in from its row menu.</p>
               )}
-              {g.items.map((t) => (
+              {!collapsed.has(g.folder) && g.items.map((t) => (
                 <button
                   key={t.path}
                   type="button"

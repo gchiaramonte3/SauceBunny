@@ -996,3 +996,51 @@
 /* On = brighter, never the accent: green means "playing" in this app. */
 .cp-reader-chip.on { color: var(--fg-1); border-color: var(--fg-4); background: var(--bg-3); }
 .cp-reader-chip:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+
+/* Disclosure in the Transcripts picker. The same chevron and the same
+   rotation as the library tree, because it means the same thing: there is
+   more inside. A hundred transcripts under six headings is a list you scroll
+   past rather than navigate. */
+.cp-reader-group-chev {
+  flex-shrink: 0;
+  color: var(--fg-4);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.cp-reader-group-chev.open { transform: rotate(90deg); }
+/* On a month bucket the whole heading is the control - a 12px glyph is not a
+   pointer target, and the heading has nothing else to click. */
+.cp-reader-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-height: 24px;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.cp-reader-group-toggle:hover .cp-reader-group-chev { color: var(--fg-2); }
+.cp-reader-group-toggle:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); border-radius: var(--r-2xs); }
+/* A project header already has a picture, a title and a menu, so its chevron
+   is its own small target rather than swallowing the row - clicking the
+   poster should still open the menu, not fold the group. */
+.cp-reader-project-chevbtn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  margin-left: -4px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: var(--r-2xs);
+  cursor: pointer;
+}
+.cp-reader-project-chevbtn:hover { background: rgba(255, 255, 255, 0.06); }
+.cp-reader-project-chevbtn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
