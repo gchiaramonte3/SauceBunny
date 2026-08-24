@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { usePlayheadSeconds } from "../lib/playhead-store";
+import { getPlayheadSeconds, subscribePlayhead } from "../lib/playhead-store";
 import { cueIndexAt, parseSrt, type Cue } from "../lib/srt";
 import {
   loadSpeakerOverrides,
@@ -135,10 +135,16 @@ type Props = {
  * speaker name rides along on screen.
  */
 export function CaptionOverlay({ path, reloadToken, fps, enabled, style }: Props) {
-  // Live playhead from the store — this overlay is one of the few 60Hz
-  // subscribers. Gated on `enabled` so a hidden overlay doesn't re-render on
-  // every tick (the snapshot pins to null → no notifications reach React).
-  const currentSec = usePlayheadSeconds(fps, enabled) ?? 0;
+  // Subscribes to the DERIVED cue index, not the raw seconds. The overlay's
+  // whole render is a function of WHICH cue is active - the split lines, the
+  // speaker resolution, the colours - and that changes every few seconds,
+  // while the raw playhead changed at source fps. Subscribing to seconds
+  // meant re-running the word-scoring line splitter and both speaker
+  // resolutions 24-60x a second to produce byte-identical output; the index
+  // snapshot lets useSyncExternalStore bail on every tick inside a cue.
+  // cueIndexAt is a binary search, so the per-tick cost of COMPUTING the
+  // snapshot on a three-hour transcript is a handful of comparisons.
+  // Gated on `enabled`: hidden pins to -1 and nothing reaches React.
   const [cues, setCues] = useState<Cue[]>([]);
   // Diarization is a property of the transcript, not of the playhead: compute
   // it once per cue array instead of scanning every cue on every tick.
@@ -163,6 +169,16 @@ export function CaptionOverlay({ path, reloadToken, fps, enabled, style }: Props
   // model from per-turn to per-cue: the label on the picture now changes the
   // moment you split a speaker in the panel.
   const taggedCues = useMemo(() => prepareCues(cues, overrides), [cues, overrides]);
+  // The derived-index subscription described above. Lives here because the
+  // snapshot closes over taggedCues, and must sit above the early returns.
+  // The user's sync offset shifts the lookup, exactly as the old per-tick
+  // compute did; it changes only from the settings pane, which re-renders.
+  const activeIdx = useSyncExternalStore(
+    subscribePlayhead,
+    () => (enabled && loadedFor.current === loadKey && taggedCues.length > 0
+      ? cueIndexAt(taggedCues, (getPlayheadSeconds(fps) ?? 0) + (style?.syncSec ?? 0))
+      : -1),
+  );
   const hasSpeakersMemo = useMemo(() => taggedCues.some((c) => !!c.speaker), [taggedCues]);
   // Last raw localStorage string we applied — skip setState when unchanged so
   // the backstop channels below don't re-render on every check.
@@ -234,12 +250,6 @@ export function CaptionOverlay({ path, reloadToken, fps, enabled, style }: Props
   }, [enabled, path, loadKey]);
 
   if (!enabled || loadedFor.current !== loadKey || taggedCues.length === 0) return null;
-  // Shift the lookup by the user's sync offset (streaming drift correction).
-  const t = currentSec + (style?.syncSec ?? 0);
-  // Binary search, not find(): this render body runs on EVERY playhead tick,
-  // and a three-hour transcript is tens of thousands of cues. Shared with the
-  // transcript reader (lib/srt.ts) so both answer the question the same way.
-  const activeIdx = cueIndexAt(taggedCues, t);
   const active = activeIdx >= 0 ? taggedCues[activeIdx] : undefined;
   const text = active?.text?.trim();
   if (!text) return null;

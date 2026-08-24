@@ -354,3 +354,32 @@ describe("CaptionOverlay — appearance settings reach the DOM", () => {
     expect(linesOnScreen()).toEqual(["First line."]);
   });
 });
+
+describe("the derived-index subscription (perf)", () => {
+  /**
+   * The overlay subscribes to WHICH cue is active, not to the raw playhead.
+   * It used to re-render at source fps to re-run the word-scoring line
+   * splitter and both speaker resolutions for byte-identical output - the
+   * cue on screen changes every few seconds, not sixty times a second.
+   */
+  it("frame ticks inside one cue do not re-render the overlay", async () => {
+    let commits = 0;
+    render(
+      <Profiler id="cap" onRender={() => { commits++; }}>
+        <CaptionOverlay path="/tmp/x.srt" fps={FPS} enabled />
+      </Profiler>,
+    );
+    await act(async () => { await Promise.resolve(); });
+    seek(1.2); // inside cue 1
+    expect(shown()).toContain("First line.");
+
+    const before = commits;
+    // Over a second of frame ticks, all inside cue 1 (1.0s..3.0s).
+    for (let f = Math.floor(1.3 * FPS); f < Math.floor(2.9 * FPS); f++) seek(f / FPS);
+    expect(commits - before, "the overlay re-rendered inside a cue").toBe(0);
+
+    // And crossing the cue boundary still updates the text.
+    seek(5.5);
+    expect(shown()).toContain("Second line.");
+  });
+});
