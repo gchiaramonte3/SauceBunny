@@ -84,6 +84,7 @@ export type PanelHandlers = {
   onMarkRange: (a: number, b: number) => void;
   onQueueRange: (a: number, b: number) => void;
   onClearAll: () => void;
+  onClearDone: () => void;
   onExportAll: () => void;
   onStop: () => void;
   onSeek: (seconds: number) => void;
@@ -357,6 +358,8 @@ export function usePanelBus({
           (e) => handlersRef.current.onQueueRange(e.payload.a, e.payload.b)),
         listen("panel:action:clearAll",
           () => handlersRef.current.onClearAll()),
+        listen("panel:action:clearDone",
+          () => handlersRef.current.onClearDone()),
         listen("panel:action:exportAll",
           () => handlersRef.current.onExportAll()),
         listen("panel:action:stop",

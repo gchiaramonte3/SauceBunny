@@ -2385,7 +2385,7 @@ export default function App() {
   // writer.
   const {
     handleAddToQueue, handleQueueRemove, handleQueueRetry, handleQueueRename,
-    handleQueueRenameAll, handleQueueClearAll, handleExportQueue,
+    handleQueueRenameAll, handleQueueClearAll, handleQueueClearDone, handleExportQueue,
   } = useClipQueue({
     metadata, metadataRef, sourceKind, localFilePath, exportOpts, fps,
     inFrames, outFrames, queueRunning, clipQueueRef, queueResolverRef,
@@ -4012,6 +4012,7 @@ export default function App() {
       onMarkRange: (a: number, b: number) => markRangeFromSeconds(a, b),
       onQueueRange: (a: number, b: number) => { const r = markRangeFromSeconds(a, b); if (r) handleAddToQueue(r); },
       onClearAll: handleQueueClearAll,
+      onClearDone: handleQueueClearDone,
       onExportAll: () => { void handleExportQueue(); },
       onStop: () => { void handleStop(); },
       onSeek: (seconds: number) => {
@@ -4958,6 +4959,7 @@ export default function App() {
                 onMarkRange={markRangeFromSeconds}
                 onQueueRange={(a, b) => { const r = markRangeFromSeconds(a, b); if (r) handleAddToQueue(r); }}
                 onClearAll={handleQueueClearAll}
+                onClearDone={handleQueueClearDone}
                 onExportAll={handleExportQueue}
                 onStop={handleStop}
                 onRenameClip={handleQueueRename}

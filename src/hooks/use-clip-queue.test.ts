@@ -218,3 +218,47 @@ describe("handleAddToQueue takes the range it is given", () => {
     expect(d.pushNotification).not.toHaveBeenCalled();
   });
 });
+
+describe("clearing finished rows", () => {
+  /**
+   * Clear all was the only broom, and the wrong one for this: it takes
+   * queued-but-not-yet-exported ranges with it (hence its confirm) and is
+   * disabled while the queue runs, so a session that exported ten clips left
+   * ten green bands on the timeline clearable only one row at a time.
+   */
+  it("removes done rows and keeps everything still owed", () => {
+    const queue = [
+      item("a", { status: "done" }),
+      item("b", { status: "queued" }),
+      item("c", { status: "error" }),
+      item("d", { status: "done" }),
+      item("e", { status: "running" }),
+    ];
+    const d = deps(queue);
+    const { result } = renderHook(() => useClipQueue(d));
+
+    result.current.handleQueueClearDone();
+
+    const left = (d.clipQueueRef as { current: { id: string }[] }).current.map((c) => c.id);
+    expect(left).toEqual(["b", "c", "e"]);
+  });
+
+  it("keeps an error row, because it is the only record that it failed", () => {
+    // Retry lives on that row; sweeping it away would hide the failure and
+    // the way to act on it in one go.
+    const d = deps([item("a", { status: "error" })]);
+    const { result } = renderHook(() => useClipQueue(d));
+    result.current.handleQueueClearDone();
+    expect((d.clipQueueRef as { current: unknown[] }).current).toHaveLength(1);
+  });
+
+  it("asks nothing, unlike Clear all - a done row is a receipt, not work", () => {
+    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(false);
+    const d = deps([item("a", { status: "done" })]);
+    const { result } = renderHook(() => useClipQueue(d));
+    result.current.handleQueueClearDone();
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect((d.clipQueueRef as { current: unknown[] }).current).toHaveLength(0);
+    confirmSpy.mockRestore();
+  });
+});

@@ -56,6 +56,8 @@ type Props = {
   onMarkRange: (startSeconds: number, endSeconds: number) => void;
   onQueueRange: (startSeconds: number, endSeconds: number) => void;
   onClearAll: () => void;
+  /** Drop only the finished rows (and their timeline bands). */
+  onClearDone?: () => void;
   onExportAll: () => void;
   onStop: () => void;
   /** Path to the currently-loaded transcript SRT, or null. */
@@ -250,7 +252,7 @@ function loadDrawerWidth(): number {
 
 export function QueueDrawer({
   open, viewActive = true, onClose, queue, fps, running, hasFolder,
-  onRemove, onRetry, onMarkRange, onQueueRange, onClearAll, onExportAll, onStop,
+  onRemove, onRetry, onMarkRange, onQueueRange, onClearAll, onClearDone, onExportAll, onStop,
   transcriptPath, transcriptOrigin, playheadAvailable, transcriptFps,
   sourceStartTimecode, onSetSourceTimecode, onGrabFace,
   onTranscriptSeek, transcriptArrivedTick, reviewRequestTick = 0,
@@ -856,6 +858,18 @@ export function QueueDrawer({
           >
             Clear all
           </button>
+          {onClearDone && (
+            <button
+              className="btn btn-ghost"
+              onClick={onClearDone}
+              // Safe while the queue RUNS: it touches only finished rows, so
+              // it never reaches the one in flight or anything still owed.
+              disabled={doneCount === 0}
+              title="Remove the exported clips from the queue, and their bands from the timeline"
+            >
+              Clear completed
+            </button>
+          )}
           {onRenameAll && (
             <button
               className="btn btn-ghost"

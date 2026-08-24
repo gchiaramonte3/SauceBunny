@@ -223,10 +223,17 @@ export const IconCoReview = (p: IconProps) => (
 // reading as a chevron rather than an arrowhead glued to a bar. A mitred
 // polyline does not reproduce it (the apex lands ~0.5 short), so this is the
 // drawn path transformed, not a redrawing of it.
+//
+// The stem ends SQUARE, the one deliberate change from the supplied drawing's
+// 0.875 round caps. On the timeline a mark's stem is a rectangle running the
+// full height of the track, so a rounded button and a square mark were two
+// shapes claiming to be one thing, and the round ends read as blurry at 16px
+// where the cap is under a pixel. Square ends make the button and the mark it
+// leaves the same silhouette. Every other measurement is the drawing's.
 export const IconMarkIn = (p: IconProps) => (
   <Icon {...p}>
     <path
-      d="M10.875 15.6504V21.1875C10.875 21.9123 11.4626 22.5 12.1875 22.5C12.9124 22.5 13.5 21.9123 13.5 21.1875V14.3496L10.415 12L13.5 9.6504V2.8125C13.5 2.0876 12.9124 1.5 12.1875 1.5C11.4626 1.5 10.875 2.0876 10.875 2.8125V8.3496L6.0849 12L10.875 15.6504Z"
+      d="M10.875 15.6504V22.5H13.5V14.3496L10.415 12L13.5 9.6504V1.5H10.875V8.3496L6.0849 12L10.875 15.6504Z"
       fill="currentColor"
       stroke="none"
     />
@@ -235,7 +242,7 @@ export const IconMarkIn = (p: IconProps) => (
 export const IconMarkOut = (p: IconProps) => (
   <Icon {...p}>
     <path
-      d="M13.125 15.6504V21.1875C13.125 21.9123 12.5374 22.5 11.8125 22.5C11.0876 22.5 10.5 21.9123 10.5 21.1875V14.3496L13.585 12L10.5 9.6504V2.8125C10.5 2.0876 11.0876 1.5 11.8125 1.5C12.5374 1.5 13.125 2.0876 13.125 2.8125V8.3496L17.9151 12L13.125 15.6504Z"
+      d="M13.125 15.6504V22.5H10.5V14.3496L13.585 12L10.5 9.6504V1.5H13.125V8.3496L17.9151 12L13.125 15.6504Z"
       fill="currentColor"
       stroke="none"
     />
@@ -265,7 +272,7 @@ export const IconMarkOut = (p: IconProps) => (
 export const IconClearMarks = (p: IconProps) => (
   <Icon {...p}>
     <path
-      d="M6.5 1.6H17.5A3.5 3.5 0 0 1 21 5.1V18.9A3.5 3.5 0 0 1 17.5 22.4H6.5A3.5 3.5 0 0 1 3 18.9V5.1A3.5 3.5 0 0 1 6.5 1.6Z M8.9225 14.8473V19.1663C8.9225 19.7316 9.3808 20.19 9.9462 20.19C10.5117 20.19 10.97 19.7316 10.97 19.1663V13.8327L8.5637 12L10.97 10.1673V4.8337C10.97 4.2683 10.5117 3.81 9.9462 3.81C9.3808 3.81 8.9225 4.2683 8.9225 4.8337V9.1527L5.1862 12L8.9225 14.8473Z M15.0775 14.8473V19.1663C15.0775 19.7316 14.6192 20.19 14.0538 20.19C13.4883 20.19 13.03 19.7316 13.03 19.1663V13.8327L15.4363 12L13.03 10.1673V4.8337C13.03 4.2683 13.4883 3.81 14.0538 3.81C14.6192 3.81 15.0775 4.2683 15.0775 4.8337V9.1527L18.8138 12L15.0775 14.8473Z"
+      d="M6.5 1.6H17.5A3.5 3.5 0 0 1 21 5.1V18.9A3.5 3.5 0 0 1 17.5 22.4H6.5A3.5 3.5 0 0 1 3 18.9V5.1A3.5 3.5 0 0 1 6.5 1.6Z M8.9225 14.8473V20.19H10.97V13.8327L8.5637 12L10.97 10.1673V3.81H8.9225V9.1527L5.1862 12L8.9225 14.8473Z M15.0775 14.8473V20.19H13.03V13.8327L15.4363 12L13.03 10.1673V3.81H15.0775V9.1527L18.8138 12L15.0775 14.8473Z"
       fill="currentColor"
       stroke="none"
       fillRule="evenodd"

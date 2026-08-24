@@ -44,6 +44,7 @@ type ActionKind =
   | "markRange"
   | "queueRange"
   | "clearAll"
+  | "clearDone"
   | "exportAll"
   | "stop"
   | "seek"
@@ -178,6 +179,7 @@ export default function PanelApp() {
         onMarkRange={(a, b) => sendAction("markRange", { a, b })}
         onQueueRange={(a, b) => sendAction("queueRange", { a, b })}
         onClearAll={() => sendAction("clearAll")}
+        onClearDone={() => sendAction("clearDone")}
         onExportAll={() => sendAction("exportAll")}
         onStop={() => sendAction("stop")}
         transcriptPath={state.transcriptPath}

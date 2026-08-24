@@ -227,6 +227,25 @@ export function useClipQueue(p: ClipQueueDeps) {
     setClipQueue([]);
   }, [clipQueueRef, setClipQueue]);
 
+  /**
+   * Drop the rows that are FINISHED, leaving everything still owed.
+   *
+   * Clear all is the only broom today, and it is the wrong one for this: it
+   * takes queued-but-not-yet-exported ranges with it (hence its confirm) and
+   * is disabled while the queue runs. So a session that exported ten clips
+   * left ten green bands on the timeline, clearable only one row at a time
+   * or by also throwing away work still owed.
+   *
+   * No confirm, deliberately, and the difference matters: a done row is a
+   * receipt for a file already on disk, so removing it destroys nothing,
+   * while a queued row is a range somebody marked by hand and nothing else
+   * remembers. Errors are kept - a failed row is the only record that it
+   * failed, and Retry lives on it.
+   */
+  const handleQueueClearDone = useCallback(() => {
+    setClipQueue((prev) => prev.filter((c) => c.status !== "done"));
+  }, [setClipQueue]);
+
   /** Run every "queued" item sequentially — web items through create_clip
    *  (yt-dlp/ffmpeg, per-item cookie retry), local items through the shared
    *  mediabunny core. Each item carries its own source + fps, so the queue
@@ -385,6 +404,6 @@ export function useClipQueue(p: ClipQueueDeps) {
 
   return {
     handleAddToQueue, handleQueueRemove, handleQueueRetry, handleQueueRename,
-    handleQueueRenameAll, handleQueueClearAll, handleExportQueue,
+    handleQueueRenameAll, handleQueueClearAll, handleQueueClearDone, handleExportQueue,
   };
 }
