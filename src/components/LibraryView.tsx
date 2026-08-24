@@ -458,6 +458,9 @@ const HOME_ROW_CAP = 24;
                Web/URL sources have no version bump → stable. */
             key={`hero#${recentSources[0] ? (posterVersions[recentSources[0].value] ?? 0) : 0}`}
             recent={recentSources[0] ?? null}
+            webPoster={recentSources[0]
+              ? (webPosters.get(recentSources[0].value) ?? webPosterFor(recentSources[0].value))
+              : null}
             onOpen={onOpenRecentSource}
             onAddFolder={() => void addFolder()}
             onPasteUrl={onSwitchToClip}

@@ -16,6 +16,15 @@ import type { RecentSource } from "../lib/recent-sources";
 type Props = {
   /** Most recent successfully-loaded source; null → the inviting empty hero. */
   recent: RecentSource | null;
+  /**
+   * Poster for a web source that is not on YouTube.
+   *
+   * The candidate list below was YouTube-derived and nothing else, so the
+   * hero over any other site had no backdrop at all - the same gap the
+   * Continue row had, on the largest picture on the screen. The caller
+   * supplies it because the caller is the one holding the metadata cache.
+   */
+  webPoster?: string | null;
   /** Routes through App's handleOpenRecentSource — the same handler the URL
    *  bar history popover uses. Switches to the Clip view upstream. */
   onOpen: (source: RecentSource) => void;
@@ -41,7 +50,7 @@ type Props = {
  * chaining; when every candidate fails the shade over bg-0 carries the band.
  * With no recents yet it flips to the empty invitation on the brand wash.
  */
-export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl, montageActive }: Props) {
+export function LibraryHero({ recent, webPoster, onOpen, onAddFolder, onPasteUrl, montageActive }: Props) {
   const ref = useRef<HTMLElement>(null);
   // Local-file art rides the same lazy intersection gate as the cards, but
   // asks for the hero-resolution still (sharp at band size, not the 480px
@@ -80,7 +89,7 @@ export function LibraryHero({ recent, onOpen, onAddFolder, onPasteUrl, montageAc
 
   const candidates = (
     recent.kind === "url"
-      ? [youTubeHeroThumbnailUrl(recent.value), youTubeThumbnailUrl(recent.value)]
+      ? [youTubeHeroThumbnailUrl(recent.value), youTubeThumbnailUrl(recent.value), webPoster ?? null]
       : [fileStill]
   ).filter((u): u is string => u != null);
   const backdrop = candidates.find((u) => !failed.includes(u)) ?? null;
