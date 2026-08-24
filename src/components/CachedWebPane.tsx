@@ -7,13 +7,14 @@ import { formatBytes } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { secondsToClock } from "../lib/timecode";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
+import { LibraryCard } from "./LibraryCard";
 import { WebListRows } from "./WebListRows";
 import { WebCollectionMenu } from "./WebCollectionMenu";
 import {
   deleteWebCollection, flushWebCollections, getWebCollections, hydrateWebCollections,
   subscribeWebCollections, type WebCollection,
 } from "../lib/web-collection-store";
-import { IconCircleX, IconDownload, IconLink } from "./Icons";
+import { IconCircleX } from "./Icons";
 
 /** View prefs for the web pane, persisted separately from the folder pane's:
  *  the two views are different rooms, and flipping the web cache to a list
@@ -180,63 +181,63 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
     : needle
       ? (filtered.length ? [{ site: "Results", items: sortedFlat }] : [])
       : groupBySite(unfiled).map((g) => ({ site: g.site, items: sortCachedWeb(g.items, prefs.sort, prefs.dir) }));
+  /**
+   * One cached web source, rendered by the LIBRARY's card - the same poster
+   * frame, hover reveal, ⋯ menu, selection affordance and broken-art
+   * fallback a local file gets. The bespoke cp-web-card this replaced had
+   * none of that: a dead i.ytimg.com URL left a broken image with no
+   * fallback, right-click gave the WKWebView default, and every card plus
+   * its forget button was a separate tab stop.
+   *
+   * The two facts a web item has and a file does not ride as card props
+   * (duration on the art, the downloaded-copy indicator); the forget and
+   * add-to-collection controls ride in the cell slot, where they can be
+   * positioned against the card and revealed with it.
+   */
   const webCard = (it: CachedWebItem) => {
-              const isArmed = armed === it.url;
-              const size = it.size_bytes ? formatBytes(it.size_bytes) : "the copy";
-              return (
-              <li key={it.url} className="cp-web-card">
-                <button
-                  type="button"
-                  className="cp-web-open"
-                  title={it.url}
-                  onClick={() => onOpenUrl(it.url)}
-                >
-                  <span className="cp-web-art">
-                    {it.thumbnail
-                      ? <img src={it.thumbnail} alt="" loading="lazy" />
-                      : <IconLink size={20} />}
-                    {it.duration_seconds != null && (
-                      <span className="cp-web-dur">{secondsToClock(it.duration_seconds)}</span>
-                    )}
-                    {/* Downloaded vs resolve-only is the one fact that changes
-                        what re-opening costs, so it is on the art, not buried
-                        in a tooltip. */}
-                    {it.path && (
-                      <span className="cp-web-have" title="A full copy is on this Mac">
-                        <IconDownload size={11} />
-                      </span>
-                    )}
-                  </span>
-                  <span className="cp-web-title">{it.title ?? it.url}</span>
-                  <span className="cp-web-sub">
-                    {it.uploader ?? siteName(it.url)}
-                    {it.size_bytes ? ` · ${formatBytes(it.size_bytes)}` : ""}
-                  </span>
-                </button>
-                <WebCollectionMenu url={it.url} />
-                <button
-                  type="button"
-                  className={"cp-web-forget" + (isArmed ? " armed" : "")}
-                  title={it.path
-                    ? "Delete the downloaded copy from this Mac. The source stays online."
-                    : "Forget this resolve. Nothing is on disk; re-opening extracts again."}
-                  aria-label={isArmed
-                    ? `Confirm deleting the ${size} copy of ${it.title ?? it.url}`
-                    : it.path
-                      ? `Delete the ${size} copy of ${it.title ?? it.url}`
-                      : `Forget ${it.title ?? it.url}`}
-                  onClick={() => {
-                    if (!it.path) { forget(it.url); return; }
-                    if (isArmed) { setArmed(null); forget(it.url); return; }
-                    setArmed(it.url);
-                  }}
-                >
-                  {isArmed
-                    ? <span className="cp-web-forget-label">Delete {size}</span>
-                    : <IconCircleX size={13} />}
-                </button>
-              </li>
-              );};
+    const isArmed = armed === it.url;
+    const size = it.size_bytes ? formatBytes(it.size_bytes) : "the copy";
+    return (
+      <LibraryCard
+        key={it.url}
+        title={it.title ?? it.url}
+        detail={`${it.uploader ?? siteName(it.url)}${it.size_bytes ? ` · ${formatBytes(it.size_bytes)}` : ""}`}
+        art={{ kind: "remote", url: it.thumbnail }}
+        badge="web"
+        duration={it.duration_seconds != null ? secondsToClock(it.duration_seconds) : null}
+        haveCopy={!!it.path}
+        revealPath={it.path}
+        onOpen={() => onOpenUrl(it.url)}
+        requestThumb={async () => null}
+        cellControls={
+          <>
+            <WebCollectionMenu url={it.url} />
+            <button
+              type="button"
+              className={"cp-web-forget" + (isArmed ? " armed" : "")}
+              title={it.path
+                ? "Delete the downloaded copy from this Mac. The source stays online."
+                : "Forget this resolve. Nothing is on disk; re-opening extracts again."}
+              aria-label={isArmed
+                ? `Confirm deleting the ${size} copy of ${it.title ?? it.url}`
+                : it.path
+                  ? `Delete the ${size} copy of ${it.title ?? it.url}`
+                  : `Forget ${it.title ?? it.url}`}
+              onClick={() => {
+                if (!it.path) { forget(it.url); return; }
+                if (isArmed) { setArmed(null); forget(it.url); return; }
+                setArmed(it.url);
+              }}
+            >
+              {isArmed
+                ? <span className="cp-web-forget-label">Delete {size}</span>
+                : <IconCircleX size={13} />}
+            </button>
+          </>
+        }
+      />
+    );
+  };
 
   const withCopy = items.filter((i) => i.path).length;
   const bytes = items.reduce((n, i) => n + (i.size_bytes ?? 0), 0);
@@ -296,7 +297,7 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
                   : "Empty. Use the + on any card to file clips here."}
               </div>
             )}
-            <ul className="cp-web-grid">{cItems.map(webCard)}</ul>
+            <div className="cp-web-grid" role="list">{cItems.map(webCard)}</div>
           </section>
         );
       })}
@@ -324,9 +325,9 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
               }}
             />
           ) : (
-          <ul className="cp-web-grid">
+          <div className="cp-web-grid" role="list">
             {g.items.map(webCard)}
-          </ul>
+          </div>
           )}
         </section>
       ))}

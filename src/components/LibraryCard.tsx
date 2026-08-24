@@ -2,11 +2,11 @@
  *  and poster-fallback layers landed. The layers share refs and timing
  *  state so a sibling split would thread 6+ props for zero reuse; keeping
  *  one file was the deliberate call. Revisit if another media layer lands. */
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { rememberAspect } from "../lib/art-aspect";
 import { reviewStatusForKey } from "../lib/review-store";
 import { ReviewStatusChip } from "./ReviewStatusChip";
-import { IconFilm, IconMore, IconPlay, IconVolume } from "./Icons";
+import { IconDownload, IconFilm, IconMore, IconPlay, IconVolume } from "./Icons";
 import { WaveformArt } from "./WaveformArt";
 import { LibraryCardMenu } from "./LibraryCardMenu";
 import { chosenPosterFor } from "../lib/library";
@@ -35,6 +35,17 @@ type Props = {
   revealPath?: string | null;
   /** Small corner tag, e.g. "web" on Continue-row URLs, "srt" on transcripts. */
   badge?: string;
+  /** Runtime, already formatted, shown on the art. Web sources know this from
+   *  their resolve; local files do not carry it here. */
+  duration?: string | null;
+  /** A full copy is on this Mac. Web sources only, where it is the one fact
+   *  that changes what re-opening costs. */
+  haveCopy?: boolean;
+  /** Per-card controls rendered INSIDE the cell, beside the card button -
+   *  the web shelf's forget and add-to-collection affordances. A node rather
+   *  than more props because the card does not care what they are; it only
+   *  owns the cell they need to live in to be positioned against it. */
+  cellControls?: ReactNode;
   /** Featured size — the Continue row's large landscape cards (~2x width). */
   large?: boolean;
   onOpen: () => void;
@@ -84,7 +95,7 @@ type Props = {
  * Open in Clip. The menu never triggers the card's open.
  */
 export function LibraryCard({
-  title, detail, art, revealPath: revealPathProp, badge, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
+  title, detail, art, revealPath: revealPathProp, badge, duration, haveCopy, cellControls, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   onSelect, onContextSelect, onRename, selected, tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -242,6 +253,12 @@ export function LibraryCard({
             </span>
           )}
           {badge && <span className="cp-lib-card-badge">{badge}</span>}
+          {duration && <span className="cp-lib-card-dur">{duration}</span>}
+          {haveCopy && (
+            <span className="cp-lib-card-have" title="A full copy is on this Mac">
+              <IconDownload size={11} />
+            </span>
+          )}
           <span className="cp-lib-card-play" aria-hidden="true">
             <IconPlay size={15} />
           </span>
@@ -249,6 +266,7 @@ export function LibraryCard({
         <span className="cp-lib-card-title">{title}</span>
         <span className="cp-lib-card-detail">{detail}</span>
       </button>
+      {cellControls}
       {/* Sibling of the card <button> (buttons can't nest) — the ⋯ trigger over
           the art's top-right corner, revealed with the card. Opens the SAME
           menu as right-click, giving mouse + keyboard users one path. */}

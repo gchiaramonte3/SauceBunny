@@ -1771,69 +1771,6 @@
 /* The card is a positioning context for the forget button, which sits over
    the art rather than taking a row of its own. */
 .cp-web-card { position: relative; }
-.cp-web-open {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  width: 100%;
-  padding: 0;
-  border: none;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-  color: inherit;
-  font: inherit;
-}
-.cp-web-art {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  aspect-ratio: 16 / 9;
-  overflow: hidden;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-md);
-  background: var(--bg-3);
-  color: var(--fg-4);
-  transition: border-color var(--dur-fast) var(--ease-out);
-}
-.cp-web-open:hover .cp-web-art { border-color: var(--line-3); }
-.cp-web-open:focus-visible .cp-web-art {
-  outline: none;
-  border-color: var(--focus-ring);
-}
-.cp-web-art img { width: 100%; height: 100%; object-fit: cover; }
-.cp-web-dur,
-.cp-web-have {
-  position: absolute;
-  bottom: 5px;
-  padding: 1px 5px;
-  border-radius: var(--r-xs);
-  background: color-mix(in srgb, var(--bg-0) 82%, transparent);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-bold);
-  color: var(--fg-2);
-}
-.cp-web-dur { right: 5px; }
-/* Green, because "already on this Mac" is a live-state fact about the file
-   and not decoration — the same reason the scan spinner is green. */
-.cp-web-have {
-  left: 5px;
-  display: flex;
-  align-items: center;
-  color: var(--ella-green);
-}
-.cp-web-title {
-  font-size: var(--text-md);
-  font-weight: var(--weight-semibold);
-  color: var(--fg-1);
-  line-height: var(--leading-tight);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.cp-web-sub { font-size: var(--text-base); color: var(--fg-4); }
 /* Hidden until the card is hovered or the button itself is focused, so a
    destructive-looking control is not sitting on forty cards at once. */
 .cp-web-forget {
@@ -2038,3 +1975,37 @@
 }
 .cp-web-collect-new button:disabled { opacity: 0.4; cursor: not-allowed; }
 .cp-web-collect-new button:hover:not(:disabled) { color: var(--fg-1); }
+
+/* Web facts on a library card: runtime on the art, and the one-glance
+   "there is a full copy here" mark. Both live in the art's corner stack
+   beside the badge, so a card carrying all three still reads. */
+.cp-lib-card-dur {
+  position: absolute;
+  right: var(--s-1);
+  bottom: var(--s-1);
+  padding: 1px var(--s-1);
+  border-radius: var(--r-2xs);
+  background: rgba(0, 0, 0, 0.72);
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-tight);
+}
+.cp-lib-card-have {
+  position: absolute;
+  left: var(--s-1);
+  bottom: var(--s-1);
+  display: grid;
+  place-items: center;
+  padding: 2px;
+  border-radius: var(--r-2xs);
+  background: rgba(0, 0, 0, 0.72);
+  color: var(--fg-2);
+}
+/* The web shelf's per-card controls sit in the library cell now. The ⋯ owns
+   the top-right, so these stack leftward from it. */
+.cp-web-grid .cp-web-forget { position: absolute; top: var(--s-1); right: 62px; }
+.cp-web-grid .cp-web-collect { position: absolute; top: var(--s-1); right: 34px; }
+.cp-web-grid .cp-lib-cell:hover .cp-web-forget,
+.cp-web-grid .cp-lib-cell:focus-within .cp-web-forget { opacity: 1; }

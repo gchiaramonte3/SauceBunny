@@ -97,7 +97,7 @@ describe("CachedWebPane browser parity", () => {
   it("mounts the library's browser bar with the web nouns", async () => {
     h.items = three();
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
-    await screen.findByText("Beta");
+    await screen.findAllByText("Beta");
     expect(screen.getByText("From the web")).toBeTruthy();
     expect(screen.getByLabelText("Search cached clips")).toBeTruthy();
     // The date option is renamed for what the number actually is here.
@@ -108,8 +108,8 @@ describe("CachedWebPane browser parity", () => {
   it("defaults keep today's order: newest fetch first within a shelf", async () => {
     h.items = three();
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
-    await screen.findByText("Beta");
-    const titles = [...document.querySelectorAll(".cp-web-title")].map((n) => n.textContent);
+    await screen.findAllByText("Beta");
+    const titles = [...document.querySelectorAll(".cp-lib-card-title")].map((n) => n.textContent);
     // YouTube shelf (2 items) first; within it Gamma (200) before Beta (100).
     expect(titles).toEqual(["Gamma", "Beta", "Alpha"]);
   });
@@ -117,7 +117,7 @@ describe("CachedWebPane browser parity", () => {
   it("switching to list view renders ONE table with sortable headers", async () => {
     h.items = three();
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
-    await screen.findByText("Beta");
+    await screen.findAllByText("Beta");
     screen.getByRole("button", { name: "List view" }).click();
     await waitFor(() => {
       expect(document.querySelectorAll(".cp-lib-list-head")).toHaveLength(1);
@@ -135,7 +135,7 @@ describe("CachedWebPane browser parity", () => {
   it("clicking a column header flips direction and persists", async () => {
     h.items = three();
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
-    await screen.findByText("Beta");
+    await screen.findAllByText("Beta");
     screen.getByRole("button", { name: "List view" }).click();
     (await screen.findByRole("button", { name: /Fetched/ })).click();
     await waitFor(() => {
@@ -155,14 +155,14 @@ describe("CachedWebPane browser parity", () => {
       render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
       // let the load promise resolve under fake timers
       await vi.waitFor(() => {
-        if (!screen.queryByText("Beta")) throw new Error("not loaded");
+        if (screen.queryAllByText("Beta").length === 0) throw new Error("not loaded");
       });
       const box = screen.getByLabelText("Search cached clips") as HTMLInputElement;
       // fireEvent-free change: React reads the input through onChange
       const { fireEvent } = await import("@testing-library/react");
       fireEvent.change(box, { target: { value: "alp" } });
       await vi.advanceTimersByTimeAsync(200);
-      const titles = [...document.querySelectorAll(".cp-web-title")].map((n) => n.textContent);
+      const titles = [...document.querySelectorAll(".cp-lib-card-title")].map((n) => n.textContent);
       expect(titles).toEqual(["Alpha"]);
       expect(screen.getByText("Results")).toBeTruthy();
     } finally {
@@ -186,7 +186,7 @@ describe("web collections (organize everything)", () => {
       item({ url: "https://youtube.com/watch?v=b", title: "Other" }),
     ];
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
-    await screen.findByText("Keeper");
+    await screen.findAllByText("Keeper");
 
     // Open the card's + menu and create a collection through its inline form.
     const fe = await fireEvent();
@@ -209,7 +209,7 @@ describe("web collections (organize everything)", () => {
   it("unchecking the collection puts the clip back on its site shelf", async () => {
     h.items = [item({ url: "https://youtube.com/watch?v=a", title: "Keeper" })];
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
-    await screen.findByText("Keeper");
+    await screen.findAllByText("Keeper");
     const fe = await fireEvent();
     screen.getAllByRole("button", { name: "Add to a collection" })[0].click();
     const nameBox = await screen.findByLabelText("New collection name");
@@ -236,7 +236,7 @@ describe("web collections (organize everything)", () => {
   it("deleting a collection is armed, and keeps the clips", async () => {
     h.items = [item({ url: "https://youtube.com/watch?v=a", title: "Keeper" })];
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
-    await screen.findByText("Keeper");
+    await screen.findAllByText("Keeper");
     const fe = await fireEvent();
     screen.getAllByRole("button", { name: "Add to a collection" })[0].click();
     const nameBox = await screen.findByLabelText("New collection name");
@@ -251,6 +251,47 @@ describe("web collections (organize everything)", () => {
     fe.click(screen.getByRole("button", { name: "Confirm deleting the collection Selects" }));
     await waitFor(() => expect(screen.queryByText("Selects")).toBeNull());
     // The clip returns to its site shelf - nothing was lost but the label.
-    expect(screen.getByText("Keeper")).toBeTruthy();
+    expect(screen.getAllByText("Keeper").length).toBeGreaterThan(0);
+  });
+});
+
+describe("web cards ARE library cards", () => {
+  beforeEach(() => {
+    h.calls = []; h.items = []; document.body.innerHTML = "";
+    localStorage.clear(); __resetWebCollectionStore();
+  });
+
+  it("renders the shared card, with the two web-only facts on the art", async () => {
+    h.items = [item({
+      url: "https://youtube.com/watch?v=a", title: "Reel",
+      duration_seconds: 95, path: "/cache/a.mp4", size_bytes: 900,
+    })];
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findAllByText("Reel");
+
+    // The library's cell + card, not the old bespoke markup.
+    expect(document.querySelector(".cp-lib-cell")).toBeTruthy();
+    expect(document.querySelector(".cp-web-card")).toBeNull();
+    // Runtime and the downloaded-copy mark ride as card props.
+    expect(document.querySelector(".cp-lib-card-dur")?.textContent).toBe("1:35");
+    expect(document.querySelector(".cp-lib-card-have")).toBeTruthy();
+    // And the card brings the ⋯ menu a bespoke card never had.
+    expect(screen.getByRole("button", { name: "More actions" })).toBeTruthy();
+  });
+
+  it("a resolve-only entry shows no downloaded mark", async () => {
+    h.items = [item({ url: "https://youtube.com/watch?v=b", title: "Stream", path: null })];
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findAllByText("Stream");
+    expect(document.querySelector(".cp-lib-card-have")).toBeNull();
+  });
+
+  it("opening still goes through onOpenUrl", async () => {
+    const opened: string[] = [];
+    h.items = [item({ url: "https://youtube.com/watch?v=c", title: "Clip" })];
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={(u) => opened.push(u)} />);
+    await screen.findAllByText("Clip");
+    (document.querySelector(".cp-lib-card") as HTMLButtonElement).click();
+    expect(opened).toEqual(["https://youtube.com/watch?v=c"]);
   });
 });
