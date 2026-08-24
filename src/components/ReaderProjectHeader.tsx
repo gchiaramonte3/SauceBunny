@@ -22,7 +22,7 @@ import type { LibraryCardArt } from "./LibraryCard";
  */
 export function ReaderProjectHeader({
   label, count, art, isProject, accent, requestThumb, posterVersions, onMenu,
-  collapsed, onToggle,
+  collapsed, onToggle, dropKey, dropActive,
 }: {
   label: string;
   count: number;
@@ -35,6 +35,13 @@ export function ReaderProjectHeader({
   posterVersions: Record<string, number>;
   onMenu: (x: number, y: number) => void;
   collapsed: boolean;
+  /** Makes this heading a drop container for a dragged transcript row. The
+   *  value is the group's folder, which for BOTH kinds of group is a real
+   *  directory: a project at the library root, or a dated YYYY-MM bucket.
+   *  That the month bucket is a real directory is what gives a filed
+   *  transcript a way back OUT of a project by dragging. */
+  dropKey?: string;
+  dropActive?: boolean;
   onToggle: () => void;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -58,7 +65,10 @@ export function ReaderProjectHeader({
   // so the hit target is the row rather than a 13px glyph.
   if (!isProject) {
     return (
-      <h3 className="cp-reader-group-label">
+      <h3
+        className={"cp-reader-group-label" + (dropActive ? " dropping" : "")}
+        data-drop={dropKey}
+      >
         <button
           type="button"
           className="cp-reader-group-toggle"
@@ -81,7 +91,8 @@ export function ReaderProjectHeader({
     : <IconFilm size={15} />;
   return (
     <h3
-      className="cp-reader-project"
+      className={"cp-reader-project" + (dropActive ? " dropping" : "")}
+      data-drop={dropKey}
       style={accent ? { "--project-accent": accent } as React.CSSProperties : undefined}
       onContextMenu={(e) => { e.preventDefault(); onMenu(e.clientX, e.clientY); }}
     >

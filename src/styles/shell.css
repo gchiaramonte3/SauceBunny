@@ -1044,3 +1044,13 @@
 }
 .cp-reader-project-chevbtn:hover { background: rgba(255, 255, 255, 0.06); }
 .cp-reader-project-chevbtn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+
+/* A group heading under a dragged transcript row. Both kinds are real
+   directories, so both can receive one: a project, and the dated bucket a
+   transcript came from - which is how a filed transcript gets back out. */
+.cp-reader-project.dropping,
+.cp-reader-group-label.dropping {
+  outline: 1px solid var(--fg-2);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}

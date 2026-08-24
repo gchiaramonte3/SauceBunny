@@ -156,6 +156,43 @@ export function tauriMockInit(expectedBuildId: string): void {
     get_file_size: 0,
     // The Library browser's detail panel + card menu "Reveal in Finder".
     reveal_in_finder: null,
+    /**
+     * The transcript library: one dated bucket and one PROJECT folder, so the
+     * picker shows both kinds of group heading and a row can be dragged from
+     * one to the other.
+     *
+     * OPT-IN, keyed on `e2e.transcripts`, for the reason `e2e.files` is: a
+     * scan that returns three transcripts to EVERY spec is not a fixture, it
+     * is a change to the app under test. Returning them unconditionally put
+     * four cards on the Library's Transcribed shelf and broke a smoke spec
+     * that had every right to expect one.
+     */
+    scan_transcript_library: () => {
+      let seeded = false;
+      try { seeded = localStorage.getItem("e2e.transcripts") !== null; } catch { /* denied */ }
+      if (!seeded) return [];
+      const t = (name: string, folder: string, ms: number) => ({
+        name, folder,
+        path: `/e2e-mock/Documents/Sauce Bunny/Transcripts/${folder ? folder + "/" : ""}${name}.srt`,
+        size_bytes: 2048, modified_ms: ms,
+        has_diarization: false, has_analysis: false, format: "srt",
+      });
+      return [
+        t("first-interview", "2026-08", 1_754_000_300_000),
+        t("second-interview", "2026-08", 1_754_000_200_000),
+        t("already-filed", "Marry Harry", 1_754_000_100_000),
+      ];
+    },
+    list_transcript_folders: () => {
+      try {
+        if (localStorage.getItem("e2e.transcripts") === null) return [];
+      } catch { /* denied */ }
+      return ["2026-08", "Marry Harry"];
+    },
+    move_transcript_to_folder: (args: unknown) => {
+      const a = args as { srtPath: string; destDir: string };
+      return `${a.destDir}/${a.srtPath.split("/").pop()}`;
+    },
     // The Frames shelf. Six stills across two films, one of them filed into
     // a folder, so the shelf has both loose cards and a container tile.
     list_frames: () => {

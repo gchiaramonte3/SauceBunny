@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCardDrag } from "../hooks/use-card-drag";
 import { invoke } from "@tauri-apps/api/core";
 import { IconTranscript, IconPanelLeft, IconPlus } from "./Icons";
 import { formatError } from "../lib/error-format";
@@ -229,9 +230,57 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
     : stageFloating ? " stage-float"
     : stageExpanded ? " stage-open"
     : " stage-rail";
+  const entryByPath = useMemo(() => {
+    const m = new Map<string, { entry: TranscriptHistoryEntry; folder: string }>();
+    for (const g of organized.groups) {
+      for (const t of g.items) m.set(t.path, { entry: t.entry, folder: g.folder });
+    }
+    return m;
+  }, [organized.groups]);
+
+  // Filing a transcript by dragging its row onto a group heading.
+  //
+  // BOTH kinds of heading are destinations, because both are real
+  // directories: a project at the library root, and the dated YYYY-MM bucket
+  // a transcript came from. Without the second, a transcript dragged into a
+  // project could only be got back out through the row menu.
+  //
+  // A COLLAPSED project is still a target, and is the one that matters most -
+  // once the picker has any history in it, the folded heading is the compact
+  // thing you can actually aim at.
+  const rowDrag = useCardDrag({
+    itemSelector: ".cp-reader-row",
+    targetSelector: "[data-drop]",
+    targetAttr: "data-drop",
+    // No multi-select in the picker, so a drag is always the one row.
+    pathsFor: (path: string) => [path],
+    onDrop: (folder: string, paths: readonly string[]) => {
+      const path = paths[0];
+      const hit = path ? entryByPath.get(path) : undefined;
+      // Dropping something back where it already lives is a no-op rather than
+      // a move. The command returns early on its own, but a rescan would
+      // still churn the picker for nothing.
+      if (!hit || hit.folder === folder) return;
+      void onMoveTranscript(hit.entry, `${transcriptLibraryPath}/${folder}`);
+    },
+  });
+
   return (
     <div className={"cp-reader" + stageClass}>
-      <aside className="cp-reader-picker" aria-label="Transcripts">
+      <aside
+        className="cp-reader-picker"
+        aria-label="Transcripts"
+        {...rowDrag.handlers}
+      >
+        {rowDrag.drag && (
+          <div
+            className="cp-card-ghost"
+            aria-hidden="true"
+            style={{ left: rowDrag.drag.x, top: rowDrag.drag.y }}
+          >
+            1 transcript
+          </div>
+        )}
         <div className="cp-reader-picker-head">
           <IconTranscript size={16} />
           <span>Transcripts</span>
@@ -347,15 +396,18 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
                 })}
                 collapsed={collapsed.has(g.folder)}
                 onToggle={() => toggleGroup(g.folder)}
+                dropKey={g.folder}
+                dropActive={rowDrag.drag?.over === g.folder}
               />
               {!collapsed.has(g.folder) && g.items.length === 0 && (
-                <p className="cp-reader-group-empty">Nothing here yet. Move a transcript in from its row menu.</p>
+                <p className="cp-reader-group-empty">Nothing here yet. Drag a transcript onto this heading, or move one in from its row menu.</p>
               )}
               {!collapsed.has(g.folder) && g.items.map((t) => (
                 <button
                   key={t.path}
                   type="button"
                   className={"cp-reader-row" + (t.path === activePath ? " active" : "")}
+                  data-path={t.path}
                   onClick={() => onOpenTranscript(t.entry)}
                   onContextMenu={(e) => { e.preventDefault(); setRowMenu({ entry: t.entry, title: t.title, x: e.clientX, y: e.clientY }); }}
                   aria-current={t.path === activePath ? "true" : undefined}
