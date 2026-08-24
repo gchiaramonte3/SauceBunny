@@ -320,3 +320,41 @@ as search results); the LIST view stays flat because Site is a column there;
 no colours on web items (real Finder tags need real paths, and a lookalike
 that Finder cannot see would break the app's "real macOS tags" promise); no
 batch forget from a selection until the summed-size confirm exists.
+
+## Containers are directories (2026-08-24)
+
+The ask was folder structure inside Frames and the web shelf, plus deeper
+organisation in the Library. Three designs were put up: real directories,
+nested virtual collections generalising the web-collection store, and
+extending transcript projects into the app's one container. Directories won,
+and the reasons are worth keeping because two of them are about what NOT to
+build:
+
+- **One concept means one persistence rule.** Both record-based designs kept
+  the Library on real directories anyway, so each shipped a record store PLUS
+  directories - two systems, which is the thing being complained about.
+- **Both needed a `STORE_SCHEMA_VERSION` 1 to 2 bump.** That constant is read
+  by every file store and its own header defines the bump as a one-way door:
+  older builds go read-only. Spending that on a feature whose whole point is
+  that it needs no file was the wrong trade.
+- **Making Frames virtual would add the exact index `frames.rs` exists to
+  avoid** - "there is no index to fall out of step with the directory".
+
+What a container IS: a directory. Identity is its path, persistence is the
+filesystem, and the cover is DERIVED from its contents at render time - the
+three newest stills for a Frames folder, `libraryPosterPaths` for a Library
+one. The evidence for deriving rather than storing was already in the repo:
+`TranscriptProject.posterPath`, documented as "an image the user picked", is
+declared, initialised, parsed, and read by nothing. Only the derived path is
+live.
+
+Web collections do NOT fold in. A web source has no file to put in a folder,
+and moving a cached copy out of `media/` severs `find_cached_download`, goes
+cold on the warm start and orphans the LRU cap - already settled above. They
+stay virtual, flat, raw-URL-keyed and web-only.
+
+Smaller calls made along the way: the noun is FOLDER (project and collection
+are both taken, and it is what the thing literally is); a filed frame leaves
+the stem shelves, so it appears in exactly one place; search and list view
+flatten the whole tree, matching the web pane; and a Frames tree is walked
+three levels deep, matching the library scan's cap.
