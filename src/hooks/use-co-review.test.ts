@@ -11,15 +11,19 @@ const base: ChaseInput = {
   playing: false,
   curSeconds: 100,
   expectedSeconds: 100,
-  hostScrubbed: false, sinceLastChaseMs: 9999,
+  hostScrubbed: false, hostStepped: false, sinceLastChaseMs: 9999,
 };
+
+/** The hook derives both from the same delta, so a scrub IS a step - any
+ *  case modelling a host scrub must set both, as the hook would. */
+const scrubbed = { hostScrubbed: true, hostStepped: true };
 
 describe("co-review chase decisions", () => {
   it("paused host double-scrub: the yielded edge survives, the guest lands on P2", () => {
     // Host scrubs to P1; the chase's own correction armed the latch, so the
     // NEXT heartbeat (host now at P2) arrives with the latch hot.
     const yielded = decideChase({
-      ...base, localSeekHot: true, hostScrubbed: true, sinceLastChaseMs: 9999,
+      ...base, ...scrubbed, localSeekHot: true, sinceLastChaseMs: 9999,
       curSeconds: 50, expectedSeconds: 80,
     });
     expect(yielded.seekSeconds).toBeNull();
@@ -29,7 +33,7 @@ describe("co-review chase decisions", () => {
     // Latch expired; because the edge was not consumed, hostScrubbed is
     // still true and the paused guest finally jumps to P2.
     const after = decideChase({
-      ...base, hostScrubbed: true, sinceLastChaseMs: 9999, curSeconds: 50, expectedSeconds: 80,
+      ...base, ...scrubbed, sinceLastChaseMs: 9999, curSeconds: 50, expectedSeconds: 80,
     });
     expect(after.seekSeconds).toBe(80);
     expect(after.commitHostPos).toBe(true);
@@ -88,5 +92,39 @@ describe("co-review chase decisions", () => {
       ...base, justLoaded: true, curSeconds: 0, expectedSeconds: 640, sinceLastChaseMs: 0,
     });
     expect(d.seekSeconds).toBe(640);
+  });
+});
+
+describe("paused frame-stepping (the audit's top finding)", () => {
+  // A 24fps step is 0.0417s: an order of magnitude under the 0.25s scrub
+  // threshold, so the old paused branch ignored it - and because the no-op
+  // branch commits the host position, fifty steps in a row never accumulated
+  // past the threshold either. The room reviewed different frames while the
+  // source bar said "frame accurate".
+  it("a single 24fps step reaches the paused guest", () => {
+    const d = decideChase({
+      ...base, hostStepped: true, hostScrubbed: false,
+      curSeconds: 100, expectedSeconds: 100 + 1 / 24,
+    });
+    expect(d.seekSeconds, "the step was swallowed").toBe(100 + 1 / 24);
+    expect(d.commitHostPos).toBe(true);
+  });
+
+  it("a static host still never yanks a wandering paused guest", () => {
+    // The guest wandered 5s away and the host has NOT moved: parked is
+    // correct, and this is the property the old threshold was protecting.
+    const d = decideChase({
+      ...base, hostStepped: false, hostScrubbed: false,
+      curSeconds: 105, expectedSeconds: 100,
+    });
+    expect(d.seekSeconds).toBeNull();
+  });
+
+  it("a guest already on the stepped frame is left alone", () => {
+    const d = decideChase({
+      ...base, hostStepped: true, hostScrubbed: false,
+      curSeconds: 100 + 1 / 24, expectedSeconds: 100 + 1 / 24,
+    });
+    expect(d.seekSeconds).toBeNull();
   });
 });

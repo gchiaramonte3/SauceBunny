@@ -614,6 +614,10 @@ export function useCoReview({
         const expected = expectedPosition(m, now, coClockRef.current.offsetMs());
         const cur = getPlayheadFrames() / r;
         const hostScrubbed = coLastHostPosRef.current === null || Math.abs(m.position - coLastHostPosRef.current) > 0.25;
+        // "Moved at all": 4ms is under any real frame duration (120fps is
+        // 8.3ms) and over transport jitter, so a frame-step registers on the
+        // first heartbeat that carries it.
+        const hostStepped = coLastHostPosRef.current === null || Math.abs(m.position - coLastHostPosRef.current) > 0.004;
         // RC3 latch: a local seek in the last ~1.2s owns the playhead — the
         // chase yields so a guest can click a transcript cue without being
         // yanked back on the next heartbeat. decideChase (pure, unit-tested)
@@ -623,7 +627,7 @@ export function useCoReview({
         const localSeekHot = Date.now() - getLastUserSeekAt() < 1200;
         const decision = decideChase({
           justLoaded, localSeekHot, playing: m.playing,
-          curSeconds: cur, expectedSeconds: expected, hostScrubbed,
+          curSeconds: cur, expectedSeconds: expected, hostScrubbed, hostStepped,
           sinceLastChaseMs: now - coLastChaseAtRef.current,
         });
         if (decision.commitHostPos) {
@@ -1342,6 +1346,14 @@ export type ChaseInput = {
   expectedSeconds: number;
   /** Host moved > 0.25s since the last heartbeat we ACTED on. */
   hostScrubbed: boolean;
+  /** Host moved AT ALL (beyond clock jitter) since that heartbeat. A paused
+   *  frame-step is 0.033-0.042s - an order of magnitude under the scrub
+   *  threshold - so gating the paused chase on hostScrubbed alone meant the
+   *  core review gesture, stepping to THE frame, never reached guests: the
+   *  room silently reviewed different frames while the UI said "frame
+   *  accurate". The no-op branch commits the host position, so steps never
+   *  accumulated past the threshold either. */
+  hostStepped: boolean;
   /** ms since our last chase seek. Guards against a correction storm: a seek
    *  takes time to land (a web seek rebuilds the whole ffmpeg stream), and
    *  measuring drift mid-seek produces another seek. */
@@ -1374,9 +1386,12 @@ export function decideChase(i: ChaseInput): ChaseDecision {
     };
   }
   if (cooling) return { seekSeconds: null, commitHostPos: true };
-  // Paused: only jump when the host actually scrubbed (or we just loaded) —
-  // a paused guest glancing at a nearby frame must not be yanked back.
-  if (i.justLoaded || (i.hostScrubbed && Math.abs(i.curSeconds - i.expectedSeconds) > 0.1)) {
+  // Paused: jump when the host MOVED - a scrub or a single frame-step alike -
+  // and stay parked when the host is static, so a paused guest glancing at a
+  // nearby frame is never yanked back by a motionless presenter. The drift
+  // gate is half a frame at 24fps: fine enough that every step lands, coarse
+  // enough that a guest already on the host's frame is left alone.
+  if (i.justLoaded || (i.hostStepped && Math.abs(i.curSeconds - i.expectedSeconds) > 0.02)) {
     return { seekSeconds: i.expectedSeconds, commitHostPos: true };
   }
   return { seekSeconds: null, commitHostPos: true };
