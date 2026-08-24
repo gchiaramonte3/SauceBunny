@@ -68,3 +68,25 @@ describe("the SessionMsg wire protocol", () => {
     expect(coReview).not.toMatch(/switch \(m\.kind\)[\s\S]{0,4000}?default:\s*throw/);
   });
 });
+
+describe("the export queue is not session state", () => {
+  it("no SessionMsg variant carries clip marks or the queue", () => {
+    // A queued clip is this machine's export plan: private working state that
+    // means nothing to the person on the other end. What a screening shares
+    // is the comments and their spans, presence, transport and reactions.
+    //
+    // This is the half that is easy to lose later. Hiding the bands is a
+    // render decision one component makes and any future call site could
+    // undo; the wire is where the promise actually lives, so the wire is
+    // where it is pinned.
+    const forbidden = /\b(inFrames|outFrames|queuedRange|clipQueue|QueuedClip)\b/;
+    expect(forbidden.test(binding), "SessionMsg binding names clip marks").toBe(false);
+
+    // The Rust union, read between `enum SessionMsg` and its closing brace, so
+    // an unrelated mention elsewhere in session.rs cannot fail this.
+    const start = rust.indexOf("enum SessionMsg");
+    expect(start, "SessionMsg enum not found in session.rs").toBeGreaterThan(-1);
+    const union = rust.slice(start, rust.indexOf("\n}", start));
+    expect(forbidden.test(union), "the SessionMsg enum names clip marks").toBe(false);
+  });
+});

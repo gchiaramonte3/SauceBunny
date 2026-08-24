@@ -4835,7 +4835,21 @@ export default function App() {
                     // Only the queued clips that belong to THIS source; see
                     // lib/queue-ranges.ts for why drawing the rest is worse
                     // than untidy.
-                    queuedRanges={queuedRangesForSource(
+                    //
+                    // AND NONE OF THEM DURING A SCREENING. A queued clip is
+                    // this machine's export plan - private working state that
+                    // says nothing to the person on the other end - and the
+                    // session's timeline is a shared reading surface where the
+                    // marks that mean something are the comment dots and their
+                    // spans. Drawing an export queue across it puts a second
+                    // set of bands on the one track both people are pointing
+                    // at, in colours that mean nothing to the guest.
+                    //
+                    // The queue was never SENT: SessionMsg carries comments,
+                    // presence, transport, sharing and reactions, and has no
+                    // marks or queue variant at all. This is about what the
+                    // host is looking at, not about what leaves the Mac.
+                    queuedRanges={coSessionActive ? [] : queuedRangesForSource(
                       clipQueue,
                       currentQueueSource(sourceKind, localFilePath, metadata?.webpage_url),
                     ).map((c) => ({
