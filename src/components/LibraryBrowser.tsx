@@ -345,7 +345,6 @@ export function LibraryBrowser({
           <FramesPane
             treeOpen={treeOpen}
             onShowTree={() => setTreeOpen(true)}
-            onOpenFrame={(p) => { void invoke("reveal_in_finder", { path: p }); }}
           />
         ) : shelf === "web" ? (
           /* The web shelf owns the whole pane, and mounts the SAME browser

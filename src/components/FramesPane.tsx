@@ -11,6 +11,7 @@ import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
 import { LibraryCard } from "./LibraryCard";
 import { LibraryFolderCard } from "./LibraryFolderCard";
 import { FrameMoveDialog } from "./FrameMoveDialog";
+import { FramePreview, revealFrame } from "./FramePreview";
 import { IconPlus } from "./Icons";
 import { FrameListRows } from "./FrameListRows";
 
@@ -44,11 +45,9 @@ function normalizeFramePrefs(raw: unknown): FramePrefs {
   };
 }
 
-export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
+export function FramesPane({ treeOpen, onShowTree }: {
   treeOpen: boolean;
   onShowTree: () => void;
-  /** Open a frame in whatever the app uses to look at a still. */
-  onOpenFrame?: (path: string) => void;
 }) {
   const [items, setItems] = useState<FrameItem[] | null>(null);
 
@@ -98,6 +97,8 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
   const [open, setOpen] = useState("");
   const [newFolder, setNewFolder] = useState<string | null>(null);
   const [moving, setMoving] = useState<FrameItem | null>(null);
+  // Which frame the viewer is showing, by path. Null = closed.
+  const [preview, setPreview] = useState<string | null>(null);
   const createFolder = useCallback(async (name: string) => {
     try {
       await invoke("create_frames_folder", { parent: open, name });
@@ -115,6 +116,7 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
   }, [query]);
 
   const remove = useCallback((path: string) => {
+    setPreview((p) => (p === path ? null : p));
     // Optimistic: the card goes now, because the disk work is one unlink and
     // waiting on it makes an instant action feel broken.
     setItems((prev) => prev?.filter((i) => i.path !== path) ?? prev);
@@ -152,6 +154,11 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
           items: sortFrames(g.items, prefs.sort, prefs.dir),
         }));
   const bytes = items.reduce((n, i) => n + i.size_bytes, 0);
+  // Exactly what is on screen, in the order it is on screen - so the
+  // viewer's Left/Right walk the shelf the user is looking at rather than
+  // some private order, and stepping crosses source bundles the way the eye
+  // does.
+  const shown = groups.flatMap((g) => g.items);
 
   const frameCard = (it: FrameItem) => {
     const tc = formatFrameTimecode(it.timecode);
@@ -166,7 +173,7 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
         art={{ kind: "remote", url: assetUrl(it.path) }}
         duration={tc}
         revealPath={it.path}
-        onOpen={() => onOpenFrame?.(it.path)}
+        onOpen={() => setPreview(it.path)}
         requestThumb={async () => null}
         // Delete lives in the card's ⋯ menu, beside Reveal in Finder and
         // Open in Clip, because that is where a card's verbs live. It asks
@@ -200,6 +207,15 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
         treeOpen={treeOpen}
         onShowTree={onShowTree}
       />
+      {preview && (
+        <FramePreview
+          items={shown}
+          path={preview}
+          onPath={setPreview}
+          onClose={() => setPreview(null)}
+          onReveal={revealFrame}
+        />
+      )}
       {moving && (
         <FrameMoveDialog
           name={moving.path}
@@ -281,7 +297,7 @@ export function FramesPane({ treeOpen, onShowTree, onOpenFrame }: {
                 sort={prefs.sort}
                 dir={prefs.dir}
                 onSort={onSort}
-                onOpenFrame={(p) => onOpenFrame?.(p)}
+                onOpenFrame={setPreview}
                 onDelete={(p) => {
                   const row = g.items.find((x) => x.path === p);
                   if (!row) return;
