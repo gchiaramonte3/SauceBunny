@@ -72,6 +72,9 @@ log = "0.4"
 # bound across every core instead of one core through a 64 KiB read loop -
 # measured 3-5x on the files people actually screen (b3sum ships this way).
 blake3 = { version = "1", features = ["mmap", "rayon"] }
+# Already in the graph via quinn/iroh; named so the Tier B bridge can pass
+# the transport's own zero-copy buffers instead of re-allocating per chunk.
+bytes = "1"
 # Cloud AI (opt-in Claude/ChatGPT): the user's API key lives in the macOS
 # Keychain, never plaintext localStorage and never in the webview. keyring 2.x
 # ships the Apple keystore in its default features.

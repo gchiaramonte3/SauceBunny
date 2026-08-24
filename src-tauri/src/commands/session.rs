@@ -1713,7 +1713,6 @@ async fn peer_media_service(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<crate::commands::peer_stream::MediaStreamRequest>,
 ) {
     use crate::commands::peer_stream::{MediaStreamHandle, BRIDGE_CHANNEL_CHUNKS};
-    use tokio::io::AsyncReadExt;
 
     #[derive(serde::Deserialize)]
     struct MediaHeader {
@@ -1784,7 +1783,7 @@ async fn peer_media_service(
                 );
             }
             let timeline = if head.timeline == "absolute" { "absolute" } else { "rebased" };
-            let (tx, brx) = tokio::sync::mpsc::channel::<Vec<u8>>(BRIDGE_CHANNEL_CHUNKS);
+            let (tx, brx) = tokio::sync::mpsc::channel::<bytes::Bytes>(BRIDGE_CHANNEL_CHUNKS);
             if req
                 .resp
                 .send(Ok(MediaStreamHandle {
@@ -1798,18 +1797,33 @@ async fn peer_media_service(
             {
                 return; // worker gave up waiting; tear the substream down
             }
-            let mut buf = vec![0u8; 64 * 1024];
+            // The header line went through a BufReader, which may have
+            // buffered the first bytes of the MEDIA BODY along with it -
+            // hand those over first (one small copy, once per stream),
+            // then drop to the raw QUIC stream for the rest.
+            let leftover = reader.buffer().to_vec();
+            let mut recv = reader.into_inner();
+            if !leftover.is_empty() && tx.send(bytes::Bytes::from(leftover)).await.is_err() {
+                return;
+            }
+            // read_chunk yields the transport's own refcounted Bytes out of
+            // the QUIC reassembly buffer. The old loop read into a scratch
+            // buffer and then heap-allocated buf[..n].to_vec() per 64 KiB
+            // chunk - with the ChannelReader's copy on the far side, every
+            // streamed byte crossed userspace three times. Now it crosses
+            // once, into the HTTP response.
             loop {
-                let n = match reader.read(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(n) => n,
-                    Err(_) => break,
-                };
-                if tx.send(buf[..n].to_vec()).await.is_err() {
-                    // Reader dropped: the HTTP response ended (seek teardown
-                    // or player gone). Dropping `reader` STOPs the stream and
-                    // the host's write fails on its next chunk.
-                    break;
+                match recv.read_chunk(64 * 1024).await {
+                    Ok(Some(chunk)) => {
+                        if tx.send(chunk).await.is_err() {
+                            // Reader dropped: the HTTP response ended (seek
+                            // teardown or player gone). Dropping the stream
+                            // STOPs it and the host's write fails on its
+                            // next chunk.
+                            break;
+                        }
+                    }
+                    Ok(None) | Err(_) => break,
                 }
             }
         });

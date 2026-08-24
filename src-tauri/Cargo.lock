@@ -5050,6 +5050,7 @@ version = "0.4.2"
 dependencies = [
  "base64 0.22.1",
  "blake3",
+ "bytes",
  "iroh",
  "iroh-tickets",
  "keyring",

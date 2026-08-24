@@ -54,7 +54,10 @@ pub struct MediaStreamHandle {
     /// lowest rung and shows a "relayed" badge — the user's media is crossing
     /// third-party infrastructure and they should be told.
     pub relayed: bool,
-    pub rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    /// Carries `Bytes` - the QUIC reassembly buffer's own refcounted
+    /// slices - so a streamed byte is copied ONCE in userspace (into the
+    /// HTTP response), not three times. See the pump in session.rs.
+    pub rx: tokio::sync::mpsc::Receiver<bytes::Bytes>,
 }
 
 /// The session installs its request sender here while live (peer role only);
@@ -102,14 +105,14 @@ pub fn request_media_stream(
 /// (tiny_http worker) — `blocking_recv` would panic inside a runtime, and
 /// that is exactly the misuse the design forbids (`Handle::block_on` class).
 pub struct ChannelReader {
-    rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
-    buf: Vec<u8>,
+    rx: tokio::sync::mpsc::Receiver<bytes::Bytes>,
+    buf: bytes::Bytes,
     pos: usize,
 }
 
 impl ChannelReader {
-    pub fn new(rx: tokio::sync::mpsc::Receiver<Vec<u8>>) -> Self {
-        Self { rx, buf: Vec::new(), pos: 0 }
+    pub fn new(rx: tokio::sync::mpsc::Receiver<bytes::Bytes>) -> Self {
+        Self { rx, buf: bytes::Bytes::new(), pos: 0 }
     }
 }
 
@@ -140,10 +143,10 @@ mod tests {
 
     #[test]
     fn channel_reader_reassembles_chunks_across_read_boundaries() {
-        let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(BRIDGE_CHANNEL_CHUNKS);
-        tx.try_send(vec![1, 2, 3]).unwrap();
-        tx.try_send(vec![4]).unwrap();
-        tx.try_send(vec![5, 6]).unwrap();
+        let (tx, rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(BRIDGE_CHANNEL_CHUNKS);
+        tx.try_send(bytes::Bytes::from(vec![1, 2, 3])).unwrap();
+        tx.try_send(bytes::Bytes::from(vec![4])).unwrap();
+        tx.try_send(bytes::Bytes::from(vec![5, 6])).unwrap();
         drop(tx);
         let mut r = ChannelReader::new(rx);
         // Small out-buffer forces splits WITHIN a chunk.
@@ -159,7 +162,7 @@ mod tests {
 
     #[test]
     fn channel_reader_signals_eof_when_the_pump_closes() {
-        let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(4);
+        let (tx, rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(4);
         drop(tx);
         let mut r = ChannelReader::new(rx);
         assert_eq!(r.read(&mut [0u8; 8]).unwrap(), 0);
@@ -171,11 +174,11 @@ mod tests {
     async fn the_bound_backpressures_the_async_sender() {
         // The pump must PARK once the reader stops draining — this is the
         // 3b property the whole tier leans on (pause → presenter stalls).
-        let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(2);
-        tx.send(vec![0u8; 8]).await.unwrap();
-        tx.send(vec![0u8; 8]).await.unwrap();
+        let (tx, rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(2);
+        tx.send(bytes::Bytes::from(vec![0u8; 8])).await.unwrap();
+        tx.send(bytes::Bytes::from(vec![0u8; 8])).await.unwrap();
         // Channel full: a third send must NOT complete while nothing drains.
-        let pending = tx.send(vec![0u8; 8]);
+        let pending = tx.send(bytes::Bytes::from(vec![0u8; 8]));
         tokio::select! {
             _ = pending => panic!("send completed past the bound with no reader draining"),
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {}
@@ -189,7 +192,7 @@ mod tests {
         });
         let (rx_back, n) = handle.await.unwrap();
         assert_eq!(n, 8);
-        tokio::time::timeout(std::time::Duration::from_secs(1), tx.send(vec![1]))
+        tokio::time::timeout(std::time::Duration::from_secs(1), tx.send(bytes::Bytes::from(vec![1])))
             .await
             .expect("send should unpark once a slot frees")
             .unwrap();
