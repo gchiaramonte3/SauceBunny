@@ -178,23 +178,31 @@ export function searchLibrary(
   const q = norm(rawQuery.trim());
   const result: LibrarySearchResult = { folders: [], items: [], totalItems: 0, totalFolders: 0 };
   if (!q) return result;
-  const walk = (node: LibraryFolder, chain: LibraryCrumb[]) => {
+  const walk = (node: LibraryFolder, chain: LibraryCrumb[], inMatch: boolean) => {
     // Count first, cap second - the same shape as items below. Folding the cap
     // into the match is what made the overflow invisible.
-    if (norm(node.name).includes(q)) {
+    const folderHit = norm(node.name).includes(q);
+    if (folderHit) {
       result.totalFolders++;
       if (result.folders.length < folderCap) result.folders.push({ folder: node, chain });
     }
+    // A folder match also matches everything INSIDE it. Home shows assets
+    // rather than folder tiles, so without this, typing a folder's name
+    // there returned nothing at all - the one thing the user was most
+    // likely to be looking for when they typed it. Callers that DO render
+    // folder hits are unaffected: this only adds items they can already
+    // reach by opening the folder.
+    const under = inMatch || folderHit;
     for (const it of node.items) {
-      if (!norm(it.name).includes(q)) continue;
+      if (!under && !norm(it.name).includes(q)) continue;
       result.totalItems++;
       if (result.items.length < itemCap) result.items.push(it);
     }
     for (const sub of node.folders) {
-      walk(sub, [...chain, { name: sub.name, path: sub.path }]);
+      walk(sub, [...chain, { name: sub.name, path: sub.path }], under);
     }
   };
-  for (const t of trees) walk(t, [{ name: t.name, path: t.path }]);
+  for (const t of trees) walk(t, [{ name: t.name, path: t.path }], false);
   return result;
 }
 
@@ -416,4 +424,27 @@ export function clearSourceTimecode(path: string): void {
   if (!Object.prototype.hasOwnProperty.call(map, path)) return;
   delete map[path];
   saveJson(SOURCE_TC_KEY, map);
+}
+
+/**
+ * Home's shelf order: the things that will show a PICTURE first.
+ *
+ * Home is a launcher, and a launcher made of grey placeholder glyphs is a
+ * worse one than a launcher made of frames. A video card grabs a
+ * representative frame, so it always resolves to real art; an audio card
+ * has nothing to frame-grab and keeps the glyph by design (see
+ * LibraryCard's art contract). So video leads, audio follows, and within
+ * each the caller's existing order is preserved - this is a stable partition,
+ * not a re-sort, so a shelf that was newest-first stays newest-first inside
+ * each half.
+ *
+ * Deliberately a PARTITION rather than a filter: an audio-only library must
+ * not get an empty Home. What the user asked for is that the shelves lead
+ * with pictures, not that anything becomes unreachable.
+ */
+export function artFirst(items: readonly LibraryItem[]): LibraryItem[] {
+  const withArt: LibraryItem[] = [];
+  const without: LibraryItem[] = [];
+  for (const it of items) (it.kind === "video" ? withArt : without).push(it);
+  return [...withArt, ...without];
 }

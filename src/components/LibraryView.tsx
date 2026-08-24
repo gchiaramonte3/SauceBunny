@@ -7,22 +7,21 @@ import {
   clickSelect, contextMenuSelect, EMPTY_SELECTION, pruneSelection,
   type SelectionState,
 } from "../lib/library-selection";
-import { LibraryFolderCard } from "./LibraryFolderCard";
 import { ThumbnailPicker } from "./ThumbnailPicker";
 import { IconSearch } from "./Icons";
 import type { RootScan } from "../hooks/use-library-scan";
 import {
+  artFirst,
   chosenPosterFor,
+  collectLibraryItems,
   clearChosenPoster,
   countLibraryItems,
   formatBytes,
   formatModifiedDate,
-  libraryPosterPaths,
   searchLibrary,
   searchTruncationNote,
   unscannedDepthNote,
   setChosenPoster,
-  type LibraryCrumb,
 } from "../lib/library";
 import { mediaKindOf } from "../lib/import-extensions";
 import {
@@ -37,7 +36,7 @@ import {
   youTubeThumbnailUrl,
 } from "../lib/validation";
 import type { RecentSource } from "../lib/recent-sources";
-import type { LibraryFolder, LibraryItem } from "../types";
+import type { LibraryItem } from "../types";
 
 type Props = {
   recentSources: RecentSource[];
@@ -59,7 +58,6 @@ type Props = {
   onSwitchToClip: () => void;
   /** A folder card / folder search-hit was opened → jump to the Library
    *  browser with that folder selected (one detail browser, not two). */
-  onOpenFolder: (chain: LibraryCrumb[]) => void;
   /** Bumped by App when the nav logo/Home is pressed — clears Home's search. */
   homeResetSignal: number;
   /** True while Home is the active view. Threaded to the ambient backdrop so its
@@ -90,7 +88,7 @@ type Props = {
 export function LibraryView({
   recentSources, onOpenLocalPath, onOpenRecentSource, onOpenTranscriptHistory,
   onReviewLocalPath, onReviewRecentSource, transcriptLibraryPath,
-  onSwitchToClip, onOpenFolder, homeResetSignal, homeVisible,
+  onSwitchToClip, homeResetSignal, homeVisible,
   roots, scans, addFolder, removeRoot, scanRoot,
   requestThumb, invalidateThumb, posterVersions, bumpPoster, resetPoster,
 }: Props) {
@@ -217,16 +215,11 @@ export function LibraryView({
     />
   );
 
-  const folderCard = (f: LibraryFolder, chain: LibraryCrumb[]) => (
-    <LibraryFolderCard
-      key={f.path}
-      name={f.name}
-      count={countLibraryItems(f)}
-      posterPaths={libraryPosterPaths(f)}
-      onOpen={() => { clearSearch(); onOpenFolder(chain); }}
-      requestThumb={requestThumb}
-    />
-  );
+/** How many assets a Home shelf shows before the Library tab takes over.
+ *  Home is a launcher, not a browser; a row that scrolls forever is the
+ *  Library's job and it does it better. */
+const HOME_ROW_CAP = 24;
+
 
   // Continue-row card — featured size (large landscape, the ref's front row).
   // Local entries route through the SAME requestThumb loader as the folder
@@ -323,7 +316,7 @@ export function LibraryView({
       );
     }
     const tree = scan.tree;
-    if (tree.folders.length === 0 && tree.items.length === 0) {
+    if (countLibraryItems(tree) === 0) {
       return (
         <section key={root} className="cp-lib-row">
           <div className="cp-lib-row-head">
@@ -334,7 +327,6 @@ export function LibraryView({
         </section>
       );
     }
-    const rootCrumb: LibraryCrumb = { name: tree.name, path: tree.path };
     return (
       <LibraryRow
         key={root}
@@ -343,8 +335,14 @@ export function LibraryView({
         onRemove={() => removeRoot(root)}
         removeLabel={`Remove ${tree.name} from library`}
       >
-        {tree.folders.map((f) => folderCard(f, [rootCrumb, { name: f.name, path: f.path }]))}
-        {tree.items.map(itemCard)}
+        {/* ASSETS, not folders, and from every depth.
+            Home is a launcher: folders are structure, and structure lives in
+            the Library tab, which has the tree, the list view and the folder
+            verbs. Showing folder cards here also meant a root whose media
+            all sits in subfolders showed a row of grey folder tiles and none
+            of its films - collectLibraryItems is what surfaces those.
+            artFirst leads with the items that resolve to a real picture. */}
+        {artFirst(collectLibraryItems(tree)).slice(0, HOME_ROW_CAP).map(itemCard)}
       </LibraryRow>
     );
   };
@@ -404,7 +402,7 @@ export function LibraryView({
             <p className="cp-lib-note cp-lib-grid-note">{truncationNote}</p>
           ) : null}
           <div role="list" aria-label="Search results" className="cp-lib-grid">
-            {results.folders.map((hit) => folderCard(hit.folder, hit.chain))}
+
             {results.items.map(itemCard)}
           </div>
         </>

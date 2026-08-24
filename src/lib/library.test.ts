@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { LibraryFolder, LibraryItem } from "../types";
 import {
+  artFirst,
   collectLibraryItems,
   countLibraryItems,
   findLibraryFolder,
@@ -76,11 +77,25 @@ describe("searchLibrary", () => {
     folder("Music", [item("theme.mp3", "audio")], [], "/lib/Music"),
   ];
 
-  it("matches items and folders case-insensitively", () => {
+  it("matches items and folders case-insensitively, and a folder brings its contents", () => {
+    // The contents half is a deliberate CHANGE, not a pre-existing rule:
+    // Home shows assets rather than folder tiles, so typing a folder's name
+    // there used to return nothing at all - which is the one thing someone
+    // typing a folder name is most likely to want. Callers that DO render
+    // folder hits are unaffected; this only adds items they could already
+    // reach by opening the folder.
     const r = searchLibrary(trees, "INTERVIEW");
-    expect(r.items.map((i) => i.name)).toEqual(["Interview-final.mp4"]);
+    expect(r.items.map((i) => i.name)).toEqual(["Interview-final.mp4", "intro.mp4"]);
     expect(r.folders.map((f) => f.folder.name)).toEqual(["Interviews"]);
-    expect(r.totalItems).toBe(1);
+    expect(r.totalItems).toBe(2);
+  });
+
+  it("a name match outside a matching folder still stands alone", () => {
+    // The guard against the change above over-reaching: matching one folder
+    // must not start returning the whole library.
+    const r = searchLibrary(trees, "Interview-final");
+    expect(r.items.map((i) => i.name)).toEqual(["Interview-final.mp4"]);
+    expect(r.folders).toEqual([]);
   });
 
   it("carries the drill chain on folder hits", () => {
@@ -388,5 +403,29 @@ describe("unscannedDepthNote", () => {
   it("tells the reader what to do about it", () => {
     const deep = folder("X", [], [], "/lib/X", true);
     expect(unscannedDepthNote([deep])).toContain("Add the inner folder");
+  });
+});
+
+describe("artFirst", () => {
+  const item = (name: string, kind: "video" | "audio"): LibraryItem => ({
+    name, path: `/m/${name}`, kind, size_bytes: 1, modified_ms: 1,
+  } as LibraryItem);
+
+  it("leads with the items that resolve to a real picture", () => {
+    const out = artFirst([item("a.mp3", "audio"), item("b.mov", "video")]);
+    expect(out.map((i) => i.name)).toEqual(["b.mov", "a.mp3"]);
+  });
+
+  it("is STABLE inside each half, so a newest-first shelf stays newest-first", () => {
+    const out = artFirst([
+      item("v1.mov", "video"), item("a1.mp3", "audio"),
+      item("v2.mov", "video"), item("a2.mp3", "audio"),
+    ]);
+    expect(out.map((i) => i.name)).toEqual(["v1.mov", "v2.mov", "a1.mp3", "a2.mp3"]);
+  });
+
+  it("keeps everything - an audio-only library must not get an empty Home", () => {
+    const only = [item("a.mp3", "audio"), item("b.wav", "audio")];
+    expect(artFirst(only).map((i) => i.name)).toEqual(["a.mp3", "b.wav"]);
   });
 });

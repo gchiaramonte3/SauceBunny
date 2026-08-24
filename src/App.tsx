@@ -16,7 +16,6 @@ import { LibraryBrowser } from "./components/LibraryBrowser";
 import { useTranscriptListeners } from "./hooks/use-transcript-listeners";
 import { useDiarizerPrepare } from "./hooks/use-diarizer-prepare";
 import { useLibraryScan } from "./hooks/use-library-scan";
-import type { LibraryCrumb } from "./lib/library";
 import { Sidebar } from "./components/Sidebar";
 import { PeoplePanel } from "./components/PeoplePanel";
 import { ReactionLayer } from "./components/ReactionLayer";
@@ -948,10 +947,6 @@ export default function App() {
   // Batch transcription runs OUTSIDE the single-source pipeline (see the hook),
   // so a folder can transcribe in the background while the user keeps working.
 
-  // Home drill-in → Library handoff: the folder chain to select, plus a tick so
-  // the same chain re-applies on repeat drills. One detail browser, not two.
-  const [librarySelection, setLibrarySelection] = useState<LibraryCrumb[] | null>(null);
-  const [librarySelectTick, setLibrarySelectTick] = useState(0);
   // Left source/export sidebar visibility — persisted, mirroring the right
   // drawer's toolbar toggle. Defaults open.
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => {
@@ -2941,14 +2936,6 @@ export default function App() {
     else { try { readerPlayerRef.current?.pause(); } catch { /* no reader player */ } }
   }, [activeView]);
 
-  // Home folder card / folder search-hit → open the Library browser with that
-  // folder selected. The tick makes a repeat drill re-apply the same chain.
-  const handleOpenLibraryFolder = useCallback((chain: LibraryCrumb[]) => {
-    setLibrarySelection(chain);
-    setLibrarySelectTick((t) => t + 1);
-    setActiveView("library");
-  }, [setActiveView]);
-
   // Hero "Paste a URL" → the same focus lever as the File-menu "Open URL…".
   const handleSwitchToClip = useCallback(() => {
     setActiveView("clip");
@@ -4150,7 +4137,6 @@ export default function App() {
               onOpenTranscriptHistory={handleLibraryOpenTranscript}
               transcriptLibraryPath={defaults.transcriptLibrary}
               onSwitchToClip={handleSwitchToClip}
-              onOpenFolder={handleOpenLibraryFolder}
               homeResetSignal={homeResetTick}
               homeVisible={activeView === "home"}
               roots={lib.roots}
@@ -4182,8 +4168,14 @@ export default function App() {
               posterVersions={lib.posterVersions}
               bumpPoster={lib.bumpPoster}
               resetPoster={lib.resetPoster}
-              selection={librarySelection}
-              selectionTick={librarySelectTick}
+              // Nothing drills in from Home any more - Home shows assets, not
+              // folder cards, and a folder-name search there surfaces the
+              // assets inside instead of a tile that navigates away. The
+              // browser keeps the handoff props as its API (null = "All",
+              // which is the right initial state regardless) for whatever
+              // wants to hand it a folder next.
+              selection={null}
+              selectionTick={0}
               onOpenLocalPath={handleLibraryOpenLocalPath}
               onOpenTranscriptHistory={handleLibraryOpenTranscript}
               onBatchTranscribe={startBatchTranscribe}
