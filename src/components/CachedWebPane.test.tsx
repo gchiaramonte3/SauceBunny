@@ -38,14 +38,14 @@ describe("CachedWebPane forget", () => {
 
   it("forgets a resolve-only row on one click", async () => {
     h.items = [item()];
-    render(<CachedWebPane onOpenUrl={() => {}} />);
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
     (await screen.findByLabelText("Forget Reel")).click();
     await waitFor(() => expect(forgetCalls()).toBe(1));
   });
 
   it("does NOT delete a downloaded copy on the first click", async () => {
     h.items = [item({ path: "/tmp/a.mp4", size_bytes: 2_400_000_000 })];
-    render(<CachedWebPane onOpenUrl={() => {}} />);
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
     (await screen.findByLabelText(/^Delete the .* copy of Reel$/)).click();
     // The click arms; nothing has been asked of the backend yet.
     await waitFor(() => expect(screen.getByLabelText(/^Confirm deleting/)).toBeTruthy());
@@ -54,7 +54,7 @@ describe("CachedWebPane forget", () => {
 
   it("names the size in the button, not in a tooltip", async () => {
     h.items = [item({ path: "/tmp/a.mp4", size_bytes: 2_400_000_000 })];
-    render(<CachedWebPane onOpenUrl={() => {}} />);
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
     (await screen.findByLabelText(/^Delete the/)).click();
     const btn = await screen.findByLabelText(/^Confirm deleting/);
     // The visible text carries the number. A user who never hovers still
@@ -64,7 +64,7 @@ describe("CachedWebPane forget", () => {
 
   it("deletes on the second click", async () => {
     h.items = [item({ path: "/tmp/a.mp4", size_bytes: 2_400_000_000 })];
-    render(<CachedWebPane onOpenUrl={() => {}} />);
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
     (await screen.findByLabelText(/^Delete the/)).click();
     (await screen.findByLabelText(/^Confirm deleting/)).click();
     await waitFor(() => expect(forgetCalls()).toBe(1));
@@ -72,11 +72,100 @@ describe("CachedWebPane forget", () => {
 
   it("disarms on Escape, so an armed row is not a mine", async () => {
     h.items = [item({ path: "/tmp/a.mp4", size_bytes: 2_400_000_000 })];
-    render(<CachedWebPane onOpenUrl={() => {}} />);
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
     (await screen.findByLabelText(/^Delete the/)).click();
     await screen.findByLabelText(/^Confirm deleting/);
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await waitFor(() => expect(screen.getByLabelText(/^Delete the/)).toBeTruthy());
     expect(forgetCalls()).toBe(0);
+  });
+});
+
+describe("CachedWebPane browser parity", () => {
+  beforeEach(() => {
+    h.calls = []; h.items = []; document.body.innerHTML = "";
+    localStorage.clear();
+  });
+
+  const three = () => [
+    item({ url: "https://youtube.com/watch?v=a", title: "Beta", fetched_at: 100 }),
+    item({ url: "https://vimeo.com/123", title: "Alpha", fetched_at: 300, path: "/cache/a.mp4", size_bytes: 900 }),
+    item({ url: "https://youtube.com/watch?v=c", title: "Gamma", fetched_at: 200 }),
+  ];
+
+  it("mounts the library's browser bar with the web nouns", async () => {
+    h.items = three();
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findByText("Beta");
+    expect(screen.getByText("From the web")).toBeTruthy();
+    expect(screen.getByLabelText("Search cached clips")).toBeTruthy();
+    // The date option is renamed for what the number actually is here.
+    expect(screen.getByText("Date fetched")).toBeTruthy();
+    expect(screen.queryByText("Date modified")).toBeNull();
+  });
+
+  it("defaults keep today's order: newest fetch first within a shelf", async () => {
+    h.items = three();
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findByText("Beta");
+    const titles = [...document.querySelectorAll(".cp-web-title")].map((n) => n.textContent);
+    // YouTube shelf (2 items) first; within it Gamma (200) before Beta (100).
+    expect(titles).toEqual(["Gamma", "Beta", "Alpha"]);
+  });
+
+  it("switching to list view renders ONE table with sortable headers", async () => {
+    h.items = three();
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findByText("Beta");
+    screen.getByRole("button", { name: "List view" }).click();
+    await waitFor(() => {
+      expect(document.querySelectorAll(".cp-lib-list-head")).toHaveLength(1);
+    });
+    // Flat: no site shelf headings, Site is a column instead.
+    expect(document.querySelectorAll(".cp-web-shelf-head")).toHaveLength(0);
+    const header = screen.getByRole("button", { name: /Fetched/ });
+    expect(header.getAttribute("aria-sort")).toBe("descending");
+    // All three rows in one list, newest first.
+    const names = [...document.querySelectorAll(".cp-lib-lrow .cp-lib-lrow-name")]
+      .map((n) => n.textContent);
+    expect(names).toEqual(["Alpha", "Gamma", "Beta"]);
+  });
+
+  it("clicking a column header flips direction and persists", async () => {
+    h.items = three();
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findByText("Beta");
+    screen.getByRole("button", { name: "List view" }).click();
+    (await screen.findByRole("button", { name: /Fetched/ })).click();
+    await waitFor(() => {
+      const names = [...document.querySelectorAll(".cp-lib-lrow .cp-lib-lrow-name")]
+        .map((n) => n.textContent);
+      expect(names).toEqual(["Beta", "Gamma", "Alpha"]);
+    });
+    expect(JSON.parse(localStorage.getItem("saucebunny.webBrowser")!)).toMatchObject({
+      view: "list", sort: "date", dir: "asc",
+    });
+  });
+
+  it("search filters across shelves after the debounce", async () => {
+    vi.useFakeTimers();
+    try {
+      h.items = three();
+      render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+      // let the load promise resolve under fake timers
+      await vi.waitFor(() => {
+        if (!screen.queryByText("Beta")) throw new Error("not loaded");
+      });
+      const box = screen.getByLabelText("Search cached clips") as HTMLInputElement;
+      // fireEvent-free change: React reads the input through onChange
+      const { fireEvent } = await import("@testing-library/react");
+      fireEvent.change(box, { target: { value: "alp" } });
+      await vi.advanceTimersByTimeAsync(200);
+      const titles = [...document.querySelectorAll(".cp-web-title")].map((n) => n.textContent);
+      expect(titles).toEqual(["Alpha"]);
+      expect(screen.getByText("Results")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -258,8 +258,9 @@ export function LibraryBrowserPane({
  * switches to it without inheriting the previous column's direction, so
  * "Modified" always starts newest-first the way a user expects.
  */
-/** The 6px grab strip between two header cells. */
-function ColDivider({ onDown, active }: { onDown: (e: React.MouseEvent) => void; active: boolean }) {
+/** The 6px grab strip between two header cells. Exported: the web cache's
+ *  list view mounts the same header machinery (see WebListRows). */
+export function ColDivider({ onDown, active }: { onDown: (e: React.MouseEvent) => void; active: boolean }) {
   return (
     <span
       className={"cp-lib-coldiv" + (active ? " dragging" : "")}
@@ -274,7 +275,7 @@ function ColDivider({ onDown, active }: { onDown: (e: React.MouseEvent) => void;
   );
 }
 
-function SortHeader({ className, label, col, sort, dir, onSort, children }: {
+export function SortHeader({ className, label, col, sort, dir, onSort, children }: {
   className: string;
   label: string;
   col: LibrarySortKey;

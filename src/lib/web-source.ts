@@ -116,3 +116,58 @@ export function groupBySite(items: readonly CachedWebItem[]): Array<{ site: stri
     (a, b) => b.items.length - a.items.length || a.site.localeCompare(b.site),
   );
 }
+
+/**
+ * Sort a copy of cached web items — the web pane's twin of sortLibraryItems,
+ * with the same three semantics decisions, because a user who has learned the
+ * folder pane's ordering must not have to learn a second one:
+ *
+ *   - name is locale-aware and numeric-aware ("clip2" before "clip10");
+ *   - the direction applies to the PRIMARY key only, so the name tiebreak on
+ *     date/size stays ascending in both directions (Finder's rule — see
+ *     sortLibraryItems for the full account of why reversing the tiebreak
+ *     reads as arbitrary);
+ *   - ties on date/size fall back to name so the order never jitters.
+ *
+ * The field mapping is the part that is web-specific: name is the title with
+ * the URL standing in for an untitled entry, date is fetched_at (when this
+ * Mac last resolved it — labelled "Date fetched" in the bar), and size is the
+ * downloaded copy's bytes, with metadata-only entries at 0 so "largest first"
+ * surfaces what is actually occupying the disk.
+ */
+export function sortCachedWeb(
+  items: readonly CachedWebItem[],
+  key: "name" | "date" | "size",
+  dir: "asc" | "desc",
+): CachedWebItem[] {
+  const nameOf = (i: CachedWebItem) => i.title ?? i.url;
+  const byName = (a: CachedWebItem, b: CachedWebItem) =>
+    nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true, sensitivity: "base" });
+  const sign = dir === "desc" ? -1 : 1;
+  const cmp = (a: CachedWebItem, b: CachedWebItem): number => {
+    if (key === "date") return sign * (a.fetched_at - b.fetched_at) || byName(a, b);
+    if (key === "size") return sign * ((a.size_bytes ?? 0) - (b.size_bytes ?? 0)) || byName(a, b);
+    return sign * byName(a, b);
+  };
+  return [...items].sort(cmp);
+}
+
+/**
+ * Filter cached web items by a search needle, matching what a person knows
+ * about a web clip: its title, who posted it, and the URL itself (the one
+ * field guaranteed to exist). Case-insensitive substring — the same contract
+ * as the folder pane's search, and like it, an empty or whitespace needle
+ * means "no filter" so the caller does not special-case the empty box.
+ */
+export function filterCachedWeb(
+  items: readonly CachedWebItem[],
+  needle: string,
+): CachedWebItem[] {
+  const q = needle.trim().toLowerCase();
+  if (!q) return [...items];
+  return items.filter((i) =>
+    (i.title ?? "").toLowerCase().includes(q) ||
+    (i.uploader ?? "").toLowerCase().includes(q) ||
+    i.url.toLowerCase().includes(q),
+  );
+}

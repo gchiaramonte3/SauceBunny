@@ -1714,6 +1714,14 @@
    ────────────────────────────────────────────────────────────────── */
 .cp-lib-tree-web .cp-lib-tree-name { color: inherit; }
 
+/* The web view: browser bar pinned above, shelf area scrolling below - the
+   same skeleton as the folder pane, so the bar never scrolls away. */
+.cp-web-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .cp-web-pane {
   flex: 1;
   min-height: 0;
@@ -1875,3 +1883,30 @@
   .cp-lib-tree-tw,
   .cp-tagrow-dot { transition-duration: 0s; }
 }
+
+/* Web list rows. The row reuses .cp-lib-lrow and the shared column variables;
+   the wrap exists so the armed forget control can overlay the row's right
+   edge without living inside the row BUTTON (a button in a button is invalid
+   and unfocusable). The wrap also re-creates the sibling hairline the folder
+   list draws between rows - its selector targets adjacent .cp-lib-lrow,
+   which the wrap breaks. */
+.cp-web-lrow-wrap { position: relative; }
+.cp-web-lrow-wrap + .cp-web-lrow-wrap { border-top: 1px solid var(--line-1); }
+.cp-web-lrow-wrap .cp-lib-lrow { width: 100%; padding-right: 40px; }
+.cp-web-lrow-dur,
+.cp-web-lrow-have {
+  margin-left: var(--s-2);
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.cp-web-lrow-have { color: var(--fg-3); }
+.cp-web-forget.list {
+  position: absolute;
+  top: 50%;
+  right: var(--s-2);
+  transform: translateY(-50%);
+}
+.cp-web-lrow-wrap:hover .cp-web-forget,
+.cp-web-lrow-wrap:focus-within .cp-web-forget { opacity: 1; }

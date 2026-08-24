@@ -8,6 +8,16 @@ type Props = {
   /** Selection chain (null = "All") — drives the breadcrumb. */
   chain: LibraryCrumb[] | null;
   onCrumb: (chain: LibraryCrumb[] | null) => void;
+  /** A fixed location name replacing the breadcrumb entirely — the web view
+   *  has no folder chain, and crumbs over a list of URLs would be chrome
+   *  pretending to navigate. The bar is otherwise identical, which is the
+   *  point: one header to learn. */
+  location?: string;
+  /** What "date" means here: "Date modified" for files, "Date fetched" for
+   *  the web cache. A wrong label is worse than a new prop. */
+  dateLabel?: string;
+  /** Search placeholder + accessible name; the default is folder-speak. */
+  searchLabel?: string;
   query: string;
   onQuery: (q: string) => void;
   sort: LibrarySortKey;
@@ -29,7 +39,7 @@ type Props = {
  * upstream in one localStorage key; this bar is a pure controlled surface.
  */
 export function LibraryBrowserBar({
-  chain, onCrumb, query, onQuery, sort, dir, view, onPrefs, treeOpen, onShowTree,
+  chain, onCrumb, location, dateLabel, searchLabel, query, onQuery, sort, dir, view, onPrefs, treeOpen, onShowTree,
 }: Props) {
   const last = chain ? chain.length - 1 : -1;
   return (
@@ -46,10 +56,10 @@ export function LibraryBrowserBar({
         </button>
       )}
       <nav className="cp-lib-bcrumbs" aria-label="Location">
-        {chain === null
+        {location != null ? <span className="cur" aria-current="page">{location}</span> : chain === null
           ? <span className="cur" aria-current="page">All</span>
           : <button type="button" onClick={() => onCrumb(null)}>All</button>}
-        {chain?.map((c, i) => (
+        {location == null && chain?.map((c, i) => (
           <Fragment key={c.path}>
             <span className="sep" aria-hidden="true">/</span>
             {i === last
@@ -66,8 +76,8 @@ export function LibraryBrowserBar({
             type="text"
             value={query}
             onChange={(e) => onQuery(e.target.value)}
-            placeholder="Search this folder"
-            aria-label="Search this folder"
+            placeholder={searchLabel ?? "Search this folder"}
+            aria-label={searchLabel ?? "Search this folder"}
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
@@ -84,7 +94,7 @@ export function LibraryBrowserBar({
           onChange={(e) => onPrefs({ sort: e.target.value as LibrarySortKey })}
         >
           <option value="name">Name</option>
-          <option value="date">Date modified</option>
+          <option value="date">{dateLabel ?? "Date modified"}</option>
           <option value="size">Size</option>
         </select>
         <button

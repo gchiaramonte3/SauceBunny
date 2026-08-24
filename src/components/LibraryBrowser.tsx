@@ -320,10 +320,15 @@ export function LibraryBrowser({
       )}
       <div className="cp-lib-main">
         {webView ? (
-          /* The web shelf owns the whole pane. The bar's crumbs, sort and
-             search are folder concepts; showing them over a list of URLs
-             would offer controls that do nothing. */
-          <CachedWebPane onOpenUrl={onOpenWebUrl} />
+          /* The web shelf owns the whole pane, and mounts the SAME browser
+             bar the folder pane uses - fixed location label instead of
+             crumbs, "Date fetched" instead of "Date modified", its own
+             persisted prefs. One header to learn, two rooms. */
+          <CachedWebPane
+            onOpenUrl={onOpenWebUrl}
+            treeOpen={treeOpen}
+            onShowTree={() => setTreeOpen(true)}
+          />
         ) : (
         <>
         <LibraryBrowserBar

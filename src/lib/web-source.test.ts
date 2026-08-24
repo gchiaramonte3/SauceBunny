@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  groupBySite, hostOf, siteKey, siteName, type CachedWebItem,
+  filterCachedWeb, groupBySite, hostOf, siteKey, siteName, sortCachedWeb,
+  type CachedWebItem,
 } from "./web-source";
 
 const item = (url: string, fetched_at = 0): CachedWebItem => ({
@@ -106,5 +107,84 @@ describe("siteKey", () => {
   it("is the grouping identity, not the display string", () => {
     expect(siteKey("https://lnkd.in/x")).toBe(siteKey("https://linkedin.com/y"));
     expect(siteKey("https://youtube.com/x")).toBe("youtube");
+  });
+});
+
+describe("sortCachedWeb", () => {
+  const item = (over: Partial<CachedWebItem>): CachedWebItem => ({
+    url: "https://youtube.com/watch?v=x", title: null, thumbnail: null,
+    uploader: null, duration_seconds: null, fetched_at: 0, path: null,
+    size_bytes: null, ...over,
+  });
+
+  it("sorts names numerically and case-insensitively, like the folder pane", () => {
+    const out = sortCachedWeb([
+      item({ url: "u1", title: "clip10" }),
+      item({ url: "u2", title: "Clip2" }),
+      item({ url: "u3", title: "alpha" }),
+    ], "name", "asc");
+    expect(out.map((i) => i.title)).toEqual(["alpha", "Clip2", "clip10"]);
+  });
+
+  it("an untitled entry sorts by its URL", () => {
+    const out = sortCachedWeb([
+      item({ url: "https://z.example/v", title: null }),
+      item({ url: "u", title: "alpha" }),
+    ], "name", "asc");
+    expect(out[0].title).toBe("alpha");
+  });
+
+  it("keeps the name tiebreak ascending under date desc — Finder's rule", () => {
+    const out = sortCachedWeb([
+      item({ url: "u1", title: "zeta", fetched_at: 100 }),
+      item({ url: "u2", title: "alpha", fetched_at: 100 }),
+      item({ url: "u3", title: "mid", fetched_at: 200 }),
+    ], "date", "desc");
+    expect(out.map((i) => i.title)).toEqual(["mid", "alpha", "zeta"]);
+  });
+
+  it("treats a metadata-only entry as size 0, so largest-first shows real disk use", () => {
+    const out = sortCachedWeb([
+      item({ url: "u1", title: "no copy", size_bytes: null }),
+      item({ url: "u2", title: "big", size_bytes: 5000 }),
+    ], "size", "desc");
+    expect(out[0].title).toBe("big");
+  });
+
+  it("does not mutate its input", () => {
+    const input = [item({ url: "u1", title: "b" }), item({ url: "u2", title: "a" })];
+    const before = [...input];
+    sortCachedWeb(input, "name", "asc");
+    expect(input).toEqual(before);
+  });
+});
+
+describe("filterCachedWeb", () => {
+  const item = (over: Partial<CachedWebItem>): CachedWebItem => ({
+    url: "https://youtube.com/watch?v=x", title: null, thumbnail: null,
+    uploader: null, duration_seconds: null, fetched_at: 0, path: null,
+    size_bytes: null, ...over,
+  });
+
+  it("matches title, uploader, and the URL itself", () => {
+    const items = [
+      item({ url: "u1", title: "Grading masterclass" }),
+      item({ url: "u2", uploader: "Novella Films" }),
+      item({ url: "https://vimeo.com/secret-cut" }),
+    ];
+    expect(filterCachedWeb(items, "grading")).toHaveLength(1);
+    expect(filterCachedWeb(items, "novella")).toHaveLength(1);
+    expect(filterCachedWeb(items, "secret-cut")).toHaveLength(1);
+  });
+
+  it("an empty or whitespace needle means no filter", () => {
+    const items = [item({ url: "u1" }), item({ url: "u2" })];
+    expect(filterCachedWeb(items, "")).toHaveLength(2);
+    expect(filterCachedWeb(items, "   ")).toHaveLength(2);
+  });
+
+  it("returns a copy even when not filtering", () => {
+    const items = [item({ url: "u1" })];
+    expect(filterCachedWeb(items, "")).not.toBe(items);
   });
 });
