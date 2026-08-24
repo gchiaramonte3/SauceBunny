@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { OPEN_SOURCE_CREDITS, fundableCredits } from "../lib/open-source";
+import { OPEN_SOURCE_CREDITS, SAUCE_BUNNY, fundableCredits } from "../lib/open-source";
 import { IconHeart, IconLink } from "./Icons";
 
 /**
@@ -23,6 +23,43 @@ export function OpenSourceCredits() {
 
   return (
     <section className="cp-credits" aria-labelledby="cp-credits-title">
+      {/* Sauce Bunny's own entry, above the list rather than inside it. It
+          is not a dependency, and putting it in the list would rank the app
+          against the projects it stands on. Its own space, at the top. */}
+      <div className="cp-credits-self">
+        <h3 className="cp-credits-self-title">Support Sauce Bunny</h3>
+        <p className="cp-credits-self-body">
+          Sauce Bunny is free and {SAUCE_BUNNY.license}-licensed. It runs entirely
+          on your Mac, has no accounts, and collects nothing about you, so there
+          is no subscription behind it and nothing is being sold on the side. If
+          it is useful to you, the source is open and the projects below are the
+          ones that need the money most.
+        </p>
+        <div className="cp-credits-self-actions">
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => open(SAUCE_BUNNY.repo)}
+            title={SAUCE_BUNNY.repo}
+          >
+            <IconLink size={12} /> View the source
+          </button>
+          {/* Rendered only when there is somewhere real to send the money.
+              See the note on SAUCE_BUNNY.fund. */}
+          {SAUCE_BUNNY.fund && (
+            <button
+              type="button"
+              className="cp-credit-fund"
+              onClick={() => open(SAUCE_BUNNY.fund!)}
+              title={SAUCE_BUNNY.fund}
+              aria-label="Sponsor Sauce Bunny"
+            >
+              <IconHeart size={12} />
+              Sponsor
+            </button>
+          )}
+        </div>
+      </div>
       <div className="cp-credits-head">
         <h3 id="cp-credits-title" className="cp-credits-title">Built on</h3>
         <p className="cp-credits-sub">

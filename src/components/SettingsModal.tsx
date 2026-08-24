@@ -7,7 +7,7 @@ const segStyle = (active: number, count: number, extra?: CSSProperties): CSSProp
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { IconChevronDown, IconReveal, IconSparkles, IconInfo } from "./Icons";
+import { IconChevronDown, IconHeart, IconReveal, IconSparkles, IconInfo } from "./Icons";
 import { loadJson, saveJson } from "../lib/storage";
 import { DEVICE_CHOICE_KEY } from "../lib/media-devices";
 import { AvSettingsPane } from "./AvSettingsPane";
@@ -37,13 +37,15 @@ import { useModalFocus } from "../hooks/use-modal-focus";
 import { formatBytes } from "../lib/library";
 import logoUrl from "../assets/saucebunny.svg";
 import { UpdateRow } from "./UpdateRow";
+import { OpenSourceCredits } from "./OpenSourceCredits";
+import { SAUCE_BUNNY } from "../lib/open-source";
 import { getVersion } from "@tauri-apps/api/app";
 import { countHiddenNotices, restoreHiddenNotices } from "../lib/hidden-notices";
 import { EXPECTED_BACKEND_BUILD_ID } from "../lib/build-id";
 import { newJobId } from "../lib/job-id";
 import { DEFAULT_STUN_URL } from "../lib/ice-servers";
 
-type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "ai-apis" | "commands" | "about";
+type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "ai-apis" | "commands" | "about" | "credits";
 
 export type Defaults = {
   folder: string | null;
@@ -240,6 +242,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "ai-apis",       label: "AI APIs" },
   { id: "commands",      label: "Shortcuts" },
   { id: "about",         label: "About" },
+  { id: "credits",       label: "Open source" },
 ];
 
 const FORMATS: { id: FormatId; label: string }[] = [
@@ -1802,7 +1805,8 @@ export function SettingsModal(props: Props) {
                       Sauce Bunny <span className="ver">{appVersion ? `v${appVersion} (${__BUILD_NUMBER__})` : ""}</span>
                     </div>
                     <div className="cp-about-tag">
-                      Local-first video section clipper. Tauri 2 + bundled yt-dlp + ffmpeg + whisper.cpp.
+                      Local-first transcription, diarization and review for video and audio.
+                      Everything runs on this Mac.
                     </div>
                   </div>
                 </div>
@@ -1813,13 +1817,20 @@ export function SettingsModal(props: Props) {
                   <div className="cp-about-row"><span className="k">Build</span><span className="v">{EXPECTED_BACKEND_BUILD_ID}</span></div>
                   <div className="cp-about-row"><span className="k">Engine</span><span className="v">Tauri 2 + Wry</span></div>
                   <div className="cp-about-row"><span className="k">UI</span><span className="v">React 18 + Vite 6</span></div>
-                  <div className="cp-about-row"><span className="k">Sidecars</span><span className="v">yt-dlp · ffmpeg · whisper-cli</span></div>
+                  <div className="cp-about-row"><span className="k">Sidecars</span><span className="v">yt-dlp · ffmpeg · whisper-cli · diarizer · llama-server</span></div>
                   <div className="cp-about-row">
                     <span className="k">Transcripts</span>
-                    <span className="v">yt-dlp captions · whisper.cpp</span>
+                    <span className="v">yt-dlp captions · whisper.cpp · SpeakerKit</span>
                   </div>
-                  <div className="cp-about-row"><span className="k">License</span><span className="v">personal use</span></div>
-                  <div className="cp-about-row"><span className="k">Data</span><span className="v">no cloud · no accounts</span></div>
+                  <div className="cp-about-row">
+                    <span className="k">License</span>
+                    <span className="v">{SAUCE_BUNNY.license} · open source</span>
+                  </div>
+                  {/* "no cloud" stopped being true when the opt-in cloud-AI
+                      path landed. It is still off unless the user configures
+                      a key, and saying so is more reassuring than a claim
+                      they can catch out. */}
+                  <div className="cp-about-row"><span className="k">Data</span><span className="v">no accounts · no telemetry · cloud AI off unless you add a key</span></div>
                   <div className="cp-about-row">
                     <span className="k">Model dir</span>
                     <span className="v"><button className="btn btn-ghost" style={{ height: 24, fontSize: 11 }} onClick={async () => {
@@ -1834,14 +1845,34 @@ export function SettingsModal(props: Props) {
                   </div>
                 </div>
 
+                {/* The full network-call list. It had gone stale in both
+                    directions - it still said the app makes no cloud calls
+                    at all, and it never mentioned co-review, which is the
+                    one place bytes actually leave the Mac. */}
                 <p style={{ marginTop: 18, fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-4)", lineHeight: 1.6 }}>
-                  Use it on content you have the rights to clip. Bundled binaries are tested releases of yt-dlp,
-                  ffmpeg, and whisper.cpp, all run locally only. No telemetry. Network calls are limited to
-                  the YouTube source you fetch, the thumbnail URL when you save or copy a poster image, and
-                  HuggingFace when you download a Whisper model.
+                  Use it on content you have the rights to clip. Bundled binaries are tested releases of
+                  yt-dlp, ffmpeg, whisper.cpp and llama.cpp, all run locally. No telemetry, ever. The app
+                  reaches the network only when you ask it to: the web source you fetch, the thumbnail URL
+                  when you save or copy a poster, HuggingFace when you download a Whisper model, GitHub when
+                  you check for an update, a live co-review session with a peer, and a cloud model only if
+                  you have added your own API key under AI APIs.
                 </p>
+
+                {/* A pointer, not a second copy of the list. The credits get
+                    their own tab because twelve projects with sponsor links
+                    would bury the six facts above them. */}
+                <div className="cp-about-credits-cta">
+                  <span>
+                    Most of this app is other people&rsquo;s work, and it is {SAUCE_BUNNY.license}-licensed itself.
+                  </span>
+                  <button className="btn btn-ghost" onClick={() => setTab("credits")}>
+                    <IconHeart size={12} /> Built on &amp; sponsors
+                  </button>
+                </div>
               </section>
             )}
+
+            {tab === "credits" && <OpenSourceCredits />}
           </div>
         </div>
       </div>

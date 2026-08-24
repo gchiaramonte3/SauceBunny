@@ -1390,3 +1390,54 @@
 }
 .cp-credit-fund:hover { color: var(--fg-1); border-color: var(--line-3); }
 .cp-credit-fund:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+
+/* ── Support Sauce Bunny ─────────────────────────────────────────────────────
+   The app's own entry, above the dependency list rather than inside it: it
+   is not a dependency, and ranking it against the projects it stands on
+   would be the wrong claim. A panel, so it reads as its own space. */
+.cp-credits-self {
+  margin: 0 0 var(--s-5);
+  padding: 14px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  background: var(--bg-2);
+}
+.cp-credits-self-title {
+  margin: 0 0 6px;
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  color: var(--fg-1);
+}
+.cp-credits-self-body {
+  margin: 0;
+  max-width: 62ch;
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--fg-3);
+}
+.cp-credits-self-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.cp-credits-self-actions .btn { display: inline-flex; align-items: center; gap: 5px; }
+
+/* Pointer from About to the Open source tab. A line and a button, because
+   the credits themselves are a tabful and copying them here would bury the
+   half-dozen facts About exists to state. */
+.cp-about-credits-cta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  color: var(--fg-4);
+}
+.cp-about-credits-cta .btn { display: inline-flex; align-items: center; gap: 5px; }

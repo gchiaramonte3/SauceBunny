@@ -129,3 +129,26 @@ export function fundableCredits(
 ): OpenSourceCredit[] {
   return credits.filter((c) => !!c.fund);
 }
+
+/**
+ * Sauce Bunny itself.
+ *
+ * The "Built on" list named every project this app stands on and left the
+ * app the one thing on that page with no entry of its own - which read as
+ * an oversight, because it was one.
+ *
+ * `fund` is null, and that is a checked fact rather than a placeholder:
+ * https://github.com/sponsors/gchiaramonte3 redirects to the plain profile,
+ * which is what GitHub serves when an account has not enrolled in Sponsors.
+ * A Sponsor button pointing there would quietly land people on a profile
+ * page with nothing to click, which is the failure the note at the top of
+ * this file is about. To turn it on: enrol the account, add a
+ * `.github/FUNDING.yml`, and set this to the sponsors URL - the button
+ * appears on its own.
+ */
+export const SAUCE_BUNNY = {
+  name: "Sauce Bunny",
+  repo: "https://github.com/gchiaramonte3/SauceBunny",
+  license: "MIT",
+  fund: null as string | null,
+};
