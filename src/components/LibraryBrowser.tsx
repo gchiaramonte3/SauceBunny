@@ -6,6 +6,7 @@ import { LibraryBrowserPane } from "./LibraryBrowserPane";
 import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { useFinderTags } from "../hooks/use-finder-tags";
 import { CachedWebPane } from "./CachedWebPane";
+import { FramesPane } from "./FramesPane";
 import { marqueeSelection } from "../lib/marquee";
 import { RenameDialog } from "./RenameDialog";
 import { LibraryQuickLook } from "./LibraryQuickLook";
@@ -103,7 +104,10 @@ export function LibraryBrowser({
    *  rather than a third value of `selected`, because every folder verb below
    *  is typed against a crumb chain and would need widening for a view that
    *  has no folder at all. */
-  const [webView, setWebView] = useState(false);
+  // Which special shelf is showing ("From the web", "Frames"), or null for
+  // the folder pane. One value rather than a boolean per shelf: they are
+  // mutually exclusive views of the same pane.
+  const [shelf, setShelf] = useState<"web" | "frames" | null>(null);
   const [prefs, setPrefs] = useState<BrowserPrefs>(() => normalizePrefs(loadJson<unknown>(BROWSER_KEY, {})));
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
@@ -306,7 +310,7 @@ export function LibraryBrowser({
         <LibraryTree
           trees={trees}
           selection={selected}
-          onSelect={(chain) => { setSelected(chain); setDetailItem(null); setWebView(false); }}
+          onSelect={(chain) => { setSelected(chain); setDetailItem(null); setShelf(null); }}
           kind={prefs.kind}
           onKind={(kind) => patchPrefs({ kind })}
           onCollapse={() => setTreeOpen(false)}
@@ -314,12 +318,18 @@ export function LibraryBrowser({
           rescanAll={rescanAll}
           scanning={scanning}
           removeRoot={removeRoot}
-          webSelected={webView}
-          onSelectWeb={() => { setWebView(true); setDetailItem(null); }}
+          shelf={shelf}
+          onSelectShelf={(next) => { setShelf(next); setDetailItem(null); }}
         />
       )}
       <div className="cp-lib-main">
-        {webView ? (
+        {shelf === "frames" ? (
+          <FramesPane
+            treeOpen={treeOpen}
+            onShowTree={() => setTreeOpen(true)}
+            onOpenFrame={(p) => { void invoke("reveal_in_finder", { path: p }); }}
+          />
+        ) : shelf === "web" ? (
           /* The web shelf owns the whole pane, and mounts the SAME browser
              bar the folder pane uses - fixed location label instead of
              crumbs, "Date fetched" instead of "Date modified", its own

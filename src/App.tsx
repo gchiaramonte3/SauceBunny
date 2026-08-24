@@ -2411,13 +2411,19 @@ export default function App() {
     const tcLabel = framesToTc(playheadNow, fps).replace(/:/g, "");
     const defaultName = `${base}_${tcLabel}.jpg`;
     try {
-      const dest = await saveDialog({
-        defaultPath: exportOpts.folder ? `${exportOpts.folder}/${defaultName}` : defaultName,
-        filters: [{ name: "Image", extensions: ["jpg", "jpeg", "png"] }],
-      });
-      if (!dest) return;
-      // The dialog offers png - honor it (default stays JPEG).
-      const snapMime = /\.png$/i.test(dest) ? "image/png" : "image/jpeg";
+      // Straight into the managed Frames folder, no dialog. Grabbing a frame
+      // is a review gesture people make many times in a session, and a save
+      // dialog per grab both interrupted that and scattered the results
+      // across the Desktop, Downloads and the export folder - after which
+      // the app had no idea they existed and could not show them. The
+      // Library's Frames shelf is where they go and where they are found;
+      // the shelf's own Export verb is the way one leaves.
+      const framesDir = await invoke<string>("frames_dir_path");
+      await invoke("ensure_dir_exists", { path: framesDir });
+      // `unique: true` on the write walks past a collision, so grabbing the
+      // same frame twice yields -2 rather than silently replacing the first.
+      const dest = `${framesDir}/${defaultName}`;
+      const snapMime = "image/jpeg";
       setSnapshotBusy(true);
       appendLog("info", "snapshot", `Grabbing frame at ${framesToTc(playheadNow, fps)} (${seconds.toFixed(2)}s)…`);
       // Defensive cast — a stale dev server still has the old `extract_frame`
@@ -2450,17 +2456,20 @@ export default function App() {
           // RAW body, not a JSON number array. The JSON route decimal-prints
           // every byte on the WKWebView main thread, so a 4K PNG snapshot
           // became a multi-megabyte string built one element at a time, with
-          // the window frozen for it. Same reason the clip exporter uses this
-          // path. saveDialog already vetted the destination, so no uniquing.
+          // the window frozen for it. Same reason the clip exporter uses
+          // this path. `x-unique` walks past a collision now that the
+          // destination is generated rather than confirmed by a dialog:
+          // grabbing the same frame twice must yield a second file, not
+          // silently replace the first.
           const bytes = new Uint8Array(await blob.arrayBuffer());
-          await invoke("write_raw_to_path", bytes, {
-            headers: { "x-dest-path": encodeURIComponent(dest) },
+          const written = await invoke<string>("write_raw_to_path", bytes, {
+            headers: { "x-dest-path": encodeURIComponent(dest), "x-unique": "1" },
           });
           // Synthesise a result shape matching the ffmpeg path so the
           // success log + notification code below works uniformly.
           // Width/height come from probe metadata when available.
           raw = {
-            path: dest,
+            path: written || dest,
             width: metadata.width,
             height: metadata.height,
             vcodec: metadata.vcodec,
@@ -2516,7 +2525,7 @@ export default function App() {
     } finally {
       setSnapshotBusy(false);
     }
-  }, [metadata, sourceKind, localFilePath, snapshotBusy, fps, exportOpts.folder, defaults.useWebCodecsDecoder, appendLog, notify, pushNotification, invokeWithCookieRetry]);
+  }, [metadata, sourceKind, localFilePath, snapshotBusy, fps, defaults.useWebCodecsDecoder, appendLog, notify, pushNotification, invokeWithCookieRetry]);
 
   /**
    * Grab the frame on screen right now as a cast member's face.

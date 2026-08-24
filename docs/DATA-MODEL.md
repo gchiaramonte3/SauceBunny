@@ -45,6 +45,8 @@ Screenings/
   <date>-<slug>-<hash>.json  one ScreeningDoc
 Collections/
   collections.json         web-source collections (virtual, keyed by URL)
+Frames/
+  <source>_<timecode>.jpg  grabbed stills; the FILENAME is the only index
 ```
 
 `~/Movies/Sauce Bunny/` is the default export folder. The app writes finished
@@ -114,6 +116,13 @@ Not all of these are preferences. Sorted by what losing them would cost:
 | In/out marks | source `pathKey` | `localStorage.sourceMarks` | `source-marks.ts` |
 | API key / TURN password | provider name | Keychain | `cloud_ai.rs` |
 | Web collection | generated id; members keyed by raw URL | `Collections/collections.json` | `web-collection-store.ts` |
+| Frame (grabbed still) | its own path; grouped by the filename stem | `Frames/*.jpg` | `commands/frames.rs`, written by `handleSnapshot` |
+
+**Frames have no index at all, deliberately.** The filename carries
+`<source>_<timecode>`, which is what the shelf groups on, so there is no
+sidecar to fall out of step with the directory: a frame renamed in Finder
+groups under its new name and nothing breaks. Same principle as projects
+below, one step further.
 
 **The directories are the truth about what a project is.** `projects.json`
 only decorates them; `reconcileProjects` re-derives the list from disk on
