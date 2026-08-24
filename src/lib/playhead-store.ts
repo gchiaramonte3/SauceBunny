@@ -146,3 +146,24 @@ export function usePlayheadSeconds(fps: number, active = true): number | null {
     () => (active ? playheadFramesToSeconds(playheadFrames, fps) : null),
   );
 }
+
+/**
+ * Playhead in WHOLE seconds unless `fine` - for a component whose render
+ * output is second-granularity text (an h:mm:ss clock, a "Comment at 1:23"
+ * placeholder). useSyncExternalStore bails on an Object.is-equal snapshot,
+ * so flooring here is what turns a per-frame re-render into one per second:
+ * the review composer subscribed at frame rate to paint text that changes
+ * 24-60x less often than it re-rendered. `fine` flips back to frame
+ * granularity for the moments that genuinely show frames - the composer's
+ * armed range edge renders a full timecode that follows the playhead.
+ */
+export function usePlayheadSecondsCoarse(fps: number, active = true, fine = false): number | null {
+  return useSyncExternalStore(
+    subscribePlayhead,
+    () => {
+      if (!active) return null;
+      const s = playheadFramesToSeconds(playheadFrames, fps);
+      return fine ? s : Math.floor(s);
+    },
+  );
+}

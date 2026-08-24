@@ -9,7 +9,7 @@ import type { DictateDoneEvent, DictateLevelEvent, DictatePartialEvent, ReviewRa
 import { DictationWave } from "./DictationWave";
 import { EmojiPicker } from "./EmojiPicker";
 import { IconDownload, IconRange } from "./Icons";
-import { getPlayheadSeconds, usePlayheadSeconds } from "../lib/playhead-store";
+import { getPlayheadSeconds, usePlayheadSecondsCoarse } from "../lib/playhead-store";
 import { secondsToHms, secondsToTc } from "../lib/timecode";
 import { loadJson, saveJson } from "../lib/storage";
 import { formatError } from "../lib/error-format";
@@ -1437,11 +1437,15 @@ function ReviewComposer({
   onPasteNotes: () => void;
 }) {
   // The composer subscribes to the playhead itself rather than taking it as a
-  // prop from ReviewPanel. Same value, same cadence, but the re-render it
-  // causes now stops at this subtree instead of dragging the whole thread list
-  // along with it 60 times a second. Two things here read it: the "Comment
-  // at 1:23" placeholder and the range pill's unmarked, following edge.
-  const currentSec = usePlayheadSeconds(fps, playheadActive);
+  // prop from ReviewPanel - the re-render stops at this subtree instead of
+  // dragging the whole thread list along. And it subscribes COARSE: its two
+  // consumers are second-granularity text (the "Comment at 1:23" placeholder
+  // and the range pill), so whole seconds cut the subtree's re-render rate
+  // from source fps to ~1/sec. The one moment that genuinely shows frames -
+  // an armed range edge rendering a full following timecode - flips the
+  // subscription fine for exactly that window.
+  const rangeArmed = rangeIn != null || rangeOut != null;
+  const currentSec = usePlayheadSecondsCoarse(fps, playheadActive, rangeArmed);
 
   // Insert an emoji at the textarea caret (replacing any selection), then
   // restore focus + caret so typing continues seamlessly.
