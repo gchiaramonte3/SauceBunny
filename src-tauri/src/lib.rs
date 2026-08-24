@@ -268,6 +268,7 @@ pub fn run() {
             commands::frames_dir_path,
             commands::list_frames,
             commands::create_frames_folder,
+            commands::list_frames_folders,
             commands::move_frame_to_folder,
             commands::delete_frame,
             commands::list_cached_web,

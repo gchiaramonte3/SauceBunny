@@ -214,6 +214,65 @@ pub async fn delete_frame(app: AppHandle, path: String) -> Result<(), crate::App
         .map_err(|e| crate::AppError::Io(format!("delete frame: {e}")))
 }
 
+/// Every folder under the Frames root, as paths relative to it.
+///
+/// THE SHELF CANNOT DERIVE THIS FROM THE FRAMES. `walk_frames` recurses into
+/// directories but only ever emits FILES, so a folder is visible to the UI
+/// only while something is already filed in it - and a folder someone has
+/// just made is, by definition, empty. "New folder" therefore appeared to do
+/// nothing at all: the directory was created on disk and there was no way for
+/// it to be shown.
+///
+/// This is the same bug the transcripts panel had, and the same fix:
+/// `list_transcript_folders` exists for exactly this reason. A directory
+/// listing is the truth about which containers exist; the files only say
+/// what is in them.
+///
+/// Symlinks are skipped and the walk is depth-capped, matching walk_frames -
+/// a symlinked subfolder could otherwise loop, or wander outside the managed
+/// folder entirely.
+#[tauri::command]
+pub async fn list_frames_folders(app: AppHandle) -> Result<Vec<String>, crate::AppError> {
+    let root = frames_dir(&app)?;
+    let mut out = Vec::new();
+    walk_frame_folders(&root, &root, 0, &mut out);
+    out.sort();
+    Ok(out)
+}
+
+fn walk_frame_folders(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    depth: u32,
+    out: &mut Vec<String>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let Ok(ft) = entry.file_type() else { continue };
+        if ft.is_symlink() || !ft.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        // Hidden directories are Finder/OS bookkeeping, not user containers.
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.starts_with('.'))
+            .unwrap_or(true)
+        {
+            continue;
+        }
+        if let Ok(rel) = path.strip_prefix(root) {
+            if let Some(s) = rel.to_str() {
+                out.push(s.to_string());
+            }
+        }
+        if depth + 1 < FRAMES_MAX_DEPTH {
+            walk_frame_folders(root, &path, depth + 1, out);
+        }
+    }
+}
+
 /// Make a folder inside the Frames root (or inside one of its subfolders).
 ///
 /// `parent` is a path RELATIVE to the Frames root, empty for the root, so a

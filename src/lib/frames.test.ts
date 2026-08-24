@@ -148,3 +148,40 @@ describe("frameCrumbs", () => {
     ]);
   });
 });
+
+describe("frameLevel — folders that exist but hold nothing", () => {
+  // THE bug behind "I hit Create New Folder and nothing happens". The folder
+  // list used to be derived from the frames, and list_frames only ever
+  // reports FILES - so a folder was visible only while something was already
+  // filed in it, and a folder someone had just made is empty by definition.
+  // It was created on disk and there was no way for it to be shown.
+  const items = [
+    f({ name: "a.jpg", folder: "" }),
+    f({ name: "b.jpg", folder: "Selects" }),
+  ];
+
+  it("shows a brand-new empty folder, with a count of nothing", () => {
+    const { folders } = frameLevel(items, "", ["Selects", "Empty"]);
+    expect(folders.map((x) => x.name)).toEqual(["Empty", "Selects"]);
+    const empty = folders.find((x) => x.name === "Empty")!;
+    expect(empty.count).toBe(0);
+    expect(empty.covers).toEqual([]);
+  });
+
+  it("without the listing it is invisible, which is the bug", () => {
+    expect(frameLevel(items, "").folders.map((x) => x.name)).toEqual(["Selects"]);
+  });
+
+  it("only DIRECT children of the open folder are listed", () => {
+    const { folders } = frameLevel(items, "", ["Selects", "Selects/Day 2"]);
+    expect(folders.map((x) => x.name)).toEqual(["Selects"]);
+    expect(frameLevel(items, "Selects", ["Selects", "Selects/Day 2"]).folders.map((x) => x.name))
+      .toEqual(["Day 2"]);
+  });
+
+  it("a folder holding frames is not duplicated by also being listed", () => {
+    const { folders } = frameLevel(items, "", ["Selects"]);
+    expect(folders).toHaveLength(1);
+    expect(folders[0].count).toBe(1);
+  });
+});

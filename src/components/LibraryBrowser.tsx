@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { formatError } from "../lib/error-format";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LibraryTree } from "./LibraryTree";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
@@ -177,6 +178,37 @@ export function LibraryBrowser({
       .map((s) => s.tree),
     [roots, scans],
   );
+  /**
+   * Make a folder inside the folder being browsed.
+   *
+   * OFFERED ONLY INSIDE A FOLDER, and that is the honest behaviour rather
+   * than a limitation: "All" is a union of every library root, so there is
+   * no single directory a new folder would belong to and no way to ask
+   * without inventing one. Pick a root or a folder first and the control
+   * appears.
+   *
+   * ensure_dir_exists already existed and is the whole backend need - this
+   * creates an empty directory and nothing else. It is emphatically NOT the
+   * move gesture, which would relocate real footage and has no undo.
+   */
+  const createLibraryFolder = useCallback(async (name: string): Promise<string | null> => {
+    const dir = selected?.[selected.length - 1]?.path;
+    if (!dir) return "Open a folder first.";
+    const trimmed = name.trim();
+    // A separator would escape the folder being browsed; the Rust side joins
+    // blind, so the check has to happen before the call.
+    if (!trimmed || trimmed.includes("/") || trimmed.startsWith(".")) {
+      return "Use a plain folder name.";
+    }
+    try {
+      await invoke("ensure_dir_exists", { path: `${dir.replace(/\/+$/, "")}/${trimmed}` });
+      rescanAll();
+      return null;
+    } catch (e) {
+      return formatError(e);
+    }
+  }, [selected, rescanAll]);
+
   const selectedNode = useMemo(
     () => (selected ? findLibraryFolder(trees, selected[selected.length - 1].path) : null),
     [trees, selected],
@@ -359,6 +391,7 @@ export function LibraryBrowser({
         ) : (
         <>
         <LibraryBrowserBar
+          onNewFolder={selected ? createLibraryFolder : undefined}
           chain={selected}
           onCrumb={(chain) => { setSelected(chain); setDetailItem(null); }}
           query={query}

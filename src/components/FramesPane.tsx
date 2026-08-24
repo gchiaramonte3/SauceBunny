@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { formatError } from "../lib/error-format";
 import {
   filterFrames, formatFrameTimecode, frameCrumbs, frameLevel, groupBySource,
   sortFrames, type FrameItem,
@@ -16,7 +17,6 @@ import { useGridSelection } from "../hooks/use-grid-selection";
 import { useMarquee } from "../hooks/use-marquee";
 import { useCardDrag } from "../hooks/use-card-drag";
 import { LibrarySelectionBar } from "./LibrarySelectionBar";
-import { IconPlus } from "./Icons";
 import { FrameListRows } from "./FrameListRows";
 
 /**
@@ -54,8 +54,15 @@ export function FramesPane({ treeOpen, onShowTree }: {
   onShowTree: () => void;
 }) {
   const [items, setItems] = useState<FrameItem[] | null>(null);
+  // The folders that EXIST, not the ones the frames imply. A folder with
+  // nothing in it is invisible to list_frames, which is why New folder looked
+  // like it did nothing at all.
+  const [diskFolders, setDiskFolders] = useState<string[]>([]);
 
   const load = useCallback(() => {
+    void invoke<string[]>("list_frames_folders")
+      .then((f) => setDiskFolders(Array.isArray(f) ? f : []))
+      .catch(() => setDiskFolders([]));
     void invoke<FrameItem[]>("list_frames")
       .then(setItems)
       // A folder that cannot be read is an EMPTY shelf, not an error banner:
@@ -99,17 +106,21 @@ export function FramesPane({ treeOpen, onShowTree }: {
   // Which folder is open, "" for the Frames root. A container here is a real
   // directory, so this is just a relative path - there is nothing to look up.
   const [open, setOpen] = useState("");
-  const [newFolder, setNewFolder] = useState<string | null>(null);
   const [moving, setMoving] = useState<FrameItem | null>(null);
   // Which frame the viewer is showing, by path. Null = closed.
   const [preview, setPreview] = useState<string | null>(null);
   const paneRef = useRef<HTMLDivElement>(null);
-  const createFolder = useCallback(async (name: string) => {
+  /** Returns a message when the folder was REFUSED, null on success. The bar
+   *  shows it. This used to swallow every error, so a duplicate name and a
+   *  broken command looked identical - and both looked like nothing at all. */
+  const createFolder = useCallback(async (name: string): Promise<string | null> => {
     try {
       await invoke("create_frames_folder", { parent: open, name });
-      setNewFolder(null);
       load();
-    } catch { /* the command's own message surfaces through the caller */ }
+      return null;
+    } catch (e) {
+      return formatError(e);
+    }
   }, [open, load]);
 
   const [query, setQuery] = useState("");
@@ -148,7 +159,7 @@ export function FramesPane({ treeOpen, onShowTree }: {
   // ONE level at a time. Search and the list view flatten the whole tree
   // instead - the web pane's rule, and the reason is the same: a needle that
   // matched four folders as four one-row shelves would read as clutter.
-  const level = frameLevel(all, open);
+  const level = frameLevel(all, open, diskFolders);
   const scoped = needle || prefs.view === "list" ? all : level.here;
   const filtered = filterFrames(scoped, needle);
   const sortedFlat = sortFrames(filtered, prefs.sort, prefs.dir);
@@ -286,6 +297,7 @@ export function FramesPane({ treeOpen, onShowTree }: {
         onPrefs={patchPrefs}
         treeOpen={treeOpen}
         onShowTree={onShowTree}
+        onNewFolder={createFolder}
       />
       {cardDrag.drag && (
         <div
@@ -348,36 +360,6 @@ export function FramesPane({ treeOpen, onShowTree }: {
         <div className="cp-web-summary">
           {items.length} {items.length === 1 ? "frame" : "frames"}
           {bytes > 0 ? ` · ${formatBytes(bytes)} on disk` : ""}
-          {/* Inline, not a dialog: making a folder is creating an empty
-              directory, and a modal puts ceremony in front of a mkdir. The
-              transcript reader's New project form is the same shape. */}
-          {newFolder === null ? (
-            <button
-              type="button"
-              className="cp-frames-newfolder"
-              onClick={() => setNewFolder("")}
-            >
-              <IconPlus size={12} />
-              New folder
-            </button>
-          ) : (
-            <form
-              className="cp-frames-newfolder-form"
-              onSubmit={(e) => { e.preventDefault(); void createFolder(newFolder); }}
-            >
-              <input
-                autoFocus
-                type="text"
-                value={newFolder}
-                placeholder="Folder name"
-                aria-label="New folder name"
-                spellCheck={false}
-                onChange={(e) => setNewFolder(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Escape") setNewFolder(null); }}
-              />
-              <button type="submit" disabled={!newFolder.trim()}>Create</button>
-            </form>
-          )}
         </div>
         {showFolders && (
           <div className="cp-web-grid" role="list" aria-label="Folders">

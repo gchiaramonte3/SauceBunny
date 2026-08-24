@@ -1,5 +1,5 @@
-import { Fragment } from "react";
-import { IconGrid, IconList, IconPanelLeft, IconSearch } from "./Icons";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { IconGrid, IconList, IconPanelLeft, IconPlus, IconSearch } from "./Icons";
 import type { LibraryCrumb, LibrarySortDir, LibrarySortKey } from "../lib/library";
 
 export type LibraryViewMode = "grid" | "list";
@@ -29,6 +29,24 @@ type Props = {
    *  (the collapse control lives in the panel's own header). */
   treeOpen: boolean;
   onShowTree: () => void;
+  /**
+   * Make a container at the level currently being browsed.
+   *
+   * IT LIVES HERE so that every shelf gets the SAME control in the SAME
+   * place. It was built once, for the frames shelf, tucked into that pane's
+   * count line - which put an organising verb in a status readout, in a
+   * different spot from every other verb, and left the Library with no way
+   * to make a folder at all. A header that three shelves already share is
+   * the one place a shared affordance can be added once.
+   *
+   * The bar owns the naming field too, for the same reason: identical
+   * behaviour everywhere is not something each caller should re-implement.
+   * Rejecting the name is the caller's job - it is the one that knows what
+   * already exists on disk - so this reports back what it is told.
+   */
+  onNewFolder?: (name: string) => Promise<string | null> | string | null | void;
+  /** "New folder" unless a shelf calls its containers something else. */
+  newFolderLabel?: string;
 };
 
 /**
@@ -41,8 +59,31 @@ type Props = {
  */
 export function LibraryBrowserBar({
   chain, onCrumb, location, dateLabel, searchLabel, query, onQuery, sort, dir, view, onPrefs, treeOpen, onShowTree,
+  onNewFolder, newFolderLabel,
 }: Props) {
   const last = chain ? chain.length - 1 : -1;
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (naming) inputRef.current?.focus(); }, [naming]);
+
+  const closeNaming = () => { setNaming(false); setName(""); setErr(null); setBusy(false); };
+  const submitName = async () => {
+    const trimmed = name.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    setErr(null);
+    // The caller returns a message to REFUSE - a duplicate name is the
+    // ordinary case and the user has to see it, which is the half the frames
+    // shelf was missing: its create swallowed every error, so a refused name
+    // and a broken command looked identical, and both looked like nothing
+    // happening.
+    const refusal = await onNewFolder?.(trimmed);
+    if (typeof refusal === "string" && refusal) { setErr(refusal); setBusy(false); return; }
+    closeNaming();
+  };
   return (
     <div className="cp-lib-bar">
       {!treeOpen && (
@@ -71,6 +112,39 @@ export function LibraryBrowserBar({
       </nav>
 
       <div className="cp-lib-bar-controls">
+        {onNewFolder && (naming ? (
+          <form
+            className="cp-lib-bar-newfolder-form"
+            onSubmit={(e) => { e.preventDefault(); void submitName(); }}
+          >
+            <input
+              ref={inputRef}
+              type="text"
+              className="cp-lib-bar-newfolder-input"
+              value={name}
+              placeholder={`${newFolderLabel ?? "New folder"} name`}
+              aria-label={`${newFolderLabel ?? "New folder"} name`}
+              spellCheck={false}
+              disabled={busy}
+              onChange={(e) => { setName(e.target.value); setErr(null); }}
+              onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); closeNaming(); } }}
+            />
+            <button type="submit" className="btn cp-tx-iconbtn" disabled={busy || !name.trim()}>Create</button>
+            <button type="button" className="btn btn-ghost cp-tx-iconbtn" onClick={closeNaming} disabled={busy}>Cancel</button>
+            {err && <span className="cp-lib-bar-newfolder-err" role="alert">{err}</span>}
+          </form>
+        ) : (
+          <button
+            type="button"
+            className="cp-lib-bar-newfolder"
+            title={newFolderLabel ?? "New folder"}
+            aria-label={newFolderLabel ?? "New folder"}
+            onClick={() => setNaming(true)}
+          >
+            <IconPlus size={12} />
+            {newFolderLabel ?? "New folder"}
+          </button>
+        ))}
         <div className="cp-lib-bar-search">
           <IconSearch size={12} />
           <input

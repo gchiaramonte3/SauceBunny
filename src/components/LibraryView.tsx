@@ -35,7 +35,10 @@ import {
   youTubeHeroThumbnailUrl,
   youTubeThumbnailUrl,
 } from "../lib/validation";
+import { invoke } from "@tauri-apps/api/core";
 import type { RecentSource } from "../lib/recent-sources";
+import { webPosterFor } from "../lib/web-poster-store";
+import type { CachedWebItem } from "../bindings/CachedWebItem";
 import type { LibraryItem } from "../types";
 
 type Props = {
@@ -157,6 +160,37 @@ export function LibraryView({
     });
     return () => { alive = false; };
   }, [historyTick, transcriptLibraryPath]);
+  /**
+   * Poster for a web source that is not on YouTube.
+   *
+   * The Continue row derived its art from `youTubeThumbnailUrl` and nothing
+   * else, so EVERY non-YouTube card fell through to the film glyph - which is
+   * most of them, and is what the shelf looked like. yt-dlp reports a
+   * thumbnail for nearly every site it supports and the app already caches
+   * that metadata, so the picture was on disk the whole time with nothing
+   * reading it. (The CSP is not the obstacle: img-src allows https: broadly.)
+   *
+   * Keyed by URL and read from the SAME metadata cache the web shelf reads,
+   * rather than by adding a field to the recents entry - a new field would
+   * only ever be filled on the NEXT fetch, so every source already in the
+   * shelf would have stayed grey.
+   */
+  const [webPosters, setWebPosters] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    let alive = true;
+    void invoke<CachedWebItem[]>("list_cached_web")
+      .then((list) => {
+        if (!alive || !Array.isArray(list)) return;
+        const m = new Map<string, string>();
+        for (const it of list) if (it.url && it.thumbnail) m.set(it.url, it.thumbnail);
+        setWebPosters(m);
+      })
+      // No cache, or a stale binary: the cards fall back the way they always
+      // did rather than the shelf failing to render.
+      .catch(() => { /* ignore */ });
+    return () => { alive = false; };
+  }, [historyTick]);
+
   // Continue shelf — the 8 most recent (the featured row stays a row, not an
   // archive; recents themselves are capped at 12 upstream).
   const continueRow = recentSources.slice(0, 8);
@@ -233,12 +267,22 @@ const HOME_ROW_CAP = 24;
       art={r.kind === "url"
         // Featured size shows 480px hqdefault soft — try maxres first, and the
         // card walks the list on 404 (maxres is missing on older/low-res
-        // videos, same chain the hero uses).
+        // videos, same chain the hero uses). The two non-YouTube candidates
+        // follow: the thumbnail yt-dlp reported for the source, then a frame
+        // captured from the player if this source was ever watched. The card
+        // walks the whole list, so a dead ytimg URL falls through instead of
+        // ending at a broken image.
         ? {
             kind: "remote",
-            url: youTubeThumbnailUrl(r.value),
-            urls: [youTubeHeroThumbnailUrl(r.value), youTubeThumbnailUrl(r.value)]
-              .filter((u): u is string => u != null),
+            url: youTubeThumbnailUrl(r.value)
+              ?? webPosters.get(r.value)
+              ?? webPosterFor(r.value),
+            urls: [
+              youTubeHeroThumbnailUrl(r.value),
+              youTubeThumbnailUrl(r.value),
+              webPosters.get(r.value) ?? null,
+              webPosterFor(r.value),
+            ].filter((u): u is string => u != null),
           }
         : { kind: "local", path: r.value, media: mediaKindOf(r.value) }}
       badge={r.kind === "url" ? "web" : undefined}

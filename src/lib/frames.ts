@@ -88,7 +88,21 @@ export function formatFrameTimecode(tc: string | null): string | null {
  *
  * `open` is the folder being viewed, "" for the root.
  */
-export function frameLevel(items: readonly FrameItem[], open: string): {
+export function frameLevel(
+  items: readonly FrameItem[],
+  open: string,
+  /**
+   * Every folder that EXISTS on disk, relative to the Frames root.
+   *
+   * Without this the folder list is derived from the frames themselves, so a
+   * folder is visible only while something is already filed in it - and a
+   * folder someone has just made is empty by definition. "New folder" looked
+   * like a no-op for exactly that reason: the directory was created and there
+   * was nothing that could show it. The directory listing is the truth about
+   * which containers exist; the frames only say what is in them.
+   */
+  allFolders: readonly string[] = [],
+): {
   here: FrameItem[];
   folders: { name: string; path: string; count: number; covers: string[] }[];
 } {
@@ -110,6 +124,15 @@ export function frameLevel(items: readonly FrameItem[], open: string): {
     const list = bySub.get(name) ?? [];
     list.push(it);
     bySub.set(name, list);
+  }
+  // Folders that exist on disk but hold nothing yet. They join the map with
+  // an empty list, so they render with a count of 0 and no cover rather than
+  // not rendering at all.
+  for (const folder of allFolders) {
+    if (!folder.startsWith(prefix)) continue;
+    const rest = folder.slice(prefix.length);
+    if (!rest || rest.includes("/")) continue; // not a DIRECT child of `open`
+    if (!bySub.has(rest)) bySub.set(rest, []);
   }
   const folders = [...bySub.entries()]
     .map(([name, list]) => ({
