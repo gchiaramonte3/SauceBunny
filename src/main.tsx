@@ -85,14 +85,16 @@ void hydrateCastStore().catch((err) => {
   console.warn("cast-store hydration failed; starting empty:", err);
 });
 
-// The PANEL does not hydrate reviews at all, unlike casts above. It cannot
-// reach a review doc: QueueDrawer drops the Review tab entirely when
-// `embedded` (its tab list is `embedded ? [] : [review]`), redirects an active
-// "review" tab to "transcript", and the one thing that can select that tab
-// (`reviewRequestTick`) is a prop only App passes. Three barriers, one of them
-// an explicit design decision, so hydrating here read index.json AND every
-// review doc through a worker pool for a store nothing in this window would
-// ever ask about, with the panel's first paint racing it. If the panel is ever
+// The PANEL does not hydrate reviews at all, unlike casts above. QueueDrawer
+// drops the Review tab when `embedded`, redirects a restored "review" tab to
+// "transcript", keeps its keep-alive set fed from the REDIRECTED value (the
+// raw restored one once mounted a hidden ReviewPanel here - caught by an
+// adversarial review, pinned in e2e/panel-window.spec.ts), and the tick that
+// selects the tab is a prop only App passes. And even if a ReviewPanel did
+// mount, the panel window is never handed a review source key, which is what
+// every read and write in it is gated on. So hydrating here read index.json
+// AND every review doc through a worker pool for a store nothing in this
+// window can ask about, with first paint racing it. If the panel is ever
 // given the review tab, call hydrateReviewStore() then: it is idempotent and
 // latched, so the call site can be wherever the tab is.
 if (isPanelWindow) {

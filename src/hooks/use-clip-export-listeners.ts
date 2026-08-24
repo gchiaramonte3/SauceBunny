@@ -127,6 +127,10 @@ export function useClipExportListeners(d: UseClipExportListenersDeps): void {
           appendLog("warn", "ffmpeg", "Export cancelled");
           pushNotification("info", "Export cancelled", "");
         } else {
+          // The source is still loaded; only the export failed. Leaving the
+          // status at "exporting" kept the Export button disabled until the
+          // source was reloaded.
+          setStatus("loaded");
           setExportPhase("error"); // Export button → cross flash
           // Humanize AFTER classifyExtractorRot sees the raw text (the
           // humanizer only rewrites EACCES spawn failures, but keep the

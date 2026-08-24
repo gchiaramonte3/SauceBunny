@@ -265,13 +265,15 @@ docs, and `review-store` has none of the merge-and-announce machinery that
 `cast-store` grew for exactly that situation. It would have been the same
 data-loss bug in a second store.
 
-It is not: the Review tab is dropped from the tab list when `embedded`, an
-active `"review"` tab is redirected to `"transcript"`, and the only thing that
-can select it is a prop App alone passes. Three barriers, one of them an
-explicit design decision. So the panel can neither read nor write a review,
-and hydrating one at boot was pure cost. `e2e/panel-window.spec.ts` now pins
-the tab's absence, because that absence is what makes skipping the hydration
-safe.
+It is not, though the first fix overclaimed HOW. The Review tab is dropped
+from the tab list when `embedded` and a restored `"review"` tab is redirected
+to `"transcript"` - but the keep-alive set was fed the RAW restored value, so
+a Review tab persisted by the main window mounted a hidden `ReviewPanel` in
+the panel anyway (found by an adversarial review of the release notes; fixed
+by feeding the set the redirected value). What actually makes the panel safe
+is that it is never handed a review source key, which every read and write in
+`ReviewPanel` is gated on. `e2e/panel-window.spec.ts` pins both: no Review
+tab, and no hidden review body even when the main window persisted that tab.
 
 ### F2 needs a decision, not a patch
 

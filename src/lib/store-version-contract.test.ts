@@ -203,3 +203,36 @@ describe("every file store consults the version it writes", () => {
     ]);
   });
 });
+
+describe("a report raised before anyone subscribes still reaches the user", () => {
+  /**
+   * Reviews and casts hydrate from main.tsx BEFORE the first render, so their
+   * future-version reports fire before App's useEffect subscribes. The first
+   * version of this bridge was a plain fan-out, which dropped those reports
+   * deterministically: a locked Reviews/index.json produced no toast, no bell
+   * entry, nothing - while edits were accepted into memory and discarded on
+   * quit. The bridge now latches every report and replays it on subscribe.
+   */
+  it("replays the latched report to a late subscriber, once", async () => {
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "default_transcript_library_path") return LIB;
+      if (cmd === "read_text_file_capped") {
+        return JSON.stringify({ version: STORE_SCHEMA_VERSION + 1, casts: [] });
+      }
+      throw new Error(`unexpected ${cmd}`);
+    });
+    // Hydration happens FIRST - nobody is listening, as at real boot.
+    await hydrateCastStore();
+
+    const seen: string[] = [];
+    onFutureStoreVersion((p) => seen.push(p.label));
+    expect(seen, "the pre-subscribe report was dropped").toEqual(["casts"]);
+
+    // A second subscriber gets the same replay; the store re-reporting the
+    // same label must not double it.
+    const seen2: string[] = [];
+    onFutureStoreVersion((p) => seen2.push(p.label));
+    expect(seen2).toEqual(["casts"]);
+    expect(seen).toEqual(["casts"]);
+  });
+});

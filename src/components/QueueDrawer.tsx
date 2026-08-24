@@ -381,13 +381,23 @@ export function QueueDrawer({
   // afterward, so per-tab state — transcript search + scroll, an in-progress
   // AI chat, a running dictation in Review — survives tab switches. Lazy so
   // never-visited tabs cost nothing at drawer mount.
-  const [visited, setVisited] = useState<ReadonlySet<TabId>>(() => new Set([activeTab]));
+  // Seeded and grown from availableTab, NOT activeTab. activeTab is restored
+  // from localStorage, which the MAIN window also writes - so popping the
+  // panel out while main sat on Review used to seed visited with "review" and
+  // mount a hidden ReviewPanel in a window whose tab strip does not offer it.
+  // availableTab is the same value with the embedded redirect applied, so the
+  // review body genuinely cannot mount here. (In the main window the two are
+  // always equal, so this changes nothing there.) The shownTab effect still
+  // covers the roomFace override, which is main-window-only.
+  const [visited, setVisited] = useState<ReadonlySet<TabId>>(
+    () => new Set([embedded && activeTab === "review" ? "transcript" : activeTab]),
+  );
   useEffect(() => {
     setVisited((prev) => (prev.has(shownTab) ? prev : new Set(prev).add(shownTab)));
   }, [shownTab]);
   useEffect(() => {
-    setVisited((prev) => (prev.has(activeTab) ? prev : new Set(prev).add(activeTab)));
-  }, [activeTab]);
+    setVisited((prev) => (prev.has(availableTab) ? prev : new Set(prev).add(availableTab)));
+  }, [availableTab]);
   // Seed with the MOUNT-TIME tick so a remount (pop-out, or re-dock after
   // closing the panel) doesn't re-fire the auto-switch for a transcript that
   // arrived long ago — only a NEW arrival (tick actually advancing while

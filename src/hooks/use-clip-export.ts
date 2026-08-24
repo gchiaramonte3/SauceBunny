@@ -190,6 +190,11 @@ export function useClipExport(p: ClipExportDeps) {
         // Future: fall back to a Rust ffmpeg-based local-clip command.
         // For now surface clearly so the user knows what happened.
         appendLog("err", "mediabunny", `Unsupported for mediabunny export: ${result.reason}`);
+        // The SOURCE is still loaded: only the export failed. Without this the
+        // status stayed "exporting" forever, which kept the Export button
+        // disabled until the source was reloaded - a quieter version of the
+        // same unmount bug the comment below records.
+        setStatus("loaded");
         // Deliberately NOT setStatus("error"). That is the SOURCE's status, and
         // Monitor's error branch returns before the player branch — so an
         // export fault unmounted the running video and replaced it with an
@@ -205,6 +210,7 @@ export function useClipExport(p: ClipExportDeps) {
         return;
       }
       if (result.kind === "error") {
+        setStatus("loaded");
         setErrorDetail(result.message);
         appendLog("err", "mediabunny", result.message);
         setExportPhase("error");
@@ -307,6 +313,7 @@ export function useClipExport(p: ClipExportDeps) {
       // reject synchronously with yt-dlp's extractor error.
       classifyExtractorRot(msg);
       appendLog("err", "ffmpeg", msg);
+      setStatus("loaded"); // the source is fine; only the export failed
       setExportPhase("error"); // create_clip rejected synchronously → cross flash
     }
   }, [metadata, sourceKind, localFilePath, exportOpts, fps, inFrames, outFrames,

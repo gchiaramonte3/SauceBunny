@@ -58,6 +58,8 @@ export type FutureStoreVersion = {
 };
 
 const listeners = new Set<(p: FutureStoreVersion) => void>();
+/** Reports raised so far, keyed by label, REPLAYED to any later subscriber. */
+const raised = new Map<string, FutureStoreVersion>();
 
 /**
  * Subscribe to "a store file on disk is newer than this build".
@@ -66,9 +68,17 @@ const listeners = new Set<(p: FutureStoreVersion) => void>();
  * be told once per store and App is the only thing that can tell them. Modelled
  * on `onReviewStoreProblem`, which exists for the same reason: this app ships
  * with no console, so a console.warn is the same as saying nothing.
+ *
+ * Reports RAISED BEFORE the subscriber existed are replayed on subscribe.
+ * This is load-bearing, not a nicety: reviews and casts hydrate from main.tsx
+ * BEFORE the first render, so their reports fire before App's useEffect has
+ * subscribed - a plain fan-out dropped them, deterministically, and a locked
+ * Reviews/index.json produced no warning at all while edits were silently
+ * held in memory. Fires at most once per store label either way.
  */
 export function onFutureStoreVersion(cb: (p: FutureStoreVersion) => void): () => void {
   listeners.add(cb);
+  for (const p of raised.values()) cb(p);
   return () => { listeners.delete(cb); };
 }
 
@@ -83,12 +93,16 @@ export function futureVersionMessage(label: string, found: number): string {
 
 /** Announce a locked store. Stores call this once, when they lock. */
 export function reportFutureVersion(label: string, found: number): void {
+  if (raised.has(label)) return;
   const message = futureVersionMessage(label, found);
+  const p = { label, found, message };
+  raised.set(label, p);
   console.warn(`store-schema: ${message}`);
-  for (const cb of listeners) cb({ label, found, message });
+  for (const cb of listeners) cb(p);
 }
 
 /** Test-only: drop subscribers so each vitest case starts cold. */
 export function resetFutureVersionListenersForTests(): void {
   listeners.clear();
+  raised.clear();
 }

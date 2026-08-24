@@ -160,3 +160,33 @@ test("the panel offers no Review tab, which is what lets it skip review hydratio
   // And no review panel body was mounted behind the scenes either.
   await expect(page.locator("#cp-tabpanel-review")).toHaveCount(0);
 });
+
+test("a Review tab persisted by the MAIN window does not mount a hidden review body here", async ({ page }) => {
+  // The sharpened version of the assertion above, covering the case an
+  // adversarial review proved the first version never exercised: activeTab is
+  // restored from localStorage, and the main window writes that same key. So
+  // popping the panel out while main sat on Review used to seed the keep-alive
+  // set with "review" and mount a hidden ReviewPanel in a window whose tab
+  // strip does not offer it - the drawer redirects the SHOWN tab, but the
+  // visited set was fed the raw restored value. The empty first-run storage of
+  // the test above can never catch that; seeding the key is the whole test.
+  const noise: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error" || m.type() === "warning") noise.push(`[${m.type()}] ${m.text()}`);
+  });
+  page.on("pageerror", (e) => noise.push(`[pageerror] ${String(e)}`));
+  await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
+  await page.addInitScript(() => {
+    localStorage.setItem("saucebunny.welcomed", "1");
+    // The RAW string, exactly as saveActiveTab writes it - a JSON-quoted
+    // value fails normalizeActiveTab and the test goes vacuous.
+    localStorage.setItem("saucebunny.queueDrawerActiveTab", "review");
+  });
+  await page.goto("/?window=panel");
+  await expect(page.locator(".cp-panel-window-root")).toBeVisible({ timeout: 15_000 });
+
+  // The redirect shows Transcript...
+  await expect(page.locator("#cp-tabpanel-review")).toHaveCount(0);
+  // ...and the panel stayed quiet doing it.
+  expect(noise).toEqual([]);
+});
