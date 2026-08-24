@@ -337,6 +337,35 @@ export const IconPencil = (p: IconProps) => (
     <path d="M4 20l4.5-1.2L19.5 7.8a2.2 2.2 0 0 0-3.1-3.1L5.2 15.5 4 20z" />
   </Icon>
 );
+// Annotation tool glyphs. The toolbar used text labels on the theory that
+// five icons over a video read as decoration; in practice five TEXT buttons
+// were ~310 unshrinkable px, which is what crushed the palette into a column
+// and blew the panel up to a third of the picture. Standard drawing-tool
+// iconography carries this in 26px squares; label and hint stay as the
+// tooltip and accessible name.
+export const IconToolHighlighter = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 15l-4.5 4.5" />
+    <path d="M9.5 8.5l6 6L9 15l-4-2z" />
+    <path d="M9.5 8.5L15 3l6 6-5.5 5.5" />
+  </Icon>
+);
+export const IconToolArrow = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M5 19L18 6" />
+    <path d="M10 5h8v8" />
+  </Icon>
+);
+export const IconToolRect = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="4" y="6" width="16" height="12" rx="1.5" />
+  </Icon>
+);
+export const IconToolEllipse = (p: IconProps) => (
+  <Icon {...p}>
+    <ellipse cx="12" cy="12" rx="8" ry="6" />
+  </Icon>
+);
 export const IconTrash = (p: IconProps) => (
   <Icon {...p}>
     <polyline points="3 6 5 6 21 6" />

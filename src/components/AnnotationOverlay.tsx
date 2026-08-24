@@ -5,6 +5,10 @@ import {
   DRAW_TOOLS, isShapeTool, shapePoints, toolOpacity, toolWidthScale, type DrawTool,
 } from "../lib/draw-tools";
 import { annotationHasContent, type AnnotationStrokes } from "../lib/review";
+import {
+  IconPencil, IconToolArrow, IconToolEllipse, IconToolHighlighter, IconToolRect,
+} from "./Icons";
+import { useDismiss } from "../hooks/use-dismiss";
 import { AnnotationLabels } from "./review/AnnotationLabels";
 import { LabelInput } from "./review/LabelInput";
 
@@ -49,6 +53,16 @@ function outlineToPath(outline: number[][]): Path2D {
   return path;
 }
 
+
+/** Glyph per tool - label and hint stay as the tooltip and accessible name. */
+const TOOL_ICON: Record<DrawTool, (p: { size?: number }) => JSX.Element> = {
+  pen: IconPencil,
+  highlighter: IconToolHighlighter,
+  arrow: IconToolArrow,
+  rect: IconToolRect,
+  ellipse: IconToolEllipse,
+};
+
 export function AnnotationOverlay({
   annotation, drawing, opacity = 1, onChange, onDismiss, labelMode = false, labelColor = "#4dabf7",
 }: {
@@ -81,6 +95,13 @@ export function AnnotationOverlay({
   // Mirrored in a ref so the input's blur and a same-tick canvas click can't
   // both commit it (whichever runs second sees null and no-ops).
   const [pendingLabel, setPendingLabel] = useState<{ x: number; y: number; text: string } | null>(null);
+  // The palette lives in a popover under a single current-colour well. Eleven
+  // wells inline were ~275px of a panel that could only afford ~500, which is
+  // what crushed them into a one-per-row column and blew the toolbar up to a
+  // third of the picture.
+  const [colorOpen, setColorOpen] = useState(false);
+  const colorWellRef = useRef<HTMLDivElement>(null);
+  useDismiss(colorWellRef, () => setColorOpen(false), colorOpen);
   const pendingRef = useRef(pendingLabel);
   pendingRef.current = pendingLabel;
 
@@ -332,33 +353,77 @@ export function AnnotationOverlay({
       )}
       {drawing ? (
         <div className="cp-annot-tools">
-          <div className="cp-annot-swatches">
-            <ColorSwatches colors={PEN_COLORS} value={color} onPick={setColor} size={17} ariaLabel="Pen color" />
+          <div className="cp-annot-colorwell" ref={colorWellRef}>
+            <button
+              type="button"
+              className="cp-annot-colorbtn"
+              aria-label="Pen color"
+              aria-expanded={colorOpen}
+              title="Pen color"
+              onClick={() => setColorOpen((v) => !v)}
+            >
+              <span className="cp-annot-colorchip" style={{ background: color }} />
+            </button>
+            {colorOpen && (
+              <div className="cp-annot-color-popover" role="group" aria-label="Pen color">
+                <ColorSwatches
+                  colors={PEN_COLORS}
+                  value={color}
+                  onPick={(c) => { setColor(c); setColorOpen(false); }}
+                  size={17}
+                  ariaLabel="Pen color"
+                />
+              </div>
+            )}
           </div>
           <span className="cp-annot-divider" />
           <div className="cp-annot-tools-row" role="radiogroup" aria-label="Drawing tool">
-            {DRAW_TOOLS.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                role="radio"
-                aria-checked={tool === t.id}
-                className={"cp-annot-tool" + (tool === t.id ? " on" : "")}
-                title={`${t.label}: ${t.hint}`}
-                onClick={() => setTool(t.id)}
-              >
-                {t.label}
-              </button>
-            ))}
+            {DRAW_TOOLS.map((t) => {
+              const Glyph = TOOL_ICON[t.id];
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={tool === t.id}
+                  aria-label={t.label}
+                  className={"cp-annot-tool" + (tool === t.id ? " on" : "")}
+                  title={`${t.label}: ${t.hint}`}
+                  onClick={() => setTool(t.id)}
+                >
+                  <Glyph size={15} />
+                </button>
+              );
+            })}
           </div>
           <span className="cp-annot-divider" />
-          <div className="cp-annot-sizectl" title="Brush size">
-            <span className="cp-annot-dot" style={{ width: Math.max(3, size / 2), height: Math.max(3, size / 2), background: color }} />
+          {/* The preview shows the EFFECTIVE stroke: the active tool's width
+              multiplier and opacity applied to the slider value, in the pen
+              colour. "Smallest slider position, unclear on which tool" was
+              the exact complaint - a dot that ignored the highlighter's 3x
+              was answering a different question than the one the slider
+              asks. The numeral is the slider value itself. */}
+          <div
+            className="cp-annot-sizectl"
+            title={`Brush size: ${size}${tool === "highlighter" ? " (highlighter draws 3x wide)" : ""}`}
+          >
+            <span className="cp-annot-previewbox" aria-hidden="true">
+              <span
+                className="cp-annot-dot"
+                style={{
+                  width: Math.min(22, Math.max(2, size * toolWidthScale(tool) * 0.5)),
+                  height: Math.min(22, Math.max(2, size * toolWidthScale(tool) * 0.5)),
+                  background: color,
+                  opacity: toolOpacity(tool),
+                }}
+              />
+            </span>
             <input
               type="range" min={MIN_SIZE} max={MAX_SIZE} step={1} value={size}
               onChange={(e) => setSize(Number(e.target.value))}
               aria-label="Brush size"
             />
+            <span className="cp-annot-sizenum">{size}</span>
           </div>
           <span className="cp-annot-divider" />
           <button
