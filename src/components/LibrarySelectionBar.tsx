@@ -1,4 +1,4 @@
-import { IconReveal, IconStack, IconTranscript, IconCircleX } from "./Icons";
+import { IconFolder, IconReveal, IconStack, IconTranscript, IconCircleX, IconTrash } from "./Icons";
 
 /**
  * The bar that appears once more than one file is selected.
@@ -14,7 +14,8 @@ import { IconReveal, IconStack, IconTranscript, IconCircleX } from "./Icons";
  * a second, competing set of actions on screen for every single click.
  */
 export function LibrarySelectionBar({
-  count, onTranscribe, onQueue, onReveal, onClear, batchLine, onBatchCancel,
+  count, onTranscribe, onQueue, onReveal, onMove, onDelete, deleteLabel, onClear,
+  batchLine, onBatchCancel,
 }: {
   count: number;
   /** Live batch status. Rendered even at zero selection: clearing the
@@ -25,6 +26,13 @@ export function LibrarySelectionBar({
   onTranscribe?: () => void;
   onQueue?: () => void;
   onReveal?: () => void;
+  /** File the whole selection into a folder. Shelves whose containers are
+   *  real directories (frames) offer this; the folder pane does not, because
+   *  moving files between library roots is a different, riskier act. */
+  onMove?: () => void;
+  /** Delete the whole selection. Asks first, at the call site. */
+  onDelete?: () => void;
+  deleteLabel?: string;
   onClear: () => void;
 }) {
   if (batchLine) {
@@ -58,6 +66,18 @@ export function LibrarySelectionBar({
       {onReveal && (
         <button className="btn btn-ghost" onClick={onReveal} title="Reveal the selected files in Finder">
           <IconReveal size={14} /> Reveal
+        </button>
+      )}
+      {onMove && (
+        <button className="btn btn-ghost" onClick={onMove} title="File every selected item into a folder">
+          <IconFolder size={14} /> Move
+        </button>
+      )}
+      {/* Destructive verb LAST, the order every menu in this app uses, so the
+          pointer never passes over it on the way to something safe. */}
+      {onDelete && (
+        <button className="btn btn-ghost cp-selbar-danger" onClick={onDelete} title={deleteLabel ?? "Delete the selected items"}>
+          <IconTrash size={14} /> Delete
         </button>
       )}
       <button className="btn btn-ghost" onClick={onClear} title="Clear the selection (Esc)">

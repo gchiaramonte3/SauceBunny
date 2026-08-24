@@ -73,6 +73,17 @@ type Props = {
   tags?: readonly import("../bindings/FinderTag").FinderTag[];
   onToggleTagColor?: (index: import("../lib/finder-tags").TagColorIndex) => void;
   onClearTagColors?: () => void;
+  /**
+   * This card's identity for selection, the marquee band and drag.
+   *
+   * It used to be derived from the art (`art.kind === "local" ? art.path`),
+   * which quietly meant a card showing REMOTE art had no identity at all -
+   * so every web source and every grabbed frame was invisible to the band,
+   * which filters out nodes with no path. Shift-click and lasso appeared to
+   * be missing from those shelves when what was missing was the attribute
+   * they select by. Identity is not a property of the artwork.
+   */
+  selectionPath?: string;
   /** Highlights the card as the current browser selection. */
   selected?: boolean;
   /** Remove this item; surfaces as the LAST menu item, in danger text.
@@ -102,7 +113,7 @@ type Props = {
  */
 export function LibraryCard({
   title, detail, art, revealPath: revealPathProp, badge, duration, haveCopy, cellControls, onDelete, deleteLabel, onMove, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
-  onSelect, onContextSelect, onRename, selected, tags, onToggleTagColor, onClearTagColors,
+  onSelect, onContextSelect, onRename, selected, selectionPath, tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
   /** The ⋯ trigger. Separate from btnRef, which is the whole CARD: anchoring
@@ -187,7 +198,7 @@ export function LibraryCard({
         ref={btnRef}
         type="button"
         className={"cp-lib-card" + (selected ? " selected" : "")}
-        data-path={art.kind === "local" ? art.path : undefined}
+        data-path={selectionPath ?? (art.kind === "local" ? art.path : undefined)}
         onFocus={isVideo ? () => startCycle("focus") : undefined}
         onBlur={isVideo ? () => stopCycle("focus") : undefined}
         // Selection mode: single click selects, double-click opens. Home shelves

@@ -20,13 +20,26 @@ import {
  * keeps hitting the right items.
  */
 export function useMarquee({
-  containerRef, itemSelector, pathAttr = "data-path", onSelect, onEnd,
+  containerRef, itemSelector, pathAttr = "data-path", gutterSelector, onSelect, onEnd,
 }: {
   containerRef: React.RefObject<HTMLElement | null>;
   /** CSS selector matching one element per item. */
   itemSelector: string;
   /** Attribute on each item holding its path. */
   pathAttr?: string;
+  /**
+   * Extra elements that count as blank space.
+   *
+   * In the Library's folder pane the scroll container IS the grid, so every
+   * gap between cards is the container itself and `target === currentTarget`
+   * is the whole test. The web and frames shelves group their cards into
+   * per-source sections, so the gaps belong to a section or an inner grid
+   * two levels down and that test is almost never true - a band there could
+   * only be started on the pane's own padding. Naming those wrappers lets a
+   * press on them start a band, without loosening the rule for shelves that
+   * do not need it.
+   */
+  gutterSelector?: string;
   /** Called live during the drag with the paths the band covers. */
   onSelect: (paths: string[], mods: { shift: boolean; meta: boolean }) => void;
   /** Fired when the band finishes or is abandoned, so the caller can forget
@@ -41,8 +54,13 @@ export function useMarquee({
   const movedRef = useRef(false);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
-    // Only a press on the gutter itself, and only the primary button.
-    if (e.button !== 0 || e.target !== e.currentTarget) return;
+    // Only a press on blank space, and only the primary button. `matches` is
+    // tested against the exact target, so a press on a control inside a
+    // named wrapper is still that control's press, not a band.
+    if (e.button !== 0) return;
+    const onGutter = e.target === e.currentTarget
+      || (!!gutterSelector && e.target instanceof Element && e.target.matches(gutterSelector));
+    if (!onGutter) return;
     const el = containerRef.current;
     if (!el) return;
     const host = el.getBoundingClientRect();
@@ -69,7 +87,7 @@ export function useMarquee({
       })
       .filter((b) => b.path);
     el.setPointerCapture(e.pointerId);
-  }, [containerRef, itemSelector, pathAttr]);
+  }, [containerRef, itemSelector, pathAttr, gutterSelector]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const start = startRef.current;

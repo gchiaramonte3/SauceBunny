@@ -293,12 +293,92 @@ describe("web cards ARE library cards", () => {
     expect(document.querySelector(".cp-lib-card-have")).toBeNull();
   });
 
-  it("opening still goes through onOpenUrl", async () => {
+  it("opening goes through onOpenUrl, on the DOUBLE click", async () => {
+    // The shelf gained multi-select, so a single click is a selection
+    // gesture here exactly as it is in the folder pane, and opening moved to
+    // the double click. A wall of cards that supports shift-click ranges
+    // cannot also navigate away on the first click of one.
+    const { fireEvent } = await import("@testing-library/react");
     const opened: string[] = [];
     h.items = [item({ url: "https://youtube.com/watch?v=c", title: "Clip" })];
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={(u) => opened.push(u)} />);
     await screen.findAllByText("Clip");
-    (document.querySelector(".cp-lib-card") as HTMLButtonElement).click();
+    const card = document.querySelector(".cp-lib-card") as HTMLButtonElement;
+
+    fireEvent.click(card);
+    expect(opened, "a single click navigated away mid-selection").toEqual([]);
+    expect(card.classList.contains("selected")).toBe(true);
+
+    fireEvent.doubleClick(card);
     expect(opened).toEqual(["https://youtube.com/watch?v=c"]);
+  });
+});
+
+describe("selecting more than one clip", () => {
+  // Its own reset. Without one this block inherited nothing, so the DOM and
+  // the fixture list leaked in from whichever test ran before it and the
+  // shelf rendered five cards for a three-item fixture.
+  beforeEach(() => {
+    h.calls = []; h.items = []; document.body.innerHTML = "";
+    localStorage.clear();
+    __resetWebCollectionStore();
+  });
+
+  const clips = () => [
+    item({ url: "https://youtube.com/watch?v=1", title: "One", site: "youtube.com" }),
+    item({ url: "https://youtube.com/watch?v=2", title: "Two", site: "youtube.com" }),
+    item({ url: "https://youtube.com/watch?v=3", title: "Three", site: "youtube.com" }),
+  ];
+
+  it("gives every card its URL as identity, which selection selects by", async () => {
+    h.items = [item({ url: "https://youtube.com/watch?v=c", title: "Clip" })];
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findAllByText("Clip");
+    expect(document.querySelector(".cp-lib-card")!.getAttribute("data-path"))
+      .toBe("https://youtube.com/watch?v=c");
+  });
+
+  it("shift-click takes the range between, in DISPLAY order", async () => {
+    // Deliberately driven off the rendered order rather than the order the
+    // fixtures were declared in: the shelf sorts, and a range means the run
+    // the user can SEE between the two clicks. Asserting against fixture
+    // order passed only by luck and hid which rule was being tested.
+    const { fireEvent } = await import("@testing-library/react");
+    h.items = clips();
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findAllByText("One");
+
+    const cards = [...document.querySelectorAll(".cp-lib-card")] as HTMLElement[];
+    expect(cards).toHaveLength(3);
+    fireEvent.click(cards[0]);
+    fireEvent.click(cards[2], { shiftKey: true });
+    expect(document.querySelectorAll(".cp-lib-card.selected")).toHaveLength(3);
+
+    // ...and a shorter range is exactly the run between, not everything.
+    fireEvent.click(cards[0]);
+    fireEvent.click(cards[1], { shiftKey: true });
+    const selected = [...document.querySelectorAll(".cp-lib-card.selected")];
+    expect(selected).toHaveLength(2);
+    expect(selected[0]).toBe(cards[0]);
+    expect(selected[1]).toBe(cards[1]);
+  });
+
+  it("forgetting a selection asks once and forgets all of them", async () => {
+    const { fireEvent, waitFor } = await import("@testing-library/react");
+    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(true);
+    h.items = clips();
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findAllByText("One");
+
+    const cards = [...document.querySelectorAll(".cp-lib-card")] as HTMLElement[];
+    fireEvent.click(cards[0]);
+    fireEvent.click(cards[2], { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /Delete/ }));
+
+    await waitFor(() => {
+      expect(h.calls.filter(([c]) => c === "forget_cached_web")).toHaveLength(3);
+    });
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    confirmSpy.mockRestore();
   });
 });

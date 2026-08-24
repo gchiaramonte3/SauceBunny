@@ -247,3 +247,120 @@ describe("filing a frame into a folder", () => {
     });
   });
 });
+
+describe("selecting more than one frame", () => {
+  beforeEach(() => { h.calls = []; h.items = []; document.body.innerHTML = ""; localStorage.clear(); });
+
+  const four = () => [
+    frame({ path: "/f/1.jpg", name: "a1.jpg", source: "Bear", created_at: 40 }),
+    frame({ path: "/f/2.jpg", name: "a2.jpg", source: "Bear", created_at: 30 }),
+    frame({ path: "/f/3.jpg", name: "a3.jpg", source: "Bear", created_at: 20 }),
+    frame({ path: "/f/4.jpg", name: "a4.jpg", source: "Bear", created_at: 10 }),
+  ];
+
+  /** The card button carrying a given frame name. */
+  const cardFor = (name: string) =>
+    [...document.querySelectorAll(".cp-lib-card")].find(
+      (c) => c.querySelector(".cp-lib-card-title")?.textContent?.trim() === name,
+    ) as HTMLElement;
+
+  it("gives every card an identity, which is what selection selects by", async () => {
+    // The bug: identity was derived from the ART, and a frame's art is
+    // REMOTE (the still through the asset protocol), so these cards carried
+    // no data-path and were invisible to the band, which skips nodes without
+    // one. The shelf looked like it was missing the feature.
+    h.items = [frame()];
+    mount();
+    await screen.findAllByText("Bear_00012304.jpg");
+    const card = document.querySelector(".cp-lib-card")!;
+    expect(card.getAttribute("data-path")).toBe("/Docs/Sauce Bunny/Frames/Bear_00012304.jpg");
+  });
+
+  it("shift-click takes the range between, in display order", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    h.items = four();
+    mount();
+    await screen.findAllByText("a1.jpg");
+
+    fireEvent.click(cardFor("a1.jpg"));
+    fireEvent.click(cardFor("a3.jpg"), { shiftKey: true });
+
+    const selected = [...document.querySelectorAll(".cp-lib-card.selected")]
+      .map((c) => c.querySelector(".cp-lib-card-title")?.textContent?.trim());
+    expect(selected).toEqual(["a1.jpg", "a2.jpg", "a3.jpg"]);
+  });
+
+  it("meta-click toggles one without losing the rest", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    h.items = four();
+    mount();
+    await screen.findAllByText("a1.jpg");
+
+    fireEvent.click(cardFor("a1.jpg"));
+    fireEvent.click(cardFor("a3.jpg"), { metaKey: true });
+    expect(document.querySelectorAll(".cp-lib-card.selected")).toHaveLength(2);
+
+    fireEvent.click(cardFor("a3.jpg"), { metaKey: true });
+    expect(document.querySelectorAll(".cp-lib-card.selected")).toHaveLength(1);
+  });
+
+  it("the batch bar appears at two, not at one", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    h.items = four();
+    mount();
+    await screen.findAllByText("a1.jpg");
+
+    fireEvent.click(cardFor("a1.jpg"));
+    expect(document.querySelector(".cp-lib-selbar")).toBeNull();
+
+    fireEvent.click(cardFor("a2.jpg"), { shiftKey: true });
+    expect(document.querySelector(".cp-lib-selbar")).toBeTruthy();
+    expect(screen.getByText("2 selected")).toBeTruthy();
+  });
+
+  it("deleting a selection asks ONCE and removes all of them", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(true);
+    h.items = four();
+    mount();
+    await screen.findAllByText("a1.jpg");
+
+    fireEvent.click(cardFor("a1.jpg"));
+    fireEvent.click(cardFor("a3.jpg"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /Delete/ }));
+
+    await waitFor(() => {
+      expect(h.calls.filter(([c]) => c === "delete_frame")).toHaveLength(3);
+    });
+    // One question for the batch, not one per file.
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    confirmSpy.mockRestore();
+  });
+
+  it("declining the batch ask deletes nothing", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(false);
+    h.items = four();
+    mount();
+    await screen.findAllByText("a1.jpg");
+    fireEvent.click(cardFor("a1.jpg"));
+    fireEvent.click(cardFor("a3.jpg"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /Delete/ }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.calls.filter(([c]) => c === "delete_frame")).toHaveLength(0);
+    confirmSpy.mockRestore();
+  });
+
+  it("a single click still opens the viewer on double-click, not on the first", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    h.items = four();
+    mount();
+    await screen.findAllByText("a1.jpg");
+
+    fireEvent.click(cardFor("a1.jpg"));
+    expect(screen.queryByRole("dialog", { name: /Frame/ })).toBeNull();
+
+    fireEvent.doubleClick(cardFor("a1.jpg"));
+    expect(await screen.findByRole("dialog", { name: /Frame/ })).toBeTruthy();
+  });
+});

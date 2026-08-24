@@ -8,6 +8,9 @@ import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { secondsToClock } from "../lib/timecode";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
 import { LibraryCard } from "./LibraryCard";
+import { LibrarySelectionBar } from "./LibrarySelectionBar";
+import { useGridSelection } from "../hooks/use-grid-selection";
+import { useMarquee } from "../hooks/use-marquee";
 import { WebListRows } from "./WebListRows";
 import { WebCollectionMenu } from "./WebCollectionMenu";
 import {
@@ -112,6 +115,7 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
   useEffect(() => () => { void flushWebCollections(); }, []);
   const collections = useSyncExternalStore(subscribeWebCollections, getWebCollections);
   const [armedCollection, setArmedCollection] = useState<string | null>(null);
+  const paneRef = useRef<HTMLDivElement>(null);
 
   const forget = useCallback((url: string) => {
     // Optimistic: the row goes now, because the disk work is a file delete and
@@ -120,15 +124,10 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
     void invoke("forget_cached_web", { url }).catch(load);
   }, [load]);
 
-  if (items === null) return <div className="cp-web-empty">Reading the cache…</div>;
-  if (items.length === 0) {
-    return (
-      <div className="cp-web-empty">
-        Nothing cached from the web yet. Fetch a URL and it will appear here,
-        ready to re-open without waiting for extraction again.
-      </div>
-    );
-  }
+  // Derivations run BEFORE the early returns: the selection hook below needs
+  // the displayed order, and a hook cannot be called after a conditional
+  // return. `all` stands in for a cache that has not been read yet.
+  const all = items ?? [];
 
   // Search flattens the shelves into one result list - a needle that matches
   // four sites as four one-row shelves reads as clutter, and the folder
@@ -136,14 +135,14 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
   // GRID keeps its site shelves, sorted within themselves; the LIST is one
   // flat table regardless, because Site is a column there and per-shelf
   // tables would repeat the header four times down the page.
-  const filtered = filterCachedWeb(items, needle);
+  const filtered = filterCachedWeb(all, needle);
   const sortedFlat = sortCachedWeb(filtered, prefs.sort, prefs.dir);
   // A collected item leaves its site shelf - it has been FILED, and showing
   // it twice would make the fold read as a search result rather than an
   // organisation. A collection may hold URLs the cache has since forgotten;
   // those simply have nothing to render until the source is fetched again.
   // Search and the list view ignore the fold entirely and stay flat.
-  const byUrl = new Map(items.map((i) => [i.url, i]));
+  const byUrl = new Map(all.map((i) => [i.url, i]));
   const collected = new Set(collections.flatMap((c) => c.urls));
   const collectionGroups: { collection: WebCollection; items: CachedWebItem[] }[] =
     prefs.view === "grid" && !needle
@@ -156,8 +155,8 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
         }))
       : [];
   const unfiled = prefs.view === "grid" && !needle
-    ? items.filter((i) => !collected.has(i.url))
-    : items;
+    ? all.filter((i) => !collected.has(i.url))
+    : all;
   const groups = prefs.view === "list"
     ? (sortedFlat.length ? [{ site: "", items: sortedFlat }] : [])
     : needle
@@ -191,6 +190,12 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
     const size = it.size_bytes ? formatBytes(it.size_bytes) : null;
     return (
       <LibraryCard
+        // A web source's identity is its URL. The card used to derive one
+        // from LOCAL art only, and these cards carry a remote thumbnail, so
+        // every one of them was invisible to selection and to the band.
+        selectionPath={it.url}
+        selected={grid.selected.has(it.url)}
+        onSelect={(e) => grid.onItemClick(it.url, e)}
         key={it.url}
         title={it.title ?? it.url}
         detail={`${it.uploader ?? siteName(it.url)}${size ? ` · ${size}` : ""}`}
@@ -219,8 +224,55 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
     );
   };
 
-  const withCopy = items.filter((i) => i.path).length;
-  const bytes = items.reduce((n, i) => n + (i.size_bytes ?? 0), 0);
+  const withCopy = all.filter((i) => i.path).length;
+  const bytes = all.reduce((n, i) => n + (i.size_bytes ?? 0), 0);
+
+  // Display order for ranges and the band: collections first, then the site
+  // shelves, exactly as they are painted.
+  const shown = [
+    ...collectionGroups.flatMap((g) => g.items),
+    ...groups.flatMap((g) => g.items),
+  ];
+  const grid = useGridSelection(shown.map((i) => i.url));
+  const { selectedPaths: selectedUrls } = grid;
+  const marquee = useMarquee({
+    containerRef: paneRef,
+    itemSelector: ".cp-lib-card",
+    gutterSelector: ".cp-web-grid, .cp-web-shelf, .cp-web-summary",
+    onSelect: grid.onMarquee,
+    onEnd: grid.onMarqueeEnd,
+  });
+  const band = marquee.band && (
+    <div
+      className="cp-lib-marquee"
+      aria-hidden="true"
+      style={{
+        left: marquee.band.left,
+        top: marquee.band.top,
+        width: marquee.band.right - marquee.band.left,
+        height: marquee.band.bottom - marquee.band.top,
+      }}
+    />
+  );
+
+  if (items === null) return <div className="cp-web-empty">Reading the cache…</div>;
+  if (items.length === 0) {
+    return (
+      <div className="cp-web-empty">
+        Nothing cached from the web yet. Fetch a URL and it will appear here,
+        ready to re-open without waiting for extraction again.
+      </div>
+    );
+  }
+
+  const forgetMany = (urls: readonly string[]) => {
+    const n = urls.length;
+    if (!confirm(n === 1
+      ? "Forget this clip? Its cached copy is removed from this Mac."
+      : `Forget ${n} clips? Their cached copies are removed from this Mac.`)) return;
+    for (const u of urls) forget(u);
+    grid.clear();
+  };
 
   return (
     <div className="cp-web-view">
@@ -239,9 +291,21 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
         treeOpen={treeOpen}
         onShowTree={onShowTree}
       />
-      <div className="cp-web-pane">
+      <LibrarySelectionBar
+        count={selectedUrls.length}
+        onDelete={() => forgetMany(selectedUrls)}
+        deleteLabel="Forget the selected clips"
+        onClear={grid.clear}
+      />
+      <div
+        ref={paneRef}
+        className="cp-web-pane"
+        onClick={(e) => { if (!marquee.dragging() && e.target === e.currentTarget) grid.clear(); }}
+        {...marquee.handlers}
+      >
+      {band}
       <div className="cp-web-summary">
-        {items.length} cached · {withCopy} downloaded
+        {all.length} cached · {withCopy} downloaded
         {bytes > 0 ? ` · ${formatBytes(bytes)} on disk` : ""}
       </div>
       {needle && groups.length === 0 && (

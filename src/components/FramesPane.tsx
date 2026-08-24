@@ -12,6 +12,9 @@ import { LibraryCard } from "./LibraryCard";
 import { LibraryFolderCard } from "./LibraryFolderCard";
 import { FrameMoveDialog } from "./FrameMoveDialog";
 import { FramePreview, revealFrame } from "./FramePreview";
+import { useGridSelection } from "../hooks/use-grid-selection";
+import { useMarquee } from "../hooks/use-marquee";
+import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { IconPlus } from "./Icons";
 import { FrameListRows } from "./FrameListRows";
 
@@ -99,6 +102,7 @@ export function FramesPane({ treeOpen, onShowTree }: {
   const [moving, setMoving] = useState<FrameItem | null>(null);
   // Which frame the viewer is showing, by path. Null = closed.
   const [preview, setPreview] = useState<string | null>(null);
+  const paneRef = useRef<HTMLDivElement>(null);
   const createFolder = useCallback(async (name: string) => {
     try {
       await invoke("create_frames_folder", { parent: open, name });
@@ -123,21 +127,17 @@ export function FramesPane({ treeOpen, onShowTree }: {
     void invoke("delete_frame", { path }).catch(load);
   }, [load]);
 
-  if (items === null) return <div className="cp-web-empty">Reading your frames…</div>;
-  if (items.length === 0) {
-    return (
-      <div className="cp-web-empty">
-        No frames yet. Press the camera in the player to grab the frame you are
-        looking at, and it will land here.
-      </div>
-    );
-  }
+  // EVERY DERIVATION RUNS BEFORE THE EARLY RETURNS, because the selection
+  // hook below needs the displayed order and hooks cannot be called after a
+  // conditional return. `all` stands in for a shelf that has not loaded yet,
+  // which is the same shape as an empty one.
+  const all = items ?? [];
 
   // ONE level at a time. Search and the list view flatten the whole tree
   // instead - the web pane's rule, and the reason is the same: a needle that
   // matched four folders as four one-row shelves would read as clutter.
-  const level = frameLevel(items, open);
-  const scoped = needle || prefs.view === "list" ? items : level.here;
+  const level = frameLevel(all, open);
+  const scoped = needle || prefs.view === "list" ? all : level.here;
   const filtered = filterFrames(scoped, needle);
   const sortedFlat = sortFrames(filtered, prefs.sort, prefs.dir);
   const showFolders = prefs.view === "grid" && !needle && level.folders.length > 0;
@@ -153,12 +153,60 @@ export function FramesPane({ treeOpen, onShowTree }: {
           source: g.source,
           items: sortFrames(g.items, prefs.sort, prefs.dir),
         }));
-  const bytes = items.reduce((n, i) => n + i.size_bytes, 0);
+  const bytes = all.reduce((n, i) => n + i.size_bytes, 0);
   // Exactly what is on screen, in the order it is on screen - so the
   // viewer's Left/Right walk the shelf the user is looking at rather than
   // some private order, and stepping crosses source bundles the way the eye
   // does.
   const shown = groups.flatMap((g) => g.items);
+  // The same order the marquee and shift-click run ranges over: what is on
+  // screen, as it is on screen.
+  const grid = useGridSelection(shown.map((f) => f.path));
+  const { selectedPaths } = grid;
+  const marquee = useMarquee({
+    containerRef: paneRef,
+    itemSelector: ".cp-lib-card",
+    // Cards here live inside a per-source section, so the gaps between them
+    // belong to the section or its grid rather than to the scroll container.
+    // Without naming those, a band could only start on the pane's padding.
+    gutterSelector: ".cp-web-grid, .cp-web-shelf, .cp-web-summary",
+    onSelect: grid.onMarquee,
+    onEnd: grid.onMarqueeEnd,
+  });
+  const band = marquee.band && (
+    <div
+      className="cp-lib-marquee"
+      aria-hidden="true"
+      style={{
+        left: marquee.band.left,
+        top: marquee.band.top,
+        width: marquee.band.right - marquee.band.left,
+        height: marquee.band.bottom - marquee.band.top,
+      }}
+    />
+  );
+
+  if (items === null) return <div className="cp-web-empty">Reading your frames…</div>;
+  if (items.length === 0) {
+    return (
+      <div className="cp-web-empty">
+        No frames yet. Press the camera in the player to grab the frame you are
+        looking at, and it will land here.
+      </div>
+    );
+  }
+
+  // Batch verbs act on the selection when the clicked item is part of it,
+  // and on the clicked item alone otherwise - the rule every file manager
+  // uses, and the one the folder pane already follows.
+  const removeMany = (paths: readonly string[]) => {
+    const n = paths.length;
+    if (!confirm(n === 1
+      ? `Delete this frame? It is removed from this Mac.`
+      : `Delete ${n} frames? They are removed from this Mac.`)) return;
+    for (const p of paths) remove(p);
+    grid.clear();
+  };
 
   const frameCard = (it: FrameItem) => {
     const tc = formatFrameTimecode(it.timecode);
@@ -173,6 +221,13 @@ export function FramesPane({ treeOpen, onShowTree }: {
         art={{ kind: "remote", url: assetUrl(it.path) }}
         duration={tc}
         revealPath={it.path}
+        // Identity for selection, the band and drag. Frames show REMOTE art
+        // (the still is its own poster, through the asset protocol), and the
+        // card used to take its identity from local art only - which is why
+        // this shelf had no working selection at all.
+        selectionPath={it.path}
+        selected={grid.selected.has(it.path)}
+        onSelect={(e) => grid.onItemClick(it.path, e)}
         onOpen={() => setPreview(it.path)}
         requestThumb={async () => null}
         // Delete lives in the card's ⋯ menu, beside Reveal in Finder and
@@ -228,7 +283,25 @@ export function FramesPane({ treeOpen, onShowTree }: {
           onClose={() => setMoving(null)}
         />
       )}
-      <div className="cp-web-pane">
+      <LibrarySelectionBar
+        count={selectedPaths.length}
+        onReveal={() => { const f = selectedPaths[0]; if (f) revealFrame(f); }}
+        onMove={() => {
+          // One dialog for the whole selection: the destination is the same
+          // for all of them, so asking once per frame would be ceremony.
+          const first = all.find((f) => f.path === selectedPaths[0]);
+          if (first) setMoving(first);
+        }}
+        onDelete={() => removeMany(selectedPaths)}
+        onClear={grid.clear}
+      />
+      <div
+        ref={paneRef}
+        className="cp-web-pane"
+        onClick={(e) => { if (!marquee.dragging() && e.target === e.currentTarget) grid.clear(); }}
+        {...marquee.handlers}
+      >
+        {band}
         <div className="cp-web-summary">
           {items.length} {items.length === 1 ? "frame" : "frames"}
           {bytes > 0 ? ` · ${formatBytes(bytes)} on disk` : ""}

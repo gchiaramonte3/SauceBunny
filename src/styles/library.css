@@ -1763,12 +1763,21 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* The selection bar anchors HERE and not to the pane below, because the
+     pane is the scroll container: a bar positioned inside it would scroll
+     away with the thumbnails instead of staying under the user's pointer. */
+  position: relative;
 }
 .cp-web-pane {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--s-4) var(--s-4) var(--s-6);
+  /* Bottom room for the floating selection bar, so it never covers the last
+     row of cards. Matches the folder pane's --s-10 for the same reason. */
+  padding: var(--s-4) var(--s-4) var(--s-10);
+  /* The marquee band is painted in this box's CONTENT coordinates, so it
+     stays glued to the cards while the pane scrolls under it. */
+  position: relative;
 }
 .cp-web-empty {
   padding: var(--s-6) var(--s-5);
@@ -2216,3 +2225,10 @@
   white-space: nowrap;
 }
 .cp-framepv-foot .btn { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+
+/* Destructive verb in the selection bar. Muted until hover, like every other
+   danger affordance here: it should be findable, not loud. */
+.cp-lib-selbar .btn.cp-selbar-danger:hover {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45.0%, transparent);
+}

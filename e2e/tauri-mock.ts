@@ -156,6 +156,36 @@ export function tauriMockInit(expectedBuildId: string): void {
     get_file_size: 0,
     // The Library browser's detail panel + card menu "Reveal in Finder".
     reveal_in_finder: null,
+    // The Frames shelf. Six stills across two films, one of them filed into
+    // a folder, so the shelf has both loose cards and a container tile.
+    list_frames: () => {
+      const f = (n: number, source: string, folder: string) => ({
+        path: `/e2e-mock/Frames/${folder ? folder + "/" : ""}${source}_${String(n).padStart(8, "0")}.jpg`,
+        name: `${source}_${String(n).padStart(8, "0")}.jpg`,
+        source, folder,
+        timecode: String(n).padStart(8, "0"),
+        created_at: 1749000000 - n,
+        size_bytes: 40960 + n,
+      });
+      return [
+        f(100, "Bear", ""), f(200, "Bear", ""), f(300, "Bear", ""),
+        f(400, "Solo", ""), f(500, "Solo", ""),
+        f(600, "Bear", "Selects"),
+      ];
+    },
+    delete_frame: null,
+    create_frames_folder: "/e2e-mock/Frames/New",
+    move_frame_to_folder: null,
+    // The web shelf.
+    list_cached_web: () => ([
+      { url: "https://youtube.com/watch?v=1", title: "First clip", thumbnail: null,
+        uploader: "Chan", duration_seconds: 61, fetched_at: 1749000300, path: null, size_bytes: null },
+      { url: "https://youtube.com/watch?v=2", title: "Second clip", thumbnail: null,
+        uploader: "Chan", duration_seconds: 62, fetched_at: 1749000200, path: "/e2e-mock/cache/2.mp4", size_bytes: 2048 },
+      { url: "https://vimeo.com/3", title: "Third clip", thumbnail: null,
+        uploader: "Other", duration_seconds: 63, fetched_at: 1749000100, path: null, size_bytes: null },
+    ]),
+    forget_cached_web: null,
     // Library scan (LibraryView) — a small deterministic tree derived from
     // the requested root: two files + one subfolder with one file. Roots
     // containing "missing" reject with a typed AppError, exercising the
