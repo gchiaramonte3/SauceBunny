@@ -5,6 +5,165 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-08-23
+
+Thirteen commits of bug-fixing, led by four ways the app could lose work you
+had already done. A verified code review and a UX review found most of these;
+the rest came out of a storage audit (`docs/DATA-MODEL.md`).
+
+### Fixed
+
+- **Batch transcribe ran every file at once.** `transcribe_local_file` returns
+  a job id in milliseconds and does the work on a spawned task, and the batch
+  loop treated that return as the work being finished. Selecting twelve files
+  started twelve whisper processes, each loading its own copy of the model, and
+  marked all twelve done inside about fifty milliseconds. On a 16 GB Mac with a
+  large model that is a swap storm; on 8 GB it is an out-of-memory. Stop was
+  dead for the same reason: the job id was set and cleared inside one turn, so
+  there was nothing left to cancel. It now waits on the `transcript-done` event
+  for its own job, one file at a time, which is what the module has claimed to
+  do since it was written.
+
+- **Two windows sharing casts.json, and the last writer erased the other.** The
+  speaker roster lives in a view both the main window and the floating panel
+  render, and each wrote the whole file on every change. Whichever saved last
+  erased everything the other had added, with no error and no way back. The
+  store now re-reads and merges before overwriting, tracking what this window
+  added and what it deleted so a merge can tell "I never had this" from "I
+  deleted this", and a successful write tells the other window to re-read.
+
+- **Turning a tag colour off deleted every tag wearing it, from Finder.** The
+  remove branch dropped every tag matching the colour, so a tag you had named
+  and coloured red was permanently removed from your real file by clicking the
+  red swatch to turn red off. Only a tag named after its colour is removed now;
+  anything you named keeps its name and loses the colour.
+
+- **In/out marks are remembered.** They were the only hand-made thing in the
+  workspace that was not: nulled on every source switch, and gone on quit,
+  while chosen posters, timecodes, chapters, review notes and the whole clip
+  queue all persist. Stored in frames, keyed the same way reviews are, so a
+  renamed file keeps its marks, and clamped on restore in case the source got
+  shorter.
+
+- **A store file from a newer Sauce Bunny is no longer silently rewritten.**
+  Every file store stamps a schema version and nothing read it back, so a file
+  written by a newer build was parsed under today's rules, its unknown fields
+  dropped, and the result written back over your Documents folder. Such a file
+  is now read as far as this build understands it and never written, with a
+  banner saying why.
+
+- **New Project created a folder nothing could show.** The shelf derived its
+  folder list from a scan that returns files, so a project existed only once
+  something was already filed in it. On a fresh install every project is empty
+  by definition, so the button did nothing on every press. Related, and fixed
+  with it: `projects.json` was written to the default library rather than the
+  one in use, so pointing the library at an external drive filed the metadata
+  away from the folders it described; renaming a project orphaned every speaker
+  name and history entry inside it, both keyed by path; and a case-only rename
+  was refused as a collision with itself, because APFS is case-insensitive.
+
+- **The MP3 export could not be stopped, then reported success.** The encode
+  ran with no registered process handle, so Stop did nothing and the export
+  finished anyway.
+
+- **The export queue could stop mid-run and stay stopped.** Loading a different
+  source while the queue ran left the runner waiting on a callback nothing
+  would make: no error, no failed row, no way to restart short of relaunching.
+  A failed row also had no way back, since nothing could set it to queued
+  again and only queued rows persist, so quitting dropped it. There is a Try
+  again now.
+
+- **An export failure took the video with it and blamed the wrong thing.** The
+  running player unmounted and was replaced by "Couldn't resolve source" over a
+  file that had resolved fine, with no Dismiss and no Retry, and the only way
+  back cleared the marks that produced the export. Export faults no longer
+  touch the source.
+
+- **A long local clip export failed instead of using the other path.** Past
+  4 GB the in-app converter throws, and the export reported the raw
+  `ArrayBuffer exceeded maximum size` after running the whole conversion. A
+  size that does not fit now routes to the ffmpeg pipeline beside it, which
+  streams and is doing the same lossless copy, and is checked before the
+  conversion starts rather than after.
+
+- **A failed co-review join disabled Join until you quit.** Pasting a wrong or
+  expired code left the button stuck on "Connecting…" forever, which is the
+  ordinary first-run mistake.
+
+- **The raw proxy route skipped its upstream check.** Its two siblings validate
+  the target; this one checked only the scheme, so a payload naming a loopback
+  port, a private address, or a URL carrying credentials was fetched and
+  streamed back. The capability token still stood in front of it, so this was
+  defence in depth rather than an open door.
+
+- **Ctrl is no longer treated as ⌘.** macOS binds the emacs line-editing keys
+  in every text field, so Ctrl+K in the URL bar or a comment box opened the
+  command palette on top of what you were typing. Every shortcut this app
+  publishes is written and shown as ⌘; a Ctrl combo now falls through to the
+  system.
+
+- Chapter and comment pins that fell close together could draw on one pixel,
+  because the merge compared against the last pin emitted rather than the last
+  of that kind. The delete control on review comments was named "✕" to a screen
+  reader, and a developer smoke test shipped as a permanent row in every
+  command palette.
+
+### Added
+
+- **A transcript selection can become a clip.** Right-clicking selected cues
+  now leads with "Mark in/out from N lines" and "Add to queue", using the end
+  of the last cue. Cutting a quote you had just found previously meant marking
+  the first line and then scrubbing for the end, because clicking the last line
+  seeks to where it begins.
+
+- **The export folder has a default** (`~/Movies/Sauce Bunny`). It was the one
+  setting with none, and export requires it, so the primary button in the app
+  sat disabled on a fresh install.
+
+- **Past screenings are reachable.** Every co-review has always written a full
+  record of the session to `~/Documents/Sauce Bunny/Screenings/`, and nothing
+  in the app could open one. There is a list in the co-review lobby now, with
+  Reveal to open the file.
+
+- **Marker export is in the command palette**, keyworded by every NLE it can
+  write for. It could write Avid, Premiere, Resolve, Final Cut and CSV from
+  behind an unlabelled glyph, inside a tab, inside a drawer, and appeared in no
+  menu, palette or shortcut sheet.
+
+- **The Transcripts view can accept a transcript.** On a fresh install the view
+  named Transcripts offered search, sort and filters over "No transcripts yet"
+  and no way to add one, and dropping an .srt was refused with "Transcript
+  needs media", which was never true. It offers Import and Make one in Clip,
+  and hides the filter chrome while there is nothing to filter.
+
+- **The first speaker-detection run says it is downloading**, rather than
+  showing the same "Loading speaker models…" for a cached run and a several
+  hundred megabyte fetch with no percentage behind it.
+
+### Changed
+
+- **The in/out mark is a chevron rather than a bracket**, everywhere a clip
+  mark is set or shown: the transport buttons, the timeline, the marked region,
+  and the reader's position bar. The comment-range tool keeps the bracket, on
+  purpose, since it is drawn on the same track in a different colour.
+
+- **A comment is stamped with the frame you were looking at.** The time was
+  read when you pressed Enter, so a note typed while the video kept rolling
+  landed wherever the playhead had drifted to. It is latched on the first
+  keystroke now, and shown latched. Drawing pauses playback for the same
+  reason: the frame moved out from under the stroke while it was being made.
+
+- **"Media never leaves each machine"** is gone from the co-review lobby, which
+  is the screen where you are about to send media to another machine, and on a
+  relayed path it passes through a relay. It says what is true and still
+  reassuring: no server sees it, no account, no upload.
+
+- Reveal in Finder on a transcript card shows the transcript, not the source
+  video whose poster the card wears.
+
+- The floating panel no longer reads the whole review store at boot for
+  something it cannot open.
+
 ## [0.4.1] — 2026-08-23
 
 ### Changed

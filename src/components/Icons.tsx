@@ -241,23 +241,32 @@ export const IconMarkOut = (p: IconProps) => (
     />
   </Icon>
 );
-// Clear both marks. The same mirrored pair at 0.6 scale, pushed 3.8 apart to
-// open a 5.8-wide gap, with the X in it. Scaling is uniform so the cap stays
-// a circle: squashing the glyph vertically to make room would turn the round
-// ends into ellipses and stop it matching the two icons beside it.
+// Clear both marks — Avid's dialect, which the user asked for by name: the two
+// marks SIDE BY SIDE and inverted in colour, rather than the two of them held
+// apart by an X. Same glyph as IconMarkIn / IconMarkOut at 0.78, pushed 2.2
+// apart so the stems sit adjacent in the middle and the wings still point
+// outward, which is what keeps it reading as the same pair as the two buttons
+// beside it.
+//
+// One path, fillRule="evenodd": the plate is the outer subpath and the two
+// glyphs are holes in it. That is what "inverted" means here, and it is why
+// this cannot be three separate paths.
+//
+// Sized by looking at it, not by arithmetic. The glyph is 21 of the 24 box, so
+// putting it inside a plate costs height, and a knockout thinner than about
+// 1.3px at the 16px this renders at turns to mud on a non-retina display.
+// Uniform 0.78 with a 20.8-tall plate was the balance: tall like the two
+// glyphs beside it (a squat wide plate reads as a different family) with a
+// slit thick enough to survive. Verified at true 1:1 in the real button
+// cluster, not at a zoom.
 export const IconClearMarks = (p: IconProps) => (
-  <Icon {...p} strokeWidth={1.8}>
+  <Icon {...p}>
     <path
-      d="M7.525 14.1902V17.5125C7.525 17.9474 7.8776 18.3 8.3125 18.3C8.7474 18.3 9.1 17.9474 9.1 17.5125V13.4098L7.249 12L9.1 10.5902V6.4875C9.1 6.0526 8.7474 5.7 8.3125 5.7C7.8776 5.7 7.525 6.0526 7.525 6.4875V9.8098L4.6509 12L7.525 14.1902Z"
+      d="M6.5 3.6H17.5A3.5 3.5 0 0 1 21 7.1V20.900000000000002A3.5 3.5 0 0 1 17.5 24.400000000000002H6.5A3.5 3.5 0 0 1 3 20.900000000000002V7.1A3.5 3.5 0 0 1 6.5 3.6Z M8.9225 14.8473V19.1663C8.9225 19.7316 9.3808 20.19 9.9462 20.19C10.5117 20.19 10.97 19.7316 10.97 19.1663V13.8327L8.5637 12L10.97 10.1673V4.8337C10.97 4.2683 10.5117 3.81 9.9462 3.81C9.3808 3.81 8.9225 4.2683 8.9225 4.8337V9.1527L5.1862 12L8.9225 14.8473Z M15.0775 14.8473V19.1663C15.0775 19.7316 14.6192 20.19 14.0538 20.19C13.4883 20.19 13.03 19.7316 13.03 19.1663V13.8327L15.4363 12L13.03 10.1673V4.8337C13.03 4.2683 13.4883 3.81 14.0538 3.81C14.6192 3.81 15.0775 4.2683 15.0775 4.8337V9.1527L18.8138 12L15.0775 14.8473Z"
       fill="currentColor"
       stroke="none"
+      fillRule="evenodd"
     />
-    <path
-      d="M16.475 14.1902V17.5125C16.475 17.9474 16.1224 18.3 15.6875 18.3C15.2526 18.3 14.9 17.9474 14.9 17.5125V13.4098L16.751 12L14.9 10.5902V6.4875C14.9 6.0526 15.2526 5.7 15.6875 5.7C16.1224 5.7 16.475 6.0526 16.475 6.4875V9.8098L19.3491 12L16.475 14.1902Z"
-      fill="currentColor"
-      stroke="none"
-    />
-    <path d="M10.1 10.1l3.8 3.8M13.9 10.1l-3.8 3.8" />
   </Icon>
 );
 // In/out span — the review comment-range tool. Deliberately STILL the "[" /

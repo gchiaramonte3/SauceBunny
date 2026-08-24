@@ -1,6 +1,6 @@
 [package]
 name = "sauce-bunny"
-version = "0.4.1"
+version = "0.4.2"
 description = "Sauce Bunny — local-first transcription + diarization"
 authors = ["Sauce Bunny contributors"]
 edition = "2021"

@@ -296,16 +296,25 @@
   /* Pixel-tight: the band lives exactly inside the track — no bleed above
      or below the filmstrip. */
   top: 0; bottom: 0;
-  /* Liquid-glass fill: the film INSIDE the selection lifts (brighter, more
-     saturated) instead of hiding under a muddy tint — the selected section
-     reads like it's behind polished glass. */
-  background: rgba(var(--marker-rgb), 0.14);
-  backdrop-filter: brightness(1.3) saturate(1.4);
-  -webkit-backdrop-filter: brightness(1.3) saturate(1.4);
+  /* The film inside the selection is DIMMED, not lifted (user directive,
+     2026-08-24: "it needs to dim by 50% at least in the selects area so we can
+     have the color come through more").
+     This reverses the original liquid-glass idea, which brightened the
+     selected film by 1.3x. That read as polished glass on a dark frame and as
+     nothing at all on a bright one, and either way it was competing with the
+     marker violet for the same pixels: a 14% tint over BRIGHTENED film is the
+     one combination in which the violet cannot be seen. Dimming to 0.45 and
+     roughly doubling the tint inverts that — the selection is now the darker,
+     more saturated stretch of the strip, which is also what every NLE does. */
+  background: rgba(var(--marker-rgb), 0.32);
+  backdrop-filter: brightness(0.45) saturate(1.15);
+  -webkit-backdrop-filter: brightness(0.45) saturate(1.15);
   border-left: 2px solid var(--marker);
   border-right: 2px solid var(--marker);
-  /* Crisp inner highlight along the glass edges, no blur. */
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -1px 0 rgba(255,255,255,0.14);
+  /* Kept, but halved: these were edge-lighting a band that used to be
+     brighter than the strip. Over a dimmed band the old values read as two
+     stray bright lines rather than as an edge. */
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 0 -1px 0 rgba(255,255,255,0.07);
   z-index: 2;
 }
 /* Chevron wings on the selection edges — the same glyph as the transport's
@@ -359,6 +368,29 @@
   cursor: pointer;
   animation: cp-queued-in 1.2s var(--ease-out) 1;
 }
+/* The queued range wears the SAME chevron as the live selection and the
+   transport buttons. It is the same object one step later - you marked a range
+   and pressed Add to queue - so it must not be speaking a different dialect
+   just because it changed colour. (User directive: the in/out markers have to
+   be consistent throughout the app, "includeing when i press command + a to
+   get somehting in the que".)
+   The COLOUR stays the queue's status system on purpose: --range-c is gold
+   while queued, green when exported, red on failure. Shape says "this is an
+   in/out range", colour says "and here is what happened to it". */
+.cp-track-queued::before,
+.cp-track-queued::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 6px;
+  transform: translateY(-50%);
+  background: var(--range-c);
+  filter: drop-shadow(0 0 0.6px rgba(0,0,0,0.85));
+  pointer-events: none;
+}
+.cp-track-queued::before { right: calc(100% + 2px); clip-path: var(--mark-wing-l); }
+.cp-track-queued::after  { left:  calc(100% + 2px); clip-path: var(--mark-wing-r); }
 .cp-track-queued:hover {
   background: color-mix(in srgb, var(--range-c) 28%, transparent);
 }
