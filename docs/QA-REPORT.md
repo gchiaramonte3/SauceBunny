@@ -4,6 +4,31 @@
 
 **Not shippable as-is.** 37 defects survived adversarial verification across six surfaces; every one is backed by a reproduction against the real frontend, not by reading alone. **There are no data-loss defects** — nothing found deletes a user's media, transcript, or review file from disk. But ten defects break a task outright, and the single worst is in the app's primary verb: **typing a timecode into Mark in / Mark out corrupts the field on the very first keystroke and destroys a range that was already marked** (`src/App.tsx:781-812`). Typing `0` round-trips a full `00:00:00:00` into the controlled input, every later character appends, and retyping over a valid Mark out leaves `00:00:00:000:00:20:00`, kills the timeline selection band, and unmounts "Add to queue". Only paste-in-one-shot works, so there is no keyboard path to enter or edit a mark in a clip tool. Beyond that headline, three recurring root causes account for over half the list: a **capped render read against an uncapped model** (Home's shelf count, Home's selection order, Library's ⌘A), the **Library list branch never receiving what the grid branch gets** (folders, the Trash verb, correct type-ahead indices), and **layout collisions at or near the app's own declared 1100×700 minimum** (`src-tauri/tauri.conf.json:18`), where three separate controls are painted over, clipped off, or made inert.
 
+## 1b. Fixed since this report
+
+Eleven defects are closed, each with tests that fail against the old code
+(every fix here was mutation-checked by reverting it and confirming the new
+tests go red). Commits are on `main`.
+
+| # | Defect | Commit |
+|---|--------|--------|
+| 1 | Typed timecodes corrupted Mark in / Mark out | `clip: a timecode typed by hand is the timecode that lands` |
+| 2 | Peeking at a drawing discarded the one in progress | `review: peeking at a drawing is not a decision to discard your own` |
+| 4 | List view hid every subfolder | `library: list view is a different spelling of the wall` |
+| 7 | "Copy join code" painted over "Clear" | `room: Clear is the thing you hit when you click Clear` |
+| 9 | Unique-session-name rule went stale after a session | `session: the unique-name rule stopped going stale mid-run` |
+| 10 | Frames / web shelves unreachable by keyboard | `library: the Frames and web shelves have a keyboard route again` |
+| 13 | ⌘A selected files the pane refused to draw | `library: selection runs over what was drawn, not what is known` |
+| 16 | Shelf header counted 40, shelf drew 24 | same |
+| 17 | ⌘/⇧-click dead on subfolder cards | same |
+| 18 | List type-ahead offset by the folder count | `library: list view is a different spelling of the wall` |
+| 22 | "Move to Trash" missing from list rows | same |
+
+Three of these shared one root cause and were closed together, which is what
+the "recurring root causes" note below is for. Defect 7 also exposed a guard
+that measured a hand-written copy of the room header rather than the real one;
+it now drives the real markup at the app's declared minimum window size.
+
 ## 2. Confirmed defects
 
 *Recurring root causes are noted inline. Where several defects share one, fixing the cause clears them together.*
