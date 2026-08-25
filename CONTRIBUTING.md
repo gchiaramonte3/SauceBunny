@@ -44,7 +44,7 @@ From a clean machine:
 git clone <repo-url> "Sauce Bunny"
 cd "Sauce Bunny"
 npm install
-npm run setup       # fetch/build all six sidecar binaries (one-time)
+npm run setup       # fetch/build all eight sidecar binaries (one-time)
 npm run tauri dev
 ```
 

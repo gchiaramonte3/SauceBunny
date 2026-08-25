@@ -5,6 +5,44 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+`0.4.4` and `0.4.5` were bumped in the manifests but never tagged or
+released, so everything below is unreleased and sits on top of `v0.4.3`.
+
+### Fixed
+- Typing a timecode into Mark in / Mark out corrupted the field on the first
+  keystroke and destroyed a range that was already marked — there was no
+  keyboard route to a mark at all. Only pasting worked.
+- Changing the Transcripts folder silently erased the OLD library's project
+  metadata: posters, colours and titles, with nothing to restore them.
+- Two concurrent saves of the same document shared one staging file and could
+  leave it corrupt; for the cast shelf the recovery path then emptied it.
+- Library list view rendered no folders, so a folder of folders looked empty,
+  type-ahead landed on the wrong file, and "Move to Trash" disappeared.
+- ⌘A selected files the pane had refused to draw, so a batch action ran across
+  files the user was told were not shown.
+- ⌘-click and ⇧-click did nothing on any Home card from a subfolder.
+- A Home shelf header counted the whole folder while the shelf stopped at 24.
+- In a co-review room, "Copy join code" was painted over the presenter's
+  "Clear", and clicking Clear copied the join code. "End session" could also be
+  clipped off the header entirely at the minimum window size.
+- Viewing another comment's drawing threw away the drawing in progress, and the
+  ⌘Z after it deleted the comment being viewed.
+- The unique-session-name rule went stale as soon as a session ended, so the
+  same name could be reused.
+- The Frames and "From the web" shelves could not be reached from the keyboard.
+- Transcribing a file with no audio failed with a raw ffmpeg message; it now
+  says the file has no audio track. The Source panel also claimed every file
+  had audio regardless.
+- A transcript failure was labelled "Whisper" even when another engine ran.
+
+### Changed
+- The dependency licence check could not see scoped packages — it scanned 148
+  of 253 and silently skipped every `@scope/name`, which is where the shipped
+  runtime dependencies live.
+- `THIRD-PARTY-LICENSES.md` now states the weak copyleft the app links
+  (MPL-2.0, LGPL) and gives ffmpeg and ffprobe their real, differing licences.
+
+
 ## [0.4.3] — 2026-08-24
 
 An adversarial verification of 0.4.2's own release notes found 18 claims

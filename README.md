@@ -34,7 +34,7 @@ worth filing.
 | Whisper / LLM / diarizer models | You choose to download one | Hugging Face, GitHub |
 | A yt-dlp update | You press Update in Settings | GitHub |
 | **Co-review session traffic** | You host or join a session | Directly to your peers over encrypted iroh QUIC. If no direct route can be punched, the session falls back to n0's public relay — still end-to-end encrypted, and n0 cannot read it. Media *does* travel that path when it is the only one, capped at the lowest quality rung (360p / 600 kbps) and never keeping a local copy, because a relayed session is someone else's bandwidth |
-| **A STUN lookup** | You start or join a co-review session **with camera or mic on** | `stun.l.google.com` by default, to discover your public address for the WebRTC mesh. It learns an IP and nothing else. Editable or clearable in Settings ▸ Co-review |
+| **A STUN lookup** | You start or join a co-review session **with camera or mic on** | `stun.l.google.com` by default, to discover your public address for the WebRTC mesh. It learns an IP and nothing else. Editable or clearable in Settings ▸ General ▸ Co-review calls |
 | **Cloud AI** — *off unless you turn it on* | You configure your own Anthropic or OpenAI key in Settings ▸ AI APIs, and only for AI Summary / Analysis | Anthropic or OpenAI. The key is stored in the macOS Keychain, is never readable back by the app's frontend, and the request is made from Rust so it never touches the browser layer. The default is a local model, and the app works fully with no key at all |
 
 Optional: sign-in-gated sources can use your browser's cookies via yt-dlp's

@@ -1376,8 +1376,24 @@ pub async fn save_poster_to_cache(
 /// and never decodes — the library calls this BEFORE paying for any decode,
 /// so a poster ever made on this Mac (by either pipeline, in any session)
 /// renders instantly no matter where the user scrolls.
+///
+/// ASYNC ON PURPOSE, despite doing no awaiting. A non-async command compiles
+/// through Tauri's `body_blocking` and runs inline on the WKWebView main
+/// thread, and this one `stat()`s the user's media path twice. On a warm local
+/// volume that is tens of microseconds and nobody notices — the hazard is the
+/// tail. Library roots are arbitrary user-picked folders, and for a video app
+/// they are commonly external or on a NAS; a `stat()` against a spun-down disk
+/// or a hung SMB mount blocks for seconds with no timeout, and inline on the
+/// main thread that is the whole UI frozen. It repeats per library item, and
+/// fires again from every visible card long after the scan proved the volume
+/// was awake. `system.rs` already carries the same warning for
+/// `read_text_file_capped`.
+///
+/// Deliberately NOT batched into a `lookup_local_thumbnails(Vec<String>)`:
+/// while the work sits on the main thread, batching makes one blocked stat
+/// freeze the UI for the whole batch, which is strictly worse.
 #[tauri::command]
-pub fn lookup_local_thumbnail(
+pub async fn lookup_local_thumbnail(
     app: AppHandle,
     args: LocalThumbnailArgs,
 ) -> Result<String, crate::AppError> {
