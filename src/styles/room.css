@@ -771,14 +771,24 @@
   margin-left: auto;
   margin-right: var(--s-3);
   min-width: 0;
+  /* SHRINKS BY NARROWING THE FIELD, never by overflowing. This bar could be
+     squeezed by the header while its own contents had a hard floor - the
+     field carried min-width:200px - so past a certain width its buttons
+     spilled out of their own box and ran into "Copy join code" next door.
+     At 720px the two overlapped by 42px and rendered as "CLEARCOPY JOIN
+     CODE". The field gives way now; the buttons never do. */
+  flex: 0 1 auto;
 }
+.cp-room-source-bar > .btn { flex: 0 0 auto; }
 .cp-room-source-field {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 0 10px;
   height: 28px;
-  min-width: 200px;
+  /* A floor small enough to still read as a field, rather than one that
+     makes the whole bar unshrinkable. */
+  min-width: 96px;
   max-width: 340px;
   flex: 1 1 240px;
   border: 1px solid var(--line-2);
