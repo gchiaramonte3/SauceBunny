@@ -300,7 +300,20 @@ export function LibraryBrowser({
     return selectedNode.folders;
   }, [selected, selectedNode, needle]);
 
-  const itemPaths = useMemo(() => items.map((i) => i.path), [items]);
+  const shown = useMemo(() => items.slice(0, BROWSE_CAP), [items]);
+  // THE PATHS THE PANE ACTUALLY DREW, not every path it knows about.
+  //
+  // This was fed from the uncapped `items`, so in a folder of 400 files ⌘A
+  // reported "400 selected" over 300 highlighted cards and Transcribe ran "1
+  // of 400" - a batch job across a hundred files the pane had already said it
+  // was not showing. The ⌘A handler's own comment says "every file ON SCREEN";
+  // it just was not reading a list that meant that.
+  //
+  // Everything downstream wants the same list: pruning keeps the selection
+  // inside what is visible, the selection order is display order, and the
+  // Finder-tag fetch should cost one round of xattr reads per drawn card
+  // rather than per file on the drive.
+  const itemPaths = useMemo(() => shown.map((i) => i.path), [shown]);
   itemPathsRef.current = itemPaths;
   // A rescan, filter or sort can remove selected files. Dropping them keeps a
   // batch action from ever running over something the user cannot see.
@@ -318,7 +331,6 @@ export function LibraryBrowser({
   // with a "showing N of M" note (searchLibrary in lib/library.ts); this is the
   // same answer, in the constitution's spirit — a cap and an honest count, not
   // a virtualization dependency.
-  const shown = useMemo(() => items.slice(0, BROWSE_CAP), [items]);
   const overflow = items.length - shown.length;
   // Finder's status bar. Counts the whole filtered set, not the capped slice,
   // so the number answers "how much is in here" rather than "how much did we

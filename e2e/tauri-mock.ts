@@ -277,6 +277,12 @@ export function tauriMockInit(expectedBuildId: string): void {
             items: [],
           }]
         : [];
+      // A root big enough to hit the render caps (Home stops at 24 cards, the
+      // Library browser at 300). Opt-in, so the shared small tree stays exactly
+      // as it was for every other spec.
+      const many = Number(localStorage.getItem("e2e.manyFiles") ?? "0");
+      const bulk = Array.from({ length: many }, (_, i) =>
+        mkItem(path, `bulk-${String(i).padStart(4, "0")}.mp4`, "video", 1000 + i));
       return {
         name: path.split("/").pop() || path,
         path,
@@ -289,6 +295,7 @@ export function tauriMockInit(expectedBuildId: string): void {
         items: [
           mkItem(path, "clip-a.mp4", "video", 2097152),
           mkItem(path, "voice-memo.m4a", "audio", 512000),
+          ...bulk,
         ],
       };
     },

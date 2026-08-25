@@ -6,6 +6,9 @@ type Props = {
   title: string;
   /** Playable-item count shown after the title. */
   count?: number;
+  /** How many of them the shelf actually drew. When it is fewer than `count`
+   *  the header says "24 of 40" rather than claiming all forty are here. */
+  shown?: number;
   /** Hover-revealed "×" in the header — root rows only. Confirm + the
    *  actual forget live upstream in LibraryView; disk is never touched. */
   onRemove?: () => void;
@@ -22,7 +25,7 @@ type Props = {
  * the track) so heterogeneous children — item cards and folder collections
  * — need no index props threaded through.
  */
-export function LibraryRow({ title, count, onRemove, removeLabel, children }: Props) {
+export function LibraryRow({ title, count, shown, onRemove, removeLabel, children }: Props) {
   const trackRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef(0);
   const [canLeft, setCanLeft] = useState(false);
@@ -102,7 +105,11 @@ export function LibraryRow({ title, count, onRemove, removeLabel, children }: Pr
     <section className="cp-lib-row">
       <div className="cp-lib-row-head">
         <h2 className="cp-lib-row-title">{title}</h2>
-        {count != null && <span className="cp-lib-row-count">{count}</span>}
+        {count != null && (
+          <span className="cp-lib-row-count">
+            {shown != null && shown < count ? `${shown} of ${count}` : count}
+          </span>
+        )}
         {onRemove && (
           <button
             type="button"

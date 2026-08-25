@@ -88,6 +88,11 @@ type Props = {
  * no longer drills in place — opening a folder routes to the Library browser
  * via onOpenFolder. Only UI-local state (search + picker) lives here.
  */
+/** How many assets a Home shelf shows before the Library tab takes over.
+ *  Home is a launcher, not a browser; a row that scrolls forever is the
+ *  Library's job and it does it better. */
+const HOME_ROW_CAP = 24;
+
 export function LibraryView({
   recentSources, onOpenLocalPath, onOpenRecentSource, onOpenTranscriptHistory,
   onReviewLocalPath, onReviewRecentSource, transcriptLibraryPath,
@@ -210,11 +215,25 @@ export function LibraryView({
   // Every item Home can show right now: the search grid when searching, else
   // every shelf in shelf order. Published to a ref so the (stable) click
   // handler ranges over exactly what is rendered.
-  const shownPaths = useMemo(() => {
-    const out: string[] = [];
-    for (const t of trees) for (const it of t.items) out.push(it.path);
-    return out;
+  //
+  // ONE expression decides what a shelf draws, and everything else reads it.
+  // The shelf rendered `artFirst(collectLibraryItems(tree))` - every depth,
+  // capped - while this list was built from `t.items`, the root level only.
+  // So ⌘-click on any card that came from a subfolder selected nothing at all
+  // (clickSelect returns the state unchanged for a path it has never heard
+  // of), and a ⇧-range skipped straight over the cards rendered between its
+  // own endpoints. Search results were not in the list either.
+  const shelfCards = useMemo(() => {
+    const m = new Map<string, LibraryItem[]>();
+    for (const t of trees) m.set(t.path, artFirst(collectLibraryItems(t)).slice(0, HOME_ROW_CAP));
+    return m;
   }, [trees]);
+  const shownPaths = useMemo(() => {
+    if (needle.trim()) return results.items.map((i) => i.path);
+    const out: string[] = [];
+    for (const t of trees) for (const it of shelfCards.get(t.path) ?? []) out.push(it.path);
+    return out;
+  }, [trees, shelfCards, needle, results]);
   shownPathsRef.current = shownPaths;
   useEffect(() => { setSel((cur) => pruneSelection(cur, shownPaths)); }, [shownPaths]);
 
@@ -249,10 +268,6 @@ export function LibraryView({
     />
   );
 
-/** How many assets a Home shelf shows before the Library tab takes over.
- *  Home is a launcher, not a browser; a row that scrolls forever is the
- *  Library's job and it does it better. */
-const HOME_ROW_CAP = 24;
 
 
   // Continue-row card — featured size (large landscape, the ref's front row).
@@ -375,7 +390,12 @@ const HOME_ROW_CAP = 24;
       <LibraryRow
         key={root}
         title={tree.name}
+        /* The header counted the whole subtree while the shelf stopped at
+           HOME_ROW_CAP, so a root of 40 films read "40" over 24 cards with
+           nothing saying so. The cap is deliberate; the silence was not -
+           this same view already discloses truncation for search. */
         count={countLibraryItems(tree)}
+        shown={(shelfCards.get(root) ?? []).length}
         onRemove={() => removeRoot(root)}
         removeLabel={`Remove ${tree.name} from library`}
       >
@@ -386,7 +406,7 @@ const HOME_ROW_CAP = 24;
             all sits in subfolders showed a row of grey folder tiles and none
             of its films - collectLibraryItems is what surfaces those.
             artFirst leads with the items that resolve to a real picture. */}
-        {artFirst(collectLibraryItems(tree)).slice(0, HOME_ROW_CAP).map(itemCard)}
+        {(shelfCards.get(root) ?? []).map(itemCard)}
       </LibraryRow>
     );
   };
