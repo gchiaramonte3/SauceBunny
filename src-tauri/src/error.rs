@@ -7,9 +7,12 @@
 //! `src/bindings/AppError.ts` via ts-rs (r49 infrastructure).
 //!
 //! See CLAUDE.md refactor priority #4 (r50). The migration is COMPLETE
-//! as of r108 — every command and helper in `commands/` returns
-//! `Result<T, AppError>`. New code should never introduce a
-//! `Result<T, String>` signature.
+//! as of r108 at the boundary that matters: every `#[tauri::command]` in
+//! `commands/` returns `Result<T, AppError>`, so nothing untyped reaches the
+//! renderer. Four private helpers still return `Result<_, String>` and are
+//! converted at the `?` by the `From<String>` impl below — that is fine, and
+//! it is why this note no longer claims "every command AND HELPER", which was
+//! false. New code should never introduce a `Result<T, String>` signature.
 //!
 //! ## Adding a new variant
 //!

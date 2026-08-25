@@ -241,9 +241,9 @@ Do not add new Tauri plugins without explaining what existing capability is insu
 - **Focus styles: never the green accent.** A focused control brightens its existing outline toward white (`--focus-ring`, defined in `base.css`); composed fields (wrapper + borderless inner input, e.g. `.cp-url`) brighten the wrapper via `:focus-within` and suppress the inner input's ring. Guarded by `src/lib/focus-contract.test.ts` — do not allowlist around it.
 
 ### Rust
-- Invoke handlers in `commands.rs` should be **thin wrappers**: validate input, call business logic, format the response. The business logic itself belongs in dedicated modules (this refactor is in progress).
+- Invoke handlers in `commands/` should be **thin wrappers**: validate input, call business logic, format the response. The business logic itself belongs in dedicated modules. (The `commands.rs` → `commands/{download,media,transcript,system,…}.rs` split is DONE — see refactor priority #1.)
 - Use `#[tauri::command]` with typed args — no manual JSON parsing in handlers.
-- Errors: return `Result<T, String>` from commands. Use `.map_err(|e| e.to_string())` for now (proper error types are a future improvement).
+- Errors: return `Result<T, AppError>` from commands — never `Result<T, String>`. Use the variant that fits (`AppError::internal/invalid/not_found`) or lean on the `From` impls for `std::io::Error` / `reqwest::Error` / `serde_json::Error` / `String`, so `?` just works. See refactor priority #4 for the full pattern, and `src-tauri/src/error.rs` for the enum.
 - JobRegistry pattern: any long-running sidecar process must be registered so it can be canceled.
 
 ### Swift (swift-sidecar/)
@@ -521,7 +521,7 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
 1. ~~**Split `commands.rs`**~~ — DONE in r47 (`commands/{download,media,transcript,system}.rs`, thin wrappers, `mod.rs` re-exports).
 2. ~~**CSS organization**~~ — DONE in r48 (per-section files imported from `index.css`; tokens stay in `tokens.css`).
 3. ~~**Type consolidation**~~ — DONE in r49. Shared types are generated from canonical Rust structs via the `ts-rs` crate. Cross-boundary structs carry `#[derive(ts_rs::TS)] #[ts(export, export_to = "../../src/bindings/")]`. Run `cargo test --lib` from `src-tauri/` to refresh `src/bindings/*.ts`. `src/types.ts` re-exports the generated types + adds frontend-only types (form state, narrowed enums like `LogTag`, etc.). When adding a new Rust struct that crosses the invoke boundary, derive TS on it; do not hand-write the TS shape in `types.ts`.
-4. ~~**Error handling**~~ — DONE (r51 bulk migration; last stragglers swept in r108). The typed error system is wired (`src-tauri/src/error.rs`'s `AppError` enum, generated TS binding at `src/bindings/AppError.ts`, frontend bridge at `src/lib/error-format.ts`), and every remaining `Result<T, String>` fn in `src-tauri/src/commands/` now returns `Result<T, AppError>` — zero `Result<T, String>` signatures left. The pattern for NEW commands stays mechanical:
+4. ~~**Error handling**~~ — DONE (r51 bulk migration; last stragglers swept in r108). The typed error system is wired (`src-tauri/src/error.rs`'s `AppError` enum, generated TS binding at `src/bindings/AppError.ts`, frontend bridge at `src/lib/error-format.ts`), and **every `#[tauri::command]` in `src-tauri/src/commands/` returns `Result<T, AppError>`** — the invoke boundary is fully typed, which is the property that matters and the one `command-error-contract.test.ts` pins. Four PRIVATE helpers still return `Result<_, String>` (`session.rs` `hash_file_parallel`/`memoized_file_hash`, `tags.rs` `encode`, `transcript.rs` `extract_wav_16k_tracked`); each is converted at the `?` by `From<String> for AppError`, so nothing untyped reaches the renderer. This used to read "zero `Result<T, String>` signatures left", which was simply false and failed on the first grep. The pattern for NEW commands stays mechanical:
    - Return `Result<T, AppError>` from the handler (and from domain helpers it calls).
    - Use the appropriate `AppError` variant (`AppError::internal(...)`, `AppError::not_found(...)`, etc.) OR rely on the `From` impls for `std::io::Error` / `reqwest::Error` / `serde_json::Error` / `String` (then `?` just works; a bare `String` becomes `Invalid`, which renders its text verbatim — use it when preserving an established user-facing message matters).
    - Update frontend callers to use `formatError(e)` from `lib/error-format.ts` instead of `String(e)`.
@@ -706,6 +706,7 @@ written after finding the rule already broken somewhere.
 | `settings-pointer-contract` | "Settings → X" in user-facing copy names a tab or section that exists (labels read from SettingsModal, never retyped) |
 | `command-coverage-contract` | Every rebindable action has a ⌘K entry, and `onNavigateView` accepts every view that has one |
 | `error-format` | Every `AppError` variant in the generated binding renders user copy — a new Rust variant fails rather than showing "[object Object]" |
+| `command-error-contract` | Every `#[tauri::command]` returns `Result<T, AppError>`, never `Result<T, String>` — and this file's own Rust style rule names AppError. Both had drifted: the style rule prescribed the retired pattern for ~100 revisions while the roadmap section called the migration done |
 | `session-msg-contract` | Every co-review `SessionMsg` kind is handled somewhere, lifecycle in Rust and app messages in the frontend |
 | `secret-persistence-contract` | `turnPassword` is the only secret-shaped field in `Defaults`, and every persist/export/import site blanks it |
 | `duplicated-tables-contract` | The caption-font map and the export-format list agree between the two files that each hold a copy |
