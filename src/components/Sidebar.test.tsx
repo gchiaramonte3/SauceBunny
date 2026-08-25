@@ -157,3 +157,19 @@ describe("the Streams row", () => {
     expect(streams()).toBe("—");
   });
 });
+
+describe("the transcript error line", () => {
+  it("does not blame Whisper for a failure from another engine", () => {
+    // Observed in the packaged app: a Parakeet run failed and the sidebar
+    // reported "Whisper: …", which points anyone debugging it at the wrong
+    // settings pane. This row cannot see which engine ran.
+    render(<Sidebar {...base({
+      transcriptState: "error",
+      transcriptError: "This file has no audio track, so there is nothing to transcribe.",
+    })} />);
+    const line = screen.getByText(/no audio track/);
+    expect(line.textContent).toBe(
+      "Transcript: This file has no audio track, so there is nothing to transcribe.");
+    expect(line.textContent).not.toContain("Whisper");
+  });
+});

@@ -607,7 +607,13 @@ export function Sidebar(props: Props) {
                 <div className="cp-source-hint err">Captions: {captionsError}</div>
               )}
               {transcriptState === "error" && transcriptError && (
-                <div className="cp-source-hint err">Whisper: {transcriptError}</div>
+                /* NOT "Whisper:". The transcript pipeline has more than one
+                   engine and the label was hardcoded to the wrong one - a
+                   Parakeet run that failed reported itself as a Whisper
+                   failure, which sends anyone debugging it to the wrong
+                   settings pane. The row does not know which engine ran, so
+                   it names the thing that failed instead of guessing. */
+                <div className="cp-source-hint err">Transcript: {transcriptError}</div>
               )}
               {/* Transcripts now route to ~/Documents/Sauce Bunny/Transcripts/
                   (auto-created), separate from the per-session clip-export
