@@ -169,3 +169,54 @@ It omits `--success`, `--ring-green` and `--stroke-green`. A `:focus` rule paint
 4. **Do `AVATAR_COLORS` lose their two greens?** `review.ts:789` contains `#2dd4bf` and `#34d399`. "Green means live" is not actually true until they go — and removing them changes existing users' assigned colours, which no CSS-scanning contract can see or enforce.
 5. **Two new spacing rungs, or 99 rounded declarations?** `--s-1-5`/`--s-2-5` makes the scale 12 rungs and weakens its authority. Rounding is a visible redesign that should be reviewed on screen, not merged as a cleanup.
 6. **Contrast risk you should price in now.** `#6CFF8D` reads ~14:1 on `--bg-1`; `--fg-4` `#86868F` reads 5.19:1 and `--fg-3` `#A2A0AA` 7.48:1. Every green *label* turned grey loses 2-3x luminance, and the ones sitting on their own tinted fill (`review.css:830`, `settings.css:320`, the queue status pill) are where it drops under 4.5:1. `tokens.css:41-48` records that exactly this class of miss was found only by pointing the sweep at a state it had never reached. Run `e2e/contrast.spec.ts` **and** `e2e/deep-state-contrast.spec.ts` after every batch, not at the end. Batch by **group** — all of (c) first, 15 of which are free no-op edits, then (b), then (a) — never by file, so each commit is one reviewable claim about meaning and can be reverted alone.
+
+---
+
+## Verified by hand, 2026-08-25
+
+Added after a sweep prompted by a report of a square corner in an icon
+overlay. The reported corner was NOT reproduced - see below - but the sweep
+turned up one real inconsistency and confirmed several things are sound.
+
+### The icon set has eight corner radii and no scale
+
+`grep -oE 'rx="[0-9.]+"' src/components/Icons.tsx | sort | uniq -c`:
+
+| rx | count |
+|----|-------|
+| 1 | 6 |
+| 2 | 5 |
+| 1.5 | 3 |
+| 3 | 2 |
+| 0.5 | 2 |
+| 8 | 1 |
+| 2.5 | 1 |
+| 2.25 | 1 |
+
+Eight values, chosen per icon. `2.25` and `2.5` differ by a quarter pixel at
+a 24-unit viewBox and cannot be told apart at any size the app renders. The
+radius tokens in `tokens.css` exist precisely so this kind of thing is picked
+from a scale; the icon set does not use them because SVG `rx` is in viewBox
+units rather than CSS pixels, so a token would need a viewBox-relative
+counterpart. Worth one: three values (a hairline, a normal, a pill) would
+cover every icon in the set.
+
+No `<rect>` in the set is missing `rx` entirely, so nothing is fully sharp.
+
+### Checked and sound
+
+- Every control in the transcripts picker header computes a 6px radius:
+  count pill 999px (a deliberate pill), view toggle, New project, search and
+  sort all 6px.
+- `.cp-annot-tool` (the drawing overlay's tool buttons) - 6px.
+- `.cp-reader-row-thumb` - 6px with `overflow: hidden`, so its poster is
+  clipped rather than overflowing square.
+- A sweep of every `button`, `[role=button]`, `[role=radio]` and `[role=tab]`
+  across the Library, Transcripts and Clip views, filtered to those with a
+  visible background or border, found **zero** with a computed radius of 0.
+
+### The four `border-radius: 0` rules are all deliberate
+
+`.cp-lib-card-art` (the card does the rounding now), `.cp-lib-lrow` (a list
+row is not a card), the popped-out queue drawer (it fills its own OS window),
+and a 12px resize handle. None is an icon overlay.
