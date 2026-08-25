@@ -260,10 +260,27 @@ export function tauriMockInit(expectedBuildId: string): void {
       const mkItem = (dir: string, name: string, kind: string, size: number) => ({
         name, path: `${dir}/${name}`, size_bytes: size, modified_ms: 1749000000000, kind,
       });
+      // A folder whose ONLY content is another folder, opt-in so the shared
+      // tree's counts stay put for everyone else. It is the shape that used
+      // to render as a completely blank pane in list view: the empty note is
+      // suppressed whenever folders exist, and the list branch drew none.
+      const foldersOnly = localStorage.getItem("e2e.nestedFolders") === "1"
+        ? [{
+            name: "Archive",
+            path: `${path}/Archive`,
+            folders: [{
+              name: "2019",
+              path: `${path}/Archive/2019`,
+              folders: [],
+              items: [mkItem(`${path}/Archive/2019`, "old-cut.mp4", "video", 4096)],
+            }],
+            items: [],
+          }]
+        : [];
       return {
         name: path.split("/").pop() || path,
         path,
-        folders: [{
+        folders: [...foldersOnly, {
           name: "Interviews",
           path: `${path}/Interviews`,
           folders: [],

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { LibraryCard } from "./LibraryCard";
 import { LibraryListRow } from "./LibraryListRow";
 import { LibraryFolderCard } from "./LibraryFolderCard";
+import { LibraryFolderRow } from "./LibraryFolderRow";
 import type { LibraryViewMode } from "./LibraryBrowserBar";
 import { countLibraryItems, formatBytes, formatModifiedDate, libraryPosterPaths } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
@@ -276,6 +277,13 @@ export function LibraryBrowserPane({
           </SortHeader>
           <SortHeader className="cp-lib-lrow-date" label="Modified" col="date" sort={sort} dir={dir} onSort={onSort} />
         </div>
+        {/* Containers first, exactly as the grid does it - and as `names`
+            above assumes. Rendering only files here both hid a folder of
+            folders behind a blank pane and put type-ahead out of step by the
+            folder count. */}
+        {folders.map((f) => (
+          <LibraryFolderRow key={f.path} folder={f} onOpen={() => onOpenFolder?.(f)} />
+        ))}
         {items.map((it) => (
           <LibraryListRow
             key={`${it.path}#${posterVersions[it.path] ?? 0}`}
@@ -287,6 +295,8 @@ export function LibraryBrowserPane({
             onSelect={(e) => onSelectItem(it, e)}
             onContextSelect={() => onContextSelectItem?.(it)}
             onRename={onRenameItem ? () => onRenameItem(it) : undefined}
+            deleteLabel="Move to Trash…"
+            onDelete={onTrashItem ? () => onTrashItem(it) : undefined}
             onOpen={() => onOpen(it.path)}
             onReview={onReview ? () => onReview(it.path) : undefined}
             requestThumb={requestThumb}

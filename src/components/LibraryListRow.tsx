@@ -18,6 +18,11 @@ type Props = {
   onContextSelect?: () => void;
   /** Rename this file (or the selection it is part of). */
   onRename?: () => void;
+  /** Move this file to the Finder Trash. The grid's card has always offered
+   *  it; the row did not, so switching to List view quietly removed the only
+   *  way to get rid of a file. */
+  onDelete?: () => void;
+  deleteLabel?: string;
   /** Finder tags: the colour dot in the row, and the menu's colour row. */
   tags?: readonly FinderTag[];
   onToggleTagColor?: (index: TagColorIndex) => void;
@@ -39,7 +44,7 @@ type Props = {
  * ContextMenu/Shift+F10 open the same LibraryCardMenu.
  */
 export function LibraryListRow({
-  item, selected, onSelect, onContextSelect, onRename, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
+  item, selected, onSelect, onContextSelect, onRename, onDelete, deleteLabel, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const swatch = primarySwatch(tags ?? []);
@@ -126,6 +131,8 @@ export function LibraryListRow({
       {menuAnchor && (
         <LibraryCardMenu
           onRename={onRename}
+          onDelete={onDelete}
+          deleteLabel={deleteLabel}
           tags={tags}
           onToggleTagColor={onToggleTagColor}
           onClearTagColors={onClearTagColors}

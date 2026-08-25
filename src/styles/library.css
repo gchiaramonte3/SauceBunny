@@ -1277,6 +1277,15 @@
   color: var(--fg-4);
 }
 .cp-lib-lrow-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Container rows. The list renders folders above files, the way the grid
+   does — a folder reads as a container rather than as a film with a missing
+   poster, so its thumb well is flat and tinted instead of an empty frame. */
+.cp-lib-lrow-folder .cp-lib-lrow-art {
+  background: var(--bg-3);
+  border-style: dashed;
+  color: var(--fg-3);
+}
+.cp-lib-lrow-folder .cp-lib-lrow-size { color: var(--fg-4); }
 .cp-lib-lrow-name { min-width: 0; font-weight: var(--weight-semibold); color: var(--fg-1); }
 .cp-lib-lrow-kind { min-width: 0; color: var(--fg-4); }
 /* Only where the value really is a lowercase enum. */
