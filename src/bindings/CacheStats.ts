@@ -14,4 +14,10 @@ import type { CacheCategoryStats } from "./CacheCategoryStats";
  * can find / reveal it. Settable-from-Settings is r40 work; r39 just
  * shows where files land.
  */
-export type CacheStats = { file_count: number, bytes_total: number, path: string, downloads: CacheCategoryStats, audio: CacheCategoryStats, meta: CacheCategoryStats, thumbnails: CacheCategoryStats, scratch: CacheCategoryStats, };
+export type CacheStats = { file_count: number, bytes_total: number, path: string, downloads: CacheCategoryStats, audio: CacheCategoryStats, meta: CacheCategoryStats, thumbnails: CacheCategoryStats, scratch: CacheCategoryStats, 
+/**
+ * Files received from co-review peers. Exempt from the size cap (they do
+ * not regenerate), so they are reported separately and cleared only by
+ * an explicit choice.
+ */
+transfers: CacheCategoryStats, };

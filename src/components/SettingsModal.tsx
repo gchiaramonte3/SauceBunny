@@ -1886,6 +1886,12 @@ const CACHE_CATEGORIES = [
   { id: "audio", label: "Audio", hint: "Cached audio tracks for instant transcription" },
   { id: "meta", label: "Metadata", hint: "Saved titles, durations, and stream links" },
   { id: "thumbnails", label: "Thumbnails", hint: "Poster frames for imported files" },
+  // Listed LAST and worded as a warning, because it is the one category here
+  // that does not come back. Everything above is derived - re-download, re-
+  // extract, re-read. A received file came off a peer's machine and the
+  // session is over. It is also exempt from the size cap for that reason, so
+  // this row is the only place it is visible or clearable at all.
+  { id: "transfers", label: "Received files", hint: "Files sent to you in a co-review session. These cannot be re-downloaded" },
 ] as const;
 
 /**

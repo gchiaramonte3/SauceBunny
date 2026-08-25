@@ -106,6 +106,7 @@ export function tauriMockInit(expectedBuildId: string): void {
       meta: emptyCacheCategory,
       thumbnails: emptyCacheCategory,
       scratch: emptyCacheCategory,
+      transfers: emptyCacheCategory,
     },
     clear_all_cache: 0,
     clear_cache_category: 0,

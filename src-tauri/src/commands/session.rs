@@ -2169,7 +2169,7 @@ pub async fn session_fetch_file(
         .path()
         .app_cache_dir()
         .map_err(|e| format!("app_cache_dir: {e}"))?;
-    let dir = cache.join(super::MEDIA_CACHE_DIRNAME).join("transfers");
+    let dir = cache.join(super::MEDIA_CACHE_DIRNAME).join(super::TRANSFERS_DIRNAME);
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| format!("create transfers dir: {e}"))?;

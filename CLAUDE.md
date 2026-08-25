@@ -656,7 +656,7 @@ human can check.
 
 ## Enforced contracts
 
-Sixty rules in this file are checked by a test rather than remembered. If you
+Sixty-one rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -707,6 +707,7 @@ written after finding the rule already broken somewhere.
 | `command-coverage-contract` | Every rebindable action has a ⌘K entry, and `onNavigateView` accepts every view that has one |
 | `error-format` | Every `AppError` variant in the generated binding renders user copy — a new Rust variant fails rather than showing "[object Object]" |
 | `command-error-contract` | Every `#[tauri::command]` returns `Result<T, AppError>`, never `Result<T, String>` — and this file's own Rust style rule names AppError. Both had drifted: the style rule prescribed the retired pattern for ~100 revisions while the roadmap section called the migration done |
+| `cache-category-contract` | Every cache category Settings lists has a `clear_cache_category` arm, and the size cap skips `transfers/`. The two lists live in different languages in different files; a row without an arm renders, counts bytes, and answers "unknown cache category" on click |
 | `session-msg-contract` | Every co-review `SessionMsg` kind is handled somewhere, lifecycle in Rust and app messages in the frontend |
 | `secret-persistence-contract` | `turnPassword` is the only secret-shaped field in `Defaults`, and every persist/export/import site blanks it |
 | `duplicated-tables-contract` | The caption-font map and the export-format list agree between the two files that each hold a copy |

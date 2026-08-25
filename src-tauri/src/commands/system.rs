@@ -207,6 +207,18 @@ const CACHE_TTL_SECONDS: u64 = 24 * 60 * 60;
 ///
 /// `migrate_cache_layout` moves an old install over, once, at startup.
 pub(crate) const MEDIA_CACHE_DIRNAME: &str = "media";
+/// Files RECEIVED from a co-review peer, inside the media cache but not OF it.
+///
+/// Everything else under `media/` is derived and regenerable — a download can
+/// be re-fetched, an audio track re-extracted, metadata re-read. A transfer
+/// cannot: the source was another person's machine and the session is over.
+/// It is also the guest's permanent copy, registered against the source's
+/// fingerprint the moment it verifies, which is the whole point of CLAUDE.md's
+/// "streaming converges to a copy" rule.
+///
+/// Named here rather than inline so `enforce_media_cache_cap`'s exemption and
+/// `session_fetch_file`'s write site cannot drift apart.
+pub(crate) const TRANSFERS_DIRNAME: &str = "transfers";
 /// What the media cache was called before the layout tidy.
 const LEGACY_MEDIA_DIRNAME: &str = "saucebunny-media";
 pub(crate) const THUMBS_DIRNAME: &str = "thumbnails";
@@ -316,6 +328,10 @@ pub struct CacheStats {
     pub meta: CacheCategoryStats,
     pub thumbnails: CacheCategoryStats,
     pub scratch: CacheCategoryStats,
+    /// Files received from co-review peers. Exempt from the size cap (they do
+    /// not regenerate), so they are reported separately and cleared only by
+    /// an explicit choice.
+    pub transfers: CacheCategoryStats,
 }
 
 /// Flat (non-recursive) file count + byte total of one directory.
@@ -347,6 +363,7 @@ pub async fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppErr
     let downloads = dir_category_stats(&media_cache_dir(&cache, "downloads"));
     let audio = dir_category_stats(&media_cache_dir(&cache, "audio"));
     let meta_cat = dir_category_stats(&media_cache_dir(&cache, "meta"));
+    let transfers = dir_category_stats(&media_cache_dir(&cache, TRANSFERS_DIRNAME));
     let mut thumbnails = CacheCategoryStats::default();
     let mut scratch = CacheCategoryStats::default();
     if let Ok(entries) = std::fs::read_dir(&cache) {
@@ -364,9 +381,9 @@ pub async fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppErr
         }
     }
     let file_count = downloads.file_count + audio.file_count + meta_cat.file_count
-        + thumbnails.file_count + scratch.file_count;
+        + thumbnails.file_count + scratch.file_count + transfers.file_count;
     let bytes_total = downloads.bytes_total + audio.bytes_total + meta_cat.bytes_total
-        + thumbnails.bytes_total + scratch.bytes_total;
+        + thumbnails.bytes_total + scratch.bytes_total + transfers.bytes_total;
     Ok(CacheStats {
         file_count,
         bytes_total,
@@ -376,6 +393,7 @@ pub async fn get_cache_stats(app: AppHandle) -> Result<CacheStats, crate::AppErr
         meta: meta_cat,
         thumbnails,
         scratch,
+        transfers,
     })
 }
 
@@ -406,6 +424,42 @@ pub fn set_clear_cache_on_quit(app: AppHandle, enabled: bool) -> Result<(), crat
 /// currently playing) are never touched. Returns how many files were removed.
 /// The cache is deliberately keep-forever by default; this cap is the opt-in
 /// retention policy from Settings.
+/// Every file under the media cache the size cap may evict, with its size and
+/// mtime — i.e. the DERIVED cache, and deliberately not `transfers/`.
+///
+/// Lifted out of the command so the exemption is testable. The command needs
+/// an `AppHandle` and the `JobRegistry`, which is why the cap had no test at
+/// all, which is how it spent its life quietly deleting files that do not come
+/// back.
+fn evictable_media_files(media: &std::path::Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<(PathBuf, u64, std::time::SystemTime)>) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                // NEVER the transfers dir. This cap is an LRU over DERIVED
+                // cache — every other subdirectory here can be rebuilt from
+                // the network. A received co-review file cannot: it came off a
+                // peer's machine, the session is gone, and the frontend has
+                // already registered it as the permanent copy for that
+                // source's fingerprint. Evicting it destroyed the only copy of
+                // a multi-GB screening master that both sides deliberately
+                // paid to transfer — silently, at boot, against a size
+                // threshold the user set thinking about web downloads.
+                if p.file_name().and_then(|n| n.to_str()) == Some(TRANSFERS_DIRNAME) {
+                    continue;
+                }
+                walk(&p, out);
+            } else if let Ok(m) = e.metadata() {
+                out.push((p, m.len(), m.modified().unwrap_or(std::time::UNIX_EPOCH)));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(media, &mut out);
+    out
+}
+
 #[tauri::command]
 pub async fn enforce_media_cache_cap(
     app: AppHandle,
@@ -424,19 +478,7 @@ pub async fn enforce_media_cache_cap(
     let active: std::collections::HashSet<String> = registry.active_ids().into_iter().collect();
     let excluded: std::collections::HashSet<String> = exclude.unwrap_or_default().into_iter().collect();
 
-    fn walk(dir: &std::path::Path, out: &mut Vec<(PathBuf, u64, std::time::SystemTime)>) {
-        let Ok(rd) = std::fs::read_dir(dir) else { return };
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                walk(&p, out);
-            } else if let Ok(m) = e.metadata() {
-                out.push((p, m.len(), m.modified().unwrap_or(std::time::UNIX_EPOCH)));
-            }
-        }
-    }
-    let mut files: Vec<(PathBuf, u64, std::time::SystemTime)> = Vec::new();
-    walk(&media, &mut files);
+    let mut files = evictable_media_files(&media);
     let total: u64 = files.iter().map(|(_, s, _)| *s).sum();
     if total <= max_bytes {
         return Ok(0);
@@ -579,7 +621,15 @@ pub async fn clear_cache_category(
     let active: std::collections::HashSet<String> = registry.active_ids().into_iter().collect();
     let excluded: std::collections::HashSet<String> = exclude.unwrap_or_default().into_iter().collect();
     match category.as_str() {
-        "downloads" | "audio" | "meta" => {
+        // `transfers` is here on purpose. It is exempt from the automatic
+        // size cap because a received file does not regenerate — but exempt
+        // from EVICTION is not the same as undeletable, and a category the
+        // Settings panel lists must actually clear when its button is pressed.
+        // Without this arm the row would render, count bytes, and answer
+        // "unknown cache category" on click: a control the UI advertises and
+        // does not honour, which is the exact defect the sortable list headers
+        // were fixed for.
+        "downloads" | "audio" | "meta" | "transfers" => {
             Ok(remove_files_in_dir(&media_cache_dir(&cache, &category), &active, &excluded))
         }
         "thumbnails" => {
@@ -1989,5 +2039,86 @@ mod atomic_write_race_tests {
             .collect();
         assert!(strays.is_empty(), "left staging files behind: {strays:?}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod media_cap_transfers_tests {
+    use super::*;
+
+    fn touch(p: &std::path::Path, bytes: usize) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, vec![b'x'; bytes]).unwrap();
+    }
+
+    fn scratch() -> PathBuf {
+        let d = std::env::temp_dir()
+            .join(format!("sb-mediacap-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// A file received from a co-review peer is not eviction fodder.
+    ///
+    /// The size cap is an LRU over the media cache, and `transfers/` lives
+    /// inside it — so a guest's only copy of a screening master was being
+    /// deleted oldest-first, at boot, against a threshold the user set with
+    /// web downloads in mind. It does not regenerate: the host is gone.
+    #[test]
+    fn transfers_are_never_offered_to_the_size_cap() {
+        let media = scratch();
+        touch(&media.join("downloads/web-clip.mp4"), 64);
+        touch(&media.join("audio/track.m4a"), 64);
+        touch(&media.join("meta/source.json"), 8);
+        touch(&media.join("transfers/abc12345-Rough cut.mov"), 4096);
+        touch(&media.join("transfers/def67890-Grade pass.mov"), 4096);
+
+        let got: Vec<String> = evictable_media_files(&media)
+            .into_iter()
+            .map(|(p, _, _)| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        assert!(
+            !got.iter().any(|n| n.contains("Rough cut") || n.contains("Grade pass")),
+            "a received co-review file was offered to the cap: {got:?}",
+        );
+        // And the derived cache IS still evictable — the exemption must not
+        // have turned the whole cap off.
+        assert!(got.iter().any(|n| n == "web-clip.mp4"), "downloads no longer evictable: {got:?}");
+        assert!(got.iter().any(|n| n == "track.m4a"), "audio no longer evictable: {got:?}");
+        assert!(got.iter().any(|n| n == "source.json"), "meta no longer evictable: {got:?}");
+        assert_eq!(got.len(), 3, "unexpected eviction set: {got:?}");
+
+        let _ = std::fs::remove_dir_all(&media);
+    }
+
+    /// The exemption is the directory, not the filename — a download that
+    /// happens to be called "transfers.mp4" is still ordinary cache.
+    #[test]
+    fn the_exemption_is_a_directory_not_a_name() {
+        let media = scratch();
+        touch(&media.join("downloads/transfers.mp4"), 32);
+        touch(&media.join("transfers/aaaaaaaa-real.mov"), 32);
+
+        let got: Vec<String> = evictable_media_files(&media)
+            .into_iter()
+            .map(|(p, _, _)| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(got, vec!["transfers.mp4".to_string()], "got {got:?}");
+
+        let _ = std::fs::remove_dir_all(&media);
+    }
+
+    /// Nested directories under the cache are still walked, so the exemption
+    /// cannot be read as "stop recursing".
+    #[test]
+    fn other_subdirectories_are_still_walked_recursively() {
+        let media = scratch();
+        touch(&media.join("downloads/2026-08/deep/clip.mp4"), 16);
+        let got = evictable_media_files(&media);
+        assert_eq!(got.len(), 1, "nested derived cache was skipped");
+
+        let _ = std::fs::remove_dir_all(&media);
     }
 }
