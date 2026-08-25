@@ -770,14 +770,24 @@
   gap: var(--s-2);
   margin-left: auto;
   margin-right: var(--s-3);
-  min-width: 0;
-  /* SHRINKS BY NARROWING THE FIELD, never by overflowing. This bar could be
-     squeezed by the header while its own contents had a hard floor - the
-     field carried min-width:200px - so past a certain width its buttons
-     spilled out of their own box and ran into "Copy join code" next door.
-     At 720px the two overlapped by 42px and rendered as "CLEARCOPY JOIN
-     CODE". The field gives way now; the buttons never do. */
+  /* SHRINKS BY NARROWING THE FIELD, never by overflowing.
+     NO `min-width: 0` HERE, and that is the whole fix. Flexbox already floors
+     an item at its min-content width, which for this bar is its two
+     non-shrinking buttons; `min-width: 0` switched that floor off, so under
+     pressure the BOX shrank while its contents did not and the buttons spilled
+     right out of it onto "Copy join code" next door - which paints on top,
+     being later in the DOM. Clicking Clear copied the join code instead, and
+     the labels rendered as "COPYJOINCLCOEDARE".
+     The field carries `min-width: 0` instead, so it is the part that gives.
+     The bar states its PREFERRED width here rather than deriving it from its
+     contents, because the field's flex-basis would otherwise become the
+     bar's floor: a `1 1 240px` field reports 240px as its min-content
+     contribution however small `min-width` is, so the bar could never shrink
+     past ~327px and the header overflowed by 110px at 1100. Basis 0 on the
+     field plus an explicit width here means the bar wants 420px and gives
+     every pixel of it back before a button moves. */
   flex: 0 1 auto;
+  width: 420px;
 }
 .cp-room-source-bar > .btn { flex: 0 0 auto; }
 .cp-room-source-field {
@@ -786,11 +796,14 @@
   gap: 6px;
   padding: 0 10px;
   height: 28px;
-  /* A floor small enough to still read as a field, rather than one that
-     makes the whole bar unshrinkable. */
-  min-width: 96px;
+  /* The field is what yields. It collapses to nothing before a button ever
+     gives up a pixel - a squeezed field is legible-ish, two overlapping
+     buttons are not. */
+  min-width: 0;
   max-width: 340px;
-  flex: 1 1 240px;
+  /* Basis 0, so the field asks for nothing and takes what the bar has left
+     over after the buttons. See the note on the bar above. */
+  flex: 1 1 0;
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
   background: var(--bg-0);
@@ -800,7 +813,13 @@
 .cp-room-source-field:focus-within { border-color: var(--focus-ring); }
 .cp-room-source-field input {
   flex: 1;
+  /* `min-width: 0` lets the input SHRINK; `width: 0` stops it from reporting
+     its intrinsic ~20-character size as the field's min-content, which is
+     what the bar's floor is computed from. Without it the field could never
+     get below ~176px however hard it was squeezed, and the header overflowed
+     by 110px at the app's minimum window width. */
   min-width: 0;
+  width: 0;
   border: none;
   outline: none;
   background: transparent;
