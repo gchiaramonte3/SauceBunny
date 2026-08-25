@@ -113,7 +113,13 @@ export function LibraryListRow({
           )}
           {item.name}
         </span>
-        <span className="cp-lib-lrow-kind">{item.kind}</span>
+        {/* `capitalize` lives on THIS cell rather than the shared class: the
+            Library's kind is a lowercase enum, while the same column holds a
+            filename in Frames and a hostname in the web shelf - where
+            capitalising turned "turbores-sample.mov" into
+            "Turbores-Sample.Mov", because a hyphen and a dot are both word
+            boundaries. */}
+        <span className="cp-lib-lrow-kind cp-lib-lrow-kindword">{item.kind}</span>
         <span className="cp-lib-lrow-size">{formatBytes(item.size_bytes)}</span>
         <span className="cp-lib-lrow-date">{formatModifiedDate(item.modified_ms)}</span>
       </button>
