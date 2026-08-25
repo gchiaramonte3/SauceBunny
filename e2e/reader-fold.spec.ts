@@ -72,3 +72,41 @@ test("a search shows its results, folded state notwithstanding", async ({ page }
   await page.getByLabel(/Search transcripts/i).fill("interview");
   await expect(rows(page).first()).toBeVisible();
 });
+
+test("the group holding the open transcript can still be closed", async ({ page }) => {
+  // The bug this pins: that group opened itself on every render, which made
+  // its own chevron dead - clicking to close it did nothing at all. An
+  // override that outranks the user is not a default, it is a broken
+  // control.
+  await bootReader(page);
+  // Open a group and load a transcript from it, so that group holds the
+  // active row.
+  const head = page.locator(".cp-reader-group-label button").first();
+  await head.click();
+  const row = rows(page).first();
+  await row.click();
+  await expect(row).toHaveAttribute("aria-current", "true");
+
+  // Now fold it. The row must go.
+  await head.click();
+  await expect(head).toHaveAttribute("aria-expanded", "false");
+  await expect(rows(page)).toHaveCount(0);
+});
+
+test("a group you closed stays closed across a relaunch", async ({ page }) => {
+  await bootReader(page);
+  const head = page.locator(".cp-reader-group-label button").first();
+  await head.click();
+  await expect(rows(page).first()).toBeVisible();
+  await rows(page).first().click();
+  await head.click();
+  await expect(rows(page)).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press("Meta+5");
+  await expect(page.locator(".cp-reader-group-label").first()).toBeVisible({ timeout: 10_000 });
+  // Still shut, even though it holds the transcript that is loaded.
+  await expect(page.locator(".cp-reader-group-label button").first())
+    .toHaveAttribute("aria-expanded", "false");
+});

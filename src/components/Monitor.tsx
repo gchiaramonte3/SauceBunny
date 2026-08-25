@@ -5,6 +5,7 @@ import { CanvasToast, type ToastKind } from "./CanvasToast";
 import { CaptionOverlay, type CaptionStyle } from "./CaptionOverlay";
 import { AnnotationOverlay } from "./AnnotationOverlay";
 import { usePlayheadSeconds } from "../lib/playhead-store";
+import { annotationsNear } from "../lib/annotation-proximity";
 import type { AnnotationStrokes } from "../lib/review";
 import type { OnboardingStep, OnboardingStepId } from "../lib/onboarding";
 import { LocalMediaPlayer } from "./LocalMediaPlayer";
@@ -191,23 +192,25 @@ function ProximityAnnotation({ annotations, fps }: {
   fps: number;
 }) {
   const playheadSec = usePlayheadSeconds(fps) ?? 0;
-  let strokes: AnnotationStrokes | null = null;
-  let color: string | undefined;
-  let bestDist = Infinity;
-  for (const a of annotations) {
-    const d = Math.abs(a.time - playheadSec);
-    if (d < bestDist) { bestDist = d; strokes = a.strokes; color = a.color; }
-  }
-  const opacity = bestDist <= ANNOT_PROX_WINDOW ? Math.max(0, 1 - bestDist / ANNOT_PROX_WINDOW) : 0;
-  if (!strokes || opacity <= 0) return null;
+  // EVERY drawing in the window, not the nearest one. This kept a single
+  // best match, so two people annotating the same moment meant one was
+  // silently invisible - tie broken by document order. The rule itself lives
+  // in lib/annotation-proximity so it can be tested without a canvas.
+  const near = annotationsNear(annotations, playheadSec, ANNOT_PROX_WINDOW);
+  if (near.length === 0) return null;
   return (
-    <AnnotationOverlay
-      annotation={strokes}
-      drawing={false}
-      opacity={opacity}
-      onChange={() => {}}
-      labelColor={color}
-    />
+    <>
+      {near.map((a) => (
+        <AnnotationOverlay
+          key={`${a.time}:${a.color ?? ""}`}
+          annotation={a.strokes}
+          drawing={false}
+          opacity={a.opacity}
+          onChange={() => {}}
+          labelColor={a.color}
+        />
+      ))}
+    </>
   );
 }
 

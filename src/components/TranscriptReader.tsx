@@ -170,11 +170,13 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
    * read under the opposite rule would fold exactly the groups someone had
    * chosen to keep open.
    */
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => {
+  const [choices, setChoices] = useState<ReadonlyMap<string, boolean>>(() => {
     try {
-      const raw = JSON.parse(localStorage.getItem("saucebunny.readerExpanded") ?? "[]");
-      return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
-    } catch { return new Set(); }
+      const raw = JSON.parse(localStorage.getItem("saucebunny.readerFolds") ?? "{}");
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return new Map();
+      return new Map(Object.entries(raw as Record<string, unknown>)
+        .filter((e): e is [string, boolean] => typeof e[1] === "boolean"));
+    } catch { return new Map(); }
   });
   // The write lives OUTSIDE the updater. A setState updater has to be pure -
   // React may run it more than once, and StrictMode does so deliberately to
@@ -182,30 +184,48 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   // depend on which invocation React kept. Same mistake, same fix, as the
   // web pane's view prefs. The ref mirrors state so reading it here is
   // race-free rather than a stale closure.
-  const expandedRef = useRef(expanded);
-  expandedRef.current = expanded;
+  const choicesRef = useRef(choices);
+  choicesRef.current = choices;
   /**
    * Is this group showing its rows?
    *
-   * Two groups open themselves regardless of what the user last chose, and
-   * both would be bugs if they did not:
+   * AN EXPLICIT CHOICE ALWAYS WINS. This used to be a set of open folders
+   * plus two overrides that forced a group open regardless - and one of
+   * those overrides made its own chevron dead: the group holding the
+   * transcript you are reading re-opened itself on every render, so
+   * clicking to close it did nothing at all. An override that outranks the
+   * user is not a default, it is a broken control.
    *
-   * - THE SEARCH RESULTS. A needle collapses everything into one synthetic
-   *   group; folded, a search would return a heading and no results, which
-   *   reads as "nothing found" for a query that matched.
-   * - THE GROUP HOLDING THE OPEN TRANSCRIPT. The picker marks the current
-   *   row with aria-current, and hiding the thing you are reading loses your
-   *   place in the list.
+   * So the stored value is a MAP of decisions rather than a set of open
+   * folders. No entry means "no opinion yet", and only then do the defaults
+   * apply:
+   *
+   * - THE SEARCH RESULTS open. A needle collapses everything into one
+   *   synthetic group; folded, a search returns a heading and no rows, which
+   *   reads as "nothing found" for a query that matched. There is also no
+   *   chevron worth clicking on a group that exists only while you type.
+   * - THE GROUP HOLDING THE OPEN TRANSCRIPT opens, so arriving with
+   *   something already loaded shows you where you are - until you say
+   *   otherwise.
+   * - Everything else starts folded.
    */
-  const isOpen = useCallback((folder: string, holdsActive: boolean) =>
-    expanded.has(folder) || folder === "__results__" || holdsActive,
-  [expanded]);
+  const isOpen = useCallback((folder: string, holdsActive: boolean) => {
+    if (folder === "__results__") return true;
+    const choice = choices.get(folder);
+    if (choice !== undefined) return choice;
+    return holdsActive;
+  }, [choices]);
 
-  const toggleGroup = useCallback((folder: string) => {
-    const next = new Set(expandedRef.current);
-    if (next.has(folder)) next.delete(folder); else next.add(folder);
-    try { localStorage.setItem("saucebunny.readerExpanded", JSON.stringify([...next])); } catch { /* quota */ }
-    setExpanded(next);
+  const toggleGroup = useCallback((folder: string, holdsActive: boolean) => {
+    const cur = choicesRef.current;
+    const wasOpen = cur.get(folder) ?? holdsActive;
+    const next = new Map(cur);
+    next.set(folder, !wasOpen);
+    // Outside the updater, which has to stay pure.
+    try {
+      localStorage.setItem("saucebunny.readerFolds", JSON.stringify(Object.fromEntries(next)));
+    } catch { /* quota */ }
+    setChoices(next);
   }, []);
 
   // Search is debounced like the Library's (150ms): typing re-filters a
@@ -512,7 +532,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
                   x, y,
                 })}
                 collapsed={!isOpen(g.folder, g.items.some((t) => t.path === activePath))}
-                onToggle={() => toggleGroup(g.folder)}
+                onToggle={() => toggleGroup(g.folder, g.items.some((t) => t.path === activePath))}
                 dropKey={moveTargets.has(g.folder) ? g.folder : undefined}
                 dropActive={rowDrag.drag?.over === g.folder}
               />
