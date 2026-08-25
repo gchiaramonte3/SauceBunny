@@ -37,7 +37,10 @@ describe("npm run verify covers every gate CI runs", () => {
     ["npm run lint", "npm run lint"],
     ["cargo check", "cargo check"],
     ["cargo test --lib", "cargo test --lib"],
-    ["cargo clippy --all-targets -- -D warnings", "cargo clippy"],
+    // The local spelling must carry --all-targets too. Mapping CI's flagged
+    // command to a bare "cargo clippy" let the local gate run a SUBSET: no
+    // test targets, so a lint inside a #[test] passed here and failed there.
+    ["cargo clippy --all-targets -- -D warnings", "cargo clippy --all-targets"],
     ["swift build", "swift build"],
     ["npm run check:licenses", "npm run check:licenses"],
     ["npx playwright test", "npx playwright test"],

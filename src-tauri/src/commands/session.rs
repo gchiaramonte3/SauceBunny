@@ -1812,18 +1812,14 @@ async fn peer_media_service(
             // chunk - with the ChannelReader's copy on the far side, every
             // streamed byte crossed userspace three times. Now it crosses
             // once, into the HTTP response.
-            loop {
-                match recv.read_chunk(64 * 1024).await {
-                    Ok(Some(chunk)) => {
-                        if tx.send(chunk).await.is_err() {
-                            // Reader dropped: the HTTP response ended (seek
-                            // teardown or player gone). Dropping the stream
-                            // STOPs it and the host's write fails on its
-                            // next chunk.
-                            break;
-                        }
-                    }
-                    Ok(None) | Err(_) => break,
+            // `while let`, because every other arm already just broke: a
+            // clean end of stream and a read error both mean stop.
+            while let Ok(Some(chunk)) = recv.read_chunk(64 * 1024).await {
+                if tx.send(chunk).await.is_err() {
+                    // Reader dropped: the HTTP response ended (seek teardown
+                    // or player gone). Dropping the stream STOPs it and the
+                    // host's write fails on its next chunk.
+                    break;
                 }
             }
         });
@@ -1987,10 +1983,6 @@ fn fetch_cancels() -> &'static std::sync::Mutex<HashMap<String, Arc<tokio::sync:
     M.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
-/// Host: hash the CURRENT source file and offer it to the room (Tier C).
-/// The click that invokes this IS the sender's consent. Returns
-/// `{ name, size, blake3 }` so the host UI can mirror the offer.
-
 /// Whole-file BLAKE3, mmap'd and hashed across every core. The serial
 /// `update_reader` loop this replaces hashed a 60 GB master on ONE core
 /// through 64 KiB reads - minutes of "Preparing the file..." for something
@@ -2006,9 +1998,14 @@ fn hash_file_parallel(path: &std::path::Path) -> Result<blake3::Hasher, String> 
 /// whole file; the pair changes on any rewrite (and this app's own writers
 /// are atomic temp+rename, which always bumps both), so a hit is safe to
 /// trust and a warm re-offer costs a stat.
-static OFFER_HASH_MEMO: std::sync::OnceLock<
-    std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, (u64, std::time::SystemTime, String)>>,
-> = std::sync::OnceLock::new();
+/// What the memo remembers for one path: the size and mtime it was hashed
+/// at, and the hex digest. Named because the nested form was four types deep
+/// and unreadable at the use site.
+type OfferHashEntry = (u64, std::time::SystemTime, String);
+type OfferHashMemo =
+    std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, OfferHashEntry>>;
+
+static OFFER_HASH_MEMO: std::sync::OnceLock<OfferHashMemo> = std::sync::OnceLock::new();
 
 fn memoized_file_hash(path: &std::path::Path, size: u64, mtime: Option<std::time::SystemTime>) -> Result<String, String> {
     let memo = OFFER_HASH_MEMO.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
@@ -2026,6 +2023,12 @@ fn memoized_file_hash(path: &std::path::Path, size: u64, mtime: Option<std::time
     Ok(hex)
 }
 
+/// Host: hash the CURRENT source file and offer it to the room (Tier C).
+/// The click that invokes this IS the sender's consent. Returns
+/// `{ name, size, blake3 }` so the host UI can mirror the offer.
+///
+/// (This doc had drifted away from its function - two helpers were inserted
+/// between them, leaving it stranded above `hash_file_parallel`.)
 #[tauri::command]
 pub async fn session_offer_file(
     app: AppHandle,

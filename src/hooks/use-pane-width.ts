@@ -60,7 +60,7 @@ export function usePaneWidth({ key, min, max, fallback, side = "left" }: {
     }
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
-  }, [key, width, min, max, side]);
+  }, [width, min, max, side]);
 
   /** Keyboard equivalent: a drag-only resize is unreachable without one. */
   const onKeyDown = useCallback((e: React.KeyboardEvent) => {

@@ -1027,10 +1027,12 @@ pub fn move_to_trash(path: String) -> Result<(), crate::AppError> {
         return Err(crate::AppError::not_found(path.as_str()));
     }
 
+    // No `unsafe` here: objc2 0.6 marks all three of these safe, and clippy
+    // rejects an unsafe block that wraps nothing unsafe.
     let ns_path = NSString::from_str(&path);
-    let url = unsafe { NSURL::fileURLWithPath(&ns_path) };
-    let fm = unsafe { NSFileManager::defaultManager() };
-    unsafe { fm.trashItemAtURL_resultingItemURL_error(&url, None) }
+    let url = NSURL::fileURLWithPath(&ns_path);
+    let fm = NSFileManager::defaultManager();
+    fm.trashItemAtURL_resultingItemURL_error(&url, None)
         .map_err(|e| crate::AppError::internal(format!("Couldn't move it to the Trash: {e}")))?;
     Ok(())
 }

@@ -37,7 +37,10 @@ run "Rust tests"    cargo test --lib --manifest-path src-tauri/Cargo.toml
 # passed" was reported for 98 commits while clippy was failing on two
 # pre-existing lints. A local gate that is a subset of the CI gate is a
 # gate that tells you the wrong thing.
-run "Clippy"        cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+# --all-targets, because CI uses it and TESTS are a target: a lint inside a
+# #[test] was invisible here and failed there, which is the same subset bug
+# the note above describes, committed a second time in the fix for it.
+run "Clippy"        cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
 run "Swift sidecar" swift build --package-path swift-sidecar
 # CI runs this too, and this script did not - the same subset bug as clippy
 # below, found the same way. It takes a second and it is the check that stops

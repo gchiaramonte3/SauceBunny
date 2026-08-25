@@ -503,6 +503,10 @@ mod folder_tests {
         // what makes the slash rejection load-bearing rather than cosmetic.
         let root = std::path::PathBuf::from("/Frames");
         assert!(valid_frame_stem("/etc").is_err());
-        assert_eq!(root.join("/etc"), std::path::PathBuf::from("/etc"));
+        // The join is built from a runtime value rather than a literal: the
+        // hazard is real, but clippy rightly refuses a literal "/etc" here
+        // because in ordinary code that is a typo, not a demonstration.
+        let absolute: &str = "/etc";
+        assert_eq!(root.join(absolute), std::path::PathBuf::from("/etc"));
     }
 }
