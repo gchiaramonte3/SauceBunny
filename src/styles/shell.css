@@ -280,19 +280,8 @@
   color: var(--fg-4);
   line-height: var(--leading-snug);
 }
-/* New project: a quiet + in the head, then an inline field. */
-.cp-reader-newproject {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--line-1);
-  background: var(--bg-2);
-  color: var(--fg-3);
-  cursor: pointer;
-}
-.cp-reader-newproject:hover { background: var(--bg-3); border-color: var(--line-2); color: var(--fg-1); }
+/* New project: an inline field in the head. (The `+` button this used to
+   sit beside is gone; only the row below is still rendered.) */
 .cp-reader-newproject-row {
   display: flex;
   gap: 6px;

@@ -147,7 +147,6 @@ export function tauriMockInit(expectedBuildId: string): void {
     ],
     list_llm_models: [],
     list_audio_input_devices: [],
-    get_downloaded_models: [],
     default_transcript_library_path: "/e2e-mock/Documents/Sauce Bunny/Transcripts",
     // Library thumbnails: a 0-byte "file" makes mediabunny bail cleanly
     // (extractFrameAsBlob → null) without ever range-reading, and the null

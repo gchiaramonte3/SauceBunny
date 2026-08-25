@@ -2626,8 +2626,10 @@ extern "C" {
 
 /// One capturable display. `index` is the avfoundation screen ordinal
 /// (ffmpeg's "Capture screen N"), which follows CG's active-display order.
-#[derive(Clone, serde::Serialize, ts_rs::TS)]
-#[ts(export, export_to = "../../src/bindings/")]
+// Internal only: `list_displays_impl` is private and its result is mapped into
+// `ShareDisplay`, which is the type that actually crosses the invoke boundary.
+// The Clone/Serialize/TS derives were all dead, and the generated
+// src/bindings/DisplayInfo.ts was the only orphan among 46 binding files.
 pub struct DisplayInfo {
     pub id: u32,
     pub index: u32,

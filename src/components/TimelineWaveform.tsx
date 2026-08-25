@@ -36,7 +36,12 @@ function drawWaveform(canvas: HTMLCanvasElement, peaks: WaveformPeaks) {
 
   // Ink comes from the muted-foreground token so theming stays in
   // tokens.css — canvas can't use `var()` directly, so resolve it here.
-  const ink = getComputedStyle(canvas).getPropertyValue("--fg-4").trim() || "#71717A";
+  // No hardcoded fallback: --fg-4 is always defined on :root, and the literal
+  // that used to sit here (#71717A) is now --fg-5's value — the r141 contrast
+  // lift moved fg-4 away from it, so the fallback named a colour the palette
+  // had deliberately abandoned. (Not `currentColor`: as a canvas fillStyle it
+  // resolves to the inherited `color`, and an unparseable value paints black.)
+  const ink = getComputedStyle(canvas).getPropertyValue("--fg-4").trim();
   ctx.clearRect(0, 0, w, h);
 
   const { mins, maxs } = peaks;
