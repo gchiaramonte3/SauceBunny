@@ -2106,7 +2106,15 @@
 .cp-framepv {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 10px;
+  /* SIZES TO THE PICTURE. The dialog used to be a full-width column, so the
+     caption bar stretched the whole way across while the image sat centred
+     and narrower - the bar ran wider than the thing it describes, which
+     reads as chrome laid over the viewer rather than a label belonging to
+     the frame. fit-content makes the column exactly as wide as the stage,
+     and the stage is exactly as wide as the image plus its stepper gutters. */
+  width: fit-content;
   max-width: min(1400px, 100%);
   max-height: 100%;
   outline: none;
@@ -2118,6 +2126,10 @@
   justify-content: center;
   min-height: 0;
   flex: 1 1 auto;
+  /* Exactly the image plus its gutters, so the caption below has something
+     real to measure itself against. */
+  width: fit-content;
+  max-width: 100%;
   /* Gutters for the steppers, as PADDING rather than negative offsets. The
      picture is max-width:100% of the content box, so it can never run under
      a stepper, and a stepper can never be pushed off screen - which is what
@@ -2177,6 +2189,13 @@
   align-items: center;
   gap: 10px;
   flex: 0 0 auto;
+  /* ALWAYS NARROWER THAN THE PICTURE. The stage is the image plus a 52px
+     stepper gutter each side, so trimming 120px from the column's width
+     leaves the bar inside the image's own edges rather than level with them
+     - a label that sits within the frame it names. */
+  width: calc(100% - 120px);
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 8px 10px 8px 14px;
   border: 1px solid var(--line-2);
   border-radius: var(--r-pill);
