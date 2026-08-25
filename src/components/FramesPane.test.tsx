@@ -7,7 +7,7 @@
 // list views the folder pane and web shelf use.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { FramesPane } from "./FramesPane";
 
 const h = vi.hoisted(() => ({ calls: [] as Array<[string, unknown]>, items: [] as unknown[] }));
@@ -31,8 +31,12 @@ const frame = (over: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => {
-  h.calls = []; h.items = []; document.body.innerHTML = "";
-  localStorage.clear();
+  // cleanup(), not a body wipe: the frame viewer renders through a PORTAL,
+  // and clearing document.body by hand rips out a node React still owns - the
+  // next unmount then throws NotFoundError and the failure lands on whichever
+  // test happens to run next.
+  cleanup();
+  h.calls = []; h.items = []; localStorage.clear();
 });
 
 const mount = () => render(<FramesPane treeOpen onShowTree={() => {}} />);
@@ -123,7 +127,7 @@ describe("the frames shelf", () => {
 });
 
 describe("folders as containers", () => {
-  beforeEach(() => { h.calls = []; h.items = []; document.body.innerHTML = ""; localStorage.clear(); });
+  beforeEach(() => { cleanup(); h.calls = []; h.items = []; localStorage.clear(); });
 
   const tree = () => [
     frame({ path: "/f/root.jpg", name: "Bear_00000100.jpg", folder: "", created_at: 10 }),
@@ -198,7 +202,7 @@ describe("folders as containers", () => {
 });
 
 describe("filing a frame into a folder", () => {
-  beforeEach(() => { h.calls = []; h.items = []; document.body.innerHTML = ""; localStorage.clear(); });
+  beforeEach(() => { cleanup(); h.calls = []; h.items = []; localStorage.clear(); });
 
   it("Move to folder… is a menu item, and moving calls the scoped command", async () => {
     const { fireEvent } = await import("@testing-library/react");
@@ -249,7 +253,7 @@ describe("filing a frame into a folder", () => {
 });
 
 describe("selecting more than one frame", () => {
-  beforeEach(() => { h.calls = []; h.items = []; document.body.innerHTML = ""; localStorage.clear(); });
+  beforeEach(() => { cleanup(); h.calls = []; h.items = []; localStorage.clear(); });
 
   const four = () => [
     frame({ path: "/f/1.jpg", name: "a1.jpg", source: "Bear", created_at: 40 }),
@@ -362,5 +366,31 @@ describe("selecting more than one frame", () => {
 
     fireEvent.doubleClick(cardFor("a1.jpg"));
     expect(await screen.findByRole("dialog", { name: /Frame/ })).toBeTruthy();
+  });
+});
+
+describe("the shelf keeps up with the grabber", () => {
+  // cleanup() rather than wiping document.body: the viewer renders through a
+  // PORTAL, and clearing the body by hand tears out a node React still owns,
+  // so the next unmount throws instead of the test failing on its own terms.
+  beforeEach(() => { cleanup(); h.calls = []; h.items = []; localStorage.clear(); });
+
+  it("re-reads when a frame is grabbed, without waiting for a window focus", async () => {
+    // The case that actually happens: grab a frame in the Clip workspace,
+    // walk to Library and open Frames. The window never lost focus, and this
+    // shelf stays MOUNTED behind the other shelves - so before the event
+    // there was nothing at all to make it look again.
+    h.items = [];
+    mount();
+    expect(await screen.findByText(/Press the camera in the player/)).toBeTruthy();
+
+    h.items = [frame()];
+    const { act } = await import("@testing-library/react");
+    const { FRAMES_CHANGED_EVENT } = await import("../lib/frames");
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent(FRAMES_CHANGED_EVENT));
+    });
+
+    expect(await screen.findAllByText("Bear_00012304.jpg")).not.toHaveLength(0);
   });
 });

@@ -781,7 +781,14 @@ pub async fn extract_frame(app: AppHandle, args: ExtractFrameArgs) -> Result<Ext
         "--no-playlist".into(),
         "--no-warnings".into(),
         "-S".into(), "res,vbr,ext".into(),
-        "-f".into(), "bv*/b".into(),
+        // PREFER A DIRECTLY-SEEKABLE STREAM. Sorting on resolution alone
+        // picks YouTube's HLS manifest for anything that has one, and ffmpeg
+        // then has to walk a DVR playlist to reach the timestamp - measured
+        // at 4s for a seek that takes 2s against the progressive URL, for a
+        // byte-identical frame. `protocol^=http` is yt-dlp's own way of
+        // saying "a plain HTTP stream, not a manifest"; the bare `bv*/b`
+        // stays on the end so a source that only publishes HLS still works.
+        "-f".into(), "bv*[protocol^=http]/b[protocol^=http]/bv*/b".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
         // Two outputs: the direct video URL (line 1) and a JSON-ish
@@ -838,6 +845,13 @@ pub async fn extract_frame(app: AppHandle, args: ExtractFrameArgs) -> Result<Ext
             "-i",
             &direct_url,
             "-frames:v",
+            "1",
+            // `-update 1` because the destination is ONE file, not a numbered
+            // sequence. Without it the image2 muxer warns that the filename
+            // carries no `%03d` pattern - and whether that is a warning or a
+            // hard error depends on the ffmpeg build, so a grab that works
+            // here can fail on a different one.
+            "-update",
             "1",
             "-q:v",
             "1",

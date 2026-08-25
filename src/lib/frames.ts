@@ -157,3 +157,25 @@ export function frameCrumbs(open: string): { name: string; path: string }[] {
   const parts = open.split("/").filter(Boolean);
   return parts.map((name, i) => ({ name, path: parts.slice(0, i + 1).join("/") }));
 }
+
+/**
+ * A frame was grabbed, or one moved or was deleted.
+ *
+ * The shelf used to re-read on window FOCUS alone, which catches a change
+ * made in Finder and misses the one that actually happens: grab a frame in
+ * the Clip workspace, walk to Library and open Frames, and no focus event
+ * ever fires because the window never lost it. The shelf stays mounted
+ * behind the other shelves, so there is no remount to save it either - the
+ * new frame simply is not there until you click away and back.
+ *
+ * Same shape as the transcripts library's own change event, for the same
+ * reason: the writer knows, and nothing else can.
+ */
+export const FRAMES_CHANGED_EVENT = "saucebunny:frames-changed";
+
+export function notifyFramesChanged(): void {
+  // Guarded: this module is imported by tests running in node.
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(FRAMES_CHANGED_EVENT));
+  }
+}

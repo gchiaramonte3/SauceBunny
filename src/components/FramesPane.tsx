@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import {
   filterFrames, formatFrameTimecode, frameCrumbs, frameLevel, groupBySource,
-  sortFrames, type FrameItem,
+  sortFrames, FRAMES_CHANGED_EVENT, type FrameItem,
 } from "../lib/frames";
 import { formatBytes } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
@@ -76,7 +76,15 @@ export function FramesPane({ treeOpen, onShowTree }: {
   useEffect(() => {
     const onFocus = () => load();
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    // The event the grabber fires. Focus alone misses the case that actually
+    // happens - grab in Clip, walk to Frames, window never lost focus - and
+    // this shelf stays MOUNTED behind the others, so there is no remount to
+    // fall back on either.
+    window.addEventListener(FRAMES_CHANGED_EVENT, onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener(FRAMES_CHANGED_EVENT, onFocus);
+    };
   }, [load]);
 
   const [prefs, setPrefs] = useState<FramePrefs>(() => {

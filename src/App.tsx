@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { notifyFramesChanged } from "./lib/frames";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -2512,6 +2513,11 @@ export default function App() {
       const notifBody = resLabel ? `${filename} · ${resLabel}` : filename;
       notify("Frame saved", notifBody);
       pushNotification("success", "Frame saved", notifBody, dest);
+      // Tell the Frames shelf. It re-read on window FOCUS alone, which never
+      // fires for the case that actually happens: grab here, walk to Library
+      // and open Frames without the window ever losing focus. The shelf stays
+      // mounted behind the others, so there is no remount to save it either.
+      notifyFramesChanged();
     } catch (err) {
       const msg = isMissingCommandError(err)
         ? staleBinaryMessage("extract_frame")
