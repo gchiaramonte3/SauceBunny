@@ -33,6 +33,13 @@
 
 /* Room header — session identity + the few room-level controls. */
 .cp-room-head {
+  /* A CONTAINER, because what squeezes this header is the comments panel
+     beside it, not the window. At the app's own 1100px minimum with the panel
+     open the header gets 400px and its content wants 458, so "End session" -
+     the way OUT of a session - was clipped off the right edge. The order of
+     yielding is: the session title truncates, then the source field collapses
+     to its icon, then these two labels go. The actions never move. */
+  container-type: inline-size;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -790,6 +797,11 @@
   width: 420px;
 }
 .cp-room-source-bar > .btn { flex: 0 0 auto; }
+/* Last to give way, and only once everything else already has. Both buttons
+   keep an aria-label, so this costs the icon's meaning to nobody. */
+@container (max-width: 480px) {
+  .cp-room-source-btnlabel { display: none; }
+}
 .cp-room-source-field {
   display: flex;
   align-items: center;

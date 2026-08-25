@@ -32,6 +32,12 @@ async function bootRoom(page: Page, title: string): Promise<void> {
     localStorage.setItem("saucebunny.welcomed", "1");
     localStorage.setItem("saucebunny.review.author", JSON.stringify("Nika"));
     localStorage.setItem("e2e.avGranted", "1");
+    // The comments panel width is a persisted preference, and it is what
+    // decides how much room the header gets. 520 is what an ordinary drag to
+    // read comments comfortably leaves; the default is narrower, which is why
+    // the first version of this measured a header 80px wider than a real one.
+    localStorage.setItem("saucebunny.queueDrawerWidth", "520");
+    localStorage.setItem("saucebunny.queueDrawerActiveTab", "review");
   });
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
@@ -41,7 +47,7 @@ async function bootRoom(page: Page, title: string): Promise<void> {
   await page.getByRole("button", { name: /^Fetch/ }).click();
   await expect(page.locator(".cp-timeline-hint")).toContainText("No marks set", { timeout: 10_000 });
 
-  await page.getByRole("button", { name: "Review" }).click();
+  await page.locator(".cp-nav-item").filter({ hasText: "Review" }).first().click();
   await page.evaluate((t) => {
     (window as unknown as {
       __TAURI_MOCK__: { emitTauriEvent: (e: string, p: unknown) => void };
@@ -55,6 +61,10 @@ async function bootRoom(page: Page, title: string): Promise<void> {
     });
   }, title);
   await expect(page.locator(".cp-room-head")).toBeVisible();
+  // The people rail is part of the room and takes width off the header, which
+  // is what makes the header narrow enough for the squeeze to bite. Measuring
+  // before it mounts reads a header 72px wider than the real one.
+  await expect(page.locator(".cp-people")).toBeVisible();
 }
 
 const clearBtn = (page: Page) => page.locator(".cp-room-source-bar").getByRole("button", { name: "Clear" });
@@ -107,4 +117,34 @@ test("a long session name squeezes the field, never the buttons", async ({ page 
   const head = (await page.locator(".cp-room-head").boundingBox())!;
   const end = (await page.getByRole("button", { name: /End session/ }).boundingBox())!;
   expect(end.x + end.width).toBeLessThanOrEqual(head.x + head.width + 1);
+});
+
+test("the header never overflows its own box, so End session cannot be clipped", async ({ page }) => {
+  // Found by driving the real app rather than by a test: fixing the OVERLAP
+  // left 58px of overflow at 1100px with the comments panel open, and what
+  // hung off the right edge was "End session" - the way out of a session.
+  //
+  // scrollWidth vs clientWidth is the assertion that does not depend on which
+  // panels happen to be open, which is exactly what the earlier version got
+  // wrong: it measured one arrangement and passed while another clipped.
+  await page.setViewportSize({ width: MIN_W, height: MIN_H });
+  await bootRoom(page, "Q3 sizzle, round two");
+
+  const head = page.locator(".cp-room-head");
+  const overflow = await head.evaluate((el) => el.scrollWidth - el.clientWidth);
+  expect(overflow, `the room header overflows itself by ${overflow}px`).toBeLessThanOrEqual(0);
+
+  // And specifically: End session is inside the header, not hanging off it.
+  const hr = (await head.boundingBox())!;
+  const end = (await page.getByRole("button", { name: /End session/ }).boundingBox())!;
+  expect(end.x + end.width).toBeLessThanOrEqual(hr.x + hr.width);
+});
+
+test("both source-bar buttons stay named once their labels are dropped", async ({ page }) => {
+  // The labels are the last thing to give way. They must not take the buttons'
+  // accessible names with them.
+  await page.setViewportSize({ width: MIN_W, height: MIN_H });
+  await bootRoom(page, "Q3 sizzle, round two");
+  await expect(page.locator(".cp-room-source-bar").getByRole("button", { name: "File" })).toBeVisible();
+  await expect(page.locator(".cp-room-source-bar").getByRole("button", { name: "Clear" })).toBeVisible();
 });

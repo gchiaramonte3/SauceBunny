@@ -44,12 +44,16 @@ export function RoomSourceBar({ hasSource, onLoadUrl, onImportFile, onClear }: {
           }}
         />
       </div>
-      <button type="button" className="btn btn-ghost btn-compact" onClick={onImportFile} title="Open a file from this Mac. Peers with the same file open their own copy, frame accurate.">
-        <IconImport size={12} /> File
+      {/* The labels are wrapped so they can be the NEXT thing to give way after
+          the field, when the header runs out of room - see the container query
+          in room.css. aria-label keeps both buttons named either way, so
+          dropping the text costs nothing to a screen reader. */}
+      <button type="button" className="btn btn-ghost btn-compact" aria-label="File" onClick={onImportFile} title="Open a file from this Mac. Peers with the same file open their own copy, frame accurate.">
+        <IconImport size={12} /> <span className="cp-room-source-btnlabel">File</span>
       </button>
       {hasSource && (
-        <button type="button" className="btn btn-ghost btn-compact" onClick={onClear} title="Clear what the room is watching">
-          <IconTrash size={12} /> Clear
+        <button type="button" className="btn btn-ghost btn-compact" aria-label="Clear" onClick={onClear} title="Clear what the room is watching">
+          <IconTrash size={12} /> <span className="cp-room-source-btnlabel">Clear</span>
         </button>
       )}
     </div>
