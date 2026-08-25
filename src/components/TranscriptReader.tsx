@@ -149,7 +149,9 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
     void hydrateProjects(transcriptLibraryPath, folders);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate once, on the first real list
   }, [folders !== null]);
-  useEffect(() => { if (folders !== null) syncProjectFolders(folders); }, [folders]);
+  useEffect(() => {
+    if (folders !== null) syncProjectFolders(transcriptLibraryPath, folders);
+  }, [folders, transcriptLibraryPath]);
   const projects = useMemo(() => { void projectTick; return getProjects(); }, [projectTick]);
 
   /**

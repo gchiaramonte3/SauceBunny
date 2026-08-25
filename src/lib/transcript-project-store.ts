@@ -131,9 +131,29 @@ export async function hydrateProjects(
   }
 }
 
-/** Re-run reconciliation after a scan, so a folder made in Finder appears. */
-export function syncProjectFolders(foldersOnDisk: readonly string[]): void {
+/**
+ * Re-run reconciliation after a scan, so a folder made in Finder appears.
+ *
+ * TAKES THE LIBRARY PATH, and refuses when it is not the one the store
+ * hydrated against. `dir` is latched once by `hydrateProjects` and never
+ * re-read, but this ran on every change to the folder LISTING - so pointing
+ * Settings ▸ Transcripts folder at a different directory reconciled the OLD
+ * library's projects against the NEW directory's folders, matched nothing,
+ * and wrote `{"projects":[]}` over the old library's file. Posters, colours
+ * and titles gone, with no user action beyond changing a setting, and nothing
+ * to restore them.
+ *
+ * The same shape was already fixed once for the boot case - see the
+ * `folders === null` guard in TranscriptReader - which is why the refusal
+ * belongs HERE rather than in another caller-side guard that the next caller
+ * will not know to copy.
+ */
+export function syncProjectFolders(
+  libraryPath: string,
+  foldersOnDisk: readonly string[],
+): void {
   if (!hydrated) return;
+  if (libraryPath.replace(/\/+$/, "") !== dir) return;
   const next = reconcileProjects(projects, foldersOnDisk, Date.now());
   const changed =
     next.length !== projects.length ||

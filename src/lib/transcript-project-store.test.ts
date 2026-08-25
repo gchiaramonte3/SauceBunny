@@ -181,7 +181,41 @@ describe("the project store", () => {
   it("notices a folder made in Finder after boot", async () => {
     const s = await store();
     await s.hydrateProjects(LIB, ["Show"]);
-    s.syncProjectFolders(["Show", "New Show"]);
+    s.syncProjectFolders(LIB, ["Show", "New Show"]);
+    expect(s.getProjects().map((p) => p.folder)).toEqual(["Show", "New Show"]);
+  });
+
+  it("refuses to reconcile the old library against a NEW library's folders", async () => {
+    // THE DATA-LOSS CASE. `dir` is latched once by hydrateProjects and never
+    // re-read, but sync ran on every change to the folder LISTING. Point
+    // Settings ▸ Transcripts folder somewhere else and the listing is re-read
+    // for the NEW directory, so the OLD library's projects matched nothing,
+    // were reconciled away, and the empty result was written back over the OLD
+    // library's projects.json. Posters, colours and titles gone from a folder
+    // the user had only just navigated away from.
+    const s = await store();
+    await s.hydrateProjects(LIB, ["Marry Harry"]);
+    s.editProject("Marry Harry", { color: "#f0f", posterFrom: "/lib/Marry Harry/ep1.srt" });
+    await settle();
+    h.writes = [];
+
+    // The user repoints the setting; the folder listing is now the new dir's.
+    s.syncProjectFolders("/other/Transcripts", ["Something Else"]);
+    await settle();
+
+    expect(h.writes, "wrote to the old library after the path changed").toEqual([]);
+    const p = s.getProjects();
+    expect(p).toHaveLength(1);
+    expect(p[0].folder).toBe("Marry Harry");
+    expect(p[0].color, "the decoration was reconciled away").toBe("#f0f");
+  });
+
+  it("still reconciles when the path is the one it hydrated against", async () => {
+    // The guard must not turn sync into a no-op for its actual job. A trailing
+    // slash is the same directory - hydrate normalises, so this must too.
+    const s = await store();
+    await s.hydrateProjects(LIB, ["Show"]);
+    s.syncProjectFolders(`${LIB}/`, ["Show", "New Show"]);
     expect(s.getProjects().map((p) => p.folder)).toEqual(["Show", "New Show"]);
   });
 
@@ -190,7 +224,7 @@ describe("the project store", () => {
     await s.hydrateProjects(LIB, ["Show"]);
     await settle();
     h.writes = [];
-    s.syncProjectFolders(["Show"]);
+    s.syncProjectFolders(LIB, ["Show"]);
     await settle();
     expect(h.writes, "a no-op scan rewrote the file").toEqual([]);
   });
@@ -215,7 +249,7 @@ describe("renaming a project keeps what was decorated onto it", () => {
     await s.hydrateProjects(LIB, ["Old Show"]);
     s.editProject("Old Show", { color: "#f0f", posterFrom: "/lib/Old Show/ep1.srt" });
     s.renameProject("Old Show", "Marry Harry");
-    s.syncProjectFolders(["Marry Harry"]);
+    s.syncProjectFolders(LIB, ["Marry Harry"]);
     const p = s.getProjects();
     expect(p).toHaveLength(1);
     expect(p[0].folder).toBe("Marry Harry");
