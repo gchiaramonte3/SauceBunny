@@ -120,7 +120,7 @@
 .cp-reader {
   flex: 1;
   display: grid;
-  grid-template-columns: 300px 1fr var(--reader-stage-w, 0px);
+  grid-template-columns: var(--reader-picker-w, 300px) 1fr var(--reader-stage-w, 0px);
   min-height: 0;
   /* No transition here: --panel-slide is a full transition LIST, so
      `transition: grid-template-columns var(--panel-slide)` was invalid at
@@ -132,6 +132,8 @@
 .cp-reader.stage-rail  { --reader-stage-w: 46px; }
 .cp-reader.stage-float { --reader-stage-w: 0px; }
 .cp-reader-picker {
+  /* The resize handle is absolutely positioned on this pane's edge. */
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1043,3 +1045,55 @@
   outline-offset: 2px;
   border-radius: var(--r-sm);
 }
+
+/* The picker's resize handle. It sits on the pane's right edge, over the
+   border, the way the Library tree's does - one idiom, two panes. */
+.cp-reader-picker-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  z-index: 3;
+}
+
+/* ── Compact transcripts list ────────────────────────────────────────────────
+   Name and chips, no poster. The picker's default row recognises a film by
+   its frame, which is right for footage and wrong for a hundred named
+   episodes; this is the other reading of the same shelf. */
+.cp-reader-viewtoggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.cp-reader-viewtoggle:hover { background: var(--bg-3); color: var(--fg-1); }
+.cp-reader-viewtoggle[aria-pressed="true"] { color: var(--fg-1); background: var(--bg-3); }
+
+.cp-reader-picker.compact .cp-reader-row-thumb { display: none; }
+.cp-reader-picker.compact .cp-reader-row {
+  padding-top: 5px;
+  padding-bottom: 5px;
+  min-height: 0;
+}
+/* The meta line joins the title's line rather than sitting under it, which
+   is where the height actually goes. */
+.cp-reader-picker.compact .cp-reader-row-body {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.cp-reader-picker.compact .cp-reader-row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-reader-picker.compact .cp-reader-row-meta { flex: 0 0 auto; }

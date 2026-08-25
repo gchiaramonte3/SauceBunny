@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { usePaneWidth } from "../hooks/use-pane-width";
 import { IconChevronRight, IconLink, IconPanelLeft, IconPlus, IconRefresh, IconStack, IconFolderSolid, IconCamera} from "./Icons";
 import type { LibraryFolder } from "../types";
 import { libraryPosterPaths, type LibraryCrumb, type LibraryKindFilter } from "../lib/library";
@@ -155,42 +156,17 @@ export function LibraryTree({
   // Drag-to-resize, sharing the app-wide handle design (resize.css) and the
   // drawer's persistence pattern. Width lives on a CSS variable set on the
   // tree element so no other component needs to know about it.
-  const TREE_W_KEY = "saucebunny.libraryTreeWidth";
-  const TREE_W_MIN = 168;
-  const TREE_W_MAX = 420;
+  // The shared pane resizer. The transcripts picker mounts the same one, so
+  // two panes that resize cannot resize differently - the clamp, the stored
+  // key, the body cursor and the keyboard step are decided in one place.
   const TREE_W_DEFAULT = 224;
-  const [treeWidth, setTreeWidth] = useState<number>(() => {
-    const raw = Number(localStorage.getItem(TREE_W_KEY));
-    return Number.isFinite(raw) && raw >= TREE_W_MIN && raw <= TREE_W_MAX ? raw : TREE_W_DEFAULT;
+  const {
+    width: treeWidth, resizing,
+    onMouseDown: onResizeMouseDown, onKeyDown: onResizeKeyDown,
+  } = usePaneWidth({
+    key: "saucebunny.libraryTreeWidth",
+    min: 168, max: 420, fallback: TREE_W_DEFAULT,
   });
-  const [resizing, setResizing] = useState(false);
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  useEffect(() => {
-    try { localStorage.setItem(TREE_W_KEY, String(treeWidth)); } catch { /* quota */ }
-  }, [treeWidth]);
-  const onResizeMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragRef.current = { startX: e.clientX, startWidth: treeWidth };
-    setResizing(true);
-    document.body.classList.add("cp-resizing-ew");
-    function onMove(ev: MouseEvent) {
-      const st = dragRef.current;
-      if (!st) return;
-      // The tree sits on the LEFT, so dragging right grows it — the plain
-      // cursor delta, unlike the right-docked drawer's inverted one.
-      const next = Math.max(TREE_W_MIN, Math.min(TREE_W_MAX, st.startWidth + (ev.clientX - st.startX)));
-      setTreeWidth(next);
-    }
-    function onUp() {
-      dragRef.current = null;
-      setResizing(false);
-      document.body.classList.remove("cp-resizing-ew");
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    }
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  }, [treeWidth]);
 
   /** Right-click target: a real folder row (never the "All" aggregate). */
   const [menu, setMenu] = useState<{ path: string; x: number; y: number; isRoot: boolean } | null>(null);
@@ -349,9 +325,10 @@ export function LibraryTree({
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize folder panel"
+        tabIndex={0}
         onMouseDown={onResizeMouseDown}
-        onDoubleClick={() => setTreeWidth(TREE_W_DEFAULT)}
-        title="Drag to resize · double-click to reset"
+        onKeyDown={onResizeKeyDown}
+        title="Drag to resize · arrow keys to nudge · Home to reset"
       />
       {menu && (
         <FolderTagMenu

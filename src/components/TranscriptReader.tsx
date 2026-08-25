@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useCardDrag } from "../hooks/use-card-drag";
+import { usePaneWidth } from "../hooks/use-pane-width";
 import { invoke } from "@tauri-apps/api/core";
-import { IconTranscript, IconPanelLeft, IconPlus } from "./Icons";
+import { IconGrid, IconList, IconPanelLeft, IconPlus, IconTranscript } from "./Icons";
 import { formatError } from "../lib/error-format";
 import { ReaderRowThumb } from "./ReaderRowThumb";
 import { ReaderRowMenu, type RowMenuTarget } from "./ReaderRowMenu";
@@ -293,6 +294,41 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   // A COLLAPSED project is still a target, and is the one that matters most -
   // once the picker has any history in it, the folded heading is the compact
   // thing you can actually aim at.
+  // The picker was a fixed 300px column: a long project name simply
+  // truncated and there was nothing to do about it. Same resizer the Library
+  // tree mounts, so the two panes cannot drift apart.
+  /**
+   * Compact rows: name and chips, no poster.
+   *
+   * The picker's row is a 52px thumbnail and two lines, which is right when
+   * you are recognising a film by its frame and wrong when you are looking
+   * down a list of a hundred named episodes. The Library already offers both
+   * readings of the same shelf; this is that toggle, in the one place the
+   * app renders a wall of transcripts.
+   */
+  const [compact, setCompact] = useState(() => {
+    try { return localStorage.getItem("saucebunny.readerCompact") === "1"; } catch { return false; }
+  });
+  const toggleCompact = useCallback(() => {
+    setCompact((prev) => {
+      const next = !prev;
+      return next;
+    });
+  }, []);
+  // Persisted OUTSIDE the updater, which must stay pure.
+  useEffect(() => {
+    try { localStorage.setItem("saucebunny.readerCompact", compact ? "1" : "0"); } catch { /* quota */ }
+  }, [compact]);
+
+  const PICKER_W_DEFAULT = 300;
+  const {
+    width: pickerWidth, resizing: pickerResizing,
+    onMouseDown: onPickerResize, onKeyDown: onPickerResizeKey,
+  } = usePaneWidth({
+    key: "saucebunny.readerPickerWidth",
+    min: 232, max: 520, fallback: PICKER_W_DEFAULT,
+  });
+
   const rowDrag = useCardDrag({
     itemSelector: ".cp-reader-row",
     targetSelector: "[data-drop]",
@@ -318,12 +354,25 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   });
 
   return (
-    <div className={"cp-reader" + stageClass}>
+    <div
+      className={"cp-reader" + stageClass}
+      style={{ ["--reader-picker-w" as string]: `${pickerWidth}px` }}
+    >
       <aside
-        className="cp-reader-picker"
+        className={"cp-reader-picker" + (compact ? " compact" : "")}
         aria-label="Transcripts"
         {...rowDrag.handlers}
       >
+        <div
+          className={"cp-reader-picker-resize cp-resize-handle vertical" + (pickerResizing ? " dragging" : "")}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the transcripts panel"
+          tabIndex={0}
+          onMouseDown={onPickerResize}
+          onKeyDown={onPickerResizeKey}
+          title="Drag to resize · arrow keys to nudge · Home to reset"
+        />
         {rowDrag.drag && (
           <div
             className="cp-card-ghost"
@@ -348,6 +397,16 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
               wherever you are. It said only "+" before, which is the one
               place in the app where that verb had no name on it. A project
               IS a folder here, so the label says so. */}
+          <button
+            type="button"
+            className="cp-reader-viewtoggle"
+            title={compact ? "Show posters" : "Compact list"}
+            aria-label={compact ? "Show posters" : "Compact list"}
+            aria-pressed={compact}
+            onClick={toggleCompact}
+          >
+            {compact ? <IconGrid size={13} /> : <IconList size={13} />}
+          </button>
           <button
             type="button"
             className="cp-newfolder-btn"
