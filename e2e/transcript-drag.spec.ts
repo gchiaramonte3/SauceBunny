@@ -27,6 +27,13 @@ async function bootReader(page: Page): Promise<void> {
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press("Meta+5");
   await expect(page.locator(".cp-view-reader")).toBeVisible();
+  // Groups fold by default now - a hundred transcripts across six months is
+  // a scroll with no shape - so open them before dragging rows about.
+  await expect(page.locator(".cp-reader-group-label, .cp-reader-project").first())
+    .toBeVisible({ timeout: 10_000 });
+  for (const head of await page.locator(".cp-reader-group-label button, .cp-reader-project-chevbtn").all()) {
+    if ((await head.getAttribute("aria-expanded")) === "false") await head.click();
+  }
   await expect(page.locator(".cp-reader-row").first()).toBeVisible({ timeout: 10_000 });
 }
 
@@ -206,6 +213,11 @@ test("a refused move is reported, not swallowed as an unhandled rejection", asyn
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press("Meta+5");
+  await expect(page.locator(".cp-reader-group-label, .cp-reader-project").first())
+    .toBeVisible({ timeout: 10_000 });
+  for (const head of await page.locator(".cp-reader-group-label button, .cp-reader-project-chevbtn").all()) {
+    if ((await head.getAttribute("aria-expanded")) === "false") await head.click();
+  }
   await expect(page.locator(".cp-reader-row").first()).toBeVisible({ timeout: 10_000 });
 
   const row = page.locator(".cp-reader-row").first();

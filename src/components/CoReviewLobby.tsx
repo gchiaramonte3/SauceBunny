@@ -12,6 +12,8 @@ import type { Participant } from "./PeoplePanel";
 import type { SessionState } from "../bindings/SessionState";
 import { shortJoinCode } from "../lib/join-code";
 import { ScreeningShelf } from "./ScreeningShelf";
+import { hydrateScreeningIndex, listScreenings } from "../lib/screening-store";
+import { isSessionNameTaken, nextFreeSessionName } from "../lib/session-name";
 
 /**
  * The Review lobby - the GREEN ROOM. Three calm steps in one tone-card
@@ -95,7 +97,35 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
     persistIdentity(v, color);
     setStep("devices");
   };
+  /**
+   * EVERY SCREENING GETS ITS OWN NAME.
+   *
+   * The lobby restores the last session's title and nothing stopped Start
+   * being pressed on it again, so a week of reviews came back as five rows
+   * all called the same thing - a history you cannot read, because the one
+   * field that tells sessions apart was identical in all of them.
+   *
+   * The titles are read once here rather than shared with ScreeningShelf:
+   * the shelf renders nothing until there IS history and can be folded away
+   * entirely, so the rule cannot depend on it having mounted.
+   */
+  const [takenTitles, setTakenTitles] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void hydrateScreeningIndex()
+      .then(() => { if (alive) setTakenTitles(listScreenings().map((r) => r.title)); })
+      // No folder yet is the normal first-run state: nothing is taken.
+      .catch(() => { if (alive) setTakenTitles([]); });
+    return () => { alive = false; };
+  }, []);
+
+  const titleTaken = isSessionNameTaken(sessionTitle, takenTitles);
+  const suggestion = titleTaken ? nextFreeSessionName(sessionTitle, takenTitles) : "";
+
   const startSession = () => {
+    // Belt and braces: the button is disabled, but Enter in the field and a
+    // future call site should both meet the same rule.
+    if (titleTaken) return;
     const v = name.trim();
     if (v) persistIdentity(v, color);
     saveJson("saucebunny.sessionTitle", sessionTitle.trim());
@@ -202,11 +232,38 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                   <h2 className="cp-colobby-card-title">Host</h2>
                   <label className="cp-colobby-field">
                     <span className="cp-colobby-field-label">Session name</span>
-                    <input className="cp-colobby-input" value={sessionTitle}
+                    <input
+                      className={"cp-colobby-input" + (titleTaken ? " taken" : "")}
+                      value={sessionTitle}
                       onChange={(e) => setSessionTitle(e.target.value)}
-                      placeholder="Rough cut review" maxLength={80} />
+                      onKeyDown={(e) => { if (e.key === "Enter" && !titleTaken) startSession(); }}
+                      placeholder="Rough cut review"
+                      maxLength={80}
+                      aria-invalid={titleTaken || undefined}
+                      aria-describedby={titleTaken ? "cp-colobby-title-taken" : undefined}
+                    />
                   </label>
-                  <button type="button" className="btn cp-colobby-cta" onClick={startSession}>
+                  {titleTaken && (
+                    <p className="cp-colobby-taken" id="cp-colobby-title-taken" role="alert">
+                      You have already screened a session with that name.
+                      {suggestion && (
+                        <button
+                          type="button"
+                          className="cp-colobby-taken-fix"
+                          onClick={() => setSessionTitle(suggestion)}
+                        >
+                          Use &ldquo;{suggestion}&rdquo;
+                        </button>
+                      )}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    className="btn cp-colobby-cta"
+                    onClick={startSession}
+                    disabled={titleTaken}
+                    title={titleTaken ? "Give this session a name of its own" : undefined}
+                  >
                     <IconPlay size={12} /> Start session
                   </button>
                 </section>

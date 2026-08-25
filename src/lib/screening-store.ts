@@ -172,11 +172,31 @@ export function screeningPath(id: string): string | null {
 }
 
 /** Read index.json once. Cheap: one small file, no documents. */
+/**
+ * Shared by every concurrent caller.
+ *
+ * `hydrated` used to be set at the TOP of this function, before the awaits
+ * below had run - so a SECOND caller arriving while the first was still
+ * reading returned instantly, read an empty index, and never retried. That
+ * was invisible while the shelf was the only caller and appeared the moment
+ * the lobby needed the titles too: the shelf listed the screenings correctly
+ * and the lobby was certain there were none.
+ */
+let hydrating: Promise<void> | null = null;
+
 export async function hydrateScreeningIndex(): Promise<void> {
   if (hydrated) return;
-  hydrated = true;
+  if (hydrating) return hydrating;
+  hydrating = hydrateOnce().finally(() => { hydrating = null; });
+  return hydrating;
+}
+
+async function hydrateOnce(): Promise<void> {
   const dir = await resolveDir();
-  if (!dir) return;
+  // No resolvable Documents root: nothing to read, but the attempt IS over.
+  // Leaving `hydrated` false here would make every future call re-resolve a
+  // path that is not going to appear.
+  if (!dir) { hydrated = true; return; }
   try {
     const text = await invoke<string>("read_text_file_capped", {
       path: `${dir}/${INDEX_FILE}`,
@@ -188,6 +208,7 @@ export async function hydrateScreeningIndex(): Promise<void> {
   } catch {
     index = new Map(); // no folder yet is the normal first-run case
   }
+  hydrated = true;
 }
 
 /** Every known screening, newest first. */

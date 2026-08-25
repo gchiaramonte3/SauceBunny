@@ -575,3 +575,32 @@
   font-variant-numeric: tabular-nums;
   color: var(--fg-4);
 }
+
+/* A session name that has already been used. The field is marked, the reason
+   is stated, and the fix is one click - a rule that only blocks is a rule
+   people work around by typing the same name with a space on the end. */
+.cp-colobby-input.taken {
+  border-color: color-mix(in srgb, var(--danger) 55.0%, transparent);
+}
+.cp-colobby-taken {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--fg-3);
+}
+.cp-colobby-taken-fix {
+  padding: 3px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--bg-3);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  cursor: pointer;
+}
+.cp-colobby-taken-fix:hover { background: var(--bg-4); }

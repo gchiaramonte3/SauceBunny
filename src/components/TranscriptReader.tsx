@@ -152,17 +152,26 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   const projects = useMemo(() => { void projectTick; return getProjects(); }, [projectTick]);
 
   /**
-   * Which groups are collapsed, by folder key ("" is the loose root).
+   * Which groups the user has OPENED, by folder key ("" is the loose root).
    *
-   * Persisted, because a collapse is a filing decision rather than a scroll
-   * position: someone who folds away six months of old work expects it folded
-   * tomorrow. Stored as a list of the CLOSED ones, so a new project or a new
-   * month arrives open - the opposite default would hide work the moment it
-   * appeared.
+   * FOLDED IS THE DEFAULT. A hundred transcripts across six months is a
+   * scroll with no shape when every group is open; folded, the picker is a
+   * list of the months and projects you actually have, and you open the one
+   * you want. The count stays on every heading, so nothing is hidden - only
+   * closed.
+   *
+   * Stored as the OPEN set rather than the closed one, which is the whole
+   * difference: with a closed-set the default is open, and every new month
+   * unfolds itself. Whatever the user opens is remembered, so a project
+   * someone lives in stays open across launches.
+   *
+   * A different key from the old closed-set, deliberately: the same list
+   * read under the opposite rule would fold exactly the groups someone had
+   * chosen to keep open.
    */
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => {
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => {
     try {
-      const raw = JSON.parse(localStorage.getItem("saucebunny.readerCollapsed") ?? "[]");
+      const raw = JSON.parse(localStorage.getItem("saucebunny.readerExpanded") ?? "[]");
       return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
     } catch { return new Set(); }
   });
@@ -172,13 +181,30 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
   // depend on which invocation React kept. Same mistake, same fix, as the
   // web pane's view prefs. The ref mirrors state so reading it here is
   // race-free rather than a stale closure.
-  const collapsedRef = useRef(collapsed);
-  collapsedRef.current = collapsed;
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+  /**
+   * Is this group showing its rows?
+   *
+   * Two groups open themselves regardless of what the user last chose, and
+   * both would be bugs if they did not:
+   *
+   * - THE SEARCH RESULTS. A needle collapses everything into one synthetic
+   *   group; folded, a search would return a heading and no results, which
+   *   reads as "nothing found" for a query that matched.
+   * - THE GROUP HOLDING THE OPEN TRANSCRIPT. The picker marks the current
+   *   row with aria-current, and hiding the thing you are reading loses your
+   *   place in the list.
+   */
+  const isOpen = useCallback((folder: string, holdsActive: boolean) =>
+    expanded.has(folder) || folder === "__results__" || holdsActive,
+  [expanded]);
+
   const toggleGroup = useCallback((folder: string) => {
-    const next = new Set(collapsedRef.current);
+    const next = new Set(expandedRef.current);
     if (next.has(folder)) next.delete(folder); else next.add(folder);
-    try { localStorage.setItem("saucebunny.readerCollapsed", JSON.stringify([...next])); } catch { /* quota */ }
-    setCollapsed(next);
+    try { localStorage.setItem("saucebunny.readerExpanded", JSON.stringify([...next])); } catch { /* quota */ }
+    setExpanded(next);
   }, []);
 
   // Search is debounced like the Library's (150ms): typing re-filters a
@@ -426,15 +452,15 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
                   posterFrom: projectFor(projects, g.folder)?.posterFrom ?? null,
                   x, y,
                 })}
-                collapsed={collapsed.has(g.folder)}
+                collapsed={!isOpen(g.folder, g.items.some((t) => t.path === activePath))}
                 onToggle={() => toggleGroup(g.folder)}
                 dropKey={moveTargets.has(g.folder) ? g.folder : undefined}
                 dropActive={rowDrag.drag?.over === g.folder}
               />
-              {!collapsed.has(g.folder) && g.items.length === 0 && (
+              {isOpen(g.folder, false) && g.items.length === 0 && (
                 <p className="cp-reader-group-empty">Nothing here yet. Drag a transcript onto this heading, or move one in from its row menu.</p>
               )}
-              {!collapsed.has(g.folder) && g.items.map((t) => (
+              {isOpen(g.folder, g.items.some((t) => t.path === activePath)) && g.items.map((t) => (
                 <button
                   key={t.path}
                   type="button"
