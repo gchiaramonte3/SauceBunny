@@ -656,7 +656,7 @@ human can check.
 
 ## Enforced contracts
 
-Fifty-nine rules in this file are checked by a test rather than remembered. If you
+Sixty rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
