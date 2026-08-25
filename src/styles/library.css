@@ -1278,7 +1278,20 @@
 }
 .cp-lib-lrow-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cp-lib-lrow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--weight-semibold); color: var(--fg-1); }
-.cp-lib-lrow-kind { color: var(--fg-4); text-transform: capitalize; }
+/* ONE LINE, always. The name cell has been clamped since it was written;
+   this one never was, and the frames shelf puts a SOURCE TITLE here - which
+   for a web clip is the whole video title. A 90-character title wrapped onto
+   six lines and took the row with it, so five frames filled the window and
+   the list stopped being a list. The full value is on the cell's title
+   attribute, so nothing is lost - it is one hover away. */
+.cp-lib-lrow-kind {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-4);
+  text-transform: capitalize;
+}
 .cp-lib-lrow-size,
 .cp-lib-lrow-date { color: var(--fg-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 

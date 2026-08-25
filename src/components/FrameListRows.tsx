@@ -130,7 +130,9 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame 
                 {it.name}
                 {tc && <span className="cp-web-lrow-dur">{tc}</span>}
               </span>
-              <span className="cp-lib-lrow-kind">{it.source}</span>
+              {/* The clamp hides the tail of a long source title, so the
+                  whole thing lives on the hover. */}
+              <span className="cp-lib-lrow-kind" title={it.source}>{it.source}</span>
               <span className="cp-lib-lrow-size">{formatBytes(it.size_bytes)}</span>
               <span className="cp-lib-lrow-date">{grabbedLabel(it.created_at)}</span>
             </button>
