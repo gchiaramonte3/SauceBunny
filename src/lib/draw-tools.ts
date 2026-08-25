@@ -60,7 +60,36 @@ export function shapePoints(tool: DrawTool, from: Pt, to: Pt): Pt[] {
   const p = (x: number, y: number): Pt => [x, y, 0.5];
 
   if (tool === "rect") {
-    return [p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1), p(x0, y0)];
+    // POINTS ALONG THE EDGES, not just the corners.
+    //
+    // Four corners and a close is a mathematically complete rectangle and a
+    // useless input to perfect-freehand, which runs at smoothing 0.72 and
+    // streamline 0.68: given five widely-spaced points it rounds straight
+    // through every corner and returns a pointed oval. Drawing a box produced
+    // a leaf.
+    //
+    // The ellipse beside this has always emitted 49 points and has always
+    // looked right, which is the same fix arrived at from the other
+    // direction: a smoothed stroke follows the points it is GIVEN, so an
+    // outline has to be sampled, not merely described.
+    const corners: Pt[] = [p(x0, y0), p(x1, y0), p(x1, y1), p(x0, y1)];
+    const out: Pt[] = [];
+    for (let i = 0; i < 4; i++) {
+      const [ax, ay] = corners[i];
+      const [bx, by] = corners[(i + 1) % 4];
+      // Step along the edge in normalised units, so a long edge gets more
+      // samples than a short one and a tiny box is not over-sampled. The
+      // floor of 8 keeps the corners tight on even the smallest rectangle.
+      const steps = Math.max(8, Math.ceil(Math.hypot(bx - ax, by - ay) / 0.01));
+      // `< steps`, so the edge's end point is the next edge's start and no
+      // point is emitted twice - a doubled point is a hitch in the outline.
+      for (let k = 0; k < steps; k++) {
+        const t = k / steps;
+        out.push(p(ax + (bx - ax) * t, ay + (by - ay) * t));
+      }
+    }
+    out.push(p(x0, y0)); // close the loop
+    return out;
   }
   if (tool === "ellipse") {
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;

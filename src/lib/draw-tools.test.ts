@@ -38,9 +38,14 @@ describe("drawing tools", () => {
   });
 
   it("closes a rectangle, so it reads as a box and not an L", () => {
+    // This used to assert exactly five points, which is a complete
+    // description of a rectangle and a useless INPUT to a smoothed stroke -
+    // perfect-freehand rounded straight through the corners and returned a
+    // pointed oval. The count is no longer the promise; the closed loop is.
     const pts = shapePoints("rect", A, B);
-    expect(pts).toHaveLength(5);
-    expect([pts[0][0], pts[0][1]]).toEqual([pts[4][0], pts[4][1]]);
+    const last = pts[pts.length - 1];
+    expect([pts[0][0], pts[0][1]]).toEqual([last[0], last[1]]);
+    expect(inRange(pts)).toBe(true);
   });
 
   it("draws an ellipse that is closed and inside its drag box", () => {
@@ -81,5 +86,51 @@ describe("drawing tools", () => {
     // Forward compatibility with a peer on a newer build.
     const pts = shapePoints("lasso" as DrawTool, A, B);
     expect(pts).toEqual([A, B]);
+  });
+});
+
+describe("the rectangle is sampled, not just described", () => {
+  // Four corners and a close is a complete rectangle and a useless input to
+  // perfect-freehand, which runs at smoothing 0.72 / streamline 0.68: given
+  // five sparse points it rounds through every corner and returns a pointed
+  // oval. Drawing a box produced a leaf.
+  const pts = shapePoints("rect", [0.2, 0.2, 0.5], [0.8, 0.6, 0.5]);
+
+  const onEdge = ([x, y]: readonly number[]): boolean => {
+    const e = 1e-9;
+    const inX = x >= 0.2 - e && x <= 0.8 + e;
+    const inY = y >= 0.2 - e && y <= 0.6 + e;
+    const onVert = (Math.abs(x - 0.2) < e || Math.abs(x - 0.8) < e) && inY;
+    const onHorz = (Math.abs(y - 0.2) < e || Math.abs(y - 0.6) < e) && inX;
+    return onVert || onHorz;
+  };
+
+  it("emits enough points for a smoothed stroke to follow the edges", () => {
+    // The ellipse has always emitted 49 and has always looked right.
+    expect(pts.length).toBeGreaterThan(40);
+  });
+
+  it("every point lies exactly on the rectangle's outline", () => {
+    // Densifying must not bow the edges - a sampled edge is still straight.
+    expect(pts.every(onEdge)).toBe(true);
+  });
+
+  it("reaches all four corners", () => {
+    const has = (x: number, y: number) =>
+      pts.some((q) => Math.abs(q[0] - x) < 1e-9 && Math.abs(q[1] - y) < 1e-9);
+    expect(has(0.2, 0.2) && has(0.8, 0.2) && has(0.8, 0.6) && has(0.2, 0.6)).toBe(true);
+  });
+
+  it("closes the loop and repeats no interior point", () => {
+    expect(pts[pts.length - 1][0]).toBeCloseTo(pts[0][0], 12);
+    expect(pts[pts.length - 1][1]).toBeCloseTo(pts[0][1], 12);
+    // A doubled point is a hitch in the outline; only the closing one repeats.
+    const seen = new Set(pts.slice(0, -1).map((q) => `${q[0]},${q[1]}`));
+    expect(seen.size).toBe(pts.length - 1);
+  });
+
+  it("a tiny rectangle still gets tight corners", () => {
+    const tiny = shapePoints("rect", [0.5, 0.5, 0.5], [0.51, 0.508, 0.5]);
+    expect(tiny.length).toBeGreaterThanOrEqual(32);
   });
 });
