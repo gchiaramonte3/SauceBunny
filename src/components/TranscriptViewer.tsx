@@ -2367,6 +2367,14 @@ export function TranscriptViewer({
           anchor={insightsAnchor}
           stats={insightStats}
           colorOf={(s) => speakerDisplayColor(resolveAlias(s))}
+          /* The same chain the turns use, minus the per-TURN override, which
+             has no meaning for an aggregate: resolve the alias, take the
+             user's rename for that tag, else humanise the model's own tag. */
+          nameOf={(s) => {
+            const resolved = resolveAlias(s);
+            return overrides.global[resolved ?? "__NULL__"]
+              ?? humanizeSpeakerTag(resolved, { unknownWhenNull: hasIdentifiedSpeakers });
+          }}
           onClose={() => setInsightsAnchor(null)}
         />
       )}

@@ -20,10 +20,19 @@ type Props = {
   stats: SpeakerStat[];
   /** Resolves a speaker tag to its display colour (override or palette). */
   colorOf: (speaker: string | null) => string;
+  /**
+   * Resolves a speaker tag to the name the transcript shows for it.
+   *
+   * This panel used to print `s.speaker` - the raw diarization tag - so it
+   * said SPEAKER_00 while the turns beside it said "Jimmy". It skipped BOTH
+   * the user's rename and the humanising the rest of the app does, which
+   * made a working rename look like it had not saved.
+   */
+  nameOf: (speaker: string | null) => string;
   onClose: () => void;
 };
 
-export function InsightsPopover({ anchor, stats, colorOf, onClose }: Props) {
+export function InsightsPopover({ anchor, stats, colorOf, nameOf, onClose }: Props) {
   const popRef = useRef<HTMLDivElement>(null);
   useDismiss(popRef, onClose);
 
@@ -58,8 +67,8 @@ export function InsightsPopover({ anchor, stats, colorOf, onClose }: Props) {
           {stats.map((s) => (
             <div className="cp-tx-insights-row" key={s.speaker ?? "__NULL__"}>
               <div className="cp-tx-insights-row-top">
-                <span className="cp-tx-insights-name" title={s.speaker ?? "Unknown"}>
-                  {s.speaker ?? "Unknown"}
+                <span className="cp-tx-insights-name" title={nameOf(s.speaker)}>
+                  {nameOf(s.speaker)}
                 </span>
                 <span className="cp-tx-insights-nums">
                   {fmtTalkTime(s.talkMs)} · {Math.round(s.sharePct)}%
