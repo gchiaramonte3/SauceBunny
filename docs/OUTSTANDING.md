@@ -127,3 +127,57 @@ Generated against f6fbde7. Re-verify before acting on anything here.
 6. **Then P5 (item 32) and the `??=` regex hole (item 34).** P5 is the only perf item left with real user consequences; the regex fix is a one-liner that closes a hole in a contract you already decided to enforce.
 
 Deliberately not in the top six: item 7 (durability) — it is the second-biggest risk but it is blocked on decision 2, not on engineering. Make that call and it moves to number one.
+
+---
+
+## An ad-hoc build shows a black window when launched from Finder or the Dock
+
+**Status: reproduced, cause NOT established. Needs re-testing against a
+Developer-ID-signed build before it can be called a product defect.**
+
+Found while driving the packaged app on 2026-08-25. On an ad-hoc-signed build
+(`APPLE_SIGNING_IDENTITY="-"`, the local/dev recipe):
+
+| Launch method | Result |
+|---|---|
+| `open -a`, Finder, Dock (i.e. LaunchServices) | window appears BLACK and never paints; `System Events` reports **0 windows** for the process |
+| `"…/Sauce Bunny.app/Contents/MacOS/sauce-bunny"` (direct exec) | renders fully, every time, in ~10s |
+
+Same bundle, same binary, both ways - so it is a property of the LAUNCH, not
+of the frontend or of any code change. Established by evidence:
+
+- the app process stays alive and idle (0.3% CPU, main thread parked in its
+  run loop); no crash report, nothing in the unified log;
+- WebKit's helper processes DO spawn (`WebContent`, `Networking`, `GPU`), so
+  the webview initialises - it just never paints;
+- the black rectangle really is the app's window: it vanishes the moment the
+  process is killed;
+- `spctl -a -t exec` reports **rejected** (`Signature=adhoc`,
+  `TeamIdentifier=not set`);
+- no Gatekeeper dialog is shown - it fails silently.
+
+Ruled OUT by testing, so do not start there:
+
+- **entitlements** - `com.apple.security.cs.allow-jit` and
+  `disable-library-validation` are both present and correct in the bundle;
+- **the hardened runtime** - re-signing ad-hoc WITHOUT the `runtime` flag
+  (`flags=0x2(adhoc)`) behaves identically;
+- **the `/Applications` copy** - the bundle in `target/release/bundle/macos/`
+  behaves the same way;
+- **an unclean previous shutdown** - reproduced from a verified
+  no-process-at-all starting state.
+
+The likely shape is that LaunchServices refuses something the ad-hoc signature
+cannot satisfy, and the app comes up windowless instead of failing loudly. The
+release path is different (Developer ID + notarisation, see
+`docs/DISTRIBUTION.md`), so **the first thing to do is reproduce this on a
+properly signed build**. If it does not reproduce there, this is an artefact
+of the local ad-hoc recipe and belongs in the dev docs rather than the bug
+list - but it still costs anyone dogfeeding an ad-hoc build an hour, so it is
+worth a line in CONTRIBUTING either way.
+
+Workaround meanwhile - run the binary rather than the bundle:
+
+```bash
+"/Applications/Sauce Bunny.app/Contents/MacOS/sauce-bunny"
+```
