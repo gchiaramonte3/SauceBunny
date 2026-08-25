@@ -16,6 +16,20 @@ vi.mock("../hooks/use-media-capture", () => ({
   }),
 }));
 vi.mock("./GreenRoomDevices", () => ({ GreenRoomDevices: () => null }));
+/** The screenings the store claims exist. Mutated per test; the lobby reads it
+ *  through listScreenings, which is what the unique-name rule is built on. */
+const takenTitles: string[] = [];
+vi.mock("../lib/screening-store", async (orig) => {
+  const real = await orig<typeof import("../lib/screening-store")>();
+  return {
+    ...real,
+    hydrateScreeningIndex: async () => {},
+    listScreenings: () => takenTitles.map((title, i) => ({
+      id: `s${i}`, file: `s${i}.json`, title, startedAt: i, endedAt: i + 1,
+      participants: ["Ada"], segmentCount: 1, commentCount: 0, bytes: 10,
+    })),
+  };
+});
 afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear(); });
 
 const session = { role: "off", error: null, code: null, peers: [] } as never;
@@ -71,5 +85,47 @@ describe("the co-review lobby's Join button", () => {
     mount(onJoin);
     join();
     await waitFor(() => expect(onJoin).toHaveBeenCalledWith("SAUC-ABCDE", "Ada"));
+  });
+});
+
+describe("the unique-name rule stays current", () => {
+  /**
+   * The lobby is kept alive under [hidden] for the life of the app, so the
+   * taken titles it read at mount were the only ones it ever knew. End "Rough
+   * cut" and press Start again on the restored title and a duplicate went
+   * straight through - a reload blocked it correctly, which is exactly what
+   * made the hole hard to see. It re-reads whenever the store announces a
+   * save.
+   */
+  function mountHost(title: string) {
+    localStorage.setItem("saucebunny.review.author", JSON.stringify("Ada"));
+    localStorage.setItem("saucebunny.sessionTitle", JSON.stringify(title));
+    render(
+      <CoReviewLobby
+        session={session}
+        localSource={null as never}
+        participants={[] as never}
+        onStart={vi.fn()}
+        onJoin={vi.fn()}
+        onLeave={vi.fn()}
+      />,
+    );
+  }
+
+  it("blocks a name that became taken while the lobby stayed mounted", async () => {
+    takenTitles.length = 0;
+    mountHost("Rough cut");
+    // Nothing taken yet.
+    await waitFor(() => {
+      expect(screen.queryByText(/already screened a session with that name/i)).toBeNull();
+    });
+
+    // A session ends and the store announces the save.
+    takenTitles.push("Rough cut");
+    fireEvent(window, new CustomEvent("saucebunny:screenings-changed"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/already screened a session with that name/i)).toBeTruthy();
+    });
   });
 });

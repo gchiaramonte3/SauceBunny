@@ -236,6 +236,14 @@ export async function loadScreening(id: string): Promise<ScreeningDoc | null> {
 
 /** Write a screening and update the index. Best-effort: a failed write must
  *  never take down the session that produced it. */
+/**
+ * Fired on `window` after a screening lands on disk and the index is rewritten.
+ * Anything showing the list of screenings - or enforcing the unique-name rule
+ * against it - should re-read on this rather than trusting a value it read at
+ * mount.
+ */
+export const SCREENINGS_CHANGED = "saucebunny:screenings-changed";
+
 export async function saveScreening(doc: ScreeningDoc): Promise<void> {
   const dir = await resolveDir();
   if (!dir) return;
@@ -261,6 +269,14 @@ export async function saveScreening(doc: ScreeningDoc): Promise<void> {
       null, 2,
     );
     await invoke("write_text_to_path", { path: `${dir}/${INDEX_FILE}`, text: indexJson, atomic: true });
+    // ANNOUNCE IT. The lobby reads the taken titles once on mount and is then
+    // kept alive under [hidden] for the life of the app, so without this the
+    // "every screening gets its own name" rule went stale the moment a session
+    // ended: end "Rough cut", press Start again on the restored title, and the
+    // library took a second "Rough cut" without a word. Same window CustomEvent
+    // shape the speaker overrides already use for their same-window fast path.
+    try { window.dispatchEvent(new CustomEvent(SCREENINGS_CHANGED)); }
+    catch { /* no window in a test environment; the write still landed */ }
   } catch (err) {
     // REJECTS rather than swallowing. The previous version caught this and
     // called console.warn, with a comment claiming that meant the failure was

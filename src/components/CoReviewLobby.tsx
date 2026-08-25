@@ -12,7 +12,7 @@ import type { Participant } from "./PeoplePanel";
 import type { SessionState } from "../bindings/SessionState";
 import { shortJoinCode } from "../lib/join-code";
 import { ScreeningShelf } from "./ScreeningShelf";
-import { hydrateScreeningIndex, listScreenings } from "../lib/screening-store";
+import { hydrateScreeningIndex, listScreenings, SCREENINGS_CHANGED } from "../lib/screening-store";
 import { isSessionNameTaken, nextFreeSessionName } from "../lib/session-name";
 
 /**
@@ -112,11 +112,20 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   const [takenTitles, setTakenTitles] = useState<string[]>([]);
   useEffect(() => {
     let alive = true;
-    void hydrateScreeningIndex()
-      .then(() => { if (alive) setTakenTitles(listScreenings().map((r) => r.title)); })
-      // No folder yet is the normal first-run state: nothing is taken.
-      .catch(() => { if (alive) setTakenTitles([]); });
-    return () => { alive = false; };
+    const read = () => {
+      void hydrateScreeningIndex()
+        .then(() => { if (alive) setTakenTitles(listScreenings().map((r) => r.title)); })
+        // No folder yet is the normal first-run state: nothing is taken.
+        .catch(() => { if (alive) setTakenTitles([]); });
+    };
+    read();
+    // AND AGAIN WHENEVER ONE IS SAVED. This lobby is kept alive under [hidden]
+    // for the life of the app, so a list read once at mount goes stale the
+    // moment a session ends - end "Rough cut", press Start again on the
+    // restored title, and the rule waves through a second "Rough cut". A
+    // reload blocked it correctly, which is what made it look like it worked.
+    window.addEventListener(SCREENINGS_CHANGED, read);
+    return () => { alive = false; window.removeEventListener(SCREENINGS_CHANGED, read); };
   }, []);
 
   const titleTaken = isSessionNameTaken(sessionTitle, takenTitles);
