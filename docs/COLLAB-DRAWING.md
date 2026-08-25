@@ -30,7 +30,7 @@ NOT YET IMPLEMENTED below this line.
 
 # DOCUMENT 1 — Collaborative drawing in a live co-review session
 
-Repo verified at `/Users/gchiaramonte/sb-ui-v3`, HEAD `3fc77b1`. Every line below was re-read at that commit; where a research pass disagreed with the tree, the tree wins and the disagreement is listed at the end.
+Repo verified at HEAD `3fc77b1`. Every line below was re-read at that commit; where a research pass disagreed with the tree, the tree wins and the disagreement is listed at the end.
 
 ## 1. What happens today
 
@@ -155,7 +155,7 @@ Add `liveDraw, postDrawOp` to the destructure at `App.tsx:3737-3749`. Feed `post
 
 | Claim | Verdict |
 |---|---|
-| Pass 1: "`src/lib/draw-tools.ts` does not exist; all drawing lives in `AnnotationOverlay.tsx`" | **Wrong.** `draw-tools.ts` (122 lines) and `draw-ops.ts` (135 lines) both exist with test files. Pass 1 ran against a different tree — probably `/Users/gchiaramonte/Desktop/Sauce Bunny`, whose `src/lib` has neither. **Believe passes 2 and 4.** Every pass-1 line number in `review.ts`, `ReviewPanel.tsx`, `use-co-review.ts` and `Monitor.tsx` is off by tens to hundreds of lines. |
+| Pass 1: "`src/lib/draw-tools.ts` does not exist; all drawing lives in `AnnotationOverlay.tsx`" | **Wrong.** `draw-tools.ts` (122 lines) and `draw-ops.ts` (135 lines) both exist with test files. Pass 1 ran against a different checkout, whose `src/lib` has neither. **Believe passes 2 and 4.** Every pass-1 line number in `review.ts`, `ReviewPanel.tsx`, `use-co-review.ts` and `Monitor.tsx` is off by tens to hundreds of lines. |
 | Pass 1: "the anchor is read at submit — a live bug; fix it first" | **Already fixed.** `anchorSec` latches on the first keystroke and on entering draw mode (`ReviewPanel.tsx:263-276`), submit uses `anchorSec ?? playheadAt()` (`ReviewPanel.tsx:889`), and App pauses playback when the pen or label tool turns on (`App.tsx:5045-5054`, `App.tsx:5064-5067`). The rationale comment at `ReviewPanel.tsx:252-262` describes exactly the bug pass 1 reported. **Believe the tree.** Drop that recommendation. |
 | Pass 1: "add a new Rust `SessionMsg::StrokeLive` variant modelled on `Reaction`" vs pass 2: "the wire format already ships on `reviewOp` with zero Rust changes" | **Believe pass 2.** `draw-ops.ts:106-121` + `use-co-review.ts:396` are live code, and the envelope was chosen precisely so old peers ignore it rather than log-flood. Pass 1's design is sound in the abstract and worse here. |
 | Pass 1: "~41 B/point, no coalescing" vs pass 2: "~44 B/point, coalescing inflates the count" | **Believe pass 2.** `AnnotationOverlay.tsx:290-301` expands `getCoalescedEvents()` deliberately (rationale at `:278-284`), so a slow, careful tracing gesture — a reviewer circling a detail — is the worst case, not the best. |

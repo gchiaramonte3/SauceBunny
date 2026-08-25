@@ -20,7 +20,7 @@ before Phase 2 is designed.
 
 # Session Recording — Implementation Plan
 
-Repo: `/Users/gchiaramonte/sb-ui-v3`. Everything below is anchored to code that exists today; line numbers were re-verified against the working tree at `fc701ab`.
+Everything below is anchored to code that exists today; line numbers were re-verified against the working tree at `fc701ab`.
 
 ---
 

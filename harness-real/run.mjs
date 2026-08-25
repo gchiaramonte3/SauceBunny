@@ -6,15 +6,16 @@ import { chromium, webkit } from "playwright";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import os from "node:os";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
-const SAMPLE = process.env.SAMPLE ?? path.join(
-  os.homedir(),
-  "Desktop/Test/Vingadores_-Doutor-Destino-_-Trailer-Oficial-Legendado-3.mp4",
-);
-if (!existsSync(SAMPLE)) throw new Error(`no sample at ${SAMPLE}`);
+// No machine-specific default: a path under one developer's home directory is a
+// sample nobody else has. Set SAMPLE, or run `node harness-audio/run.mjs` once to
+// generate a synthetic AV1+Opus clip with the bundled ffmpeg.
+const SAMPLE = process.env.SAMPLE ?? path.join(ROOT, "harness-audio/generated-sample.mp4");
+if (!existsSync(SAMPLE)) {
+  throw new Error(`no sample at ${SAMPLE} — set SAMPLE=/path/to/any.mp4, or run \`node harness-audio/run.mjs\` once to generate one`);
+}
 console.log(`• sample: ${SAMPLE} (${(statSync(SAMPLE).size / 1e6).toFixed(2)} MB)`);
 
 const server = await createServer({

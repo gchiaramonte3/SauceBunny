@@ -4,11 +4,14 @@
 import { webkit, chromium } from "playwright";
 import { createReadStream, statSync } from "node:fs";
 import http from "node:http";
-import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+// No machine-specific default: a path under one developer's home directory is a
+// sample nobody else has. Set SAMPLE, or run `node harness-audio/run.mjs` once to
+// generate a synthetic AV1+Opus clip with the bundled ffmpeg.
 const SAMPLE = process.env.SAMPLE ?? path.join(
-  os.homedir(), "Desktop/Test/Vingadores_-Doutor-Destino-_-Trailer-Oficial-Legendado-3.mp4");
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."), "harness-audio/generated-sample.mp4");
 const size = statSync(SAMPLE).size;
 const server = http.createServer((req, res) => {
   const range = req.headers.range;

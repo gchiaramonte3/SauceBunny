@@ -3,13 +3,15 @@ import { webkit, chromium } from "playwright";
 import { createReadStream, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import os from "node:os";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TAURI_CSP = (await import(path.join(ROOT, "src-tauri/tauri.conf.json"), { with: { type: "json" } })).default.app.security.csp;
 const APPLY = process.env.CSP !== "off";
 const CSP_STR = process.env.CSP === "wasm" ? TAURI_CSP.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'") : TAURI_CSP;
-const SAMPLE = process.env.SAMPLE ?? path.join(os.homedir(), "Desktop/Test/Vingadores_-Doutor-Destino-_-Trailer-Oficial-Legendado-3.mp4");
+// No machine-specific default: a path under one developer's home directory is a
+// sample nobody else has. Set SAMPLE, or run `node harness-audio/run.mjs` once to
+// generate a synthetic AV1+Opus clip with the bundled ffmpeg.
+const SAMPLE = process.env.SAMPLE ?? path.join(ROOT, "harness-audio/generated-sample.mp4");
 console.log("• CSP:", APPLY ? CSP_STR.match(/script-src[^;]*/)[0] : "off", "| sample:", path.basename(SAMPLE));
 
 const server = await createServer({

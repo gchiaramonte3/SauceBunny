@@ -8,10 +8,12 @@
  * observed numbers for each probe mode.
  *
  * Sample file resolution order:
- *   1. $SAMPLE (absolute path)
- *   2. ~/Desktop/Test/Vingadores_-Doutor-Destino-_-Trailer-Oficial-Legendado-3.mp4
- *   3. harness-audio/generated-sample.mp4, produced on demand with the bundled
- *      ffmpeg (AV1 + Opus, 5.5s, audible 440Hz tone) if neither exists.
+ *   1. $SAMPLE (absolute path to any local media file)
+ *   2. harness-audio/generated-sample.mp4, produced on demand with the bundled
+ *      ffmpeg (AV1 + Opus, 5.5s, audible 440Hz tone).
+ *
+ * There is deliberately no third, machine-specific default: a path under one
+ * developer's home directory is a sample nobody else has.
  */
 import { createServer } from "vite";
 import { chromium, webkit } from "playwright";
@@ -19,7 +21,6 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import os from "node:os";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -27,12 +28,6 @@ const FFMPEG = path.join(ROOT, "src-tauri/binaries/ffmpeg-aarch64-apple-darwin")
 
 function resolveSample() {
   if (process.env.SAMPLE && existsSync(process.env.SAMPLE)) return process.env.SAMPLE;
-  const desktop = path.join(
-    os.homedir(),
-    "Desktop/Test/Vingadores_-Doutor-Destino-_-Trailer-Oficial-Legendado-3.mp4",
-  );
-  if (existsSync(desktop)) return desktop;
-
   const gen = path.join(HERE, "generated-sample.mp4");
   if (existsSync(gen)) return gen;
   if (!existsSync(FFMPEG)) {

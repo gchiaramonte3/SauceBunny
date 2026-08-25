@@ -48,3 +48,6 @@ playwright-report/
 # Internal design notes / working docs (personal paths, session transcripts)
 # — deliberately local-only, never part of the public tree.
 _design/
+
+# Synthetic harness fixture, produced on demand by harness-audio/run.mjs
+harness-*/generated-sample.mp4

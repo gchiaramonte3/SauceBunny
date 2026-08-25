@@ -14,9 +14,9 @@ SAMPLE=/abs/path/to/file.mp4 node harness-audio/run.mjs
 node harness-audio/run.mjs 'race&blip=1'   # modes take query params
 ```
 
-Sample file: `$SAMPLE`, else
-`~/Desktop/Test/Vingadores_-Doutor-Destino-_-Trailer-Oficial-Legendado-3.mp4`,
-else one is generated with the bundled ffmpeg (AV1 + Opus + 440 Hz tone).
+Sample file: `$SAMPLE` (any local media file), else one is generated with the
+bundled ffmpeg (AV1 + Opus + 440 Hz tone). Set `SAMPLE=/path/to/your.mp4` to
+probe real footage.
 
 Nothing here is in `tsconfig.json`'s `include` (`src` only), vitest's globs, or
 the lint targets — the harness cannot affect CI.
