@@ -10,7 +10,7 @@
 # That rule was written down and never checked. A transitive crate is one
 # `cargo update` away from arriving under GPL, nothing would fail, and the
 # first anyone would know is a licence audit after release. Both graphs are
-# clean today: 642 crates and 148 npm packages, zero strong copyleft.
+# clean today: 751 crates and 253 npm packages, zero strong copyleft.
 #
 # The bundled ffmpeg/ffprobe ARE GPLv3 and are deliberately exempt — they are
 # separate subprocesses, never linked, and THIRD-PARTY-LICENSES.md carries the
@@ -43,7 +43,18 @@ python3 - <<'PY' || fail=1
 import json, pathlib, sys
 bad = []
 n = 0
-for pj in pathlib.Path("node_modules").glob("*/package.json"):
+root = pathlib.Path("node_modules")
+# EVERY package root, not just the unscoped top level. `glob("*/package.json")`
+# matched 148 of 253 and silently skipped all 101 @scope/name packages - which is
+# precisely where the shipped runtime deps live (@mediabunny/*, @fontsource/*,
+# @tauri-apps/*). It printed a confident count and passed, and CI leaned on it for
+# the claim that a strong-copyleft arrival would fail the build. It would not have.
+# An explicit union rather than rglob("package.json"), which also sweeps ~28
+# internal sub-manifests (test fixtures, dist folders) and inflates the number.
+roots = (list(root.glob("*/package.json")) + list(root.glob("@*/*/package.json"))
+         + list(root.glob("*/node_modules/*/package.json"))
+         + list(root.glob("*/node_modules/@*/*/package.json")))
+for pj in roots:
     try: d = json.loads(pj.read_text())
     except Exception: continue
     n += 1

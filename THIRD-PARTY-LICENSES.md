@@ -1,9 +1,14 @@
 # Third-Party Licenses & Acknowledgements
 
-Sauce Bunny itself is licensed under the [MIT License](LICENSE). It does not
-contain or link any copyleft source code. However, the distributed app **bundles
-several third-party binaries** (each invoked as a *separate subprocess*, not
-linked into the app) and uses third-party libraries, a font, and — at the user's
+Sauce Bunny itself is licensed under the [MIT License](LICENSE). It links no
+STRONG copyleft (no GPL or AGPL reaches the app). It does link weak copyleft:
+mediabunny, `@mediabunny/prores` and turbores are MPL-2.0, and LAME inside
+`@mediabunny/mp3-encoder` is LGPL — all bundled into the JS by Vite, and all
+listed below. Redistributors therefore carry MPL source-availability and LGPL
+relinking obligations for those components. The distributed app additionally
+**bundles several third-party binaries** (each invoked as a *separate
+subprocess*, not linked into the app) and uses third-party libraries, a font,
+and — at the user's
 option, downloaded at runtime — machine-learning models. Their licenses are
 disclosed below.
 
@@ -27,7 +32,7 @@ of the day it was written. CI runs it on every push.
 | graph | count | licences seen |
 |---|---|---|
 | Rust (`cargo metadata`) | ~750 crates | MIT, Apache-2.0, MIT/Apache dual, BSD-2/3, Zlib, Unicode-3.0, ISC, MPL-2.0, Unlicense |
-| npm (`node_modules`) | ~150 packages | MIT, ISC, Apache-2.0, BSD-2/3, MPL-2.0, BlueOak-1.0.0, CC0-1.0 |
+| npm (`node_modules`) | ~250 packages | MIT, ISC, Apache-2.0, BSD-2/3, MPL-2.0, BlueOak-1.0.0, CC0-1.0 |
 
 The MPL-2.0 entries are mediabunny and its extensions (already detailed above);
 MPL is file-level copyleft and does not reach the app around it.
@@ -56,10 +61,13 @@ The ffmpeg and ffprobe binaries are static builds from
 [ffmpeg.martin-riedl.de](https://ffmpeg.martin-riedl.de/) (see
 `scripts/fetch-ffmpeg.sh` / `scripts/fetch-ffprobe.sh`).
 
-**They are GPL v2 or later, not GPLv3.** That is checkable rather than
-remembered — `ffmpeg -version` reports `--enable-gpl --enable-libx264
---enable-libx265` and does NOT report `--enable-version3`, which is exactly
-what puts an ffmpeg build at "GPLv2 or later" instead of v3. This file
+**The two binaries differ, and the difference is checkable rather than
+remembered.** `ffmpeg -version` reports `--enable-gpl` and does NOT report
+`--enable-version3`, which puts that build at **GPLv2 or later**. `ffprobe
+-version` reports `--enable-gpl` AND `--enable-version3`, which puts it at
+**GPLv3 or later**. Neither reports `--enable-nonfree`. Do not "correct" the
+table below to a single row: it would relabel a genuinely GPLv3 binary as v2.
+This file
 previously called them "the GPLv3 static builds", which overstated the
 upstream terms. Nothing about the compliance below changes: "or later" lets a
 redistributor pass the work on under v3, which is what Sauce Bunny does and
@@ -95,7 +103,8 @@ explicitly **LGPL** ffmpeg build (no `--enable-gpl` / `--enable-nonfree`); see
 | Binary | Upstream | License |
 |---|---|---|
 | `yt-dlp` | https://github.com/yt-dlp/yt-dlp | The Unlicense (public domain) |
-| `ffmpeg`, `ffprobe` | https://ffmpeg.org (osxexperts.net build) | **GPLv3** — see note above |
+| `ffmpeg` | https://ffmpeg.org ([osxexperts.net](https://www.osxexperts.net/) build) | **GPLv2 or later** — `--enable-gpl`, no `--enable-version3`; see note above |
+| `ffprobe` | https://ffmpeg.org ([ffmpeg.martin-riedl.de](https://ffmpeg.martin-riedl.de/) build) | **GPLv3 or later** — `--enable-gpl --enable-version3`; see note above |
 | `whisper-cli` (whisper.cpp) | https://github.com/ggerganov/whisper.cpp | MIT |
 | `llama-server` (llama.cpp) | https://github.com/ggml-org/llama.cpp | MIT |
 | `saucebunny-diarize` | this repo (`swift-sidecar/`) | MIT — links SpeakerKit ([argmax-oss-swift](https://github.com/argmaxinc/argmax-oss-swift), MIT, with Apache-2.0 swift-transformers portions) and [FluidAudio](https://github.com/FluidInference/FluidAudio) (Apache-2.0) |
