@@ -3886,6 +3886,40 @@ export default function App() {
     draftPastRef.current = [];
     draftFutureRef.current = [];
   }, []);
+  // PEEKING AT SOMEONE ELSE'S DRAWING IS NOT A DECISION TO THROW AWAY YOUR
+  // OWN. Clicking a comment's drawing badge leaves draw mode to show that
+  // annotation, and that used to null the in-progress draft and wipe its undo
+  // history in the same breath - a half-finished markup gone with no way back,
+  // and ⌘Z afterwards falling through to the app stack and deleting the very
+  // comment being looked at. The draft is set aside here instead, and comes
+  // back when the pen does.
+  const draftStashRef = useRef<{
+    draft: AnnotationStrokes | null;
+    past: (AnnotationStrokes | null)[];
+    future: (AnnotationStrokes | null)[];
+  } | null>(null);
+  const stashDraft = useCallback(() => {
+    if (reviewDraftRef.current == null && draftPastRef.current.length === 0) return;
+    draftStashRef.current = {
+      draft: reviewDraftRef.current,
+      past: draftPastRef.current,
+      future: draftFutureRef.current,
+    };
+    draftPastRef.current = [];
+    draftFutureRef.current = [];
+  }, []);
+  /** Puts a stashed draft back. Returns whether there was one. */
+  const restoreDraft = useCallback(() => {
+    const stash = draftStashRef.current;
+    if (!stash) return false;
+    draftStashRef.current = null;
+    draftPastRef.current = stash.past;
+    draftFutureRef.current = stash.future;
+    setReviewDraft(stash.draft);
+    return true;
+  }, []);
+  /** Drops a stash for good — a new source, or a draft that got posted. */
+  const dropDraftStash = useCallback(() => { draftStashRef.current = null; }, []);
   const onReviewDraftChange = useCallback((a: AnnotationStrokes) => {
     draftPastRef.current.push(reviewDraftRef.current);
     if (draftPastRef.current.length > 50) draftPastRef.current.shift();
@@ -3895,9 +3929,15 @@ export default function App() {
   // Register with the keyboard dispatch (plain render-time ref assignment,
   // like sessionDocRef above): only while draw mode is live does ⌘Z route
   // here, and an exhausted history falls through to the app stack.
-  draftUndoRef.current = reviewDrawActive
+  // Routed while the pen is live, AND while a peek is showing - otherwise ⌘Z
+  // during a peek reaches the app stack and undoes whatever came before,
+  // which was usually the comment on screen.
+  draftUndoRef.current = (reviewDrawActive || annotationDisplay != null)
     ? {
         undo: () => {
+          // A stashed draft is the most recent thing the user lost, so it is
+          // the first thing ⌘Z gives back.
+          if (restoreDraft()) { setAnnotationDisplay(null); setReviewDrawActive(true); return true; }
           const prev = draftPastRef.current.pop();
           if (prev === undefined) return false;
           draftFutureRef.current.push(reviewDraftRef.current);
@@ -3919,6 +3959,7 @@ export default function App() {
     setReviewLabelMode(false);
     setReviewDraft(null);
     clearDraftHistory();
+    dropDraftStash();
     setAnnotationDisplay(null);
     // In a co-review session the SHARED doc drives markers (see the effect
     // below) — don't let the local-by-sourceKey reload overwrite them.
@@ -3973,7 +4014,7 @@ export default function App() {
     // closure. Listing them again would re-read the review store and re-register
     // the listener on every probe for a result that cannot differ.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- covered by reviewSourceKey, which derives from them
-  }, [reviewSourceKey, coSessionActive, clearDraftHistory]);
+  }, [reviewSourceKey, coSessionActive, clearDraftHistory, dropDraftStash]);
 
   // Auto-chapter markers for the timeline — same pattern as the review
   // markers above: keyed by the source, re-read on CHAPTERS_CHANGED_EVENT
@@ -5051,16 +5092,24 @@ export default function App() {
                   // pen (stay in draw mode); otherwise toggle draw mode itself.
                   if (reviewDrawActive && reviewLabelMode) { setReviewLabelMode(false); return; }
                   setReviewLabelMode(false);
-                  setReviewDrawActive((on) => {
-                    if (on) { setReviewDraft(null); clearDraftHistory(); }
+                  // Read the flag rather than the updater's argument: the
+                  // branches below have real side effects, and a state updater
+                  // must stay pure enough to run twice.
+                  if (reviewDrawActive) {
+                    // Putting the pen down is a decision to discard, so this
+                    // one really does drop the draft - and the stash with it.
+                    setReviewDraft(null); clearDraftHistory(); dropDraftStash();
+                    setReviewDrawActive(false);
+                  } else {
                     // Turning the pen ON pauses. Drawing over a still-playing
                     // video means the frame moves out from under the stroke
                     // while it is being made, so the mark ends up describing a
                     // frame nobody chose. The composer latches its anchor time
                     // on the same edge, so the note and the drawing agree.
-                    else playerRef.current?.pause();
-                    return !on;
-                  });
+                    playerRef.current?.pause();
+                    restoreDraft();
+                    setReviewDrawActive(true);
+                  }
                 }}
                 reviewLabelActive={reviewLabelMode}
                 onToggleReviewLabel={() => {
@@ -5077,8 +5126,11 @@ export default function App() {
                   }
                   setReviewLabelMode((v) => !v);
                 }}
-                onReviewDraftConsumed={() => { setReviewDraft(null); clearDraftHistory(); setReviewDrawActive(false); setReviewLabelMode(false); }}
-                onShowAnnotation={(a, color) => { setReviewDrawActive(false); setReviewLabelMode(false); setReviewDraft(null); clearDraftHistory(); setAnnotationDisplay(a); setAnnotationDisplayColor(color ?? null); }}
+                onReviewDraftConsumed={() => { setReviewDraft(null); clearDraftHistory(); dropDraftStash(); setReviewDrawActive(false); setReviewLabelMode(false); }}
+                /* Set the draft ASIDE rather than dropping it - see stashDraft.
+                   Looking at what someone else drew is not a decision to throw
+                   away what you were drawing. */
+                onShowAnnotation={(a, color) => { stashDraft(); setReviewDrawActive(false); setReviewLabelMode(false); setReviewDraft(null); setAnnotationDisplay(a); setAnnotationDisplayColor(color ?? null); }}
                 onOpenReviewSource={handleOpenReviewSource}
                 onReviewLinkAsVersion={sourceKind === "file" ? linkAsReviewVersion : undefined}
                 onReviewUnlinkVersion={sourceKind === "file" ? unlinkReviewVersion : undefined}
