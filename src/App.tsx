@@ -115,7 +115,7 @@ import { useClipExport } from "./hooks/use-clip-export";
 import { useClipQueue } from "./hooks/use-clip-queue";
 import { loadRecentSources, saveRecentSources, upsertRecent, removeRecent, type RecentSource } from "./lib/recent-sources";
 import {
-  durationToTc, framesToTc, tcToFrames,
+  durationToTc, framesToTc, tcToFrames, isCompleteTc,
   tcDigitsToDisplay,
 } from "./lib/timecode";
 import { currentQueueSource, queuedRangesForSource } from "./lib/queue-ranges";
@@ -778,11 +778,20 @@ export default function App() {
     if (exportOpts.folder) try { localStorage.setItem("cp-folder", exportOpts.folder); } catch { /* ignore */ }
   }, [exportOpts.folder]);
 
-  // Timeline → TC fields (empty string when the mark is null)
+  // Timeline → TC fields (empty string when the mark is null).
+  //
+  // A field whose text ALREADY MEANS this mark is left exactly as the user
+  // typed it. Rewriting it to the canonical spelling would move their cursor
+  // mid-edit for nothing - "0:00:05:00" and "00:00:05:00" are the same frame -
+  // and it is this write-back that used to feed the corruption loop below.
   useEffect(() => {
     setExportOpts((prev) => {
-      const nextIn  = inFrames  != null ? framesToTc(inFrames, fps)  : "";
-      const nextOut = outFrames != null ? framesToTc(outFrames, fps) : "";
+      const keep = (text: string, mark: number | null) =>
+        text !== "" && mark != null && tcToFrames(text, fps) === mark;
+      const nextIn  = keep(prev.inTc, inFrames)   ? prev.inTc
+        : inFrames  != null ? framesToTc(inFrames, fps)  : "";
+      const nextOut = keep(prev.outTc, outFrames) ? prev.outTc
+        : outFrames != null ? framesToTc(outFrames, fps) : "";
       if (prev.inTc === nextIn && prev.outTc === nextOut) return prev;
       return { ...prev, inTc: nextIn, outTc: nextOut };
     });
@@ -797,13 +806,13 @@ export default function App() {
     const max = durationFrames > 0 ? durationFrames - 1 : Infinity;
     if (exportOpts.inTc === "") {
       if (inFrames !== null) setInFrames(null);
-    } else {
+    } else if (isCompleteTc(exportOpts.inTc, fps)) {
       const inF = tcToFrames(exportOpts.inTc, fps);
       if (inF != null && inF !== inFrames && inF >= 0 && inF <= max) setInFrames(inF);
     }
     if (exportOpts.outTc === "") {
       if (outFrames !== null) setOutFrames(null);
-    } else {
+    } else if (isCompleteTc(exportOpts.outTc, fps)) {
       const outF = tcToFrames(exportOpts.outTc, fps);
       if (outF != null && outF !== outFrames && outF >= 0 && outF <= max + 1) {
         setOutFrames(Math.min(outF, max));

@@ -176,3 +176,23 @@ export function tcDigitsToDisplay(digits: string): string {
   const d = digits.slice(-8).padStart(8, "0");
   return `${d.slice(0, 2)}:${d.slice(2, 4)}:${d.slice(4, 6)}:${d.slice(6, 8)}`;
 }
+
+/**
+ * Whether a timecode someone is part-way through typing is finished enough to
+ * move the marks.
+ *
+ * `isValidTc` answers a different question and answering this one with it was
+ * the bug. `tcToFrames` left-pads, so a bare "0" is a perfectly VALID frame 0
+ * - which meant the first keystroke of "00:00:05:00" committed frame 0, the
+ * marks-to-field effect wrote the full "00:00:00:00" back into the input the
+ * user was still typing in, and every later character appended to that. The
+ * field ended up holding "00:00:00:000:00:05:00", and retyping over an out
+ * point destroyed the range on the way.
+ *
+ * So a partial entry must PARSE (the field styles itself from that) without
+ * COMMITTING. Committing waits for all four segments, or for blur, where
+ * `normalizeTc` expands the shorthand first.
+ */
+export function isCompleteTc(tc: string, fps: number): boolean {
+  return /^\d{1,2}:\d{2}:\d{2}:\d{2}$/.test(tc.trim()) && tcToFrames(tc, fps) !== null;
+}

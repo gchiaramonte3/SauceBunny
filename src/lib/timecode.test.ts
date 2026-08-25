@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { framesToTc, tcToFrames, tcToSeconds, hmsToSeconds, secondsToClock, secondsToHms, tcDigitsToFrames, tcDigitsToDisplay } from "./timecode";
+import { framesToTc, tcToFrames, tcToSeconds, hmsToSeconds, secondsToClock, secondsToHms, tcDigitsToFrames, tcDigitsToDisplay, isCompleteTc, isValidTc } from "./timecode";
 
 // Frames↔timecode math drives the playhead, marks, exports, and the
 // transcript click-to-seek (whose floor-rounding produced the r85
@@ -233,5 +233,39 @@ describe("round vs floor is a real distinction, not a preference", () => {
 
   it("leaves rounding off by default", () => {
     expect(secondsToClock(10.9)).toBe("0:10");
+  });
+});
+
+describe("isCompleteTc", () => {
+  // The distinction from isValidTc is the whole point: every prefix of a
+  // timecode being typed is VALID, and committing those prefixes is what
+  // corrupted the Mark in / Mark out fields.
+  it("accepts a finished four-segment timecode", () => {
+    expect(isCompleteTc("00:00:05:00", 25)).toBe(true);
+    expect(isCompleteTc("01:23:45:12", 25)).toBe(true);
+  });
+
+  it("accepts a one-digit hour, which is a thing people type", () => {
+    expect(isCompleteTc("0:00:05:00", 25)).toBe(true);
+  });
+
+  it("refuses every prefix on the way to one, though each of them parses", () => {
+    for (const partial of ["0", "00", "00:", "00:0", "00:00", "00:00:", "00:00:0", "00:00:05", "00:00:05:", "00:00:05:0"]) {
+      expect(isValidTc(partial, 25), `${partial} should still parse`).toBe(partial.at(-1) !== ":");
+      expect(isCompleteTc(partial, 25), `${partial} must not commit`).toBe(false);
+    }
+  });
+
+  it("refuses a shape that is complete but cannot exist", () => {
+    expect(isCompleteTc("00:99:99:99", 25)).toBe(false);
+    expect(isCompleteTc("00:00:00:99", 25)).toBe(false); // 99 frames at 25fps
+  });
+
+  it("refuses an over-long entry, which is what the corrupted field held", () => {
+    expect(isCompleteTc("00:00:00:000:00:05:00", 25)).toBe(false);
+  });
+
+  it("tolerates surrounding whitespace", () => {
+    expect(isCompleteTc("  00:00:05:00  ", 25)).toBe(true);
   });
 });
