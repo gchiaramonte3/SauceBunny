@@ -479,7 +479,18 @@ export function Sidebar(props: Props) {
               <div className="v mono">{durationTc}</div>
               <div className="k">Streams</div>
               <div className="v mono">
-                {metadata.has_subs ? "video + audio + subs" : "video + audio"}
+                {/* WHAT THE FILE ACTUALLY HAS. This read "video + audio" for
+                    everything, hardcoded - so a silent ProRes master said it
+                    had audio, and the only way to find out otherwise was to
+                    start a transcript and watch it fail on a raw ffmpeg
+                    message. The probe has always reported this: acodec is null
+                    when there is no audio stream (media.rs `has_audio:
+                    acodec.is_some()`); this row simply never asked. */}
+                {[
+                  metadata.vcodec ? "video" : null,
+                  metadata.acodec ? "audio" : null,
+                  metadata.has_subs ? "subs" : null,
+                ].filter(Boolean).join(" + ") || "—"}
               </div>
             </div>
 

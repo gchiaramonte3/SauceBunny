@@ -1873,12 +1873,33 @@ async fn extract_wav_16k_tracked(
 /// Format an extraction failure, preferring ffmpeg's own stderr tail over the
 /// bare status when we captured anything useful.
 fn fail_msg(stderr_tail: &str, fallback: String) -> String {
+    // THE COMMONEST CAUSE, SAID PLAINLY. A source with no audio track (a
+    // silent ProRes master, a screen capture, a GIF-style export) sends `-vn`
+    // ffmpeg a file it can strip to nothing, and ffmpeg reports the empty
+    // OUTPUT rather than the missing input: "Output file does not contain any
+    // stream" / "Error opening output files: Invalid argument". Passed through
+    // verbatim that reads like a bug in the app, or a bad output folder, and
+    // says nothing about the one thing the user can act on.
+    if no_audio_stream(stderr_tail) {
+        return "This file has no audio track, so there is nothing to transcribe.".into();
+    }
     let tail = short_err(stderr_tail);
     if tail.trim().is_empty() {
         format!("Audio conversion failed — {fallback}")
     } else {
         format!("Audio conversion failed — {tail}")
     }
+}
+
+/// Whether ffmpeg's stderr says the extraction produced an empty output, which
+/// for a `-vn` audio extraction means the input carried no audio.
+///
+/// Matched on ffmpeg's own wording rather than probing the file again: the
+/// extraction has already read it, and a second probe could disagree with the
+/// run that actually failed.
+fn no_audio_stream(stderr: &str) -> bool {
+    stderr.contains("does not contain any stream")
+        || (stderr.contains("Output file is empty") && stderr.contains("nothing was encoded"))
 }
 
 // Parses whisper-cli segment lines like "[00:00:04.000 --> 00:00:08.500]" → 8.5
@@ -3628,5 +3649,59 @@ mod whisper_parser_tests {
         // No arrow, no timestamp, no guess.
         assert_eq!(parse_whisper_segment_end("just a line of text"), None);
         assert_eq!(parse_whisper_segment_end("[00:00:01.000] no arrow"), None);
+    }
+}
+
+#[cfg(test)]
+mod no_audio_tests {
+    use super::*;
+
+    /// The REAL stderr, captured from the bundled ffmpeg running the app's own
+    /// extraction args against a silent ProRes master. Reproduced verbatim so
+    /// this test cannot drift into matching a wording ffmpeg never emits.
+    const SILENT_PRORES_STDERR: &str = "\
+  Stream #0:0[0x1]: Video: prores (HQ) (apch / 0x68637061), yuv422p10le, 1920x1080\n\
+Output #0, wav, to '/Users/x/Library/Caches/com.saucebunny.desktop/scratch/j.wav':\n\
+[out#0/wav @ 0x137704470] Output file does not contain any stream\n\
+Error opening output file /Users/x/Library/Caches/com.saucebunny.desktop/scratch/j.wav.\n\
+Error opening output files: Invalid argument\n";
+
+    #[test]
+    fn a_source_with_no_audio_says_so_instead_of_quoting_ffmpeg() {
+        let msg = fail_msg(SILENT_PRORES_STDERR, "exit Some(1)".into());
+        assert_eq!(msg, "This file has no audio track, so there is nothing to transcribe.");
+        // The point of the change: none of ffmpeg's own vocabulary survives.
+        assert!(!msg.contains("Invalid argument"), "{msg}");
+        assert!(!msg.contains("Audio conversion failed"), "{msg}");
+    }
+
+    #[test]
+    fn a_genuine_conversion_failure_still_reports_what_ffmpeg_said() {
+        // The no-audio branch must not swallow every other failure - a missing
+        // input or an unreadable volume still has to reach the user.
+        let msg = fail_msg(
+            "[in#0 @ 0x0] Error opening input: No such file or directory\n",
+            "exit Some(1)".into(),
+        );
+        assert!(msg.starts_with("Audio conversion failed"), "{msg}");
+        assert!(msg.contains("No such file or directory"), "{msg}");
+    }
+
+    #[test]
+    fn an_empty_stderr_falls_back_to_the_status() {
+        let msg = fail_msg("", "ffmpeg exited without reporting a status".into());
+        assert_eq!(
+            msg,
+            "Audio conversion failed — ffmpeg exited without reporting a status",
+        );
+    }
+
+    #[test]
+    fn the_detector_matches_ffmpegs_wording_and_nothing_looser() {
+        assert!(no_audio_stream(SILENT_PRORES_STDERR));
+        assert!(no_audio_stream("Output file is empty, nothing was encoded\n"));
+        // "stream" appears in plenty of healthy ffmpeg chatter.
+        assert!(!no_audio_stream("Stream mapping:\n  Stream #0:1 -> #0:0 (aac -> pcm_s16le)\n"));
+        assert!(!no_audio_stream("Error opening input: No such file or directory\n"));
     }
 }

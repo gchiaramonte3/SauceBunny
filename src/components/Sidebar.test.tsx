@@ -108,3 +108,52 @@ describe("the queue export button", () => {
     expect(queueBtn().textContent).toContain("Export 1 clip");
   });
 });
+
+describe("the Streams row", () => {
+  /**
+   * It read "video + audio" for every source, hardcoded. A silent ProRes
+   * master therefore claimed to have audio, and the only way to discover
+   * otherwise was to start a transcript and watch it die on a raw ffmpeg
+   * message ("Error opening output files: Invalid argument") that never
+   * mentions audio at all. Found by driving the packaged app against a real
+   * file; the probe had reported the truth in `acodec` the whole time.
+   */
+  const streams = () => screen.getByText("Streams").nextElementSibling?.textContent?.trim();
+  /** base()'s metadata with a few fields overridden, keeping its real type. */
+  type Meta = Props["metadata"];
+  const meta = (over: Partial<NonNullable<Meta>>): Meta =>
+    ({ ...(base().metadata as NonNullable<Meta>), ...over });
+
+  it("names only the tracks the file actually has", () => {
+    render(<Sidebar {...base({
+      metadata: meta({ vcodec: "prores", acodec: null }),
+    })} />);
+    expect(streams()).toBe("video");
+  });
+
+  it("still says video + audio when both are there", () => {
+    render(<Sidebar {...base()} />);
+    expect(streams()).toBe("video + audio");
+  });
+
+  it("names an audio-only source as audio, not as video", () => {
+    render(<Sidebar {...base({
+      metadata: meta({ vcodec: null, acodec: "aac" }),
+    })} />);
+    expect(streams()).toBe("audio");
+  });
+
+  it("adds subs to whatever is really present", () => {
+    render(<Sidebar {...base({
+      metadata: meta({ vcodec: "h264", acodec: null, has_subs: true }),
+    })} />);
+    expect(streams()).toBe("video + subs");
+  });
+
+  it("prints a dash rather than an empty row when it knows neither", () => {
+    render(<Sidebar {...base({
+      metadata: meta({ vcodec: null, acodec: null }),
+    })} />);
+    expect(streams()).toBe("—");
+  });
+});
