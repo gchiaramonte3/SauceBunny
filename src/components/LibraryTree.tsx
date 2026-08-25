@@ -43,6 +43,11 @@ type Row = {
   expanded: boolean;
   /** Root rows only — the first video under the root, for the folder art. */
   artPath?: string | null;
+  /** Set on the two CATEGORY rows. They were rendered outside this array with
+   *  a hard-coded tabIndex={-1}, so the roving tabindex never reached them and
+   *  neither did ↑/↓ - the Frames and web shelves had no keyboard route at
+   *  all, and clicking was the only way in. One list is the truth again. */
+  shelf?: "web" | "frames";
 };
 
 const KIND_CHIPS: Array<{ kind: LibraryKindFilter; label: string }> = [
@@ -54,6 +59,11 @@ const KIND_CHIPS: Array<{ kind: LibraryKindFilter; label: string }> = [
 function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
   const rows: Row[] = [
     { key: "all", chain: null, depth: 0, name: "All", hasChildren: false, expanded: false },
+    // Directly under "All" because they are the same KIND of thing - a view
+    // over everything of a category - rather than folders that happen to live
+    // somewhere. Below the roots they would read as one more drive.
+    { key: "shelf:web", chain: null, depth: 0, name: "From the web", hasChildren: false, expanded: false, shelf: "web" },
+    { key: "shelf:frames", chain: null, depth: 0, name: "Frames", hasChildren: false, expanded: false, shelf: "frames" },
   ];
   const walk = (node: LibraryFolder, chain: LibraryCrumb[], depth: number) => {
     const isExp = expanded.has(node.path);
@@ -116,7 +126,9 @@ export function LibraryTree({
   const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   // Keep the roving stop valid as rows collapse/expand; follow the selection.
-  useEffect(() => { setActiveKey(selKey); }, [selKey]);
+  // A selected shelf keeps the roving stop, rather than the tree snapping the
+  // tab stop back to "All" behind the user.
+  useEffect(() => { setActiveKey(shelf ? `shelf:${shelf}` : selKey); }, [selKey, shelf]);
   const active = rows.some((r) => r.key === activeKey) ? activeKey : "all";
 
   const toggle = (key: string) =>
@@ -149,7 +161,14 @@ export function LibraryTree({
           for (let j = i - 1; j >= 0; j--) if (rows[j].depth < row.depth) { focusRow(rows[j].key); break; }
         }
         break;
-      case "Enter": case " ": e.preventDefault(); onSelect(row.chain); break;
+      case "Enter": case " ":
+        e.preventDefault();
+        // Enter on a shelf row picks the shelf, the way clicking it does -
+        // otherwise ↓ could reach the row and Enter would silently select
+        // "All" instead.
+        if (row.shelf) { setActiveKey(row.key); onSelectShelf(row.shelf); break; }
+        onSelect(row.chain);
+        break;
     }
   };
 
@@ -234,40 +253,8 @@ export function LibraryTree({
         ))}
       </div>
       <div className="cp-lib-tree-scroll" role="tree" aria-label="Library folders" onKeyDown={onKeyDown}>
-        {/* Sits directly under "All" because it is the same KIND of thing —
-            a view over everything of a category — rather than a folder that
-            happens to live somewhere. Below the roots it would read as one
-            more drive. */}
-        <button
-          type="button"
-          role="treeitem"
-          aria-level={1}
-          aria-selected={shelf === "web"}
-          tabIndex={-1}
-          className={"cp-lib-tree-row cp-lib-tree-web" + (shelf === "web" ? " selected" : "")}
-          style={{ ["--depth" as string]: "0" }}
-          onClick={() => onSelectShelf("web")}
-        >
-          <span className="cp-lib-tree-tw empty" aria-hidden="true"><IconLink size={13} /></span>
-          <span className="cp-lib-tree-name">From the web</span>
-        </button>
-        {/* Frames sits beside it for the same reason: both are views over a
-            category of thing the app manages, not folders someone made. */}
-        <button
-          type="button"
-          role="treeitem"
-          aria-level={1}
-          aria-selected={shelf === "frames"}
-          tabIndex={-1}
-          className={"cp-lib-tree-row cp-lib-tree-web" + (shelf === "frames" ? " selected" : "")}
-          style={{ ["--depth" as string]: "0" }}
-          onClick={() => onSelectShelf("frames")}
-        >
-          <span className="cp-lib-tree-tw empty" aria-hidden="true"><IconCamera size={13} /></span>
-          <span className="cp-lib-tree-name">Frames</span>
-        </button>
         {rows.map((row) => {
-          const isSel = row.key === selKey;
+          const isSel = row.shelf ? shelf === row.shelf : (row.key === selKey && shelf === null);
           return (
             <button
               key={row.key}
@@ -278,13 +265,19 @@ export function LibraryTree({
               aria-selected={isSel}
               aria-expanded={row.hasChildren ? row.expanded : undefined}
               tabIndex={row.key === active ? 0 : -1}
-              className={"cp-lib-tree-row" + (isSel && shelf === null ? " selected" : "")}
+              className={"cp-lib-tree-row"
+                + (row.shelf ? " cp-lib-tree-web" : "")
+                + (isSel ? " selected" : "")}
               style={{ ["--depth" as string]: String(row.depth) }}
-              onClick={() => { setActiveKey(row.key); onSelect(row.chain); }}
+              onClick={() => {
+                setActiveKey(row.key);
+                if (row.shelf) { onSelectShelf(row.shelf); return; }
+                onSelect(row.chain);
+              }}
               onContextMenu={(e) => {
                 // "All" is an aggregate, not a folder on disk — nothing to tag
                 // or reveal.
-                if (row.key === "all") return;
+                if (row.key === "all" || row.shelf) return;
                 e.preventDefault();
                 setMenu({ path: row.key, x: e.clientX, y: e.clientY, isRoot: row.depth === 0 });
               }}
@@ -300,9 +293,11 @@ export function LibraryTree({
               ) : (
                 <span className="cp-lib-tree-tw empty" aria-hidden="true">
                   {row.key === "all" ? <IconStack size={13} /> : null}
+                  {row.shelf === "web" ? <IconLink size={13} /> : null}
+                  {row.shelf === "frames" ? <IconCamera size={13} /> : null}
                 </span>
               )}
-              {row.key !== "all" && (
+              {row.key !== "all" && !row.shelf && (
                 <IconFolderSolid
                   size={15}
                   className="cp-lib-tree-folder"

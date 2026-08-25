@@ -112,3 +112,34 @@ test("transport keys do not reach the Clip player from the Library", async ({ pa
   });
   expect(claimed).toBe(false);
 });
+
+test("the Frames and web shelves are reachable from the folder tree", async ({ page }) => {
+  // Both rows were rendered outside the array that buildRows/onKeyDown walk,
+  // with a hard-coded tabIndex={-1}. So the roving tabindex never reached them
+  // and ↓ from "All" skipped straight to the first root: clicking was the only
+  // way into either shelf, and 80 Tab presses cycled the ring four times
+  // without landing on one.
+  await bootLibrary(page);
+  const tree = page.locator("[role=tree]");
+  await tree.getByRole("treeitem", { name: "All" }).focus();
+
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator("[role=treeitem]:focus")).toHaveText(/From the web/);
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator("[role=treeitem]:focus")).toHaveText(/Frames/);
+
+  // And Enter picks it, rather than quietly selecting "All".
+  await page.keyboard.press("Enter");
+  await expect(tree.getByRole("treeitem", { name: "Frames" }))
+    .toHaveAttribute("aria-selected", "true");
+});
+
+test("a selected shelf keeps the tab stop instead of snapping back to All", async ({ page }) => {
+  await bootLibrary(page);
+  const tree = page.locator("[role=tree]");
+  await tree.getByRole("treeitem", { name: "From the web" }).click();
+  await expect(tree.getByRole("treeitem", { name: "From the web" }))
+    .toHaveAttribute("tabindex", "0");
+  await expect(tree.getByRole("treeitem", { name: "All" }))
+    .toHaveAttribute("tabindex", "-1");
+});
