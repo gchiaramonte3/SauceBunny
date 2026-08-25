@@ -114,13 +114,25 @@ describe("the bundled ffmpeg licence is described consistently", () => {
     );
   });
 
-  it("states the build is GPL v2 or later, with the evidence", () => {
+  it("states each build's licence separately, with the evidence", () => {
     // "or later" is what permits redistributing under v3, which is what this
     // app does and why the v3 text ships. The configure flags are cited so the
     // claim is checkable against the binary rather than remembered.
-    expect(thirdParty).toContain("GPL v2 or later");
+    //
+    // TWO ROWS, NOT ONE. This test used to require a single "GPL v2 or later"
+    // for both binaries, which is what let the table say GPLv3 for both while
+    // the prose said v2 for both - each wrong about a different binary. Running
+    // them settles it: ffmpeg (osxexperts 8.1) reports --enable-gpl and NOT
+    // --enable-version3, so GPLv2-or-later; ffprobe (martin-riedl 8.1.1)
+    // reports both, so GPLv3-or-later. Requiring them separately is what stops
+    // the next tidy-up collapsing them back into one wrong row.
+    expect(thirdParty).toMatch(/GPL\s?v2 or later/);
+    expect(thirdParty).toMatch(/GPL\s?v3 or later/);
     expect(thirdParty).toContain("--enable-gpl");
     expect(thirdParty).toContain("--enable-version3");
+    // Each binary named on its own row, so the licences cannot be merged.
+    expect(thirdParty).toMatch(/^\| `ffmpeg` \|/m);
+    expect(thirdParty).toMatch(/^\| `ffprobe` \|/m);
   });
 
   it("agrees with the README, which is where most people will read it first", () => {
