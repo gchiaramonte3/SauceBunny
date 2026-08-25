@@ -28,7 +28,11 @@ tauri = { version = "2", features = ["protocol-asset", "macos-private-api"] }
 # unreliable for capture, so the app can't otherwise tell "granted" from
 # "denied" - AVCaptureDevice.authorizationStatus is the real answer).
 objc2 = "0.6"
-objc2-foundation = "0.3"
+# NSFileManager for trashItemAtURL: moving a file to the Finder Trash rather
+# than unlinking it. The app has no undo and no trash of its own, so the OS's
+# is the recovery path - a delete you can take back is a different feature
+# from one you cannot. No new crate: objc2-foundation was already here.
+objc2-foundation = { version = "0.3", features = ["NSFileManager", "NSURL", "NSString", "NSError"] }
 # NSPasteboard, for read_clipboard_text. Already in the tree via muda/tao/tauri
 # (see `cargo tree -i objc2-app-kit`), so naming it directly adds no crate - it
 # only makes a dependency the app already compiles usable from our own code.

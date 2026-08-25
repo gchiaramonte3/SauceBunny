@@ -242,6 +242,7 @@ pub fn run() {
             commands::open_external_url,
             commands::read_clipboard_text,
             commands::reveal_in_finder,
+            commands::move_to_trash,
             commands::open_privacy_pane,
             commands::av_permission_status,
             commands::set_clear_cache_on_quit,

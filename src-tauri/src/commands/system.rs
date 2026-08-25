@@ -1003,6 +1003,38 @@ pub fn open_external_url(url: String) -> Result<(), crate::AppError> {
     Ok(())
 }
 
+/// Move a file to the Finder Trash.
+///
+/// NOT `remove_file`. This app has no undo and no trash of its own, so a
+/// delete it performs itself is final - and the things being deleted here are
+/// somebody's footage. `trashItemAtURL:` puts the file where macOS already
+/// offers Put Back, which makes the OS the recovery path rather than leaving
+/// there being none.
+///
+/// Uses NSFileManager through objc2-foundation, which the app already
+/// depends on, so this adds no crate.
+#[tauri::command]
+pub fn move_to_trash(path: String) -> Result<(), crate::AppError> {
+    use objc2_foundation::{NSFileManager, NSString, NSURL};
+
+    if path.trim().is_empty() {
+        return Err(crate::AppError::invalid("No path to move to the Trash."));
+    }
+    let p = std::path::Path::new(&path);
+    // Report a missing file as missing rather than as a Trash failure: it is
+    // the ordinary case when two windows both act on the same item.
+    if !p.exists() {
+        return Err(crate::AppError::not_found(path.as_str()));
+    }
+
+    let ns_path = NSString::from_str(&path);
+    let url = unsafe { NSURL::fileURLWithPath(&ns_path) };
+    let fm = unsafe { NSFileManager::defaultManager() };
+    unsafe { fm.trashItemAtURL_resultingItemURL_error(&url, None) }
+        .map_err(|e| crate::AppError::internal(format!("Couldn't move it to the Trash: {e}")))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn reveal_in_finder(path: String) -> Result<(), crate::AppError> {
     let p = PathBuf::from(&path);

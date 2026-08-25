@@ -209,6 +209,35 @@ export function LibraryBrowser({
     }
   }, [selected, rescanAll]);
 
+  /**
+   * Move a file to the Finder Trash.
+   *
+   * The frames shelf and the web shelf have always had a removal verb; the
+   * file wall had none, so the one shelf holding somebody's actual footage
+   * was the only one with no way to get rid of anything.
+   *
+   * The TRASH, not a delete. This app has no undo, and these are the user's
+   * own media files - macOS already offers Put Back on anything in there,
+   * which makes the OS the recovery path rather than there being none. That
+   * is also why this is allowed to ship at all when a drag-to-move between
+   * folders is not: one is recoverable and the other would not be.
+   */
+  const trashItem = useCallback(async (item: LibraryItem) => {
+    const ok = confirm(
+      `Move "${item.name}" to the Trash?\n\nYou can put it back from the Finder.`,
+    );
+    if (!ok) return;
+    try {
+      await invoke("move_to_trash", { path: item.path });
+      setDetailItem((cur) => (cur?.path === item.path ? null : cur));
+      rescanAll();
+    } catch (e) {
+      // A refusal has to be seen. The frames shelf learned this the hard way:
+      // a swallowed error and a dead button look identical.
+      alert(formatError(e));
+    }
+  }, [rescanAll]);
+
   const selectedNode = useMemo(
     () => (selected ? findLibraryFolder(trees, selected[selected.length - 1].path) : null),
     [trees, selected],
@@ -424,6 +453,7 @@ export function LibraryBrowser({
             onClear={() => setSel(EMPTY_SELECTION)}
           />
           <LibraryBrowserPane
+            onTrashItem={trashItem}
             items={shown}
             folders={folders}
             onOpenFolder={(f) => {

@@ -33,6 +33,15 @@ type Props = {
   onContextSelectItem?: (item: LibraryItem) => void;
   /** Rename: the pane hands back the item the menu was opened on. */
   onRenameItem?: (item: LibraryItem) => void;
+  /**
+   * Move this file to the Finder Trash.
+   *
+   * The frames shelf and the web shelf have always had a removal verb and
+   * the file wall had none at all - the one shelf holding somebody's actual
+   * footage was the one with no way to get rid of anything. It is the Trash
+   * rather than a delete because this app has no undo of its own.
+   */
+  onTrashItem?: (item: LibraryItem) => void;
   onChoosePoster: (path: string) => void;
   onResetPoster: (path: string) => void;
   /** Clears the selection on a click in the empty gutter. */
@@ -60,7 +69,7 @@ const EMPTY_FOLDERS: LibraryFolder[] = [];
 export function LibraryBrowserPane({
   folders = EMPTY_FOLDERS, onOpenFolder,
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
-  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, emptyText,
+  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, emptyText,
   sort, dir, onSort,
 }: Props) {
 
@@ -208,6 +217,8 @@ export function LibraryBrowserPane({
             tags={tagsByPath?.get(it.path)}
             onToggleTagColor={onToggleTagColor ? (i) => onToggleTagColor(it.path, i) : undefined}
             onClearTagColors={onClearTagColors ? () => onClearTagColors(it.path) : undefined}
+            deleteLabel="Move to Trash…"
+            onDelete={onTrashItem ? () => onTrashItem(it) : undefined}
             onSelect={(e) => onSelectItem(it, e)}
             onContextSelect={() => onContextSelectItem?.(it)}
             onRename={onRenameItem ? () => onRenameItem(it) : undefined}
