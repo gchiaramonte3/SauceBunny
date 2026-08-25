@@ -413,22 +413,34 @@
 /* Featured size — the Continue row's large landscape cards (~2x standard). */
 .cp-lib-cell.lg { width: 432px; }
 .cp-lib-card {
+  /* ONE OBJECT, not a picture with a caption floating under it.
+     The art used to be a rounded tile on a transparent card and the title
+     sat below it on the page background, separated by a margin - so a shelf
+     read as a row of pictures with unrelated text between them, and on a
+     dark frame it was genuinely unclear which label belonged to which clip.
+     The card carries the surface and the rounding now, and the art meets the
+     label plate with no seam: picture on top, name attached to it. */
   display: flex;
   flex-direction: column;
   width: 100%;
   padding: 0;
-  border: none;
-  background: none;
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
   border-radius: var(--r-lg);
+  overflow: hidden;
   text-align: left;
   cursor: pointer;
 }
+.cp-lib-card:hover,
+.cp-lib-card:focus-visible { border-color: var(--line-2); background: var(--bg-3); }
 .cp-lib-card-art {
   position: relative;
   display: block;
   aspect-ratio: 16 / 9;
   width: 100%;
-  border-radius: var(--r-lg);
+  /* The CARD rounds and clips now; rounding here too would cut a notch out
+     of the plate the art sits directly on top of. */
+  border-radius: 0;
   overflow: hidden;
   background: var(--bg-2);
   border: 1px solid var(--line-1);
@@ -525,8 +537,9 @@
   color: var(--fg-2);
 }
 .cp-lib-card-title {
-  margin-top: var(--s-2);
-  padding: 0 2px;
+  /* Joined to the art, not floated under it. */
+  margin-top: 0;
+  padding: 7px 9px 0;
   font-family: var(--font-ui);
   font-size: var(--text-md);
   font-weight: var(--weight-bold);
@@ -539,7 +552,7 @@
    so the reveal never reflows the shelf. */
 .cp-lib-card-detail {
   height: 16px;
-  padding: 0 2px;
+  padding: 0 9px 7px;
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
@@ -1164,7 +1177,9 @@
 }
 .cp-lib-browse-grid .cp-lib-cell { width: auto; }
 .cp-lib-browse-grid .cp-lib-card-title {
-  margin-top: var(--s-1);
+  /* No margin-top: the label plate is joined to the art, and its own padding
+     is the spacing. This override survived the card becoming one object and
+     put a 4px seam back into the browse grid alone. */
   font-size: var(--text-base);
 }
 .cp-lib-browse-grid .cp-lib-card-detail {

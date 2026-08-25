@@ -94,19 +94,9 @@
   --bevel-pressed:
     inset 0 1px 2px rgba(0,0,0,0.45),
     inset 0 -1px 0 rgba(255,255,255,0.04);
-  /* Green CTA — crisp 1px ring + inset shine; halo pulled in tight. */
-  --glow-green-cta:
-    inset 0 1px 0 rgba(255,255,255,0.30),
-    inset 0 -1px 0 rgba(0,0,0,0.20),
-    0 0 0 1px rgba(108,255,141,0.55),
-    0 0 8px rgba(108,255,141,0.22),
-    0 1px 2px rgba(0,0,0,0.40);
-  --glow-green-cta-hover:
-    inset 0 1px 0 rgba(255,255,255,0.40),
-    inset 0 -1px 0 rgba(0,0,0,0.20),
-    0 0 0 1px rgba(108,255,141,0.75),
-    0 0 10px rgba(108,255,141,0.32),
-    0 1px 2px rgba(0,0,0,0.40);
+  /* The green CTA glow stack lived here for .btn-primary, which is a raised
+     NEUTRAL now - see buttons.css. Green is state ("this is on"), not a way
+     of saying "click this", so nothing needs a green button halo any more. */
   /* Selected/active ring — used on sidebar items, toggles ON, queue
      currently-exporting, etc. Crisp 1px ring, minimal halo. */
   --ring-green:
@@ -131,7 +121,6 @@
   --color-surface-elevated:  #1A1A1D;
   --color-text-secondary:    #8A8A8E;
   --color-accent-green:      #6CFF8D;
-  --color-accent-green-2:    #88F362;
   --color-accent-purple:     #6D52ED;
   --color-destructive:       #FF5C5C;
   --color-warning:           #FFB545;
