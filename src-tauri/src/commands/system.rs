@@ -746,7 +746,32 @@ fn write_bytes_impl(
             .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| crate::AppError::invalid(format!("Not a file path: {}", p.display())))?;
-        let tmp = p.with_file_name(format!(".{file_name}.tmp-{}", std::process::id()));
+        // UNIQUE PER CALL, not per process. Keying the staging file on the
+        // destination plus the PID meant two concurrent saves of the SAME file
+        // from this process shared one temp path - and Tauri runs invokes
+        // concurrently. Writer B's `File::create` opens O_TRUNC on the inode A
+        // still holds an fd to; A goes on writing at its old offset, so the
+        // staged file becomes a NUL hole plus A's tail, fsyncs, and renames
+        // cleanly over the destination. Full length, valid rename, and
+        // `JSON.parse` rejects it.
+        //
+        // That is worst for casts.json, whose recovery path then finishes the
+        // job: the parse throws into hydrate's `catch { /* fresh shelf */ }`,
+        // the shelf boots empty, and the next merge writes `{"casts":[]}` over
+        // the file - underneath the pre-hydration write refusal, the merge and
+        // the tombstones that all exist to prevent exactly that.
+        //
+        // The error-path cleanup below was part of the same bug: a failing
+        // writer deleted the temp a healthy concurrent writer was about to
+        // rename, turning a good save into a bogus ENOENT. With a per-call name
+        // each writer only ever removes its own.
+        // PID keeps two processes apart; the counter keeps two concurrent
+        // calls in THIS process apart, which is the half that was missing.
+        // Relaxed is enough - the only requirement is that no two calls read
+        // the same value, not that anything is ordered against it.
+        static STAGE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = STAGE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = p.with_file_name(format!(".{file_name}.tmp-{}-{seq}", std::process::id()));
         let write_and_sync = || -> std::io::Result<()> {
             use std::io::Write;
             let mut f = std::fs::File::create(&tmp)?;
@@ -1900,5 +1925,69 @@ mod cache_layout_tests {
         touch(&cache.join("saucebunny-webcache-oldjob.mp4"), b"tmp");
         let later = std::time::SystemTime::now() + std::time::Duration::from_secs(CACHE_TTL_SECONDS * 2);
         assert_eq!(sweep_stale_files(&cache, later), 1);
+    }
+}
+
+#[cfg(test)]
+mod atomic_write_race_tests {
+    use super::*;
+
+    /// Two concurrent atomic saves of the SAME file must not corrupt it.
+    ///
+    /// Every other test in this module is sequential, which is why the staging
+    /// collision survived: the temp path was keyed on the destination plus the
+    /// PID, so within one process two writers shared it. Tauri runs invokes
+    /// concurrently, so this is reachable by two windows saving one document.
+    ///
+    /// Real threads rather than a simulated interleave - the failure is
+    /// `File::create` truncating an inode another writer still holds an fd to,
+    /// which nothing but genuine concurrency reproduces.
+    #[test]
+    fn concurrent_atomic_writes_never_leave_a_torn_file() {
+        let dir = std::env::temp_dir().join(format!("sb-atomic-race-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("casts.json");
+
+        // Distinguishable payloads, both large enough that a torn write lands
+        // mid-buffer rather than being swallowed by a single syscall.
+        let a = format!("{{\"a\":\"{}\"}}", "a".repeat(400_000));
+        let b = format!("{{\"b\":\"{}\"}}", "b".repeat(400_000));
+        let dest_s = dest.to_string_lossy().into_owned();
+
+        for _ in 0..12 {
+            let (d1, d2) = (dest_s.clone(), dest_s.clone());
+            let (p1, p2) = (a.clone(), b.clone());
+            let t1 = std::thread::spawn(move || {
+                write_bytes_impl(&d1, p1.as_bytes(), false, false, true)
+            });
+            let t2 = std::thread::spawn(move || {
+                write_bytes_impl(&d2, p2.as_bytes(), false, false, true)
+            });
+            // Neither writer may fail: the old cleanup path had a failing
+            // writer delete the temp a healthy one was about to rename.
+            t1.join().unwrap().expect("writer A failed");
+            t2.join().unwrap().expect("writer B failed");
+
+            // Whoever won, the file must be exactly one of the two payloads -
+            // not a splice, not a NUL hole, not a truncation.
+            let got = std::fs::read_to_string(&dest).unwrap();
+            assert!(
+                got == a || got == b,
+                "torn write: {} bytes, starts {:?}, contains NUL: {}",
+                got.len(),
+                &got[..got.len().min(24)],
+                got.contains('\0'),
+            );
+        }
+
+        // No staging files left behind.
+        let strays: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".tmp-"))
+            .collect();
+        assert!(strays.is_empty(), "left staging files behind: {strays:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
