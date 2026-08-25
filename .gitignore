@@ -40,6 +40,10 @@ playwright-report/
 
 # Editor/agent-local config (machine-specific, not shared)
 .claude/
+# Agent-harness config, same class as .claude/ above: machine-local, and a
+# skill checked in here would be a second release runbook competing with
+# docs/DISTRIBUTION.md.
+.agents/
 
 # Internal design notes / working docs (personal paths, session transcripts)
 # — deliberately local-only, never part of the public tree.
