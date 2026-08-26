@@ -1596,15 +1596,16 @@ pub async fn download_web_preview(
 
     // yt-dlp picks the ext from the format selector — we let it choose
     // and probe the resulting file after to find the actual path. The
-    // download lands under a JOB-scoped temp prefix in the cache ROOT (so an
+    // download lands under a JOB-scoped temp prefix in `scratch/` (so an
     // abandoned partial is swept by the 24h cleanup), then atomically renames
     // into the persistent downloads cache on success — a file there is
     // complete by construction.
+    //
+    // The template and the finder below come from the same pair so neither
+    // names a directory: this comment used to say "cache ROOT" while the code
+    // wrote to scratch/, and the finder believed the comment.
     let prefix = format!("webcache-{}", args.job_id);
-    let template = super::scratch_dir(&cache)
-        .join(format!("{}.%(ext)s", prefix))
-        .to_string_lossy()
-        .to_string();
+    let template = scratch_download_template(&cache, &prefix);
 
     let cmd = ytdlp(&app)?;
     // Bundled ffmpeg for the DASH merge below — without it yt-dlp falls back to
@@ -1760,7 +1761,7 @@ pub async fn download_web_preview(
                     // still works this session, reuse just isn't persisted.
                     // Every branch yields a usable path (the temp one if the
                     // move fails), so this is a `map`, not an `and_then`.
-                    let written = find_audio_in_cache(&cache_for, &prefix_for).map(|p| {
+                    let written = find_scratch_download(&cache_for, &prefix_for).map(|p| {
                         let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
                         let dl_dir = media_cache_dir(&cache_for, "downloads");
                         if std::fs::create_dir_all(&dl_dir).is_err() {
@@ -2171,10 +2172,7 @@ pub async fn download_audio_track(
     // can't write the same temp). Rename to the final name only on a clean
     // exit, making the cache hit atomic.
     let dl_prefix = format!("audiodl-{}", args.job_id);
-    let template = super::scratch_dir(&cache)
-        .join(format!("{}.%(ext)s", dl_prefix))
-        .to_string_lossy()
-        .to_string();
+    let template = scratch_download_template(&cache, &dl_prefix);
     // Clear any leftover partial from a prior failed/cancelled attempt under
     // this SAME job_id — the frontend's cookie-retry reuses the job_id, and
     // yt-dlp's default --continue would otherwise resume a partial that may now
@@ -2263,7 +2261,7 @@ pub async fn download_audio_track(
     // source-keyed name in the persistent media cache (r112: sweep-exempt —
     // this track is downloaded ONCE and reused across sessions) so the cache
     // hit is all-or-nothing.
-    let dl_file = find_audio_in_cache(&cache, &dl_prefix).ok_or_else(|| {
+    let dl_file = find_scratch_download(&cache, &dl_prefix).ok_or_else(|| {
         crate::AppError::internal("yt-dlp exited cleanly but no audio file was found in cache")
     })?;
     let ext = dl_file

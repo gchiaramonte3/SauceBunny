@@ -28,6 +28,32 @@ fn parse_ffmpeg_time(line: &str) -> Option<f64> {
     parse_hms_ms(tc)
 }
 
+/// The `-o` template for a job-scoped yt-dlp download staged in `scratch/`.
+///
+/// PAIRED WITH `find_scratch_download` ON PURPOSE, because splitting them is
+/// exactly how this broke. The r112 cache reshuffle moved these downloads from
+/// the cache ROOT into `scratch/`, and the WRITE sites moved with it while the
+/// FIND sites kept scanning the root — which `find_audio_in_cache` does
+/// non-recursively, so the file could never be seen.
+///
+/// yt-dlp then did everything right, the app declared "exited cleanly but no
+/// file was found in cache", and the frontend read that failure as an
+/// auth problem and re-downloaded the whole thing WITHOUT cookies before
+/// failing identically. Two full downloads of a ~200 MB source, every time,
+/// with nothing to show. Neither caller names a directory now.
+pub(crate) fn scratch_download_template(cache_root: &std::path::Path, prefix: &str) -> String {
+    super::scratch_dir(cache_root)
+        .join(format!("{prefix}.%(ext)s"))
+        .to_string_lossy()
+        .to_string()
+}
+
+/// The file `scratch_download_template` produced, whatever extension yt-dlp
+/// settled on. `None` means the download really did not land.
+pub(crate) fn find_scratch_download(cache_root: &std::path::Path, prefix: &str) -> Option<PathBuf> {
+    find_audio_in_cache(&super::scratch_dir(cache_root), prefix)
+}
+
 pub(crate) fn find_audio_in_cache(dir: &std::path::Path, prefix: &str) -> Option<PathBuf> {
     std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()).find_map(|e| {
         let p = e.path();
@@ -2932,5 +2958,83 @@ mod ffprobe_parse_tests {
         let video = streams.iter().find(|s| s["codec_type"].as_str() == Some("video")).unwrap();
         assert_eq!(video["width"].as_u64(), Some(1556));
         assert_eq!(video["codec_name"].as_str(), Some("h264"));
+    }
+}
+
+#[cfg(test)]
+mod scratch_download_tests {
+    use super::*;
+
+    fn root() -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "sb-scratchdl-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// The template and the finder must agree about which directory they mean.
+    ///
+    /// They did not. yt-dlp wrote `<cache>/scratch/webcache-<job>.mp4` and the
+    /// finder scanned `<cache>/` — non-recursively — so a completed download
+    /// was reported as "yt-dlp exited cleanly but no file was found in cache".
+    /// The frontend read that as an auth failure and re-downloaded the whole
+    /// source without cookies before failing the same way.
+    #[test]
+    fn the_finder_looks_where_the_template_writes() {
+        let cache = root();
+        let template = scratch_download_template(&cache, "webcache-job1");
+
+        // Stand in for yt-dlp: write the file the template asks for, choosing
+        // an extension the way the format selector would.
+        let written = PathBuf::from(template.replace(".%(ext)s", ".mp4"));
+        std::fs::create_dir_all(written.parent().unwrap()).unwrap();
+        std::fs::write(&written, b"video").unwrap();
+
+        let found = find_scratch_download(&cache, "webcache-job1");
+        assert_eq!(found.as_deref(), Some(written.as_path()), "template wrote {written:?}");
+
+        // And the old behaviour, pinned so the regression is legible: the
+        // cache ROOT does not contain it, which is what the finder used to scan.
+        assert!(
+            find_audio_in_cache(&cache, "webcache-job1").is_none(),
+            "the file is in scratch/, not the root — scanning the root is the bug",
+        );
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    /// Whatever extension yt-dlp settles on, including the audio case.
+    #[test]
+    fn any_extension_the_format_selector_picks_is_found() {
+        for ext in ["mp4", "m4a", "webm", "mkv", "opus"] {
+            let cache = root();
+            let t = scratch_download_template(&cache, "audiodl-j");
+            let w = PathBuf::from(t.replace(".%(ext)s", &format!(".{ext}")));
+            std::fs::create_dir_all(w.parent().unwrap()).unwrap();
+            std::fs::write(&w, b"a").unwrap();
+            assert_eq!(find_scratch_download(&cache, "audiodl-j").as_deref(), Some(w.as_path()),
+                "ext {ext} not found");
+            let _ = std::fs::remove_dir_all(&cache);
+        }
+    }
+
+    /// A half-written download is not a finished one.
+    #[test]
+    fn a_partial_is_not_mistaken_for_the_download() {
+        let cache = root();
+        let t = scratch_download_template(&cache, "webcache-j2");
+        let part = PathBuf::from(t.replace(".%(ext)s", ".mp4.partial"));
+        std::fs::create_dir_all(part.parent().unwrap()).unwrap();
+        std::fs::write(&part, b"half").unwrap();
+        assert!(find_scratch_download(&cache, "webcache-j2").is_none(), "matched a .partial");
+        let _ = std::fs::remove_dir_all(&cache);
+    }
+
+    /// Missing scratch dir is "not downloaded", not a panic.
+    #[test]
+    fn a_download_that_never_landed_is_none() {
+        let cache = root();
+        assert!(find_scratch_download(&cache, "webcache-nope").is_none());
+        let _ = std::fs::remove_dir_all(&cache);
     }
 }

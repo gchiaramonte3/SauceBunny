@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { useWebPlayback } from "./use-web-playback";
+import { useWebPlayback, shouldRetryWithoutCookies } from "./use-web-playback";
 
 /**
  * The WIRING, which is the half that had no tests.
@@ -130,5 +130,36 @@ describe("driving a real download", () => {
     const { result } = await startDownload();
     act(() => { fire("playback-prep-progress", { job_id: "somebody-else", percent: 99 }); });
     expect(result.current.downloadProgress).not.toBe(99);
+  });
+});
+
+describe("shouldRetryWithoutCookies", () => {
+  /**
+   * The retry is expensive: it re-downloads the whole source. It fired on any
+   * error that was not a cancellation, so a bug in the app's own file lookup
+   * ("yt-dlp exited cleanly but no file was found in cache") was read as an
+   * auth problem and cost a second 119 MB + 89 MB fetch before failing
+   * identically.
+   */
+  it("does not retry when yt-dlp exited cleanly — the download worked", () => {
+    expect(shouldRetryWithoutCookies(
+      "yt-dlp exited cleanly but no file was found in cache", true)).toBe(false);
+    expect(shouldRetryWithoutCookies(
+      "yt-dlp exited cleanly but no audio file was found in cache", true)).toBe(false);
+  });
+
+  it("still retries a genuine failure, which is what the retry is for", () => {
+    // Public social posts break BECAUSE the cookies are attached.
+    expect(shouldRetryWithoutCookies("download failed (yt-dlp exit Some(1))", true)).toBe(true);
+    expect(shouldRetryWithoutCookies("HTTP Error 403: Forbidden", true)).toBe(true);
+  });
+
+  it("never retries when no cookies were sent — there is nothing to drop", () => {
+    expect(shouldRetryWithoutCookies("download failed (yt-dlp exit Some(1))", false)).toBe(false);
+  });
+
+  it("treats cancellation and a source switch as the user, not a failure", () => {
+    expect(shouldRetryWithoutCookies("Cancelled", true)).toBe(false);
+    expect(shouldRetryWithoutCookies("Source changed", true)).toBe(false);
   });
 });

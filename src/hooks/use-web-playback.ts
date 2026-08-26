@@ -92,6 +92,28 @@ export type WebPlayback = {
 
 const WATCHDOG_MS = 15000;
 
+/**
+ * Whether a failed preview download is worth retrying WITHOUT sign-in cookies.
+ *
+ * Yes for a genuine failure with cookies attached: public social posts
+ * (LinkedIn and friends) break precisely because the cookies are there.
+ *
+ * No when yt-dlp exited CLEANLY. That message means the download worked and
+ * the app then failed to find the file it had just written, so cookies were
+ * never the problem — and a retry is a second full download of the same
+ * source for nothing. One 4K YouTube video fetched 119 MB + 89 MB twice
+ * before reporting failure, because a bug in our own file lookup was being
+ * read as an auth problem.
+ *
+ * No for cancellation or a source switch — those are the user, not a failure.
+ */
+export function shouldRetryWithoutCookies(message: string, hadCookies: boolean): boolean {
+  if (!hadCookies) return false;
+  if (message.includes("exited cleanly")) return false;
+  if (message.includes("Cancelled") || message.includes("Source changed")) return false;
+  return true;
+}
+
 export function useWebPlayback(helpers: Helpers): WebPlayback {
   const [state, dispatch] = useReducer(webPlaybackReducer, INITIAL_WEB_PLAYBACK);
 
@@ -296,9 +318,7 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
         try {
           cachePath = await attempt(cookies);
         } catch (err) {
-          const m = formatError(err);
-          // Public social posts (LinkedIn…) break with auth cookies — retry public.
-          if (cookies && !m.includes("Cancelled") && !m.includes("Source changed") && !cancelled) {
+          if (!cancelled && shouldRetryWithoutCookies(formatError(err), !!cookies)) {
             h.appendLog("info", "web-preview", "Download failed with sign-in cookies. Retrying without…");
             cachePath = await attempt(undefined);
           } else {
