@@ -389,7 +389,15 @@
 }
 .cp-gr-selects { display: flex; flex-direction: column; gap: var(--s-2); }
 .cp-gr-toggles { display: flex; justify-content: center; gap: var(--s-2); }
-.cp-gr-devices-foot { display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
+/* The helper line under Continue.
+   `.cp-colobby-hint` carries `margin-top: calc(-1 * var(--s-2))`, a pull-up
+   written for the Host card it sits under in the lobby. Here that cancelled
+   this footer's own 8px gap EXACTLY, to zero, and the line came to rest on
+   the button - reading as part of the control rather than as a note about it.
+   The gap is also a step wider than the lobby's, because a sentence this
+   close under a CTA is the one place the extra 4px is doing real work. */
+.cp-gr-devices-foot { display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
+.cp-gr-devices-foot .cp-colobby-hint { margin-top: 0; }
 .cp-gr-denied-row { display: flex; justify-content: center; gap: var(--s-2); }
 /* Identity swatches are the shared ColorSwatches (base.css); the card
    centers the row. */
