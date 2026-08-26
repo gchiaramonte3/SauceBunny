@@ -247,20 +247,35 @@ export function AiSummary({
 
   // Bring the server up for the active model (idempotent backend-side; restarts
   // when the chosen model changed).
-  const ensureServer = useCallback(async (): Promise<LlmServerInfo | null> => {
+  const ensureServer = useCallback(async (signal?: AbortSignal): Promise<LlmServerInfo | null> => {
     const model = activeModel;
     if (!model) return null;
     if (server && serverModelRef.current === model.id) return server;
     setPhase("starting");
     setPhaseMsg(`Loading ${model.name} into memory…`);
+    // Loading a multi-GB model into memory is the longest wait these features
+    // impose, and it was the one thing Stop could not touch: an abort signal
+    // only ever reached the token stream, which has not started yet. Shutting
+    // the server down IS the cancel - `start_llm_server` polls for exactly
+    // this state between health checks and returns "server start cancelled".
+    // That path was written and then never called by anything.
+    const cancelStart = () => { void invoke("stop_llm_server").catch(() => { /* already gone */ }); };
+    signal?.addEventListener("abort", cancelStart, { once: true });
     try {
       const info = await invoke<LlmServerInfo>("start_llm_server", { modelId: model.id });
+      // Won the race: the server came up after the user stopped. Put it back
+      // down rather than leaving GBs resident for a run nobody wants.
+      if (signal?.aborted) { cancelStart(); setPhase("idle"); setPhaseMsg(null); return null; }
       serverModelRef.current = model.id;
       setServer(info); setPhase("ready"); setPhaseMsg(null);
       return info;
     } catch (e) {
+      // A stop is not an error, and must not paint one.
+      if (signal?.aborted) { setPhase("idle"); setPhaseMsg(null); return null; }
       setPhase("error"); setPhaseMsg(formatError(e));
       return null;
+    } finally {
+      signal?.removeEventListener("abort", cancelStart);
     }
   }, [server, activeModel]);
 
@@ -377,30 +392,34 @@ export function AiSummary({
     if (!transcriptForModel) return;
     setInput("");
     const provider = loadAiProvider();
-    // Local Qwen needs its server up first (may start/download); cloud goes
-    // straight to the provider. Bail cleanly if the local server won't start.
-    let info: LlmServerInfo | null = null;
-    if (provider === "local") {
-      info = await ensureServer();
-      if (!info) return;
-    }
-
     const history: ChatMessage[] = [...messages, { role: "user", content }];
     setMessages([...history, { role: "assistant", content: "" }]);
-    setStreaming(true);
+    // Both of these come BEFORE the server start, and that ordering is the
+    // whole fix. `streaming` is what puts Stop on screen, and `abortRef` is
+    // what Stop acts on; with the model load sitting between them, the longest
+    // part of a cold run showed a Send button that was disabled and no way out
+    // at all. Now one control covers the whole run.
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    // System = the shared source prefix, nothing else. Task rules ride on the
-    // FIRST user turn, so the ten-thousand-token transcript stays a prefix that
-    // chapters and the analysis already paid for.
-    const prefix = info
-      ? buildSourcePrefix(transcriptForModel.lines, info.ctx).system
-      : transcriptForModel.text;
-    const task = buildTaskInstruction(style ?? DEFAULT_STYLE, transcriptForModel.hasSpeakers, sourceDescription);
-    const withTask: ChatMessage[] = history.map((m, i) =>
-      i === 0 && m.role === "user" ? { ...m, content: `${task}\n\n${m.content}` } : m,
-    );
+    setStreaming(true);
     try {
+      // Local Qwen needs its server up first (may start/download); cloud goes
+      // straight to the provider. Bail cleanly if the local server won't start.
+      let info: LlmServerInfo | null = null;
+      if (provider === "local") {
+        info = await ensureServer(ctrl.signal);
+        if (ctrl.signal.aborted || !info) return;
+      }
+      // System = the shared source prefix, nothing else. Task rules ride on the
+      // FIRST user turn, so the ten-thousand-token transcript stays a prefix that
+      // chapters and the analysis already paid for.
+      const prefix = info
+        ? buildSourcePrefix(transcriptForModel.lines, info.ctx).system
+        : transcriptForModel.text;
+      const task = buildTaskInstruction(style ?? DEFAULT_STYLE, transcriptForModel.hasSpeakers, sourceDescription);
+      const withTask: ChatMessage[] = history.map((m, i) =>
+        i === 0 && m.role === "user" ? { ...m, content: `${task}\n\n${m.content}` } : m,
+      );
       if (provider === "local" && info) {
         await streamChat(info, [{ role: "system", content: prefix }, ...withTask], (delta) => {
           setMessages((prev) => {
@@ -438,7 +457,9 @@ export function AiSummary({
       }
     } finally {
       setStreaming(false);
-      abortRef.current = null;
+      // Ownership-checked: a run started after this one may already have
+      // installed its controller, and nulling it would strand its Stop.
+      if (abortRef.current === ctrl) abortRef.current = null;
     }
   }, [streaming, chaptersBusy, ensureServer, transcriptForModel, messages, style, sourceDescription]);
 

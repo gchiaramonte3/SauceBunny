@@ -19,8 +19,9 @@ type Props = {
   /** Timestamped transcript lines (resolved speaker names), or null when the
    *  transcript couldn't be parsed. Same lines the summary prompt is built from. */
   lines: string[] | null;
-  /** Bring the llama-server up (AiSummary owns model/server state). */
-  ensureServer: () => Promise<LlmServerInfo | null>;
+  /** Bring the llama-server up (AiSummary owns model/server state). `signal`
+   *  cancels a load still in flight, not just the token stream that follows. */
+  ensureServer: (signal?: AbortSignal) => Promise<LlmServerInfo | null>;
   /** True while the chat is streaming — one model call at a time. */
   chatBusy: boolean;
   /** Mirror of the mutual exclusion in the other direction: reports the
@@ -102,8 +103,21 @@ export function AiChapters({
     setBusy(true);
     onBusyChange?.(true);
     setError(null);
+    // THE HANDLE BEFORE THE WORK. This used to be created further down, after
+    // `await ensureServer()`, and the Stop button is rendered the instant
+    // `busy` is true - so for the whole model load, which the comment on that
+    // button correctly calls "minutes of prompt ingestion", pressing Stop ran
+    // `abortRef.current?.abort()` against null and did nothing at all. Not
+    // slowly: silently, because optional chaining on a null ref is a no-op.
+    // The rule is CLAUDE.md's: never let an await sit between starting work
+    // and holding the handle that cancels it.
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
-      const info = await ensureServer();
+      const info = await ensureServer(ctrl.signal);
+      // Re-checked after the await, because a signal that fired while nothing
+      // was listening leaves no other trace.
+      if (ctrl.signal.aborted) return;
       if (!info) { setError("The AI model couldn't start. Check Settings → AI Summary."); return; }
       // Same context math as the summary chat: ~3.5 chars/token, ~65% of the
       // window for the transcript — but sampled EVENLY across the duration
@@ -111,8 +125,6 @@ export function AiChapters({
       // The SHARED prefix, identical to the one the summary and the chat send,
       // so whichever ran first has already paid for the transcript.
       const { system, sampled } = buildSourcePrefix(lines, info.ctx);
-      const ctrl = new AbortController();
-      abortRef.current = ctrl;
       const raw = await streamChat(
         info, buildChapterPrompt(system, durationSec, sampled),
         // Fifteen chapter lines is ~250 tokens; 600 is headroom, not a target.
@@ -133,9 +145,12 @@ export function AiChapters({
       setCollapsedPersisted(false);
       commit(parsed);
     } catch (e) {
-      if (!abortRef.current?.signal.aborted) setError(formatError(e));
+      if (!ctrl.signal.aborted) setError(formatError(e));
     } finally {
-      abortRef.current = null;
+      // Ownership-checked, the same discipline the export cancel token uses:
+      // a later run may already have installed ITS controller, and blindly
+      // nulling would strand that run's Stop button.
+      if (abortRef.current === ctrl) abortRef.current = null;
       setBusy(false);
       onBusyChange?.(false);
     }

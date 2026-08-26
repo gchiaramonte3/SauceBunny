@@ -107,12 +107,26 @@ export function ReaderAnalysis({ transcriptPath, visible, selectedModelId, style
       let modelUsed: string;
       if (provider === "local") {
         let info = await invoke<LlmServerInfo | null>("llm_server_status");
+        if (ctrl.signal.aborted) return;
         if (!info) {
           if (!selectedModelId) {
             setError("No local AI model is set up yet. Open AI settings to download one.");
             setPhase("error"); return;
           }
-          info = await invoke<LlmServerInfo>("start_llm_server", { modelId: selectedModelId });
+          // Stop, during the part of a cold run that is not a fetch. The
+          // button is on screen for the whole "Loading the model…" phase, and
+          // aborting the controller could not reach a load that had not
+          // produced a stream yet: the model kept loading, the machine kept
+          // working, and the panel said idle. Shutting the server down is the
+          // cancel `start_llm_server` already polls for.
+          const cancelStart = () => { void invoke("stop_llm_server").catch(() => { /* already gone */ }); };
+          ctrl.signal.addEventListener("abort", cancelStart, { once: true });
+          try {
+            info = await invoke<LlmServerInfo>("start_llm_server", { modelId: selectedModelId });
+          } finally {
+            ctrl.signal.removeEventListener("abort", cancelStart);
+          }
+          if (ctrl.signal.aborted) { cancelStart(); return; }
         }
         const built = buildTranscriptForModel(raw, info.ctx, transcriptPath);
         if (!built) { setError("This transcript has no readable content to analyze."); setPhase("error"); return; }
@@ -156,7 +170,9 @@ export function ReaderAnalysis({ transcriptPath, visible, selectedModelId, style
       if (ctrl.signal.aborted) { setPhase("idle"); return; }
       setError(formatError(e)); setPhase("error");
     } finally {
-      abortRef.current = null;
+      // A run that returned early because it was stopped still owns the phase
+      // until stop() sets it; an ownership check keeps a later run's handle.
+      if (abortRef.current === ctrl) abortRef.current = null;
     }
   }, [transcriptPath, phase, selectedModelId, style]);
 

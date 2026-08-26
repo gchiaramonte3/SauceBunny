@@ -432,6 +432,25 @@ pub async fn start_llm_server(
     Ok(info)
 }
 
+/// Put the resident model down.
+///
+/// This is ALSO the cancel path for a start that is still in flight, and that
+/// is the reason it exists. `start_llm_server` polls `/health` for up to
+/// ninety seconds while llama-server maps a multi-GB model, and between polls
+/// it checks for exactly this state and returns "server start cancelled". That
+/// check was written, was correct, and had no caller: nothing in the app could
+/// reach it, so a Stop pressed during "Loading the model into memory" aborted
+/// a token stream that had not started while the load ran to completion.
+///
+/// Idempotent. Stopping a server that is not running is not an error, which
+/// matters because the frontend fires this from an abort handler that cannot
+/// know whether the start had already finished.
+#[tauri::command]
+pub fn stop_llm_server(state: State<'_, LlmServer>) -> Result<(), crate::AppError> {
+    state.shutdown();
+    Ok(())
+}
+
 #[cfg(test)]
 mod llm_tests {
     use super::{free_loopback_port, mint_api_key, spec, LLM_MODELS};

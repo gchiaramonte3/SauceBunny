@@ -180,6 +180,36 @@ Do not add new Tauri plugins without explaining what existing capability is insu
   `src/lib/job-id.test.ts`, including against `await newJobId()`, which
   type-checks and silently costs the microtask turn that was the whole bug.
 
+  **Two more shapes of the same bug, found by driving the packaged app (r166).**
+  Both were wide enough to hit by hand, which the earlier ones were not.
+
+  *The handle exists but nothing is holding it yet.* `AiChapters` set `busy`,
+  which renders Stop, then awaited `ensureServer()` for the length of a
+  multi-GB model load before assigning `abortRef`. Stop was on screen and
+  enabled for that entire window and ran `abortRef.current?.abort()` against
+  null. Optional chaining made it silent rather than loud, so the only symptom
+  was a button that did nothing. `AiSummary` had the mirror image: the same
+  await sat before `setStreaming(true)`, so during a cold run there was no Stop
+  button at all and a disabled Send where it should have been. Pinned by
+  `src/lib/abort-handle-contract.test.ts`, which reads the ORDER of two
+  statements, because no test with a fast `ensureServer` can see the window.
+
+  *Cancellation inferred from a result instead of recorded as a fact.* The clip
+  queue decided "the user stopped" by looking at the shape of the current
+  item's result. A local export stopped during its disk write still finishes
+  `ok`, so the run read a clean success and started the next item; and in the
+  gap between two items there was no cancel token and no job id to find, so
+  `handleStop` returned without so much as a log line while the button stayed
+  enabled (`status` is `"exporting"` for the whole queue). Stop is now a flag
+  the loop reads at its own head, which is the only place that covers every
+  route into the next item.
+
+  *Some waits are not fetches, and need their own cancel.* `start_llm_server`
+  already had a cancellation path: it polls `/health` for up to ninety seconds
+  and checks for a shut-down server between polls. Nothing ever called it, so
+  aborting a signal could not reach a model load. `stop_llm_server` is that
+  caller.
+
   Where an await genuinely IS unavoidable before the invoke, the shape is:
   create the AbortController or token first, assign it, then await, then
   re-check `aborted` before spawning — and re-check again after any expensive
@@ -656,7 +686,7 @@ human can check.
 
 ## Enforced contracts
 
-Sixty-one rules in this file are checked by a test rather than remembered. If you
+Sixty-two rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -751,6 +781,7 @@ written after finding the rule already broken somewhere.
 | `modal-focus-contract` | An `aria-modal` dialog traps and restores focus; a dialog behind a scrim declares `aria-modal` (the cmd+F guard reads it) |
 | `contract-register` | This table describes itself: the spelled-out count matches the rows, and every row names a test file that exists |
 | `e2e-mock-shape-contract` | The two object literals in `e2e/tauri-mock.ts` carry exactly the fields of their ts-rs binding, so 100 Playwright tests cannot certify a backend shape that no longer exists |
+| `abort-handle-contract` | Every AI run arms its AbortController BEFORE its first await. The Stop button is drawn from a different piece of state than the one that arms it, so a run could show an enabled Stop that ran `?.abort()` against null for the whole model load |
 
 Three more are measured against the RENDERED app rather than its source, in
 `e2e/`, because CSS and the accessibility tree are not readable by grep:

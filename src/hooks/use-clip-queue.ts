@@ -27,6 +27,22 @@ export type ClipQueueDeps = {
     current: ((r: { success: boolean; path?: string; error?: string }) => void) | null;
   };
   localExportCancelRef: { current: { cancelled: boolean } | null };
+  /**
+   * Stop, as a fact about the RUN rather than about one item.
+   *
+   * The runner used to infer "the user stopped" from the shape of the current
+   * item's result, and that inference had two holes a real Stop falls straight
+   * through. Between items nothing is in flight at all, so handleStop found
+   * nothing to cancel and returned while the loop calmly started the next
+   * export. And a local item stopped during its disk write still finishes
+   * "ok", so the run continued from a result that was true about the file and
+   * false about what the user wanted.
+   *
+   * A flag the loop reads at its own boundaries has neither hole: it is set
+   * once, it outlives whatever was in flight when it was set, and every item
+   * after it is simply never started.
+   */
+  queueStopRef: { current: boolean };
   runLocalClipExport: (args: {
     inputPath: string; startSeconds: number | null; endSeconds: number | null;
     format: "video-mp4" | "audio-mp3"; destPath: string; onProgress: (pct: number) => void;
@@ -74,7 +90,7 @@ export function useClipQueue(p: ClipQueueDeps) {
   const {
     metadata, metadataRef, sourceKind, localFilePath, exportOpts, fps,
     inFrames, outFrames, queueRunning, clipQueueRef, queueResolverRef,
-    localExportCancelRef, runLocalClipExport, appendLog, pushNotification,
+    localExportCancelRef, queueStopRef, runLocalClipExport, appendLog, pushNotification,
     cookiesBrowserOrNone, pushMarksUndo,
     setClipQueue, setQueueOpen, setQueueRunning, setStatus, setProgress,
     setJobId, setRecents, setInFrames, setOutFrames,
@@ -285,6 +301,8 @@ export function useClipQueue(p: ClipQueueDeps) {
     }
     const eligible = clipQueueRef.current.filter((c) => c.status === "queued");
     if (eligible.length === 0) return;
+    // A Stop from the PREVIOUS run must not stop this one before it starts.
+    queueStopRef.current = false;
     setQueueRunning(true);
     setStatus("exporting");
     setProgress(0);
@@ -292,6 +310,16 @@ export function useClipQueue(p: ClipQueueDeps) {
     let failCount = 0;
     let cancelled = false;
     for (const item of eligible) {
+      // Stop, checked at the one place that covers every route into it.
+      // Both branches below end by returning here with no await in between,
+      // so a flag set at ANY point during an item is seen before the next one
+      // is started - including the two moments that used to slip through: the
+      // gap between items, and a local item's uninterruptible disk write.
+      //
+      // The item that was in flight keeps whatever actually happened. A file
+      // that landed is honestly "done"; relabelling it cancelled would be a
+      // lie about a file on disk.
+      if (queueStopRef.current) break;
       // Bail out if user cleared the queue mid-run.
       if (!clipQueueRef.current.some((c) => c.id === item.id)) continue;
       setClipQueue((prev) => prev.map((c) => c.id === item.id ? { ...c, status: "running" } : c));
@@ -410,6 +438,10 @@ export function useClipQueue(p: ClipQueueDeps) {
         failCount++;
       }
     }
+    // The head check cannot fire for a Stop during the LAST item, because the
+    // loop ends rather than coming round again. Without this the run would
+    // announce "Queue complete" for a run the user stopped.
+    if (queueStopRef.current) cancelled = true;
     setQueueRunning(false);
     // Restore status only if the queue still owns it — a source switch
     // mid-run (which cancels the current item) has already set "fetching"
@@ -424,7 +456,7 @@ export function useClipQueue(p: ClipQueueDeps) {
     } else {
       pushNotification("error", "Queue finished with errors", `${okCount} ok · ${failCount} failed.`);
     }
-  }, [exportOpts.folder, queueRunning, runLocalClipExport, appendLog, pushNotification, cookiesBrowserOrNone, clipQueueRef, localExportCancelRef, metadataRef, queueResolverRef, setClipQueue, setJobId, setProgress, setQueueRunning, setRecents, setStatus]);
+  }, [exportOpts.folder, queueRunning, runLocalClipExport, appendLog, pushNotification, cookiesBrowserOrNone, clipQueueRef, localExportCancelRef, queueStopRef, metadataRef, queueResolverRef, setClipQueue, setJobId, setProgress, setQueueRunning, setRecents, setStatus]);
 
   return {
     handleAddToQueue, handleQueueRemove, handleQueueRetry, handleQueueRename,

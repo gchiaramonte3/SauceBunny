@@ -1011,6 +1011,20 @@ export default function App() {
    * `conversion.cancel()`. Stop / source-switch both flip it.
    */
   const localExportCancelRef = useRef<{ cancelled: boolean } | null>(null);
+  /**
+   * Stop, as a fact about the queue RUN rather than about whatever it happens
+   * to be doing this instant.
+   *
+   * The token above only exists while a local export is actually converting,
+   * and a backend job id only exists while a child is alive. Between two queue
+   * items neither is true, so Stop had nothing to look at, returned without
+   * even a log line, and the run continued - with the button still enabled,
+   * because `status` is "exporting" for the whole queue. This is the state the
+   * button was always claiming to act on.
+   */
+  const queueStopRef = useRef(false);
+  const queueRunningRef = useRef(false);
+  queueRunningRef.current = queueRunning;
   /** Live ID of the playback prep job — drives progress + cancel routing. */
   const [playbackPrepJobId, setPlaybackPrepJobId] = useState<string | null>(null);
   const playbackPrepJobIdRef = useRef<string | null>(null);
@@ -2333,9 +2347,16 @@ export default function App() {
     const hasLocalExport = !!localExportCancelRef.current;
     const hadPlaybackPrep = !!playbackPrepJobId;
     const webDownloading = webPlayback.downloading;
-    if (ids.length === 0 && !hasLocalExport && !webDownloading) return;
+    // A running queue is stoppable even in the gap between two items, when
+    // there is no token and no job id to find. Read from a ref, not the
+    // closure: this callback is rebuilt on a render the queue does not wait
+    // for. Set BEFORE the awaits below so the loop sees it at its next
+    // boundary regardless of how long cancel_job takes to come back.
+    const queueRunningNow = queueRunningRef.current;
+    if (queueRunningNow) queueStopRef.current = true;
+    if (ids.length === 0 && !hasLocalExport && !webDownloading && !queueRunningNow) return;
     appendLog("warn", "control",
-      `Stopping ${ids.length + (hasLocalExport ? 1 : 0) + (webDownloading ? 1 : 0)} job(s)…`);
+      `Stopping ${ids.length + (hasLocalExport ? 1 : 0) + (webDownloading ? 1 : 0) + (queueRunningNow && ids.length === 0 && !hasLocalExport ? 1 : 0)} job(s)…`);
     // Cancel an in-flight web-preview download (the hook SIGKILLs its yt-dlp
     // job + resets the machine). No-op for streaming/cached/local.
     if (webDownloading) stopWebPlayback();
@@ -2401,7 +2422,7 @@ export default function App() {
   } = useClipQueue({
     metadata, metadataRef, sourceKind, localFilePath, exportOpts, fps,
     inFrames, outFrames, queueRunning, clipQueueRef, queueResolverRef,
-    localExportCancelRef, runLocalClipExport, appendLog, pushNotification,
+    localExportCancelRef, queueStopRef, runLocalClipExport, appendLog, pushNotification,
     cookiesBrowserOrNone, pushMarksUndo,
     setClipQueue, setQueueOpen, setQueueRunning, setStatus, setProgress,
     setJobId, setRecents, setInFrames, setOutFrames,

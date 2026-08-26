@@ -152,3 +152,77 @@ describe("AI chapters", () => {
     expect(screen.queryByRole("button", { name: /^Chapters/ })).toBeNull();
   });
 });
+
+/**
+ * Stop, during the part of a run that is not a stream.
+ *
+ * The Stop button appears the instant a detection starts, and the comment
+ * beside it says why: a feature-length transcript is minutes of prompt
+ * ingestion before a single token comes back. But the AbortController it fires
+ * was created AFTER `await ensureServer()`, so for that entire wait
+ * `abortRef.current` was null and the click ran `?.abort()` against nothing.
+ * Optional chaining made it silent rather than loud. The run then went on to
+ * load the model and stream the whole answer.
+ */
+describe("Stop reaches a run that has not started streaming yet", () => {
+  /** A server start we control the timing of, the way a cold load behaves. */
+  function pending() {
+    let release!: (v: null | { base_url: string; api_key: string; model_id: string; ctx: number }) => void;
+    const promise = new Promise<null | { base_url: string; api_key: string; model_id: string; ctx: number }>(
+      (r) => { release = r; },
+    );
+    const seen: Array<AbortSignal | undefined> = [];
+    return {
+      release,
+      seen,
+      ensureServer: (signal?: AbortSignal) => { seen.push(signal); return promise; },
+    };
+  }
+
+  it("never starts the stream when Stop is pressed during the model load", async () => {
+    const { streamChat } = await import("../lib/ai-chat");
+    vi.mocked(streamChat).mockClear();
+    const p = pending();
+    render(
+      <AiChapters sourceKey={SOURCE} durationSec={3600} lines={["0:00 hello"]}
+        ensureServer={p.ensureServer} chatBusy={false} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Regenerate|Detect/ }));
+    // The load is in flight. This is the window the button was built for.
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    p.release({ base_url: "http://127.0.0.1:1", api_key: "k", model_id: "m", ctx: 8192 });
+    await vi.waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull());
+    expect(streamChat, "the model ran anyway after the user stopped it").not.toHaveBeenCalled();
+  });
+
+  it("hands the load a signal, so the load itself can be cancelled", async () => {
+    // Aborting the stream is not enough: llama-server maps a multi-GB file and
+    // keeps doing it. The signal is what reaches stop_llm_server.
+    const p = pending();
+    render(
+      <AiChapters sourceKey={SOURCE} durationSec={3600} lines={["0:00 hello"]}
+        ensureServer={p.ensureServer} chatBusy={false} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Regenerate|Detect/ }));
+    await vi.waitFor(() => expect(p.seen).toHaveLength(1));
+    expect(p.seen[0], "ensureServer was called with no way to cancel it").toBeInstanceOf(AbortSignal);
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    expect(p.seen[0]?.aborted, "Stop did not reach the signal the load is watching").toBe(true);
+    p.release(null);
+  });
+
+  it("does not paint an error for a run the user stopped", async () => {
+    // A stopped run is not a failed one. The catch judges the run's OWN
+    // controller rather than whatever the ref happens to hold by then.
+    const p = pending();
+    render(
+      <AiChapters sourceKey={SOURCE} durationSec={3600} lines={["0:00 hello"]}
+        ensureServer={p.ensureServer} chatBusy={false} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Regenerate|Detect/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    p.release(null);
+    await vi.waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull());
+    expect(document.querySelector(".cp-ai-chapters-error")).toBeNull();
+  });
+});

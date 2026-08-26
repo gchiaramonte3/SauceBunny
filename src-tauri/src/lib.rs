@@ -202,6 +202,7 @@ pub fn run() {
             commands::download_llm_model,
             commands::delete_llm_model,
             commands::start_llm_server,
+            commands::stop_llm_server,
             commands::llm_server_status,
             commands::set_api_key,
             commands::delete_api_key,

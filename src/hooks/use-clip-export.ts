@@ -101,6 +101,15 @@ export function useClipExport(p: ClipExportDeps) {
         onProgress: (p) => args.onProgress(p * 100),
       }, cancelToken);
       if (result.kind !== "ok") return result;
+      // The conversion is done and the bytes are in memory, and NOTHING has
+      // touched the disk yet. This is the last moment a Stop can still mean
+      // "no file", so it is checked here: the write below is a single invoke
+      // that cannot be interrupted once it starts, and for a long clip it is
+      // seconds of it. Without this check a Stop pressed after the progress
+      // bar filled was swallowed whole - the file landed, Recents gained a
+      // row, and a "clip exported" toast announced the thing the user had
+      // just asked not to happen.
+      if (cancelToken.cancelled) return { kind: "cancelled" };
       // Persist via the RAW-BODY writer: the clip travels as the IPC body
       // itself. The old write_bytes_to_path route serialized the buffer as a
       // JSON number array — every byte decimal-printed into a string built

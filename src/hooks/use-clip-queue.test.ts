@@ -45,6 +45,7 @@ function deps(queue: unknown[], over: Partial<Deps> = {}): Deps {
     clipQueueRef,
     queueResolverRef: { current: null },
     localExportCancelRef: { current: null },
+    queueStopRef: { current: false },
     runLocalClipExport: async (args: { destPath: string }) => {
       h.calls.push({ destPath: args.destPath });
       return (h.results.shift() ?? { kind: "ok", bytesWritten: 10, finalPath: args.destPath }) as never;
@@ -153,6 +154,75 @@ describe("a run that proceeds", () => {
       "info", "Queue stopped", expect.stringContaining("rest still queued"));
     const left = (d.clipQueueRef.current as Array<{ id: string; status: string }>);
     expect(left.find((c) => c.id === "a")?.status, "a cancelled item did not return to queued").toBe("queued");
+  });
+
+  it("STOPS when Stop is pressed, and never starts the next item", async () => {
+    // The bug this pins: the runner used to infer a stop from the shape of the
+    // current item's RESULT. A local export stopped during its disk write
+    // still finishes "ok", so the run read a perfectly successful result and
+    // calmly started the next export. The user had pressed Stop and watched
+    // the queue carry on.
+    const stop = { current: false };
+    const d = deps([item("a"), item("b"), item("c")], {
+      queueStopRef: stop,
+      runLocalClipExport: async (args: { destPath: string }) => {
+        h.calls.push({ destPath: args.destPath });
+        stop.current = true;             // Stop, pressed during item a
+        return { kind: "ok", bytesWritten: 10, finalPath: args.destPath } as never;
+      },
+    } as Partial<Deps>);
+    const { result } = renderHook(() => useClipQueue(d));
+    await result.current.handleExportQueue();
+    expect(h.calls.map((c) => c.destPath)).toEqual(["/out/clip-a.mp4"]);
+  });
+
+  it("leaves the item that was in flight reported as what actually happened", async () => {
+    // Its file landed. Calling that row "cancelled" would be a lie about a
+    // file on disk, and the two rows behind it are the ones that must stay
+    // queued.
+    const stop = { current: false };
+    const q = [item("a"), item("b")];
+    const d = deps(q, {
+      queueStopRef: stop,
+      runLocalClipExport: async (args: { destPath: string }) => {
+        stop.current = true;
+        return { kind: "ok", bytesWritten: 10, finalPath: args.destPath } as never;
+      },
+    } as Partial<Deps>);
+    const { result } = renderHook(() => useClipQueue(d));
+    await result.current.handleExportQueue();
+    const rows = d.clipQueueRef.current as Array<{ id: string; status: string }>;
+    expect(rows.find((c) => c.id === "a")?.status).toBe("done");
+    expect(rows.find((c) => c.id === "b")?.status).toBe("queued");
+  });
+
+  it("says it was stopped even when Stop landed on the LAST item", async () => {
+    // The loop-head check cannot fire for the last item, because the loop ends
+    // rather than coming round again. Without the reconciliation after it, a
+    // stopped run announced "Queue complete".
+    const stop = { current: false };
+    const d = deps([item("a")], {
+      queueStopRef: stop,
+      runLocalClipExport: async (args: { destPath: string }) => {
+        stop.current = true;
+        return { kind: "ok", bytesWritten: 10, finalPath: args.destPath } as never;
+      },
+    } as Partial<Deps>);
+    const { result } = renderHook(() => useClipQueue(d));
+    await result.current.handleExportQueue();
+    const said = (d.pushNotification as unknown as { mock: { calls: unknown[][] } }).mock.calls.at(-1);
+    expect(said?.[1]).toBe("Queue stopped");
+  });
+
+  it("does not let a PREVIOUS run's Stop stop the next one", async () => {
+    // The flag outlives the run that set it, which is the whole point of it.
+    // It therefore has to be cleared as a run begins, or Export would export
+    // exactly one item ever again after the first time you pressed Stop.
+    const stop = { current: true };
+    const d = deps([item("a"), item("b")], { queueStopRef: stop } as Partial<Deps>);
+    const { result } = renderHook(() => useClipQueue(d));
+    await result.current.handleExportQueue();
+    expect(h.calls).toHaveLength(2);
   });
 
   it("skips an item the user removed mid-run", async () => {
