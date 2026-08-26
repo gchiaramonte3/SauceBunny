@@ -6,6 +6,7 @@ import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle } from "./player-handle";
 import { base64UrlEncode } from "../lib/stream-proxy";
 import { encodedStreamMime, peerStreamMime } from "../lib/codec-strings";
+import { rebuildLogLine } from "../lib/seek-log";
 
 /**
  * Streams a web source (YouTube/Vimeo/…) into a NATIVE `<video>` element via
@@ -239,6 +240,25 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const seekingRef = useRef(false);
   /** Mirror of the disableScrubPreview prop for the []-deps handle. */
   const disableScrubPreviewRef = useRef(!!disableScrubPreview);
+  /**
+   * Where the current gesture STARTED, and how many seeks it has emitted.
+   *
+   * The seek log reports `seek req` once per gesture (a drag emits one per
+   * animation frame, and each line is App state, so logging every one
+   * re-rendered the app per vsync). The rebuild that follows reports where the
+   * gesture ENDED. Those two lines sat next to each other in the Pipeline log
+   * with nothing saying they were different moments, so an ordinary drag read
+   * as a seek that had landed hundreds of seconds from where it was asked:
+   *
+   *     seek req 2666.0 → target 2666.0
+   *     seek out-of-buffer → rebuilding from 3855.5s
+   *
+   * Both numbers are correct and the player did exactly the right thing. The
+   * log was the defect. It is kept once-per-gesture for the reason it always
+   * was; what it now says is which gesture it belongs to.
+   */
+  const gestureFromRef = useRef<number | null>(null);
+  const gestureSeeksRef = useRef(0);
 
   // Per-source once-guard: a single decode/append failure can fire several error
   // signals (SourceBuffer 'error', appendBuffer throw, <video> 'error') in
@@ -294,9 +314,12 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
       // drag was forcing a full App re-render per vsync. A single click is a
       // gesture of one and still logs exactly as before.
       if (newGesture) {
+        gestureFromRef.current = target;
+        gestureSeeksRef.current = 0;
         onDiagRef.current?.("info",
           `seek req ${s.toFixed(1)} → target ${target.toFixed(1)} (base ${baseTimeRef.current.toFixed(1)}, total ${total.toFixed(1)}, rel ${rel.toFixed(1)}, clockOrigin ${co.toFixed(2)})`);
       }
+      gestureSeeksRef.current += 1;
       if (newGesture) wantPlayRef.current = !!v && !v.paused;
       seekingRef.current = true;
       try { v?.pause(); } catch { /* ignore */ }
@@ -374,7 +397,10 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
         // timeline mode is per-pipeline (the proxy's probe can fail on any
         // rebuild, flipping absolute→rebased), so the clock commits only in
         // startFetch once this pipeline's X-Timeline header is read.
-        onDiagRef.current?.("info", `seek out-of-buffer → rebuilding from ${t.toFixed(1)}s`);
+        // Say which gesture this rebuild belongs to. Wording lives in
+        // lib/seek-log.ts, where it can be tested.
+        onDiagRef.current?.("info",
+          rebuildLogLine(t, gestureFromRef.current, gestureSeeksRef.current));
         teardownRef.current?.();
         rebuildRef.current?.(t);
       }, 280);
