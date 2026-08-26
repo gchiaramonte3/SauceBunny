@@ -55,6 +55,8 @@ type Props = {
   selectedInOrder?: readonly string[];
   /** Drop `paths` into the folder at `dest`. Absent = no drag-to-file. */
   onMoveToFolder?: (dest: string, paths: readonly string[]) => void;
+  /** "Move to folder…" was chosen from a card's menu — open the picker. */
+  onRequestMove?: (path: string) => void;
   emptyText: string;
   /** Current sort, so the list headers can show and toggle it. */
   sort: LibrarySortKey;
@@ -75,7 +77,7 @@ const EMPTY_FOLDERS: LibraryFolder[] = [];
 export function LibraryBrowserPane({
   folders = EMPTY_FOLDERS, onOpenFolder,
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
-  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, selectedInOrder, onMoveToFolder, emptyText,
+  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, selectedInOrder, onMoveToFolder, onRequestMove, emptyText,
   sort, dir, onSort,
 }: Props) {
 
@@ -266,6 +268,10 @@ export function LibraryBrowserPane({
             onClearTagColors={onClearTagColors ? () => onClearTagColors(it.path) : undefined}
             deleteLabel="Move to Trash…"
             onDelete={onTrashItem ? () => onTrashItem(it) : undefined}
+            // The drag's keyboard-reachable twin. This menu item has existed
+            // behind LibraryCardMenu's `onMove` all along; the Library was the
+            // one pane that never passed it.
+            onMove={onMoveToFolder ? () => onRequestMove?.(it.path) : undefined}
             onSelect={(e) => onSelectItem(it, e)}
             onContextSelect={() => onContextSelectItem?.(it)}
             onRename={onRenameItem ? () => onRenameItem(it) : undefined}
@@ -349,6 +355,7 @@ export function LibraryBrowserPane({
             onRename={onRenameItem ? () => onRenameItem(it) : undefined}
             deleteLabel="Move to Trash…"
             onDelete={onTrashItem ? () => onTrashItem(it) : undefined}
+            onMove={onMoveToFolder ? () => onRequestMove?.(it.path) : undefined}
             onOpen={() => onOpen(it.path)}
             onReview={onReview ? () => onReview(it.path) : undefined}
             requestThumb={requestThumb}

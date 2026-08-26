@@ -3,6 +3,7 @@ import { formatError } from "../lib/error-format";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LibraryTree } from "./LibraryTree";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
+import { LibraryMoveDialog } from "./LibraryMoveDialog";
 import { LibraryBrowserPane } from "./LibraryBrowserPane";
 import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { useFinderTags } from "../hooks/use-finder-tags";
@@ -113,6 +114,8 @@ export function LibraryBrowser({
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
   const [moveError, setMoveError] = useState<string | null>(null);
+  /** Paths the "Move to folder…" menu item is filing, or null. */
+  const [movingPaths, setMovingPaths] = useState<readonly string[] | null>(null);
   const [detailItem, setDetailItem] = useState<LibraryItem | null>(null);
   /** Multi-selection for batch actions. The DETAIL panel still follows a single
    *  item (detailItem); this is the set the toolbar acts on. */
@@ -477,6 +480,16 @@ export function LibraryBrowser({
           treeOpen={treeOpen}
           onShowTree={() => setTreeOpen(true)}
         />
+        {movingPaths && (
+          <LibraryMoveDialog
+            paths={movingPaths}
+            // The SAME destinations the drag offers, so the two routes cannot
+            // disagree about where a file can go.
+            folders={folders}
+            onMove={(dest, paths) => { void moveToFolder(dest, paths); }}
+            onClose={() => setMovingPaths(null)}
+          />
+        )}
         <div className="cp-lib-browse-body">
           {/* A refused move has to SAY so. Dropping onto a folder that already
               holds that name fails per file, and a drop that silently moved
@@ -564,6 +577,13 @@ export function LibraryBrowser({
             onMarqueeEnd={() => { dragBaseRef.current = null; }}
             selectedInOrder={selectedPaths}
             onMoveToFolder={(dest, paths) => { void moveToFolder(dest, paths); }}
+            onRequestMove={(path) => {
+              // The menu acts on the SELECTION when the clicked file is part
+              // of one, so it means the same thing as the drag and as the
+              // colour row above it in the same menu.
+              setMovingPaths(sel.selected.has(path) && sel.selected.size > 1
+                ? selectedPaths : [path]);
+            }}
             onMarquee={(paths, mods) => {
               // The band is computed against the selection as it was when the
               // drag STARTED, so sweeping back and forth keeps answering the

@@ -23,6 +23,8 @@ type Props = {
    *  way to get rid of a file. */
   onDelete?: () => void;
   deleteLabel?: string;
+  /** "Move to folder…" — the drag's keyboard-reachable twin. */
+  onMove?: () => void;
   /** Finder tags: the colour dot in the row, and the menu's colour row. */
   tags?: readonly FinderTag[];
   onToggleTagColor?: (index: TagColorIndex) => void;
@@ -44,7 +46,7 @@ type Props = {
  * ContextMenu/Shift+F10 open the same LibraryCardMenu.
  */
 export function LibraryListRow({
-  item, selected, onSelect, onContextSelect, onRename, onDelete, deleteLabel, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
+  item, selected, onSelect, onContextSelect, onRename, onDelete, deleteLabel, onMove, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const swatch = primarySwatch(tags ?? []);
@@ -133,6 +135,7 @@ export function LibraryListRow({
           onRename={onRename}
           onDelete={onDelete}
           deleteLabel={deleteLabel}
+          onMove={onMove}
           tags={tags}
           onToggleTagColor={onToggleTagColor}
           onClearTagColors={onClearTagColors}

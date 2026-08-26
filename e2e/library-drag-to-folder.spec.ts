@@ -115,3 +115,47 @@ for (const view of ["grid", "list"] as const) {
     expect(await moves(page), "a wobble moved a file").toEqual([]);
   });
 }
+
+/**
+ * The drag's keyboard-reachable twin.
+ *
+ * `e2e/transcript-drag.spec.ts` states the rule this repo holds itself to:
+ * "the drag is an addition to a menu item, never the only route." The Library
+ * shipped the drag first, so for one commit the only way to file a clip was a
+ * pointer gesture. The menu item it needed already existed - LibraryCardMenu
+ * has rendered "Move to folder…" behind an `onMove` prop the whole time.
+ */
+test("Move to folder… is in the menu, and files the file without a drag", async ({ page }) => {
+  await bootLibrary(page, "list");
+  const file = page.locator(".cp-lib-pane .cp-lib-lrow:not(.cp-lib-lrow-folder)").first();
+  await expect(file).toBeVisible({ timeout: 10_000 });
+  const src = await file.getAttribute("data-path");
+
+  await file.click({ button: "right" });
+  const item = page.getByRole("menuitem", { name: /Move to folder/ });
+  await expect(item, "the menu offers no move, so the drag is the only route").toBeVisible();
+  await item.click();
+
+  // The picker offers exactly the folders the drag can reach.
+  const dialog = page.getByRole("dialog", { name: /Move to folder/i });
+  await expect(dialog).toBeVisible();
+  const dest = await page.locator(".cp-lib-pane .cp-lib-lrow-folder").first().getAttribute("data-drop");
+  await dialog.getByRole("button", { name: "Interviews" }).click();
+
+  await expect.poll(() => moves(page)).toEqual([{ srcPath: src, destDir: dest }]);
+});
+
+test("the move picker traps focus, like every other dialog here", async ({ page }) => {
+  await bootLibrary(page, "list");
+  const file = page.locator(".cp-lib-pane .cp-lib-lrow:not(.cp-lib-lrow-folder)").first();
+  await expect(file).toBeVisible({ timeout: 10_000 });
+  await file.click({ button: "right" });
+  await page.getByRole("menuitem", { name: /Move to folder/ }).click();
+
+  const dialog = page.getByRole("dialog", { name: /Move to folder/i });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  for (let i = 0; i < 8; i++) await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => !!document.activeElement?.closest("[role=dialog]")),
+    "focus escaped the move dialog").toBe(true);
+});
