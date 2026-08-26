@@ -31,6 +31,13 @@ type Props = {
    *  rather than of the roots. */
   shelf: "web" | "frames" | null;
   onSelectShelf: (shelf: "web" | "frames") => void;
+  /**
+   * The folder a drag is hovering, or null. Finder's sidebar is a first-class
+   * drop target - "drag files onto any folder listed there" - and it is very
+   * often where the destination actually is: the folder you want is one you
+   * can see in the tree, not necessarily a subfolder of the one on screen.
+   */
+  dropOver?: string | null;
 };
 
 type Row = {
@@ -97,7 +104,7 @@ function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
  */
 export function LibraryTree({
   trees, selection, onSelect, kind, onKind, onCollapse,
-  addFolder, rescanAll, scanning, removeRoot, shelf, onSelectShelf,
+  addFolder, rescanAll, scanning, removeRoot, shelf, onSelectShelf, dropOver,
 }: Props) {
   // Roots open by default; ancestors of the current selection are auto-revealed.
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -267,7 +274,14 @@ export function LibraryTree({
               tabIndex={row.key === active ? 0 : -1}
               className={"cp-lib-tree-row"
                 + (row.shelf ? " cp-lib-tree-web" : "")
-                + (isSel ? " selected" : "")}
+                + (isSel ? " selected" : "")
+                + (dropOver && dropOver === row.key ? " dropping" : "")}
+              // A DROP TARGET, but only where a real directory is named.
+              // "All" is an aggregate and the two shelf rows are views over a
+              // category, so neither is a place a file can be put - and a
+              // target that lights up and then refuses is worse than one that
+              // never offered.
+              data-drop={row.key !== "all" && !row.shelf ? row.key : undefined}
               style={{ ["--depth" as string]: String(row.depth) }}
               onClick={() => {
                 setActiveKey(row.key);

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LibraryTree } from "./LibraryTree";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
 import { LibraryMoveDialog } from "./LibraryMoveDialog";
+import { useCardDrag } from "../hooks/use-card-drag";
 import { LibraryBrowserPane } from "./LibraryBrowserPane";
 import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { useFinderTags } from "../hooks/use-finder-tags";
@@ -212,6 +213,34 @@ export function LibraryBrowser({
       return formatError(e);
     }
   }, [selected, rescanAll]);
+
+  /**
+   * The drag, owned HERE rather than in the pane, because it spans both the
+   * pane and the folder tree beside it.
+   *
+   * Finder's sidebar is a first-class drop target - "drag files onto any
+   * folder listed there" - and it is where the destination usually IS: the
+   * folder you want is one you can see in the tree, not necessarily a
+   * subfolder of the one you are looking at. A hook owned by the pane could
+   * only ever light up the pane's own tiles.
+   *
+   * `use-card-drag` finds its target with elementFromPoint, so it already
+   * reaches anywhere in the document; the pointer is captured by the pane, so
+   * moves keep arriving while the cursor is over the tree.
+   */
+  const cardDrag = useCardDrag({
+    itemSelector: prefs.view === "grid"
+      ? ".cp-lib-card:not(.cp-lib-foldercard)"
+      : ".cp-lib-lrow:not(.cp-lib-lrow-folder)",
+    // Three shapes, one contract: the grid's folder tile, the list's folder
+    // row, and any tree row that names a real directory.
+    targetSelector: ".cp-lib-foldercard, .cp-lib-lrow-folder, .cp-lib-tree-row[data-drop]",
+    targetAttr: "data-drop",
+    // Finder's rule, and the one the batch verbs already use: a file inside
+    // the selection drags the whole selection, one outside it drags itself.
+    pathsFor: (path) => (sel.selected.has(path) ? selectedPaths : [path]),
+    onDrop: (dest, paths) => { void moveToFolder(dest, paths); },
+  });
 
   /**
    * File the dragged selection into a folder.
@@ -447,6 +476,7 @@ export function LibraryBrowser({
           removeRoot={removeRoot}
           shelf={shelf}
           onSelectShelf={(next) => { setShelf(next); setDetailItem(null); }}
+          dropOver={cardDrag.drag?.over ?? null}
         />
       )}
       <div className="cp-lib-main">
@@ -575,7 +605,7 @@ export function LibraryBrowser({
             onResetPoster={resetPoster}
             onClearSelection={() => { setDetailItem(null); setSel(EMPTY_SELECTION); }}
             onMarqueeEnd={() => { dragBaseRef.current = null; }}
-            selectedInOrder={selectedPaths}
+            cardDrag={cardDrag}
             onMoveToFolder={(dest, paths) => { void moveToFolder(dest, paths); }}
             onRequestMove={(path) => {
               // The menu acts on the SELECTION when the clicked file is part

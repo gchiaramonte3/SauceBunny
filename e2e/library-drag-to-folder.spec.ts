@@ -159,3 +159,40 @@ test("the move picker traps focus, like every other dialog here", async ({ page 
   expect(await page.evaluate(() => !!document.activeElement?.closest("[role=dialog]")),
     "focus escaped the move dialog").toBe(true);
 });
+
+/**
+ * Finder's sidebar is a first-class drop target — "drag files onto any folder
+ * listed there" — and it is usually where the destination IS: the folder you
+ * want is one you can see in the tree, not necessarily a subfolder of the one
+ * on screen. The Library's tree accepted nothing.
+ */
+test("a file can be dropped on a folder in the tree", async ({ page }) => {
+  await bootLibrary(page, "list");
+  const file = page.locator(".cp-lib-pane .cp-lib-lrow:not(.cp-lib-lrow-folder)").first();
+  await expect(file).toBeVisible({ timeout: 10_000 });
+  const src = await file.getAttribute("data-path");
+
+  // A tree row naming a real directory.
+  const treeRow = page.locator(".cp-lib-tree-row[data-drop]").first();
+  await expect(treeRow).toBeVisible();
+  const dest = await treeRow.getAttribute("data-drop");
+  expect(dest, "no tree row offers a drop").toBeTruthy();
+
+  await dragTo(page, centre((await file.boundingBox())!), centre((await treeRow.boundingBox())!));
+  await expect(treeRow).toHaveClass(/dropping/);
+  await page.mouse.up();
+
+  await expect.poll(() => moves(page)).toEqual([{ srcPath: src, destDir: dest }]);
+});
+
+test("the aggregate and shelf rows are not drop targets", async ({ page }) => {
+  // "All" is not a directory, and the two shelf rows are views over a
+  // category. A target that lights up and then refuses is worse than one that
+  // never offered.
+  await bootLibrary(page, "list");
+  await expect(page.locator(".cp-lib-tree-row").first()).toBeVisible({ timeout: 10_000 });
+  for (const name of ["All", "From the web", "Frames"]) {
+    const row = page.locator(".cp-lib-tree-row").filter({ hasText: name }).first();
+    await expect(row, `${name} should not be a drop target`).not.toHaveAttribute("data-drop", /.+/);
+  }
+});

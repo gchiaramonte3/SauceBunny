@@ -2357,3 +2357,11 @@
   color: var(--danger-text);
   cursor: pointer;
 }
+
+/* A tree row a drag is hovering. Same language as the folder tile and the
+   folder row: the target says it will take the drop BEFORE the mouse comes up,
+   which is the only thing that makes the gesture aimable. */
+.cp-lib-tree-row.dropping {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}

@@ -8,7 +8,6 @@ import { countLibraryItems, formatBytes, formatModifiedDate, libraryPosterPaths 
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { useRovingGrid } from "../hooks/use-roving-grid";
 import { useMarquee } from "../hooks/use-marquee";
-import { useCardDrag } from "../hooks/use-card-drag";
 import type { LibraryFolder, LibraryItem } from "../types";
 
 type Props = {
@@ -51,12 +50,23 @@ type Props = {
   /** Live rubber-band result: the paths the band covers, plus its modifiers. */
   onMarquee?: (paths: string[], mods: { shift: boolean; meta: boolean }) => void;
   onMarqueeEnd?: () => void;
-  /** Every currently selected path, so a drag of one member takes the set. */
-  selectedInOrder?: readonly string[];
   /** Drop `paths` into the folder at `dest`. Absent = no drag-to-file. */
   onMoveToFolder?: (dest: string, paths: readonly string[]) => void;
   /** "Move to folder…" was chosen from a card's menu — open the picker. */
   onRequestMove?: (path: string) => void;
+  /**
+   * The drag lives in LibraryBrowser, not here, because it spans BOTH the pane
+   * and the folder tree beside it: Finder's sidebar is a drop target, and a
+   * hook owned by one of the two panels could only ever highlight its own.
+   */
+  cardDrag?: {
+    drag: { x: number; y: number; paths: readonly string[]; over: string | null } | null;
+    handlers: {
+      onPointerDown: (e: React.PointerEvent) => void;
+      onPointerMove: (e: React.PointerEvent) => void;
+      onPointerUp: () => void;
+    };
+  };
   emptyText: string;
   /** Current sort, so the list headers can show and toggle it. */
   sort: LibrarySortKey;
@@ -77,7 +87,7 @@ const EMPTY_FOLDERS: LibraryFolder[] = [];
 export function LibraryBrowserPane({
   folders = EMPTY_FOLDERS, onOpenFolder,
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
-  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, selectedInOrder, onMoveToFolder, onRequestMove, emptyText,
+  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, onMoveToFolder, onRequestMove, cardDrag, emptyText,
   sort, dir, onSort,
 }: Props) {
 
@@ -159,30 +169,8 @@ export function LibraryBrowserPane({
     onEnd: () => onMarqueeEnd?.(),
   });
 
-  /**
-   * DRAG A FILE ONTO A FOLDER TO FILE IT — the gesture the Library was missing
-   * while Frames, the web shelf and Transcripts all had it, even though this
-   * is the one shelf whose folders are real directories. The folder tile has
-   * carried `data-drop` and a `dropActive` prop the whole time; nothing was
-   * ever wired to them.
-   *
-   * Pointer events, not HTML5 drag-and-drop — see use-card-drag for why (the
-   * OS drag layer is Tauri's, and the marquee next door is already built this
-   * way).
-   */
-  const cardDrag = useCardDrag({
-    itemSelector: view === "grid" ? ".cp-lib-card:not(.cp-lib-foldercard)" : ".cp-lib-lrow:not(.cp-lib-lrow-folder)",
-    targetSelector: view === "grid" ? ".cp-lib-foldercard" : ".cp-lib-lrow-folder",
-    targetAttr: "data-drop",
-    // Finder's rule, and the same one the batch verbs use: a file inside the
-    // selection drags the whole selection; a file outside it drags only itself.
-    pathsFor: (path) =>
-      (selectedPaths?.has(path) && selectedInOrder?.length ? selectedInOrder : [path]),
-    onDrop: (dest, paths) => onMoveToFolder?.(dest, paths),
-  });
-
   /** What a drag is carrying, shown under the pointer. */
-  const ghostEl = cardDrag.drag && (
+  const ghostEl = cardDrag?.drag && (
     <div className="cp-card-ghost" style={{ left: cardDrag.drag.x, top: cardDrag.drag.y }}>
       {cardDrag.drag.paths.length}
       {cardDrag.drag.paths.length === 1 ? " file" : " files"}
@@ -191,7 +179,7 @@ export function LibraryBrowserPane({
 
   /** Both gestures share one pointer surface: the band starts on blank space,
    *  the drag starts on a card, so they never both claim a press. */
-  const gestures = onMoveToFolder ? {
+  const gestures = cardDrag ? {
     onPointerDown: (e: React.PointerEvent) => { marquee.handlers.onPointerDown(e); cardDrag.handlers.onPointerDown(e); },
     onPointerMove: (e: React.PointerEvent) => { marquee.handlers.onPointerMove(e); cardDrag.handlers.onPointerMove(e); },
     onPointerUp: () => { marquee.handlers.onPointerUp(); cardDrag.handlers.onPointerUp(); },
@@ -251,7 +239,7 @@ export function LibraryBrowserPane({
             posterPaths={libraryPosterPaths(f, 3)}
             requestThumb={requestThumb}
             dropKey={f.path}
-            dropActive={cardDrag.drag?.over === f.path}
+            dropActive={cardDrag?.drag?.over === f.path}
             onOpen={() => onOpenFolder?.(f)}
           />
         ))}
@@ -338,7 +326,7 @@ export function LibraryBrowserPane({
           <LibraryFolderRow
             key={f.path}
             folder={f}
-            dropActive={cardDrag.drag?.over === f.path}
+            dropActive={cardDrag?.drag?.over === f.path}
             onOpen={() => onOpenFolder?.(f)}
           />
         ))}
