@@ -66,5 +66,44 @@ export function marqueeSelection(
   hit: readonly string[],
   mods: { shift: boolean; meta: boolean },
 ): Set<string> {
-  return (mods.shift || mods.meta) ? new Set([...base, ...hit]) : new Set(hit);
+  // SHIFT AND COMMAND ARE NOT THE SAME GESTURE. Both used to union, which made
+  // ⌘ a slower Shift and left no way to take something OUT of a selection with
+  // a band. Finder: Shift = union with the pre-drag selection; Command =
+  // toggle, so an already-selected item the band sweeps becomes deselected.
+  // That is the whole point of ⌘ — sweep back over a mistake to undo it.
+  if (mods.meta) {
+    const out = new Set(base);
+    for (const p of hit) {
+      if (out.has(p)) out.delete(p); else out.add(p);
+    }
+    return out;
+  }
+  if (mods.shift) return new Set([...base, ...hit]);
+  return new Set(hit);
+}
+
+/**
+ * How far to scroll per frame when a band's pointer nears the container edge,
+ * as a signed pixel step (negative = up). Zero when the pointer is comfortably
+ * inside.
+ *
+ * Pure, and separate from the hook, because it is the part with the arithmetic
+ * and the part worth pinning: the hook around it is a frame loop and a
+ * scrollTop assignment. Same split as `marqueeRect` and `pathsInRect` above.
+ *
+ * Ramped rather than constant — the further past the edge, the faster — so a
+ * long list can be crossed quickly without making a small overshoot lurch.
+ */
+export function edgeScrollStep(
+  pointerY: number,
+  top: number,
+  bottom: number,
+  edge = 48,
+  maxStep = 24,
+): number {
+  const above = top + edge - pointerY;
+  if (above > 0) return -Math.min(maxStep, above / 2);
+  const below = pointerY - (bottom - edge);
+  if (below > 0) return Math.min(maxStep, below / 2);
+  return 0;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  intersects, isDrag, MARQUEE_THRESHOLD, marqueeRect, marqueeSelection, pathsInRect,
+  intersects, isDrag, MARQUEE_THRESHOLD, marqueeRect, marqueeSelection, pathsInRect, edgeScrollStep,
   type Rect,
 } from "./marquee";
 
@@ -126,5 +126,65 @@ describe("composing with the existing selection", () => {
   it("an empty band clears a plain drag but keeps a modified one", () => {
     expect([...marqueeSelection(base, [], { shift: false, meta: false })]).toEqual([]);
     expect([...marqueeSelection(base, [], { shift: true, meta: false })].sort()).toEqual(["x", "y"]);
+  });
+});
+
+describe("Shift and Command are different gestures during a band", () => {
+  // Both used to union, which made ⌘ a slower Shift and left no way to take
+  // something OUT of a selection with a band. Finder: Shift = union with the
+  // pre-drag selection, Command = toggle.
+  const base = new Set(["a", "b"]);
+
+  it("Shift unions with what was already selected", () => {
+    expect([...marqueeSelection(base, ["c"], { shift: true, meta: false })].sort())
+      .toEqual(["a", "b", "c"]);
+  });
+
+  it("Command REMOVES an already-selected item the band sweeps", () => {
+    // The point of ⌘: sweep back over a mistake to undo it.
+    expect([...marqueeSelection(base, ["b"], { shift: false, meta: true })])
+      .toEqual(["a"]);
+  });
+
+  it("Command adds one that was not selected, in the same sweep", () => {
+    expect([...marqueeSelection(base, ["b", "c"], { shift: false, meta: true })].sort())
+      .toEqual(["a", "c"]);
+  });
+
+  it("no modifier still replaces, so a plain band is not additive", () => {
+    expect([...marqueeSelection(base, ["c"], { shift: false, meta: false })])
+      .toEqual(["c"]);
+  });
+});
+
+describe("edgeScrollStep", () => {
+  // Without autoscroll the largest selection a band can make is whatever is
+  // visible — in a folder of a few hundred files, a fraction of it.
+  const TOP = 100, BOTTOM = 500;
+
+  it("is zero well inside the container", () => {
+    expect(edgeScrollStep(300, TOP, BOTTOM)).toBe(0);
+    expect(edgeScrollStep(TOP + 60, TOP, BOTTOM)).toBe(0);
+    expect(edgeScrollStep(BOTTOM - 60, TOP, BOTTOM)).toBe(0);
+  });
+
+  it("scrolls UP near the top edge and DOWN near the bottom", () => {
+    expect(edgeScrollStep(TOP + 10, TOP, BOTTOM)).toBeLessThan(0);
+    expect(edgeScrollStep(BOTTOM - 10, TOP, BOTTOM)).toBeGreaterThan(0);
+  });
+
+  it("ramps: further past the edge scrolls faster", () => {
+    const near = edgeScrollStep(BOTTOM - 40, TOP, BOTTOM);
+    const far = edgeScrollStep(BOTTOM - 4, TOP, BOTTOM);
+    expect(far).toBeGreaterThan(near);
+  });
+
+  it("caps the step, so a pointer far outside does not teleport the list", () => {
+    expect(edgeScrollStep(BOTTOM + 5000, TOP, BOTTOM)).toBe(24);
+    expect(edgeScrollStep(TOP - 5000, TOP, BOTTOM)).toBe(-24);
+  });
+
+  it("is symmetric about the two edges", () => {
+    expect(edgeScrollStep(TOP + 8, TOP, BOTTOM)).toBe(-edgeScrollStep(BOTTOM - 8, TOP, BOTTOM));
   });
 });

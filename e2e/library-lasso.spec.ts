@@ -12,14 +12,15 @@ import { tauriMockInit } from "./tauri-mock";
  * start a band landed on the child and was ignored. Lasso worked in one view
  * and silently did nothing in the other.
  */
-async function bootLibrary(page: Page, view: "grid" | "list"): Promise<void> {
+async function bootLibrary(page: Page, view: "grid" | "list", opts: { many?: number } = {}): Promise<void> {
   await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
-  await page.addInitScript((v) => {
+  await page.addInitScript(([v, many]: [string, number]) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
     localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e-mock/Footage"]));
     localStorage.setItem("saucebunny.libraryBrowser", JSON.stringify({ view: v, sort: "name", dir: "asc" }));
-  }, view);
+    if (many) localStorage.setItem("e2e.manyFiles", String(many));
+  }, [view, opts.many ?? 0] as [string, number]);
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press("Meta+2");
@@ -87,3 +88,35 @@ for (const view of ["grid", "list"] as const) {
     await expect(selected(page)).toHaveCount(0);
   });
 }
+
+test("⌘ during a band toggles, so a sweep back undoes a mistake", async ({ page }) => {
+  // Shift and ⌘ used to do the same thing (both union), which made ⌘ a slower
+  // Shift and left no way to take something OUT of a selection with a band.
+  await bootLibrary(page, "list");
+  const items = page.locator(".cp-lib-pane .cp-lib-lrow:not(.cp-lib-lrow-folder)");
+  await expect(items.first()).toBeVisible({ timeout: 10_000 });
+  const n = await items.count();
+  expect(n).toBeGreaterThan(1);
+
+  const pane = (await page.locator(".cp-lib-pane").boundingBox())!;
+  const first = (await items.first().boundingBox())!;
+  const last = (await items.nth(n - 1).boundingBox())!;
+  const below = { x: pane.x + pane.width - 12, y: Math.min(pane.y + pane.height - 6, last.y + last.height + 40) };
+
+  // Select everything with a plain band.
+  await band(page, below, { x: first.x + 8, y: first.y + 6 });
+  await page.mouse.up();
+  const all = await selected(page).count();
+  expect(all).toBeGreaterThan(1);
+
+  // Now ⌘-band over the LAST row only, starting from the blank space below it
+  // (a band can only START on blank space, so sweeping upward from under the
+  // list is the gesture that reaches exactly one row).
+  const lastBox = (await items.nth(n - 1).boundingBox())!;
+  await page.keyboard.down("Meta");
+  await band(page, below, { x: lastBox.x + 20, y: lastBox.y + lastBox.height / 2 });
+  await page.mouse.up();
+  await page.keyboard.up("Meta");
+
+  await expect(selected(page)).toHaveCount(all - 1);
+});

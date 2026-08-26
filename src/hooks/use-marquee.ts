@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  isDrag, marqueeRect, marqueeSelection, pathsInRect, type Point, type Rect,
+  isDrag, marqueeRect, marqueeSelection, pathsInRect, edgeScrollStep,
+  type Point, type Rect,
 } from "../lib/marquee";
 
 /**
@@ -89,6 +90,38 @@ export function useMarquee({
     el.setPointerCapture(e.pointerId);
   }, [containerRef, itemSelector, pathAttr, gutterSelector]);
 
+  /**
+   * AUTOSCROLL AT THE EDGES, which is what lets a band reach past one
+   * screenful. Finder scrolls when a drag reaches a window edge; without it
+   * the largest selection a band can make is whatever happens to be visible,
+   * and in a folder of a few hundred files that is a fraction of it.
+   *
+   * The pointer stops sending events once it stops moving, so the scroll has
+   * to be driven by a frame loop rather than by pointermove — otherwise
+   * holding still at the edge, which is exactly what a user does while
+   * waiting for the list to come to them, scrolls once and stops.
+   */
+  const edgeRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
+  const recomputeRef = useRef<(() => void) | null>(null);
+
+  const stopAutoScroll = useCallback(() => {
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    edgeRef.current = 0;
+  }, []);
+
+  const runAutoScroll = useCallback(() => {
+    const el = containerRef.current;
+    if (!el || edgeRef.current === 0) { rafRef.current = null; return; }
+    const before = el.scrollTop;
+    el.scrollTop += edgeRef.current;
+    // At the top or bottom there is nothing left to give; stop rather than
+    // spinning a frame loop that cannot move anything.
+    if (el.scrollTop !== before) recomputeRef.current?.();
+    rafRef.current = requestAnimationFrame(runAutoScroll);
+  }, [containerRef]);
+
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const start = startRef.current;
     const el = containerRef.current;
@@ -102,12 +135,35 @@ export function useMarquee({
     // from it would make an ordinary click clear the selection.
     if (!movedRef.current && !isDrag(start, here)) return;
     movedRef.current = true;
-    const rect = marqueeRect(start, here);
-    setBand(rect);
-    onSelect(pathsInRect(rect, boxesRef.current), modsRef.current);
-  }, [containerRef, onSelect]);
+    const paint = () => {
+      const el2 = containerRef.current;
+      if (!el2) return;
+      const host2 = el2.getBoundingClientRect();
+      const pt: Point = {
+        x: e.clientX - host2.left + el2.scrollLeft,
+        y: e.clientY - host2.top + el2.scrollTop,
+      };
+      const r = marqueeRect(start, pt);
+      setBand(r);
+      onSelect(pathsInRect(r, boxesRef.current), modsRef.current);
+    };
+    recomputeRef.current = paint;
+    paint();
+
+    // How far past the edge the pointer is, as a per-frame scroll step. The
+    // band is measured in CONTENT coordinates, so scrolling grows it without
+    // the pointer moving at all.
+    edgeRef.current = edgeScrollStep(e.clientY, host.top, host.bottom);
+    if (edgeRef.current !== 0 && rafRef.current == null) {
+      rafRef.current = requestAnimationFrame(runAutoScroll);
+    } else if (edgeRef.current === 0) {
+      stopAutoScroll();
+    }
+  }, [containerRef, onSelect, runAutoScroll, stopAutoScroll]);
 
   const end = useCallback(() => {
+    stopAutoScroll();
+    recomputeRef.current = null;
     startRef.current = null;
     boxesRef.current = [];
     setBand(null);
@@ -116,7 +172,7 @@ export function useMarquee({
     // fires a click on the gutter, and clearOnBlank has to still see that a
     // drag happened or it wipes the selection the drag just made.
     requestAnimationFrame(() => { movedRef.current = false; });
-  }, [onEnd]);
+  }, [onEnd, stopAutoScroll]);
 
   // A drag interrupted by Escape or a lost pointer must not leave a band
   // painted on the wall forever.
