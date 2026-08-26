@@ -62,7 +62,7 @@ type Props = {
    * hook owned by one of the two panels could only ever highlight its own.
    */
   cardDrag?: {
-    drag: { x: number; y: number; paths: readonly string[]; over: string | null } | null;
+    drag: { x: number; y: number; paths: readonly string[]; over: string | null; copy: boolean } | null;
     handlers: {
       onPointerDown: (e: React.PointerEvent) => void;
       onPointerMove: (e: React.PointerEvent) => void;
@@ -183,6 +183,10 @@ export function LibraryBrowserPane({
   /** What a drag is carrying, shown under the pointer. */
   const ghostEl = cardDrag?.drag && (
     <div className="cp-card-ghost" style={{ left: cardDrag.drag.x, top: cardDrag.drag.y }}>
+      {/* Which act this is, said on the thing under the pointer. Apple changes
+          the POINTER for exactly this reason - a copy and a move look
+          identical right up to the moment one of them is wrong. */}
+      {cardDrag.drag.copy ? "Copy " : ""}
       {cardDrag.drag.paths.length}
       {cardDrag.drag.paths.length === 1 ? " file" : " files"}
     </div>

@@ -28,6 +28,15 @@ export type CardDragState = {
   y: number;
   /** The drop container under the pointer, or null over open space. */
   over: string | null;
+  /**
+   * Option held: this drop COPIES rather than moves.
+   *
+   * Apple: "Option-drag: Copy the dragged item. The pointer changes while you
+   * drag the item." Read live rather than latched at pointerdown, because the
+   * modifier can be pressed or released mid-drag and Finder's pointer follows
+   * it - the decision belongs to the release, not the press.
+   */
+  copy: boolean;
 };
 
 const THRESHOLD_PX = 6;
@@ -49,7 +58,7 @@ export function useCardDrag({
    * different sets depending on which control you reach for afterwards.
    */
   pathsFor: (path: string) => readonly string[];
-  onDrop: (target: string, paths: readonly string[]) => void;
+  onDrop: (target: string, paths: readonly string[], opts: { copy: boolean }) => void;
 }) {
   const [drag, setDrag] = useState<CardDragState | null>(null);
   const startRef = useRef<{ x: number; y: number; paths: readonly string[] } | null>(null);
@@ -102,6 +111,7 @@ export function useCardDrag({
       x: e.clientX,
       y: e.clientY,
       over: target?.getAttribute(targetAttr) ?? null,
+      copy: e.altKey,
     });
   }, [targetSelector, targetAttr]);
 
@@ -112,7 +122,7 @@ export function useCardDrag({
     reset();
     if (!wasDragging || !start) return;
     swallowClickRef.current = true;
-    if (over) onDrop(over, start.paths);
+    if (over) onDrop(over, start.paths, { copy: drag?.copy ?? false });
   }, [drag, onDrop, reset]);
 
   const onPointerCancel = useCallback(() => {

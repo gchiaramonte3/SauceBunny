@@ -196,3 +196,133 @@ test("the aggregate and shelf rows are not drop targets", async ({ page }) => {
     await expect(row, `${name} should not be a drop target`).not.toHaveAttribute("data-drop", /.+/);
   }
 });
+
+const copies = (page: Page) => page.evaluate(() =>
+  ((window as unknown as { __TAURI_MOCK__: { invoked: () => { cmd: string; args: unknown }[] } })
+    .__TAURI_MOCK__.invoked())
+    .filter((c) => c.cmd === "copy_library_file")
+    .map((c) => c.args as { srcPath: string; destDir: string }));
+
+/**
+ * Apple: "Option-drag: Copy the dragged item. The pointer changes while you
+ * drag the item." Without it a copy and a move are indistinguishable, and only
+ * one of them is recoverable.
+ */
+test("Option-dragging copies instead of moving, and says so", async ({ page }) => {
+  await bootLibrary(page, "list");
+  const file = page.locator(".cp-lib-pane .cp-lib-lrow:not(.cp-lib-lrow-folder)").first();
+  const folder = page.locator(".cp-lib-pane .cp-lib-lrow-folder").first();
+  await expect(file).toBeVisible({ timeout: 10_000 });
+  const src = await file.getAttribute("data-path");
+  const dest = await folder.getAttribute("data-drop");
+
+  await page.keyboard.down("Alt");
+  const from = centre((await file.boundingBox())!);
+  const to = centre((await folder.boundingBox())!);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 8 });
+  // The ghost says which act this is, before the drop commits.
+  await expect(page.locator(".cp-card-ghost")).toHaveText(/^Copy /);
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await page.mouse.up();
+  await page.keyboard.up("Alt");
+
+  await expect.poll(() => copies(page)).toEqual([{ srcPath: src, destDir: dest }]);
+  expect(await moves(page), "an Option-drag moved the file as well").toEqual([]);
+});
+
+test("a plain drag still moves, and the ghost does not say Copy", async ({ page }) => {
+  await bootLibrary(page, "list");
+  const file = page.locator(".cp-lib-pane .cp-lib-lrow:not(.cp-lib-lrow-folder)").first();
+  const folder = page.locator(".cp-lib-pane .cp-lib-lrow-folder").first();
+  await expect(file).toBeVisible({ timeout: 10_000 });
+
+  const from = centre((await file.boundingBox())!);
+  const to = centre((await folder.boundingBox())!);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 8 });
+  await expect(page.locator(".cp-card-ghost")).not.toHaveText(/Copy/);
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await page.mouse.up();
+
+  expect(await copies(page), "a plain drag copied").toEqual([]);
+  expect((await moves(page)).length).toBe(1);
+});
+
+/**
+ * Finder's Path Bar is a documented drop target — "you can move items into the
+ * appropriate folder in the Path Bar" — and it is the only gesture that moves a
+ * file UP the tree without navigating away from it first.
+ */
+test("a breadcrumb ancestor takes a drop", async ({ page }) => {
+  await bootLibrary(page, "list");
+  // Go one level down so there IS an ancestor crumb.
+  await page.locator(".cp-lib-pane .cp-lib-lrow-folder").first().click();
+  const crumb = page.locator(".cp-lib-bcrumbs button[data-drop]").first();
+  await expect(crumb).toBeVisible({ timeout: 10_000 });
+  const dest = await crumb.getAttribute("data-drop");
+
+  const file = page.locator(".cp-lib-pane .cp-lib-lrow:not(.cp-lib-lrow-folder)").first();
+  await expect(file).toBeVisible();
+  const src = await file.getAttribute("data-path");
+
+  await dragTo(page, centre((await file.boundingBox())!), centre((await crumb.boundingBox())!));
+  await expect(crumb).toHaveClass(/dropping/);
+  await page.mouse.up();
+  await expect.poll(() => moves(page)).toEqual([{ srcPath: src, destDir: dest }]);
+});
+
+test("the folder you are already in is not a drop target", async ({ page }) => {
+  // Dropping a file where it already lives is a no-op, and a target that
+  // lights up to do nothing is a lie.
+  await bootLibrary(page, "list");
+  await page.locator(".cp-lib-pane .cp-lib-lrow-folder").first().click();
+  await expect(page.locator(".cp-lib-bcrumbs .cur")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".cp-lib-bcrumbs .cur")).not.toHaveAttribute("data-drop", /.+/);
+});
+
+/**
+ * Spring-loaded folders: hold a drag over a folder and it opens, so a
+ * destination two levels down is reachable without dropping the files
+ * somewhere else first and dragging them again. On by default in Finder.
+ */
+test("holding a drag over a folder springs it open", async ({ page }) => {
+  await bootLibrary(page, "list");
+  const file = page.locator(".cp-lib-pane .cp-lib-lrow:not(.cp-lib-lrow-folder)").first();
+  const folder = page.locator(".cp-lib-pane .cp-lib-lrow-folder").first();
+  await expect(file).toBeVisible({ timeout: 10_000 });
+  const folderName = (await folder.getAttribute("title")) ?? "";
+
+  const from = centre((await file.boundingBox())!);
+  const to = centre((await folder.boundingBox())!);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 10 });
+
+  // Hold. The breadcrumb gains the folder without the mouse coming up.
+  await expect(page.locator(".cp-lib-bcrumbs .cur"), "the folder never sprang open")
+    .toHaveText(folderName, { timeout: 4000 });
+  await page.mouse.up();
+});
+
+test("crossing a folder on the way somewhere else does not spring it", async ({ page }) => {
+  // The delay is the whole point: a folder that opened on contact would make
+  // the pane rearrange itself under every drag that passed over one.
+  await bootLibrary(page, "list");
+  const file = page.locator(".cp-lib-pane .cp-lib-lrow:not(.cp-lib-lrow-folder)").first();
+  const folder = page.locator(".cp-lib-pane .cp-lib-lrow-folder").first();
+  await expect(file).toBeVisible({ timeout: 10_000 });
+  const before = await page.locator(".cp-lib-bcrumbs").textContent();
+
+  const from = centre((await file.boundingBox())!);
+  const fb = (await folder.boundingBox())!;
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(fb.x + fb.width / 2, fb.y + fb.height / 2, { steps: 4 });
+  await page.mouse.move(from.x, from.y, { steps: 4 });   // straight back off
+  await page.waitForTimeout(900);
+  expect(await page.locator(".cp-lib-bcrumbs").textContent()).toBe(before);
+  await page.mouse.up();
+});

@@ -240,6 +240,11 @@ export function tauriMockInit(expectedBuildId: string): void {
     move_frame_to_folder: null,
     // Records the drop so a spec can assert what was moved where. Rejects a
     // name the destination already holds, which is the refusal path.
+    copy_library_file: (args: unknown) => {
+      const a = args as { srcPath?: string; destDir?: string } | undefined;
+      const src = String(a?.srcPath ?? "");
+      return `${String(a?.destDir ?? "")}/${src.split("/").pop() ?? src}`;
+    },
     move_library_file: (args: unknown) => {
       const a = args as { srcPath?: string; destDir?: string } | undefined;
       const src = String(a?.srcPath ?? "");

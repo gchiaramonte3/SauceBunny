@@ -2365,3 +2365,11 @@
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
 }
+
+/* A breadcrumb ancestor a drag is hovering. Finder's Path Bar is a drop
+   target, and it is the only gesture that moves a file UP the tree without
+   first navigating away from it. */
+.cp-lib-bcrumbs button.dropping {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}

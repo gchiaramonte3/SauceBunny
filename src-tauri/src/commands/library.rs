@@ -659,6 +659,46 @@ pub fn move_library_file(src_path: String, dest_dir: String) -> Result<String, c
         .ok_or_else(|| crate::AppError::internal("Moved path isn't valid UTF-8."))
 }
 
+/// Copy a library file into `dest_dir`. Returns the new path.
+///
+/// Option-drag, Apple's own wording: "Option-drag: Copy the dragged item."
+/// Unlike the move this genuinely duplicates bytes, so it is the one drop that
+/// can take real time on media - the caller reports it rather than pretending
+/// it is instant.
+///
+/// Refuses a name collision rather than overwriting or auto-numbering: the
+/// file it would clobber may be the only copy of something, and inventing
+/// "clip 2.mov" quietly makes a decision the user did not ask for.
+#[tauri::command]
+pub fn copy_library_file(src_path: String, dest_dir: String) -> Result<String, crate::AppError> {
+    let src = PathBuf::from(&src_path);
+    if !src.is_file() {
+        return Err(crate::AppError::not_found(src_path.as_str()));
+    }
+    let dir = PathBuf::from(&dest_dir);
+    if !dir.is_dir() {
+        return Err(crate::AppError::not_found(dest_dir.as_str()));
+    }
+    let name = src
+        .file_name()
+        .ok_or_else(|| crate::AppError::invalid("That path has no filename."))?;
+    let dest = dir.join(name);
+    if dest == src {
+        return Err(crate::AppError::invalid("A file cannot be copied over itself."));
+    }
+    if dest.exists() {
+        let n = name.to_string_lossy();
+        return Err(crate::AppError::invalid(format!(
+            "\"{n}\" already exists in that folder."
+        )));
+    }
+    std::fs::copy(&src, &dest)
+        .map_err(|e| crate::AppError::internal(format!("Couldn't copy the file: {e}")))?;
+    dest.to_str()
+        .map(str::to_string)
+        .ok_or_else(|| crate::AppError::internal("Copied path isn't valid UTF-8."))
+}
+
 /// Move a transcript (+ its sidecars) into `dest_dir`. Returns the new path.
 #[tauri::command]
 pub fn move_transcript_to_folder(srt_path: String, dest_dir: String) -> Result<String, crate::AppError> {

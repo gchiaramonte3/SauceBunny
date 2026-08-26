@@ -234,12 +234,12 @@ export function LibraryBrowser({
       : ".cp-lib-lrow:not(.cp-lib-lrow-folder)",
     // Three shapes, one contract: the grid's folder tile, the list's folder
     // row, and any tree row that names a real directory.
-    targetSelector: ".cp-lib-foldercard, .cp-lib-lrow-folder, .cp-lib-tree-row[data-drop]",
+    targetSelector: ".cp-lib-foldercard, .cp-lib-lrow-folder, .cp-lib-tree-row[data-drop], .cp-lib-bcrumbs button[data-drop]",
     targetAttr: "data-drop",
     // Finder's rule, and the one the batch verbs already use: a file inside
     // the selection drags the whole selection, one outside it drags itself.
     pathsFor: (path) => (sel.selected.has(path) ? selectedPaths : [path]),
-    onDrop: (dest, paths) => { void moveToFolder(dest, paths); },
+    onDrop: (dest, paths, { copy }) => { void moveToFolder(dest, paths, { copy }); },
   });
 
   /**
@@ -255,15 +255,24 @@ export function LibraryBrowser({
    * Per file rather than in one call, so one refusal (a name already taken in
    * the destination) does not abandon the rest of the drop.
    */
-  const moveToFolder = useCallback(async (dest: string, paths: readonly string[]) => {
+  const moveToFolder = useCallback(async (
+    dest: string, paths: readonly string[], opts: { copy?: boolean } = {},
+  ) => {
+    const copying = opts.copy === true;
     let moved = 0;
     const failures: string[] = [];
     for (const from of paths) {
       // Probed BEFORE the move: afterwards the old path no longer resolves.
-      const id = await probeIdentity(from);
+      // A COPY keeps the original where it is, so the poster and the review
+      // link stay attached to it. Carrying them to the duplicate would move
+      // the notes off the file the user still has open.
+      const id = copying ? null : await probeIdentity(from);
       try {
-        const to = await invoke<string>("move_library_file", { srcPath: from, destDir: dest });
-        if (to !== from) { repathIdentity(from, to, id); moved += 1; }
+        const to = await invoke<string>(
+          copying ? "copy_library_file" : "move_library_file",
+          { srcPath: from, destDir: dest },
+        );
+        if (to !== from) { if (id) repathIdentity(from, to, id); moved += 1; }
       } catch (e) {
         failures.push(`${from.split("/").pop() ?? from}: ${formatError(e)}`);
       }
@@ -392,6 +401,44 @@ export function LibraryBrowser({
     if (!selected || !selectedNode || needle.trim()) return [];
     return selectedNode.folders;
   }, [selected, selectedNode, needle]);
+
+
+  /**
+   * SPRING-LOADED FOLDERS. Hold a drag over a folder and it opens, so a
+   * destination two levels down is reachable without putting the files
+   * somewhere else first and dragging them again.
+   *
+   * On by default in Finder, with the delay in System Settings ▸ Accessibility
+   * ▸ Pointer Control. 700ms is the middle of that range: short enough to feel
+   * like the folder is cooperating, long enough that crossing a folder on the
+   * way somewhere else does not open it.
+   *
+   * Only the folders in the PANE spring. The tree already shows the whole
+   * hierarchy — every one of its rows is a direct target, so there is nothing
+   * to drill into — and springing a breadcrumb would navigate AWAY from the
+   * files being dragged.
+   */
+  const springRef = useRef<{ key: string; timer: number } | null>(null);
+  const over = cardDrag.drag?.over ?? null;
+  useEffect(() => {
+    const cancel = () => {
+      if (springRef.current) window.clearTimeout(springRef.current.timer);
+      springRef.current = null;
+    };
+    if (!over || springRef.current?.key === over) {
+      if (!over) cancel();
+      return;
+    }
+    cancel();
+    const target = folders.find((f) => f.path === over);
+    if (!target) return;   // a tree row or a crumb: nothing to drill into
+    const timer = window.setTimeout(() => {
+      setSelected((cur) => [...(cur ?? []), { name: target.name, path: target.path }]);
+      setDetailItem(null);
+    }, 700);
+    springRef.current = { key: over, timer };
+    return cancel;
+  }, [over, folders]);
 
   const shown = useMemo(() => items.slice(0, BROWSE_CAP), [items]);
   // THE PATHS THE PANE ACTUALLY DREW, not every path it knows about.
@@ -541,6 +588,7 @@ export function LibraryBrowser({
           onNewFolder={selected ? createLibraryFolder : undefined}
           chain={selected}
           onCrumb={(chain) => { setSelected(chain); setDetailItem(null); }}
+          dropOver={cardDrag.drag?.over ?? null}
           query={query}
           onQuery={setQuery}
           sort={prefs.sort}

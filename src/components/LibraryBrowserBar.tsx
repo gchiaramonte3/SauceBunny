@@ -5,6 +5,14 @@ import type { LibraryCrumb, LibrarySortDir, LibrarySortKey } from "../lib/librar
 export type LibraryViewMode = "grid" | "list";
 
 type Props = {
+  /**
+   * The folder a drag is hovering, or null.
+   *
+   * Finder's Path Bar is a documented drop target - "you can move items into
+   * the appropriate folder in the Path Bar" - and it is the only gesture that
+   * moves a file UP the tree without first navigating away from it.
+   */
+  dropOver?: string | null;
   /** Selection chain (null = "All") — drives the breadcrumb. */
   chain: LibraryCrumb[] | null;
   onCrumb: (chain: LibraryCrumb[] | null) => void;
@@ -58,7 +66,7 @@ type Props = {
  * upstream in one localStorage key; this bar is a pure controlled surface.
  */
 export function LibraryBrowserBar({
-  chain, onCrumb, location, dateLabel, searchLabel, query, onQuery, sort, dir, view, onPrefs, treeOpen, onShowTree,
+  chain, onCrumb, location, dateLabel, searchLabel, query, onQuery, sort, dir, view, onPrefs, treeOpen, onShowTree, dropOver,
   onNewFolder, newFolderLabel,
 }: Props) {
   const last = chain ? chain.length - 1 : -1;
@@ -105,8 +113,20 @@ export function LibraryBrowserBar({
           <Fragment key={c.path}>
             <span className="sep" aria-hidden="true">/</span>
             {i === last
+              // The folder you are already IN. Not a drop target: dropping a
+              // file where it already lives is a no-op, and a target that
+              // lights up to do nothing is a lie.
               ? <span className="cur" aria-current="page">{c.name}</span>
-              : <button type="button" onClick={() => onCrumb(chain.slice(0, i + 1))}>{c.name}</button>}
+              : (
+                <button
+                  type="button"
+                  className={dropOver === c.path ? "dropping" : undefined}
+                  data-drop={c.path}
+                  onClick={() => onCrumb(chain.slice(0, i + 1))}
+                >
+                  {c.name}
+                </button>
+              )}
           </Fragment>
         ))}
       </nav>
