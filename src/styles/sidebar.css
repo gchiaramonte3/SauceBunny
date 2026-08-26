@@ -430,7 +430,7 @@
 }
 .cp-toggle-switch.on::after {
   left: 14px;
-  background: linear-gradient(180deg, var(--fg-0), var(--color-accent-green));
+  background: linear-gradient(180deg, var(--fg-0), var(--fg-2));
   box-shadow:
     0 0 8px color-mix(in srgb, var(--accent) 65%, transparent),
     0 1px 2px rgba(0,0,0,0.40),
@@ -512,7 +512,7 @@
   color: var(--fg-1);
   background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
 }
-.cp-segmented button.active { color: var(--color-accent-green); }
+.cp-segmented button.active { color: var(--fg-1); }
 .cp-segmented button:active { transform: translateY(0.5px); }
 .cp-segmented button:disabled { opacity: 0.3; cursor: not-allowed; }
 

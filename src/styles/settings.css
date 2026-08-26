@@ -278,7 +278,7 @@
 .cp-model-row.selected {
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
   background: color-mix(in srgb, var(--accent) 5%, transparent);
-  box-shadow: var(--ring-green);
+  box-shadow: var(--ring-selected);
 }
 .cp-model-row:not(.selected):hover {
   border-color: var(--line-3);
@@ -663,7 +663,7 @@
 .cp-mediainfo-info:hover { opacity: 1; }
 .cp-mediainfo-info.open {
   opacity: 1;
-  color: var(--color-accent-green);
+  color: var(--fg-1);
 }
 
 /* Inline explanation — full-width annotation under the row (or badge row). */
@@ -735,7 +735,7 @@
   color: var(--fg-1);
 }
 .cp-ytauth-browser.active {
-  color: var(--color-accent-green);
+  color: var(--fg-1);
   background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--accent) 8%, transparent));
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
   box-shadow:
@@ -747,7 +747,7 @@
   font-weight: var(--weight-bold);
   text-transform: uppercase;
   letter-spacing: var(--track-caps-loose);
-  color: var(--color-accent-green);
+  color: var(--fg-3);
   opacity: 0.9;
 }
 .cp-ytauth-note {
@@ -1199,10 +1199,19 @@
 }
 .cp-aiapi-cardhead { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
 .cp-aiapi-name { font-family: var(--font-ui); font-size: var(--text-lg); font-weight: var(--weight-bold); color: var(--fg-1); }
-.cp-aiapi-set {
+/* "It is ready" — a positive OUTCOME, which is one of the two things green
+   still means here. See the accent note in base.css. */
+.cp-aiapi-set,
+.cp-settings-ready {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--color-accent-green);
 }
+/* Was an inline style on the diarizer's "Models cached locally" line, which
+   CLAUDE.md forbids outright and which also put a colour decision somewhere
+   no stylesheet audit would ever find it. This whole pass exists because
+   green had scattered; leaving one copy of it in a JSX attribute would have
+   guaranteed the next audit missed it too. */
+.cp-settings-ready { font-size: var(--text-sm); }
 .cp-aiapi-row { display: flex; gap: 6px; align-items: center; }
 .cp-aiapi-input {
   flex: 1;

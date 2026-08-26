@@ -95,10 +95,12 @@
   display: block;
   text-wrap: balance;
 }
+/* The speaker's name. It is IDENTITY, not an outcome: who is talking is
+   not something that went well. It reads on brightness and weight. */
 .cp-caption-speaker {
   display: block;
   margin-bottom: 2px;
-  color: var(--color-accent-green);
+  color: var(--fg-2);
   font-weight: var(--weight-black);
   font-size: 0.82em;
   letter-spacing: var(--track-slight);
@@ -938,7 +940,8 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--ella-green);
+  /* Unread marker. "There is something here" is a count, not a verdict. */
+  background: var(--accent);
 }
 .cp-notif-popover {
   /* `position` + `top`/`right` come from inline style (NotificationBell

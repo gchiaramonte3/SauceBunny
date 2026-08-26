@@ -1577,7 +1577,7 @@ export function SettingsModal(props: Props) {
                         <button className="btn btn-ghost" onClick={onPrepareDiarizerModels}>
                           Re-download models
                         </button>
-                        <span style={{ fontSize: 11, color: "var(--color-accent-green)" }}>
+                        <span className="cp-settings-ready">
                           ✓ Models cached locally
                         </span>
                       </>

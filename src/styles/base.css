@@ -55,8 +55,31 @@ body {
    ACCENT
    ============================================================ */
 :root {
-  --accent: var(--ella-green);
-  --accent-rgb: 108, 255, 141;
+  /* THE ACCENT IS NEUTRAL. It was `var(--ella-green)`, and that one line is
+     why green kept coming back after it had been removed from a button here
+     and a chip there: --accent and --accent-rgb are read 137 times across
+     seventeen stylesheets, so every "active", "selected", "current" and
+     "in progress" surface in the app was inheriting the brand green from a
+     single alias nobody was looking at.
+
+     Emphasis in this app is BRIGHTNESS, not hue. That is already the rule for
+     focus (a focused control brightens its outline toward white, never the
+     accent - see focus-contract), and this makes the rest of the system agree
+     with it: an active tool, a selected row and a running job all read as
+     lifted rather than as coloured.
+
+     Green did not go away. It narrowed to the two things it actually means,
+     and green-contract.test.ts is what keeps it there:
+       · a POSITIVE OUTCOME - approved, passed, copied, exported, ok;
+       · a LIVE broadcast - the session dot, the mic level's good zone.
+     Selection, activation, progress, identity and counts are none of those.
+
+     The value is --fg-1, the palette's existing emphasis neutral, rather than
+     a new grey: the tints built on it (8-20% mixes over the dark surfaces)
+     have to stay visible, and a mid-grey at 8% over #141415 is nothing at
+     all. */
+  --accent: var(--fg-1);
+  --accent-rgb: 245, 245, 245;
   /* Selection-marker color used for timeline ranges, mark in/out lines,
      and the running-queue-item pulse. Was orange (var(--warning)) — too close
      to a "warning" semantic and clashed with the green accent on focus.

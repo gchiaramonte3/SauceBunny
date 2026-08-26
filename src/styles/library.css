@@ -781,7 +781,7 @@
   align-items: center;
   gap: var(--s-3);
 }
-.cp-lib-thumb-slider input[type="range"] { flex: 1; accent-color: var(--ella-green); cursor: pointer; }
+.cp-lib-thumb-slider input[type="range"] { flex: 1; accent-color: var(--accent); cursor: pointer; }
 .cp-lib-thumb-time {
   min-width: 56px;
   text-align: right;
@@ -814,7 +814,7 @@
               transform var(--dur-fast) var(--ease-out);
 }
 .cp-lib-thumb-preset:hover {
-  border-color: var(--ella-green);
+  border-color: var(--line-3);
   transform: scale(1.03);
 }
 .cp-lib-thumb-preset:focus-visible {
@@ -948,7 +948,7 @@
   box-shadow: inset 0 0 0 1px var(--focus-ring);
 }
 /* The one green live state in the panel: a scan in progress. */
-.cp-lib-tree-act.scanning { color: var(--ella-green); }
+.cp-lib-tree-act.scanning { color: var(--fg-3); }
 .cp-lib-tree-act.scanning svg { animation: cp-lib-scan-spin 900ms linear infinite; }
 /* Kind chips — neutral per the color contract: bg-3 fill + fg-1 when active,
    quiet outline at rest. They patch the same persisted prefs key the bar's

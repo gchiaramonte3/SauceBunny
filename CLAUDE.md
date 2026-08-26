@@ -268,6 +268,15 @@ Do not add new Tauri plugins without explaining what existing capability is insu
   difference from spacing is that the radius question had an answer that cost
   nobody anything; the spacing one still does not.
 
+- **Emphasis is brightness, not hue.** `--accent` is `var(--fg-1)`, a neutral,
+  and the two green tokens are reserved for a positive OUTCOME (approved,
+  passed, exported, ready) and a LIVE feed (the session dot, the mic meter's
+  good zone), plus the brand mark itself. Selection, activation, progress,
+  identity and counts all read as lifted instead. This is the same language
+  focus already speaks, which is the point: the app had two ways of saying
+  "this one" and they disagreed. Guarded by `src/lib/green-contract.test.ts`
+  as a shrink-only ratchet - the allowlist fails on an entry that no longer
+  matches anything, so it cannot quietly become a licence.
 - **Focus styles: never the green accent.** A focused control brightens its existing outline toward white (`--focus-ring`, defined in `base.css`); composed fields (wrapper + borderless inner input, e.g. `.cp-url`) brighten the wrapper via `:focus-within` and suppress the inner input's ring. Guarded by `src/lib/focus-contract.test.ts` — do not allowlist around it.
 
 ### Rust
@@ -686,7 +695,7 @@ human can check.
 
 ## Enforced contracts
 
-Sixty-two rules in this file are checked by a test rather than remembered. If you
+Sixty-three rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -781,6 +790,7 @@ written after finding the rule already broken somewhere.
 | `modal-focus-contract` | An `aria-modal` dialog traps and restores focus; a dialog behind a scrim declares `aria-modal` (the cmd+F guard reads it) |
 | `contract-register` | This table describes itself: the spelled-out count matches the rows, and every row names a test file that exists |
 | `e2e-mock-shape-contract` | The two object literals in `e2e/tauri-mock.ts` carry exactly the fields of their ts-rs binding, so 100 Playwright tests cannot certify a backend shape that no longer exists |
+| `green-contract` | `--accent` is a NEUTRAL, and green survives only on a positive outcome, a live feed or the brand mark. Green had been removed by hand three times and returned every time, because `--accent` was aliased to the brand green and is read 137 times: every active, selected, running and count surface inherited it from one line |
 | `abort-handle-contract` | Every AI run arms its AbortController BEFORE its first await. The Stop button is drawn from a different piece of state than the one that arms it, so a run could show an enabled Stop that ran `?.abort()` against null for the whole model load |
 
 Three more are measured against the RENDERED app rather than its source, in

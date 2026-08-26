@@ -439,8 +439,9 @@ body.cp-tab-dragging { cursor: grabbing; }
   height: 16px;
   padding: 0 4px;
   border-radius: var(--r-md);
-  /* Count badge = a notification (5a): brand green with dark text. */
-  background: var(--ella-green);
+  /* Count badge = a notification (5a): a bright neutral with dark text.
+     A count is not an outcome, so it does not wear the outcome colour. */
+  background: var(--accent);
   color: var(--bg-0);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

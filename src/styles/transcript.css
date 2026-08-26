@@ -58,7 +58,7 @@
   gap: 4px;
 }
 .cp-tx-iconbtn.active {
-  color: var(--color-accent-green);
+  color: var(--fg-1);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   border-color: color-mix(in srgb, var(--accent) 18%, transparent);
 }
@@ -121,7 +121,7 @@
 .cp-tx-history-row:hover { background: rgba(255, 255, 255, 0.04); }
 .cp-tx-history-row.active {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
-  border-left-color: var(--color-accent-green);
+  border-left-color: var(--accent);
 }
 .cp-tx-history-row-main { flex: 1; min-width: 0; }
 .cp-tx-history-row-title {
@@ -147,7 +147,7 @@
   letter-spacing: var(--track-caps);
 }
 .cp-tx-history-active-pill {
-  color: var(--color-accent-green);
+  color: var(--fg-2);
   font-weight: var(--weight-semibold);
   text-transform: uppercase;
   letter-spacing: var(--track-caps);
@@ -785,7 +785,7 @@
   font-size: var(--text-base); color: var(--fg-3); cursor: pointer; line-height: var(--leading-snug);
 }
 .cp-tx-rename-scope input[type="radio"] {
-  margin-top: 2px; flex-shrink: 0; accent-color: var(--color-accent-green);
+  margin-top: 2px; flex-shrink: 0; accent-color: var(--accent);
 }
 .cp-tx-rename-scope strong { color: var(--fg-2); font-weight: var(--weight-semibold); }
 .cp-tx-rename-actions {
@@ -810,7 +810,7 @@
   user-select: none;
 }
 .cp-toggle-row input[type="checkbox"] {
-  accent-color: var(--color-accent-green);
+  accent-color: var(--accent);
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -908,7 +908,7 @@
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: var(--r-xs);
-  color: var(--color-accent-green);
+  color: var(--fg-1);
   font: 600 11px var(--font-sans);
   cursor: pointer;
 }
@@ -994,7 +994,7 @@
 }
 .cp-phase-track .step.active {
   opacity: 1;
-  color: var(--color-accent-green);
+  color: var(--fg-1);
   text-shadow: 0 0 6px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 .cp-phase-track .sep { opacity: 0.3; }

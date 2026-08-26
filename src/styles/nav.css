@@ -91,7 +91,7 @@
   width: 3px;
   height: 20px;
   border-radius: 0 2px 2px 0;
-  background: var(--ella-green);
+  background: var(--accent);
 }
 
 /* Live-session badge — a small accent dot pinned to the Review item's

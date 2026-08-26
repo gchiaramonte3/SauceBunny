@@ -98,10 +98,14 @@
      NEUTRAL now - see buttons.css. Green is state ("this is on"), not a way
      of saying "click this", so nothing needs a green button halo any more. */
   /* Selected/active ring — used on sidebar items, toggles ON, queue
-     currently-exporting, etc. Crisp 1px ring, minimal halo. */
-  --ring-green:
-    0 0 0 1px rgba(108,255,141,0.60),
-    0 0 8px rgba(108,255,141,0.18);
+     currently-exporting, etc. Crisp 1px ring, minimal halo.
+     NEUTRAL, and renamed to say so. Selection is not an outcome, so it does
+     not get the outcome colour; it reads as lifted instead. The old
+     --ring-green name outlived its colour by one refactor and would have
+     invited the green straight back in. */
+  --ring-selected:
+    0 0 0 1px rgba(245,245,245,0.34),
+    0 0 8px rgba(245,245,245,0.10);
 
   /* ── Semantic surface tokens — aliases over the existing bg-N / fg-N
         scale, layered in so component CSS could opt into clearer names
