@@ -1832,6 +1832,33 @@ mod nightly_proxy_tests {
         }
     }
 
+    /// Stand up the real proxy over a real long fixture and HOLD, so a browser
+    /// can drive the real player against it.
+    ///
+    /// Not an assertion. This is the server half of `harness-seek/run.mjs`,
+    /// which mounts MSEStreamPlayer in Chromium and prints the seek log a user
+    /// would see in the Pipeline pane. It exists because a seek report was
+    /// answered from reading, then from unit tests, and neither of those is
+    /// the same thing as watching it happen.
+    ///
+    /// Prints one machine-readable line the Node side parses, then sleeps.
+    #[test]
+    #[ignore = "harness: run via harness-seek/run.mjs"]
+    fn harness_seek_session_server() {
+        let av = nightly::fixture_av_long();
+        let cdn = serve_fixtures(vec![("long.mp4", av)]);
+        let upstream = format!("{cdn}/long.mp4");
+        let b64 = URL_SAFE_NO_PAD.encode(upstream.as_bytes());
+        // The RAW route, exactly what the app hands MSEStreamPlayer as `path`;
+        // the player derives the /fmp4/ URL from it itself.
+        println!("HARNESS_PATH={}/v1/{b64}", proxy_base());
+        let secs: u64 = std::env::var("HARNESS_HOLD_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(120);
+        std::thread::sleep(std::time::Duration::from_secs(secs));
+    }
+
     #[test]
     #[ignore = "nightly: needs real sidecar binaries"]
     fn nightly_fmp4_dash_split_audio_merge() {

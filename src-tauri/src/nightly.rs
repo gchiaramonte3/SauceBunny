@@ -102,6 +102,45 @@ pub(crate) fn fixture_av() -> PathBuf {
     out
 }
 
+/// A LONG H.264+AAC MP4 (600s), small and cheap to encode, with a keyframe
+/// every two seconds.
+///
+/// The 5-second fixture above cannot exercise the thing a seek report is
+/// actually about: a scrub across a feature-length source, where every landing
+/// is out of buffer and each one costs a pipeline rebuild. This one is long
+/// enough to seek minutes into and small enough to generate in seconds.
+///
+/// Used by the live seek session harness, which drives the REAL player in a
+/// REAL browser against the REAL proxy and prints the seek log a user would
+/// see. That harness exists because a report of "a major regression in seeking
+/// and scrubbing" was answered twice from reading and once from unit tests,
+/// and none of those is the same thing as watching it happen.
+pub(crate) fn fixture_av_long() -> PathBuf {
+    let out = scratch_dir().join("av-long-600s.mp4");
+    if fresh(&out) {
+        return out;
+    }
+    run_ok(
+        &sidecar("ffmpeg"),
+        [
+            "-y",
+            "-f", "lavfi", "-i", "testsrc2=duration=600:size=320x180:rate=24",
+            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=600",
+            "-c:v", "libx264", "-preset", "ultrafast",
+            // A keyframe every 2s: far enough apart to be realistic, close
+            // enough that a seek lands within a couple of seconds of the ask.
+            "-g", "48", "-keyint_min", "48",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "64k",
+            "-shortest",
+            "-movflags", "+faststart",
+            utf8(&out),
+        ],
+        "generate long AV fixture",
+    );
+    out
+}
+
 /// 5-second 10-bit ProRes 422 HQ (`apch`) tagged BT.2020/PQ — the exact
 /// source class CLAUDE.md's "ProRes / 10-bit caveat" routes through the
 /// ffmpeg playback copy because WKWebView can't paint 10-bit VideoFrames.
