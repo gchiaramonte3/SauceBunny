@@ -2346,3 +2346,14 @@
 /* The reader's inline row gives the shared input the full width it has there;
    in the browser bar it keeps its fixed width beside the other controls. */
 .cp-reader-newproject-row .cp-newfolder-input { flex: 1; min-width: 0; width: auto; }
+
+/* A refused drop, said out loud. Click to dismiss - it is informational, and
+   a dedicated close button for a line that disappears on the next successful
+   move is more chrome than the message is worth. */
+.cp-lib-move-err {
+  margin: 0 12px 8px;
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  color: var(--danger-text);
+  cursor: pointer;
+}

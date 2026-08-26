@@ -228,6 +228,7 @@ pub fn run() {
             commands::list_transcript_folders,
             commands::rename_transcript_folder,
             commands::delete_transcript_folder,
+            commands::move_library_file,
             commands::move_transcript_to_folder,
             commands::save_transcript_analysis,
             commands::transcribe_local_file,

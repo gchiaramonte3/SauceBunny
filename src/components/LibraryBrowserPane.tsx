@@ -8,6 +8,7 @@ import { countLibraryItems, formatBytes, formatModifiedDate, libraryPosterPaths 
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { useRovingGrid } from "../hooks/use-roving-grid";
 import { useMarquee } from "../hooks/use-marquee";
+import { useCardDrag } from "../hooks/use-card-drag";
 import type { LibraryFolder, LibraryItem } from "../types";
 
 type Props = {
@@ -50,6 +51,10 @@ type Props = {
   /** Live rubber-band result: the paths the band covers, plus its modifiers. */
   onMarquee?: (paths: string[], mods: { shift: boolean; meta: boolean }) => void;
   onMarqueeEnd?: () => void;
+  /** Every currently selected path, so a drag of one member takes the set. */
+  selectedInOrder?: readonly string[];
+  /** Drop `paths` into the folder at `dest`. Absent = no drag-to-file. */
+  onMoveToFolder?: (dest: string, paths: readonly string[]) => void;
   emptyText: string;
   /** Current sort, so the list headers can show and toggle it. */
   sort: LibrarySortKey;
@@ -70,7 +75,7 @@ const EMPTY_FOLDERS: LibraryFolder[] = [];
 export function LibraryBrowserPane({
   folders = EMPTY_FOLDERS, onOpenFolder,
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
-  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, emptyText,
+  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, selectedInOrder, onMoveToFolder, emptyText,
   sort, dir, onSort,
 }: Props) {
 
@@ -152,6 +157,44 @@ export function LibraryBrowserPane({
     onEnd: () => onMarqueeEnd?.(),
   });
 
+  /**
+   * DRAG A FILE ONTO A FOLDER TO FILE IT — the gesture the Library was missing
+   * while Frames, the web shelf and Transcripts all had it, even though this
+   * is the one shelf whose folders are real directories. The folder tile has
+   * carried `data-drop` and a `dropActive` prop the whole time; nothing was
+   * ever wired to them.
+   *
+   * Pointer events, not HTML5 drag-and-drop — see use-card-drag for why (the
+   * OS drag layer is Tauri's, and the marquee next door is already built this
+   * way).
+   */
+  const cardDrag = useCardDrag({
+    itemSelector: view === "grid" ? ".cp-lib-card:not(.cp-lib-foldercard)" : ".cp-lib-lrow:not(.cp-lib-lrow-folder)",
+    targetSelector: view === "grid" ? ".cp-lib-foldercard" : ".cp-lib-lrow-folder",
+    targetAttr: "data-drop",
+    // Finder's rule, and the same one the batch verbs use: a file inside the
+    // selection drags the whole selection; a file outside it drags only itself.
+    pathsFor: (path) =>
+      (selectedPaths?.has(path) && selectedInOrder?.length ? selectedInOrder : [path]),
+    onDrop: (dest, paths) => onMoveToFolder?.(dest, paths),
+  });
+
+  /** What a drag is carrying, shown under the pointer. */
+  const ghostEl = cardDrag.drag && (
+    <div className="cp-card-ghost" style={{ left: cardDrag.drag.x, top: cardDrag.drag.y }}>
+      {cardDrag.drag.paths.length}
+      {cardDrag.drag.paths.length === 1 ? " file" : " files"}
+    </div>
+  );
+
+  /** Both gestures share one pointer surface: the band starts on blank space,
+   *  the drag starts on a card, so they never both claim a press. */
+  const gestures = onMoveToFolder ? {
+    onPointerDown: (e: React.PointerEvent) => { marquee.handlers.onPointerDown(e); cardDrag.handlers.onPointerDown(e); },
+    onPointerMove: (e: React.PointerEvent) => { marquee.handlers.onPointerMove(e); cardDrag.handlers.onPointerMove(e); },
+    onPointerUp: () => { marquee.handlers.onPointerUp(); cardDrag.handlers.onPointerUp(); },
+  } : marquee.handlers;
+
   /** The band itself, painted in the pane's own content coordinates. */
   const bandEl = marquee.band && (
     <div
@@ -191,9 +234,10 @@ export function LibraryBrowserPane({
         onClick={clearOnBlank}
         onKeyDown={roving.onKeyDown}
         onFocusCapture={roving.onFocusCapture}
-        {...marquee.handlers}
+        {...gestures}
       >
         {bandEl}
+        {ghostEl}
         {/* Containers first, then this folder's own files - Finder's order,
             and the order `names` above assumes. The cover is derived from the
             folder's contents (libraryPosterPaths), never stored. */}
@@ -204,6 +248,8 @@ export function LibraryBrowserPane({
             count={countLibraryItems(f)}
             posterPaths={libraryPosterPaths(f, 3)}
             requestThumb={requestThumb}
+            dropKey={f.path}
+            dropActive={cardDrag.drag?.over === f.path}
             onOpen={() => onOpenFolder?.(f)}
           />
         ))}
@@ -240,9 +286,10 @@ export function LibraryBrowserPane({
       onClick={clearOnBlank}
       onKeyDown={roving.onKeyDown}
       onFocusCapture={roving.onFocusCapture}
-      {...marquee.handlers}
+      {...gestures}
     >
       {bandEl}
+      {ghostEl}
       <div
         className="cp-lib-list"
         role="list"
@@ -282,7 +329,12 @@ export function LibraryBrowserPane({
             folders behind a blank pane and put type-ahead out of step by the
             folder count. */}
         {folders.map((f) => (
-          <LibraryFolderRow key={f.path} folder={f} onOpen={() => onOpenFolder?.(f)} />
+          <LibraryFolderRow
+            key={f.path}
+            folder={f}
+            dropActive={cardDrag.drag?.over === f.path}
+            onOpen={() => onOpenFolder?.(f)}
+          />
         ))}
         {items.map((it) => (
           <LibraryListRow

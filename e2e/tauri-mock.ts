@@ -238,6 +238,18 @@ export function tauriMockInit(expectedBuildId: string): void {
       return `/e2e-mock/Frames/${rel}`;
     },
     move_frame_to_folder: null,
+    // Records the drop so a spec can assert what was moved where. Rejects a
+    // name the destination already holds, which is the refusal path.
+    move_library_file: (args: unknown) => {
+      const a = args as { srcPath?: string; destDir?: string } | undefined;
+      const src = String(a?.srcPath ?? "");
+      const dest = String(a?.destDir ?? "");
+      const name = src.split("/").pop() ?? src;
+      if (localStorage.getItem("e2e.refuseMove") === "1") {
+        return Promise.reject({ kind: "Invalid", data: `"${name}" already exists in that folder.` });
+      }
+      return `${dest}/${name}`;
+    },
     // The web shelf.
     list_cached_web: () => ([
       { url: "https://youtube.com/watch?v=1", title: "First clip", thumbnail: null,

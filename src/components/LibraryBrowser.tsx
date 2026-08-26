@@ -11,7 +11,7 @@ import { FramesPane } from "./FramesPane";
 import { marqueeSelection } from "../lib/marquee";
 import { RenameDialog } from "./RenameDialog";
 import { LibraryQuickLook } from "./LibraryQuickLook";
-import { applyRenamePlan } from "../lib/rename-apply";
+import { applyRenamePlan, probeIdentity, repathIdentity } from "../lib/rename-apply";
 import {
   clickSelect, contextMenuSelect, EMPTY_SELECTION, pruneSelection, selectAll, selectedInOrder,
   type SelectionState,
@@ -112,6 +112,7 @@ export function LibraryBrowser({
   const [prefs, setPrefs] = useState<BrowserPrefs>(() => normalizePrefs(loadJson<unknown>(BROWSER_KEY, {})));
   const [query, setQuery] = useState("");
   const [needle, setNeedle] = useState("");
+  const [moveError, setMoveError] = useState<string | null>(null);
   const [detailItem, setDetailItem] = useState<LibraryItem | null>(null);
   /** Multi-selection for batch actions. The DETAIL panel still follows a single
    *  item (detailItem); this is the set the toolbar acts on. */
@@ -208,6 +209,38 @@ export function LibraryBrowser({
       return formatError(e);
     }
   }, [selected, rescanAll]);
+
+  /**
+   * File the dragged selection into a folder.
+   *
+   * A move is a PATH CHANGE, so it carries the same records a rename does -
+   * the chosen poster frame, the source timecode, and the review link. Without
+   * that, dropping a clip into a folder would silently lose the poster someone
+   * picked and orphan their review notes, which is the exact failure
+   * rename-apply exists to prevent; it would just have arrived through a
+   * different gesture.
+   *
+   * Per file rather than in one call, so one refusal (a name already taken in
+   * the destination) does not abandon the rest of the drop.
+   */
+  const moveToFolder = useCallback(async (dest: string, paths: readonly string[]) => {
+    let moved = 0;
+    const failures: string[] = [];
+    for (const from of paths) {
+      // Probed BEFORE the move: afterwards the old path no longer resolves.
+      const id = await probeIdentity(from);
+      try {
+        const to = await invoke<string>("move_library_file", { srcPath: from, destDir: dest });
+        if (to !== from) { repathIdentity(from, to, id); moved += 1; }
+      } catch (e) {
+        failures.push(`${from.split("/").pop() ?? from}: ${formatError(e)}`);
+      }
+    }
+    setSel(EMPTY_SELECTION);
+    setDetailItem(null);
+    if (moved > 0) rescanAll();
+    if (failures.length > 0) setMoveError(failures.join(" · "));
+  }, [rescanAll]);
 
   /**
    * Move a file to the Finder Trash.
@@ -445,6 +478,14 @@ export function LibraryBrowser({
           onShowTree={() => setTreeOpen(true)}
         />
         <div className="cp-lib-browse-body">
+          {/* A refused move has to SAY so. Dropping onto a folder that already
+              holds that name fails per file, and a drop that silently moved
+              three of four would be worse than one that moved none. */}
+          {moveError && (
+            <p className="cp-lib-move-err" role="alert" onClick={() => setMoveError(null)}>
+              {moveError}
+            </p>
+          )}
           <LibrarySelectionBar
             count={selectedPaths.length}
             batchLine={batchLine}
@@ -521,6 +562,8 @@ export function LibraryBrowser({
             onResetPoster={resetPoster}
             onClearSelection={() => { setDetailItem(null); setSel(EMPTY_SELECTION); }}
             onMarqueeEnd={() => { dragBaseRef.current = null; }}
+            selectedInOrder={selectedPaths}
+            onMoveToFolder={(dest, paths) => { void moveToFolder(dest, paths); }}
             onMarquee={(paths, mods) => {
               // The band is computed against the selection as it was when the
               // drag STARTED, so sweeping back and forth keeps answering the

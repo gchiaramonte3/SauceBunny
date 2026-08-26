@@ -5,6 +5,8 @@ import type { LibraryFolder } from "../types";
 type Props = {
   folder: LibraryFolder;
   onOpen: () => void;
+  /** Highlighted because a drag is hovering it. */
+  dropActive?: boolean;
 };
 
 /**
@@ -28,12 +30,15 @@ type Props = {
  * worth printing and no poster, so the Size column carries its item count and
  * Modified stays empty rather than inventing a date.
  */
-export function LibraryFolderRow({ folder, onOpen }: Props) {
+export function LibraryFolderRow({ folder, onOpen, dropActive }: Props) {
   const count = countLibraryItems(folder);
   return (
     <button
       type="button"
-      className="cp-lib-lrow cp-lib-lrow-folder"
+      className={"cp-lib-lrow cp-lib-lrow-folder" + (dropActive ? " dropping" : "")}
+      // `data-drop` is the attribute use-card-drag reads, and it is the same
+      // name the grid's folder tile uses - one drop contract, two shapes.
+      data-drop={folder.path}
       data-folder={folder.path}
       title={folder.name}
       onClick={onOpen}

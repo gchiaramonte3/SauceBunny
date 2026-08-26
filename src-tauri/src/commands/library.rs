@@ -612,6 +612,53 @@ pub(crate) fn transcripts_in(dir: &Path) -> usize {
         .count()
 }
 
+/// Move a library file into `dest_dir`. Returns the new path.
+///
+/// The Library had no move verb AT ALL - not a drag, not a menu item, not a
+/// command. `rename_path` refuses a directory change on purpose ("A rename may
+/// not move a file to another folder"), so filing a clip into a folder you can
+/// see in the app meant leaving for Finder. This is the backend half of
+/// drag-to-folder.
+///
+/// A plain rename, so it is atomic within a volume and instant. It deliberately
+/// does NOT fall back to copy+delete across volumes: that turns a gesture the
+/// user thinks is instant into a multi-gigabyte copy with no progress and no
+/// cancel, on media files. Across volumes this fails and says so.
+#[tauri::command]
+pub fn move_library_file(src_path: String, dest_dir: String) -> Result<String, crate::AppError> {
+    let src = PathBuf::from(&src_path);
+    if !src.is_file() {
+        return Err(crate::AppError::not_found(src_path.as_str()));
+    }
+    let dir = PathBuf::from(&dest_dir);
+    if !dir.is_dir() {
+        return Err(crate::AppError::not_found(dest_dir.as_str()));
+    }
+    let name = src
+        .file_name()
+        .ok_or_else(|| crate::AppError::invalid("That path has no filename."))?;
+    let dest = dir.join(name);
+    // Already there: a no-op, not an error. Dropping a file on the folder it
+    // is already in is a thing people do, and it should do nothing quietly.
+    if dest == src {
+        return Ok(src_path);
+    }
+    if dest.exists() {
+        let n = name.to_string_lossy();
+        return Err(crate::AppError::invalid(format!(
+            "\"{n}\" already exists in that folder."
+        )));
+    }
+    std::fs::rename(&src, &dest).map_err(|e| {
+        crate::AppError::internal(format!(
+            "Couldn't move the file: {e}. Moving between volumes isn't supported - copy it in Finder instead."
+        ))
+    })?;
+    dest.to_str()
+        .map(str::to_string)
+        .ok_or_else(|| crate::AppError::internal("Moved path isn't valid UTF-8."))
+}
+
 /// Move a transcript (+ its sidecars) into `dest_dir`. Returns the new path.
 #[tauri::command]
 pub fn move_transcript_to_folder(srt_path: String, dest_dir: String) -> Result<String, crate::AppError> {
