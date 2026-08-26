@@ -3893,6 +3893,9 @@ export default function App() {
   const [reviewDraft, setReviewDraft] = useState<AnnotationStrokes | null>(null);
   const [annotationDisplay, setAnnotationDisplay] = useState<AnnotationStrokes | null>(null);
   const [annotationDisplayColor, setAnnotationDisplayColor] = useState<string | null>(null);
+  /** The second a pinned drawing belongs to, so the monitor can let it go
+   *  once you have scrubbed away. Null = pinned with no home to leave. */
+  const [annotationDisplayTime, setAnnotationDisplayTime] = useState<number | null>(null);
   // ── In-composer draft undo ─────────────────────────────────────────
   // Snapshot history of the draft while drawing: each committed stroke/label
   // (or a Clear) pushes the PREVIOUS draft, so ⌘Z steps items off one at a
@@ -4857,7 +4860,8 @@ export default function App() {
                     annotationDrawing={annDrawing}
                     proximityAnnotations={!annDrawing && !annotationDisplay ? reviewAnnotations : undefined}
                     onAnnotationChange={onReviewDraftChange}
-                    onAnnotationDismiss={annPinned ? () => setAnnotationDisplay(null) : undefined}
+                    annotationTime={annPinned ? annotationDisplayTime : null}
+                    onAnnotationDismiss={annPinned ? () => { setAnnotationDisplay(null); setAnnotationDisplayTime(null); } : undefined}
                     annotationLabelMode={annDrawing && reviewLabelMode}
                     annotationLabelColor={annLabelColor}
                   />
@@ -5151,7 +5155,7 @@ export default function App() {
                 /* Set the draft ASIDE rather than dropping it - see stashDraft.
                    Looking at what someone else drew is not a decision to throw
                    away what you were drawing. */
-                onShowAnnotation={(a, color) => { stashDraft(); setReviewDrawActive(false); setReviewLabelMode(false); setReviewDraft(null); setAnnotationDisplay(a); setAnnotationDisplayColor(color ?? null); }}
+                onShowAnnotation={(a, color, time) => { stashDraft(); setReviewDrawActive(false); setReviewLabelMode(false); setReviewDraft(null); setAnnotationDisplay(a); setAnnotationDisplayColor(color ?? null); setAnnotationDisplayTime(time ?? null); }}
                 onOpenReviewSource={handleOpenReviewSource}
                 onReviewLinkAsVersion={sourceKind === "file" ? linkAsReviewVersion : undefined}
                 onReviewUnlinkVersion={sourceKind === "file" ? unlinkReviewVersion : undefined}

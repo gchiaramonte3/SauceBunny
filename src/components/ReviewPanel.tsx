@@ -195,7 +195,7 @@ export function ReviewPanel({
   onDraftConsumed?: () => void;
   /** Display a saved annotation read-only over the frame (null to hide).
    *  `color` = the author's reviewer colour, for the label chips. */
-  onShowAnnotation?: (a: AnnotationStrokes | null, color?: string) => void;
+  onShowAnnotation?: (a: AnnotationStrokes | null, color?: string, time?: number) => void;
   /** Re-open a past-review source (local path / URL) from the history popover. */
   onOpenReview?: (path: string) => void;
   /** Version stacks: absorb the CURRENT source into `oldKey`'s review doc as
@@ -1689,7 +1689,7 @@ function CommentRow({
   myColor: string;
   replies: ReviewComment[];
   onSeek: (s: number) => void;
-  onShowAnnotation?: (a: AnnotationStrokes | null, color?: string) => void;
+  onShowAnnotation?: (a: AnnotationStrokes | null, color?: string, time?: number) => void;
   onResolve: () => void;
   onDelete: () => void;
   onEdit: (body: string) => void;
@@ -1735,7 +1735,7 @@ function CommentRow({
       <div className="cp-review-chiprow">
         <button
           className={"cp-review-tc" + (c.timeEnd != null && c.timeEnd > c.timeStart ? " range" : "")}
-          onClick={() => { onSeek(c.timeStart); if (hasDrawing) onShowAnnotation?.(c.annotation, authorTint); }}
+          onClick={() => { onSeek(c.timeStart); if (hasDrawing) onShowAnnotation?.(c.annotation, authorTint, c.timeStart); }}
           title={c.timeEnd != null && c.timeEnd > c.timeStart ? "Jump to range start" : (hasDrawing ? "Jump + show drawing" : "Jump to this point")}
         >
           <ClockGlyph /> {secondsToTc(c.timeStart, fps)}
@@ -1744,7 +1744,7 @@ function CommentRow({
         {hasDrawing && (
           <button
             className="cp-review-drawbadge"
-            onClick={() => { onSeek(c.timeStart); onShowAnnotation?.(c.annotation, authorTint); }}
+            onClick={() => { onSeek(c.timeStart); onShowAnnotation?.(c.annotation, authorTint, c.timeStart); }}
             title="Show this drawing on the frame"
           >
             ✎ drawing

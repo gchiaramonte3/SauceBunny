@@ -20,12 +20,33 @@ import type { PlayerHandle } from "./player-handle";
  * SourceBuffer that is exactly the branch taken. This is the reported path.
  */
 
+/**
+ * The preview decoder, under test control.
+ *
+ * `h.frameDelay` is how long a frame takes to decode, which is the whole
+ * subject of the second half of this file: over a network, on a long source,
+ * it is seconds - and the overlay used to be revealed immediately regardless.
+ * `h.noVideoTrack` makes the decoder fail to open, which is the case that
+ * fails FOREVER and used to do so in silence.
+ */
+const h = vi.hoisted(() => ({ frameDelay: 0, noVideoTrack: false }));
+
 vi.mock("mediabunny", () => ({
   ALL_FORMATS: [],
-  Input: class { getPrimaryVideoTrack() { return Promise.resolve(null); } dispose() { return Promise.resolve(); } },
+  Input: class {
+    getPrimaryVideoTrack() {
+      return Promise.resolve(h.noVideoTrack ? null : { canDecode: () => Promise.resolve(true) });
+    }
+    dispose() { return Promise.resolve(); }
+  },
   UrlSource: class {},
-  CanvasSink: class {},
-  EncodedPacketSink: class {},
+  CanvasSink: class {
+    getCanvas(_t: number) {
+      const canvas = { width: 320, height: 180 };
+      return new Promise((resolve) => setTimeout(() => resolve({ canvas }), h.frameDelay));
+    }
+  },
+  EncodedPacketSink: class { getKeyPacket() { return Promise.resolve(null); } },
 }));
 
 // jsdom implements no media playback, so every `v.pause()` in the seek path
@@ -39,7 +60,7 @@ if (!HTMLMediaElement.prototype.pause.toString().includes("noop")) {
 
 type Line = { tag: string; msg: string };
 
-function mountPlayer(diag: Line[]) {
+function mountPlayer(diag: Line[], opts: { preview?: boolean } = {}) {
   const ref = createRef<PlayerHandle>();
   render(
     <MSEStreamPlayer
@@ -48,12 +69,16 @@ function mountPlayer(diag: Line[]) {
       hasVideo
       initialVolume={1}
       knownDuration={5756}
-      disableScrubPreview
+      disableScrubPreview={!opts.preview}
       onDiag={(tag, msg) => diag.push({ tag, msg })}
     />,
   );
   return ref;
 }
+
+/** The overlay, and whether it is actually being shown over the video. */
+const overlay = () => document.querySelector(".cp-scrub-preview");
+const overlayShown = () => !!overlay()?.classList.contains("show");
 
 /** The rebuild debounce (280ms) plus a little air. */
 const SETTLE = 400;
@@ -163,5 +188,78 @@ describe("what the player actually did with the reported gestures", () => {
     vi.advanceTimersByTime(SETTLE);
     expect(reqs()[0]).toContain("target 5756.0");
     expect(rebuilds()[0]).toContain("rebuilding from 5756.0s");
+  });
+});
+
+/**
+ * The scrub overlay must never be the thing you are looking at when it is
+ * empty.
+ *
+ * `.cp-scrub-preview` carries `background: var(--bg-0)` (near black) and sits
+ * at z-index 2 over the <video>. The player used to reveal it the instant a
+ * seek began — before the decoder existed, let alone a frame. So the moment
+ * you touched the scrubber the picture was replaced by an opaque black
+ * rectangle, and it stayed black until a frame decoded: seconds on a long
+ * source over the network, and permanently when the preview decoder cannot
+ * open at all, which it does silently.
+ *
+ * Reported as "the frames are black for long periods of time until finally it
+ * comes available to see, which is the worst user experience I've ever seen".
+ * It was the overlay showing its own background.
+ */
+describe("the scrub preview overlay", () => {
+  beforeEach(() => { h.frameDelay = 0; h.noVideoTrack = false; });
+
+  it("is NOT shown before it has a frame to show", async () => {
+    // The whole bug, in one assertion. A slow decode must leave the video
+    // visible, not cover it with black.
+    h.frameDelay = 5_000;
+    const ref = mountPlayer(diag, { preview: true });
+    ref.current!.seekTo(1298.8);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(overlayShown(), "an empty overlay was painted over the video").toBe(false);
+  });
+
+  it("is shown once a frame has actually landed", async () => {
+    h.frameDelay = 20;
+    const ref = mountPlayer(diag, { preview: true });
+    ref.current!.seekTo(1298.8);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(overlayShown(), "a decoded frame never reached the overlay").toBe(true);
+  });
+
+  it("stays hidden forever when the decoder cannot open, and says why", async () => {
+    // The permanent case. Silence here is what made it unreportable: a
+    // preview that never opens and one that is merely slow look identical.
+    h.noVideoTrack = true;
+    const ref = mountPlayer(diag, { preview: true });
+    ref.current!.seekTo(1298.8);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(overlayShown()).toBe(false);
+    const said = diag.find((l) => l.msg.includes("scrub preview unavailable"));
+    expect(said, "a preview that cannot open must say so, not fail silently").toBeTruthy();
+    expect(said!.msg).toContain("no video track");
+  });
+
+  it("reports how long the first frame took, so slow and broken are told apart", async () => {
+    h.frameDelay = 30;
+    const ref = mountPlayer(diag, { preview: true });
+    ref.current!.seekTo(1298.8);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(diag.some((l) => l.msg.startsWith("scrub preview ready"))).toBe(true);
+  });
+
+  it("keeps showing the last frame across a later seek, rather than blanking", async () => {
+    // Once it holds a real frame, a slightly stale frame beats black while the
+    // next one decodes. This is what an NLE does.
+    h.frameDelay = 20;
+    const ref = mountPlayer(diag, { preview: true });
+    ref.current!.seekTo(100);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(overlayShown()).toBe(true);
+    h.frameDelay = 5_000;            // the next frame is a long way off
+    ref.current!.seekTo(4000);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(overlayShown(), "the overlay blanked instead of holding the last frame").toBe(true);
   });
 });

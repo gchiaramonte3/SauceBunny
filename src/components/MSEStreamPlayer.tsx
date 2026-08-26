@@ -231,6 +231,21 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   const previewTargetRef = useRef<number | null>(null);
   const previewBusyRef = useRef(false);
   const scrubCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  /**
+   * Has the preview overlay ever painted a frame for THIS source?
+   *
+   * It matters because the overlay is opaque. `.cp-scrub-preview` carries
+   * `background: var(--bg-0)` and sits at z-index 2 over the video, and the
+   * old code turned it on the instant a seek began - before the decoder had
+   * been created, let alone produced a frame. So touching the scrubber put a
+   * near-black rectangle over the picture and left it there until a frame
+   * arrived: seconds on a long source over the network, and FOREVER when the
+   * preview decoder failed to open, which it does silently.
+   *
+   * "The frames are black for long periods until finally it comes available"
+   * is that, exactly. The overlay was showing its own background.
+   */
+  const previewPaintedRef = useRef(false);
   const requestPreviewRef = useRef<((seconds: number) => void) | null>(null);
   const [scrubPreview, setScrubPreview] = useState(false);
   // True from the moment an out-of-buffer seek starts until the rebuilt
@@ -346,7 +361,11 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             if (rest) requestPreviewRef.current?.(rest.t);
           }, 170);
         }
-        setScrubPreview(true);
+        // Only reveal the overlay when it is holding a real frame. Before the
+        // first paint the video underneath is a far better thing to look at
+        // than an opaque black rectangle, and after it a slightly stale frame
+        // still beats one. The paint itself turns it on (see requestPreview).
+        if (previewPaintedRef.current) setScrubPreview(true);
         requestPreviewRef.current?.(target);
       }
       if (seekSettleRef.current != null) window.clearTimeout(seekSettleRef.current);
@@ -549,6 +568,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     wantPlayRef.current = false;
     failedRef.current = false;
     setScrubPreview(false);
+    previewPaintedRef.current = false;
 
     // One failure typically emits several error signals; only the first reaches
     // onError (App's fallback owns the rest), so a single fault can't surface a
@@ -562,14 +582,31 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
     // scrubs). `requestPreview` coalesces to the latest target so rapid
     // drags never backlog the decoder.
     let previewSinkPromise: Promise<CanvasSink | null> | null = null;
+    let previewOpenedAt = 0;
+    /**
+     * Every exit from here used to be `return null`, silently.
+     *
+     * A preview that cannot open is indistinguishable from one that is merely
+     * slow: both leave the overlay empty. One is a permanent property of the
+     * source and the other passes; they want completely different responses
+     * from whoever is looking at it, and the log said nothing at all about
+     * either. Now it says which.
+     */
+    const previewUnavailable = (why: string): null => {
+      onDiagRef.current?.("warn", `scrub preview unavailable: ${why}. Scrubbing falls back to the video's own seek.`);
+      return null;
+    };
     const ensurePreviewSink = () => {
       if (!previewSinkPromise) {
+        previewOpenedAt = performance.now();
         previewSinkPromise = (async () => {
           try {
             const input = new Input({ source: new UrlSource(path), formats: ALL_FORMATS });
             previewInputRef.current = input;
             const vt = await input.getPrimaryVideoTrack();
-            if (disposed || !vt || !(await vt.canDecode())) return null;
+            if (disposed) return null;
+            if (!vt) return previewUnavailable("the raw stream has no video track mediabunny can index");
+            if (!(await vt.canDecode())) return previewUnavailable("this platform cannot decode the raw stream's video codec");
             const sink = new CanvasSink(vt, { poolSize: 2 });
             previewSinkRef.current = sink;
             // Keyframe index for fast drags: decoding a keyframe timestamp
@@ -578,8 +615,8 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             // that walk is the whole scrub lag.
             previewKeySinkRef.current = new EncodedPacketSink(vt);
             return sink;
-          } catch {
-            return null;
+          } catch (e) {
+            return previewUnavailable(e instanceof Error ? e.message : String(e));
           }
         })();
       }
@@ -611,6 +648,15 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
               dst.height = src.height;
             }
             dst.getContext("2d")?.drawImage(src as CanvasImageSource, 0, 0);
+            // NOW it is safe to show. The first paint also reports how long it
+            // took, because "scrubbing is black" and "scrubbing is slow" look
+            // identical from the outside and want different fixes.
+            if (!previewPaintedRef.current) {
+              previewPaintedRef.current = true;
+              onDiagRef.current?.("ok",
+                `scrub preview ready (first frame in ${Math.round(performance.now() - previewOpenedAt)}ms)`);
+            }
+            setScrubPreview(true);
           }
         }
         previewBusyRef.current = false;

@@ -1,11 +1,11 @@
-import { forwardRef, useLayoutEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { IconAlert, IconHistory } from "./Icons";
 import { BunnyLoader } from "./BunnyLoader";
 import { CanvasToast, type ToastKind } from "./CanvasToast";
 import { CaptionOverlay, type CaptionStyle } from "./CaptionOverlay";
 import { AnnotationOverlay } from "./AnnotationOverlay";
 import { usePlayheadSeconds } from "../lib/playhead-store";
-import { annotationsNear } from "../lib/annotation-proximity";
+import { annotationsNear, shouldReleasePin } from "../lib/annotation-proximity";
 import type { AnnotationStrokes } from "../lib/review";
 import type { OnboardingStep, OnboardingStepId } from "../lib/onboarding";
 import { LocalMediaPlayer } from "./LocalMediaPlayer";
@@ -178,10 +178,58 @@ type Props = {
   annotationLabelMode?: boolean;
   /** Reviewer colour for annotation label chips. */
   annotationLabelColor?: string;
+  /** Source time a PINNED drawing belongs to. Scrubbing well away from it
+   *  releases the pin via onAnnotationDismiss, so an opened drawing stops
+   *  being painted over the whole timeline. Absent = no automatic release. */
+  annotationTime?: number | null;
 };
 
-/** Seconds on either side of a drawing's time that the proximity fade spans. */
-const ANNOT_PROX_WINDOW = 0.6;
+/**
+ * Seconds on either side of a drawing's time that the proximity fade spans.
+ *
+ * Was 0.6, which is fourteen frames at 24fps. A drawing therefore existed for
+ * about a third of a second of timeline and was effectively invisible unless
+ * you parked on it: scrub past the note somebody left you and you would never
+ * know it was there. Reported as wanting "maybe a 5-second interval where it
+ * was drawn, and it kind of fades away" - so 2.5 either side, and the fade is
+ * linear with distance, which it already was.
+ */
+const ANNOT_PROX_WINDOW = 2.5;
+
+/**
+ * How far the playhead has to travel before a PINNED drawing lets go.
+ *
+ * Clicking a comment seeks to its time and pins its drawing, which is right:
+ * you asked to look at it, and it must not dissolve while you study the
+ * frame. But the pin had no release at all, so from then on the drawing was
+ * painted over every frame in the source - "the drawing is persistent across
+ * all frames". Wider than the proximity window on purpose: nudging a frame or
+ * two must not throw away something you deliberately opened.
+ */
+const ANNOT_PIN_RELEASE = 6;
+
+/**
+ * Lets a pinned drawing go once you have scrubbed away from it.
+ *
+ * A private leaf that subscribes to the playhead so the OWNER of the pin
+ * (App) does not have to. That is the same fence TimelineGhosts uses and for
+ * the same reason: this reads at up to 60Hz, and a subscription one story up
+ * re-renders the whole keep-alive tree on every tick.
+ */
+function PinnedAnnotationRelease({ time, fps, onRelease }: {
+  time: number;
+  fps: number;
+  onRelease: () => void;
+}) {
+  const playheadSec = usePlayheadSeconds(fps) ?? 0;
+  const firedRef = useRef(false);
+  const far = shouldReleasePin(playheadSec, time, ANNOT_PIN_RELEASE);
+  useEffect(() => {
+    if (far && !firedRef.current) { firedRef.current = true; onRelease(); }
+    if (!far) firedRef.current = false;
+  }, [far, onRelease]);
+  return null;
+}
 
 /** Proximity fade — the nearest saved drawing as the playhead passes it,
  *  opacity ramping with distance so it appears then fades while scrubbing.
@@ -262,7 +310,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     transcriptPath, transcriptReloadToken, fps, captionsOn, captionStyle, tcOverlay,
     shuttleRate, playbackRateHud,
     annotation, annotationDrawing, proximityAnnotations, onAnnotationChange, onAnnotationDismiss,
-    annotationLabelMode, annotationLabelColor,
+    annotationLabelMode, annotationLabelColor, annotationTime,
   } = props;
 
   const natural = metadata?.width && metadata?.height ? metadata.width / metadata.height : 16 / 9;
@@ -555,6 +603,13 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
         {/* Review drawing annotations — draw on the frame (draft), view a
             pinned one, or let the nearest saved drawing fade in/out with the
             playhead. Pointer-transparent unless actively drawing. */}
+        {/* A pinned drawing lets go once the playhead has moved well away.
+            Rendered beside the overlay rather than inside it: the release
+            watches the playhead at 60Hz and must not drag the overlay's
+            canvas into that. */}
+        {!annotationDrawing && annotation && annotationTime != null && onAnnotationDismiss && (
+          <PinnedAnnotationRelease time={annotationTime} fps={fps} onRelease={onAnnotationDismiss} />
+        )}
         {annotationDrawing || annotation || !proximityAnnotations?.length ? (
           <AnnotationOverlay
             annotation={annotation ?? null}

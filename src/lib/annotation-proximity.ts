@@ -55,3 +55,29 @@ export function annotationsNear<T extends ProximityInput>(
     // From the END, so the ones actually kept are the nearest.
     .slice(-Math.max(0, cap));
 }
+
+/**
+ * Has the playhead travelled far enough to let a PINNED drawing go?
+ *
+ * Clicking a comment seeks to its time and pins its drawing, which is right:
+ * you asked to look at it and it must not dissolve while you study the frame.
+ * But the pin had no release, so from then on the drawing was painted over
+ * every frame in the source - reported as "the drawing is persistent across
+ * all frames".
+ *
+ * Deliberately WIDER than the proximity fade. Those are two different
+ * questions: the fade asks "is a drawing near enough to glimpse", and this
+ * asks "have you left the thing you opened". Nudging a frame or two while
+ * studying a note must not throw it away.
+ *
+ * A pin with no time (nothing to be away FROM) never releases on its own.
+ */
+export function shouldReleasePin(
+  playheadSec: number,
+  pinnedAt: number | null | undefined,
+  releaseAfter: number,
+): boolean {
+  if (pinnedAt == null || !Number.isFinite(pinnedAt)) return false;
+  if (!Number.isFinite(playheadSec)) return false;
+  return Math.abs(playheadSec - pinnedAt) > releaseAfter;
+}

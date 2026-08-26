@@ -158,7 +158,7 @@ type Props = {
   onReviewDraftConsumed?: () => void;
   /** Show a saved annotation read-only over the frame (null to hide).
    *  `color` = the note author's reviewer colour, for the label chips. */
-  onShowAnnotation?: (a: AnnotationStrokes | null, color?: string) => void;
+  onShowAnnotation?: (a: AnnotationStrokes | null, color?: string, time?: number) => void;
   /** Re-open a past-review source (local path or URL) from the history popover. */
   onOpenReviewSource?: (path: string) => void;
   /** Version stacks: absorb the open source into an older cut's review doc. */
