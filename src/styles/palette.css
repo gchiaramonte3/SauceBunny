@@ -114,11 +114,15 @@
   transition: background var(--dur-fast) var(--ease-out);
 }
 .cp-palette-row.active {
-  /* Same green wash as the active tab pill — single accent language. */
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 14%, transparent), color-mix(in srgb, var(--accent) 4%, transparent));
+  /* A KEYBOARD CURSOR, not a state. This is where the arrow keys are, and it
+     moves on every keypress - painting it the same green as a live session or
+     a running job spends the app's one "something is happening" colour on a
+     highlight that is just following the user's finger. The row's label
+     already lifts to --fg-0 below and carries the emphasis. */
+  background: rgba(255,255,255,0.08);
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.06),
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
+    inset 0 0 0 1px var(--line-3);
 }
 .cp-palette-row.disabled { opacity: 0.4; cursor: not-allowed; }
 .cp-palette-row-text {
@@ -136,6 +140,11 @@
   letter-spacing: var(--track-tight);
 }
 .cp-palette-row.active .cp-palette-row-label { color: var(--fg-0); }
+/* The description lifts too. The neutral wash that replaced the green one is
+   lighter, and --fg-4 on it measures 4.14:1 - under the 4.5 floor for 11px
+   text. --fg-3 is 5.79:1, and a row the keyboard is sitting on should be the
+   MOST legible one on screen, not the least. Guarded by contrast.spec.ts. */
+.cp-palette-row.active .cp-palette-row-desc { color: var(--fg-3); }
 .cp-palette-row-desc {
   font-family: var(--font-ui);
   font-size: var(--text-base);

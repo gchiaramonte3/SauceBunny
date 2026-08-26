@@ -878,17 +878,22 @@
   background: linear-gradient(180deg, #c4a8ff 0%, #7b61ff 52%, #5b3ee6 100%);
   box-shadow: 0 0 6px rgba(123, 97, 255, 0.6), 0 0 2px rgba(196, 168, 255, 0.9);
 }
+/* NEUTRAL. This is a button that shows a saved drawing - an affordance, not a
+   live state - and green here says "something is on" about a comment that is
+   simply sitting there. Same treatment as `.cp-review-range-x` above, which is
+   the same kind of control in the same rows. */
 .cp-review-drawbadge {
   font-size: var(--text-base);
   line-height: var(--leading-none);
-  color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--fg-3);
+  background: rgba(255,255,255,0.06);
   border: none;
   border-radius: var(--r-sm);
   padding: 3px 6px;
   cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.cp-review-drawbadge:hover { background: rgba(var(--accent-rgb), 0.22); }
+.cp-review-drawbadge:hover { background: rgba(255,255,255,0.12); color: var(--fg-1); }
 
 /* ── Approval status (chip shared by panel/sidebar/room/cards) ────── */
 .cp-status-chip {

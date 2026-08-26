@@ -187,26 +187,12 @@
    flares green (color contract: green marks the primary action and live
    states, nothing else). Clear / Import / panel toggles stay neutral
    ghosts on the shared .btn-ghost hover. */
-.cp-toolbar .btn.cp-sbtn-fetch:hover:not(:disabled) {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 14%, transparent), color-mix(in srgb, var(--accent) 4%, transparent));
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  color: var(--fg-1);
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.12),
-    inset 0 -1px 0 rgba(0,0,0,0.20),
-    0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
-    0 0 11px color-mix(in srgb, var(--accent) 22%, transparent);
-  transform: translateY(-1px);
-}
-.cp-toolbar .btn.cp-sbtn-fetch:active:not(:disabled) {
-  transform: translateY(0);
-  /* Pressed state — bevel inverts, glow dampens but stays present so
-     the click feels like the button absorbing the input. */
-  box-shadow:
-    inset 0 1px 2px rgba(0,0,0,0.25),
-    0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent),
-    0 0 6px color-mix(in srgb, var(--accent) 12%, transparent);
-}
+/* No green on hover or press. Fetch is the primary verb, but hovering it is
+   not an event - the button flared green before anything had happened, which
+   is what taught the eye that green means "clickable". It falls through to the
+   shared ghost hover now, and green returns on this exact button where it
+   means something: [data-phase="loading"] while a fetch runs, and the result
+   flash after one. */
 
 /* Compact modifier — shorter, tighter padding, smaller text. Used in
    chrome strips like the pipeline footer where the default 30px button

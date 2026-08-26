@@ -1127,7 +1127,11 @@
   border: 1px solid var(--line-2);
   color: var(--fg-3);
 }
-.cp-av-perm.authorized { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, transparent); }
+/* "Allowed" is a LABEL, not a live state - the camera is not on because the
+   permission exists. The word and its check glyph carry the meaning; green
+   here made a settled, unremarkable fact look like something happening.
+   denied/restricted stay red below: a blocked permission IS actionable. */
+.cp-av-perm.authorized { color: var(--fg-2); border-color: var(--line-2); }
 .cp-av-perm.denied,
 .cp-av-perm.restricted { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 .cp-av-perm svg { flex-shrink: 0; }
