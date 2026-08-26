@@ -54,6 +54,8 @@ type Props = {
   onMoveToFolder?: (dest: string, paths: readonly string[]) => void;
   /** "Move to folder…" was chosen from a card's menu — open the picker. */
   onRequestMove?: (path: string) => void;
+  /** The keyboard moved onto `path`; apply the same rule a click would. */
+  onKeyboardSelect?: (path: string, mods: { shift: boolean; meta: boolean }) => void;
   /**
    * The drag lives in LibraryBrowser, not here, because it spans BOTH the pane
    * and the folder tree beside it: Finder's sidebar is a drop target, and a
@@ -87,7 +89,7 @@ const EMPTY_FOLDERS: LibraryFolder[] = [];
 export function LibraryBrowserPane({
   folders = EMPTY_FOLDERS, onOpenFolder,
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
-  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, onMoveToFolder, onRequestMove, cardDrag, emptyText,
+  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, onMoveToFolder, onRequestMove, onKeyboardSelect, cardDrag, emptyText,
   sort, dir, onSort,
 }: Props) {
 
@@ -111,6 +113,15 @@ export function LibraryBrowserPane({
     itemSelector: view === "grid" ? ".cp-lib-card" : ".cp-lib-lrow",
     names,
     layout: view,
+    // Finder moves the SELECTION with the arrow keys, not just a focus ring,
+    // and Shift extends it. `names` lists folders first and then files, which
+    // is the render order — so an index past the folders is a file, and the
+    // ones before it are containers the selection does not cover.
+    onNavigate: (index, mods) => {
+      const fileIndex = index - folders.length;
+      const path = fileIndex >= 0 ? items[fileIndex]?.path : undefined;
+      if (path) onKeyboardSelect?.(path, mods);
+    },
   });
 
   // Column widths, persisted. Applied on the list CONTAINER so the header and

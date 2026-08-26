@@ -303,6 +303,34 @@ export function LibraryBrowser({
     }
   }, [rescanAll]);
 
+  /**
+   * Trash a whole selection, for ⌘Delete.
+   *
+   * One confirm for the set rather than one per file: Apple's own wording is
+   * "Move the selected item to the Trash", singular verb over a plural
+   * selection, and a dialog per file for a twelve-file selection is a way of
+   * saying no.
+   */
+  const trashMany = useCallback(async (list: readonly LibraryItem[]) => {
+    const what = list.length === 1
+      ? `"${list[0].name}"`
+      : `${list.length} files`;
+    if (!confirm(`Move ${what} to the Trash?\n\nYou can put ${list.length === 1 ? "it" : "them"} back from the Finder.`)) return;
+    const failures: string[] = [];
+    for (const item of list) {
+      try {
+        await invoke("move_to_trash", { path: item.path });
+      } catch (e) {
+        failures.push(`${item.name}: ${formatError(e)}`);
+      }
+    }
+    setSel(EMPTY_SELECTION);
+    setDetailItem(null);
+    rescanAll();
+    // Same rule as the drop: one refusal must not hide behind the others.
+    if (failures.length > 0) setMoveError(failures.join(" · "));
+  }, [rescanAll]);
+
   const selectedNode = useMemo(
     () => (selected ? findLibraryFolder(trees, selected[selected.length - 1].path) : null),
     [trees, selected],
@@ -440,6 +468,18 @@ export function LibraryBrowser({
           e.preventDefault();
           e.stopPropagation();
           setSel(selectAll(itemPathsRef.current));
+          return;
+        }
+        // ⌘Delete = "Move the selected item to the Trash", Apple's own wording,
+        // and it applies to the whole selection. The verb already exists in the
+        // card menu and the selection bar; it just had no key.
+        if (e.metaKey && !e.ctrlKey && (e.key === "Backspace" || e.key === "Delete")
+            && !(e.target instanceof HTMLInputElement)) {
+          const doomed = items.filter((i) => sel.selected.has(i.path));
+          if (doomed.length === 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          void trashMany(doomed);
           return;
         }
         // Space = Quick Look, Finder's muscle memory. Only with exactly one
@@ -606,6 +646,13 @@ export function LibraryBrowser({
             onClearSelection={() => { setDetailItem(null); setSel(EMPTY_SELECTION); }}
             onMarqueeEnd={() => { dragBaseRef.current = null; }}
             cardDrag={cardDrag}
+            onKeyboardSelect={(path, mods) => {
+              // The SAME reducer a click goes through. Finder's arrow keys
+              // move the selection and Shift extends it, which is exactly
+              // plain-click and shift-click - so routing both through
+              // clickSelect means the two can never drift apart.
+              setSel((cur) => clickSelect(cur, itemPathsRef.current, path, mods));
+            }}
             onMoveToFolder={(dest, paths) => { void moveToFolder(dest, paths); }}
             onRequestMove={(path) => {
               // The menu acts on the SELECTION when the clicked file is part

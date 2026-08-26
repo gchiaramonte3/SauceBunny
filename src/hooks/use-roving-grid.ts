@@ -29,8 +29,18 @@ export function useRovingGrid(opts: {
   names: readonly string[];
   /** `grid` makes up/down move by a row; `list` makes them move by one. */
   layout: "grid" | "list";
+  /**
+   * The keyboard moved to `index`. Finder moves the SELECTION with the arrow
+   * keys, not just a focus ring — "arrow keys move the selection itself" — and
+   * Shift extends it. This hook only knows about elements and indices, so the
+   * caller maps the index to a path and applies its own selection rule.
+   *
+   * Not called for type-ahead, which in Finder jumps the selection too, so
+   * that is reported the same way.
+   */
+  onNavigate?: (index: number, mods: { shift: boolean; meta: boolean }) => void;
 }) {
-  const { containerRef, itemSelector, names, layout } = opts;
+  const { containerRef, itemSelector, names, layout, onNavigate } = opts;
   const activeRef = useRef(0);
   const typeBufRef = useRef("");
   const typeAtRef = useRef(0);
@@ -112,6 +122,7 @@ export function useRovingGrid(opts: {
         e.preventDefault();
         setActive(list, hit);
         list[hit].focus();
+        onNavigate?.(hit, { shift: false, meta: false });
       }
       return;
     }
@@ -132,7 +143,10 @@ export function useRovingGrid(opts: {
     e.preventDefault();
     setActive(list, next);
     list[next].focus(); // the browser scrolls it into view
-  }, [items, names, columns, setActive]);
+    // Shift extends, a bare arrow replaces — the caller decides what that
+    // means against its own selection state.
+    onNavigate?.(next, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
+  }, [items, names, columns, setActive, onNavigate]);
 
   /** Clicking or tabbing onto an item adopts it as the roving stop. */
   const onFocusCapture = useCallback((e: React.FocusEvent) => {
