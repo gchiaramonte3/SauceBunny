@@ -1757,6 +1757,81 @@ mod nightly_proxy_tests {
         );
     }
 
+    /// GET a proxy URL and return (status, headers, body). `fetch_all` throws
+    /// the headers away, and the seek contract lives in two of them.
+    fn fetch_with_headers(url: &str) -> (u16, std::collections::HashMap<String, String>, Vec<u8>) {
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(180))
+            .build()
+            .expect("build blocking client");
+        let resp = client.get(url).send().expect("proxy request failed");
+        let status = resp.status().as_u16();
+        let headers = resp
+            .headers()
+            .iter()
+            .map(|(k, v)| (k.as_str().to_ascii_lowercase(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+        let bytes = resp.bytes().expect("read proxy stream").to_vec();
+        (status, headers, bytes)
+    }
+
+    /// A seek lands WHERE IT WAS ASKED, end to end, through real ffmpeg.
+    ///
+    /// This is the assertion the seek path never had. The existing rebuild
+    /// test above proves `?start=3` returns a SMALLER stream than `?start=0`,
+    /// which would also be true of a stream that seeked to the wrong place, or
+    /// to a place near enough to fool a byte count. What the player actually
+    /// depends on is the timeline the response declares:
+    ///
+    ///   · X-Timeline: absolute  → the epoch probe worked, and
+    ///   · X-Stream-Epoch: N     → the first video dts the remux erased,
+    ///
+    /// which the player re-adds via MSE timestampOffset so buffered ranges,
+    /// the landing seek and the playhead are in true source time. If that
+    /// number does not match the requested offset, every seek in the app lands
+    /// somewhere else and the log tells you nothing, because both halves agree
+    /// with each other and disagree with the file.
+    ///
+    /// Written after a report of "a major regression in seeking and scrubbing
+    /// for web clips" that turned out to be a misread log. The player half was
+    /// proved correct by driving its seek handle directly
+    /// (src/components/MSEStreamPlayer.seek.test.tsx); this is the other half,
+    /// and it was the half with nothing holding it down.
+    #[test]
+    #[ignore = "nightly: needs real sidecar binaries"]
+    fn nightly_fmp4_seek_lands_at_the_requested_second() {
+        let av = nightly::fixture_av();
+        let cdn = serve_fixtures(vec![("av.mp4", av)]);
+        let upstream = format!("{cdn}/av.mp4");
+        let b64 = URL_SAFE_NO_PAD.encode(upstream.as_bytes());
+
+        for want in [0.0_f64, 1.0, 2.0, 3.0] {
+            let url = format!("{}/fmp4/v1/{b64}?start={want}", proxy_base());
+            let (status, headers, bytes) = fetch_with_headers(&url);
+            assert_eq!(status, 200, "start={want}: proxy returned {status}");
+            assert_fmp4_with_tracks(&bytes, true, &format!("seek to {want}s"));
+
+            let mode = headers.get("x-timeline").map(String::as_str).unwrap_or("");
+            assert_eq!(
+                mode, "absolute",
+                "start={want}: the epoch probe failed, so the stream came back REBASED.                  The player then treats currentTime as relative and the playhead is only                  right by accident."
+            );
+            let epoch: f64 = headers
+                .get("x-stream-epoch")
+                .unwrap_or_else(|| panic!("start={want}: absolute timeline with no X-Stream-Epoch"))
+                .parse()
+                .expect("epoch parses as a number");
+            // The fixture has a keyframe every second and ffmpeg seeks to the
+            // keyframe at or before the request, so the landing is exact here.
+            // A whole second of drift would mean the seek missed its keyframe.
+            assert!(
+                (epoch - want).abs() < 1.0,
+                "start={want}: the stream actually begins at {epoch}s. A seek that                  reports one position and delivers another is the bug every                  'it jumped somewhere else' report is really about."
+            );
+        }
+    }
+
     #[test]
     #[ignore = "nightly: needs real sidecar binaries"]
     fn nightly_fmp4_dash_split_audio_merge() {
