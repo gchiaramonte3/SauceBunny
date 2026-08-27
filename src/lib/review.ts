@@ -42,6 +42,28 @@ export type AnnotationStrokes = {
      * required field.
      */
     pts: ([number, number] | [number, number, number])[];
+    /**
+     * A GEOMETRIC shape, drawn as one rather than traced as handwriting.
+     *
+     * perfect-freehand is a handwriting library: smoothing and streamlining
+     * are its whole purpose, and they are wrong for a rectangle. Pushing four
+     * corners through it rounded them off; sampling the edges densely to fight
+     * that produced wobbly sides and still-soft corners, because the smoothing
+     * is applied to whatever it is given. A box came out as a lozenge and an
+     * arrow came out as a curved line with no head.
+     *
+     * So a shape carries its two drag anchors and is stroked as real geometry.
+     *
+     * OPTIONAL, and `pts` still holds the sampled outline beside it, for the
+     * same reason the pressure tuple is optional: a peer on an older build
+     * ignores this field and renders the polyline, which is wobbly but
+     * recognisable, rather than showing nothing at all.
+     */
+    shape?: {
+      kind: "arrow" | "rect" | "ellipse";
+      from: [number, number];
+      to: [number, number];
+    };
     /** 0..1, so a saved highlighter still reads as one. Optional: strokes drawn
      *  before tools existed have none and paint fully opaque. */
     opacity?: number;

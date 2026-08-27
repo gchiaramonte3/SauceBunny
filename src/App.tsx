@@ -3977,6 +3977,36 @@ export default function App() {
         },
       }
     : null;
+  /**
+   * Escape leaves drawing mode.
+   *
+   * The only way out was to find the pen in the composer and click it off
+   * again, which is a long way to reach for "no, stop". Escape is what every
+   * other mode in this app answers to, and a drawing mode that ignores it
+   * traps you: the annotation toolbar covers the frame, and every click on
+   * the video draws instead of doing what it usually does.
+   *
+   * Label mode first, then drawing: one press per layer, so Escape peels the
+   * mode back rather than jumping straight out of both and losing a label you
+   * were mid-way through placing.
+   *
+   * A capture-phase listener, so it beats the panel's own handlers, and it
+   * only acts when a mode is actually on - Escape must keep doing whatever it
+   * did before everywhere else.
+   */
+  useEffect(() => {
+    if (!reviewDrawActive) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (reviewLabelMode) { setReviewLabelMode(false); return; }
+      setReviewDrawActive(false);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [reviewDrawActive, reviewLabelMode]);
+
   useEffect(() => {
     // New source → drop any in-flight drawing + viewed annotation.
     setReviewDrawActive(false);
@@ -4760,7 +4790,7 @@ export default function App() {
                         // the catch block down in runPlaybackPrep already
                         // surfaces an error toast.
                         appendLog("warn", "media",
-                          `${msg.replace("[WEBCODECS_UNSUPPORTED]", "WebCodecs doesn't support")}. Falling back to ffmpeg prep.`);
+                          `${msg.replace("[WEBCODECS_UNSUPPORTED] ", "")}. Falling back to ffmpeg prep.`);
                         setWebCodecsFallbackForImport(true);
                         // Reuse the same prep pipeline. seq guards against the
                         // user switching sources before prep finishes.

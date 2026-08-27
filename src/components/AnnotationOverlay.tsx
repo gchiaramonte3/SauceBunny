@@ -2,7 +2,7 @@ import { ColorSwatches } from "./ColorSwatches";
 import { useEffect, useRef, useState } from "react";
 import { getStroke } from "perfect-freehand";
 import {
-  DRAW_TOOLS, isShapeTool, shapePoints, toolOpacity, toolWidthScale, type DrawTool,
+  DRAW_TOOLS, isShapeTool, shapeGeometry, shapePoints, toolOpacity, toolWidthScale, type DrawTool,
 } from "../lib/draw-tools";
 import { annotationHasContent, type AnnotationStrokes } from "../lib/review";
 import {
@@ -135,6 +135,36 @@ export function AnnotationOverlay({
     ctx.clearRect(0, 0, w, h);
     const paint = (s: Stroke) => {
       if (s.pts.length === 0) return;
+      // A SHAPE IS NOT HANDWRITING. Stroked as geometry, so a rectangle has
+      // right angles and an arrow has a point. Everything below this is the
+      // freehand path, and smoothing there is correct.
+      if (s.shape) {
+        const g = shapeGeometry(s.shape.kind, s.shape.from, s.shape.to, w, h);
+        const prevA = ctx.globalAlpha;
+        ctx.globalAlpha = s.opacity ?? 1;
+        ctx.strokeStyle = s.color;
+        ctx.fillStyle = s.color;
+        ctx.lineWidth = Math.max(1, s.size) * (s.widthScale ?? 1) * dpr;
+        // Miter, so a corner is a corner. A round join is part of what
+        // softened these into lozenges.
+        ctx.lineJoin = "miter";
+        ctx.lineCap = "butt";
+        ctx.beginPath();
+        if (g.kind === "rect") ctx.rect(g.x, g.y, g.w, g.h);
+        else if (g.kind === "ellipse") ctx.ellipse(g.cx, g.cy, g.rx, g.ry, 0, 0, Math.PI * 2);
+        else { ctx.moveTo(g.shaft[0][0], g.shaft[0][1]); ctx.lineTo(g.shaft[1][0], g.shaft[1][1]); }
+        ctx.stroke();
+        if (g.kind === "arrow") {
+          ctx.beginPath();
+          ctx.moveTo(g.head[0][0], g.head[0][1]);
+          ctx.lineTo(g.head[1][0], g.head[1][1]);
+          ctx.lineTo(g.head[2][0], g.head[2][1]);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.globalAlpha = prevA;
+        return;
+      }
       // Pressure rides along when the pen gave us one; 0.5 is the neutral
       // middle for everything else, which keeps a mouse line even.
       const input = s.pts.map((pt) => [pt[0] * w, pt[1] * h, pt[2] ?? 0.5]);
@@ -283,7 +313,15 @@ export function AnnotationOverlay({
     // A shape is a drag, not a trace: every move re-derives it from origin to
     // cursor, so it rubber-bands instead of accumulating a scribble.
     if (shapeStart.current) {
-      live.current.pts = shapePoints(tool, shapeStart.current, norm(e));
+      const to = norm(e);
+      live.current.pts = shapePoints(tool, shapeStart.current, to);
+      // The anchors, so the renderer can draw real geometry. `pts` stays
+      // beside them for peers that predate this field.
+      live.current.shape = {
+        kind: tool as "arrow" | "rect" | "ellipse",
+        from: [shapeStart.current[0], shapeStart.current[1]],
+        to: [to[0], to[1]],
+      };
       redraw();
       return;
     }

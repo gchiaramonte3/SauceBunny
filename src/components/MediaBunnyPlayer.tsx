@@ -1039,9 +1039,24 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
           // sample decodes but can't be wrapped for the canvas, getCanvas throws
           // → same unsupported-render fallback rather than a silent black frame.
           try {
-            const first = await videoSinkRef.current.getCanvas(0);
+            // THE FIRST FRAME IS NOT ALWAYS AT ZERO, and asking for it there
+            // was condemning perfectly decodable files to a full transcode.
+            //
+            // Big Buck Bunny's h264/mp3 build starts its video stream at
+            // 0.066667s - two frames at 30fps, an ordinary non-zero start PTS
+            // that ffprobe prints as `start 0.066667`. `getCanvas(0)` has
+            // nothing at or before 0, returns null, and the null was read as
+            // "this platform cannot render AVC". H.264 is the most widely
+            // supported codec WebCodecs has; the claim was never plausible.
+            // The file then went to ffmpeg for a ten-minute h264_videotoolbox
+            // re-encode it did not need, and mediabunny - the whole local
+            // playback engine - was skipped.
+            //
+            // Ask the track where it actually begins.
+            const firstTs = await vt.getFirstTimestamp().catch(() => 0);
+            const first = await videoSinkRef.current.getCanvas(firstTs);
             if (cancelled) return;
-            if (!first) throw new Error("no frame at 0s");
+            if (!first) throw new Error(`no frame at ${firstTs.toFixed(3)}s`);
             drawCanvas(first.canvas);
             // A canvas that decoded but reads PURE BLACK is the silent
             // failed-wrap signature (nothing throws). One black frame proves
@@ -1062,8 +1077,12 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
             }
           } catch (e) {
             if (cancelled) return;
+            // Say what happened, not what we guessed. This message used to
+            // assert the CODEC was unsupported, which turned one failed frame
+            // grab into a verdict about the platform - and printed
+            // "WebCodecs doesn't support avc" at the user, which is false.
             const codec = await vt.getCodec().catch(() => "unknown");
-            onErrorRef.current?.(`[WEBCODECS_UNSUPPORTED] ${codec} video can't be rendered here (${e instanceof Error ? e.message : String(e)})`);
+            onErrorRef.current?.(`[WEBCODECS_UNSUPPORTED] could not get a frame from this ${codec} track (${e instanceof Error ? e.message : String(e)})`);
             return;
           }
         }

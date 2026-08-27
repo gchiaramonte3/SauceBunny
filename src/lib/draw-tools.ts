@@ -114,9 +114,110 @@ export function shapePoints(tool: DrawTool, from: Pt, to: Pt): Pt[] {
       const ca = Math.cos(ang), sa = Math.sin(ang);
       return p(x1 - head * (ux * ca - uy * sa), y1 - head * (ux * sa + uy * ca));
     };
-    // Shaft, then out to one barb, back to the tip, out to the other — one
-    // continuous path, because the stroke model is a single polyline.
-    return [p(x0, y0), p(x1, y1), back(Math.PI / 7), p(x1, y1), back(-Math.PI / 7)];
+
+    // SAMPLED, for the same reason the rectangle above is.
+    //
+    // This used to return the five points that describe an arrow: shaft, barb,
+    // tip, barb. Mathematically complete, and a useless input to
+    // perfect-freehand at smoothing 0.72 / streamline 0.68 - it rounded
+    // straight through both barbs and returned a gently curved line. The
+    // arrow tool drew something indistinguishable from the pen, which is
+    // exactly what the rectangle did before it was sampled ("drawing a box
+    // produced a leaf").
+    //
+    // A smoothed stroke follows the points it is GIVEN, so the head has to be
+    // traced rather than described.
+    const seg = (a: Pt, b: Pt, out: Pt[], includeEnd: boolean) => {
+      const [ax, ay] = a;
+      const [bx, by] = b;
+      // Same normalised step as the rectangle, with a floor so a short barb
+      // still gets enough samples to hold its angle.
+      const steps = Math.max(6, Math.ceil(Math.hypot(bx - ax, by - ay) / 0.01));
+      for (let k = 0; k < steps; k++) {
+        const t = k / steps;
+        out.push(p(ax + (bx - ax) * t, ay + (by - ay) * t));
+      }
+      if (includeEnd) out.push(p(bx, by));
+    };
+
+    const tip = p(x1, y1);
+    const out: Pt[] = [];
+    seg(p(x0, y0), tip, out, true);      // shaft, ending exactly at the tip
+    seg(tip, back(Math.PI / 7), out, true);   // out to one barb
+    seg(back(Math.PI / 7), tip, out, true);   // back to the tip
+    seg(tip, back(-Math.PI / 7), out, true);  // out to the other
+    return out;
   }
   return [from, to];
+}
+
+/**
+ * A shape as real geometry - not as handwriting.
+ *
+ * The shape tools used to be sampled into a polyline and pushed through
+ * perfect-freehand, whose smoothing (0.72) and streamlining (0.68) exist to
+ * make a traced pen line look natural. Applied to a rectangle they round every
+ * corner and bow every edge: a box came out as a lozenge, and an arrow came
+ * out as a gently curved line with no head. Sampling the outline more densely
+ * was the wrong fix and did not work, because the smoothing is applied to
+ * whatever it is handed.
+ *
+ * Returns plain DATA rather than a Path2D so the geometry is testable without
+ * a DOM - Path2D exists in neither node nor jsdom, and a shape that cannot be
+ * checked is how the first version of this shipped bent.
+ *
+ * Coordinates come in normalised and go out in canvas pixels.
+ */
+export type ShapeGeom =
+  | { kind: "rect"; x: number; y: number; w: number; h: number }
+  | { kind: "ellipse"; cx: number; cy: number; rx: number; ry: number }
+  | {
+      kind: "arrow";
+      /** Stops short of the tip, so the fill is not sitting on a line cap. */
+      shaft: [[number, number], [number, number]];
+      /** The head, as a filled triangle: sharp at every width, where three
+       *  more stroked lines would read as a blob at small sizes. */
+      head: [[number, number], [number, number], [number, number]];
+    };
+
+export function shapeGeometry(
+  kind: "arrow" | "rect" | "ellipse",
+  from: Pt,
+  to: Pt,
+  w: number,
+  h: number,
+): ShapeGeom {
+  const x0 = from[0] * w, y0 = from[1] * h;
+  const x1 = to[0] * w, y1 = to[1] * h;
+
+  if (kind === "rect") {
+    return {
+      kind: "rect",
+      x: Math.min(x0, x1), y: Math.min(y0, y1),
+      w: Math.abs(x1 - x0), h: Math.abs(y1 - y0),
+    };
+  }
+  if (kind === "ellipse") {
+    return {
+      kind: "ellipse",
+      cx: (x0 + x1) / 2, cy: (y0 + y1) / 2,
+      rx: Math.abs(x1 - x0) / 2, ry: Math.abs(y1 - y0) / 2,
+    };
+  }
+
+  const dx = x1 - x0, dy = y1 - y0;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  // Scales with the shaft and is capped, so a long arrow does not end in a
+  // head the size of a face.
+  const head = Math.min(Math.min(w, h) * 0.06, len * 0.28);
+  const barb = (ang: number): [number, number] => {
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    return [x1 - head * (ux * ca - uy * sa), y1 - head * (ux * sa + uy * ca)];
+  };
+  return {
+    kind: "arrow",
+    shaft: [[x0, y0], [x1 - ux * head * 0.6, y1 - uy * head * 0.6]],
+    head: [[x1, y1], barb(Math.PI / 7), barb(-Math.PI / 7)],
+  };
 }
