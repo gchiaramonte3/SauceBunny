@@ -133,6 +133,36 @@ try {
 const P = (fn, ...a) => page.evaluate(fn, ...a);
 const sleep = (ms) => page.waitForTimeout(ms);
 
+// ── REPLAY MODE: somebody else's gestures, verbatim ──────────────────
+//
+// REPLAY is a JSON list of gestures: {from} is a click, {from,to} is a drag
+// released at `to`. It exists so a reported log can be re-run with its own
+// numbers rather than with numbers that happen to suit the harness, which is
+// the difference between "I could not reproduce it" and "here is what your
+// gesture actually does".
+if (process.env.REPLAY) {
+  const gestures = JSON.parse(process.env.REPLAY);
+  for (const g of gestures) {
+    await P((x) => (window).__probe.seekTo(x), g.from);
+    if (g.to != null) {
+      for (let i = 1; i <= 20; i++) {
+        await P((x) => (window).__probe.seekTo(x), g.from + (g.to - g.from) * (i / 20));
+        await sleep(25);
+      }
+    }
+    await sleep(4500);
+    const at = await P(() => (window).__probe.currentTime());
+    const want = g.to ?? g.from;
+    const ok = Math.abs(at - want) < 1.5;
+    console.log(`  ${ok ? "✓" : "✗"} ${g.to != null ? `drag ${g.from} → ${g.to}` : `click ${g.from}`}  landed ${at.toFixed(1)}s`);
+  }
+  console.log("\n── what the player logged ──");
+  for (const l of await P(() => (window).__probe.diag)) console.log(`  ${l.tag.padEnd(5)} ${l.msg}`);
+  await page.screenshot({ path: path.join(HERE, "landed.png") });
+  await browser.close(); await vite.close(); proxy.close();
+  process.exit(0);
+}
+
 // ── 1. THE COLD SCRUB: the only window the overlay bug lives in ──────
 //
 // It has to be first. The overlay is revealed once it holds a frame and then
