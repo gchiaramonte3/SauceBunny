@@ -268,6 +268,41 @@ fn cut_local(
     ))
 }
 
+/// Where a full source copy lives once an export has paid for it.
+///
+/// Deliberately NOT `download_cache_prefix`, which keys on the URL alone and
+/// is what PLAYBACK's fallback writes - at `previewMaxHeight`, 480 by
+/// default. Reusing that for an export would silently ship a 480p clip to
+/// somebody who asked for 1080p, and nothing would say so. The export
+/// quality is in the key, and so are captions, because they ride the
+/// download too: a copy fetched without subtitles cannot serve an export
+/// that wants them burned in.
+///
+/// It still lands in `downloads/`, so the cache breakdown counts it and the
+/// size cap can evict it like anything else derived from the network.
+pub(crate) fn export_cache_prefix(url: &str, format: &str, captions: bool) -> String {
+    format!(
+        "saucebunny-export-{}-{}{}",
+        super::source_audio_hash(url),
+        match format { "4k" => "2160", "720" => "720", _ => "1080" },
+        if captions { "-cc" } else { "" },
+    )
+}
+
+/// A complete copy of `url` at this export's quality, if one is already here.
+fn find_export_copy(
+    cache_root: &std::path::Path,
+    url: &str,
+    format: &str,
+    captions: bool,
+) -> Option<PathBuf> {
+    find_audio_in_cache(
+        &super::media_cache_dir(cache_root, "downloads"),
+        &export_cache_prefix(url, format, captions),
+    )
+    .filter(|p| p.metadata().map(|m| m.len() > 0).unwrap_or(false))
+}
+
 async fn spawn_video_clip(
     app: AppHandle,
     args: ClipArgs,
@@ -292,6 +327,38 @@ async fn spawn_video_clip(
     } else {
         output_str.clone()
     };
+
+    // ── Already downloaded? Then this export is a 0.2s local cut ───────
+    // The expensive half of an export is fetching the source, and a session
+    // is usually several clips out of ONE video: the second and every one
+    // after it should pay nothing. Keyed on url+quality+captions, kept in
+    // downloads/ where the size cap can evict it.
+    if let Some((cut_s, cut_e)) = section_secs {
+        if let Some(raw) = find_export_copy(&cache, &args.url, &args.format, args.captions) {
+            let app_fast = app.clone();
+            let job_fast = job_id.clone();
+            let ff_fast = ffmpeg_str.clone();
+            let out_fast = output_str.clone();
+            let reencode = args.reencode;
+            tokio::spawn(async move {
+                emit_clip_log(&app_fast, &job_fast, "ok",
+                    "The source is already in the cache. Cutting straight from it…".into());
+                let _ = app_fast.emit("clip-progress", ProgressEvent {
+                    job_id: job_fast.clone(), percent: 92.0,
+                });
+                match cut_local(&ff_fast, &raw, cut_s, cut_e, &out_fast, reencode) {
+                    Ok(()) => {
+                        let _ = app_fast.emit("clip-progress", ProgressEvent {
+                            job_id: job_fast.clone(), percent: 100.0,
+                        });
+                        emit_clip_done(&app_fast, &job_fast, true, Some(0), Some(out_fast), None);
+                    }
+                    Err(e) => emit_clip_done(&app_fast, &job_fast, false, None, None, Some(e)),
+                }
+            });
+            return Ok(());
+        }
+    }
 
     let mut cmd_args: Vec<String> = vec![
         "-f".into(),
@@ -354,6 +421,9 @@ async fn spawn_video_clip(
     let total_seconds = section_secs.map(|(s, e)| (e - s).max(0.0)).unwrap_or(0.0);
     let url = args.url.clone();
     let cache_for_cut = cache.clone();
+    let url_for_cut = args.url.clone();
+    let format_for_cut = args.format.clone();
+    let captions_for_cut = args.captions;
     let raw_prefix_for_cut = raw_prefix.clone();
     let ffmpeg_for_cut = ffmpeg_str.clone();
     let args_reencode = args.reencode;
@@ -418,14 +488,28 @@ async fn spawn_video_clip(
                     format!("Cutting {:.1}s out of the download…", (cut_e - cut_s).max(0.0)));
                 match find_scratch_download(&cache_for_cut, &raw_prefix_for_cut) {
                     Some(raw) => {
-                        let r = cut_local(&ffmpeg_for_cut, &raw, cut_s, cut_e,
+                        // KEEP it, under a url+quality key, so the next clip
+                        // from this video is a 0.2s cut. Renamed rather than
+                        // copied, and only now that yt-dlp has exited cleanly:
+                        // a half-file under the cache name would be found by
+                        // the next export and cut into silently.
+                        let keep = super::media_cache_dir(&cache_for_cut, "downloads")
+                            .join(format!(
+                                "{}.{}",
+                                export_cache_prefix(&url_for_cut, &format_for_cut, captions_for_cut),
+                                raw.extension().and_then(|e| e.to_str()).unwrap_or("mp4"),
+                            ));
+                        let _ = std::fs::create_dir_all(
+                            super::media_cache_dir(&cache_for_cut, "downloads"));
+                        let src = match std::fs::rename(&raw, &keep) {
+                            Ok(()) => keep,
+                            // Cross-device, a full disk, anything: the cut
+                            // still has to happen, it just does not get to be
+                            // free next time.
+                            Err(_) => raw,
+                        };
+                        let r = cut_local(&ffmpeg_for_cut, &src, cut_s, cut_e,
                                           &output_str, args_reencode);
-                        // The full source is the expensive thing here and it is
-                        // gone the moment the cut lands, so a second clip from
-                        // the same video pays the download again. Reusing it is
-                        // the next win and wants a cache key on the URL, not on
-                        // the job id this file is named after.
-                        let _ = std::fs::remove_file(&raw);
                         if let Err(e) = r { success = false; cut_error = Some(e); }
                     }
                     None => {
@@ -3152,5 +3236,66 @@ mod scratch_download_tests {
         let cache = root();
         assert!(find_scratch_download(&cache, "webcache-nope").is_none());
         let _ = std::fs::remove_dir_all(&cache);
+    }
+}
+
+#[cfg(test)]
+mod export_cache_key_tests {
+    use super::*;
+
+    /// The whole point of this key: an export must never be served a copy
+    /// somebody else downloaded at a different quality.
+    ///
+    /// Playback's fallback writes `saucebunny-download-<urlhash>` at
+    /// `previewMaxHeight`, 480 by default. If an export reused that, asking
+    /// for 1080p would hand back a 480p clip with nothing to say so - the
+    /// worst kind of bug, because the file opens and plays.
+    #[test]
+    fn quality_is_part_of_the_key() {
+        let u = "https://www.youtube.com/watch?v=abc";
+        let a = export_cache_prefix(u, "1080", false);
+        let b = export_cache_prefix(u, "4k", false);
+        let c = export_cache_prefix(u, "720", false);
+        assert_ne!(a, b, "1080 and 4k must not share a cached copy");
+        assert_ne!(a, c, "1080 and 720 must not share a cached copy");
+        assert_ne!(b, c, "4k and 720 must not share a cached copy");
+    }
+
+    /// Captions ride the DOWNLOAD (--embed-subs), so a copy fetched without
+    /// them cannot serve an export that wants them.
+    #[test]
+    fn captions_are_part_of_the_key() {
+        let u = "https://www.youtube.com/watch?v=abc";
+        assert_ne!(
+            export_cache_prefix(u, "1080", true),
+            export_cache_prefix(u, "1080", false),
+        );
+    }
+
+    /// And the point of having a key at all: the same request twice is the
+    /// same file, or the second clip pays the download again.
+    #[test]
+    fn the_same_request_is_the_same_file() {
+        let u = "https://www.youtube.com/watch?v=abc";
+        assert_eq!(
+            export_cache_prefix(u, "1080", false),
+            export_cache_prefix(u, "1080", false),
+        );
+        assert_ne!(
+            export_cache_prefix(u, "1080", false),
+            export_cache_prefix("https://www.youtube.com/watch?v=zzz", "1080", false),
+        );
+    }
+
+    /// It must not collide with PLAYBACK's key, in either direction.
+    /// `find_audio_in_cache` matches on `starts_with`, so a shared stem would
+    /// let each path pick up the other's file.
+    #[test]
+    fn it_cannot_be_confused_with_the_playback_copy() {
+        let u = "https://www.youtube.com/watch?v=abc";
+        let export = export_cache_prefix(u, "1080", false);
+        let playback = super::super::download_cache_prefix(u);
+        assert!(!export.starts_with(&playback), "export copy would satisfy a playback lookup");
+        assert!(!playback.starts_with(&export), "playback copy would satisfy an export lookup");
     }
 }
