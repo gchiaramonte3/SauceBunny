@@ -196,11 +196,14 @@ export function FramesPane({ treeOpen, onShowTree }: {
   const { selectedPaths } = grid;
   const marquee = useMarquee({
     containerRef: paneRef,
-    itemSelector: ".cp-lib-card",
-    // Cards here live inside a per-source section, so the gaps between them
-    // belong to the section or its grid rather than to the scroll container.
-    // Without naming those, a band could only start on the pane's padding.
-    gutterSelector: ".cp-web-grid, .cp-web-shelf, .cp-web-summary",
+    // The band has to find whatever the CURRENT view draws. This was pinned to
+    // `.cp-lib-card`, which only exists in grid view, so switching to list
+    // silently took the lasso away: the rows were there, the gesture drew a
+    // rectangle, and it selected nothing.
+    itemSelector: prefs.view === "list" ? ".cp-lib-lrow" : ".cp-lib-card",
+    // Rows are wrapped, so name the wrapper as gutter too or a band cannot
+    // start in the space beside a row.
+    gutterSelector: ".cp-web-grid, .cp-web-shelf, .cp-web-summary, .cp-web-lrow-wrap",
     onSelect: grid.onMarquee,
     onEnd: grid.onMarqueeEnd,
   });
@@ -401,6 +404,8 @@ export function FramesPane({ treeOpen, onShowTree }: {
             )}
             {prefs.view === "list" ? (
               <FrameListRows
+                selected={grid.selected}
+                onSelect={grid.onItemClick}
                 items={g.items}
                 sort={prefs.sort}
                 dir={prefs.dir}

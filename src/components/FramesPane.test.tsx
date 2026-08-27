@@ -82,6 +82,65 @@ describe("the frames shelf", () => {
     expect(img.src).toContain("Frames");
   });
 
+  /**
+   * Multi-select must survive the view toggle.
+   *
+   * The pane computed a selection and handed it to the GRID only, and the
+   * band's item selector was pinned to `.cp-lib-card` - a class that exists
+   * in grid view and nowhere else. So switching to list silently took both
+   * shift-click and the lasso away: the rows were there, the gesture drew a
+   * rectangle, and it selected nothing. A view toggle must not remove a
+   * capability.
+   */
+  it("shift-click selects a range in LIST view, not just in the grid", async () => {
+    h.items = [
+      frame(),
+      frame({ path: "/f/b.jpg", name: "B_00000100.jpg" }),
+      frame({ path: "/f/c.jpg", name: "C_00000200.jpg" }),
+    ];
+    mount();
+    await screen.findAllByText("Bear_00012304.jpg");
+    screen.getByRole("button", { name: "List view" }).click();
+    await waitFor(() => expect(document.querySelectorAll(".cp-lib-lrow").length).toBeGreaterThan(2));
+
+    const rows = [...document.querySelectorAll<HTMLButtonElement>(".cp-lib-lrow")];
+    rows[0].click();
+    rows[2].dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".cp-lib-lrow.selected")).toHaveLength(3);
+    });
+  });
+
+  it("marks the selected list rows for assistive tech too", async () => {
+    // The class paints it; aria-current is what says it out loud.
+    h.items = [frame(), frame({ path: "/f/b.jpg", name: "B_00000100.jpg" })];
+    mount();
+    await screen.findAllByText("Bear_00012304.jpg");
+    screen.getByRole("button", { name: "List view" }).click();
+    await waitFor(() => expect(document.querySelectorAll(".cp-lib-lrow").length).toBeGreaterThan(1));
+
+    const rows = [...document.querySelectorAll<HTMLButtonElement>(".cp-lib-lrow")];
+    rows[0].click();
+    await waitFor(() => {
+      expect(rows[0].getAttribute("aria-current")).toBe("true");
+    });
+  });
+
+  it("gives every list row the identity the lasso reads", async () => {
+    // useMarquee finds items by `data-path`. Without it a band can sweep the
+    // rows and select nothing, which is what list view did.
+    h.items = [frame(), frame({ path: "/f/b.jpg", name: "B_00000100.jpg" })];
+    mount();
+    await screen.findAllByText("Bear_00012304.jpg");
+    screen.getByRole("button", { name: "List view" }).click();
+    await waitFor(() => expect(document.querySelectorAll(".cp-lib-lrow").length).toBeGreaterThan(1));
+
+    const rows = [...document.querySelectorAll(".cp-lib-lrow")];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(r.getAttribute("data-path")).toBeTruthy();
+  });
+
   it("switching to list view renders one table with sortable headers", async () => {
     h.items = [frame(), frame({ path: "/f/b.jpg", name: "Solo_00000100.jpg", source: "Solo" })];
     mount();

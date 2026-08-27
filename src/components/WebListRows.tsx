@@ -41,13 +41,17 @@ function fetchedLabel(unixSeconds: number): string {
   });
 }
 
-export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl }: {
+export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, selected, onSelect }: {
   items: readonly CachedWebItem[];
   sort: LibrarySortKey;
   dir: LibrarySortDir;
   onSort: (key: LibrarySortKey) => void;
   onForget: (url: string) => void;
   onOpenUrl: (url: string) => void;
+  /** Multi-select, when the shelf above is running one. A web source's
+   *  identity is its URL, the same key the grid cards select on. */
+  selected?: ReadonlySet<string>;
+  onSelect?: (url: string, e: React.MouseEvent) => void;
 }) {
   const [cols, setCols] = useState<{ site: number; size: number; date: number }>(() => {
     try {
@@ -123,9 +127,16 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl }: {
           <div key={it.url} role="listitem" className="cp-web-lrow-wrap">
             <button
               type="button"
-              className="cp-lib-lrow"
+              data-path={it.url}
+              aria-current={selected?.has(it.url) ? "true" : undefined}
+              className={"cp-lib-lrow" + (selected?.has(it.url) ? " selected" : "")}
               title={it.url}
-              onClick={() => onOpenUrl(it.url)}
+              // Selection owns the single click when a selection is
+              // running, and opening moves to the double click - the same
+              // split LibraryListRow uses. Without a selection above, the
+              // single click still opens, exactly as before.
+              onClick={(e) => { if (onSelect) onSelect(it.url, e); else onOpenUrl(it.url); }}
+              onDoubleClick={() => onOpenUrl(it.url)}
             >
               <span className="cp-lib-lrow-art">
                 {it.thumbnail

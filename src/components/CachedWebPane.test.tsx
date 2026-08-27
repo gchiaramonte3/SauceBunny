@@ -121,6 +121,44 @@ describe("CachedWebPane browser parity", () => {
     expect(titles).toEqual(["Gamma", "Beta", "Alpha"]);
   });
 
+  /**
+   * The same gap the frames shelf had: the pane computed a selection, handed
+   * it to the GRID only, and pinned the band's item selector to
+   * `.cp-lib-card` - a class that exists in grid view and nowhere else. So
+   * list view had neither shift-click nor a lasso, and nothing said why.
+   */
+  it("shift-click selects a range in LIST view, not just in the grid", async () => {
+    h.items = three();
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findAllByText("Beta");
+    screen.getByRole("button", { name: "List view" }).click();
+    await waitFor(() => expect(document.querySelectorAll(".cp-lib-lrow").length).toBeGreaterThan(2));
+
+    const rows = [...document.querySelectorAll<HTMLButtonElement>(".cp-lib-lrow")];
+    rows[0].click();
+    rows[2].dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
+
+    await waitFor(() => {
+      expect(document.querySelectorAll(".cp-lib-lrow.selected")).toHaveLength(3);
+    });
+  });
+
+  it("selects list rows by URL, which is a web source's identity", async () => {
+    // The grid cards select on `it.url` rather than a local path, because a
+    // cached source may have no copy on disk at all. The rows have to agree,
+    // or the two views would hold different selections.
+    h.items = three();
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findAllByText("Beta");
+    screen.getByRole("button", { name: "List view" }).click();
+    await waitFor(() => expect(document.querySelectorAll(".cp-lib-lrow").length).toBeGreaterThan(1));
+
+    const rows = [...document.querySelectorAll(".cp-lib-lrow")];
+    for (const r of rows) {
+      expect(r.getAttribute("data-path"), "the lasso reads data-path").toMatch(/^https?:/);
+    }
+  });
+
   it("switching to list view renders ONE table with sortable headers", async () => {
     h.items = three();
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);

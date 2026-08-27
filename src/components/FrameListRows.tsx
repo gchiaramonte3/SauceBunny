@@ -37,13 +37,17 @@ function grabbedLabel(unixSeconds: number): string {
   });
 }
 
-export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame }: {
+export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame, selected, onSelect }: {
   items: readonly FrameItem[];
   sort: LibrarySortKey;
   dir: LibrarySortDir;
   onSort: (key: LibrarySortKey) => void;
   onDelete: (path: string) => void;
   onOpenFrame: (path: string) => void;
+  /** Multi-select, when the shelf above is running one. Absent leaves the
+   *  rows behaving exactly as they did. */
+  selected?: ReadonlySet<string>;
+  onSelect?: (path: string, e: React.MouseEvent) => void;
 }) {
   const [cols, setCols] = useState<{ source: number; size: number; date: number }>(() => {
     try {
@@ -119,9 +123,16 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame 
           <div key={it.path} role="listitem" className="cp-web-lrow-wrap">
             <button
               type="button"
-              className="cp-lib-lrow"
+              data-path={it.path}
+              aria-current={selected?.has(it.path) ? "true" : undefined}
+              className={"cp-lib-lrow" + (selected?.has(it.path) ? " selected" : "")}
               title={it.path}
-              onClick={() => onOpenFrame(it.path)}
+              // Selection owns the single click when a selection is
+              // running, and opening moves to the double click - the same
+              // split LibraryListRow uses. Without a selection above, the
+              // single click still opens, exactly as before.
+              onClick={(e) => { if (onSelect) onSelect(it.path, e); else onOpenFrame(it.path); }}
+              onDoubleClick={() => onOpenFrame(it.path)}
             >
               <span className="cp-lib-lrow-art">
                 <img src={assetUrl(it.path)} alt="" loading="lazy" />
