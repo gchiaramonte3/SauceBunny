@@ -8,7 +8,19 @@ All notable changes to Sauce Bunny. Format loosely follows
 `0.4.4`, `0.4.5` and `0.4.6` were bumped in the manifests but never tagged
 or released, so everything below is unreleased and sits on top of `v0.4.3`.
 The build in your hands is identified by its CFBundleVersion, shown in
-Settings ▸ About: `2026082701` is this one.
+Settings ▸ About.
+
+`0.4.7` fixes four defects the `0.4.6` build shipped with, all of them
+introduced by the export speedup and found afterwards:
+
+- Exported clips were OUT OF SYNC. An input seek with `-c copy` keeps the
+  leading GOP, whose packets carry negative timestamps (measured: video
+  -1.066667, audio -1.024), and the mp4 muxer resolves that per stream.
+- Exported clips silently LOST THEIR CAPTIONS: with no explicit stream
+  mapping, ffmpeg's default selection dropped the subtitle track.
+- With captions mapped, a RE-ENCODE produced no file at all: ffmpeg looked
+  for a subtitle encoder and killed the export.
+- Escape in drawing mode swallowed the key from any open dialog.
 
 ### Fixed
 - Stop and Cancel did not stop. An export queue kept going after Stop, and a
