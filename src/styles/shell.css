@@ -178,6 +178,10 @@
 }
 
 .cp-reader-list {
+  /* The lasso band is absolutely positioned against this scroller, so it needs
+     to be the containing block. Without it the band draws against the page and
+     lands nowhere near the pointer. */
+  position: relative;
   flex: 1;
   overflow-y: scroll;             /* permanent scrollbar, like the transcript body */
   scrollbar-gutter: stable;
@@ -311,6 +315,14 @@
 .cp-reader-row.active {
   background: var(--bg-3);
   border-color: var(--line-2);
+  color: var(--fg-1);
+}
+/* Picked out by shift or cmd click, or by the lasso. Distinct from .active,
+   which means "this is the transcript currently open" - you can select rows
+   other than the one you are reading, and both states can sit on one row. */
+.cp-reader-row.selected {
+  background: var(--bg-4);
+  border-color: var(--line-3);
   color: var(--fg-1);
 }
 /* Leading 16:9 poster tile — same cache as the Library cards. */

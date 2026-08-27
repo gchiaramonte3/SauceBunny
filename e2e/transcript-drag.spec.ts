@@ -226,3 +226,63 @@ test("a refused move is reported, not swallowed as an unhandled rejection", asyn
   await expect(page.locator(".cp-reader-project-err")).toContainText(/already there/i);
   expect(rejections, "the refusal escaped as an unhandled rejection").toEqual([]);
 });
+
+/**
+ * The picker can pick more than one thing.
+ *
+ * It had drag-to-project but no multi-select at all, and said so in a comment:
+ * "No multi-select in the picker, so a drag is always the one row." Filing a
+ * morning's transcripts therefore meant dragging them one at a time. The rules
+ * were already generic and already assembled - `useGridSelection` is the same
+ * hook the Library, frames and web shelves run - the picker simply never
+ * called it.
+ *
+ * A plain click OPENS a transcript, which is the picker's whole job, so
+ * selection takes the modifiers rather than taking that gesture.
+ */
+test("shift-click picks a range of transcripts, and a plain click still opens", async ({ page }) => {
+  await bootReader(page);
+  const rows = page.locator(".cp-reader-row");
+  await expect(rows.first()).toBeVisible({ timeout: 10_000 });
+  const n = await rows.count();
+  test.skip(n < 3, "needs three transcripts to range over");
+
+  await rows.nth(0).click({ modifiers: ["ControlOrMeta"] });
+  await rows.nth(2).click({ modifiers: ["Shift"] });
+  await expect(page.locator(".cp-reader-row.selected")).toHaveCount(3);
+
+  // The gesture the picker already had must survive: an unmodified click
+  // opens, and drops the selection rather than leaving it armed behind you.
+  await rows.nth(1).click();
+  await expect(page.locator(".cp-reader-row.selected")).toHaveCount(0);
+});
+
+test("cmd-click adds one transcript without collapsing the rest", async ({ page }) => {
+  await bootReader(page);
+  const rows = page.locator(".cp-reader-row");
+  await expect(rows.first()).toBeVisible({ timeout: 10_000 });
+  test.skip((await rows.count()) < 3, "needs three transcripts");
+
+  await rows.nth(0).click({ modifiers: ["ControlOrMeta"] });
+  await rows.nth(2).click({ modifiers: ["ControlOrMeta"] });
+  await expect(page.locator(".cp-reader-row.selected")).toHaveCount(2);
+});
+
+test("a lasso over the picker selects the rows it crosses", async ({ page }) => {
+  await bootReader(page);
+  const rows = page.locator(".cp-reader-row");
+  await expect(rows.first()).toBeVisible({ timeout: 10_000 });
+  test.skip((await rows.count()) < 2, "needs two transcripts to band over");
+
+  const first = (await rows.nth(0).boundingBox())!;
+  const last = (await rows.nth(1).boundingBox())!;
+  // Start in the gutter beside the rows, not on one: a band that begins on a
+  // row would be a drag of that row instead.
+  const x = first.x + first.width - 6;
+  await page.mouse.move(x, first.y - 2);
+  await page.mouse.down();
+  await page.mouse.move(x - 8, last.y + last.height / 2, { steps: 8 });
+  await page.mouse.up();
+
+  await expect(page.locator(".cp-reader-row.selected").first()).toBeVisible();
+});

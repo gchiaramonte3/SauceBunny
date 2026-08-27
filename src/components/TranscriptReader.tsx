@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useGridSelection } from "../hooks/use-grid-selection";
+import { useMarquee } from "../hooks/use-marquee";
 import { useCardDrag } from "../hooks/use-card-drag";
 import { usePaneWidth } from "../hooks/use-pane-width";
 import { invoke } from "@tauri-apps/api/core";
@@ -351,12 +353,45 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
     min: 232, max: 520, fallback: PICKER_W_DEFAULT,
   });
 
+  /**
+   * Multi-select over the transcript picker.
+   *
+   * The picker had drag-to-project but no way to pick more than one thing, so
+   * filing a morning's transcripts meant dragging them one at a time. The
+   * rules were already generic and already assembled - `useGridSelection` is
+   * the same hook the Library, frames and web shelves run - the picker simply
+   * never called it, and said so in a comment that is now gone.
+   *
+   * `order` is the flattened VISIBLE order across groups, because a shift
+   * range has to run over what is on screen: the rows are grouped by project
+   * and collapsed groups contribute nothing.
+   */
+  const visiblePaths = useMemo(
+    () => groups.flatMap((g) =>
+      isOpen(g.folder, g.items.some((t) => t.path === activePath))
+        ? g.items.map((t) => t.path)
+        : []),
+    [groups, isOpen, activePath],
+  );
+  const pick = useGridSelection(visiblePaths);
+  const listRef = useRef<HTMLDivElement>(null);
+  const marquee = useMarquee({
+    containerRef: listRef,
+    itemSelector: ".cp-reader-row",
+    // Rows sit inside per-project sections, so a band starting in the gap
+    // between two groups belongs to the section rather than the scroller.
+    gutterSelector: ".cp-reader-group, .cp-reader-list",
+    onSelect: pick.onMarquee,
+    onEnd: pick.onMarqueeEnd,
+  });
+
   const rowDrag = useCardDrag({
     itemSelector: ".cp-reader-row",
     targetSelector: "[data-drop]",
     targetAttr: "data-drop",
-    // No multi-select in the picker, so a drag is always the one row.
-    pathsFor: (path: string) => [path],
+    // Finder's rule: dragging a row that is part of the selection drags the
+    // whole selection; dragging one outside it drags only that one.
+    pathsFor: (path: string) => (pick.selected.has(path) ? pick.selectedPaths : [path]),
     onDrop: (folder: string, paths: readonly string[]) => {
       const path = paths[0];
       const hit = path ? entryByPath.get(path) : undefined;
@@ -515,7 +550,19 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
             Analyzed
           </button>
         </div>}
-        <div className="cp-reader-list">
+        <div className="cp-reader-list" ref={listRef} {...marquee.handlers}>
+          {marquee.band && (
+            <div
+              className="cp-lib-marquee"
+              aria-hidden="true"
+              style={{
+                left: marquee.band.left,
+                top: marquee.band.top,
+                width: marquee.band.right - marquee.band.left,
+                height: marquee.band.bottom - marquee.band.top,
+              }}
+            />
+          )}
           {groups.map((g) => (
             <section key={g.folder || "root"} className="cp-reader-group">
               <ReaderProjectHeader
@@ -545,9 +592,23 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
                 <button
                   key={t.path}
                   type="button"
-                  className={"cp-reader-row" + (t.path === activePath ? " active" : "")}
+                  className={"cp-reader-row"
+                    + (t.path === activePath ? " active" : "")
+                    + (pick.selected.has(t.path) ? " selected" : "")}
                   data-path={t.path}
-                  onClick={() => onOpenTranscript(t.entry)}
+                  // A plain click OPENS here, and that is the picker's whole
+                  // job, so selection takes the modifiers instead of taking
+                  // the gesture. Shift and cmd pick; an unmodified click
+                  // behaves exactly as it always has.
+                  onClick={(e) => {
+                    if (e.shiftKey || e.metaKey || e.ctrlKey) {
+                      e.preventDefault();
+                      pick.onItemClick(t.path, e);
+                      return;
+                    }
+                    pick.clear();
+                    onOpenTranscript(t.entry);
+                  }}
                   onContextMenu={(e) => { e.preventDefault(); setRowMenu({ entry: t.entry, title: t.title, x: e.clientX, y: e.clientY }); }}
                   aria-current={t.path === activePath ? "true" : undefined}
                   title={t.title}
