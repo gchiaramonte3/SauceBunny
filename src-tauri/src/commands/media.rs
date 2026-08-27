@@ -252,7 +252,27 @@ fn cut_local(
     } else {
         a.extend(["-c".into(), "copy".into()]);
     }
-    a.extend(["-movflags".into(), "+faststart".into(), output.into()]);
+    // A/V SYNC. Without this the cut desyncs, and it is the whole reason
+    // exported clips came out with the sound off the picture.
+    //
+    // `-ss` before `-i` is an input seek, so with `-c copy` ffmpeg keeps the
+    // leading GOP and those packets carry NEGATIVE timestamps: measured on a
+    // 20s cut, video began at -1.066667 and audio at -1.024. Negative PTS in
+    // an mp4 is resolved differently by different players, and the two streams
+    // do not agree about it - the muxer writes an edit list for one and shifts
+    // the other, so the sound slides against the picture.
+    //
+    // `make_zero` shifts BOTH streams by the same amount so the first packet
+    // sits at 0 and their true relative offset survives. After it: video
+    // 0.096, audio 0.000, durations within 20ms of each other.
+    //
+    // yt-dlp's --download-sections was doing this for us, so removing it took
+    // the guard with it. That is on me.
+    a.extend([
+        "-avoid_negative_ts".into(), "make_zero".into(),
+        "-movflags".into(), "+faststart".into(),
+        output.into(),
+    ]);
 
     let out = std::process::Command::new(ffmpeg)
         .args(&a)
