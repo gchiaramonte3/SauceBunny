@@ -1,81 +1,74 @@
 /**
- * Mounts the REAL src/components/MSEStreamPlayer.tsx against the REAL Rust
- * stream proxy (booted by `harness_seek_session_server` in stream_proxy.rs)
- * and drives the two gestures a user makes, then reports the seek log.
+ * Mounts the REAL src/components/MSEStreamPlayer.tsx against a mini
+ * stream-proxy that serves the same two routes the Rust one does:
+ * `/v1/<b64>` raw with Range, and `/fmp4/v1/<b64>?start=N` remuxed by the
+ * bundled ffmpeg.
  *
- * Everything here is real: a real MediaSource, a real fetch of a real
- * ffmpeg-remuxed fMP4, real rebuilds. The only thing the harness supplies is
- * the gestures, which is exactly the part a unit test has to fake.
- *
- * Harness only — nothing here is app code.
+ * Harness only. Nothing here is app code. It exists because "seeking and
+ * scrubbing is broken" was reported twice and answered once from reasoning
+ * rather than from a running player, which was wrong. This makes the claim
+ * checkable: it drives real seeks through the real component and reports what
+ * the app itself says happened.
  */
-import React from "react";
+import { createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { MSEStreamPlayer } from "../src/components/MSEStreamPlayer";
 import type { PlayerHandle } from "../src/components/player-handle";
 
-const params = new URLSearchParams(location.search);
-const PATH = params.get("path") ?? "";
-const DURATION = Number(params.get("duration") ?? "600");
+type Line = { tag: string; msg: string };
+const diag: Line[] = [];
+const ref = createRef<PlayerHandle>();
 
-type Line = { at: number; tag: string; msg: string };
-const log: Line[] = [];
-const t0 = Date.now();
-const done: { value: unknown } = { value: null };
-(globalThis as unknown as Record<string, unknown>).__SEEK_LOG__ = log;
-(globalThis as unknown as Record<string, unknown>).__SEEK_DONE__ = done;
+const B64 = btoa("http://127.0.0.1:5199/sample-600s.mp4").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const PATH = `http://127.0.0.1:5199/t/harness/v1/${B64}`;
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+declare global { interface Window { __probe: Record<string, unknown> } }
 
-function Harness() {
-  const ref = React.useRef<PlayerHandle>(null);
-  React.useEffect(() => {
-    void (async () => {
-      // Wait for the first pipeline to open.
-      for (let i = 0; i < 200 && !log.some((l) => l.msg.includes("pipeline open")); i++) await sleep(100);
+window.__probe = {
+  diag,
+  ready: false,
+  seekTo: (s: number) => ref.current?.seekTo(s),
+  currentTime: () => ref.current?.getCurrentTime() ?? -1,
+  /** Is the scrub overlay actually covering the video right now? */
+  overlayShown: () => !!document.querySelector(".cp-scrub-preview")?.classList.contains("show"),
+  /** Mean luminance of the overlay canvas — 0 when it is painting its own
+   *  near-black background, well above 0 once a real frame lands. */
+  overlayLuma: () => {
+    const c = document.querySelector(".cp-scrub-preview") as HTMLCanvasElement | null;
+    if (!c || !c.width) return -1;
+    const d = c.getContext("2d")?.getImageData(0, 0, c.width, c.height).data;
+    if (!d) return -1;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) sum += (d[i] + d[i + 1] + d[i + 2]) / 3;
+    return sum / (d.length / 4);
+  },
+  /** Mean luminance of the <video> itself, so "the picture moved" is checkable. */
+  videoLuma: () => {
+    const v = document.querySelector(".cp-local-video") as HTMLVideoElement | null;
+    if (!v || !v.videoWidth) return -1;
+    const c = document.createElement("canvas");
+    c.width = 64; c.height = 36;
+    const ctx = c.getContext("2d");
+    if (!ctx) return -1;
+    ctx.drawImage(v, 0, 0, 64, 36);
+    const d = ctx.getImageData(0, 0, 64, 36).data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) sum += (d[i] + d[i + 1] + d[i + 2]) / 3;
+    return sum / (d.length / 4);
+  },
+};
 
-      // ── Gesture 1: a CLICK, far from the playhead ───────────────
-      ref.current?.seekTo(DURATION * 0.2255);   // 135.3s on a 600s source
-      await sleep(2500);
-
-      // ── Gesture 2: a DRAG, released well past where it began ────
-      // One seek per frame, the way Timeline's rAF-coalesced scrub emits them.
-      const from = DURATION * 0.44;
-      const to = DURATION * 0.67;
-      const steps = 12;
-      for (let i = 0; i <= steps; i++) {
-        ref.current?.seekTo(from + ((to - from) * i) / steps);
-        await sleep(16);
-      }
-      await sleep(2500);
-
-      // ── Gesture 3: a DRAG back to the very start ────────────────
-      const back = DURATION * 0.85;
-      ref.current?.seekTo(back);
-      await sleep(16);
-      for (let i = 10; i >= 0; i--) {
-        ref.current?.seekTo((back * i) / 10);
-        await sleep(16);
-      }
-      await sleep(2500);
-
-      done.value = { ok: true, lines: log.length };
-    })();
-  }, []);
-
-  if (!PATH) return React.createElement("pre", null, "no ?path=");
-  return React.createElement(MSEStreamPlayer, {
-    ref,
-    path: PATH,
-    hasVideo: true,
-    initialVolume: 0,
-    knownDuration: DURATION,
-    // The scrub preview opens a SECOND mediabunny pipeline over the raw route.
-    // Off here so the log is the seek machinery and nothing else.
-    disableScrubPreview: true,
-    onDiag: (tag: string, msg: string) => { log.push({ at: Date.now() - t0, tag, msg }); },
-    onError: (m: string) => { log.push({ at: Date.now() - t0, tag: "err", msg: m }); },
-  });
-}
-
-createRoot(document.getElementById("root")!).render(React.createElement(Harness));
+createRoot(document.getElementById("root")!).render(
+  <MSEStreamPlayer
+    ref={ref}
+    path={PATH}
+    hasVideo
+    initialVolume={0}
+    knownDuration={600}
+    videoCodec="avc1.64001E"
+    audioCodec="mp4a.40.2"
+    onReady={() => { window.__probe.ready = true; }}
+    onDiag={(tag, msg) => { diag.push({ tag, msg }); }}
+    onError={(e) => { diag.push({ tag: "error", msg: String(e) }); }}
+  />,
+);
