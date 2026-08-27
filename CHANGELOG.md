@@ -5,10 +5,37 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
-`0.4.4` and `0.4.5` were bumped in the manifests but never tagged or
-released, so everything below is unreleased and sits on top of `v0.4.3`.
+`0.4.4`, `0.4.5` and `0.4.6` were bumped in the manifests but never tagged
+or released, so everything below is unreleased and sits on top of `v0.4.3`.
+The build in your hands is identified by its CFBundleVersion, shown in
+Settings ▸ About: `2026082701` is this one.
 
 ### Fixed
+- Stop and Cancel did not stop. An export queue kept going after Stop, and a
+  cloud AI request carried on with its answer landing on a screen that said
+  it was cancelled.
+- Scrubbing a web clip went black. The preview overlay carries an opaque
+  background and was revealed the instant a seek began, before a frame had
+  decoded, so touching the scrubber replaced the picture with a black
+  rectangle. It is revealed by the first painted frame now.
+- Web clip export was ~20x slower than it needed to be. `--download-sections`
+  switched yt-dlp onto a single throttled connection and made the sixteen
+  concurrent fragments above it inert: measured at 285 KB/s against
+  47.3 MB/s, so the whole 1.18 GB source now arrives in under 25s where a
+  60-second section took 54.5s. Exports download and cut locally, and the
+  source is kept, so a second clip from the same video takes 0.2s.
+- A drawing left on a frame was painted over every frame in the source. The
+  proximity fade was ±0.6s, fourteen frames at 24fps, and a drawing opened
+  from a comment was pinned with no release at all.
+- The move dialog opened in the top-left corner over undimmed content, and
+  told you to make a folder with a control that lives behind it. It is
+  centred, and it can make the folder itself.
+- Shift-click, cmd-click and the lasso vanished when the frames or web shelf
+  was switched to list view, and the transcripts picker had no multi-select
+  at all.
+- The seek log described a drag's start and its end as though they were one
+  moment, which read as seeks landing hundreds of seconds from where they
+  were asked.
 - Typing a timecode into Mark in / Mark out corrupted the field on the first
   keystroke and destroyed a range that was already marked — there was no
   keyboard route to a mark at all. Only pasting worked.
