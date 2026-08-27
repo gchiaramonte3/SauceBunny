@@ -241,6 +241,19 @@ fn cut_local(
         "-ss".into(), format!("{start:.3}"),
         "-i".into(), raw.to_string_lossy().to_string(),
         "-t".into(), format!("{:.3}", (end - start).max(0.0)),
+        // MAP EXPLICITLY, or the captions vanish.
+        //
+        // With `-c copy` and no mapping, ffmpeg's default stream selection
+        // dropped the mov_text subtitle track outright: a source cut with
+        // Captions on came out with no subtitles at all, silently. Verified
+        // both ways - default mapping loses it, this keeps it.
+        //
+        // The `?` on audio and subtitles is load-bearing: without it a source
+        // that has no subtitle track (most of them) fails the whole export
+        // with "Stream map matches no streams".
+        "-map".into(), "0:v:0".into(),
+        "-map".into(), "0:a:0?".into(),
+        "-map".into(), "0:s:0?".into(),
     ];
     if reencode {
         // Frame-accurate: the decode starts at the keyframe and output starts
@@ -248,6 +261,14 @@ fn cut_local(
         a.extend([
             "-c:v".into(), "h264_videotoolbox".into(), "-b:v".into(), "8M".into(),
             "-pix_fmt".into(), "yuv420p".into(), "-c:a".into(), "aac".into(),
+            // COPY the subtitles, never encode them. With the subtitle stream
+            // mapped and no codec named for it, ffmpeg looks for a subtitle
+            // ENCODER, finds none, and kills the whole export with "Error
+            // selecting an encoder" - so a re-encode of any captioned source
+            // produced no file at all. Found immediately after adding the map
+            // that fixed captions for the copy path, which is the shape these
+            // keep taking: one fix, one new hole.
+            "-c:s".into(), "copy".into(),
         ]);
     } else {
         a.extend(["-c".into(), "copy".into()]);

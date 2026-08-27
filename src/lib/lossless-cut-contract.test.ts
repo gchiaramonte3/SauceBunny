@@ -40,12 +40,34 @@ function code(text: string): string {
     .join("\n");
 }
 
-describe("a lossless cut keeps its streams in sync", () => {
-  const src = code(readFileSync(MEDIA, "utf8"));
+/**
+ * `cut_local`'s body ALONE.
+ *
+ * Scanning the whole file passed for the wrong reason: another function in
+ * media.rs also maps `0:a:0?`, so an assertion that the file "contains" it
+ * stayed green while cut_local's own map was mutated to non-optional. That is
+ * this repo's recurring failure - a scan that finds something else - and it
+ * caught me writing it during the audit that was looking for exactly this.
+ */
+function cutLocalBody(text: string): string {
+  const i = text.indexOf("fn cut_local");
+  if (i < 0) return "";
+  const j = text.indexOf("\n}", i);
+  return text.slice(i, j < 0 ? undefined : j);
+}
 
-  it("finds the cut helper, so the checks below cannot pass vacuously", () => {
+describe("a lossless cut keeps its streams in sync", () => {
+  const whole = code(readFileSync(MEDIA, "utf8"));
+  const src = cutLocalBody(whole);
+
+  it("finds the cut helper's body, so the checks below cannot pass vacuously", () => {
     expect(src, "cut_local is gone — re-derive this contract").toContain("fn cut_local");
     expect(src, "the cut no longer input-seeks").toContain('"-ss"');
+    expect(src.length, "the body extractor returned almost nothing").toBeGreaterThan(200);
+    expect(
+      src.length,
+      "the extractor swallowed the rest of the file, so these checks are file-wide again",
+    ).toBeLessThan(whole.length * 0.5);
   });
 
   it("normalises timestamps whenever it stream-copies", () => {
@@ -65,5 +87,40 @@ describe("a lossless cut keeps its streams in sync", () => {
     // packets or leave one stream behind, which is the same desync again.
     expect(src, "-avoid_negative_ts is set to something other than make_zero")
       .toContain('"make_zero"');
+  });
+
+  it("maps the streams explicitly, or the captions disappear", () => {
+    // SECOND regression from the same change, found by auditing rather than
+    // by a test. With `-c copy` and no mapping, ffmpeg's default stream
+    // selection dropped the mov_text subtitle track: a source exported with
+    // Captions on came out with no subtitles at all, and nothing said so.
+    // Verified against the bundled ffmpeg both ways.
+    expect(src, "cut_local no longer maps streams, so embedded captions are dropped")
+      .toContain('"-map"');
+    expect(src).toContain('"0:s:0?"');
+  });
+
+  it("marks the audio and subtitle maps optional", () => {
+    // The `?` is load-bearing. Most sources have no subtitle track, and a
+    // hard map on a stream that is not there fails the entire export with
+    // "Stream map matches no streams" - trading dropped captions for no
+    // clip at all.
+    expect(src, "an unconditional subtitle map fails every source without one")
+      .not.toMatch(/"0:s:0"/);
+    expect(src).toContain('"0:a:0?"');
+  });
+
+  it("copies subtitles on the RE-ENCODE path instead of encoding them", () => {
+    // THIRD regression from this one change, and caused by the fix for the
+    // second. With the subtitle stream mapped and no codec named for it,
+    // ffmpeg hunts for a subtitle encoder, finds none, and kills the export:
+    // "Error selecting an encoder", no file at all. Verified against the
+    // bundled ffmpeg - it fails without this and succeeds with it.
+    expect(
+      src,
+      "the re-encode branch maps subtitles without -c:s copy, so a captioned " +
+        "source produces no file at all",
+    ).toContain('"-c:s"');
+    expect(src).toMatch(/"-c:s"\.into\(\),\s*"copy"/);
   });
 });

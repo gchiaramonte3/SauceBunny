@@ -3998,6 +3998,15 @@ export default function App() {
     if (!reviewDrawActive) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // A DIALOG OWNS ESCAPE WHILE IT IS OPEN.
+      //
+      // This listener is capture-phase on window and calls stopPropagation,
+      // so without this guard it ran BEFORE any dialog's own handler and then
+      // swallowed the key: open the command palette or Settings while drawing
+      // is on, press Escape, and drawing mode exited while the modal stayed
+      // put and never saw it. Found auditing my own change rather than by a
+      // test, which is the point of the audit.
+      if (document.querySelector('[aria-modal="true"]')) return;
       e.preventDefault();
       e.stopPropagation();
       if (reviewLabelMode) { setReviewLabelMode(false); return; }
