@@ -870,6 +870,20 @@
   box-shadow: 0 24px 60px rgba(0,0,0,0.55);
   font-family: var(--font-ui);
 }
+/* "Make a folder for them" inside the move dialog. Sits between the folder
+   list and the on-disk caveat, because it is another destination rather than
+   a different kind of action. */
+.cp-rowmenu-newfolder { margin-top: 12px; }
+.cp-rowmenu-newfolder-label {
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--fg-3);
+}
+.cp-rowmenu-newfolder-row { display: flex; gap: 6px; align-items: center; }
+.cp-rowmenu-newfolder-row .cp-rowmenu-input { flex: 1; min-width: 0; }
+.cp-rowmenu-newfolder-row .btn { flex: none; white-space: nowrap; }
 .cp-rowmenu-title { margin: 0 0 12px; font-size: var(--text-xl); font-weight: var(--weight-bold); color: var(--fg-1); }
 .cp-rowmenu-input {
   width: 100%;

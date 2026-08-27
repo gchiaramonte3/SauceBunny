@@ -71,7 +71,7 @@ export function FrameMoveDialog({ name, folders, currentFolder, onMoved, onClose
   const options = ["", ...folders.filter((f) => f !== "")];
 
   return createPortal(
-    <div className="cp-rowmenu-scrim" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="cp-rowmenu-scrim modal" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       {/* tabIndex={-1} so the trap has somewhere to put focus on open;
           without it the first Tab escapes the scrim. */}
       <div ref={dialogRef} tabIndex={-1} className="cp-rowmenu-dialog" role="dialog" aria-modal="true" aria-label="Move frame">

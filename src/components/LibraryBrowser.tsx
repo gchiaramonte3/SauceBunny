@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
+import { newFolderPath } from "../lib/library-folder";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LibraryTree } from "./LibraryTree";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
@@ -197,22 +198,17 @@ export function LibraryBrowser({
    * move gesture, which would relocate real footage and has no undo.
    */
   const createLibraryFolder = useCallback(async (name: string): Promise<string | null> => {
-    const dir = selected?.[selected.length - 1]?.path;
-    if (!dir) return "Open a folder first.";
-    const trimmed = name.trim();
-    // A separator would escape the folder being browsed; the Rust side joins
-    // blind, so the check has to happen before the call.
-    if (!trimmed || trimmed.includes("/") || trimmed.startsWith(".")) {
-      return "Use a plain folder name.";
-    }
+    const target = newFolderPath(selected?.[selected.length - 1]?.path ?? "", name);
+    if ("error" in target) return target.error;
     try {
-      await invoke("ensure_dir_exists", { path: `${dir.replace(/\/+$/, "")}/${trimmed}` });
+      await invoke("ensure_dir_exists", { path: target.path });
       rescanAll();
       return null;
     } catch (e) {
       return formatError(e);
     }
   }, [selected, rescanAll]);
+
 
   /**
    * The drag, owned HERE rather than in the pane, because it spans both the
@@ -282,6 +278,33 @@ export function LibraryBrowser({
     if (moved > 0) rescanAll();
     if (failures.length > 0) setMoveError(failures.join(" · "));
   }, [rescanAll]);
+
+  /**
+   * Make a subfolder and file the selection into it, in one gesture.
+   *
+   * The move dialog used to say "This folder has no subfolders yet. Make one
+   * with New folder first" and then offer no way to do that: you had to cancel,
+   * find the bar, make the folder, re-select the files and start again. A
+   * dialog that names the thing you need and cannot give it to you is a dead
+   * end wearing an instruction's clothes.
+   *
+   * Both halves live HERE rather than in the dialog so the destination path is
+   * computed once, by the same rule the bar uses.
+   */
+  const createFolderAndMove = useCallback(async (
+    name: string,
+    paths: readonly string[],
+  ): Promise<string | null> => {
+    const target = newFolderPath(selected?.[selected.length - 1]?.path ?? "", name);
+    if ("error" in target) return target.error;
+    try {
+      await invoke("ensure_dir_exists", { path: target.path });
+    } catch (e) {
+      return formatError(e);
+    }
+    await moveToFolder(target.path, paths, { copy: false });
+    return null;
+  }, [selected, moveToFolder]);
 
   /**
    * Move a file to the Finder Trash.
@@ -600,6 +623,7 @@ export function LibraryBrowser({
         />
         {movingPaths && (
           <LibraryMoveDialog
+            onCreateFolder={selected ? createFolderAndMove : undefined}
             paths={movingPaths}
             // The SAME destinations the drag offers, so the two routes cannot
             // disagree about where a file can go.

@@ -326,3 +326,74 @@ test("crossing a folder on the way somewhere else does not spring it", async ({ 
   expect(await page.locator(".cp-lib-bcrumbs").textContent()).toBe(before);
   await page.mouse.up();
 });
+
+/**
+ * The move dialog is a MODAL, and has to look like one.
+ *
+ * `.cp-rowmenu-scrim` is only `position: fixed; inset: 0`. The dimming and the
+ * flex centring live on `.cp-rowmenu-scrim.modal`, and both move dialogs
+ * rendered the bare class - so the box landed in the top-left corner over
+ * undimmed content, reading as a stray panel rather than something asking for
+ * an answer. ProjectMenu and ReaderRowMenu had the modifier all along; the two
+ * move dialogs did not, and the second one inherited it from the first.
+ *
+ * Measured in the browser rather than asserted in CSS, because "is it centred"
+ * is a question about layout that source cannot answer.
+ */
+test("the move dialog opens centred, over a dimmed page", async ({ page }) => {
+  await bootLibrary(page, "list");
+  const file = page.locator(".cp-lib-pane .cp-lib-lrow:not(.cp-lib-lrow-folder)").first();
+  await expect(file).toBeVisible({ timeout: 10_000 });
+  await file.click({ button: "right" });
+  await page.getByRole("menuitem", { name: /Move to folder/ }).click();
+
+  const dialog = page.locator(".cp-rowmenu-dialog");
+  await expect(dialog).toBeVisible();
+
+  const box = (await dialog.boundingBox())!;
+  const view = page.viewportSize()!;
+  const dxCentre = Math.abs((box.x + box.width / 2) - view.width / 2);
+  const dyCentre = Math.abs((box.y + box.height / 2) - view.height / 2);
+  expect(dxCentre, `dialog is ${Math.round(dxCentre)}px off-centre horizontally`).toBeLessThan(2);
+  expect(dyCentre, `dialog is ${Math.round(dyCentre)}px off-centre vertically`).toBeLessThan(2);
+
+  // And the scrim actually dims: the bare class is transparent, which is the
+  // other half of what made it read as a floating panel.
+  const scrimBg = await page.locator(".cp-rowmenu-scrim").evaluate(
+    (el) => getComputedStyle(el).backgroundColor,
+  );
+  expect(scrimBg, "the scrim is transparent, so nothing says the page is inert")
+    .not.toBe("rgba(0, 0, 0, 0)");
+});
+
+/**
+ * And it can make the folder it asks for.
+ *
+ * It used to say "This folder has no subfolders yet. Make one with New folder
+ * first" while offering no way to do that: the control it named lived on the
+ * bar BEHIND the modal, so following the instruction meant cancelling, finding
+ * it, and re-selecting every file. A dialog that names what you need and
+ * cannot give it to you is a dead end wearing an instruction's clothes.
+ */
+test("a new folder can be made from inside the move dialog", async ({ page }) => {
+  await bootLibrary(page, "list");
+  const file = page.locator(".cp-lib-pane .cp-lib-lrow:not(.cp-lib-lrow-folder)").first();
+  await expect(file).toBeVisible({ timeout: 10_000 });
+  await file.click({ button: "right" });
+  await page.getByRole("menuitem", { name: /Move to folder/ }).click();
+
+  const field = page.locator("#cp-move-newfolder");
+  await expect(field, "the dialog offers no way to make the folder it asks for").toBeVisible();
+
+  // The refusal path, because the validation is the load-bearing half: a
+  // separator would escape the folder being browsed.
+  await field.fill("../escape");
+  await page.getByRole("button", { name: /Create and move/ }).click();
+  await expect(page.locator(".cp-rowmenu-warn").filter({ hasText: "plain folder name" })).toBeVisible();
+
+  // A real name closes the dialog, which is the whole gesture: name it, and
+  // the files are filed.
+  await field.fill("Selects");
+  await page.getByRole("button", { name: /Create and move/ }).click();
+  await expect(page.locator(".cp-rowmenu-dialog")).toBeHidden({ timeout: 10_000 });
+});
