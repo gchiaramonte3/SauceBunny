@@ -19,11 +19,30 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+/*
+ * MEASURED, so nobody has to rediscover it:
+ *
+ *   fixture            first preview frame
+ *   640x360             ~32ms
+ *   3840x2160         ~2076ms      (65x, and the reported source was 4K)
+ *
+ * That is the scrub complaint's remaining half. Revealing the overlay only
+ * once it holds a frame stops the BLACK (this harness proves that: 10 empty
+ * frames with the fix reverted, 0 with it). It does not make a 4K preview
+ * keep up, because the preview decodes full-resolution frames over ranged
+ * reads. The fix for that is a lower-resolution source for the preview, not
+ * a faster decoder.
+ *
+ *   FIXTURE=sample-4k.mp4 VC=avc1.42C033 DUR=240 SLOW_MS=400 node harness-seek/run.mjs
+ */
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
-const SAMPLE = path.join(HERE, "sample-600s.mp4");
+const FIXTURE = process.env.FIXTURE ?? "sample-600s.mp4";
+const VC = process.env.VC ?? "avc1.64001E";
+const DUR = process.env.DUR ?? "600";
+const SAMPLE = path.join(HERE, FIXTURE);
 const FFMPEG = path.join(ROOT, "src-tauri/binaries/ffmpeg-aarch64-apple-darwin");
-if (!existsSync(SAMPLE)) {
+if (!existsSync(SAMPLE) && FIXTURE === "sample-600s.mp4") {
   // Generated, not committed: 35 MB, and it is reproducible in one command.
   // The timecode is burned INTO the picture on purpose - it is what makes a
   // landing checkable by eye instead of by the player's own say-so.
@@ -38,6 +57,8 @@ if (!existsSync(SAMPLE)) {
     "-c:a", "aac", "-b:a", "64k", "-shortest", SAMPLE,
   ]);
 }
+
+if (!existsSync(SAMPLE)) throw new Error(`no fixture at ${SAMPLE}`);
 
 const proxy = createServer((req, res) => {
   const url = new URL(req.url, "http://127.0.0.1:5199");
@@ -99,7 +120,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
 page.on("pageerror", (e) => console.log("  ✗ pageerror:", e.message));
 page.on("console", (m) => console.log("  [console]", m.text().slice(0,200)));
-await page.goto("http://127.0.0.1:5198/harness-seek/probe.html");
+await page.goto(`http://127.0.0.1:5198/harness-seek/probe.html?f=${FIXTURE}&vc=${VC}&dur=${DUR}`);
 try {
   await page.waitForFunction(() => (window).__probe?.ready === true, null, { timeout: 25_000 });
   console.log("• player ready\n");
@@ -129,6 +150,26 @@ for (let i = 0; i < 20; i++) {
   await sleep(30);
 }
 const blackFrames = cold.filter((s) => s.shown && s.luma >= 0 && s.luma < 4).length;
+
+// ── What is on SCREEN through a rebuild ──────────────────────────────
+// Hiding the overlay only helps if the thing underneath is worth seeing.
+// An out-of-buffer seek tears the MediaSource down and builds a new one,
+// and if the <video> goes black for that window then the picture is black
+// either way and the overlay fix bought nothing. This measures the
+// composite the user actually looks at: the overlay when it is shown, the
+// video when it is not.
+const onScreen = [];
+await P(() => (window).__probe.seekTo(240));
+for (let i = 0; i < 60; i++) {
+  onScreen.push(await P(() => {
+    const p = (window).__probe;
+    return p.overlayShown() ? p.overlayLuma() : p.videoLuma();
+  }));
+  await sleep(100);
+}
+const darkMs = onScreen.filter((l) => l >= 0 && l < 4).length * 100;
+console.log(`  screen dark during a rebuild      : ${darkMs}ms of ${onScreen.length * 100}ms`);
+if (process.env.DEBUG_SAMPLES) console.log("  onScreen:", JSON.stringify(onScreen.map((n) => Math.round(n))));
 if (process.env.DEBUG_SAMPLES) console.log("  samples:", JSON.stringify(cold));
 console.log(`  frames where an EMPTY overlay covered the video : ${blackFrames}`);
 console.log("  (>0 is the bug: the black rectangle is back)");

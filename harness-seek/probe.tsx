@@ -19,7 +19,8 @@ type Line = { tag: string; msg: string };
 const diag: Line[] = [];
 const ref = createRef<PlayerHandle>();
 
-const B64 = btoa("http://127.0.0.1:5199/sample-600s.mp4").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const q = new URLSearchParams(location.search);
+const B64 = btoa("http://127.0.0.1:5199/" + (q.get("f") ?? "sample-600s.mp4")).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const PATH = `http://127.0.0.1:5199/t/harness/v1/${B64}`;
 
 declare global { interface Window { __probe: Record<string, unknown> } }
@@ -64,8 +65,8 @@ createRoot(document.getElementById("root")!).render(
     path={PATH}
     hasVideo
     initialVolume={0}
-    knownDuration={600}
-    videoCodec="avc1.64001E"
+    knownDuration={Number(q.get("dur") ?? "600")}
+    videoCodec={q.get("vc") ?? "avc1.64001E"}
     audioCodec="mp4a.40.2"
     onReady={() => { window.__probe.ready = true; }}
     onDiag={(tag, msg) => { diag.push({ tag, msg }); }}
