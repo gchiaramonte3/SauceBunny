@@ -214,6 +214,60 @@ pub async fn create_clip(app: AppHandle, args: ClipArgs) -> Result<String, crate
     Ok(job_id)
 }
 
+/// Cut a range out of an already-downloaded file.
+///
+/// This is phase 2 of every sectioned video export. It replaced
+/// `--download-sections`, which was 162x slower on the measured case and
+/// dragged `--force-keyframes-at-cuts` plus two sets of hardware-encoder
+/// postprocessor args along with it, all of which are now gone.
+///
+/// Lossless by default: `-ss` before `-i` is an input seek, so ffmpeg starts
+/// at the nearest preceding keyframe and copies. That is the same accuracy
+/// yt-dlp's section download gave without `--force-keyframes-at-cuts`, and it
+/// took 0.15s on a 5m17s range where the old path took 3m06s.
+///
+/// `-t` rather than `-to`, because `-to` after an input seek is measured on
+/// the OUTPUT timeline and would silently cut short.
+fn cut_local(
+    ffmpeg: &str,
+    raw: &std::path::Path,
+    start: f64,
+    end: f64,
+    output: &str,
+    reencode: bool,
+) -> Result<(), String> {
+    let mut a: Vec<String> = vec![
+        "-hide_banner".into(), "-loglevel".into(), "error".into(), "-y".into(),
+        "-ss".into(), format!("{start:.3}"),
+        "-i".into(), raw.to_string_lossy().to_string(),
+        "-t".into(), format!("{:.3}", (end - start).max(0.0)),
+    ];
+    if reencode {
+        // Frame-accurate: the decode starts at the keyframe and output starts
+        // at `start`. h264_videotoolbox is the macOS hardware encoder.
+        a.extend([
+            "-c:v".into(), "h264_videotoolbox".into(), "-b:v".into(), "8M".into(),
+            "-pix_fmt".into(), "yuv420p".into(), "-c:a".into(), "aac".into(),
+        ]);
+    } else {
+        a.extend(["-c".into(), "copy".into()]);
+    }
+    a.extend(["-movflags".into(), "+faststart".into(), output.into()]);
+
+    let out = std::process::Command::new(ffmpeg)
+        .args(&a)
+        .output()
+        .map_err(|e| format!("could not run ffmpeg: {e}"))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    Err(format!(
+        "the cut failed: {}",
+        err.lines().last().unwrap_or("ffmpeg gave no reason").trim()
+    ))
+}
+
 async fn spawn_video_clip(
     app: AppHandle,
     args: ClipArgs,
@@ -222,11 +276,28 @@ async fn spawn_video_clip(
     output_str: String,
     ffmpeg_str: String,
 ) -> Result<(), crate::AppError> {
+    // Where yt-dlp writes. A sectioned export downloads the FULL source to
+    // scratch and cuts locally afterwards, because the full file arrives
+    // faster than a section of it does (see the flag note below). With no
+    // marks set there is nothing to cut, so it writes straight to the output.
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| crate::AppError::internal(format!("app_cache_dir: {e}")))?;
+    std::fs::create_dir_all(super::scratch_dir(&cache))
+        .map_err(|e| crate::AppError::internal(format!("mkdir cache: {e}")))?;
+    let raw_prefix = format!("{job_id}-rawv");
+    let dl_target = if section_secs.is_some() {
+        scratch_download_template(&cache, &raw_prefix)
+    } else {
+        output_str.clone()
+    };
+
     let mut cmd_args: Vec<String> = vec![
         "-f".into(),
         yt_dlp_video_format(&args.format).into(),
         "--ffmpeg-location".into(),
-        ffmpeg_str,
+        ffmpeg_str.clone(),
         "--no-playlist".into(),
         "--no-part".into(),
         "--newline".into(),
@@ -234,49 +305,41 @@ async fn spawn_video_clip(
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
         "-o".into(),
-        output_str.clone(),
+        dl_target.clone(),
         "--merge-output-format".into(),
         "mp4".into(),
-        // ─── Concurrent fragments — the actual 10× speedup ─────────────
-        // YouTube throttles single-stream downloads to ~1.5–2× realtime
-        // (intentional anti-scrape measure). Splitting the DASH manifest
-        // into 16 parallel HTTP requests bypasses the per-connection cap
-        // and saturates the user's bandwidth instead. Each fragment is
-        // typically 1–10s of video, so 16 parallel = ~16× throughput on
-        // a fast connection. Combined with hardware re-encode below this
-        // gets us close to the user's 10× target.
+        // ─── Concurrent fragments — and nothing may cancel them ────────
+        // YouTube throttles single-stream downloads to ~1.5-2x realtime.
+        // Sixteen parallel fragment requests bypass the per-connection cap
+        // and saturate the link instead.
+        //
+        // This comment used to end with "gets us close to the 10x target"
+        // and was followed, eight lines down, by --download-sections, which
+        // switches yt-dlp off the native fragment downloader and onto a
+        // SINGLE-CONNECTION ffmpeg read of the googlevideo URL. Every one of
+        // these flags was inert. transcript.rs found this, measured it and
+        // wrote it down; this path kept the flag and the claim.
+        //
+        // Measured on the reported video (2h11m, 1.18 GB):
+        //   section download of a 60s clip : 54.5s   @ 285 KB/s
+        //   full file, these flags working : <25s    @ 47.3 MB/s
+        //   local lossless cut of 5m17s    : 0.15s
+        //
+        // The WHOLE FILE arrives faster than one minute of it did. That is
+        // why there is no size threshold here and no setting: there is no
+        // clip length at which sectioning wins.
         "--concurrent-fragments".into(), "16".into(),
         // Bigger HTTP chunks per request → fewer round trips, less per-
         // connection overhead in TLS / TCP handshake.
         "--http-chunk-size".into(), "10M".into(),
     ];
-    if let Some((s, e)) = section_secs {
-        cmd_args.push("--download-sections".into());
-        cmd_args.push(format!("*{:.3}-{:.3}", s, e));
-        // Frame-accurate cut only matters when sectioning.
-        if args.reencode {
-            cmd_args.push("--force-keyframes-at-cuts".into());
-            // ─── Hardware-encode the boundary re-cuts ──────────────────
-            // Without these args, yt-dlp's ffmpeg sub-invocation defaults
-            // to libx264 (software, ~1.5–2× realtime on Apple Silicon).
-            // h264_videotoolbox is the macOS hardware H.264 encoder —
-            // 10–15× realtime for 1080p, gets us frame-accurate cuts
-            // without the slow software-encode penalty.
-            //
-            // We target both possible ffmpeg invocations yt-dlp may make
-            // during the keyframe re-cut:
-            //   • `ffmpeg_o` — output args on the final mux
-            //   • `Merger`  — the A+V stream merger
-            // -b:v 8M ≈ visually transparent for 1080p; bump for 4K via
-            // the format selector if needed.
-            cmd_args.extend([
-                "--postprocessor-args".into(),
-                "ffmpeg_o:-c:v h264_videotoolbox -b:v 8M -pix_fmt yuv420p -movflags +faststart".into(),
-                "--postprocessor-args".into(),
-                "Merger:-c:v h264_videotoolbox -b:v 8M -pix_fmt yuv420p -movflags +faststart".into(),
-            ]);
-        }
-    }
+    // Burned-in captions. This was deleted with the section-cut machinery it
+    // happened to sit next to, which is exactly the accident a `never read`
+    // warning on ClipArgs::captions caught: an export silently losing its
+    // subtitles, with nothing failing.
+    //
+    // It rides the DOWNLOAD, which now fetches the whole source, so the subs
+    // are embedded in the full file and the local cut copies them through.
     if args.captions {
         cmd_args.extend([
             "--write-subs".into(),
@@ -287,10 +350,13 @@ async fn spawn_video_clip(
             "srt".into(),
         ]);
     }
-    // `cmd_args` is now the cookie-free, URL-free base; each attempt appends the
-    // cookie flag (or not) + the URL so we can retry public on a cookied failure.
+
     let total_seconds = section_secs.map(|(s, e)| (e - s).max(0.0)).unwrap_or(0.0);
     let url = args.url.clone();
+    let cache_for_cut = cache.clone();
+    let raw_prefix_for_cut = raw_prefix.clone();
+    let ffmpeg_for_cut = ffmpeg_str.clone();
+    let args_reencode = args.reencode;
     let cookies_browser = args.cookies_browser.clone();
     let cookied = !cookies_args(cookies_browser.as_deref()).is_empty();
 
@@ -315,6 +381,13 @@ async fn spawn_video_clip(
             // cookied attempt's half-file, and the no-cookie resolve can pick a
             // DIFFERENT format → spliced/corrupt output (or a size-complete file
             // makes yt-dlp print "already downloaded" and exit 0 over junk).
+            // A sectioned export downloads to scratch, so that is where a
+            // half-finished cookied attempt is. Clearing only the output path
+            // would leave it, and --continue would resume it under a format
+            // the no-cookie resolve may not have picked.
+            if let Some(raw) = find_scratch_download(&cache_for_cut, &raw_prefix_for_cut) {
+                let _ = std::fs::remove_file(raw);
+            }
             let _ = std::fs::remove_file(&output_str);
             let _ = std::fs::remove_file(format!("{output_str}.part"));
             let out_path = std::path::Path::new(&output_str);
@@ -333,7 +406,35 @@ async fn spawn_video_clip(
             }
             outcome = run_video_attempt(&app, &job_id, with(None), total_seconds).await;
         }
-        let success = outcome.success;
+        // ── Phase 2: cut the range out of the full download ──────────
+        let mut success = outcome.success;
+        let mut cut_error: Option<String> = None;
+        if success {
+            if let Some((cut_s, cut_e)) = section_secs {
+                let _ = app.emit("clip-progress", ProgressEvent {
+                    job_id: job_id.clone(), percent: 92.0,
+                });
+                emit_clip_log(&app, &job_id, "info",
+                    format!("Cutting {:.1}s out of the download…", (cut_e - cut_s).max(0.0)));
+                match find_scratch_download(&cache_for_cut, &raw_prefix_for_cut) {
+                    Some(raw) => {
+                        let r = cut_local(&ffmpeg_for_cut, &raw, cut_s, cut_e,
+                                          &output_str, args_reencode);
+                        // The full source is the expensive thing here and it is
+                        // gone the moment the cut lands, so a second clip from
+                        // the same video pays the download again. Reusing it is
+                        // the next win and wants a cache key on the URL, not on
+                        // the job id this file is named after.
+                        let _ = std::fs::remove_file(&raw);
+                        if let Err(e) = r { success = false; cut_error = Some(e); }
+                    }
+                    None => {
+                        success = false;
+                        cut_error = Some("the download did not land in the cache".into());
+                    }
+                }
+            }
+        }
         if success {
             let _ = app.emit("clip-progress", ProgressEvent {
                 job_id: job_id.clone(), percent: 100.0,
@@ -341,6 +442,8 @@ async fn spawn_video_clip(
         }
         let error = if success {
             None
+        } else if let Some(e) = cut_error {
+            Some(e)
         } else if outcome.signalled {
             Some("Cancelled".into())
         } else if outcome.saw_auth_error {
@@ -424,10 +527,11 @@ async fn spawn_audio_clip(
         raw_template,
     ];
     yt_args.extend(cookies_args(cookies_browser.as_deref()));
-    if let Some((s, e)) = section_secs {
-        yt_args.push("--download-sections".into());
-        yt_args.push(format!("*{:.3}-{:.3}", s, e));
-    }
+    // NO --download-sections here either, for the reason the video path now
+    // states at length: it switches yt-dlp off the concurrent downloader and
+    // onto a single throttled connection, cancelling the very flags three
+    // lines above. Phase 2 already runs ffmpeg over the result, so the range
+    // costs nothing there.
     yt_args.push(url);
 
     let cmd = ytdlp(&app)?;
@@ -443,6 +547,7 @@ async fn spawn_audio_clip(
     let cache_for = super::scratch_dir(&cache);
     let raw_prefix_for = raw_prefix.clone();
     let output_for = output_str.clone();
+    let section_for = section_secs;
     // yt-dlp's [download] % is the download progress for this phase. We map
     // it to 0–80% so phase 2 (mp3 encode) can advance the bar through 80–100.
 
@@ -546,14 +651,25 @@ async fn spawn_audio_clip(
         };
         // -vn drops any embedded thumbnail/image track; libmp3lame VBR -q:a 2
         // is the sweet spot (~190 kbps, fast).
-        let ff_args = [
-            "-y", "-i", &raw_path_str,
-            "-vn",
-            "-codec:a", "libmp3lame",
-            "-q:a", "2",
-            "-id3v2_version", "3",
-            &output_for,
-        ];
+        // The range is cut HERE now, on a local file, instead of by
+        // --download-sections over a throttled connection. `-ss` before `-i`
+        // and `-t` for the length: `-to` after an input seek is measured on
+        // the output timeline and would cut short.
+        let mut ff_args: Vec<String> = vec!["-y".into()];
+        if let Some((cut_s, cut_e)) = section_for {
+            ff_args.extend([
+                "-ss".into(), format!("{cut_s:.3}"),
+                "-t".into(), format!("{:.3}", (cut_e - cut_s).max(0.0)),
+            ]);
+        }
+        ff_args.extend([
+            "-i".into(), raw_path_str.clone(),
+            "-vn".into(),
+            "-codec:a".into(), "libmp3lame".into(),
+            "-q:a".into(), "2".into(),
+            "-id3v2_version".into(), "3".into(),
+            output_for.clone(),
+        ]);
         // REGISTERED, like phase 1. `.output()` gives no handle, so Stop had
         // nothing to kill for the whole encode: phase 1's yt-dlp child is
         // taken out of the registry the moment it terminates, and nothing
