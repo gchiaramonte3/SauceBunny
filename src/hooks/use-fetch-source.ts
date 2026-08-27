@@ -81,6 +81,26 @@ export type FetchSourceProps = {
  * already load-bearing - the comment above `sessionRoomRef` records another
  * instance of the same constraint. Two paths, two seams.
  */
+/**
+ * The probe line, saying which number it is.
+ *
+ * `width`/`height` from fetch_metadata are the SOURCE's best rendition:
+ * download.rs walks `formats[]` and takes the max. What actually gets
+ * streamed is capped by `previewMaxHeight` (480 by default). Printing only
+ * the first number told the reader their 4K stream was struggling when the
+ * app had been streaming 480p all along, and it sent a whole investigation
+ * after 4K decode costs that were never being paid.
+ */
+export function probeLine(
+  m: { width?: number | null; height?: number | null; fps?: number | null; duration?: number | null },
+  cap: number,
+  suffix = "",
+): string {
+  const src = `${m.width ?? "?"}×${m.height ?? "?"}`;
+  const streamed = m.height != null && m.height > cap ? ` · streaming ≤${cap}p` : "";
+  return `${src} · ${m.fps ?? "?"} fps · ${m.duration?.toFixed(1) ?? "?"}s${streamed}${suffix}`;
+}
+
 export function useFetchSource(p: FetchSourceProps) {
   // Destructured so the block below is byte-identical to App.tsx.
   const {
@@ -304,7 +324,7 @@ export function useFetchSource(p: FetchSourceProps) {
         title: wm.title,
         durationSeconds: wm.duration ?? undefined,
       });
-      appendLog("ok", "probe", `${wm.width ?? "?"}×${wm.height ?? "?"} · ${wm.fps ?? "?"} fps · ${wm.duration?.toFixed(1) ?? "?"}s · from cache`);
+      appendLog("ok", "probe", probeLine(wm, defaults.previewMaxHeight, " · from cache"));
       // Warm opens skip the cold fetch_metadata branch, so re-attach the source's
       // transcript here too (else a re-pasted cached URL loses its transcript).
       void tryAutoLoadTranscript({ sourceUrl: wm.webpage_url ?? full }, seq);
@@ -364,7 +384,7 @@ export function useFetchSource(p: FetchSourceProps) {
         setInFrames((prev)  => prev == null ? prev : Math.min(prev, maxF));
         setOutFrames((prev) => prev == null ? prev : Math.min(prev, maxF));
       }
-      appendLog("ok", "probe", `${m.width ?? "?"}×${m.height ?? "?"} · ${m.fps ?? "?"} fps · ${m.duration?.toFixed(1) ?? "?"}s`);
+      appendLog("ok", "probe", probeLine(m, defaults.previewMaxHeight));
       // Playback (stream URL → proxy) was already kicked off in parallel
       // above (r59) — metadata only hydrates title/dims/duration here.
     } catch (err) {
