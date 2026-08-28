@@ -113,7 +113,10 @@ function insertAtCaret(
 // 140px, today's behavior). A number = the user dragged the composer to a
 // fixed height: the typing area IS that height and content scrolls inside it.
 const COMPOSER_HEIGHT_KEY = "saucebunny.review.composerHeight";
-const COMPOSER_MIN = 34;       // matches .cp-review-input min-height
+// Matches .cp-review-input min-height. Raised with it when the composer
+// became a column: the field is three lines now, and a floor of 34 let the
+// autosize and the drag handle shrink it back to the slot it used to be.
+const COMPOSER_MIN = 68;
 const COMPOSER_LOAD_MAX = 480; // static clamp on read; live drags clamp to 60% of the panel
 function loadComposerHeight(): number | null {
   try {
@@ -1522,6 +1525,37 @@ function ReviewComposer({
       })()}
       {/* Composer — draw + voice + comment, anchored at the current playhead. */}
       <div className="cp-review-composer">
+        {/* THE TEXT GETS ITS OWN ROW.
+            This was one nowrap flex row: six tool buttons, the textarea at
+            `flex: 1`, and Post. In a panel at any ordinary width the textarea
+            collapsed to its 120px minimum and you were writing a note through
+            a slot. The tools are secondary to the writing, so they sit under
+            it now and the field spans the full width. */}
+        <textarea
+          ref={composerRef}
+          className="cp-review-input"
+          value={text}
+          rows={1}
+          onChange={(e) => setText(e.target.value)}
+          onInput={autosize}
+          onFocus={() => ensureNamed()}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
+          // Placeholder uses coarse h:mm:ss (no frames, no zero-padded hour) so
+          // it fits a narrow panel without wrapping; posted comments still
+          // carry the full SMPTE timecode via secondsToTc.
+          placeholder={drawActive
+            ? "Describe the drawing…"
+            // Once latched this stops counting up, which is the only signal a
+            // user gets that the stamp is fixed rather than following them.
+            : `Comment at ${secondsToHms(anchorSec ?? currentSec ?? 0).replace(/^0(?=\d)/, "")}`}
+          /* A NAME, not just a placeholder. The placeholder changes with the
+             playhead ("Comment at 1:23"), so it is a hint rather than a label,
+             and the form-label sweep deliberately refuses placeholders as
+             names. Without this the app's main writing surface announced as an
+             unlabelled text box. */
+          aria-label={drawActive ? "Describe the drawing" : "Comment"}
+        />
+        <div className="cp-review-composer-actions">
         {/* Height drag handle — rides the composer's top hairline; the list
             above takes whatever the composer doesn't. */}
         <div
@@ -1583,31 +1617,9 @@ function ReviewComposer({
         >
           <IconRange size={16} className="cp-review-glyph" />
         </button>
-        <textarea
-          ref={composerRef}
-          className="cp-review-input"
-          value={text}
-          rows={1}
-          onChange={(e) => setText(e.target.value)}
-          onInput={autosize}
-          onFocus={() => ensureNamed()}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
-          // Placeholder uses coarse h:mm:ss (no frames, no zero-padded hour) so
-          // it fits a narrow panel without wrapping; posted comments still
-          // carry the full SMPTE timecode via secondsToTc.
-          placeholder={drawActive
-            ? "Describe the drawing…"
-            // Once latched this stops counting up, which is the only signal a
-            // user gets that the stamp is fixed rather than following them.
-            : `Comment at ${secondsToHms(anchorSec ?? currentSec ?? 0).replace(/^0(?=\d)/, "")}`}
-          /* A NAME, not just a placeholder. The placeholder changes with the
-             playhead ("Comment at 1:23"), so it is a hint rather than a label,
-             and the form-label sweep deliberately refuses placeholders as
-             names. Without this the app's main writing surface announced as an
-             unlabelled text box. */
-          aria-label={drawActive ? "Describe the drawing" : "Comment"}
-        />
+          <span className="cp-review-composer-spacer" />
         <button className="btn btn-primary btn-compact" onClick={submit} disabled={!text.trim() && !hasDraft}>Post</button>
+        </div>
       </div>
     </>
   );

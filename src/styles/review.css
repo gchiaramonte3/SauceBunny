@@ -593,16 +593,28 @@
 /* Composer — tool buttons sit at the bottom so they stay aligned as the
    textarea grows. Single row (no wrap): the input takes the slack and the
    tool/Post buttons keep their intrinsic width at any panel width. */
+/* A COLUMN, so the writing surface is not competing with the toolbar.
+   This was one nowrap row - six tool buttons, the textarea at `flex: 1`, and
+   Post - so at any ordinary panel width the field collapsed to its 120px
+   minimum and you typed a paragraph through a slot. The tools are secondary
+   to the writing; they belong under it. */
 .cp-review-composer {
   position: relative; /* anchor the height drag handle */
   display: flex;
-  align-items: flex-end;
-  flex-wrap: nowrap;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
   padding: 10px 12px;
   border-top: 1px solid var(--line-1);
   background: linear-gradient(180deg, rgba(255,255,255,0.015), transparent);
 }
+/* Tools left, Post right, on their own line under the field. */
+.cp-review-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cp-review-composer-spacer { flex: 1; }
 .cp-review-composer .btn { flex-shrink: 0; }
 /* Composer height handle — placement only; visuals come from
    .cp-resize-handle (resize.css). Straddles the composer's top hairline. */
@@ -614,10 +626,12 @@
 }
 /* Expandable comment textarea — JS autosizes the height up to max-height. */
 .cp-review-input {
-  flex: 1;
-  min-width: 120px;
-  min-height: 34px;
-  max-height: 140px;
+  /* Full width of the composer now, and taller: three lines rather than one,
+     because a review note is usually a sentence and the old 34px floor made
+     every one of them scroll. */
+  width: 100%;
+  min-height: 68px;
+  max-height: 240px;
   padding: 7px 10px;
   background: var(--bg-0);
   border: 1px solid var(--line-2);

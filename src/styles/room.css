@@ -22,6 +22,13 @@
 .cp-room .cp-view-clip .cp-toolbar { display: none; }
 .cp-room .cp-sidebar { display: none; }
 .cp-room .cp-view-bar { display: none; }
+/* The pipeline log is not part of a screening, and hiding only its CHILDREN
+   left the container reserving height: a 32px dead strip along the bottom of
+   the room, or 200px if the log happened to be open when the session started.
+   Measured at 1440x900: .cp-logs sat at y=860 with h=32 while the monitor had
+   301px to work with. Collapse the container itself and the stage takes the
+   space. */
+.cp-room .cp-logs { display: none; }
 .cp-room .cp-logs-header,
 .cp-room .cp-logs-body { display: none; }
 /* Minimal transport: play/pause + scrub only. Editing clusters go. */
