@@ -238,6 +238,8 @@ export type CoReview = {
   watchOfferedStream: (opts?: { keepCopy?: boolean }) => Promise<void>;
   /** Start a copy of the stream already playing. Absent until one is. */
   keepOfferedCopy: () => void;
+  /** Assign a placer to move a finished transfer out of the cache. */
+  placeReceivedRef: MutableRefObject<((path: string, name: string) => Promise<void>) | null>;
   canKeepCopy: boolean;
   cancelFetch: () => void;
   /** True when YOUR hand is up. */
@@ -1123,6 +1125,9 @@ export function useCoReview({
   // the room head returns to normal without a click; the unhappy ones stay
   // until the user acts (retry or cancel is their decision to make).
   const transferClearRef = useRef(0);
+  /** Set by the app, because WHERE a received file goes is a preference and
+   *  this hook does not read preferences. */
+  const placeReceivedRef = useRef<((path: string, name: string) => Promise<void>) | null>(null);
   useEffect(() => {
     const un = listen<TransferProgress>("session:transfer", (e) => {
       const p = e.payload;
@@ -1130,6 +1135,14 @@ export function useCoReview({
       if (transferClearRef.current) window.clearTimeout(transferClearRef.current);
       if (p.phase === "done" || p.phase === "sent" || p.phase === "cancelled") {
         transferClearRef.current = window.setTimeout(() => setTransfer(null), 4000);
+      }
+      // WHERE IT LANDS. The transfer itself always writes into the cache's
+      // transfers/ dir, because that is where resume, the running hash and
+      // cancel all work from, and re-pointing the streaming write would put
+      // a half-file somewhere the size cap deliberately does not sweep.
+      // Placing it is a separate, verified step at the end.
+      if (p.phase === "done" && p.path) {
+        void placeReceivedRef.current?.(p.path, p.name);
       }
     });
     return () => {
@@ -1345,6 +1358,7 @@ export function useCoReview({
     fetchOfferedFile,
     watchOfferedStream,
     keepOfferedCopy,
+    placeReceivedRef,
     canKeepCopy: keepCandidateRef.current != null && keepTarget == null,
     cancelFetch,
     handRaised: coSession.selfId != null ? raisedHands.has(coSession.selfId) : raisedHands.has("m0"),

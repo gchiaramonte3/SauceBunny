@@ -264,6 +264,8 @@ export default function App() {
       // optimise for fast download over sharpness. Export uses real quality.
       previewMaxHeight: stored.previewMaxHeight ?? 480,
       autoKeepSessionCopy: stored.autoKeepSessionCopy ?? false,
+      sessionCopyDest: stored.sessionCopyDest ?? "cache",
+      sessionCopyFolder: stored.sessionCopyFolder ?? null,
       // r141 cache retention: 0 = keep everything (the long-standing
       // default). A positive cap LRU-prunes the media cache at boot and
       // whenever the cap is changed in Settings.
@@ -3773,7 +3775,7 @@ export default function App() {
     meshStreams, meshStates, meshMutedForMe, toggleMuteForMe,
     shareState, shareStream, sharingMembers, startShare, stopShare,
     isPresenter, pendingSource, sourceStatus, makePresenter, adoptPendingSource,
-    offeredFile, transfer, offerCurrentFile, offerError, fetchOfferedFile, watchOfferedStream, keepOfferedCopy, canKeepCopy, cancelFetch,
+    offeredFile, transfer, offerCurrentFile, offerError, fetchOfferedFile, watchOfferedStream, keepOfferedCopy, canKeepCopy, placeReceivedRef, cancelFetch,
     keepBadge, keepAction, onKeepCancel, onKeepResume, keepEnabled, setKeepEnabled,
     onKeepStall, onKeepStreamInfo,
     startCoReview, joinCoReview, leaveCoReview,
@@ -3913,6 +3915,35 @@ export default function App() {
    * peer route, so without them nothing can be built and the old affordances
    * are the honest fallback.
    */
+  /**
+   * Move a finished transfer to the folder the user chose.
+   *
+   * Only ever runs AFTER the bytes are verified, and only when they asked for
+   * a folder: the default stays the cache, which is counted in Settings ▸ Data
+   * and swept by the size cap - the right home for something you were handed
+   * rather than chose.
+   *
+   * A failure is not fatal and must not read as one. The file is already
+   * whole and already on this Mac; it just did not get moved, and saying so
+   * is better than a scary error about a transfer that actually succeeded.
+   */
+  placeReceivedRef.current = async (path: string, name: string) => {
+    if (defaults.sessionCopyDest !== "folder") return;
+    const dir = defaults.sessionCopyFolder;
+    if (!dir) {
+      appendLog("info", "session",
+        "Received files are set to go to a folder, but none is chosen yet. Kept in the cache. Settings, General, Co-review calls.");
+      return;
+    }
+    try {
+      await invoke("move_library_file", { from: path, to: `${dir.replace(/\/+$/, "")}/${name}` });
+      appendLog("ok", "session", `Saved "${name}" to ${dir}.`);
+    } catch (e) {
+      appendLog("info", "session",
+        `"${name}" arrived and is in the cache. Moving it to ${dir} did not work: ${formatError(e)}`);
+    }
+  };
+
   const autoWatchedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!offeredFile?.vcodec || !pendingSource || isPresenter) return;

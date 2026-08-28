@@ -176,6 +176,10 @@ export type Defaults = {
    *  session. OFF by default: it is a multi-GB write to someone else's disk
    *  and that has always needed a click here. */
   autoKeepSessionCopy: boolean;
+  /** Where a file received in a session ends up. "cache" is managed and
+   *  evictable; "folder" is somewhere you chose and nothing sweeps. */
+  sessionCopyDest: "cache" | "folder";
+  sessionCopyFolder: string | null;
   /**
    * Media-cache size cap in GB (0 = keep everything, the long-standing
    * default). When set, `enforce_media_cache_cap` prunes the oldest files
@@ -909,6 +913,46 @@ export function SettingsModal(props: Props) {
                 </CollapsibleSection>
 
                 <CollapsibleSection id="gen-coreview" label="Co-review calls" open={sectionOpen("gen-coreview")} onToggle={() => toggleSection("gen-coreview")}>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Where received files go
+                      <span className="desc">
+                        The cache is managed: it is counted in Settings ▸ Data and the size cap can clear it,
+                        which is right for something you were handed rather than chose. Pick a folder instead
+                        and the file is moved there when it lands, and nothing sweeps it. Either way the
+                        transfer itself is verified before it is placed.
+                      </span>
+                    </div>
+                    <div className="v">
+                      <select
+                        className="cp-select"
+                        aria-label="Where received files go"
+                        value={defaults.sessionCopyDest}
+                        onChange={(e) => setDefaults({
+                          ...defaults,
+                          sessionCopyDest: e.target.value === "folder" ? "folder" : "cache",
+                        })}
+                      >
+                        <option value="cache">The app cache</option>
+                        <option value="folder">A folder I choose</option>
+                      </select>
+                      {defaults.sessionCopyDest === "folder" && (
+                        <button
+                          className="btn btn-ghost btn-compact"
+                          onClick={async () => {
+                            const picked = await openDialog({ directory: true, multiple: false });
+                            if (typeof picked === "string") {
+                              setDefaults({ ...defaults, sessionCopyFolder: picked });
+                            }
+                          }}
+                        >
+                          {defaults.sessionCopyFolder
+                            ? defaults.sessionCopyFolder.split("/").pop()
+                            : "Choose folder…"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                   <div className="cp-pane-row">
                     <div className="k">
                       Keep a copy of shared files
