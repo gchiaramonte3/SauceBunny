@@ -53,7 +53,13 @@ export function WelcomeScreen({ onDone }: { onDone: () => void }) {
       aria-label="Welcome to Sauce Bunny"
     >
       <div className="cp-welcome-stage">
-        <img className="cp-welcome-mark" src={logoUrl} alt="" />
+        {/* The glow is a sibling layer, not a filter on the image. See the
+            note in welcome.css: a drop-shadow on an <img> rasterises
+            differently across compositors and came out as a hard-edged box in
+            the packaged WKWebView. */}
+        <span className="cp-welcome-markwrap">
+          <img className="cp-welcome-mark" src={logoUrl} alt="" />
+        </span>
         <h1 className="cp-welcome-title">Welcome to Sauce Bunny</h1>
         <p className="cp-welcome-sub">Watch, transcribe, and review video together.</p>
         <ul className="cp-welcome-rows">

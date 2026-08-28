@@ -27,11 +27,37 @@
   padding: var(--s-6) var(--s-5);
   text-align: center;
 }
+/* The mark's glow, as a LAYER rather than a filter.
+   It was `filter: drop-shadow(...)` on the <img>. drop-shadow traces the
+   alpha, so in Chromium and in Playwright's WebKit it followed the bunny
+   exactly - but in the packaged WKWebView it rasterised to the element's box
+   and painted a hard-edged rectangle behind the logo, cropped at the image
+   bounds. Neither test engine reproduces that, which is the whole reason not
+   to keep a construct whose result depends on the compositor.
+   A radial gradient behind the mark has no filter, no rasterisation step and
+   nothing to clip. */
+.cp-welcome-markwrap {
+  position: relative;
+  display: inline-flex;
+  animation: cp-welcome-rise 520ms var(--ease-out) both;
+}
+.cp-welcome-markwrap::before {
+  content: "";
+  position: absolute;
+  /* Generous, because the falloff has to finish well inside the box or the
+     gradient's own edge becomes the hard edge this replaced. */
+  inset: -55%;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--ella-green) 24%, transparent) 0%,
+    transparent 62%
+  );
+  pointer-events: none;
+}
 .cp-welcome-mark {
+  position: relative;
   width: 96px;
   height: auto;
-  filter: drop-shadow(0 0 28px color-mix(in srgb, var(--ella-green) 34%, transparent));
-  animation: cp-welcome-rise 520ms var(--ease-out) both;
 }
 .cp-welcome-title {
   margin: var(--s-2) 0 0;
@@ -106,6 +132,10 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 @media (prefers-reduced-motion: reduce) {
+  /* The rise moved off .cp-welcome-mark onto its wrapper when the glow became
+     a layer; without this line the mark kept animating under reduce, and the
+     contract caught it. */
+  .cp-welcome-markwrap,
   .cp-welcome-mark,
   .cp-welcome-title,
   .cp-welcome-sub,
