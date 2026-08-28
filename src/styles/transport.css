@@ -106,18 +106,16 @@
   background: var(--bg-5);
   color: var(--fg-0);
 }
-.cp-icon-btn.cc,
-.cp-icon-btn.snapshot {
-  width: 32px;
-  height: 30px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid var(--line-1);
-}
-.cp-icon-btn.cc:hover,
-.cp-icon-btn.snapshot:hover { background: rgba(255,255,255,0.06); }
+/* Captions and Snapshot are ORDINARY icon buttons.
+   They used to be 32x30 with a 1px border while Mark in, Mark out and Clear
+   sat beside them at 30x28 with none - five buttons in one row wearing two
+   different treatments, which is what made the captions button look like a
+   mistake. Nothing about either function needs a box around it; being ON is
+   what `.active` is for, and the base already has a hover.
+   The size override went with the border: 2px of difference on a neighbour
+   reads as misalignment rather than as emphasis. */
 .cp-icon-btn.cc.active {
   background: var(--bg-5);
-  border-color: var(--line-3);
   color: var(--fg-0);
 }
 .cp-icon-btn.snapshot.busy {
