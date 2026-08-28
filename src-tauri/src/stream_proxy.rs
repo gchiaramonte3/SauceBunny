@@ -800,8 +800,38 @@ fn serve_fmp4(request: tiny_http::Request, upstream: String, start: f64, audio: 
         if start > 0.0 { cmd.arg("-ss").arg(format!("{start}")); }
         cmd.arg("-user_agent").arg(SAFARI_UA).arg("-i").arg(a);
         cmd.arg("-map").arg("0:v:0").arg("-map").arg("1:a:0");
+    } else {
+        // MAP THE AUDIO EXPLICITLY, and take the FIRST track.
+        //
+        // With no map, ffmpeg's default selection picks the "best" audio
+        // stream, and best means most channels. Big Buck Bunny's h264 build
+        // carries stereo mp3 AND 5.1 ac3, so the remux chose the ac3 - which
+        // an mp4 muxer cannot even write in a fragmented stream:
+        //
+        //   Cannot write moov atom before AC3 packets
+        //   Could not write header (incorrect codec parameters ?)
+        //
+        // The whole remux failed, so it was not "no audio", it was no stream.
+        // The `?` keeps a silent video working.
+        cmd.arg("-map").arg("0:v:0").arg("-map").arg("0:a:0?");
     }
-    cmd.arg("-c").arg("copy");
+    // Video is copied; that is the expensive part and it stays untouched.
+    cmd.arg("-c:v").arg("copy");
+    // AUDIO IS TRANSCODED TO STEREO AAC, always.
+    //
+    // WKWebView's MSE decodes AAC. Copying gave it whatever the source
+    // happened to carry - ac3, opus, 5.1 - and anything it cannot decode is
+    // silence with nothing in the log to say why. That is the second half of
+    // "some files had no audio".
+    //
+    // Unconditional on purpose. Detecting the codec first would spare a
+    // re-encode of the AAC that most web sources already use, but it needs a
+    // probe on a path that has none, and today has been a lesson in what
+    // clever conditionals cost. An audio encode is a rounding error beside the
+    // video, and silence is not a tradeoff worth making for it.
+    //
+    // `-ac 2` because a 5.1 track is downmixed rather than dropped.
+    cmd.arg("-c:a").arg("aac").arg("-b:a").arg("160k").arg("-ac").arg("2");
     // HLS segments carry AAC in ADTS framing; the MP4 muxer DROPS the audio
     // ("Malformed AAC bitstream") unless it's converted to ASC. Apply ONLY for
     // HLS inputs — running it on already-ASC MP4/DASH audio would corrupt those.

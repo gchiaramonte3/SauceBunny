@@ -706,7 +706,7 @@ human can check.
 
 ## Enforced contracts
 
-Sixty-seven rules in this file are checked by a test rather than remembered. If you
+Sixty-eight rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -801,6 +801,7 @@ written after finding the rule already broken somewhere.
 | `modal-focus-contract` | An `aria-modal` dialog traps and restores focus; a dialog behind a scrim declares `aria-modal` (the cmd+F guard reads it) |
 | `contract-register` | This table describes itself: the spelled-out count matches the rows, and every row names a test file that exists |
 | `e2e-mock-shape-contract` | The two object literals in `e2e/tauri-mock.ts` carry exactly the fields of their ts-rs binding, so 100 Playwright tests cannot certify a backend shape that no longer exists |
+| `stream-audio-contract` | The fMP4 remux maps the FIRST audio track and transcodes it to stereo AAC. With no map ffmpeg picks the stream with the most channels, so a file carrying stereo mp3 and 5.1 ac3 chose the ac3 - which a fragmented mp4 muxer cannot write at all, killing the whole remux rather than just the sound. And a blanket copy handed WKWebView whatever the source had, which decodes AAC and little else |
 | `button-variant-contract` | No button modifier gives itself a border when its base declares `border: none`. Captions and Snapshot were 32x30 and outlined while Mark in, Mark out and Clear sat beside them at 30x28 with none: five buttons, one row, two treatments. Size variants stay legal (a compact button, a text-bearing speed pill, the primary play control) because those are emphasis; an outline on one sibling of five is drift |
 | `lossless-cut-contract` | A stream-copy cut passes `-avoid_negative_ts make_zero`. `-ss` before `-i` with `-c copy` keeps the leading GOP, whose packets carry NEGATIVE timestamps (measured: video -1.066667, audio -1.024); the mp4 muxer resolves that per-stream, so the sound slides against the picture. yt-dlp's `--download-sections` was normalising them, and dropping it for the ~20x speedup took the guard with it |
 | `first-frame-contract` | The opening frame is fetched at the track's own `getFirstTimestamp()`, never at a hardcoded 0, and a failed grab is not reported as an unsupported codec. A video stream need not start at zero (Big Buck Bunny's h264 build starts at 0.066667s); `getCanvas(0)` returns null there, and that null was read as "WebCodecs cannot decode AVC" - skipping mediabunny entirely and sending the file to a ten-minute ffmpeg re-encode. `harness-firstframe` proves it against a real decode |

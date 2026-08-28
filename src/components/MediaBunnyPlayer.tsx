@@ -1001,6 +1001,27 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
         audioTrackRef.current = at;
         durationRef.current = dur;
 
+        // THE AUDIO TRACK GETS THE SAME QUESTION THE VIDEO ONE DOES.
+        //
+        // The video track has been checked with canDecode() since this file
+        // was written, and an undecodable one routes to the ffmpeg prep. The
+        // audio track was never asked. So a file whose audio WebCodecs cannot
+        // handle - ac3, and some builds' mp3 - played picture with silence,
+        // and nothing anywhere said why. Reported as "some files couldn't
+        // play audio", and it was unreportable by design.
+        //
+        // The same sentinel, because the same fallback is the right answer:
+        // playback_prep transcodes audio to AAC on its way through, which is
+        // exactly what an undecodable track needs. A file with NO audio is
+        // not a fault and must not trigger it.
+        if (at && !(await at.canDecode())) {
+          const acodec = await at.getCodec().catch(() => "unknown");
+          onDiagRef.current?.("warn",
+            `this platform cannot decode "${acodec}" audio; preparing a copy with AAC instead`);
+          onErrorRef.current?.(`[WEBCODECS_UNSUPPORTED] audio codec "${acodec}"`);
+          return;
+        }
+
         if (vt) {
           // canDecode() short-circuits the whole mediabunny path if
           // WebCodecs can't handle this codec on the current platform —
