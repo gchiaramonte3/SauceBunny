@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { KeepAction } from "../lib/stream-keep";
 import { IconAlert, IconHistory } from "./Icons";
 import { BunnyLoader } from "./BunnyLoader";
 import { CanvasToast, type ToastKind } from "./CanvasToast";
@@ -87,7 +88,10 @@ type Props = {
   /** What the keep chip does when clicked, or null when it is only a label.
    *  Drives whether it renders as a button at all — a chip that looks
    *  clickable and does nothing is worse than a plain label. */
-  streamKeepAction?: { kind: "cancel" | "resume"; title: string } | null;
+  /** The shape is IMPORTED, not retyped. It was spelled out here and in
+   *  use-co-review as well as declared in stream-keep, so adding a third kind
+   *  broke two copies that had no reason to know about it. */
+  streamKeepAction?: KeepAction;
   onStreamKeepAction?: () => void;
   /** Pipeline/seek diagnostics → the Pipeline log (channel "seek"). */
   onDiag?: (tag: string, message: string) => void;

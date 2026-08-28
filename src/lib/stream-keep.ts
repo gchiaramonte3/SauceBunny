@@ -284,7 +284,9 @@ export function keepBadge(s: KeepState): string | null {
  * label, its action, and whether it is a button at all from being three
  * independent opinions in the component.
  */
-export type KeepAction = { kind: "cancel" | "resume"; title: string } | null;
+/** "start" is the OPTIONAL copy, offered while a stream plays without one:
+ *  watching and keeping are two decisions now, not one button. */
+export type KeepAction = { kind: "cancel" | "resume" | "start"; title: string } | null;
 
 export function keepAction(s: KeepState): KeepAction {
   if (s.phase === "waiting" || s.phase === "keeping" || s.phase === "yielded") {

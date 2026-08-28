@@ -40,7 +40,18 @@ Sauce Bunny is local-first, and a live session is the one place bytes leave the 
 What that rules in and out:
 
 - **Fixed quality, not adaptive bitrate.** The rung ladder (`src/lib/stream-rung.ts`) picks ONE known height and reports which the guest actually got. It must never collapse the bitrate mid-shot — a reviewer judging a grade has to see compression that is in the source, not in the transport.
-- **Streaming converges to a copy.** "Watch it now" runs a Tier C transfer underneath the live stream (`src/lib/stream-keep.ts`), so a stream becomes a local file rather than evaporating with the session. That copy is a multi-GB write, so it is named in the button the guest clicks — never only in a tooltip.
+- **Watching and keeping are two decisions.** A streamable offer starts
+  playing on its own: the host already clicked to offer it, everyone is
+  looking at the same frame, and making the guest read a paragraph first was
+  a wall in front of a live session. What still needs a click is the COPY.
+  "Watch it now" used to do both, which meant the only way to see what
+  somebody was showing you was to accept a multi-GB write onto your disk.
+  The copy is now offered in the player's chip rail beside the quality badge
+  (`src/lib/stream-keep.ts`), or automatically if the user turns that on in
+  Settings ▸ General ▸ Co-review calls, which is OFF by default. The rule
+  underneath is unchanged and is the one that matters: a copy is never
+  written without the user asking for it, and a relayed session still keeps
+  nothing at all.
 - **A relayed path is a different bargain.** Kilobytes of control traffic through n0's public relay was an accepted cost; someone's media is not. A relayed session is capped at the lowest rung and keeps no copy at all.
 - **No second transport.** iroh QUIC already gives NAT traversal, encryption and P2P delivery, and the connection is open and authenticated before media starts. Do not add WebRTC or GStreamer for file streaming. (WebRTC IS used, over iroh signalling, for the live webcam/mic mesh — a different problem with different latency rules.)
 - **The webcam mesh needs a STUN server, and that is the app's one un-asked-for outbound call.** A STUN server exists to tell you how your NAT sees you, so it necessarily learns your public IP. It was hardcoded to Google's, which meant nobody could see it, aim it elsewhere, or refuse it — a real gap in an app whose first promise is that it runs on your machine. It now lives in `src/lib/ice-servers.ts`, is shown and editable in Settings ▸ General, and an empty field means no reflexive candidates at all (LAN, plus TURN if configured). The default is unchanged, so upgrading behaves identically. Note this is ONLY the A/V mesh: control traffic, the review doc and file transfer all ride iroh, which does its own traversal and never touches this list. Do not re-inline the endpoint; `src/lib/ice-servers.test.ts` fails the build if a `stun:` URL appears anywhere else.

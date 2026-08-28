@@ -172,6 +172,10 @@ export type Defaults = {
    * clip points; bump to 720/1080 if you want a sharper preview.
    */
   previewMaxHeight: 480 | 720 | 1080;
+  /** Save a copy of a shared file automatically while streaming it in a
+   *  session. OFF by default: it is a multi-GB write to someone else's disk
+   *  and that has always needed a click here. */
+  autoKeepSessionCopy: boolean;
   /**
    * Media-cache size cap in GB (0 = keep everything, the long-standing
    * default). When set, `enforce_media_cache_cap` prunes the oldest files
@@ -905,6 +909,28 @@ export function SettingsModal(props: Props) {
                 </CollapsibleSection>
 
                 <CollapsibleSection id="gen-coreview" label="Co-review calls" open={sectionOpen("gen-coreview")} onToggle={() => toggleSection("gen-coreview")}>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Keep a copy of shared files
+                      <span className="desc">
+                        When someone streams you a file, save it to this Mac while you watch, so you can scrub
+                        the whole thing when it lands and it stays yours afterwards. Off by default: it is a
+                        multi-gigabyte write and that should be something you ask for. Leave it off and the
+                        player offers a Save a copy button instead. Nothing is saved on a relayed connection
+                        either way.
+                      </span>
+                    </div>
+                    <div className="v">
+                      <label className="cp-toggle-row">
+                        <input
+                          type="checkbox"
+                          checked={defaults.autoKeepSessionCopy}
+                          onChange={(e) => setDefaults({ ...defaults, autoKeepSessionCopy: e.target.checked })}
+                        />
+                        <span>Save automatically</span>
+                      </label>
+                    </div>
+                  </div>
                   <div className="cp-pane-row">
                     <div className="k">
                       Streaming quality

@@ -19,6 +19,7 @@ import {
   type Dispatch, type MutableRefObject, type RefObject, type SetStateAction,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import type { KeepAction } from "../lib/stream-keep";
 import { listen } from "@tauri-apps/api/event";
 import { formatError } from "../lib/error-format";
 import { loadInstallId } from "../lib/identity";
@@ -222,7 +223,7 @@ export type CoReview = {
   /** S.5: one quiet line about the copy running under a live stream, or null. */
   keepBadge: string | null;
   /** What the chip does when clicked, or null when it is only a label. */
-  keepAction: { kind: "cancel" | "resume"; title: string } | null;
+  keepAction: KeepAction;
   onKeepCancel: () => void;
   onKeepResume: () => void;
   /** Whether watching also saves a copy on this Mac (Settings, per machine). */
@@ -234,7 +235,10 @@ export type CoReview = {
   /** Forward what the presenter served; only `relayed` matters to the copy. */
   onKeepStreamInfo: (info: { rung: number | null; relayed: boolean }) => void;
   fetchOfferedFile: () => Promise<void>;
-  watchOfferedStream: () => Promise<void>;
+  watchOfferedStream: (opts?: { keepCopy?: boolean }) => Promise<void>;
+  /** Start a copy of the stream already playing. Absent until one is. */
+  keepOfferedCopy: () => void;
+  canKeepCopy: boolean;
   cancelFetch: () => void;
   /** True when YOUR hand is up. */
   handRaised: boolean;
@@ -1175,7 +1179,25 @@ export function useCoReview({
   /** Guest: watch the host's offered file NOW as a live stream (Tier B).
    *  App mounts the stream; this wrapper owns the session bookkeeping so
    *  the room converges (pending cleared, readiness reported). */
-  const watchOfferedStream = useCallback(async () => {
+  /**
+   * The file we are streaming, held so a copy can be started LATER.
+   *
+   * `setKeepTarget` is what begins the Tier C write. Watching no longer does
+   * it automatically, so the details have to survive until the guest asks.
+   */
+  const keepCandidateRef = useRef<{
+    blake3: string; name: string; total: number; fingerprint: string | null;
+  } | null>(null);
+
+  /** Start saving a copy of what is already playing. The optional half. */
+  const keepOfferedCopy = useCallback(() => {
+    const c = keepCandidateRef.current;
+    if (!c) return;
+    setKeepTarget(c);
+    slog("info", `Saving a copy of "${c.name}" while you watch.`);
+  }, [slog]);
+
+  const watchOfferedStream = useCallback(async (opts?: { keepCopy?: boolean }) => {
     const offer = offeredFileRef.current;
     if (!offer) return;
     const pending = pendingSourceRef.current;
@@ -1184,12 +1206,23 @@ export function useCoReview({
         { name: offer.name, blake3: offer.blake3, vcodec: offer.vcodec, acodec: offer.acodec },
         { title: pending?.title ?? offer.name, duration: pending?.duration ?? null },
       );
-      // Captured BEFORE pendingSource is cleared — it is the only place the
-      // fingerprint still exists, and without it the landed copy is un-indexed.
-      setKeepTarget({
+      // The keep CANDIDATE, captured whether or not we start a copy now.
+      //
+      // Watching used to imply a multi-GB write with no way to decline it, so
+      // the only way to see what somebody was showing you was to accept their
+      // file onto your disk. Those are two different decisions and this splits
+      // them: the stream starts on its own, and the copy is offered.
+      //
+      // Captured HERE because pendingSource is cleared below and it is the
+      // only place the fingerprint still exists. Without it a landed copy is
+      // un-indexed, and the next session re-streams a file already on disk -
+      // the exact thing Tier A exists to prevent.
+      const candidate = {
         blake3: offer.blake3, name: offer.name, total: offer.size,
         fingerprint: pending?.fingerprint ?? null,
-      });
+      };
+      keepCandidateRef.current = candidate;
+      if (opts?.keepCopy) setKeepTarget(candidate);
       setPendingSource(null);
       sendSessionMsg({ kind: "sourceStatus", from: "", state: "ready", detail: null });
       slog("ok", `Streaming "${offer.name}" from the host.`);
@@ -1311,6 +1344,8 @@ export function useCoReview({
     onKeepStreamInfo: streamKeep.onStreamInfo,
     fetchOfferedFile,
     watchOfferedStream,
+    keepOfferedCopy,
+    canKeepCopy: keepCandidateRef.current != null && keepTarget == null,
     cancelFetch,
     handRaised: coSession.selfId != null ? raisedHands.has(coSession.selfId) : raisedHands.has("m0"),
     sendReaction,

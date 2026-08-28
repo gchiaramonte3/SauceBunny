@@ -263,6 +263,7 @@ export default function App() {
       // 480 by default: the preview is throwaway (scrub/mark only), so we
       // optimise for fast download over sharpness. Export uses real quality.
       previewMaxHeight: stored.previewMaxHeight ?? 480,
+      autoKeepSessionCopy: stored.autoKeepSessionCopy ?? false,
       // r141 cache retention: 0 = keep everything (the long-standing
       // default). A positive cap LRU-prunes the media cache at boot and
       // whenever the cap is changed in Settings.
@@ -3772,7 +3773,7 @@ export default function App() {
     meshStreams, meshStates, meshMutedForMe, toggleMuteForMe,
     shareState, shareStream, sharingMembers, startShare, stopShare,
     isPresenter, pendingSource, sourceStatus, makePresenter, adoptPendingSource,
-    offeredFile, transfer, offerCurrentFile, offerError, fetchOfferedFile, watchOfferedStream, cancelFetch,
+    offeredFile, transfer, offerCurrentFile, offerError, fetchOfferedFile, watchOfferedStream, keepOfferedCopy, canKeepCopy, cancelFetch,
     keepBadge, keepAction, onKeepCancel, onKeepResume, keepEnabled, setKeepEnabled,
     onKeepStall, onKeepStreamInfo,
     startCoReview, joinCoReview, leaveCoReview,
@@ -3893,6 +3894,32 @@ export default function App() {
   const [reviewDraft, setReviewDraft] = useState<AnnotationStrokes | null>(null);
   const [annotationDisplay, setAnnotationDisplay] = useState<AnnotationStrokes | null>(null);
   const [annotationDisplayColor, setAnnotationDisplayColor] = useState<string | null>(null);
+
+  /**
+   * A streamable offer starts playing on its own.
+   *
+   * It used to sit behind a full-screen "X is watching Y. That file lives on
+   * their Mac." with three buttons, so the guest had to read a paragraph and
+   * make a decision before seeing anything - in a LIVE session, where the
+   * whole point is that everyone is looking at the same frame right now.
+   *
+   * Watching is not the consequential act; COPYING is. Those were one button
+   * ("Watch now … saves a copy") and are now two: the stream starts here, and
+   * the multi-GB write stays a thing you ask for. Settings ▸ Co-review can
+   * opt into starting it automatically, and it is off by default because
+   * filling someone's disk is not a default.
+   *
+   * Only when the host's offer carries codec strings - there is no probe on a
+   * peer route, so without them nothing can be built and the old affordances
+   * are the honest fallback.
+   */
+  const autoWatchedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!offeredFile?.vcodec || !pendingSource || isPresenter) return;
+    if (autoWatchedRef.current === offeredFile.blake3) return;
+    autoWatchedRef.current = offeredFile.blake3;
+    void watchOfferedStream({ keepCopy: defaults.autoKeepSessionCopy });
+  }, [offeredFile, pendingSource, isPresenter, watchOfferedStream, defaults.autoKeepSessionCopy]);
   /** The second a pinned drawing belongs to, so the monitor can let it go
    *  once you have scrubbed away. Null = pinned with no home to leave. */
   const [annotationDisplayTime, setAnnotationDisplayTime] = useState<number | null>(null);
@@ -4617,32 +4644,20 @@ export default function App() {
                       <>
                         <span>
                           {pendingSource.kind === "file"
-                            ? `${presenterName} is watching ${pendingSource.title ?? "a local file"}. That file lives on their Mac.`
+                            /* Short, because by the time anyone reads this the
+                               stream has already failed to be possible. The old
+                               copy explained where the file lived, which is the
+                               host's business, not a thing to make a guest
+                               read before they can see anything. */
+                            ? `${presenterName} is showing ${pendingSource.title ?? "a local file"}, and it cannot be streamed to you.`
                             : `Loading ${pendingSource.title ?? "the shared source"}…`}
                         </span>
-                        {pendingSource.kind === "file" && offeredFile && offeredFile.vcodec && (
-                          /* Tier B: watch NOW, streamed live from the host.
-                             Needs codec strings (no probe on a peer route);
-                             an older host's offer just hides this chip. */
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-compact"
-                            title={
-                              "Starts playing straight away, streamed over the session. "
-                              + "A copy is saved to this Mac while you watch, so when it finishes "
-                              + "you can scrub the whole file and you keep it afterwards. "
-                              + "On a relayed connection nothing is saved."
-                            }
-                            onClick={() => { void watchOfferedStream(); }}
-                          >
-                            {/* The label says "saves a copy" because the tooltip
-                                used to promise the opposite, and the sibling
-                                Get chip treats naming the write as the consent.
-                                A multi-GB write must be in the thing you click,
-                                not only in the thing you hover. */}
-                            {`Watch now (streams from ${presenterName}, saves a copy)`}
-                          </button>
-                        )}
+                        {/* No "Watch now" button any more: a streamable offer
+                            starts on its own (see the auto-watch effect), so
+                            reaching this block at all means it could not be.
+                            What is left are the two things that still need a
+                            decision - taking their copy, or pointing at your
+                            own. */}
                         {pendingSource.kind === "file" && offeredFile && (
                           /* The chip names the file and its size; clicking it
                              IS the consent to a multi-GB write on this disk. */
@@ -4729,9 +4744,21 @@ export default function App() {
                     onStreamInfo={onStreamInfoAll}
                     streamRungBadge={streamRung.badge}
                     streamRungBadgeTitle={streamRung.badgeTitle}
-                    streamKeepBadge={keepBadge}
-                    streamKeepAction={keepAction}
-                    onStreamKeepAction={keepAction?.kind === "resume" ? onKeepResume : onKeepCancel}
+                    /* The copy is OPTIONAL and lives in the player's chip
+                       rail beside the quality badge, not under the video and
+                       not as a wall you read before you can watch. When no
+                       copy is running, the chip offers to start one. */
+                    streamKeepBadge={keepBadge ?? (canKeepCopy ? "Save a copy" : null)}
+                    streamKeepAction={
+                      keepAction ?? (canKeepCopy
+                        ? { kind: "start", title: "Keep this file on your Mac. It saves while you watch, so when it finishes you can scrub the whole thing and it is yours afterwards." }
+                        : null)
+                    }
+                    onStreamKeepAction={
+                      keepAction?.kind === "resume" ? onKeepResume
+                        : keepAction ? onKeepCancel
+                        : keepOfferedCopy
+                    }
                     onDiag={(tag, msg) => appendLog(asLogTag(tag), "seek", msg)}
                     onAudioDiag={(tag, msg) => appendLog(asLogTag(tag), "audio", msg)}
                     /* Audio track + codecs are meaningful only while STREAMING (the
