@@ -108,6 +108,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
   // tracks real media time. Re-captured on every rebuild (seek).
   const clockOriginRef = useRef(0);
   const clockOriginSetRef = useRef(false);
+  // Has THIS pipeline been forced to present a frame? See the nudge in
+  // `updateend`. One per pipeline, reset alongside clockOriginSetRef.
+  const paintedOnceRef = useRef(false);
   /**
    * Resume-after-idle forensics.
    *
@@ -869,6 +872,7 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
             sb.mode = "segments";
             sbRef.current = sb;
             clockOriginSetRef.current = false; // re-capture for this pipeline
+            paintedOnceRef.current = false;
             // ms.duration is sized in startFetch once the response header
             // reveals THIS pipeline's timeline mode (review fix: sizing it
             // here used the previous pipeline's mode).
@@ -890,6 +894,37 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
                 if (v && sb.buffered.end(sb.buffered.length - 1) >= land) {
                   pendingLandRef.current = null;
                   try { v.currentTime = land; } catch { /* ignore */ }
+                }
+              }
+              // Force the first frame to PRESENT.
+              //
+              // A rebuild that finished while paused showed black with a
+              // correct timecode - the bug reported as "I pause and cannot
+              // see anything". `video.play()` is what makes WKWebView decode
+              // and present the first frame of a freshly attached
+              // MediaSource, so the playing path always looked right and the
+              // paused path never painted at all. Nothing else assigns
+              // currentTime here: the landing seek above runs only in
+              // ABSOLUTE timeline mode with a pending target, which a web
+              // source is not.
+              //
+              // The nudge lands on the buffer's own origin, which is exactly
+              // what the playhead already reports (clockOrigin is subtracted
+              // back out in corrected()), so this moves the picture and not
+              // the clock. When currentTime already equals that origin the
+              // assignment is not a seek and decodes nothing, so step a
+              // millisecond instead - far under one frame, and it guarantees
+              // the `seeked` that also retires the scrub-preview overlay.
+              // Without that event the overlay has no other way to clear
+              // while paused: onSettled had been skipped (its timer was
+              // armed during the rebuild) and `playing` never comes.
+              if (!paintedOnceRef.current && sb.buffered.length > 0) {
+                paintedOnceRef.current = true;
+                const pv = videoRef.current;
+                if (pv && pv.paused && pendingLandRef.current == null) {
+                  const origin = sb.buffered.start(0);
+                  const to = Math.abs(pv.currentTime - origin) < 1e-3 ? origin + 1e-3 : origin;
+                  try { pv.currentTime = to; } catch { /* ignore */ }
                 }
               }
               // First real media data is in the buffer → the pipeline genuinely

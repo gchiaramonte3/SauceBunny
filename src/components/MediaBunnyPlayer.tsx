@@ -10,6 +10,7 @@ import { mediabunnySource } from "../lib/mediabunny-source";
 import { canvasLooksBlank } from "../lib/mediabunny-helpers";
 import { audioAnchorWaitMs, audioVitals, shouldRetakeAnchor } from "../lib/av-clock";
 import { createScrubPump, type ScrubPump } from "../lib/scrub-pump";
+import { GRAIN_MAX_VOICES, idleScrubState, planGrain, type ScrubGrainState } from "../lib/audio-scrub";
 import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle } from "./player-handle";
 
@@ -43,7 +44,19 @@ const FAST_SCRUB_EXACT_MS = 170;
 /** Audio-scrub blip length (s). Long enough to hear a syllable at a slow
  *  drag; a fast drag supersedes it long before it ends, which is what makes
  *  the classic NLE scrub chatter. */
-const SCRUB_BLIP_S = 0.08;
+/** Raised-cosine rising edge for a grain's fade. A linear ramp is audible
+ *  as an edge on excerpts this short; a Hann edge is not. Reversed for the
+ *  fall. 64 points is far finer than the ~8ms it is stretched over. */
+const GRAIN_EDGE = (() => {
+  const n = 64, a = new Float32Array(n);
+  for (let i = 0; i < n; i++) a[i] = 0.5 - 0.5 * Math.cos(Math.PI * i / (n - 1));
+  return a;
+})();
+const scaledEdge = (peak: number, falling: boolean): Float32Array => {
+  const n = GRAIN_EDGE.length, a = new Float32Array(n);
+  for (let i = 0; i < n; i++) a[i] = GRAIN_EDGE[falling ? n - 1 - i : i] * peak;
+  return a;
+};
 /** Per-blip fade in/out (s) so back-to-back blips don't click at the seams. */
 const SCRUB_BLIP_FADE_S = 0.005;
 
@@ -211,7 +224,10 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
   /** The blip currently sounding, so the next target can cut it off. One
    *  envelope gain + the chunk nodes scheduled under it (AAC chunks are only
    *  ~21ms, so a blip is several consecutive chunks). */
-  const scrubBlipRef = useRef<{ nodes: AudioBufferSourceNode[]; env: GainNode } | null>(null);
+  /** Grains currently sounding. A LIST, not one slot: cutting the previous
+   *  grain on every drag tick was what made scrub audio chatter. */
+  const scrubVoicesRef = useRef<{ nodes: AudioBufferSourceNode[]; env: GainNode }[]>([]);
+  const grainStateRef = useRef<ScrubGrainState>(idleScrubState());
   /** Latest-wins decoder for scrub BLIPS (audio twin of scrubPumpRef). */
   const scrubAudioPumpRef = useRef<ScrubPump | null>(null);
   /** Keyframe index over the video track (fast-scrub previews). */
@@ -286,10 +302,13 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
    * the incoming blip (which starts after exactly that much scheduling
    * headroom) rather than colliding with it.
    */
+  /** Fade out and release every sounding grain. Used when playback takes
+   *  over or the pipeline is torn down — NOT between grains, which is the
+   *  whole point of the voices list. */
   const stopScrubBlip = () => {
-    const blip = scrubBlipRef.current;
-    if (!blip) return;
-    scrubBlipRef.current = null;
+    const voices = scrubVoicesRef.current;
+    if (voices.length === 0) return;
+    scrubVoicesRef.current = [];
     const ctx = audioCtxRef.current;
     const release = (nodes: AudioBufferSourceNode[], env: GainNode) => {
       for (const n of nodes) {
@@ -298,25 +317,30 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       }
       try { env.disconnect(); } catch { /* ignore */ }
     };
-    // No context (teardown) means nothing is sounding anyway; drop the graph.
-    if (!ctx || ctx.state === "closed") { release(blip.nodes, blip.env); return; }
-    const now = ctx.currentTime;
-    const end = now + SCRUB_BLIP_FADE_S;
-    try {
-      const g = blip.env.gain;
-      // cancelAndHoldAtTime pins the CURRENT automated value before ramping;
-      // without it, cancelScheduledValues alone can snap the gain back to the
-      // last explicitly-set value and produce the very click being avoided.
-      if (typeof g.cancelAndHoldAtTime === "function") g.cancelAndHoldAtTime(now);
-      else { g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); }
-      g.linearRampToValueAtTime(0, end);
-      for (const n of blip.nodes) { try { n.stop(end); } catch { /* already stopped */ } }
-    } catch {
-      release(blip.nodes, blip.env);
+    // No context (teardown) means nothing is sounding anyway; drop the graphs.
+    if (!ctx || ctx.state === "closed") {
+      for (const v of voices) release(v.nodes, v.env);
       return;
     }
-    // Disconnect only after the ramp has actually run.
-    window.setTimeout(() => release(blip.nodes, blip.env), (SCRUB_BLIP_FADE_S + 0.05) * 1000);
+    const now = ctx.currentTime;
+    const end = now + SCRUB_BLIP_FADE_S;
+    for (const v of voices) {
+      try {
+        const g = v.env.gain;
+        // cancelAndHoldAtTime pins the CURRENT automated value before ramping;
+        // without it, cancelScheduledValues alone can snap the gain back to the
+        // last explicitly-set value and produce the very click being avoided.
+        if (typeof g.cancelAndHoldAtTime === "function") g.cancelAndHoldAtTime(now);
+        else { g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); }
+        g.linearRampToValueAtTime(0, end);
+        for (const n of v.nodes) { try { n.stop(end); } catch { /* already stopped */ } }
+      } catch {
+        release(v.nodes, v.env);
+        continue;
+      }
+      // Disconnect only after the ramp has actually run.
+      window.setTimeout(() => release(v.nodes, v.env), (SCRUB_BLIP_FADE_S + 0.05) * 1000);
+    }
   };
 
   // Latest-wins scrub pump, created once. Its drain closes over refs only
@@ -364,45 +388,67 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       const ctx = audioCtxRef.current;
       const gain = gainRef.current;
       if (!sink || !ctx || !gain) return;
+
+      // Ask the policy FIRST, before resuming the context or touching the
+      // decoder. Its commonest answer is "stay silent" — a playhead that is
+      // not moving must make no sound rather than loop one excerpt, which is
+      // the stuck-record noise that makes scrub audio intolerable to leave
+      // switched on. See lib/audio-scrub.ts for the numbers and the why.
+      const plan = planGrain(grainStateRef.current, performance.now(), target, durationRef.current);
+      if (!plan) return;
+      // Hard ceiling on simultaneous grains. The policy's rate cap normally
+      // keeps us well under this; past it the result is mud, not detail.
+      if (scrubVoicesRef.current.length >= GRAIN_MAX_VOICES) return;
+      grainStateRef.current = { lastFiredAtMs: performance.now(), lastSourceSec: target };
+
       if (ctx.state === "suspended") {
         // A scrub IS a user gesture, so WKWebView allows the resume here.
         try { await ctx.resume(); } catch { return; }
         if (gen !== genRef.current) return;
       }
-      stopScrubBlip();
+
+      // NOTE: no stopScrubBlip() here, deliberately. Cutting the previous
+      // grain on every drag tick is what made this chatter — successive
+      // grains are longer than their spacing so they OVERLAP, and a moving
+      // playhead never produces a gap. Each grain retires itself below.
       const env = ctx.createGain();
       env.connect(gain);
-      const start = ctx.currentTime + 0.005; // scheduling headroom
-      env.gain.setValueAtTime(0, start);
-      env.gain.linearRampToValueAtTime(1, start + SCRUB_BLIP_FADE_S);
-      env.gain.setValueAtTime(1, start + SCRUB_BLIP_S - SCRUB_BLIP_FADE_S);
-      env.gain.linearRampToValueAtTime(0, start + SCRUB_BLIP_S);
+      const t0 = ctx.currentTime + 0.005; // scheduling headroom
+      const { offsetSec, durationSec, fadeSec, gain: peak } = plan;
+      env.gain.setValueAtTime(0, t0);
+      // Raised-cosine edges. On excerpts this short a linear ramp is audible
+      // as an edge of its own; the curve is why the joins disappear.
+      env.gain.setValueCurveAtTime(scaledEdge(peak, false), t0, fadeSec);
+      env.gain.setValueAtTime(peak, t0 + durationSec - fadeSec);
+      env.gain.setValueCurveAtTime(scaledEdge(peak, true), t0 + durationSec - fadeSec, fadeSec);
+
       const entry = { nodes: [] as AudioBufferSourceNode[], env };
-      scrubBlipRef.current = entry;
+      scrubVoicesRef.current.push(entry);
       try {
-        for await (const w of sink.buffers(target, target + SCRUB_BLIP_S)) {
-          // Bail if playback took over or a newer blip cut this one off.
-          if (gen !== genRef.current || scrubBlipRef.current !== entry) break;
-          const off = Math.max(0, target - w.timestamp);
+        for await (const w of sink.buffers(offsetSec, offsetSec + durationSec)) {
+          // Bail if playback took over or everything was retired under us.
+          if (gen !== genRef.current || !scrubVoicesRef.current.includes(entry)) break;
+          const off = Math.max(0, offsetSec - w.timestamp);
           if (off >= w.buffer.duration) continue;
           const src = ctx.createBufferSource();
           src.buffer = w.buffer;
           src.connect(env);
-          // The envelope bounds the audible window, so chunks just play out.
-          src.start(start + Math.max(0, w.timestamp - target), off);
+          // Always FORWARD, at rate 1. Scrubbing backwards steps the grain
+          // positions back and still plays each one forward: reversed speech
+          // is unintelligible, which defeats the point of listening at all.
+          src.start(t0 + Math.max(0, w.timestamp - offsetSec), off);
           entry.nodes.push(src);
         }
       } catch { /* sink torn down mid-drag */ }
-      // The envelope is fully closed at start+SCRUB_BLIP_S; release the graph
-      // shortly after (stopScrubBlip may already have — everything is guarded).
+      // The envelope is fully closed at t0+durationSec; release just after.
       window.setTimeout(() => {
-        if (scrubBlipRef.current === entry) scrubBlipRef.current = null;
+        scrubVoicesRef.current = scrubVoicesRef.current.filter((v) => v !== entry);
         for (const n of entry.nodes) {
           try { n.stop(); } catch { /* done */ }
           try { n.disconnect(); } catch { /* ignore */ }
         }
         try { env.disconnect(); } catch { /* ignore */ }
-      }, (SCRUB_BLIP_S + 0.05) * 1000);
+      }, (durationSec + 0.05) * 1000);
     });
   }
 

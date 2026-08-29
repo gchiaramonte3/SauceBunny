@@ -273,7 +273,7 @@ export default function App() {
       clearCacheOnQuit: stored.clearCacheOnQuit ?? false,
       // r143: NLE-style audio blips while dragging the playhead (WebCodecs
       // player). Editors expect scrub audio, so it defaults on.
-      scrubAudio: stored.scrubAudio ?? true,
+      scrubAudio: stored.scrubAudio ?? false,
     };
   });
   const setDefaults = useCallback((d: Defaults | ((prev: Defaults) => Defaults)) => {

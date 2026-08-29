@@ -1095,7 +1095,7 @@ export function SettingsModal(props: Props) {
                   <div className="cp-pane-row">
                     <div className="k">
                       Audio while scrubbing
-                      <span className="desc">Dragging the playhead plays short blips of the sound under the cursor, like an NLE. Applies to the WebCodecs player; follows the player volume and mute.</span>
+                      <span className="desc">Off by default. Dragging the playhead sounds the audio under the cursor at its normal pitch, the way an NLE shuttle does, and goes quiet the moment you stop moving. Applies to the WebCodecs player; follows the player volume and mute.</span>
                     </div>
                     <div className="v">
                       <button
