@@ -7,6 +7,7 @@ import type { PlayerHandle } from "./player-handle";
 import { base64UrlEncode } from "../lib/stream-proxy";
 import { encodedStreamMime, peerStreamMime } from "../lib/codec-strings";
 import { rebuildLogLine } from "../lib/seek-log";
+import { planFirstAppend } from "../lib/first-append";
 
 /**
  * Streams a web source (YouTube/Vimeo/…) into a NATIVE `<video>` element via
@@ -885,47 +886,31 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
                 // Absolute timeline: currentTime IS source time; origin stays 0.
                 clockOriginRef.current = timelineAbsRef.current ? 0 : sb.buffered.start(0);
               }
-              // Absolute-mode landing: seek to the requested second once the
-              // buffer covers it, so a rebuild lands exactly where the user
-              // clicked instead of the preceding keyframe.
-              if (timelineAbsRef.current && pendingLandRef.current != null && sb.buffered.length > 0) {
-                const land = pendingLandRef.current;
-                const v = videoRef.current;
-                if (v && sb.buffered.end(sb.buffered.length - 1) >= land) {
-                  pendingLandRef.current = null;
-                  try { v.currentTime = land; } catch { /* ignore */ }
-                }
-              }
-              // Force the first frame to PRESENT.
+              // Landing seek + first-frame paint, as ONE decision.
               //
-              // A rebuild that finished while paused showed black with a
-              // correct timecode - the bug reported as "I pause and cannot
-              // see anything". `video.play()` is what makes WKWebView decode
-              // and present the first frame of a freshly attached
-              // MediaSource, so the playing path always looked right and the
-              // paused path never painted at all. Nothing else assigns
-              // currentTime here: the landing seek above runs only in
-              // ABSOLUTE timeline mode with a pending target, which a web
-              // source is not.
-              //
-              // The nudge lands on the buffer's own origin, which is exactly
-              // what the playhead already reports (clockOrigin is subtracted
-              // back out in corrected()), so this moves the picture and not
-              // the clock. When currentTime already equals that origin the
-              // assignment is not a seek and decodes nothing, so step a
-              // millisecond instead - far under one frame, and it guarantees
-              // the `seeked` that also retires the scrub-preview overlay.
-              // Without that event the overlay has no other way to clear
-              // while paused: onSettled had been skipped (its timer was
-              // armed during the rebuild) and `playing` never comes.
-              if (!paintedOnceRef.current && sb.buffered.length > 0) {
-                paintedOnceRef.current = true;
+              // These are two things that both want to set currentTime at this
+              // exact moment, and letting each guard on the other's leftovers
+              // produced two high-severity bugs within an hour: in rebased mode
+              // the nudge never ran at all, and in absolute mode it overwrote
+              // the landing seek and dropped the playhead a whole GOP before
+              // where the user clicked. The rules, and why, are in
+              // lib/first-append.ts, where they are tested.
+              {
                 const pv = videoRef.current;
-                if (pv && pv.paused && pendingLandRef.current == null) {
-                  const origin = sb.buffered.start(0);
-                  const to = Math.abs(pv.currentTime - origin) < 1e-3 ? origin + 1e-3 : origin;
-                  try { pv.currentTime = to; } catch { /* ignore */ }
-                }
+                const plan = planFirstAppend({
+                  painted: paintedOnceRef.current,
+                  absolute: timelineAbsRef.current,
+                  pendingLand: pendingLandRef.current,
+                  bufferedStart: sb.buffered.length > 0 ? sb.buffered.start(0) : 0,
+                  bufferedEnd: sb.buffered.length > 0 ? sb.buffered.end(sb.buffered.length - 1) : 0,
+                  currentTime: pv?.currentTime ?? 0,
+                  paused: pv?.paused ?? true,
+                  hasBuffer: sb.buffered.length > 0,
+                });
+                if (plan.clearLand) pendingLandRef.current = null;
+                if (plan.burnOneShot) paintedOnceRef.current = true;
+                const to = plan.landTo ?? plan.nudgeTo;
+                if (pv && to != null) { try { pv.currentTime = to; } catch { /* ignore */ } }
               }
               // First real media data is in the buffer → the pipeline genuinely
               // delivered. NOW fire onReady so the watchdog covered the full path

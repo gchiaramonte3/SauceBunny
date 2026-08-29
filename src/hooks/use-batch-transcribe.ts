@@ -33,6 +33,8 @@ export type BatchTranscribeSettings = {
   modelId: string;
   engine: string;
   language: string;
+  /** "accurate" | "fast" — see Settings ▸ Transcription ▸ Speed. */
+  speed: string;
   detectSpeakers: boolean;
   /** 0 or less means "let the diarizer decide". */
   expectedSpeakers: number;
@@ -112,6 +114,7 @@ export function useBatchTranscribe(
               expected_speakers: settings.expectedSpeakers > 0 ? settings.expectedSpeakers : null,
               engine: settings.engine,
               language: settings.language,
+              speed: settings.speed,
               duration_seconds: null,
             },
           });

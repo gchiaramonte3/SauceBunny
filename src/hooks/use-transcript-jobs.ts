@@ -332,6 +332,7 @@ export function useTranscriptJobs(p: TranscriptJobsProps) {
               detect_speakers: defaults.detectSpeakers,
               expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
               language: defaults.transcriptionLanguage,
+              speed: defaults.transcriptionSpeed,
             },
           });
         } else {
@@ -518,6 +519,7 @@ export function useTranscriptJobs(p: TranscriptJobsProps) {
           detect_speakers: defaults.detectSpeakers,
           expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
           language: defaults.transcriptionLanguage,
+          speed: defaults.transcriptionSpeed,
         },
       });
     } catch (err) {
@@ -527,7 +529,7 @@ export function useTranscriptJobs(p: TranscriptJobsProps) {
     }
   }, [ensureEngineModelReady, metadata, metadataLoading, exportOpts.folder, exportOpts.filename, resolveTranscriptOutDir,
       durationFrames, fps, defaults.whisperModel, defaults.transcriptionEngine, defaults.detectSpeakers,
-      defaults.expectedSpeakers, defaults.transcriptionLanguage, appendLog, cookiesBrowserOrNone, setTranscriptError, setTranscriptJobId, setTranscriptPhase, setTranscriptProgress, setTranscriptResolution, setTranscriptState, transcriptAbortRef]);
+      defaults.expectedSpeakers, defaults.transcriptionLanguage, defaults.transcriptionSpeed, appendLog, cookiesBrowserOrNone, setTranscriptError, setTranscriptJobId, setTranscriptPhase, setTranscriptProgress, setTranscriptResolution, setTranscriptState, transcriptAbortRef]);
 
   const handleOpenTranscriptionSettings = useCallback(() => {
     setSettingsInitialTab("transcription");

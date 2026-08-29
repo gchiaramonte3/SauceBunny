@@ -120,10 +120,32 @@ impl JobRegistry {
     /// the cancel set can't accumulate stale entries across a session.
     pub(crate) fn finish_job(&self, id: &str) {
         if let Ok(mut g) = self.cancelled.lock() { g.remove(id); }
-        if let Ok(mut g) = self.children.lock() {
-            // Stage keys too — a `<job>::diarize` left behind would outlive
-            // the job it belongs to and never be reachable by Stop again.
-            g.retain(|k, _| !belongs_to_job(k, id));
+        // KILL what is swept, do not merely drop it.
+        //
+        // This used to `retain` the map, which removes the entry and drops the
+        // CommandChild - and dropping one does NOT stop the process. The
+        // plugin's waiter thread still holds the shared handle and `kill()` is
+        // by-value, so a child dropped here keeps running with nothing left
+        // that can reach it: not Stop (its key is gone from the map), not the
+        // app-exit sweep (which walks the same map).
+        //
+        // It became reachable the moment stages started overlapping. A job
+        // ending for a reason OTHER than Stop - whisper exiting non-zero, or
+        // exiting clean without an SRT - takes an exit path that calls this
+        // while the diarizer is still running, and orphaned it: minutes of
+        // GPU work with no UI, surviving app quit. Exactly the class the
+        // exit sweep exists to prevent.
+        let orphans: Vec<CommandChild> = match self.children.lock() {
+            Ok(mut g) => {
+                let keys: Vec<String> = g.keys().filter(|k| belongs_to_job(k, id)).cloned().collect();
+                keys.into_iter().filter_map(|k| g.remove(&k)).collect()
+            }
+            Err(_) => Vec::new(),
+        };
+        for child in orphans {
+            // Already-exited children are the common case here and their kill
+            // fails harmlessly; a live one is the case this exists for.
+            let _ = child.kill();
         }
     }
 }

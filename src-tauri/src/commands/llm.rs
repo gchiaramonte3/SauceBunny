@@ -238,6 +238,20 @@ pub fn delete_llm_model(app: AppHandle, model_id: String) -> Result<(), crate::A
 pub struct LlmServer {
     child: Mutex<Option<CommandChild>>,
     info: Mutex<Option<LlmServerInfo>>,
+    /// Which start attempt owns this server.
+    ///
+    /// Bumped by every `start_llm_server` and by every `stop_llm_server`. A
+    /// start that is no longer the current generation has been superseded and
+    /// must touch nothing: not the child slot, not `shutdown()`.
+    ///
+    /// Without it, a start abandoned mid-load kept polling. Its cancel check
+    /// asked "is there no info AND no child", which a NEWER start had already
+    /// made false by storing its own child - so the stale start polled a dead
+    /// port for the rest of its 90 seconds and then called `shutdown()`,
+    /// killing the live server the user was talking to. The AI tab then
+    /// answered "Failed to fetch" for the rest of the session, because the
+    /// frontend caches `server` and never re-reads it.
+    generation: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Serialize, Clone, ts_rs::TS)]
@@ -265,6 +279,14 @@ impl LlmServer {
     }
     fn current(&self) -> Option<LlmServerInfo> {
         self.info.lock().ok().and_then(|g| g.clone())
+    }
+    /// Claim ownership for a new attempt and return its generation.
+    fn begin(&self) -> u64 {
+        self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    }
+    /// Is `gen` still the newest attempt?
+    fn is_current(&self, gen: u64) -> bool {
+        self.generation.load(std::sync::atomic::Ordering::SeqCst) == gen
     }
 }
 
@@ -320,6 +342,9 @@ pub async fn start_llm_server(
         return Err(crate::AppError::not_found(format!("Model {model_id} not downloaded")));
     }
 
+    // Claim this attempt before anything is spawned, so a later start or a
+    // stop immediately supersedes us.
+    let my_gen = state.begin();
     let port = free_loopback_port()?;
     let api_key = mint_api_key()?;
     let threads = performance_cores();
@@ -377,8 +402,18 @@ pub async fn start_llm_server(
     // file (205, 210, 215, 326) and the whole of JobRegistry already guard with
     // `if let Ok` / `.ok()` for exactly that reason; these two were the
     // outliers. A poisoned lock now costs one failed start, not the feature.
+    if !state.is_current(my_gen) {
+        // Superseded while spawning. Kill what we just started rather than
+        // overwriting the newer start's handle, which would drop that child
+        // unkilled and leak a multi-GB llama-server nothing can reach.
+        let _ = child.kill();
+        return Err(crate::AppError::internal("server start superseded"));
+    }
     match state.child.lock() {
-        Ok(mut g) => *g = Some(child),
+        Ok(mut g) => {
+            if let Some(prev) = g.take() { let _ = prev.kill(); }
+            *g = Some(child);
+        }
         // The child is already spawned. Kill it rather than leaking an
         // untracked llama-server that nothing can ever stop.
         Err(_) => {
@@ -415,8 +450,10 @@ pub async fn start_llm_server(
     let client = reqwest::Client::new();
     let mut ready = false;
     for _ in 0..180 {
-        if state.current().is_none() && state.child.lock().map(|g| g.is_none()).unwrap_or(true) {
-            // Shut down out from under us (user switched away).
+        if !state.is_current(my_gen) {
+            // Superseded by a newer start, or cancelled by stop_llm_server.
+            // Either way this attempt owns nothing and must not shut anything
+            // down on its way out.
             return Err(crate::AppError::internal("server start cancelled"));
         }
         if let Ok(resp) = client.get(&health).bearer_auth(&api_key).send().await {
@@ -428,7 +465,9 @@ pub async fn start_llm_server(
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
     if !ready {
-        state.shutdown();
+        // Only tear down what we still own. A superseded attempt calling
+        // shutdown() here is what killed the live server.
+        if state.is_current(my_gen) { state.shutdown(); }
         return Err(crate::AppError::internal("llama-server did not become ready in time"));
     }
 
@@ -436,6 +475,9 @@ pub async fn start_llm_server(
     // Same reasoning as the child lock above. The server IS up at this point,
     // so a poisoned lock here loses the handle rather than the process - report
     // it instead of panicking and leaving the caller with neither.
+    if !state.is_current(my_gen) {
+        return Err(crate::AppError::internal("server start superseded"));
+    }
     match state.info.lock() {
         Ok(mut g) => *g = Some(info.clone()),
         Err(_) => return Err(crate::AppError::internal(
@@ -460,6 +502,9 @@ pub async fn start_llm_server(
 /// know whether the start had already finished.
 #[tauri::command]
 pub fn stop_llm_server(state: State<'_, LlmServer>) -> Result<(), crate::AppError> {
+    // Bump first: an in-flight start checks the generation between polls, so
+    // this is what makes it give up instead of finishing and re-registering.
+    state.begin();
     state.shutdown();
     Ok(())
 }
@@ -528,5 +573,56 @@ mod llm_tests {
         assert!(b > 0);
         // Not asserting a != b: the OS may legitimately hand back the same
         // freed port twice. The property that matters is that it answers.
+    }
+}
+
+#[cfg(test)]
+mod llm_generation_tests {
+    use super::LlmServer;
+
+    fn server() -> LlmServer {
+        LlmServer {
+            child: std::sync::Mutex::new(None),
+            info: std::sync::Mutex::new(None),
+            generation: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    #[test]
+    fn a_start_owns_the_server_until_something_supersedes_it() {
+        let s = server();
+        let g = s.begin();
+        assert!(s.is_current(g), "a fresh start must own the server");
+    }
+
+    #[test]
+    fn a_newer_start_supersedes_an_older_one() {
+        // The bug: the older attempt kept polling a dead port and then shut
+        // down the server the newer attempt had brought up.
+        let s = server();
+        let first = s.begin();
+        let second = s.begin();
+        assert!(!s.is_current(first), "the abandoned start still believed it owned the server");
+        assert!(s.is_current(second));
+    }
+
+    #[test]
+    fn stop_supersedes_an_in_flight_start() {
+        // stop_llm_server bumps the generation so a start mid-load gives up
+        // instead of finishing and re-registering behind the user's back.
+        let s = server();
+        let starting = s.begin();
+        s.begin(); // what stop_llm_server does
+        assert!(!s.is_current(starting));
+    }
+
+    #[test]
+    fn generations_never_repeat() {
+        let s = server();
+        let seen: Vec<u64> = (0..50).map(|_| s.begin()).collect();
+        let mut sorted = seen.clone();
+        sorted.dedup();
+        assert_eq!(seen.len(), sorted.len(), "a repeated generation would let a stale start think it is current");
+        assert!(seen.windows(2).all(|w| w[1] > w[0]), "generations must increase");
     }
 }

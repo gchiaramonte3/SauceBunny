@@ -82,7 +82,7 @@ function finishCurrent(ok = true, err?: string) {
  */
 const FILES = [{ path: "/a.mov", name: "a.mov" }, { path: "/b.mov", name: "b.mov" }];
 const SETTINGS = {
-  outDir: "/out", modelId: "base", engine: "whisper", language: "en",
+  outDir: "/out", modelId: "base", engine: "whisper", language: "en", speed: "accurate",
   detectSpeakers: false, expectedSpeakers: 0,
 };
 

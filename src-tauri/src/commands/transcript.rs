@@ -3236,6 +3236,23 @@ async fn run_diarizer(
     let stage = JobRegistry::stage_key(job_id, "diarize");
     app.state::<JobRegistry>().insert(stage.clone(), child);
 
+    // Re-check cancellation AFTER registering, not before.
+    //
+    // This runs on a detached task (start_diarizer_early spawns it and keeps
+    // no handle), so between the caller's is_cancelled gate and the insert
+    // above there is real time: two create_dir_all, sidecar resolution and a
+    // spawn. A Stop landing in that window sweeps a map that does not yet
+    // contain this child, kills only whisper, and leaves the diarizer running
+    // with nothing able to reach it. `cancel_job` marks the flag BEFORE it
+    // sweeps, so checking after the insert closes the window from this side.
+    if app.state::<JobRegistry>().is_cancelled(job_id) {
+        if let Some(c) = app.state::<JobRegistry>().take(&stage) {
+            let _ = c.kill();
+        }
+        let _ = std::fs::remove_file(&diar_json);
+        return Err("Cancelled".into());
+    }
+
     // Emit explicit phase events so the Sidebar can label what's
     // happening RIGHT NOW without scraping pipeline-log strings.
     // Channels are job-scoped just like transcript-progress.

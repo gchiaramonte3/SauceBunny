@@ -3609,6 +3609,7 @@ export default function App() {
       modelId: defaults.whisperModel,
       engine: defaults.transcriptionEngine,
       language: defaults.transcriptionLanguage,
+      speed: defaults.transcriptionSpeed,
       detectSpeakers: defaults.detectSpeakers,
       expectedSpeakers: defaults.expectedSpeakers,
     });
