@@ -970,6 +970,82 @@ fn caption_is_auto_generated(text: &str) -> bool {
     text.contains("<c>") || text.contains("</c>") || text.contains("<00:")
 }
 
+/// Best caption file already on disk for this source, by preference ladder.
+///
+/// Lifted out of the monitor closure so it can also run BEFORE the spawn.
+/// It is a pure filesystem scan, and running it first means a repeat caption
+/// request costs nothing instead of ~8s - almost all of which is the
+/// PyInstaller bootstrap every yt-dlp spawn pays (6.2s of a measured 7.8s).
+///
+/// It also closes a real window: yt-dlp DELETES the existing .vtt before it
+/// rewrites it, so a re-fetch that failed or was cancelled midway left the
+/// user with no captions where they previously had good ones.
+pub(crate) fn scan_best(
+        dir: &std::path::Path,
+        safe_for: &str,
+        rank_langs: &[String],
+    ) -> Option<String> {
+        let mut candidates: Vec<(bool, bool, u8, String)> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                let name = p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                // Only THIS job's language variants: `<safe>.<lang>.<vtt|srt>`.
+                // Requiring `<safe>.` rejects a different video that merely
+                // shares a title prefix ("My Video" vs "My Video Part 2");
+                // requiring a language segment (≥2 dots after the base)
+                // rejects a stale bare `<safe>.srt` from an earlier Whisper
+                // run in the same dir — which the manual-preferred sort would
+                // otherwise rank ABOVE the freshly downloaded caption.
+                let rest = match name.strip_prefix(safe_for) {
+                    Some(r) if r.starts_with('.') => r,
+                    _ => continue,
+                };
+                if !(rest.ends_with(".vtt") || rest.ends_with(".srt"))
+                    || rest.matches('.').count() < 2
+                {
+                    continue;
+                }
+                // Lower rank = preferred. ALL .vtt tiers outrank ALL
+                // .srt tiers — vtt is what we now write and it's the
+                // format that still carries speaker voice tags (a
+                // stray .srt would have lost them). Within a format,
+                // rank_langs order wins (English defaults reproduce
+                // the historical en-US > en > en-orig ladder).
+                let unranked = (rank_langs.len() * 2) as u8;
+                let mut rank: u8 = unranked;
+                for (i, lg) in rank_langs.iter().enumerate() {
+                    if name.ends_with(&format!(".{lg}.vtt")) {
+                        rank = i as u8;
+                        break;
+                    }
+                }
+                if rank == unranked {
+                    for (i, lg) in rank_langs.iter().enumerate() {
+                        if name.ends_with(&format!(".{lg}.srt")) {
+                            rank = (rank_langs.len() + i) as u8;
+                            break;
+                        }
+                    }
+                }
+                // Caption files are tiny — read each once to sniff
+                // for speaker labels AND auto-vs-manual.
+                let body = std::fs::read_to_string(&p).unwrap_or_default();
+                let has_speakers = caption_has_speaker_tags(&body);
+                let is_auto = caption_is_auto_generated(&body);
+                candidates.push((has_speakers, is_auto, rank, p.to_string_lossy().to_string()));
+            }
+        }
+        // Speaker-bearing first, then manual over auto, then by the
+        // language/format preference (false sorts before true).
+        candidates.sort_by_key(|(has_spk, is_auto, rank, _)| (!*has_spk, *is_auto, *rank));
+        candidates.into_iter().next().map(|(_, _, _, p)| p)
+    }
+
 #[tauri::command]
 pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<String, crate::AppError> {
     let caption_ffmpeg_str = sidecar_path("ffmpeg")?
@@ -1032,6 +1108,20 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
         "--skip-download".into(),
         "--no-playlist".into(),
         "--newline".into(),
+        // Silence the byte-counter.
+        //
+        // Every non-empty line of yt-dlp's output is forwarded to the pipeline
+        // log, and a caption fetch produced nine rows of
+        // "[download]  1.00KiB at Unknown B/s (00:00:00)" per track, sizes
+        // doubling, for a file that arrives in well under a second.
+        //
+        // The two progress filters this codebase already has could not catch
+        // them: `is_ytdlp_progress` and appendLog's consecutive-line collapse
+        // BOTH key on a literal `%`, and YouTube serves timedtext chunked with
+        // no Content-Length, so yt-dlp emits its unknown-total format, which
+        // has no percentage in it at all. Suppressing at the source is both
+        // simpler and complete - nothing on this path consumes a percentage.
+        "--no-progress".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
         YT_JS_RUNTIME_ARGS[0].into(),
@@ -1048,6 +1138,32 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
     // yt-dlp can't parse). The command itself returns immediately (fire-and-
     // forget), so the retry must live HERE in the monitor task, not in a
     // frontend invoke wrapper that resolves before the download finishes.
+    // Already on disk? Then do not spawn.
+    //
+    // A repeat caption request re-ran the whole thing: ~8s, of which 6.2s is
+    // PyInstaller bootstrap, to re-download a file the user already had. Worse,
+    // yt-dlp DELETES the existing .vtt before rewriting it, so a re-fetch that
+    // failed or was cancelled midway left them with nothing where they had
+    // working captions a moment earlier.
+    //
+    // The scan is the same one the monitor already runs on exit; running it
+    // first costs a directory read.
+    if let Some(existing) = scan_best(&out_dir, &safe, &rank_langs) {
+        // Same event shape the monitor emits, so the frontend cannot tell a
+        // cache hit from a fast download - it just gets its captions.
+        let _ = app.emit(
+            "captions-done",
+            DoneEvent {
+                job_id: args.job_id.clone(),
+                success: true,
+                code: Some(0),
+                path: Some(existing.clone()),
+                error: None,
+            },
+        );
+        return Ok(existing);
+    }
+
     let cookied = cookies_active(args.cookies_browser.as_deref());
     let mut first_args = caption_args.clone();
     first_args.extend(cookies_args(args.cookies_browser.as_deref()));
@@ -1086,71 +1202,6 @@ pub async fn download_captions(app: AppHandle, args: CaptionsArgs) -> Result<Str
         //   2. NOT auto-generated — manual/creator captions are human-corrected
         //      and far more accurate than YouTube's ASR auto-captions.
         //   3. language/format tier.
-        fn scan_best(
-            dir: &std::path::Path,
-            safe_for: &str,
-            rank_langs: &[String],
-        ) -> Option<String> {
-            let mut candidates: Vec<(bool, bool, u8, String)> = Vec::new();
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let p = entry.path();
-                    let name = p
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("")
-                        .to_string();
-                    // Only THIS job's language variants: `<safe>.<lang>.<vtt|srt>`.
-                    // Requiring `<safe>.` rejects a different video that merely
-                    // shares a title prefix ("My Video" vs "My Video Part 2");
-                    // requiring a language segment (≥2 dots after the base)
-                    // rejects a stale bare `<safe>.srt` from an earlier Whisper
-                    // run in the same dir — which the manual-preferred sort would
-                    // otherwise rank ABOVE the freshly downloaded caption.
-                    let rest = match name.strip_prefix(safe_for) {
-                        Some(r) if r.starts_with('.') => r,
-                        _ => continue,
-                    };
-                    if !(rest.ends_with(".vtt") || rest.ends_with(".srt"))
-                        || rest.matches('.').count() < 2
-                    {
-                        continue;
-                    }
-                    // Lower rank = preferred. ALL .vtt tiers outrank ALL
-                    // .srt tiers — vtt is what we now write and it's the
-                    // format that still carries speaker voice tags (a
-                    // stray .srt would have lost them). Within a format,
-                    // rank_langs order wins (English defaults reproduce
-                    // the historical en-US > en > en-orig ladder).
-                    let unranked = (rank_langs.len() * 2) as u8;
-                    let mut rank: u8 = unranked;
-                    for (i, lg) in rank_langs.iter().enumerate() {
-                        if name.ends_with(&format!(".{lg}.vtt")) {
-                            rank = i as u8;
-                            break;
-                        }
-                    }
-                    if rank == unranked {
-                        for (i, lg) in rank_langs.iter().enumerate() {
-                            if name.ends_with(&format!(".{lg}.srt")) {
-                                rank = (rank_langs.len() + i) as u8;
-                                break;
-                            }
-                        }
-                    }
-                    // Caption files are tiny — read each once to sniff
-                    // for speaker labels AND auto-vs-manual.
-                    let body = std::fs::read_to_string(&p).unwrap_or_default();
-                    let has_speakers = caption_has_speaker_tags(&body);
-                    let is_auto = caption_is_auto_generated(&body);
-                    candidates.push((has_speakers, is_auto, rank, p.to_string_lossy().to_string()));
-                }
-            }
-            // Speaker-bearing first, then manual over auto, then by the
-            // language/format preference (false sorts before true).
-            candidates.sort_by_key(|(has_spk, is_auto, rank, _)| (!*has_spk, *is_auto, *rank));
-            candidates.into_iter().next().map(|(_, _, _, p)| p)
-        }
 
         let mut saw_auth_error = false;
         let mut attempt = 1;
@@ -1598,8 +1649,31 @@ pub async fn download_web_preview(
     // `--ffmpeg-location` note below); without it the AAC stayed raw ADTS and
     // WKWebView showed a black player.
     let h = args.max_height.unwrap_or(720);
+    // H.264 FIRST, and that is not a preference - it is what makes the cached
+    // copy playable.
+    //
+    // `ext=mp4` does NOT mean H.264. Under yt-dlp's default codec sort it
+    // resolves to AV1 on YouTube: measured on a real video at the default
+    // cap, this selector returned 397+140 (av01.0.04M.08), which is exactly
+    // the f397/f140 pair seen in a user's log. WKWebView's WebCodecs cannot
+    // decode av01, so MediaBunnyPlayer's canDecode() check failed and the app
+    // logged "Cached copy failed in the mediabunny player. Retrying with
+    // native." on EVERY YouTube download fallback - a guaranteed failure
+    // dressed as an intermittent one.
+    //
+    // The stream path already knew this and pinned `bv*[vcodec^=avc1]` for
+    // the same reason (see resolve_stream_tiers). The download path did not,
+    // and a comment in App.tsx asserted the opposite outright: "the download
+    // cascade always produces H.264+AAC MP4". That claim is what kept
+    // mediabunny as the default player for these files.
+    //
+    // avc1 terms come first; the un-pinned terms stay behind them so a source
+    // with no H.264 at all still downloads rather than failing.
     let fmt = format!(
-        "b[height<={h}][ext=mp4][acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]/\
+        "b[height<={h}][vcodec^=avc1][acodec!=none][protocol^=http][protocol!*=m3u8]/\
+         bv*[height<={h}][vcodec^=avc1][protocol^=http][protocol!*=m3u8]+ba[acodec^=mp4a][protocol^=http][protocol!*=m3u8]/\
+         bv*[height<={h}][vcodec^=avc1]+ba[ext=m4a]/\
+         b[height<={h}][ext=mp4][acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]/\
          bv*[height<={h}][ext=mp4][protocol^=http][protocol!*=m3u8]+ba[ext=m4a][protocol^=http][protocol!*=m3u8]/\
          b[ext=mp4][acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]/\
          18/\

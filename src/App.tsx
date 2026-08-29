@@ -698,8 +698,16 @@ export default function App() {
    * r107 mediabunny-first lesson: native <video> over asset:// silently hangs
    * on large files (black canvas, often no error event), and the cached copy
    * of a long source is exactly that. Default mediabunny: the download
-   * cascade always produces H.264+AAC MP4, which WebCodecs decodes on every
-   * Apple Silicon Mac. A background probe demotes to native in the rare case
+   * cascade produces H.264+AAC MP4, which WebCodecs decodes on every Apple
+   * Silicon Mac. That sentence used to say "always", and it was false in a
+   * way that made this default wrong: the download selector asked for
+   * `ext=mp4`, which under yt-dlp's codec sort resolves to AV1 on YouTube
+   * (measured: 397+140, av01.0.04M.08). WebCodecs in WKWebView cannot decode
+   * av01, so mediabunny failed on EVERY YouTube download fallback and the app
+   * logged "Cached copy failed in the mediabunny player" as though it were
+   * intermittent. The selector now pins avc1 first (see download_web_preview);
+   * the guarantee holds because the format request enforces it, not because
+   * mp4 implied it. A background probe demotes to native in the rare case
    * mediabunny can't read the file, and one runtime error swaps players once
    * (guarded per cache path so it can't loop).
    */
