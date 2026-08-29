@@ -828,6 +828,7 @@ Three more are measured against the RENDERED app rather than its source, in
 | `min-window-size` | Nothing overflows sideways at the `minWidth`/`minHeight` declared in `tauri.conf.json` (read from the config, not retyped) |
 | `long-names` | A filename with no break opportunity cannot push a library row's controls out of the window |
 | `peer-name-bounds` | A remote peer's display name is bounded where it paints over your video, and capped at the lobby input |
+| `list-tiling` | List rows tile: no overlap, no void, one height, one width, no sideways scroll — and overlapping library roots never list a file twice. Written to settle a report that the list was "all over the place"; the geometry was fine and the duplication was real |
 
 Two habits these encode, worth applying to any new one:
 
