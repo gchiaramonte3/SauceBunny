@@ -287,4 +287,17 @@ if [ "${FAILED}" -ne 0 ]; then
   printf '\033[31m✗ bundle verification failed\033[0m\n\n'
   exit 1
 fi
-printf '\033[32m✓ bundle looks shippable\033[0m\n\n'
+# "Shippable" is a claim about Gatekeeper, and only a real identity can earn it.
+#
+# Every check above can pass on an ad-hoc bundle, because ad-hoc is the expected
+# LOCAL state and is warned rather than failed. The summary then said "bundle
+# looks shippable" over a bundle `spctl -a -t exec` rejects outright - the one
+# sentence a person reads, telling them the opposite of what would happen on
+# someone else's Mac. Contents and signing are separate verdicts, so say both.
+if [ "${SIGNED_FOR_REAL}" -eq 1 ]; then
+  printf '\033[32m✓ bundle looks shippable\033[0m\n\n'
+else
+  printf '\033[32m✓ bundle contents check out\033[0m — but it is \033[33mNOT shippable\033[0m:\n'
+  printf '  ad-hoc signed, so Gatekeeper will reject it on any other Mac.\n'
+  printf '  A release needs a Developer ID and notarization (docs/DISTRIBUTION.md).\n\n'
+fi
