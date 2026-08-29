@@ -21,9 +21,22 @@ import { join, resolve } from "node:path";
  *   · the BRAND MARK itself - the loader and the welcome glow, which are not
  *     system chrome and were never the complaint.
  *
- * Selection, activation, progress, identity and counts are none of those.
- * They read as brighter, which is what focus already does (focus-contract),
- * so the whole system says emphasis with one language instead of two.
+ * Two categories were ADDED on 2026-08-29, at the user's direction, and the
+ * rule above was narrowed to make room for them rather than quietly bent:
+ *
+ *   · WORK ACTUALLY RUNNING - the generate button's sweep while a job is in
+ *     flight. This is the same category as the session dot: a live thing
+ *     reporting itself. It had been violet, which is the brand's ACTION
+ *     colour, so a busy button that could not be pressed still looked like
+ *     the thing to press.
+ *   · A TIMECODE - in the transcript and in the AI panel's citations. A
+ *     timecode is the one thing in a wall of text that points AT the media
+ *     and can be jumped to, so it is a live-media reference rather than
+ *     decoration.
+ *
+ * Selection, identity and counts remain none of those. They read as
+ * brighter, which is what focus already does (focus-contract), so the system
+ * still says emphasis with one language instead of two.
  *
  * SHRINK-ONLY. Deleting a row is always fine. Adding one means arguing that a
  * new surface reports an outcome or a live feed, and if it does, say so here.
@@ -43,12 +56,15 @@ const GREEN = /var\(--(ella-green|success|stroke-green|color-accent-green)\b/;
  */
 const ALLOWED: Record<string, string[]> = {
   // ── positive outcome ───────────────────────────────────────────────
-  "buttons.css": ["cp-sbtn-result", "cp-gen-result"],
+  "buttons.css": ["cp-sbtn-result", "cp-gen-result", "cp-gen-btn"],
   "monitor.css": ["cp-getting-started-check"],
   "review.css": ["cp-review-export-msg", "cp-status-chip"],
   "settings.css": ["cp-spike-row", "cp-aiapi-set", "cp-settings-ready", "cp-aiapi-msg"],
   "shell.css": ["cp-drop-card"],
   "transport.css": ["cp-track-queued"],
+  // ── work actually running, and timecodes (2026-08-29) ──────────────
+  "ai.css": ["cp-md-ts"],
+  "transcript.css": ["cp-tx-jump"],
   // ── live broadcast ─────────────────────────────────────────────────
   "room.css": ["cp-room-live"],
   "nav.css": ["cp-nav-badge"],

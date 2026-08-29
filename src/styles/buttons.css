@@ -372,19 +372,24 @@
  * Two layers on one pseudo-element: the standing bloom keeps its position,
  * the sheen is the only thing that moves.
  */
+/* GREEN, not violet (user call 2026-08-29). A job that is actually running is
+   the same category as the session dot and the mic meter: a live thing,
+   reporting itself. Violet is the brand's action colour - it says "press
+   this" - and it was still saying that while the button was busy and could
+   not be pressed. */
 .cp-gen-btn.loading::before {
   opacity: 1;
   background:
     linear-gradient(
       100deg,
       transparent 48%,
-      color-mix(in srgb, var(--novella-violet) 20%, transparent) 100%
+      color-mix(in srgb, var(--ella-green) 18%, transparent) 100%
     ),
     linear-gradient(
       100deg,
       transparent 38%,
       rgba(255, 255, 255, 0.06) 48%,
-      color-mix(in srgb, var(--novella-violet) 26%, transparent) 54%,
+      color-mix(in srgb, var(--ella-green) 24%, transparent) 54%,
       transparent 66%
     );
   background-size: 100% 100%, 240% 100%;

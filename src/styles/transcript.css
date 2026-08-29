@@ -413,11 +413,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Green, matching the AI panel's citations - same meaning, same colour.
+   See the note on .cp-md-ts in ai.css. */
 .cp-tx-jump {
   font-size: var(--text-sm);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  color: var(--fg-4);
+  color: var(--ella-green);
   background: transparent;
   border: none;
   padding: 2px 6px;
