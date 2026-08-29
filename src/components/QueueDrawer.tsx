@@ -1058,6 +1058,11 @@ export function QueueDrawer({
         <AiSummary
           transcriptPath={transcriptPath}
           reloadToken={transcriptArrivedTick}
+          /* Pre-warm only while the tab is actually on screen. `visited` is
+             seeded from localStorage and this <aside> renders whether or not
+             the drawer is open, so mounting alone would load a multi-GB model
+             at boot for a user who did nothing. */
+          warmable={open && shownTab === "ai"}
           selectedModelId={aiModelId}
           style={aiStyle}
           onOpenSettings={onOpenAiSettings}

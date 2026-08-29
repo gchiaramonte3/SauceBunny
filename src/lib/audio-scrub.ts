@@ -110,8 +110,15 @@ export function planGrain(
   if (durationSec <= 0) return null;
 
   // How many grains are sounding at once at this spacing.
+  //
+  // No GRAIN_MAX_VOICES clamp here: it could never bind. The rate cap above
+  // guarantees spacing >= GRAIN_MIN_INTERVAL_MS, so this is at most
+  // 55/32 = 1.72 voices and the clamp was dead code — along with the
+  // assertion that named it, which could not fail. The constant still earns
+  // its keep as the player's hard ceiling on simultaneous grains, where
+  // grains already sounding CAN pile up past what one spacing predicts.
   const spacingMs = Math.min(sinceMs, 1000);
-  const voices = Math.max(1, Math.min(GRAIN_MAX_VOICES, GRAIN_CORE_SEC * 1000 / spacingMs));
+  const voices = Math.max(1, GRAIN_CORE_SEC * 1000 / spacingMs);
   const gain = 1 / Math.sqrt(voices);
 
   return {

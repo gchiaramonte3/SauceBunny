@@ -31,6 +31,17 @@ type Props = {
   transcriptPath: string | null;
   /** Bumped on every transcript arrival — re-read when the same path is overwritten. */
   reloadToken?: number;
+  /**
+   * True only while this tab is ON SCREEN in this session (drawer open AND the
+   * AI tab shown). Gates the prompt pre-warm.
+   *
+   * Mounting is NOT the intent signal the pre-warm originally assumed. The
+   * drawer seeds its visited-tabs set from localStorage and renders its
+   * <aside> whether or not it is open, and the Clip view never unmounts - so a
+   * user who opened the AI tab once last week got a multi-GB model load at
+   * boot, in a closed drawer, having done nothing.
+   */
+  warmable?: boolean;
   /** Model id chosen in Settings → AI Summary (persisted). */
   selectedModelId?: string | null;
   /** Output formatting preferences from Settings. */
@@ -149,7 +160,7 @@ export function buildTaskInstruction(
 }
 
 export function AiSummary({
-  transcriptPath, reloadToken, selectedModelId, style, onOpenSettings, onSeek,
+  transcriptPath, reloadToken, warmable, selectedModelId, style, onOpenSettings, onSeek,
   sourceKey, sourceDescription, durationSec, onChaptersChanged,
 }: Props) {
   // ── Transcript text (timestamped, model-friendly) ────────────────
@@ -404,11 +415,22 @@ export function AiSummary({
   // mounting IS the intent signal. Cloud providers have nothing to warm.
   const primedRef = useRef<string | null>(null);
   const primeAbortRef = useRef<AbortController | null>(null);
+  // Read inside the effect WITHOUT depending on it. transcriptForModel is a
+  // useMemo keyed on `server?.ctx`, and the warm-up itself sets `server` - so
+  // depending on the object made the effect re-run the instant the server came
+  // up, and its cleanup aborted the very warm-up that had just started. The
+  // ingestion it exists to pay for never completed on a cold server, which is
+  // the only case it was written for.
+  const forModelRef = useRef(transcriptForModel);
+  useEffect(() => { forModelRef.current = transcriptForModel; }, [transcriptForModel]);
+
   useEffect(() => {
-    if (loadAiProvider() !== "local") return;
-    if (!transcriptForModel || transcriptForModel.lines.length === 0) return;
+    if (!warmable) return;                       // on screen, this session
+    if (loadAiProvider() !== "local") return;    // cloud has nothing to warm
+    const src = forModelRef.current;
+    if (!src || src.lines.length === 0) return;
     const model = activeModel;
-    if (!model?.downloaded) return;
+    if (!model?.downloaded) return;              // never triggers a download
     const key = `${transcriptPath}#${model.id}`;
     if (primedRef.current === key) return;
     primedRef.current = key;
@@ -419,26 +441,28 @@ export function AiSummary({
       try {
         const info = await ensureServer(ctrl.signal);
         if (!info || ctrl.signal.aborted) return;
-        // One token. The answer is thrown away — the point is the prompt
-        // eval that precedes it, which is what lands in the cache.
+        const lines = forModelRef.current?.lines ?? src.lines;
+        // One token. The answer is discarded — the point is the prompt eval
+        // before it, which is what lands in llama-server's cache.
         await streamChat(
           info,
-          [{ role: "system", content: buildSourcePrefix(transcriptForModel.lines, info.ctx).system },
+          [{ role: "system", content: buildSourcePrefix(lines, info.ctx).system },
            { role: "user", content: "ok" }],
           () => { /* discard */ },
           ctrl.signal,
           { maxTokens: 1 },
         );
       } catch {
-        // A failed warm-up must be completely silent: nothing was asked for,
-        // so nothing can be reported. The real request will surface any
-        // genuine problem in its own path.
+        // A failed warm-up must be silent: nothing was asked for. Allow one
+        // retry on the next visit rather than latching the failure.
         primedRef.current = null;
       }
     })();
-    return () => { ctrl.abort(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- ensureServer identity churns with server state; keying on the transcript+model is the intent
-  }, [transcriptPath, transcriptForModel, activeModel?.id, activeModel?.downloaded]);
+    // NOTE: no abort in cleanup. Tearing the warm-up down on any re-render is
+    // what made it abort itself; a real question aborts it explicitly in
+    // send(), which is the only case where stopping it is right.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately keyed on STABLE identities; see forModelRef above
+  }, [warmable, transcriptPath, activeModel?.id, activeModel?.downloaded]);
 
   const send = useCallback(async (text: string) => {
     const content = text.trim();

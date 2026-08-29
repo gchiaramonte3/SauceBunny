@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  GRAIN_CORE_SEC, GRAIN_FADE_SEC, GRAIN_MAX_VOICES, GRAIN_MIN_INTERVAL_MS,
+  GRAIN_CORE_SEC, GRAIN_FADE_SEC, GRAIN_MIN_INTERVAL_MS,
   GRAIN_MIN_MOVE_SEC, grainEnvelope, idleScrubState, planGrain, type ScrubGrainState,
 } from "./audio-scrub";
 
@@ -39,7 +39,12 @@ describe("audio scrub grain policy", () => {
     const fast = planGrain(at(0, 10), GRAIN_MIN_INTERVAL_MS, 12, DUR)!; // tightest legal
     expect(slow.gain).toBeGreaterThan(fast.gain);
     expect(slow.gain).toBeLessThanOrEqual(1);
-    expect(fast.gain).toBeGreaterThanOrEqual(1 / Math.sqrt(GRAIN_MAX_VOICES));
+    // The REAL floor, not GRAIN_MAX_VOICES. The rate cap bounds overlap at
+    // GRAIN_CORE_SEC / GRAIN_MIN_INTERVAL_MS voices, so asserting against the
+    // max-voices constant was vacuous - it could not fail whatever the gain
+    // formula did.
+    const tightestOverlap = (GRAIN_CORE_SEC * 1000) / GRAIN_MIN_INTERVAL_MS;
+    expect(fast.gain).toBeCloseTo(1 / Math.sqrt(tightestOverlap), 6);
   });
 
   it("plays each grain FORWARD when scrubbing backwards", () => {
