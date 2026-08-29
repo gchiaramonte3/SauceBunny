@@ -192,8 +192,45 @@ pub async fn download_parakeet_model(app: AppHandle, job_id: String) -> Result<(
     );
     emit_transcript_log(&app, &job_id, "info", "Downloading Parakeet model (~0.5 GB, first run only)…".into());
     let mut stderr_tail = String::new();
-    while let Some(event) = rx.recv().await {
+    // QUIET IS NOT THE SAME AS STUCK, and the user could not tell them apart.
+    //
+    // FluidAudio's `AsrModels.download` is one awaited call with no progress
+    // callback: the sidecar emits "prepare", then nothing at all until "done".
+    // Half a gigabyte over a slow link therefore looks exactly like a hang,
+    // and this loop threw the sidecar's stdout away as well (`_ => {}`), so
+    // even the two statuses it does emit never reached anyone.
+    //
+    // We cannot invent a percentage the dependency does not expose. We can
+    // stop the silence being total: say so when nothing has been heard for a
+    // while, and leave the job running - the Cancel button in Settings is the
+    // way out, and killing a download on a slow connection would be worse.
+    const QUIET_AFTER: std::time::Duration = std::time::Duration::from_secs(45);
+    let mut quiet_reports = 0u32;
+    loop {
+        let event = match tokio::time::timeout(QUIET_AFTER, rx.recv()).await {
+            Ok(Some(e)) => e,
+            Ok(None) => break,
+            Err(_) => {
+                quiet_reports += 1;
+                emit_transcript_log(
+                    &app, &job_id, "info",
+                    format!(
+                        "Still downloading. No word from the model host for {}s.                          This model reports no progress while it transfers, so a slow                          connection looks like this. Cancel in Settings if you want to stop.",
+                        quiet_reports * QUIET_AFTER.as_secs() as u32,
+                    ),
+                );
+                continue;
+            }
+        };
         match event {
+            // Stdout was being discarded. The sidecar's own status lines are
+            // the only signal this job has; they belong in the log.
+            CommandEvent::Stdout(b) => {
+                let raw = String::from_utf8_lossy(&b).to_string();
+                for line in raw.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                    emit_transcript_log(&app, &job_id, "info", line.to_string());
+                }
+            }
             CommandEvent::Stderr(b) => {
                 let raw = String::from_utf8_lossy(&b).to_string();
                 stderr_tail.push_str(&raw);
@@ -205,6 +242,13 @@ pub async fn download_parakeet_model(app: AppHandle, job_id: String) -> Result<(
             }
             CommandEvent::Terminated(payload) => {
                 let _ = app.state::<JobRegistry>().take(&job_id);
+                // A cancel kills the child, which arrives here as a signal
+                // rather than a clean exit. That is the user's doing, not a
+                // failure, and must not be reported as one.
+                if payload.signal.is_some() {
+                    emit_transcript_log(&app, &job_id, "info", "Model download cancelled.".into());
+                    return Ok(());
+                }
                 if payload.code != Some(0) {
                     return Err(crate::AppError::SidecarFailed {
                         name: "saucebunny-diarize".into(),

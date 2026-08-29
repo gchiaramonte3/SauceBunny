@@ -491,11 +491,32 @@ export function SettingsModal(props: Props) {
       .catch(() => setParakeetReady(false));
   }, [open]);
 
+  /**
+   * The running download's job id, so Cancel has something to cancel.
+   *
+   * It was minted and then dropped on the floor. The backend registers the
+   * child in the JobRegistry and its own comment says "cancellable via the
+   * JobRegistry" - the handle just never left this function, so a download
+   * that stalled could only be escaped by quitting the app.
+   *
+   * Assigned BEFORE the await, which is this repo's standing rule: an await
+   * between starting work and holding its handle is a window where Stop finds
+   * nothing to stop.
+   */
+  const parakeetJobRef = useRef<string | null>(null);
+
+  const cancelParakeet = useCallback(async () => {
+    const id = parakeetJobRef.current;
+    if (!id) return;
+    try { await invoke("cancel_job", { jobId: id }); } catch { /* already gone */ }
+  }, []);
+
   const downloadParakeet = useCallback(async () => {
     setParakeetBusy(true);
     setParakeetError(null);
     try {
       const id = newJobId();
+      parakeetJobRef.current = id;
       await invoke("download_parakeet_model", { jobId: id });
       // Confirm against disk rather than assuming success, so the row never
       // shows "Installed/In use" without the model actually being present.
@@ -504,6 +525,7 @@ export function SettingsModal(props: Props) {
       setParakeetError(formatError(e));
     } finally {
       setParakeetBusy(false);
+      parakeetJobRef.current = null;
     }
   }, []);
 
@@ -1447,13 +1469,23 @@ export function SettingsModal(props: Props) {
                         {parakeetReady === null ? (
                           <span className="size">checking…</span>
                         ) : !parakeetReady ? (
-                          <button
-                            className="btn btn-ghost"
-                            onClick={downloadParakeet}
-                            disabled={parakeetBusy}
-                          >
-                            {parakeetBusy ? "Downloading…" : "Download"}
-                          </button>
+                          parakeetBusy ? (
+                            /* A half-gigabyte download with no percentage and
+                               no way out was indistinguishable from a hang.
+                               Cancel is the honest control: the partial is
+                               discarded and Download starts again. */
+                            <button
+                              className="btn btn-ghost"
+                              onClick={() => { void cancelParakeet(); }}
+                              title="Stop downloading the Parakeet model. Nothing is kept; you can start again."
+                            >
+                              Cancel
+                            </button>
+                          ) : (
+                            <button className="btn btn-ghost" onClick={downloadParakeet}>
+                              Download
+                            </button>
+                          )
                         ) : (
                           <>
                             {!parakeetActive && (
