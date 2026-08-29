@@ -10,6 +10,36 @@ or released, so everything below is unreleased and sits on top of `v0.4.3`.
 The build in your hands is identified by its CFBundleVersion, shown in
 Settings ▸ About.
 
+`0.4.8` adds the first-run permissions step and fixes a paused-playback
+regression, a library duplication bug, and the app's missing select style.
+
+### Added
+- **Permissions are asked for at first run**, not half way into a live
+  session. macOS prompts once, and only once, so a prompt dismissed while
+  distracted previously left no route back except System Settings with
+  nothing in the app saying so. The step is explicit that NONE of it is
+  required: everything it asks for is for watching together, and skipping
+  is a first-class answer.
+- The app can now tell whether **Full Disk Access** was actually granted.
+  macOS exposes no query for it, so it probes a TCC-protected path and
+  reports whether the read was refused.
+- **Audio while scrubbing is off by default** and much better when on.
+
+### Fixed
+- **Pausing a web clip after a scrub showed BLACK** with a correct
+  timecode. Rebuilding the stream pipeline only ever forced a frame to
+  present by resuming playback, so the paused path painted nothing at all.
+- **A library folder added inside another library folder duplicated
+  everything under it**: twice in the sidebar tree, twice in All, and with
+  a duplicate React key per row, which is what made a long list look
+  shuffled. The inner root is redundant and is now dropped.
+- **Scrub audio chattered.** It cut the previous excerpt on every drag
+  tick so grains never overlapped, repeated itself forever when the
+  playhead stopped, and got louder the faster you dragged.
+- **Fourteen of the app's sixteen dropdowns were drawing macOS's own
+  control** inside the dark UI, including the library's sort picker. There
+  was no select style to draw instead; there is now, with three sizes.
+
 `0.4.7` fixes four defects the `0.4.6` build shipped with, all of them
 introduced by the export speedup and found afterwards:
 
