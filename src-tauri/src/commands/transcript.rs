@@ -1764,11 +1764,25 @@ pub(crate) fn whisper_cli_args(
     vad_model: Option<&str>,
     fast: bool,
 ) -> Vec<String> {
-    // Beam search or greedy. This is THE transcription speed knob: on a
-    // 77-minute recording the batched decode was 145.6s of a 215.8s run, and
-    // beam-5 does that work five times over. Greedy gives most of it back and
-    // costs accuracy, which is why it is the user's choice and not a default
-    // change - whisper's own default is 5, and the app has always matched it.
+    // Beam search or greedy.
+    //
+    // MEASURED, because the obvious reasoning is wrong. "Batched decode was
+    // 145.6s of a 215.8s run, and beam-5 does that work five times over, so
+    // greedy should be 2-3x faster" sounds right and is not: whisper.cpp
+    // decodes the five candidates AS ONE BATCH, so the GPU does them roughly
+    // in parallel and beam-5 costs nowhere near 5x. Batching is exactly what
+    // makes it cheap.
+    //
+    // 8.46 minutes of speech, M3 Pro, VAD on, ten threads, two passes each
+    // and reproducible to a hundredth of a second:
+    //
+    //     medium.en   beam-5  29.29s     greedy  23.22s   (21% faster)
+    //     base.en     beam-5   6.62s     greedy   4.58s   (31% faster)
+    //
+    // So this is worth offering and is NOT the transformation it looks like.
+    // It stays the user's choice rather than a default change: whisper's own
+    // default is 5, the app has always matched it, and 20-30% is not worth
+    // spending accuracy on without being asked.
     let (bs, bo) = if fast { ("1", "1") } else { ("5", "5") };
     let mut args: Vec<String> = [
         "-m", model,

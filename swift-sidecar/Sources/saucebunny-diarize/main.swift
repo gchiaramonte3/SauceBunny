@@ -449,7 +449,22 @@ func tokensToSrt(_ tokens: [TokenTiming]) -> String {
     if let s = start, !t.isEmpty { cues.append((start: s, end: end, text: t)) }
     text = ""; start = nil; end = 0
   }
+  // Parakeet emits SUB-WORD tokens, so a length cap applied the instant it is
+  // exceeded cuts inside a word: a real transcript came out reading
+  // "…is not obvio" / "us. Most of the wall clock…". Whisper never had this
+  // problem because -sow makes it split on words for us.
+  //
+  // So the cap only ARMS a break; the break itself happens at the next token
+  // that starts a word. A sentence end is already a word end, so that path
+  // can flush immediately.
+  var wantBreak = false
   for tok in tokens {
+    // Sentencepiece marks a word start with a leading space (or U+2581).
+    let startsWord = tok.token.hasPrefix(" ") || tok.token.hasPrefix("\u{2581}")
+    if wantBreak && startsWord {
+      flush()
+      wantBreak = false
+    }
     if start == nil { start = tok.startTime }
     text += tok.token
     end = tok.endTime
@@ -457,7 +472,12 @@ func tokensToSrt(_ tokens: [TokenTiming]) -> String {
     let endsSentence = trimmed.hasSuffix(".") || trimmed.hasSuffix("?") || trimmed.hasSuffix("!")
     // Cap at ~2 overlay lines; also break at a sentence end once the cue is
     // long enough that we don't fragment into one-word cues.
-    if trimmed.count >= 84 || (endsSentence && trimmed.count >= 32) { flush() }
+    if endsSentence && trimmed.count >= 32 {
+      flush()
+      wantBreak = false
+    } else if trimmed.count >= 84 {
+      wantBreak = true
+    }
   }
   flush()
   var out = ""

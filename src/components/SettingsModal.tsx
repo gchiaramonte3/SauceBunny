@@ -1546,9 +1546,10 @@ export function SettingsModal(props: Props) {
                       Decoding
                       <span className="desc">
                         Accurate is Whisper's own default and what every previous version used.
-                        Fast decodes one candidate instead of five, which is most of the time a
-                        long transcription spends. Expect a quicker result and a few more
-                        mistakes, mostly on unclear speech and unusual names.
+                        Fast keeps one candidate instead of five. Measured here it saves about
+                        a fifth to a third of the time, not half: Whisper decodes the five
+                        together, so five candidates cost far less than five times as much.
+                        Expect a few more mistakes, mostly on unclear speech and unusual names.
                       </span>
                     </div>
                     <div className="v">
