@@ -1762,6 +1762,12 @@ pub(crate) fn whisper_cli_args(
     .iter()
     .map(|s| s.to_string())
     .collect();
+    // whisper-cli defaults to FOUR threads regardless of the machine. The
+    // encoder runs on Metal, but the sampler and the beam bookkeeping do not,
+    // and on a 77-minute transcript those were 30.6s of sample time and
+    // 145.6s of batched decode out of 215.8s total. Give it the performance
+    // cluster, the same count llama-server already gets.
+    args.extend(["-t".to_string(), crate::commands::llm::performance_cores().to_string()]);
     // Best-effort Silero VAD (accuracy: trims silence → fewer hallucinations
     // + tighter timing). None ⇒ no-VAD.
     if let Some(vm) = vad_model {

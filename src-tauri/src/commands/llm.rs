@@ -149,7 +149,7 @@ pub struct LlmModel {
 ///
 /// `hw.perflevel0` is the performance cluster. A Mac with no such split reports
 /// nothing, and falls back to the old behaviour.
-fn performance_cores() -> usize {
+pub(crate) fn performance_cores() -> usize {
     let total = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     let out = std::process::Command::new("/usr/sbin/sysctl")
         .args(["-n", "hw.perflevel0.logicalcpu"])
@@ -336,6 +336,19 @@ pub async fn start_llm_server(
             "-c".into(), s.ctx.to_string(),       // context window
             "-ngl".into(), "999".into(),          // offload all layers to Metal
             "-t".into(), threads.to_string(),
+            // Flash attention ON rather than left at `auto`. Prompt
+            // processing is where the wait is: an AI Summary of a 77-minute
+            // transcript sends ~17k tokens and took 55.7s before the first
+            // word, at a throughput that fell from 592 to 320 tok/s across
+            // the prompt as attention cost grew with context. `auto` may
+            // already resolve to on for this model, but leaving it to be
+            // decided means it can silently resolve the other way.
+            "-fa".into(), "on".into(),
+            // Physical batch 512 -> 1024. Prompt processing on Metal is
+            // launch-bound at 512: bigger ubatches keep the GPU busy for
+            // longer per dispatch. Costs activation memory proportional to
+            // the ubatch, which at 1024 is small next to the model itself.
+            "-ub".into(), "1024".into(),
             "--no-webui".into(),                  // no built-in UI surface
             "--jinja".into(),                     // use the GGUF's chat template
             // ONE slot. The app serialises model calls by design (AiSummary and
