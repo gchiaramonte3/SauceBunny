@@ -81,6 +81,8 @@ export type Defaults = {
    * yt-dlp caption downloads as the preferred subtitle locale. Parakeet
    * handles language itself and ignores this.
    */
+  /** "accurate" (whisper's beam-5 default) or "fast" (greedy). */
+  transcriptionSpeed: "accurate" | "fast";
   transcriptionLanguage: string;
   /** AI Summary: chosen local llama.cpp model id (Settings → AI Summary). */
   llmSummarizationModel: string;
@@ -1536,6 +1538,31 @@ export function SettingsModal(props: Props) {
                       </div>
                     )}
                   </CollapsibleSection>
+                </CollapsibleSection>
+
+                <CollapsibleSection id="tx-speed" label="Speed" open={sectionOpen("tx-speed")} onToggle={() => toggleSection("tx-speed")}>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Decoding
+                      <span className="desc">
+                        Accurate is Whisper's own default and what every previous version used.
+                        Fast decodes one candidate instead of five, which is most of the time a
+                        long transcription spends. Expect a quicker result and a few more
+                        mistakes, mostly on unclear speech and unusual names.
+                      </span>
+                    </div>
+                    <div className="v">
+                      <select
+                        className="cp-select"
+                        aria-label="Decoding"
+                        value={defaults.transcriptionSpeed}
+                        onChange={(e) => setDefaults({ ...defaults, transcriptionSpeed: e.target.value as "accurate" | "fast" })}
+                      >
+                        <option value="accurate">Accurate</option>
+                        <option value="fast">Fast</option>
+                      </select>
+                    </div>
+                  </div>
                 </CollapsibleSection>
 
                 <CollapsibleSection id="tx-language" label="Language" open={sectionOpen("tx-language")} onToggle={() => toggleSection("tx-language")}>

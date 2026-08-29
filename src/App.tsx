@@ -275,6 +275,7 @@ export default function App() {
       // r143: NLE-style audio blips while dragging the playhead (WebCodecs
       // player). Editors expect scrub audio, so it defaults on.
       scrubAudio: stored.scrubAudio ?? false,
+      transcriptionSpeed: stored.transcriptionSpeed ?? "accurate",
     };
   });
   const setDefaults = useCallback((d: Defaults | ((prev: Defaults) => Defaults)) => {

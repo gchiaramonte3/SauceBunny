@@ -386,6 +386,60 @@ export function AiSummary({
   // Reset the conversation when the transcript changes.
   useEffect(() => { setMessages([]); }, [transcriptPath]);
 
+  // ── Pre-warm the prompt ──────────────────────────────────────────
+  // The FIRST question of a session pays twice: ~15s to load the model, then
+  // the whole transcript through prompt processing. Measured on a 77-minute
+  // recording: 55.7s before the first word. Every question after that is
+  // nearly free, because llama-server reuses the KV cache for the shared
+  // prefix — the second and third measured 3.5s and 0.4s.
+  //
+  // So the complaint "the local model is slow" is really "the first request
+  // pays an ingestion that every later request gets for nothing". This does
+  // that ingestion when the user OPENS the tab instead of when they press
+  // the button, turning most of the wait into time they were spending
+  // reading the panel anyway.
+  //
+  // It cannot fire for someone who does not use the feature: this panel is
+  // only mounted once the "ai" tab has been visited (see QueueDrawer), so
+  // mounting IS the intent signal. Cloud providers have nothing to warm.
+  const primedRef = useRef<string | null>(null);
+  const primeAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (loadAiProvider() !== "local") return;
+    if (!transcriptForModel || transcriptForModel.lines.length === 0) return;
+    const model = activeModel;
+    if (!model?.downloaded) return;
+    const key = `${transcriptPath}#${model.id}`;
+    if (primedRef.current === key) return;
+    primedRef.current = key;
+
+    const ctrl = new AbortController();
+    primeAbortRef.current = ctrl;
+    void (async () => {
+      try {
+        const info = await ensureServer(ctrl.signal);
+        if (!info || ctrl.signal.aborted) return;
+        // One token. The answer is thrown away — the point is the prompt
+        // eval that precedes it, which is what lands in the cache.
+        await streamChat(
+          info,
+          [{ role: "system", content: buildSourcePrefix(transcriptForModel.lines, info.ctx).system },
+           { role: "user", content: "ok" }],
+          () => { /* discard */ },
+          ctrl.signal,
+          { maxTokens: 1 },
+        );
+      } catch {
+        // A failed warm-up must be completely silent: nothing was asked for,
+        // so nothing can be reported. The real request will surface any
+        // genuine problem in its own path.
+        primedRef.current = null;
+      }
+    })();
+    return () => { ctrl.abort(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ensureServer identity churns with server state; keying on the transcript+model is the intent
+  }, [transcriptPath, transcriptForModel, activeModel?.id, activeModel?.downloaded]);
+
   const send = useCallback(async (text: string) => {
     const content = text.trim();
     if (!content || streaming || chaptersBusy) return;
@@ -399,6 +453,10 @@ export function AiSummary({
     // what Stop acts on; with the model load sitting between them, the longest
     // part of a cold run showed a Send button that was disabled and no way out
     // at all. Now one control covers the whole run.
+    // The server has ONE slot. If a warm-up is still running, drop it: the
+    // user's actual question must not queue behind a request whose only
+    // purpose was to make that question fast.
+    primeAbortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setStreaming(true);

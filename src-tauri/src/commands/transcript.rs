@@ -1169,6 +1169,9 @@ pub struct GenerateTranscriptArgs {
     /// "auto" (whisper.cpp auto-detect). See normalize_whisper_lang.
     #[serde(default)]
     pub language: Option<String>,
+    /// "fast" → greedy decoding (`-bs 1 -bo 1`); anything else keeps
+    /// whisper's own beam-5 default. See `whisper_cli_args`.
+    pub speed: Option<String>,
 }
 
 fn emit_transcript_done(
@@ -1273,6 +1276,9 @@ pub async fn generate_transcript(
     let wav_path_for = wav_path.clone();
     let detect_speakers = args.detect_speakers;
     let expected_speakers = args.expected_speakers;
+    // Anything other than an explicit "fast" keeps beam-5, so an older
+    // frontend that sends no field at all behaves exactly as before.
+    let fast_decode = args.speed.as_deref() == Some("fast");
 
     tokio::spawn(async move {
         // ─── Phase 1: obtain the source audio ───
@@ -1592,7 +1598,7 @@ pub async fn generate_transcript(
             start_diarizer_early(&app_for, &job_for, &wav_path_for, expected_speakers);
         }
         let spawn = wsp
-            .args(whisper_cli_args(&model_str, &wav_path_str, &output_base_str, &lang, vad_model.as_deref()))
+            .args(whisper_cli_args(&model_str, &wav_path_str, &output_base_str, &lang, vad_model.as_deref(), fast_decode))
             .spawn();
 
         let (mut rx, child) = match spawn {
@@ -1756,14 +1762,21 @@ pub(crate) fn whisper_cli_args(
     output_base: &str,
     language: &str,
     vad_model: Option<&str>,
+    fast: bool,
 ) -> Vec<String> {
+    // Beam search or greedy. This is THE transcription speed knob: on a
+    // 77-minute recording the batched decode was 145.6s of a 215.8s run, and
+    // beam-5 does that work five times over. Greedy gives most of it back and
+    // costs accuracy, which is why it is the user's choice and not a default
+    // change - whisper's own default is 5, and the app has always matched it.
+    let (bs, bo) = if fast { ("1", "1") } else { ("5", "5") };
     let mut args: Vec<String> = [
         "-m", model,
         "-f", wav,
         "-osrt",
         "-of", output_base,
         "-l", language,
-        "-bs", "5", "-bo", "5", "-sow", "-ml", "84",
+        "-bs", bs, "-bo", bo, "-sow", "-ml", "84",
         "-pp",
     ]
     .iter()
@@ -2135,6 +2148,9 @@ pub struct TranscribeLocalArgs {
     /// None → the extract phase shows an indeterminate bar (still watchdogged).
     #[serde(default)]
     pub duration_seconds: Option<f64>,
+    /// "fast" → greedy decoding (`-bs 1 -bo 1`); anything else keeps
+    /// whisper's own beam-5 default. See `whisper_cli_args`.
+    pub speed: Option<String>,
 }
 
 /// Where a job's 16 kHz mono WAV lives while whisper reads it.
@@ -2250,6 +2266,9 @@ pub struct TranscribePreparedWavArgs {
     pub language: Option<String>,
     // NB: no `engine` field — Parakeet local-file runs route through
     // transcribe_local_file (ffmpeg WAV), not this WebCodecs fast-path.
+    /// "fast" → greedy decoding (`-bs 1 -bo 1`); anything else keeps
+    /// whisper's own beam-5 default. See `whisper_cli_args`.
+    pub speed: Option<String>,
 }
 
 #[tauri::command]
@@ -2300,6 +2319,9 @@ pub async fn transcribe_prepared_wav(
     let wav_path_for = wav_path.clone();
     let detect_speakers = args.detect_speakers;
     let expected_speakers = args.expected_speakers;
+    // Anything other than an explicit "fast" keeps beam-5, so an older
+    // frontend that sends no field at all behaves exactly as before.
+    let fast_decode = args.speed.as_deref() == Some("fast");
 
     tokio::spawn(async move {
         emit_transcript_log(
@@ -2354,7 +2376,7 @@ pub async fn transcribe_prepared_wav(
         let spawn = wsp
             // No DYLD override — whisper-cli is statically linked (see the
             // generate_transcript spawn for the full rationale).
-            .args(whisper_cli_args(&model_str, &wav_path_str, &output_base_str, &lang, vad_model.as_deref()))
+            .args(whisper_cli_args(&model_str, &wav_path_str, &output_base_str, &lang, vad_model.as_deref(), fast_decode))
             .spawn();
         let (mut rx, child) = match spawn {
             Ok(c) => c,
@@ -2506,6 +2528,9 @@ pub async fn transcribe_local_file(
     let wav_path_for = wav_path.clone();
     let detect_speakers = args.detect_speakers;
     let expected_speakers = args.expected_speakers;
+    // Anything other than an explicit "fast" keeps beam-5, so an older
+    // frontend that sends no field at all behaves exactly as before.
+    let fast_decode = args.speed.as_deref() == Some("fast");
     let engine = args.engine.clone().unwrap_or_default();
     let model_id = args.model_id.clone();
     let lang = normalize_whisper_lang(args.language.as_deref());
@@ -2636,7 +2661,7 @@ pub async fn transcribe_local_file(
         let spawn = wsp
             // No DYLD override — whisper-cli is statically linked (see the
             // generate_transcript spawn for the full rationale).
-            .args(whisper_cli_args(&model_str, &wav_path_str, &output_base_str, &lang, vad_model.as_deref()))
+            .args(whisper_cli_args(&model_str, &wav_path_str, &output_base_str, &lang, vad_model.as_deref(), fast_decode))
             .spawn();
         let (mut rx, child) = match spawn {
             Ok(c) => c,
@@ -3207,11 +3232,53 @@ async fn run_diarizer(
         );
     }
 
+    // How long the audio is, so the log can say what is being worked on.
+    // A 16kHz mono 16-bit WAV is 32000 bytes a second; the 44-byte header is
+    // noise at these lengths. Best-effort - a failure here just omits it.
+    let audio_secs = std::fs::metadata(wav_path)
+        .ok()
+        .map(|m| m.len().saturating_sub(44) as f64 / 32_000.0)
+        .filter(|s| *s > 1.0);
+    if let Some(secs) = audio_secs {
+        emit_transcript_log(
+            app, job_id, "info",
+            format!(
+                "Diarizing {} of audio, alongside transcription.",
+                fmt_elapsed(std::time::Duration::from_secs_f64(secs)),
+            ),
+        );
+    }
+
     let mut stderr_tail = String::new();
     let mut announced_prepare = false;
     let mut announced_process = false;
     let mut cancelled = false;
-    while let Some(event) = rx.recv().await {
+    // The diarizer cannot report a percentage: SpeakerKit's `diarize` is a
+    // single awaited call with no progress callback, so there is genuinely
+    // nothing between "process" and "done" to report. What it CAN do is say
+    // it is still alive - without that, slow and hung look identical, which
+    // is what led to a 98-second run being cancelled on suspicion.
+    const QUIET_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+    let started = std::time::Instant::now();
+    loop {
+        let event = match tokio::time::timeout(QUIET_AFTER, rx.recv()).await {
+            Ok(Some(e)) => e,
+            Ok(None) => break, // stream closed
+            Err(_) => {
+                // Silence, not a stall. Say so and keep waiting; the diarizer
+                // is registered under its stage key, so Stop still reaches it.
+                if announced_process {
+                    emit_transcript_log(
+                        app, job_id, "info",
+                        format!(
+                            "Still diarizing ({} elapsed). No progress is reported by this stage.",
+                            fmt_elapsed(started.elapsed()),
+                        ),
+                    );
+                }
+                continue;
+            }
+        };
         match event {
             CommandEvent::Stdout(b) => {
                 // Newline-delimited progress JSON. We only care about
@@ -3608,6 +3675,7 @@ mod nightly_transcript_tests {
             base.to_str().unwrap(),
             &lang,
             Some(vad.to_str().unwrap()),
+            false,
         );
         nightly::run_ok(&nightly::sidecar("whisper-cli"), &args, "whisper-cli transcription");
 
@@ -3639,7 +3707,7 @@ mod nightly_transcript_tests {
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );
-        let flags: Vec<String> = whisper_cli_args("M", "W", "O", "en", Some("V"))
+        let flags: Vec<String> = whisper_cli_args("M", "W", "O", "en", Some("V"), false)
             .into_iter()
             .filter(|a| a.starts_with('-'))
             .collect();
@@ -3883,5 +3951,44 @@ Error opening output files: Invalid argument\n";
         // "stream" appears in plenty of healthy ffmpeg chatter.
         assert!(!no_audio_stream("Stream mapping:\n  Stream #0:1 -> #0:0 (aac -> pcm_s16le)\n"));
         assert!(!no_audio_stream("Error opening input: No such file or directory\n"));
+    }
+}
+
+#[cfg(test)]
+mod whisper_speed_tests {
+    use super::whisper_cli_args;
+
+    fn flag_after(args: &[String], flag: &str) -> Option<String> {
+        args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
+    }
+
+    #[test]
+    fn the_default_is_still_whispers_own_beam_five() {
+        // The app has always matched whisper's default. Changing that silently
+        // would trade accuracy nobody asked to trade.
+        let a = whisper_cli_args("m", "w", "o", "en", None, false);
+        assert_eq!(flag_after(&a, "-bs").as_deref(), Some("5"));
+        assert_eq!(flag_after(&a, "-bo").as_deref(), Some("5"));
+    }
+
+    #[test]
+    fn fast_is_greedy() {
+        // Beam-5 does the decode five times over, and decode was 145.6s of a
+        // 215.8s run on a 77-minute recording. This is the knob.
+        let a = whisper_cli_args("m", "w", "o", "en", None, true);
+        assert_eq!(flag_after(&a, "-bs").as_deref(), Some("1"));
+        assert_eq!(flag_after(&a, "-bo").as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn speed_changes_nothing_else_at_all() {
+        // Anything else differing would mean the setting alters the OUTPUT
+        // format, not just how long it takes to get there.
+        let slow = whisper_cli_args("m", "w", "o", "en", Some("v"), false);
+        let fast = whisper_cli_args("m", "w", "o", "en", Some("v"), true);
+        assert_eq!(slow.len(), fast.len());
+        let differ: Vec<usize> = (0..slow.len()).filter(|&i| slow[i] != fast[i]).collect();
+        // Exactly the two values after -bs and -bo.
+        assert_eq!(differ.len(), 2, "slow={slow:?} fast={fast:?}");
     }
 }

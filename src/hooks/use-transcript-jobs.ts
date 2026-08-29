@@ -352,6 +352,7 @@ export function useTranscriptJobs(p: TranscriptJobsProps) {
               expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
               engine,
               language: defaults.transcriptionLanguage,
+              speed: defaults.transcriptionSpeed,
               duration_seconds: metadata.duration ?? null,
             },
           });
@@ -384,6 +385,7 @@ export function useTranscriptJobs(p: TranscriptJobsProps) {
             expected_speakers: defaults.expectedSpeakers > 0 ? defaults.expectedSpeakers : null,
             engine,
             language: defaults.transcriptionLanguage,
+            speed: defaults.transcriptionSpeed,
           },
         });
       }
@@ -401,6 +403,7 @@ export function useTranscriptJobs(p: TranscriptJobsProps) {
   }, [ensureEngineModelReady, transcriptState, metadata, metadataLoading, exportOpts, fps, selectedModel, defaults.whisperModel,
       defaults.transcriptionEngine, defaults.useWebCodecsDecoder,
       defaults.detectSpeakers, defaults.expectedSpeakers, defaults.transcriptionLanguage,
+      defaults.transcriptionSpeed,
       appendLog, resolveTranscriptOutDir, localFilePath, sourceKind,
       durationFrames, inFrames, outFrames, cookiesBrowserOrNone, jobStartedRef, setTranscriptError, setTranscriptJobId, setTranscriptPhase, setTranscriptProgress, setTranscriptResolution, setTranscriptState, stageClockRef, transcriptAbortRef]);
 
