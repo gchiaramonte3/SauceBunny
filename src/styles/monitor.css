@@ -862,8 +862,16 @@
 }
 /* Stacked above the bottom-left prep banner (download/transcode in progress)
    so the centered toast and the banner never overlap in the same bottom band.
-   The translateX(-50%) centering is preserved — only the bottom offset lifts. */
-.cp-canvas-toast.cp-canvas-toast--above-banner { bottom: 72px; }
+   The translateX(-50%) centering is preserved — only the bottom offset lifts.
+
+   --prep-h is the banner's MEASURED height (Monitor publishes it on
+   .cp-monitor). This was a flat 72px, which guessed that height and guessed
+   it low, so the toast still clipped the banner's top-right corner. The
+   fallback matches a one-line banner for the frame before the measurement
+   lands. 12px is the banner's own bottom inset; 12px more is the gap. */
+.cp-canvas-toast.cp-canvas-toast--above-banner {
+  bottom: calc(var(--prep-h, 62px) + 24px);
+}
 .cp-canvas-toast .icon {
   width: 26px; height: 26px;
   border-radius: 50%;

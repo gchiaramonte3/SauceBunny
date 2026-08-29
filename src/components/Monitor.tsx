@@ -325,7 +325,27 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
                       : aspect === "2.39" ? 2.39
                       : natural;
   const { ref: monitorRef, dims } = useContainSize(ratio);
-  const monitorStyle = dims ? { width: `${dims.w}px`, height: `${dims.h}px` } : undefined;
+  /* How tall the prep banner actually is, published to CSS so the toast can
+     clear it. The lift used to be a hardcoded 72px guessing that height, and
+     the guess was low: the banner is a 44px loader plus padding and border,
+     and its subtitle wraps, so the centered toast still clipped its top-right
+     corner. A magic number tracking another element's box cannot stay
+     correct - measure it instead. */
+  const prepRef = useRef<HTMLDivElement>(null);
+  const [prepH, setPrepH] = useState(0);
+  useEffect(() => {
+    const el = prepRef.current;
+    if (!playbackPrepBusy || !el) { setPrepH(0); return; }
+    const ro = new ResizeObserver(() => setPrepH(el.offsetHeight));
+    ro.observe(el);
+    setPrepH(el.offsetHeight);
+    return () => ro.disconnect();
+  }, [playbackPrepBusy]);
+
+  const monitorStyle = {
+    ...(dims ? { width: `${dims.w}px`, height: `${dims.h}px` } : {}),
+    ["--prep-h" as string]: `${prepH}px`,
+  };
 
   /* Floating toast — hoisted above the status early-returns so feedback that
      fires with NO source loaded (a rejected drag-and-drop, a transcript that
@@ -338,9 +358,9 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
       kind={toast.kind}
       title={toast.title}
       body={toast.body}
-      /* When the bottom-left prep banner is up (e.g. the web-preview
-         download), lift the centered toast above it so the two don't
-         collide in the same bottom band. */
+      /* When the bottom-left prep banner is up (e.g. a transcode), lift the
+         centered toast clear of it. The distance comes from --prep-h, which
+         is measured above, not from a constant. */
       className={playbackPrepBusy ? "cp-canvas-toast--above-banner" : undefined}
       onDismiss={onToastDismiss}
     />
@@ -707,7 +727,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             Now shows for any prep-busy state with source-aware copy and
             an inline Cancel button. */}
         {playbackPrepBusy && (
-          <div className="cp-prep-banner">
+          <div className="cp-prep-banner" ref={prepRef}>
             <BunnyLoader size={44} label="Preparing" />
             <div className="cp-prep-text">
               <div className="cp-prep-title">

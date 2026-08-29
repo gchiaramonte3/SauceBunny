@@ -829,6 +829,7 @@ Three more are measured against the RENDERED app rather than its source, in
 | `long-names` | A filename with no break opportunity cannot push a library row's controls out of the window |
 | `peer-name-bounds` | A remote peer's display name is bounded where it paints over your video, and capped at the lobby input |
 | `list-tiling` | List rows tile: no overlap, no void, one height, one width, no sideways scroll — and overlapping library roots never list a file twice. Written to settle a report that the list was "all over the place"; the geometry was fine and the duplication was real |
+| `overlay-collision` | The canvas toast and the prep banner never intersect. The lift reads the banner's MEASURED height, not a constant that guessed it low |
 
 Two habits these encode, worth applying to any new one:
 

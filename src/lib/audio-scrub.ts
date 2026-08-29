@@ -123,3 +123,29 @@ export function planGrain(
     gain,
   };
 }
+
+/**
+ * The WHOLE grain envelope as one curve: raised-cosine up, hold, raised-
+ * cosine down. A linear ramp is audible as an edge of its own on excerpts
+ * this short, which is why the edges are shaped at all.
+ *
+ * One curve rather than three automation events, and that is a correctness
+ * requirement, not tidiness. setValueCurveAtTime throws NotSupportedError if
+ * ANY automation event falls within its range, endpoints included - so a
+ * setValueAtTime sitting exactly on a curve's start (the obvious way to
+ * write this) throws, the exception escapes the scheduling path, and scrub
+ * audio is silent with nothing in the log to say why.
+ */
+export const grainEnvelope = (peak: number, durationSec: number, fadeSec: number): Float32Array => {
+  const n = 128, a = new Float32Array(n);
+  const fade = durationSec > 0 ? Math.min(0.5, fadeSec / durationSec) : 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    const w = fade <= 0 ? 1
+      : t < fade ? 0.5 - 0.5 * Math.cos(Math.PI * (t / fade))
+      : t > 1 - fade ? 0.5 - 0.5 * Math.cos(Math.PI * ((1 - t) / fade))
+      : 1;
+    a[i] = w * peak;
+  }
+  return a;
+};

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GRAIN_CORE_SEC, GRAIN_FADE_SEC, GRAIN_MAX_VOICES, GRAIN_MIN_INTERVAL_MS,
-  GRAIN_MIN_MOVE_SEC, idleScrubState, planGrain, type ScrubGrainState,
+  GRAIN_MIN_MOVE_SEC, grainEnvelope, idleScrubState, planGrain, type ScrubGrainState,
 } from "./audio-scrub";
 
 const DUR = 600;
@@ -83,5 +83,53 @@ describe("audio scrub grain policy", () => {
     // Guards the gate against a backwards/frozen monotonic reading opening it.
     expect(planGrain(at(1000, 10), 1000, 20, DUR)).toBeNull();
     expect(planGrain(at(1000, 10), 900, 20, DUR)).toBeNull();
+  });
+});
+
+describe("grain envelope", () => {
+  const peak = 0.8;
+  const env = grainEnvelope(peak, 0.055, 0.008);
+
+  it("opens and closes at silence, so a joined grain cannot click", () => {
+    expect(env[0]).toBeCloseTo(0, 6);
+    expect(env[env.length - 1]).toBeCloseTo(0, 6);
+  });
+
+  it("reaches the requested peak in the middle and never exceeds it", () => {
+    expect(Math.max(...env)).toBeCloseTo(peak, 6);
+    expect(env[Math.floor(env.length / 2)]).toBeCloseTo(peak, 6);
+  });
+
+  it("rises and falls monotonically through the edges", () => {
+    const mid = Math.floor(env.length / 2);
+    for (let i = 1; i <= mid; i++) expect(env[i]).toBeGreaterThanOrEqual(env[i - 1] - 1e-9);
+    for (let i = mid + 1; i < env.length; i++) expect(env[i]).toBeLessThanOrEqual(env[i - 1] + 1e-9);
+  });
+
+  it("is smooth rather than a straight line, which is the whole point", () => {
+    // A raised cosine is BELOW the linear ramp early on. If someone replaces
+    // this with a linear fade the difference vanishes and this fails.
+    const fadeFrac = 0.008 / 0.055;
+    const i = Math.round((fadeFrac / 2) * (env.length - 1));
+    const linear = peak * (i / (env.length - 1)) / fadeFrac;
+    expect(env[i]).toBeLessThan(linear - 1e-3);
+  });
+
+  it("degrades safely when the fade cannot fit the grain", () => {
+    const tiny = grainEnvelope(1, 0.001, 0.008); // fade longer than the grain
+    expect([...tiny].every((v) => Number.isFinite(v))).toBe(true);
+    expect(tiny[0]).toBeCloseTo(0, 6);
+    // The clamp is what matters: without it the fade never completes, so the
+    // grain never reaches full level and just sounds quiet. Clamped, the
+    // envelope becomes a triangle that still peaks in the middle.
+    // Not toBeCloseTo(1): with 128 samples nothing lands exactly on the
+    // midpoint, so the peak is 0.9998. Without the clamp it is about 0.19,
+    // which this still separates cleanly.
+    expect(Math.max(...tiny)).toBeGreaterThan(0.99);
+  });
+
+  it("does not divide by zero on a zero-length grain", () => {
+    const z = grainEnvelope(1, 0, 0.008);
+    expect([...z].every((v) => Number.isFinite(v))).toBe(true);
   });
 });

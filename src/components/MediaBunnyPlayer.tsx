@@ -10,7 +10,7 @@ import { mediabunnySource } from "../lib/mediabunny-source";
 import { canvasLooksBlank } from "../lib/mediabunny-helpers";
 import { audioAnchorWaitMs, audioVitals, shouldRetakeAnchor } from "../lib/av-clock";
 import { createScrubPump, type ScrubPump } from "../lib/scrub-pump";
-import { GRAIN_MAX_VOICES, idleScrubState, planGrain, type ScrubGrainState } from "../lib/audio-scrub";
+import { GRAIN_MAX_VOICES, grainEnvelope, idleScrubState, planGrain, type ScrubGrainState } from "../lib/audio-scrub";
 import { BunnyMark } from "./BunnyMark";
 import type { PlayerHandle } from "./player-handle";
 
@@ -44,19 +44,6 @@ const FAST_SCRUB_EXACT_MS = 170;
 /** Audio-scrub blip length (s). Long enough to hear a syllable at a slow
  *  drag; a fast drag supersedes it long before it ends, which is what makes
  *  the classic NLE scrub chatter. */
-/** Raised-cosine rising edge for a grain's fade. A linear ramp is audible
- *  as an edge on excerpts this short; a Hann edge is not. Reversed for the
- *  fall. 64 points is far finer than the ~8ms it is stretched over. */
-const GRAIN_EDGE = (() => {
-  const n = 64, a = new Float32Array(n);
-  for (let i = 0; i < n; i++) a[i] = 0.5 - 0.5 * Math.cos(Math.PI * i / (n - 1));
-  return a;
-})();
-const scaledEdge = (peak: number, falling: boolean): Float32Array => {
-  const n = GRAIN_EDGE.length, a = new Float32Array(n);
-  for (let i = 0; i < n; i++) a[i] = GRAIN_EDGE[falling ? n - 1 - i : i] * peak;
-  return a;
-};
 /** Per-blip fade in/out (s) so back-to-back blips don't click at the seams. */
 const SCRUB_BLIP_FADE_S = 0.005;
 
@@ -415,12 +402,9 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       env.connect(gain);
       const t0 = ctx.currentTime + 0.005; // scheduling headroom
       const { offsetSec, durationSec, fadeSec, gain: peak } = plan;
-      env.gain.setValueAtTime(0, t0);
-      // Raised-cosine edges. On excerpts this short a linear ramp is audible
-      // as an edge of its own; the curve is why the joins disappear.
-      env.gain.setValueCurveAtTime(scaledEdge(peak, false), t0, fadeSec);
-      env.gain.setValueAtTime(peak, t0 + durationSec - fadeSec);
-      env.gain.setValueCurveAtTime(scaledEdge(peak, true), t0 + durationSec - fadeSec, fadeSec);
+      // ONE event for the whole envelope. See grainEnvelope: any other
+      // automation inside a curve's range makes setValueCurveAtTime throw.
+      env.gain.setValueCurveAtTime(grainEnvelope(peak, durationSec, fadeSec), t0, durationSec);
 
       const entry = { nodes: [] as AudioBufferSourceNode[], env };
       scrubVoicesRef.current.push(entry);

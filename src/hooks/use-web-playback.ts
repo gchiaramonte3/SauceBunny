@@ -272,8 +272,11 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
       if (s.kind === "streaming" && s.fromCache) {
         h.appendLog("info", "cache", "Cached stream didn't open in 15s. Getting a fresh URL.");
       } else {
+        // No toast: the prep banner in the player says exactly this, with
+        // live progress and a Cancel button, and the two collided in the
+        // same bottom band. One event, one surface, and the surface that
+        // carries the action wins.
         h.appendLog("warn", "media", "Stream didn't open in 15s. Falling back to download.");
-        h.pushNotification("info", "Downloading preview…", "Fetching the file via yt-dlp so you can scrub and mark in-app.");
       }
       dispatch({ t: "WATCHDOG", seq: mySeq, atSeconds: helpersRef.current.getPlayheadSeconds() });
     }, WATCHDOG_MS);
@@ -399,8 +402,10 @@ export function useWebPlayback(helpers: Helpers): WebPlayback {
       // r81: not a failure from the user's POV — some sources (HLS-only /
       // live broadcasts) just can't decode in WKWebView's MSE pipeline, so
       // we quietly download a playable copy. Keep it `info`, not `warn`.
+      // Also no toast — same reason as the watchdog above. BOTH could fire
+      // for one source (watchdog at 15s, then this), so a single fallback
+      // could announce itself three times over.
       h.appendLog("info", "media", `In-app stream unavailable for this source (${message}). Downloading a playable copy instead…`);
-      h.pushNotification("info", "Downloading preview…", "Couldn't stream this source in-app. Fetching the file so you can scrub and mark.");
       dispatch({ t: "MEDIA_ERROR", seq: s.seq, atSeconds: helpersRef.current.getPlayheadSeconds() });
       return true;
     }
