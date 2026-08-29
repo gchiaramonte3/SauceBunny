@@ -871,6 +871,13 @@
    we want to nudge the user (e.g. "no speakers in this transcript"). */
 /* Slim, muted "no speaker labels" hint (r65) — quiet info strip, not a
    full-width yellow warning. One line, tucked under the search row. */
+/* ── Transient edit notice ────────────────────────────────────────────
+   The one strip that survived the bar, and deliberately so: this is a
+   `role="status"` message about an edit the reader just made ("cue saved",
+   "reverted"), which is transient and self-clearing. The banners that became
+   the bar were the opposite - standing statements about the transcript's
+   provenance that never resolved on their own. Transient status earns a
+   strip; a permanent fact does not. */
 .cp-tx-hint {
   display: flex;
   align-items: center;
@@ -884,27 +891,121 @@
   color: var(--fg-3);
 }
 .cp-tx-hint-ico { color: var(--fg-4); flex-shrink: 0; }
-.cp-tx-hint-text {
-  flex: 1;
-  min-width: 0;
-  line-height: var(--leading-snug);
+.cp-tx-hint-text { flex: 1; min-width: 0; line-height: var(--leading-snug); }
+
+/* ── Transcript bar ───────────────────────────────────────────────────
+   One row replacing a conditional roster row plus up to three stacking
+   `cp-tx-hint` banners. See the note in TranscriptViewer for why they could
+   not stay separate: they were statements about the same thing, answered by
+   the same re-run, and the roster row was hidden in exactly the case a
+   banner fired.
+
+   Deliberately quiet. This is provenance, not an alert: it sits at the same
+   weight as a column header, and the only thing that raises its voice is the
+   Improve count when there is something to act on. */
+.cp-tx-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0 12px;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--line-1);
+  font-size: var(--text-base);
+  color: var(--fg-4);
+  /* Digits in "3 speakers" must not reflow the row as the count changes. */
+  font-variant-numeric: tabular-nums;
 }
-.cp-tx-hint-text em { font-style: normal; color: var(--fg-2); font-weight: var(--weight-semibold); }
-.cp-tx-hint-action {
-  flex-shrink: 0;
+.cp-tx-bar-fact { color: var(--fg-3); white-space: nowrap; }
+.cp-tx-bar-sep { color: var(--fg-5); }
+.cp-tx-bar-spacer { flex: 1 1 auto; min-width: var(--s-2); }
+.cp-tx-bar-btn {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
   height: 22px;
-  padding: 0 9px;
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid var(--line-2);
   border-radius: var(--r-xs);
-  color: var(--fg-1);
-  font: 600 11px var(--font-sans);
+  color: var(--fg-3);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.cp-tx-hint-action:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
-.cp-tx-hint-action:disabled { opacity: 0.6; cursor: not-allowed; }
+.cp-tx-bar-btn:hover { border-color: var(--line-3); color: var(--fg-1); }
+.cp-tx-bar-btn.on { border-color: var(--line-3); color: var(--fg-1); background: var(--bg-3); }
+.cp-tx-bar-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.cp-tx-bar-btn.primary { border-color: var(--line-3); color: var(--fg-1); }
+.cp-tx-bar-btn.primary:hover { background: var(--bg-3); }
+/* The one place the row is allowed to draw the eye. */
+.cp-tx-improve-count {
+  min-width: 14px;
+  padding: 0 3px;
+  /* Pill rather than a hand-picked radius: the badge's height changes with the
+     type scale and a fixed radius stops matching it. */
+  border-radius: var(--r-pill);
+  background: var(--bg-4);
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+  text-align: center;
+}
+
+.cp-tx-improve { position: relative; flex-shrink: 0; }
+.cp-tx-improve-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: var(--z-popover);
+  width: min(340px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  animation: cp-tx-improve-in var(--dur-fast) var(--ease-out);
+}
+@keyframes cp-tx-improve-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-tx-improve-pop { animation: none; }
+}
+.cp-tx-improve-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+}
+.cp-tx-improve-row + .cp-tx-improve-row {
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--line-1);
+}
+.cp-tx-improve-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.cp-tx-improve-copy strong {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--fg-1);
+}
+.cp-tx-improve-copy span {
+  font-size: var(--text-base);
+  line-height: var(--leading-snug);
+  color: var(--fg-4);
+}
+.cp-tx-improve-note {
+  margin: 0;
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--line-1);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--fg-5);
+}
 .cp-tx-hint-close {
   flex-shrink: 0;
   width: 20px;
@@ -998,22 +1099,6 @@
 
 /* Clean space (3b): no hairline framing, no tinted band - the row is
    just a quiet label + controls above the prose. */
-.cp-tx-roster {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px 4px;
-}
-.cp-tx-roster-label {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--track-caps);
-  text-transform: uppercase;
-  color: var(--fg-4);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
 
 /* Transient write-failure note under the Download button (downloadAs). The
    menu is already closed when a save fails, so the error needs its own spot. */
@@ -1037,21 +1122,6 @@
 }
 
 /* ── Manage-speakers button (roster header) ───────────────────────────── */
-.cp-tx-roster-manage {
-  margin-left: 8px;
-  padding: 2px 9px;
-  font-family: var(--font-ui);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--track-wide);
-  color: var(--fg-2);
-  background: rgba(255,255,255,0.05);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-pill);
-  cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
-}
-.cp-tx-roster-manage:hover { background: rgba(255,255,255,0.1); color: var(--fg-1); }
 
 /* ── Speakers modal ───────────────────────────────────────────────────── */
 .cp-spk-backdrop {
@@ -1551,10 +1621,6 @@
 
 /* Follow playback beside Manage speakers (3d): the roster-button grammar
    with a lifted grey fill so the disengaged state is findable. */
-.cp-tx-follow-btn {
-  background: var(--bg-5);
-  color: var(--fg-0);
-}
 
 /* Compact preset row (rename popover's color control, 4a). */
 .cp-colorpick-compact {

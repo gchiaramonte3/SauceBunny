@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useDismiss } from "../hooks/use-dismiss";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -831,6 +832,50 @@ export function TranscriptViewer({
   // control falls back to the floating pill without it (3d).
   const rosterVisible = roster.length > 1 || (roster.length === 1 && roster[0].tag !== "Speaker");
 
+  // ── What this transcript is, and what could make it better ──────────
+  // Both facts and both remedies used to live in separate banners that
+  // could not appear together (see the bar's own note). They are derived
+  // here so the bar states one coherent thing.
+  const provenanceLabel =
+    origin === "captions" ? "Auto-captions"
+    : origin === "whisper" ? "Transcribed here"
+    : "Imported";
+
+  const [improveOpen, setImproveOpen] = useState(false);
+  const improveRef = useRef<HTMLDivElement>(null);
+  // The house dismisser: brings Escape with it, and dismiss-parity-contract
+  // forbids a new hand-rolled click-outside.
+  useDismiss(improveRef, () => setImproveOpen(false), improveOpen);
+
+  /** Ordered by how much each one improves the result. */
+  const improvements = useMemo(() => {
+    const out: Array<{ id: string; title: string; detail: string; action: string; hint: string; run: () => void }> = [];
+    if (turns.length === 0 || !canRegenerate) return out;
+    // Speaker labels first: re-running for them ALSO re-times the captions,
+    // so offering it above the timing fix is what stops a double transcribe.
+    if (roster.length === 1 && roster[0].tag === "Speaker" && onRegenerate) {
+      out.push({
+        id: "speakers",
+        title: "Add speaker labels",
+        detail: "This transcript has one unnamed speaker. Turn on Detect speakers in Settings, then re-run.",
+        action: "Regenerate",
+        hint: "Re-run transcription with current Settings (model · speaker detection)",
+        run: onRegenerate,
+      });
+    }
+    if (origin === "captions" && sourceKind === "youtube" && onFixCaptionTiming) {
+      out.push({
+        id: "timing",
+        title: "Tighten the timing",
+        detail: "YouTube's auto-captions drift against the audio. Re-timing locally makes them exact.",
+        action: "Fix timing",
+        hint: "Re-transcribes the cached audio locally; a few minutes for long clips. Current captions stay until it finishes.",
+        run: onFixCaptionTiming,
+      });
+    }
+    return out;
+  }, [turns.length, canRegenerate, roster, origin, sourceKind, onRegenerate, onFixCaptionTiming]);
+
   // True when the transcript actually carries speaker identity — either
   // more than one speaker, or a single one that's been labeled (not the
   // generic fallback "Speaker"). When false (un-diarized whisper output,
@@ -1440,36 +1485,11 @@ export function TranscriptViewer({
   // the same transcript. Cleared automatically when the user clicks
   // Regenerate (a fresh run might add speakers, so the notice should
   // get another shot at evaluating).
-  const noticeStorageKey = path ? `saucebunny.noticeDismissed.${path}` : null;
-  const [noticeDismissed, setNoticeDismissedState] = useState(false);
-  useEffect(() => {
-    if (!noticeStorageKey) { setNoticeDismissedState(false); return; }
-    setNoticeDismissedState(localStorage.getItem(noticeStorageKey) === "1");
-  }, [noticeStorageKey]);
-  const setNoticeDismissed = useCallback((v: boolean) => {
-    setNoticeDismissedState(v);
-    if (!noticeStorageKey) return;
-    try {
-      if (v) localStorage.setItem(noticeStorageKey, "1");
-      else   localStorage.removeItem(noticeStorageKey);
-    } catch { /* quota */ }
-  }, [noticeStorageKey]);
-  // r84: separate dismissal for the "fix caption timing" banner, per SRT path,
-  // so it doesn't fight the speaker-labels notice above.
-  const timingFixKey = path ? `saucebunny.timingFixDismissed.${path}` : null;
-  const [timingFixDismissed, setTimingFixDismissedState] = useState(false);
-  useEffect(() => {
-    if (!timingFixKey) { setTimingFixDismissedState(false); return; }
-    setTimingFixDismissedState(localStorage.getItem(timingFixKey) === "1");
-  }, [timingFixKey]);
-  const setTimingFixDismissed = useCallback((v: boolean) => {
-    setTimingFixDismissedState(v);
-    if (!timingFixKey) return;
-    try {
-      if (v) localStorage.setItem(timingFixKey, "1");
-      else   localStorage.removeItem(timingFixKey);
-    } catch { /* quota */ }
-  }, [timingFixKey]);
+  // The two per-notice dismiss flags that used to live here are gone with the
+  // banners. They were persisted per SRT path and permanent, which made the
+  // quickest way to clear the top of the screen also the way to lose the
+  // information for good. The bar is not dismissible because it is not an
+  // interruption: it states what the transcript is, and it is one line.
   useEffect(() => {
     if (!historyOpen) return;
     setHistoryEntries(getHistory());
@@ -1916,90 +1936,109 @@ export function TranscriptViewer({
       {/* r84: loose YouTube ASR caption timing → offer an exact Whisper re-time.
           Same quiet cp-tx-hint pattern; self-dismisses once origin flips to
           "whisper" (handleFixCaptionTiming swaps it). Web sources only. */}
-      {turns.length > 0 && origin === "captions" && sourceKind === "youtube" && canRegenerate && !!onFixCaptionTiming && !timingFixDismissed && (
-        <div
-          className="cp-tx-hint"
-          title="Re-transcribes the cached audio locally for exact timing; a few minutes for long clips. Your current captions stay until it finishes."
-        >
-          <svg className="cp-tx-hint-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 7v5l3 2" />
-          </svg>
-          <span className="cp-tx-hint-text">
-            Captions are auto-timed by YouTube and can run late.
-          </span>
-          <button
-            className="cp-tx-hint-action"
-            onClick={onFixCaptionTiming}
-            disabled={regenerateBusy}
-            title="Re-time captions to the audio with your transcription engine (local, exact)"
-          >
-            {regenerateBusy ? "Re-timing…" : "Fix timing"}
-          </button>
-          <button
-            className="cp-tx-hint-close"
-            onClick={() => setTimingFixDismissed(true)}
-            title="Dismiss (won't show again for this transcript)"
-            aria-label="Dismiss"
-          >×</button>
-        </div>
-      )}
-      {turns.length > 0 && roster.length === 1 && roster[0].tag === "Speaker" && canRegenerate && !noticeDismissed && (
-        <div
-          className="cp-tx-hint"
-          title="Caption speaker labels are used automatically when the source carries them; this one's captions didn't. Detect speakers runs diarization to add them."
-        >
-          <svg className="cp-tx-hint-ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 16v-4" />
-            <path d="M12 8h.01" />
-          </svg>
-          <span className="cp-tx-hint-text">
-            No speaker labels. Turn on <em>Detect speakers</em> to add them.
-          </span>
-          <button
-            className="cp-tx-hint-action"
-            onClick={onRegenerate}
-            disabled={regenerateBusy}
-            title="Re-run transcription with current Settings (model · speaker detection)"
-          >
-            {regenerateBusy ? "Regenerating…" : "Regenerate"}
-          </button>
-          <button
-            className="cp-tx-hint-close"
-            onClick={() => setNoticeDismissed(true)}
-            title="Dismiss (won't show again for this transcript)"
-            aria-label="Dismiss"
-          >×</button>
-        </div>
-      )}
+      {/*
+        ONE bar, not a stack of banners.
+        ------------------------------------------------------------------
+        This used to be a conditional roster row plus up to three sibling
+        `cp-tx-hint` strips, each with its own dismiss state, stacking above
+        the transcript and pushing it down by ~44px each.
 
-      {rosterVisible && (
-        <div className="cp-tx-roster" role="toolbar" aria-label="Speakers in this transcript">
-          <div className="cp-tx-roster-label">
+        Three things were wrong with that, and they were structural rather
+        than cosmetic:
+
+        1. The strips were not independent facts. "These are auto-captions,
+           so the timing is loose" and "there are no speaker labels" are both
+           statements about where this transcript CAME FROM, and both are
+           answered by re-running transcription. Presented as two equal
+           banners with two equal buttons, nothing said so - and running
+           both transcribes the source twice, because Regenerate with Detect
+           speakers on already re-times the captions.
+        2. The roster row was hidden in exactly the case a notice fired:
+           rosterVisible is false when there is a single "Speaker" bucket,
+           which is the precise condition of the no-speaker-labels notice.
+           So the two halves of the same story could never appear together.
+        3. Dismissing was per-strip and permanent, which made the fastest
+           way to clear the top of the screen also the way to lose the
+           information for good.
+
+        So: one row that is always there when there is a transcript, saying
+        what this transcript IS, with a single "Improve" affordance that
+        opens the things that can be done about it. Nothing is dismissed,
+        nothing shifts as notices come and go, and the two actions sit in
+        one list where their relationship is visible.
+      */}
+      {turns.length > 0 && (
+        <div className="cp-tx-bar" role="toolbar" aria-label="About this transcript">
+          <span className="cp-tx-bar-fact">{provenanceLabel}</span>
+          <span className="cp-tx-bar-sep" aria-hidden="true">·</span>
+          <span className="cp-tx-bar-fact">
             {roster.length} speaker{roster.length === 1 ? "" : "s"}
+          </span>
+          {rosterVisible && (
             <button
               type="button"
-              className="cp-tx-roster-manage"
+              className="cp-tx-bar-btn"
               onClick={() => setSpeakerModalOpen(true)}
               title="See all speakers · rename · recolour · merge"
             >
-              Manage speakers
+              Manage
             </button>
-            {/* Follow playback lives beside Manage speakers (3d): same
-                control group, grey-active grammar. Appears only while
-                auto-scroll is disengaged, exactly like the old pill. */}
-            {!autoScroll && (
+          )}
+
+          <span className="cp-tx-bar-spacer" />
+
+          {!autoScroll && (
+            <button
+              type="button"
+              className="cp-tx-bar-btn"
+              onClick={() => setAutoScroll(true)}
+              title="Resume auto-scroll to follow playback"
+            >
+              Follow playback
+            </button>
+          )}
+
+          {improvements.length > 0 && (
+            <div className="cp-tx-improve" ref={improveRef}>
               <button
                 type="button"
-                className="cp-tx-roster-manage cp-tx-follow-btn"
-                onClick={() => setAutoScroll(true)}
-                title="Resume auto-scroll to follow playback"
+                className={"cp-tx-bar-btn" + (improveOpen ? " on" : "")}
+                aria-expanded={improveOpen}
+                aria-haspopup="true"
+                onClick={() => setImproveOpen((v) => !v)}
+                title="Ways this transcript could be better"
               >
-                Follow playback
+                Improve
+                <span className="cp-tx-improve-count">{improvements.length}</span>
               </button>
-            )}
-          </div>
+              {improveOpen && (
+                <div className="cp-tx-improve-pop" role="group" aria-label="Ways to improve this transcript">
+                  {improvements.map((im) => (
+                    <div className="cp-tx-improve-row" key={im.id}>
+                      <div className="cp-tx-improve-copy">
+                        <strong>{im.title}</strong>
+                        <span>{im.detail}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="cp-tx-bar-btn primary"
+                        onClick={() => { im.run(); setImproveOpen(false); }}
+                        disabled={regenerateBusy}
+                        title={im.hint}
+                      >
+                        {regenerateBusy ? "Working…" : im.action}
+                      </button>
+                    </div>
+                  ))}
+                  {improvements.length > 1 && (
+                    <p className="cp-tx-improve-note">
+                      Re-running with speaker detection also re-times the captions, so you only need it once.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
