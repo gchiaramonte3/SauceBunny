@@ -62,40 +62,55 @@ public func srtTimecode(_ seconds: Double) -> String {
 /// into ONE cue. Past `cueHardCap` the cue breaks wherever it is.
 public func tokensToSrt(_ tokens: [CueToken]) -> String {
   var cues: [(start: Double, end: Double, text: String)] = []
-  var text = ""
-  var start: Double? = nil
-  var end = 0.0
+  /// Tokens accumulated for the cue being built.
+  var cur: [CueToken] = []
 
-  func flush() {
-    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let s = start, !t.isEmpty { cues.append((start: s, end: end, text: t)) }
-    text = ""; start = nil; end = 0
+  func textOf(_ toks: ArraySlice<CueToken>) -> String {
+    toks.map(\.token).joined().trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+  func emit(_ toks: ArraySlice<CueToken>) {
+    let t = textOf(toks)
+    guard let first = toks.first, let last = toks.last, !t.isEmpty else { return }
+    cues.append((start: first.startTime, end: last.endTime, text: t))
+  }
+  func startsWord(_ tok: CueToken) -> Bool {
+    tok.token.hasPrefix(" ") || tok.token.hasPrefix("\u{2581}")
+  }
+  /// Index of the last token that begins a word, past the first token.
+  func lastWordStart(_ toks: [CueToken]) -> Int? {
+    for i in stride(from: toks.count - 1, through: 1, by: -1) where startsWord(toks[i]) { return i }
+    return nil
   }
 
-  var wantBreak = false
   for tok in tokens {
-    let startsWord = tok.token.hasPrefix(" ") || tok.token.hasPrefix("\u{2581}")
-    if wantBreak && startsWord {
-      flush()
-      wantBreak = false
-    }
-    if start == nil { start = tok.startTime }
-    text += tok.token
-    end = tok.endTime
+    cur.append(tok)
+    let text = textOf(cur[...])
 
-    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    let endsSentence = trimmed.hasSuffix(".") || trimmed.hasSuffix("?") || trimmed.hasSuffix("!")
-    if (endsSentence && trimmed.count >= cueSentenceMin) || trimmed.count >= cueSoftCap {
-      wantBreak = true
+    // Break RETROACTIVELY, at the last word boundary already passed.
+    //
+    // The earlier fix armed a break and waited for the NEXT word-start token,
+    // which meant a cue could run well past the cap before one arrived. That
+    // matters because the on-video overlay paints exactly two 42-character
+    // lines and DISCARDS anything that does not fit, replacing the tail with
+    // an ellipsis - so an over-long cue lost words on screen while the
+    // transcript reader still showed them. Splitting backwards keeps every
+    // cue under the cap AND never cuts inside a word.
+    if text.count >= cueSoftCap {
+      if let i = lastWordStart(cur) {
+        emit(cur[0..<i])
+        cur = Array(cur[i...])
+        continue
+      }
     }
-    // Runaway guard. Breaking mid-word here is the lesser evil against a single
-    // cue holding an entire transcript.
-    if trimmed.count >= cueHardCap {
-      flush()
-      wantBreak = false
+    // No word boundary anywhere in this run - a script with no spaces
+    // (Japanese, Chinese) never produces one. Break wherever we are rather
+    // than letting a single cue swallow the transcript.
+    if textOf(cur[...]).count >= cueHardCap {
+      emit(cur[...])
+      cur = []
     }
   }
-  flush()
+  emit(cur[...])
 
   var out = ""
   for (i, c) in cues.enumerated() {

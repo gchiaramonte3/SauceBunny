@@ -132,6 +132,66 @@ final class CueBreakTests: XCTestCase {
     }
   }
 
+  /// The on-video overlay paints two 42-character lines and DISCARDS whatever
+  /// does not fit, replacing the tail with an ellipsis. A cue longer than that
+  /// budget loses words on screen while the reader still shows them, so the
+  /// cap is not cosmetic.
+  func testNoCueExceedsWhatTheCaptionOverlayCanPaint() {
+    let s = String(repeating: "the question of how a local transcription pipeline should spend its time is not obvious ", count: 4)
+    let texts = cueTexts(tokensToSrt(tokenize(s)))
+    XCTAssertGreaterThan(texts.count, 2)
+    for t in texts {
+      XCTAssertLessThan(t.count, cueSoftCap + 1, "cue is \(t.count) chars, over the overlay's budget: \(t)")
+    }
+  }
+
+  /// The GENERAL property, and the one that actually catches a bad split.
+  ///
+  /// The suffix assertions above are narrow: they name the exact strings two
+  /// known bugs produced, and a split that breaks a word somewhere else slips
+  /// past them. (A mutation that split before the LAST token instead of the
+  /// last word-start passed every other test in this file.) Rejoining the cues
+  /// with a single space must reproduce the source text: if any word was cut,
+  /// a space appears inside it and this fails.
+  func testCuesRejoinIntoExactlyTheSourceText() {
+    for source in [
+      "The measured throughput on the new machine landed at 3.14 times the old number and everyone was pleased with it.",
+      "Sales across the U.S. market last year were well ahead of what the forecast had suggested by a wide margin.",
+      "It specifies version 1.2.3 of the protocol and that detail matters more than anyone expected it to matter.",
+      String(repeating: "the question of how a local pipeline should spend its time is not obvious ", count: 3),
+    ] {
+      let cues = cueTexts(tokensToSrt(tokenize(source)))
+      XCTAssertFalse(cues.isEmpty, "no cues for: \(source)")
+      let rejoined = cues.joined(separator: " ")
+      let expected = source.split(separator: " ").joined(separator: " ")
+      XCTAssertEqual(rejoined, expected, "a word was split across cues")
+    }
+  }
+
+  /// Sweep a number ACROSS the cap boundary.
+  ///
+  /// The fixed sentences above never happen to cross the cap in the middle of
+  /// "3.14", so a split that ignores word boundaries entirely (breaking before
+  /// the last token rather than the last WORD START) passed every one of them.
+  /// Only by sliding the number through the boundary does the difference show.
+  func testANumberIsNeverSplitWhereverItFallsRelativeToTheCap() {
+    for pad in 0..<40 {
+      // Built with a single join so pad 0 cannot introduce a double space -
+      // that is a fixture artefact, not a split.
+      let filler = String(repeating: "word ", count: 8).trimmingCharacters(in: .whitespaces)
+      let padding = pad == 0 ? "" : " " + String(repeating: "x", count: pad)
+      let source = "\(filler)\(padding) measured at 3.14 times the previous value across the whole run"
+      let cues = cueTexts(tokensToSrt(tokenize(source)))
+      XCTAssertFalse(cues.isEmpty, "pad \(pad) produced no cues")
+      let rejoined = cues.joined(separator: " ")
+      let expected = source.split(separator: " ").joined(separator: " ")
+      XCTAssertEqual(rejoined, expected, "pad \(pad): a word or number was split across cues")
+      for c in cues {
+        XCTAssertLessThan(c.count, cueSoftCap + 1, "pad \(pad): cue over the overlay budget")
+      }
+    }
+  }
+
   func testTimecodeFormatting() {
     XCTAssertEqual(srtTimecode(0), "00:00:00,000")
     XCTAssertEqual(srtTimecode(-5), "00:00:00,000", "negative time must clamp, not format garbage")
