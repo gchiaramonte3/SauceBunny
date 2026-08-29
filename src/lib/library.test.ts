@@ -8,6 +8,7 @@ import {
   formatBytes,
   formatModifiedDate,
   libraryPosterPaths,
+  dedupeLibraryItems,
   sanitizeLibraryRoots,
   searchLibrary,
   searchTruncationNote,
@@ -41,6 +42,34 @@ describe("sanitizeLibraryRoots", () => {
     expect(sanitizeLibraryRoots("nope")).toEqual([]);
     expect(sanitizeLibraryRoots({ roots: ["/a"] })).toEqual([]);
     expect(sanitizeLibraryRoots(undefined)).toEqual([]);
+  });
+
+  it("drops a root that lives inside another root", () => {
+    // The shape that actually happens: add a folder, then later add one of
+    // its subfolders. The inner one is entirely redundant, and keeping it
+    // duplicated the folder in the sidebar tree (same path = same React key)
+    // and every file underneath in the All view.
+    expect(sanitizeLibraryRoots(["/Footage", "/Footage/Interviews"])).toEqual(["/Footage"]);
+    // Order does not matter: the ANCESTOR always wins, because keeping the
+    // parent preserves strictly more of the library.
+    expect(sanitizeLibraryRoots(["/Footage/Interviews", "/Footage"])).toEqual(["/Footage"]);
+    // Grandchildren too.
+    expect(sanitizeLibraryRoots(["/a", "/a/b/c/d"])).toEqual(["/a"]);
+  });
+
+  it("keeps siblings whose names merely share a prefix", () => {
+    // The boundary case a naive startsWith gets wrong: "/Footage2" is NOT
+    // inside "/Footage", and dropping it would silently remove a library.
+    expect(sanitizeLibraryRoots(["/Footage", "/Footage2"])).toEqual(["/Footage", "/Footage2"]);
+    expect(sanitizeLibraryRoots(["/a/b", "/a/bc"])).toEqual(["/a/b", "/a/bc"]);
+  });
+
+  it("tolerates a trailing slash on the parent", () => {
+    expect(sanitizeLibraryRoots(["/Footage/", "/Footage/Interviews"])).toEqual(["/Footage/"]);
+  });
+
+  it("keeps unrelated roots untouched", () => {
+    expect(sanitizeLibraryRoots(["/a", "/b", "/c"])).toEqual(["/a", "/b", "/c"]);
   });
 });
 
@@ -427,5 +456,33 @@ describe("artFirst", () => {
   it("keeps everything - an audio-only library must not get an empty Home", () => {
     const only = [item("a.mp3", "audio"), item("b.wav", "audio")];
     expect(artFirst(only).map((i) => i.name)).toEqual(["a.mp3", "b.wav"]);
+  });
+});
+
+describe("dedupeLibraryItems", () => {
+  const it_ = (path: string, name = path.split("/").pop() ?? path) =>
+    ({ name, path, size_bytes: 1, modified_ms: 0, kind: "video" as const });
+
+  it("collapses repeats of the same path, keeping the first", () => {
+    const a = it_("/a/one.mp4"), b = it_("/a/two.mp4"), a2 = it_("/a/one.mp4", "renamed");
+    expect(dedupeLibraryItems([a, b, a2])).toEqual([a, b]);
+  });
+
+  it("keeps different files that share a NAME", () => {
+    // Two folders can both hold intro.mp4; only the path identifies a file.
+    const x = it_("/a/intro.mp4"), y = it_("/b/intro.mp4");
+    expect(dedupeLibraryItems([x, y])).toEqual([x, y]);
+  });
+
+  it("is a no-op on an already-unique list, and on an empty one", () => {
+    const l = [it_("/a.mp4"), it_("/b.mp4")];
+    expect(dedupeLibraryItems(l)).toEqual(l);
+    expect(dedupeLibraryItems([])).toEqual([]);
+  });
+
+  it("does not mutate its input", () => {
+    const l = [it_("/a.mp4"), it_("/a.mp4")];
+    dedupeLibraryItems(l);
+    expect(l).toHaveLength(2);
   });
 });

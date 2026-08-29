@@ -277,6 +277,20 @@ export function tauriMockInit(expectedBuildId: string): void {
       const mkItem = (dir: string, name: string, kind: string, size: number) => ({
         name, path: `${dir}/${name}`, size_bytes: size, modified_ms: 1749000000000, kind,
       });
+      // A nested root must see the SAME files its parent sees under that
+      // folder. Deriving a fresh synthetic tree from whatever path was asked
+      // for made every root disjoint, so overlapping roots could not be
+      // reproduced here at all — the one shape that duplicates a file in the
+      // "All" view. Answering for the leaf exactly as its parent describes it
+      // is both more faithful and what makes that case testable.
+      if (path.endsWith("/Interviews")) {
+        return {
+          name: "Interviews",
+          path,
+          folders: [],
+          items: [mkItem(path, "intro.mp4", "video", 1048576)],
+        };
+      }
       // A folder whose ONLY content is another folder, opt-in so the shared
       // tree's counts stay put for everyone else. It is the shape that used
       // to render as a completely blank pane in list view: the empty note is

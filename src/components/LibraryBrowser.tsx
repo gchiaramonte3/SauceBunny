@@ -23,7 +23,7 @@ import { LibraryDetail } from "./LibraryDetail";
 import { ThumbnailPicker } from "./ThumbnailPicker";
 import type { RootScan } from "../hooks/use-library-scan";
 import {
-  chosenPosterFor, clearChosenPoster, collectLibraryItems, findLibraryFolder,
+  chosenPosterFor, clearChosenPoster, collectLibraryItems, dedupeLibraryItems, findLibraryFolder,
   setChosenPoster, sortLibraryItems, formatBytes,
   type LibraryCrumb, type LibraryKindFilter, type LibrarySortDir, type LibrarySortKey,
 } from "../lib/library";
@@ -411,7 +411,11 @@ export function LibraryBrowser({
       ? (selectedNode
           ? (needle.trim() ? collectLibraryItems(selectedNode) : selectedNode.items)
           : [])
-      : trees.flatMap(collectLibraryItems);
+      // Deduped: roots can nest (pick "Footage", later pick
+      // "Footage/Interviews"), and without this every file under the inner
+      // one is listed twice — with the same path, which is the same React
+      // key. See dedupeLibraryItems.
+      : dedupeLibraryItems(trees.flatMap(collectLibraryItems));
     const byKind = prefs.kind === "all" ? base : base.filter((i) => i.kind === prefs.kind);
     const q = needle.trim().toLowerCase();
     const bySearch = q ? byKind.filter((i) => i.name.toLowerCase().includes(q)) : byKind;

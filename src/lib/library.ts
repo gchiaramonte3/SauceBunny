@@ -48,16 +48,48 @@ export type LibrarySearchResult = {
  * empties, de-dup preserving order. Corrupt shapes yield [] rather than
  * crashing the Library render (same contract as sanitizeRecentSources).
  */
+/** Is `child` the same path as, or inside, `parent`? Boundary-aware, so
+ *  "/Footage2" is NOT inside "/Footage". */
+function isWithin(child: string, parent: string): boolean {
+  if (child === parent) return true;
+  const base = parent.endsWith("/") ? parent : parent + "/";
+  return child.startsWith(base);
+}
+
+/**
+ * The library's roots, cleaned up.
+ *
+ * Exact duplicates were always collapsed. NESTED ones were not, and that is
+ * the case that actually happens: you add "Footage", then later add
+ * "Footage/Interviews" because you were browsing it. The inner one is
+ * entirely redundant - every file under it is already in the library through
+ * its parent - and keeping it costs real breakage rather than just a
+ * duplicate line:
+ *
+ *  - the sidebar tree renders that folder TWICE with the same path, and the
+ *    path is its React key, so React warns and may reuse the wrong node;
+ *  - the "All" view aggregates every root, so every file underneath is
+ *    listed twice, inflating the item count and the "showing N" note;
+ *  - and each duplicate row shares a key with its twin, which is how a long
+ *    list starts rendering as though rows had been shuffled together.
+ *
+ * A contained root is therefore dropped. Order still decides which survives:
+ * whichever ANCESTOR is present wins, whether it was added before or after,
+ * because keeping the parent always preserves strictly more of the library.
+ */
 export function sanitizeLibraryRoots(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const seen = new Set<string>();
-  const out: string[] = [];
+  const uniq: string[] = [];
   for (const x of raw) {
     if (typeof x !== "string" || x === "" || seen.has(x)) continue;
     seen.add(x);
-    out.push(x);
+    uniq.push(x);
   }
-  return out;
+  // Drop anything contained by another surviving root. Self-comparison is
+  // skipped by index, not by value, so two equal strings could not cancel
+  // each other out (the exact-dedupe above has already removed those).
+  return uniq.filter((r, i) => !uniq.some((other, j) => j !== i && isWithin(r, other)));
 }
 
 /** Recursive playable-item count for a folder subtree (row/card counts). */
@@ -75,6 +107,34 @@ export function countLibraryItems(folder: LibraryFolder): number {
 export function collectLibraryItems(folder: LibraryFolder): LibraryItem[] {
   const out: LibraryItem[] = [...folder.items];
   for (const sub of folder.folders) out.push(...collectLibraryItems(sub));
+  return out;
+}
+
+/**
+ * One entry per PATH, first occurrence wins.
+ *
+ * Library roots are chosen by hand and nothing stops one sitting inside
+ * another — pick "Footage" and later "Footage/Interviews" and both are
+ * roots. The "All" view aggregates every root, so every file under the
+ * nested one then appeared TWICE.
+ *
+ * That is not merely an inflated count. The list and grid key their rows by
+ * `item.path`, so a duplicate is a DUPLICATE REACT KEY: React logs a warning
+ * and is free to reuse the wrong DOM node for the wrong item, which is how
+ * a long list starts rendering as though rows had been shuffled on top of
+ * each other. Deduping is what makes the keys unique again.
+ *
+ * First-wins rather than last-wins so the order the roots were added in
+ * still decides, and the sort afterwards is unaffected either way.
+ */
+export function dedupeLibraryItems(items: readonly LibraryItem[]): LibraryItem[] {
+  const seen = new Set<string>();
+  const out: LibraryItem[] = [];
+  for (const it of items) {
+    if (seen.has(it.path)) continue;
+    seen.add(it.path);
+    out.push(it);
+  }
   return out;
 }
 
