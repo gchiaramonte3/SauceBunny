@@ -229,7 +229,7 @@ export function SpeakerRosterModal({
                 {picked.size} selected
               </span>
               <select
-                className="cp-spk-merge"
+                className="cp-select cp-spk-merge"
                 value=""
                 onChange={(e) => {
                   if (!e.target.value) return;

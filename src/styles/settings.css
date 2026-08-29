@@ -874,21 +874,6 @@
 /* Caption font picker — themed <select>. */
 .cp-cap-font-select {
   min-width: 200px;
-  height: 30px;
-  padding: 0 30px 0 11px;
-  background: var(--bg-0);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-md);
-  color: var(--fg-1);
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
-  cursor: pointer;
-  /* Custom chevron so it matches the app's dark chrome instead of the OS look. */
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
 }
 .cp-cap-font-select:focus { outline: none; border-color: var(--focus-ring); }
 .cp-cap-range-val {

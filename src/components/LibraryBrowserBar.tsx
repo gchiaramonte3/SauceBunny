@@ -183,7 +183,7 @@ export function LibraryBrowserBar({
         </div>
 
         <select
-          className="cp-lib-select"
+          className="cp-select cp-lib-select"
           aria-label="Sort by"
           value={sort}
           onChange={(e) => onPrefs({ sort: e.target.value as LibrarySortKey })}

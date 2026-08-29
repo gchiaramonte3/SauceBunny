@@ -519,7 +519,7 @@ export function TranscriptReader({ transcriptLibraryPath, activePath, onOpenTran
             onChange={(e) => setQuery(e.target.value)}
           />
           <select
-            className="cp-reader-sort"
+            className="cp-select sm cp-reader-sort"
             value={sort}
             aria-label="Sort transcripts"
             onChange={(e) => setSort(e.target.value as TranscriptSort)}

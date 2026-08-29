@@ -706,7 +706,7 @@ human can check.
 
 ## Enforced contracts
 
-Sixty-nine rules in this file are checked by a test rather than remembered. If you
+Seventy rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -799,6 +799,7 @@ written after finding the rule already broken somewhere.
 | `scrim-layer-contract` | Every element with a `-scrim`/`-backdrop` class gets `position: fixed` from one of its own classes (composition allowed) |
 | `node-baseline-contract` | No source file imports a `node:fs` API newer than the Node major CI pins (globSync is Node 22; CI is 20) |
 | `modal-focus-contract` | An `aria-modal` dialog traps and restores focus; a dialog behind a scrim declares `aria-modal` (the cmd+F guard reads it) |
+| `select-contract` | Every `<select>` carries `cp-select`, that primitive kills the native control, and no rule on a select's class uses the `background` shorthand (which resets the chevron and leaves no arrow at all) |
 | `contract-register` | This table describes itself: the spelled-out count matches the rows, and every row names a test file that exists |
 | `e2e-mock-shape-contract` | The two object literals in `e2e/tauri-mock.ts` carry exactly the fields of their ts-rs binding, so 100 Playwright tests cannot certify a backend shape that no longer exists |
 | `cancellable-download-contract` | The Parakeet model download holds its job id and offers a cancel, and a killed download is not reported as a failure. The backend registered the child and said it was cancellable; the renderer minted the id and dropped it, so a half-gigabyte download that reports no progress at all could only be escaped by quitting |

@@ -75,7 +75,7 @@ export function CastApply({
                 />
               )}
               <select
-                className="cp-spk-merge cp-cast-select"
+                className="cp-select cp-spk-merge cp-cast-select"
                 value={picked}
                 onChange={(e) => setAssignment((p) => ({ ...p, [t.tag]: e.target.value || null }))}
                 aria-label={`Cast member for ${t.name}`}

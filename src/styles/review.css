@@ -210,7 +210,10 @@
   font-size: var(--text-base);
   color: var(--fg-3);
 }
-.cp-review-export-select,
+/* Split from the timecode input below: they shared one rule, whose
+   `background` shorthand reset the chevron .cp-select paints. The select now
+   takes its chrome from the .sm rung and states only its own height. */
+.cp-review-export-select { height: 24px; }
 .cp-review-export-tc {
   height: 24px;
   padding: 0 8px;
@@ -328,17 +331,6 @@
   font-family: var(--font-ui);
   font-size: var(--text-base);
   color: var(--color-accent-green);
-}
-.cp-review-sort {
-  height: 26px;
-  padding: 0 8px;
-  background: var(--bg-0);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  color: var(--fg-2);
-  font-family: var(--font-ui);
-  font-size: var(--text-base);
-  cursor: pointer;
 }
 
 /* Comment list */

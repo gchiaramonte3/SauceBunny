@@ -1111,16 +1111,9 @@
 .cp-lib-bar-search input::placeholder { color: var(--fg-4); }
 .cp-lib-bar-search input:focus-visible { box-shadow: none; }
 .cp-lib-select {
-  height: 28px;
-  padding: 0 var(--s-2);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-md);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--fg-2);
-  font-family: var(--font-ui);
-  font-size: var(--text-md);
+  /* Look comes from .cp-select (buttons.css). Only the bar's own weight and
+     its 30px alignment with .cp-lib-search live here. */
   font-weight: var(--weight-semibold);
-  cursor: pointer;
 }
 .cp-lib-select:hover { border-color: var(--line-3); }
 .cp-lib-select:focus-visible { outline: none; border-color: var(--line-3); }

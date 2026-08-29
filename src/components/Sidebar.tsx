@@ -548,7 +548,7 @@ export function Sidebar(props: Props) {
                         Expected speakers
                       </span>
                       <select
-                        className="cp-mini-select"
+                        className="cp-select xs cp-mini-select"
                         value={expectedSpeakers}
                         onChange={(e) => setExpectedSpeakers(parseInt(e.target.value, 10) || 0)}
                         disabled={transcriptState === "running"}

@@ -972,13 +972,6 @@
 .cp-reader-search:focus-visible { outline: none; border-color: var(--focus-ring); }
 .cp-reader-sort {
   flex: 0 0 auto;
-  padding: 6px 4px;
-  background: var(--bg-1);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  font-family: var(--font-ui);
-  font-size: var(--text-base);
-  color: var(--fg-2);
 }
 .cp-reader-sort:focus-visible { outline: none; border-color: var(--focus-ring); }
 .cp-reader-chips {

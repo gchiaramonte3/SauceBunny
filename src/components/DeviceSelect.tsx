@@ -34,7 +34,7 @@ export function DeviceSelect({ kind, devices, value, onPick }: {
         {isCamera ? <IconVideo size={12} /> : <IconMic size={12} />} {title}
       </span>
       <select
-        className="cp-colobby-input"
+        className="cp-select cp-colobby-input"
         value={value ?? ""}
         onChange={(e) => onPick(e.target.value || null)}
       >

@@ -640,3 +640,68 @@
   .btn-icon,
   .cp-export-cta { transition-duration: 0s; }
 }
+
+/* ============================================================
+   SELECT — the one <select> style.
+
+   It did not exist. `cp-select` sat on nine controls in Settings and the
+   A/V pane and matched NO rule in any stylesheet, so macOS drew its own:
+   a pale glossy stepper in the middle of a dark hand-rolled UI. Six more
+   selects had colours but no `appearance: none`, which is the same bug
+   wearing a coat — the platform still paints the frame and the double
+   arrow, and only the background changes. Two of sixteen were right.
+
+   Left alone they had also drifted to six heights (22/24/26/28/30/32)
+   and three radii, so "make it consistent" needed rungs to be consistent
+   WITH. There are three, and every select in the app takes one.
+
+   `appearance: none` is the load-bearing line: without it nothing below
+   is visible, because the native control paints over all of it. The
+   chevron is ours for the same reason, and its stroke is --fg-3 written
+   out (#A2A0AA) because a data URI cannot read a CSS variable — keep the
+   two in step by hand if the palette moves.
+   ============================================================ */
+.cp-select {
+  /* Chevron inset. A rung that changes the height re-points the arrow by
+     setting this one value rather than restating the padding and the
+     background position. */
+  --sel-chev: 10px;
+
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 calc(var(--sel-chev) + 14px) 0 var(--s-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  cursor: pointer;
+  /* background-COLOR, kept separate so the chevron background-image below
+     is not wiped by a variant that only wants to restate the fill. */
+  background-color: var(--bg-0);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23A2A0AA' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right var(--sel-chev) center;
+}
+.cp-select:hover { border-color: var(--line-3); }
+/* Never the accent — see focus-contract. */
+.cp-select:focus-visible { outline: none; border-color: var(--focus-ring); }
+.cp-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Dense toolbar rung — review sort, export row, reader sort. */
+.cp-select.sm {
+  --sel-chev: 7px;
+  height: 26px;
+  border-radius: var(--r-sm);
+  font-size: var(--text-base);
+}
+/* Inline-in-chrome rung — the transcript mini pickers. */
+.cp-select.xs {
+  --sel-chev: 5px;
+  height: 22px;
+  padding-left: var(--s-2);
+  border-radius: var(--r-xs);
+  font-size: var(--text-sm);
+}

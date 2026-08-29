@@ -127,7 +127,10 @@
 .cp-colobby-input {
   height: 32px;
   padding: 0 var(--s-3);
-  background: var(--bg-0);
+  /* background-COLOR, not the shorthand: this rule is shared with the lobby's
+     text inputs, and on the device <select> the shorthand would reset the
+     chevron .cp-select paints as a background-image. */
+  background-color: var(--bg-0);
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
   color: var(--fg-1);

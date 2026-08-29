@@ -1245,7 +1245,7 @@ function ReviewToolbar({
         >
           <SearchGlyph />
         </button>
-        <select className="cp-review-sort" value={sort} onChange={(e) => setSort(e.target.value as CommentSort)} title="Sort comments">
+        <select className="cp-select sm cp-review-sort" value={sort} onChange={(e) => setSort(e.target.value as CommentSort)} title="Sort comments">
           <option value="time">By timecode</option>
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
@@ -1357,7 +1357,7 @@ function MarkerSettingsRow({
       <label className="cp-review-export-field">
         <span>Frame rate</span>
         <select
-          className="cp-review-export-select"
+          className="cp-select sm cp-review-export-select"
           value={settings.frameRate}
           onChange={(e) => onChange({ frameRate: e.target.value as FrameRateKey })}
         >

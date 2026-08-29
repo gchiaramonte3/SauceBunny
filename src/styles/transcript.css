@@ -840,15 +840,6 @@
    typography so the two read as a single control. */
 .cp-mini-select {
   margin-left: auto;
-  height: 22px;
-  padding: 0 4px;
-  font: 11px var(--font-sans);
-  color: var(--fg-2);
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-xs);
-  cursor: pointer;
-  outline: none;
 }
 .cp-mini-select:focus { border-color: var(--focus-ring); }
 .cp-mini-select:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -1262,20 +1253,6 @@
 }
 .cp-spk-merge {
   flex-shrink: 0;
-  appearance: none;
-  -webkit-appearance: none;
-  font-family: var(--font-ui);
-  font-size: var(--text-base);
-  color: var(--fg-2);
-  /* Separate background-color so the custom chevron (background-image) survives. */
-  background-color: rgba(255,255,255,0.05);
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23A2A0AA' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 7px center;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  padding: 4px 22px 4px 8px;
-  cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 .cp-spk-merge:hover { background-color: rgba(255,255,255,0.09); }
