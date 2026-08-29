@@ -53,6 +53,7 @@ async function openNameGate(page: Page) {
   await page.addInitScript((u: string) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     // Opt in to the mock's read/write filesystem; seed nothing.
     localStorage.setItem("e2e.files", "{}");
     localStorage.setItem("saucebunny.recentSources", JSON.stringify([

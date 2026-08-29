@@ -18,6 +18,7 @@ async function bootLobby(page: Page, lastTitle: string): Promise<void> {
   await page.addInitScript(([lib, title]: string[]) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     // A returning user with granted devices lands on the Host step; without
     // both of these the lobby stops at identity and there is no name field.
     localStorage.setItem("saucebunny.review.author", JSON.stringify("Ada"));

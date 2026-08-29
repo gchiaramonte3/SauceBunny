@@ -38,6 +38,7 @@ async function boot(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
   });
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
@@ -213,6 +214,7 @@ test("nothing animates in the transcript or review under reduced motion", async 
   await page.addInitScript(([srt, srtPath, url]: string[]) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("e2e.files", JSON.stringify({ [srtPath]: srt }));
     localStorage.setItem("saucebunny.transcriptHistory", JSON.stringify([{
       id: "h1", srtPath, sourcePath: null, sourceUrl: url,

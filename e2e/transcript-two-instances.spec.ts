@@ -69,6 +69,7 @@ async function bootWithTranscript(page: Page): Promise<void> {
   await page.addInitScript(([srt, srtPath, url]: string[]) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("e2e.files", JSON.stringify({ [srtPath]: srt }));
     // The auto-load path is history-driven: App looks the SOURCE up in
     // transcript history, probes the SRT, then sets activeTranscript. Seeding

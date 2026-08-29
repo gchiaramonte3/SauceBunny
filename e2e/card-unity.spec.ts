@@ -17,6 +17,7 @@ test("the label is attached to the picture, with no gap and a shared surface", a
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e-mock/Footage"]));
   });
   await page.goto("/");

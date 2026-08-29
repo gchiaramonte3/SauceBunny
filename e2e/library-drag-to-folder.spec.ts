@@ -19,6 +19,7 @@ async function bootLibrary(page: Page, view: "grid" | "list", opts: { refuse?: b
   await page.addInitScript(([v, refuse]: [string, string]) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e-mock/Footage"]));
     localStorage.setItem("saucebunny.libraryBrowser", JSON.stringify({ view: v, sort: "name", dir: "asc" }));
     if (refuse === "1") localStorage.setItem("e2e.refuseMove", "1");

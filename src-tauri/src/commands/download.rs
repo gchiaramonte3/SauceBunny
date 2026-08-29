@@ -499,6 +499,41 @@ pub fn open_full_disk_access() -> Result<(), crate::AppError> {
     Ok(())
 }
 
+/// Is Full Disk Access actually granted?
+///
+/// macOS exposes no API that answers this, so the documented technique is to
+/// PROBE: read a path TCC protects and see whether the kernel refuses. If
+/// ~/Library/Application Support/com.apple.TCC/TCC.db opens, this app holds
+/// FDA; if it returns EPERM, it does not. Nothing is read from the file, and
+/// the probe is the whole point — opening it IS the question.
+///
+/// Why this exists: the UI could previously only offer a button to the
+/// settings pane and then keep saying the same thing forever, whether or not
+/// the user had already granted it. "Once access is granted, it should show
+/// that in the UI" was the request, and it needs a real answer, not a flag we
+/// set when we open the pane (which would lie the moment someone declines).
+///
+/// If this returns false right after a grant, suspect the build rather than
+/// the user: TCC keys an ad-hoc-signed app by its cdhash, so every rebuild is
+/// a different app to the permission database and the old grant does not
+/// carry over. That is a property of unsigned local builds, not a bug here.
+#[tauri::command]
+pub fn full_disk_access_status() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(home) = std::env::var_os("HOME") else { return false };
+        let probe = std::path::Path::new(&home)
+            .join("Library/Application Support/com.apple.TCC/TCC.db");
+        // Tail expression, not `return`: with the non-macOS arm cfg'd out this
+        // block IS the function body, and clippy rejects the explicit form.
+        std::fs::File::open(probe).is_ok()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
 /// Cheap per-line check used by the streaming loops (which don't have
 /// access to a single accumulated stderr buffer). Set a captured boolean
 /// when this returns true; on termination, swap the generic

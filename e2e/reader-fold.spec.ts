@@ -19,6 +19,7 @@ async function bootReader(page: Page, seed: (() => void) | null = null): Promise
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("e2e.transcripts", "1");
   });
   if (seed) await page.addInitScript(seed);

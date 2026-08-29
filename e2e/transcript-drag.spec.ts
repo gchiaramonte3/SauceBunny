@@ -20,6 +20,7 @@ async function bootReader(page: Page): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     // Opt in to the seeded transcript library (see tauri-mock).
     localStorage.setItem("e2e.transcripts", "1");
   });
@@ -207,6 +208,7 @@ test("a refused move is reported, not swallowed as an unhandled rejection", asyn
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("e2e.transcripts", "1");
     localStorage.setItem("e2e.refuseMove", "1");
   });

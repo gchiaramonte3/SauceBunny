@@ -22,6 +22,7 @@ async function bootQueue(page: Page): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     const clip = (id: string, filename: string) => ({
       id, filename, fps: 25, inFrames: 0, outFrames: 250,
       source: { kind: "file", path: `/e2e-mock/${id}.mp4` },

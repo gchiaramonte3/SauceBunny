@@ -7,7 +7,7 @@
  * a banner if they don't match — which is the unambiguous signal that
  * `npm run tauri dev` needs to be restarted so cargo rebuilds the binary.
  */
-export const EXPECTED_BACKEND_BUILD_ID = "2026-08-26-r166-stop-actually-stops";
+export const EXPECTED_BACKEND_BUILD_ID = "2026-08-29-r167-permissions-onboarding";
 
 export type BuildIdCheck =
   | { kind: "ok"; id: string }

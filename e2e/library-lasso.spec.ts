@@ -17,6 +17,7 @@ async function bootLibrary(page: Page, view: "grid" | "list", opts: { many?: num
   await page.addInitScript(([v, many]: [string, number]) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e-mock/Footage"]));
     localStorage.setItem("saucebunny.libraryBrowser", JSON.stringify({ view: v, sort: "name", dir: "asc" }));
     if (many) localStorage.setItem("e2e.manyFiles", String(many));

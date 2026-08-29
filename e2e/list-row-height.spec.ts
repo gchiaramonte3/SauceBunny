@@ -15,6 +15,7 @@ async function bootFramesList(page: import("@playwright/test").Page): Promise<vo
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e-mock/Footage"]));
     // List view, so the table is what renders.
     localStorage.setItem("saucebunny.framesBrowser", JSON.stringify({ view: "list", sort: "date", dir: "desc" }));

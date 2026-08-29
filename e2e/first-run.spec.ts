@@ -111,16 +111,58 @@ test("Get started dismisses it, and it stays dismissed", async ({ page }) => {
 });
 
 test("onboarding is a sequence, not a stack", async ({ page }) => {
-  // Exactly one modal at a time. Two aria-modal dialogs open together is both
-  // an ambiguity for assistive tech and the reason Escape used to resolve to
-  // the wrong one.
+  // Exactly one modal at a time, all the way through. Two aria-modal dialogs
+  // open together is both an ambiguity for assistive tech and the reason
+  // Escape used to resolve to the wrong one. The permissions step shares the
+  // welcome's z-rung, so stacking them would hide one behind the other and
+  // trap focus in whichever mounted last.
   await firstRun(page);
   await expect(page.getByRole("dialog")).toHaveCount(1);
 
   await page.getByRole("button", { name: "Get started" }).click();
+  await expect(page.getByRole("dialog", { name: "Permissions" })).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Continue" }).click();
   // The YouTube connect prompt takes its turn only now.
   await expect(page.locator(".cp-ytauth")).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(1);
+});
+
+test("the permissions step says none of it is required", async ({ page }) => {
+  // The one thing this screen must never imply. Everything it asks for is for
+  // watching together; transcribing a local file needs none of it. A first-run
+  // wall that reads as mandatory would be worse than not asking at all.
+  await firstRun(page);
+  await page.getByRole("button", { name: "Get started" }).click();
+  const dlg = page.getByRole("dialog", { name: "Permissions" });
+  await expect(dlg).toBeVisible();
+  await expect(dlg).toContainText(/skipping is a perfectly good answer/i);
+  // Every permission it lists is reachable and named.
+  for (const name of ["Microphone", "Camera", "Screen Recording", "Full Disk Access"]) {
+    await expect(dlg.getByText(name, { exact: false }).first()).toBeVisible();
+  }
+});
+
+test("the permissions step latches, like the welcome", async ({ page }) => {
+  // Asking again on every launch is the failure mode that makes people stop
+  // reading these screens at all.
+  await firstRun(page);
+  await page.getByRole("button", { name: "Get started" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("dialog", { name: "Permissions" })).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("dialog", { name: "Permissions" })).toHaveCount(0);
+});
+
+test("Escape leaves the permissions step rather than trapping the user in it", async ({ page }) => {
+  await firstRun(page);
+  await page.getByRole("button", { name: "Get started" }).click();
+  await expect(page.getByRole("dialog", { name: "Permissions" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Permissions" })).toHaveCount(0);
 });
 
 test("Escape is the same as Get started", async ({ page }) => {

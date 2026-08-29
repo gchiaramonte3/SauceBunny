@@ -33,6 +33,7 @@ async function boot(page: Page, urlOnly = false): Promise<void> {
   await page.addInitScript((one: boolean) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     const web = { kind: "url", value: "https://youtube.com/watch?v=abc", title: "Seeded web source", durationSeconds: 90, lastOpenedAt: Date.now() };
     const file = { kind: "file", value: "/tmp/seeded.mp4", title: "seeded.mp4", lastOpenedAt: Date.now() - 60_000 };
     // `urlOnly` matters. With two entries, one ArrowDown lands on the FILE row,

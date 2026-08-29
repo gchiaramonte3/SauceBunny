@@ -20,6 +20,7 @@ async function bootWeb(page: Page): Promise<void> {
   await page.addInitScript((lib: string) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e-mock/Footage"]));
     // Two collections on disk, so a drop has somewhere to land and a second
     // somewhere to prove membership is additive.

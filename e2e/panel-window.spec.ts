@@ -33,6 +33,7 @@ async function openPanel(page: Page, sink: string[], snapshot?: unknown) {
   await page.addInitScript(
     ([key, snap]) => {
       localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
       if (snap) localStorage.setItem(key as string, JSON.stringify(snap));
     },
     [SNAPSHOT_KEY, snapshot ?? null] as const,
@@ -178,6 +179,7 @@ test("a Review tab persisted by the MAIN window does not mount a hidden review b
   await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
   await page.addInitScript(() => {
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     // The RAW string, exactly as saveActiveTab writes it - a JSON-quoted
     // value fails normalizeActiveTab and the test goes vacuous.
     localStorage.setItem("saucebunny.queueDrawerActiveTab", "review");

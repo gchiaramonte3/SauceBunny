@@ -30,6 +30,7 @@ async function bootRoom(page: Page, title: string): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("saucebunny.review.author", JSON.stringify("Nika"));
     localStorage.setItem("e2e.avGranted", "1");
     // The comments panel width is a persisted preference, and it is what

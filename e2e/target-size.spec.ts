@@ -32,6 +32,7 @@ async function boot(page: Page): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
   });
   await page.goto("/");
   // Walk to the Clip workbench the way the smoke suite does. Landing on Home

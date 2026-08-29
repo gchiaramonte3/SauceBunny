@@ -25,6 +25,7 @@ async function boot(page: Page, opts: { many?: number } = {}): Promise<void> {
   await page.addInitScript((many) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e-mock/Footage"]));
     if (many) localStorage.setItem("e2e.manyFiles", String(many));
   }, opts.many ?? 0);

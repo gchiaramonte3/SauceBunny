@@ -70,6 +70,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutSheet } from "./components/ShortcutSheet";
 import { DropTarget } from "./components/DropTarget";
 import { WelcomeScreen } from "./components/WelcomeScreen";
+import { PermissionsOnboarding } from "./components/PermissionsOnboarding";
 import { RoomSourceBar } from "./components/RoomSourceBar";
 import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from "./lib/import-extensions";
 import {
@@ -470,6 +471,12 @@ export default function App() {
   // of the YouTube-auth onboarding latch below.
   const [showWelcome, setShowWelcome] = useState<boolean>(() => {
     try { return localStorage.getItem("saucebunny.welcomed") !== "1"; } catch { return false; }
+  });
+  // Step two of first run. Separate flag from `welcomed` on purpose: an
+  // existing install has already been welcomed and would otherwise never be
+  // offered the permissions step at all.
+  const [showPerms, setShowPerms] = useState<boolean>(() => {
+    try { return localStorage.getItem("saucebunny.permissioned") !== "1"; } catch { return false; }
   });
 
   const [ytAuthOpen, setYtAuthOpen] = useState(false);
@@ -5362,7 +5369,7 @@ export default function App() {
           left up the one they could; this one's latch then meant the connect
           prompt never came back. Sequenced instead: welcome first, this after. */}
       <YouTubeAuthModal
-        open={ytAuthOpen && !showWelcome}
+        open={ytAuthOpen && !showWelcome && !showPerms}
         mode={ytAuthMode}
         site={ytAuthSite}
         current={defaults.ytCookiesBrowser}
@@ -5429,6 +5436,15 @@ export default function App() {
         <WelcomeScreen onDone={() => {
           try { localStorage.setItem("saucebunny.welcomed", "1"); } catch { /* quota */ }
           setShowWelcome(false);
+        }} />
+      )}
+      {/* SEQUENCED, not stacked: the welcome must be gone first. Both sit on
+          --z-firstrun, so rendering them together would paint one over the
+          other and trap focus in whichever mounted last. */}
+      {!showWelcome && showPerms && (
+        <PermissionsOnboarding onDone={() => {
+          try { localStorage.setItem("saucebunny.permissioned", "1"); } catch { /* quota */ }
+          setShowPerms(false);
         }} />
       )}
     </div>

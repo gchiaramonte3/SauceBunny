@@ -39,6 +39,7 @@ test("a hostile peer name cannot escape the window", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
   });
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
@@ -105,6 +106,7 @@ test("the lobby caps the name at the source too", async ({ page }) => {
     // the nav click, which reads as "the Review button never appeared".
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
   });
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });

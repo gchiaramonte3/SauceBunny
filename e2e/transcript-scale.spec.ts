@@ -53,6 +53,7 @@ async function openTranscript(page: Page, cues: number) {
   await page.addInitScript(([srt, srtPath, url]: string[]) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("e2e.files", JSON.stringify({ [srtPath]: srt }));
     localStorage.setItem("saucebunny.transcriptHistory", JSON.stringify([{
       id: "h1", srtPath, sourcePath: null, sourceUrl: url,

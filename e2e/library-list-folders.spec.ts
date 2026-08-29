@@ -22,6 +22,7 @@ async function bootLibrary(page: Page, opts: { nested?: boolean } = {}): Promise
   await page.addInitScript((nested) => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e-mock/Footage"]));
     if (nested) localStorage.setItem("e2e.nestedFolders", "1");
   }, opts.nested === true);

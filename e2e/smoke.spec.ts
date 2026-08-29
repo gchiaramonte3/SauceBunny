@@ -23,6 +23,7 @@ async function boot(page: Page): Promise<void> {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     // Latch the first-launch welcome screen too - it overlays everything.
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
   });
   await page.goto("/");
   // Every launch lands on Home (r140); the suite's tests exercise the Clip

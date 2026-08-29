@@ -18,6 +18,7 @@ async function bootReview(page: Page): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
     localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
     localStorage.setItem("saucebunny.review.author", JSON.stringify("Nika"));
     localStorage.setItem("e2e.files", "{}");
     localStorage.setItem("saucebunny.queueDrawerActiveTab", "review");

@@ -287,6 +287,7 @@ pub fn run() {
             commands::reset_ytdlp,
             commands::open_youtube_signin,
             commands::open_full_disk_access,
+            commands::full_disk_access_status,
             commands::safari_fda_status,
             commands::cookie_browser_ready,
             commands::latest_release,
