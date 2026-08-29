@@ -44,28 +44,23 @@ describe("sanitizeLibraryRoots", () => {
     expect(sanitizeLibraryRoots(undefined)).toEqual([]);
   });
 
-  it("drops a root that lives inside another root", () => {
-    // The shape that actually happens: add a folder, then later add one of
-    // its subfolders. The inner one is entirely redundant, and keeping it
-    // duplicated the folder in the sidebar tree (same path = same React key)
-    // and every file underneath in the All view.
-    expect(sanitizeLibraryRoots(["/Footage", "/Footage/Interviews"])).toEqual(["/Footage"]);
-    // Order does not matter: the ANCESTOR always wins, because keeping the
-    // parent preserves strictly more of the library.
-    expect(sanitizeLibraryRoots(["/Footage/Interviews", "/Footage"])).toEqual(["/Footage"]);
-    // Grandchildren too.
-    expect(sanitizeLibraryRoots(["/a", "/a/b/c/d"])).toEqual(["/a"]);
+  it("KEEPS a root that lives inside another root", () => {
+    // Reversed deliberately. A previous version dropped the inner one on the
+    // reasoning that the parent contains everything beneath it. It does not:
+    // scan_library_folder descends only LIBRARY_SCAN_DEPTH levels and skips
+    // symlinked and dot-prefixed directories, and when it stops short the Home
+    // view tells the user in as many words to "Add the inner folder as a
+    // library root to see what is inside". Dropping it deleted the user's own
+    // folder on the next launch for following the app's instructions.
+    expect(sanitizeLibraryRoots(["/Footage", "/Footage/Interviews"]))
+      .toEqual(["/Footage", "/Footage/Interviews"]);
+    expect(sanitizeLibraryRoots(["/Footage/Interviews", "/Footage"]))
+      .toEqual(["/Footage/Interviews", "/Footage"]);
+    expect(sanitizeLibraryRoots(["/a", "/a/b/c/d"])).toEqual(["/a", "/a/b/c/d"]);
   });
 
-  it("keeps siblings whose names merely share a prefix", () => {
-    // The boundary case a naive startsWith gets wrong: "/Footage2" is NOT
-    // inside "/Footage", and dropping it would silently remove a library.
-    expect(sanitizeLibraryRoots(["/Footage", "/Footage2"])).toEqual(["/Footage", "/Footage2"]);
-    expect(sanitizeLibraryRoots(["/a/b", "/a/bc"])).toEqual(["/a/b", "/a/bc"]);
-  });
-
-  it("tolerates a trailing slash on the parent", () => {
-    expect(sanitizeLibraryRoots(["/Footage/", "/Footage/Interviews"])).toEqual(["/Footage/"]);
+  it("still collapses EXACT duplicates, which are pure noise", () => {
+    expect(sanitizeLibraryRoots(["/a", "/a", "/b"])).toEqual(["/a", "/b"]);
   });
 
   it("keeps unrelated roots untouched", () => {

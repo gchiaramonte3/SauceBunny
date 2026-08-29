@@ -213,7 +213,10 @@
 /* Split from the timecode input below: they shared one rule, whose
    `background` shorthand reset the chevron .cp-select paints. The select now
    takes its chrome from the .sm rung and states only its own height. */
-.cp-review-export-select { height: 24px; }
+/* Two classes, to outrank `.cp-select.sm`'s 26px. As a single class this
+   never applied and the control silently sat two pixels taller than the
+   timecode field beside it. */
+.cp-select.cp-review-export-select { height: 24px; }
 .cp-review-export-tc {
   height: 24px;
   padding: 0 8px;

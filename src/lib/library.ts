@@ -48,34 +48,24 @@ export type LibrarySearchResult = {
  * empties, de-dup preserving order. Corrupt shapes yield [] rather than
  * crashing the Library render (same contract as sanitizeRecentSources).
  */
-/** Is `child` the same path as, or inside, `parent`? Boundary-aware, so
- *  "/Footage2" is NOT inside "/Footage". */
-function isWithin(child: string, parent: string): boolean {
-  if (child === parent) return true;
-  const base = parent.endsWith("/") ? parent : parent + "/";
-  return child.startsWith(base);
-}
-
 /**
  * The library's roots, cleaned up.
  *
- * Exact duplicates were always collapsed. NESTED ones were not, and that is
- * the case that actually happens: you add "Footage", then later add
- * "Footage/Interviews" because you were browsing it. The inner one is
- * entirely redundant - every file under it is already in the library through
- * its parent - and keeping it costs real breakage rather than just a
- * duplicate line:
+ * Exact duplicates are collapsed. NESTED roots are deliberately KEPT, and that
+ * is a reversal: a previous version dropped any root contained by another, on
+ * the reasoning that "keeping the parent always preserves strictly more of the
+ * library". That is false, and the app's own UI proves it. `scan_library_folder`
+ * descends only LIBRARY_SCAN_DEPTH levels and skips symlinked and dot-prefixed
+ * directories at every level, so a parent's scanned tree does NOT contain
+ * everything beneath it - and when it stops early the Home view tells the user,
+ * in these words, to "Add the inner folder as a library root to see what is
+ * inside". Dropping that root deleted the user's own folder on the next launch,
+ * silently, for following the app's instructions.
  *
- *  - the sidebar tree renders that folder TWICE with the same path, and the
- *    path is its React key, so React warns and may reuse the wrong node;
- *  - the "All" view aggregates every root, so every file underneath is
- *    listed twice, inflating the item count and the "showing N" note;
- *  - and each duplicate row shares a key with its twin, which is how a long
- *    list starts rendering as though rows had been shuffled together.
- *
- * A contained root is therefore dropped. Order still decides which survives:
- * whichever ANCESTOR is present wins, whether it was added before or after,
- * because keeping the parent always preserves strictly more of the library.
+ * The duplicate-key and double-listing problems that change was meant to solve
+ * are real, and are solved where they occur instead: `dedupeLibraryItems` for
+ * any aggregate that spans roots, and per-root keys in the sidebar tree. Losing
+ * a root is not an acceptable price for either.
  */
 export function sanitizeLibraryRoots(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -86,10 +76,7 @@ export function sanitizeLibraryRoots(raw: unknown): string[] {
     seen.add(x);
     uniq.push(x);
   }
-  // Drop anything contained by another surviving root. Self-comparison is
-  // skipped by index, not by value, so two equal strings could not cancel
-  // each other out (the exact-dedupe above has already removed those).
-  return uniq.filter((r, i) => !uniq.some((other, j) => j !== i && isWithin(r, other)));
+  return uniq;
 }
 
 /** Recursive playable-item count for a folder subtree (row/card counts). */

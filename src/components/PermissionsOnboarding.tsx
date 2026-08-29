@@ -40,6 +40,13 @@ export function PermissionsOnboarding({ onDone }: { onDone: () => void }) {
 
   const [tcc, setTcc] = useState<{ camera: AvAuthState; microphone: AvAuthState; screen: AvAuthState } | null>(null);
   const [disk, setDisk] = useState<boolean | null>(null);
+  // `screen_capture_access` RETURNS the answer ("granted" / "denied" /
+  // "undetermined") and this screen used to throw it away, re-reading state
+  // from av_permission_status instead. That reads CGPreflightScreenCaptureAccess,
+  // which commonly keeps saying no until the app is relaunched - so a user who
+  // had just granted screen recording watched the row sit on "Allow" forever
+  // and had no way to tell it had worked.
+  const [screenGrant, setScreenGrant] = useState<AvAuthState | null>(null);
   const [busy, setBusy] = useState<RowKey | null>(null);
 
   const refresh = useCallback(() => {
@@ -80,7 +87,10 @@ export function PermissionsOnboarding({ onDone }: { onDone: () => void }) {
 
   const askScreen = async () => {
     setBusy("screen");
-    try { await invoke<string>("screen_capture_access", { request: true }); } catch { /* ditto */ }
+    try {
+      const r = await invoke<string>("screen_capture_access", { request: true });
+      setScreenGrant(r === "granted" ? "authorized" : r === "denied" ? "denied" : null);
+    } catch { /* ditto */ }
     setBusy(null);
     refresh();
   };
@@ -103,7 +113,10 @@ export function PermissionsOnboarding({ onDone }: { onDone: () => void }) {
     {
       key: "screen" as const, name: "Screen Recording", icon: <IconScreenShare size={14} />,
       why: "Share a screen in a live session.",
-      state: tcc?.screen, ask: askScreen, anchor: "Privacy_ScreenCapture",
+      // Prefer what the request itself reported; the preflight behind
+      // tcc.screen lags a fresh grant until relaunch.
+      state: screenGrant ?? tcc?.screen, ask: askScreen, anchor: "Privacy_ScreenCapture",
+      note: "macOS may not apply this until Sauce Bunny is restarted.",
     },
   ];
 
@@ -136,7 +149,7 @@ export function PermissionsOnboarding({ onDone }: { onDone: () => void }) {
                 <span className="cp-perms-row-icon">{r.icon}</span>
                 <span className="cp-perms-row-text">
                   <strong>{r.name}</strong>
-                  <span>{r.why}</span>
+                  <span>{r.why}{granted && r.note ? ` ${r.note}` : ""}</span>
                 </span>
                 {granted ? (
                   <span className="cp-perms-ok"><IconCheck size={13} /> Allowed</span>

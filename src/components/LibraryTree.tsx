@@ -41,7 +41,7 @@ type Props = {
 };
 
 type Row = {
-  /** "all" or the folder's absolute path. */
+  /** "all", a shelf id, or `<rootIndex>:<absolute path>` — see buildRows. */
   key: string;
   chain: LibraryCrumb[] | null;
   depth: number;
@@ -72,10 +72,16 @@ function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
     { key: "shelf:web", chain: null, depth: 0, name: "From the web", hasChildren: false, expanded: false, shelf: "web" },
     { key: "shelf:frames", chain: null, depth: 0, name: "Frames", hasChildren: false, expanded: false, shelf: "frames" },
   ];
-  const walk = (node: LibraryFolder, chain: LibraryCrumb[], depth: number) => {
+  const walk = (node: LibraryFolder, chain: LibraryCrumb[], depth: number, rootIdx: number) => {
     const isExp = expanded.has(node.path);
     rows.push({
-      key: node.path, chain, depth, name: node.name,
+      // Keyed by WHERE it sits, not by what it is. Roots may nest - the Home
+      // view tells the user to add an inner folder as its own root when the
+      // scan stops short of it - so the same path legitimately appears twice,
+      // once as a root and once inside its parent. Keying on node.path alone
+      // made those two rows collide, and React is then free to reuse the wrong
+      // DOM node for the wrong folder.
+      key: `${rootIdx}:${node.path}`, chain, depth, name: node.name,
       hasChildren: node.folders.length > 0, expanded: isExp,
       // Roots carry small folder art (first video's poster, BFS) — the
       // Spotify library-row read. Subfolders stay text rows.
@@ -83,11 +89,11 @@ function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
     });
     if (isExp) {
       for (const sub of node.folders) {
-        walk(sub, [...chain, { name: sub.name, path: sub.path }], depth + 1);
+        walk(sub, [...chain, { name: sub.name, path: sub.path }], depth + 1, rootIdx);
       }
     }
   };
-  for (const t of trees) walk(t, [{ name: t.name, path: t.path }], 0);
+  trees.forEach((t, i) => walk(t, [{ name: t.name, path: t.path }], 0, i));
   return rows;
 }
 

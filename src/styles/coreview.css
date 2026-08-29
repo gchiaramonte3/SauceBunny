@@ -138,6 +138,11 @@
   font-size: var(--text-md);
 }
 .cp-colobby-input::placeholder { color: var(--fg-5); }
+/* The rule above sets `padding` as a shorthand and lands AFTER buttons.css,
+   so on the device <select> it overwrote the right-hand gutter .cp-select
+   reserves for its chevron and long device names ran under the arrow. Scoped
+   to select so the shared text inputs keep their symmetric padding. */
+select.cp-colobby-input { padding-right: calc(var(--sel-chev) + 14px); }
 /* THE lobby action: the grey chip (user call 2026-07-19 - no green
    buttons anywhere in this flow). Faint fill + line border, hover
    brightens both; buttons hug their labels (P7), min-width keeps short

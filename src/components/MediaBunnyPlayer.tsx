@@ -400,30 +400,49 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
       // playhead never produces a gap. Each grain retires itself below.
       const env = ctx.createGain();
       env.connect(gain);
-      const t0 = ctx.currentTime + 0.005; // scheduling headroom
       const { offsetSec, durationSec, fadeSec, gain: peak } = plan;
+
+      // DECODE FIRST, then schedule. The clock must not start before the
+      // audio exists.
+      //
+      // This previously took t0 = currentTime + 5ms and armed the whole
+      // envelope over [t0, t0+55ms] BEFORE awaiting the decoder. Decoding a
+      // grain takes tens of milliseconds, so by the time the sources were
+      // started t0 was already in the past and the envelope had closed over
+      // silence: the feature made no sound at all, intermittently, with
+      // nothing in the log to say why.
+      const decoded: { buffer: AudioBuffer; timestamp: number }[] = [];
+      try {
+        for await (const w of sink.buffers(offsetSec, offsetSec + durationSec)) {
+          if (gen !== genRef.current) break;
+          const off = Math.max(0, offsetSec - w.timestamp);
+          if (off >= w.buffer.duration) continue;
+          decoded.push({ buffer: w.buffer, timestamp: w.timestamp });
+        }
+      } catch { /* sink torn down mid-drag */ }
+      if (decoded.length === 0 || gen !== genRef.current) {
+        try { env.disconnect(); } catch { /* ignore */ }
+        return;
+      }
+
+      const t0 = ctx.currentTime + 0.005; // headroom, measured from NOW
       // ONE event for the whole envelope. See grainEnvelope: any other
       // automation inside a curve's range makes setValueCurveAtTime throw.
       env.gain.setValueCurveAtTime(grainEnvelope(peak, durationSec, fadeSec), t0, durationSec);
 
       const entry = { nodes: [] as AudioBufferSourceNode[], env };
       scrubVoicesRef.current.push(entry);
-      try {
-        for await (const w of sink.buffers(offsetSec, offsetSec + durationSec)) {
-          // Bail if playback took over or everything was retired under us.
-          if (gen !== genRef.current || !scrubVoicesRef.current.includes(entry)) break;
-          const off = Math.max(0, offsetSec - w.timestamp);
-          if (off >= w.buffer.duration) continue;
-          const src = ctx.createBufferSource();
-          src.buffer = w.buffer;
-          src.connect(env);
-          // Always FORWARD, at rate 1. Scrubbing backwards steps the grain
-          // positions back and still plays each one forward: reversed speech
-          // is unintelligible, which defeats the point of listening at all.
-          src.start(t0 + Math.max(0, w.timestamp - offsetSec), off);
-          entry.nodes.push(src);
-        }
-      } catch { /* sink torn down mid-drag */ }
+      for (const w of decoded) {
+        const off = Math.max(0, offsetSec - w.timestamp);
+        const src = ctx.createBufferSource();
+        src.buffer = w.buffer;
+        src.connect(env);
+        // Always FORWARD, at rate 1. Scrubbing backwards steps the grain
+        // positions back and still plays each one forward: reversed speech
+        // is unintelligible, which defeats the point of listening at all.
+        src.start(t0 + Math.max(0, w.timestamp - offsetSec), off);
+        entry.nodes.push(src);
+      }
       // The envelope is fully closed at t0+durationSec; release just after.
       window.setTimeout(() => {
         scrubVoicesRef.current = scrubVoicesRef.current.filter((v) => v !== entry);
