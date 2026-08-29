@@ -41,6 +41,7 @@
 //
 
 import Foundation
+import SrtCore
 import AVFoundation
 import SpeakerKit
 import FluidAudio
@@ -433,60 +434,9 @@ func prepareModelsOnly(backend: Backend, emit: Bool) async {
 // the SAME .srt contract whisper-cli produces. The Rust caller + the
 // diarize-merge step are therefore engine-agnostic.
 
-func srtTimecode(_ seconds: Double) -> String {
-  let ms = Int((max(0, seconds) * 1000).rounded())
-  return String(format: "%02d:%02d:%02d,%03d",
-                ms / 3_600_000, (ms / 60_000) % 60, (ms / 1000) % 60, ms % 1000)
-}
-
-func tokensToSrt(_ tokens: [TokenTiming]) -> String {
-  var cues: [(start: Double, end: Double, text: String)] = []
-  var text = ""
-  var start: Double? = nil
-  var end = 0.0
-  func flush() {
-    let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let s = start, !t.isEmpty { cues.append((start: s, end: end, text: t)) }
-    text = ""; start = nil; end = 0
-  }
-  // Parakeet emits SUB-WORD tokens, so a length cap applied the instant it is
-  // exceeded cuts inside a word: a real transcript came out reading
-  // "…is not obvio" / "us. Most of the wall clock…". Whisper never had this
-  // problem because -sow makes it split on words for us.
-  //
-  // So the cap only ARMS a break; the break itself happens at the next token
-  // that starts a word. A sentence end is already a word end, so that path
-  // can flush immediately.
-  var wantBreak = false
-  for tok in tokens {
-    // Sentencepiece marks a word start with a leading space (or U+2581).
-    let startsWord = tok.token.hasPrefix(" ") || tok.token.hasPrefix("\u{2581}")
-    if wantBreak && startsWord {
-      flush()
-      wantBreak = false
-    }
-    if start == nil { start = tok.startTime }
-    text += tok.token
-    end = tok.endTime
-    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    let endsSentence = trimmed.hasSuffix(".") || trimmed.hasSuffix("?") || trimmed.hasSuffix("!")
-    // Cap at ~2 overlay lines; also break at a sentence end once the cue is
-    // long enough that we don't fragment into one-word cues.
-    if endsSentence && trimmed.count >= 32 {
-      flush()
-      wantBreak = false
-    } else if trimmed.count >= 84 {
-      wantBreak = true
-    }
-  }
-  flush()
-  var out = ""
-  for (i, c) in cues.enumerated() {
-    out += "\(i + 1)\n\(srtTimecode(c.start)) --> \(srtTimecode(c.end))\n\(c.text)\n\n"
-  }
-  return out
-}
-
+// Cue construction moved to the SrtCore target so it can be TESTED - it had
+// never been executed by any automated tier, and a cue-breaking bug shipped
+// through that gap twice. `srtTimecode` and `tokensToSrt` now live there.
 // The Rust caller passes --models-dir (app_data_dir/models/parakeet) so the
 // Core ML bundle is app-managed + reused across runs, not buried in
 // ~/Library/Application Support/FluidAudio.
@@ -533,7 +483,9 @@ func runAsrMode(args: Args) async {
     // TdtDecoderState() is a throwing initializer in FluidAudio 0.15.x.
     var state = try TdtDecoderState()
     let result = try await asr.transcribe(URL(fileURLWithPath: inPath), decoderState: &state)
-    let srt = tokensToSrt(result.tokenTimings ?? [])
+    let srt = tokensToSrt((result.tokenTimings ?? []).map {
+      CueToken(token: $0.token, startTime: Double($0.startTime), endTime: Double($0.endTime))
+    })
     if srt.isEmpty {
       eprintln("error: Parakeet produced no transcript (no token timings)")
       exit(3)

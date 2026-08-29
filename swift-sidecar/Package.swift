@@ -43,9 +43,22 @@ let package = Package(
     ),
   ],
   targets: [
+    // Pure cue-construction for the Parakeet ASR path, with NO dependencies so
+    // `swift test` is fast and needs no models on disk. It lives in its own
+    // target because an executable target cannot be imported by tests, and
+    // this logic had never been executed by any automated tier - CI compiles
+    // the sidecars and nothing runs them. A cue-breaking bug shipped through
+    // that gap twice; see Sources/SrtCore/SrtCore.swift.
+    .target(name: "SrtCore", path: "Sources/SrtCore"),
+    .testTarget(
+      name: "SrtCoreTests",
+      dependencies: ["SrtCore"],
+      path: "Tests/SrtCoreTests"
+    ),
     .executableTarget(
       name: "saucebunny-diarize",
       dependencies: [
+        "SrtCore",
         .product(name: "SpeakerKit", package: "argmax-oss-swift"),
         .product(name: "FluidAudio", package: "FluidAudio"),
       ],

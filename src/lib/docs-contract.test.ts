@@ -32,6 +32,9 @@ describe("npm run verify covers every gate CI runs", () => {
 
   /** CI step (a substring of its `run:` line) -> how verify-all spells it. */
   const GATES: Array<[ciStep: string, localCommand: string]> = [
+    // Swift is COMPILED by both and, until this row existed, executed by
+    // neither. Two cue-breaking bugs shipped through that gap.
+    ["swift test", "swift test --package-path swift-sidecar"],
     ["npx tsc --noEmit", "npx tsc --noEmit"],
     ["npx vitest run", "npm test"],
     ["npm run lint", "npm run lint"],

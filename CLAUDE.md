@@ -619,7 +619,7 @@ These are the known cleanup tasks. When Claude Code has discretion on how to org
    the second time one commit after the first was written up — because the
    write-up was a warning rather than a fix. Handle the empty case in the
    script, and grep the result for `[, ` before believing it.
-6. **Shrink `App.tsx`.** It is ~5,100 lines and the largest single risk in the
+6. **Shrink `App.tsx`.** It is ~5,450 lines and the largest single risk in the
    codebase: nothing can be tested without booting the whole app, and reviewing
    a change to it means reading around a dozen unrelated subsystems. The
    direction is the one already established — lift ONE cohesive subsystem at a
@@ -694,19 +694,28 @@ vitest, lint, `cargo check`, `cargo test --lib`, `cargo clippy -D warnings`,
 going after a failure so you see every broken gate rather than the first one,
 and exits non-zero if any failed.
 
-**It is deliberately the same set `.github/workflows/ci.yml` runs.** Keep it
-that way. A local gate that is a SUBSET of the CI gate reports "all gates
-passed" for work that CI will reject, and this has happened twice: clippy ran
-in CI and not here for 98 commits, and `check:licenses` was missing until an
-open-source audit went looking. If you add a job to CI, add it here in the
-same commit.
+**It runs the same set `.github/workflows/ci.yml` runs, with ONE stated
+exception.** Keep it that way. A local gate that is a SUBSET of the CI gate
+reports "all gates passed" for work that CI will reject, and this has happened
+twice: clippy ran in CI and not here for 98 commits, and `check:licenses` was
+missing until an open-source audit went looking. If you add a job to CI, add it
+here in the same commit.
+
+The exception is CI's `bundle` job (`npm run tauri build` +
+`scripts/verify-bundle.sh`), which needs a full release build and takes minutes.
+It is deliberately not in `npm run verify`; `npm run verify:packaged` and
+`npm run verify:bundle` cover it before a release. `docs-contract.test.ts`
+exempts exactly those two commands by name and nothing else, so any OTHER new CI
+step still has to be added here. This paragraph used to claim parity with no
+exception at all, which was simply false and is the kind of sentence that gets
+believed because it is read every session.
 
 Neither one launches the app. `docs/HAND-TEST.md` is the list of things only a
 human can check.
 
 ## Enforced contracts
 
-Seventy rules in this file are checked by a test rather than remembered. If you
+Sixty-eight rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -766,8 +775,6 @@ written after finding the rule already broken somewhere.
 | `component-reachable-contract` | Every component in `src/components` is imported by something. A component written, styled, tested and then never mounted passes tsc and the suite while being absent from the running app |
 | `selection-bar-contract` | The library's multi-select bar is out of the browse row's flow. In flow inside a `display: flex` row it renders as a full-height column beside the grid rather than as a bar |
 | `pure-updater-contract` | Reducer-style updaters stay pure |
-| `hidden-instance-contract` | Every Cmd-chord in TranscriptViewer checks it is not inside a [hidden]/aria-hidden subtree. The component is mounted twice (reader + drawer keep-alive), and without the gate a Cmd-G advanced the HIDDEN copy and killed its auto-scroll |
-| `rust-panic-contract` | No `unwrap`/`expect`/`panic!` in production Rust |
 | `rung-ladder-contract` | The streaming rung table is identical in TS and Rust |
 | `wire-path-contract` | A review doc on the wire carries no local filesystem path |
 | `asset-scope-contract` | The `asset://` scope stays narrow |

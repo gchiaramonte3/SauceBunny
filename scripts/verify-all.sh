@@ -42,6 +42,10 @@ run "Rust tests"    cargo test --lib --manifest-path src-tauri/Cargo.toml
 # the note above describes, committed a second time in the fix for it.
 run "Clippy"        cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
 run "Swift sidecar" swift build --package-path swift-sidecar
+# The sidecars were COMPILED by every gate and executed by none, and a
+# cue-breaking bug shipped through that gap twice. SrtCore is dependency-free
+# so this needs no models and runs in milliseconds.
+run "Swift tests" swift test --package-path swift-sidecar
 # CI runs this too, and this script did not - the same subset bug as clippy
 # below, found the same way. It takes a second and it is the check that stops
 # a strong-copyleft dependency being LINKED into an MIT app, which is the one

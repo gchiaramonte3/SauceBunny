@@ -53,6 +53,14 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "20"
+      # This job compiles the whole Tauri dependency graph THREE times (check,
+      # test, clippy) and had no cache, while the bundle job below it does.
+      # Swatinem's cache is per-job, so the bundle job's copy never reached
+      # here. macOS runners are the slowest and (on private repos) the most
+      # expensive minutes GitHub bills.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
       - run: npm ci
       - run: cargo check
         working-directory: src-tauri
@@ -86,6 +94,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: swift build -c release --arch arm64
+        working-directory: swift-sidecar
+      # Executes the sidecars' pure logic. Compiling them was never enough:
+      # a cue-breaking bug shipped twice through a gap where CI built the
+      # Swift and nothing ever ran it.
+      - run: swift test
         working-directory: swift-sidecar
 
   ui-smoke:
