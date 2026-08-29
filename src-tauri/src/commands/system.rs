@@ -32,6 +32,17 @@ pub struct JobRegistry {
     cancelled: Mutex<std::collections::HashSet<String>>,
 }
 
+/// Does registry key `key` belong to job `job`?
+///
+/// The job's own key, or one of its stage keys (`<job>::<stage>`). The
+/// separator check is the load-bearing part: a plain `starts_with(job)` would
+/// make job "abc" claim and KILL the children of job "abcd", and since ids
+/// are generated per run that is a cross-job kill that would look like a
+/// random cancellation. `::` cannot occur inside a UUID.
+pub(crate) fn belongs_to_job(key: &str, job: &str) -> bool {
+    key == job || key.strip_prefix(job).is_some_and(|rest| rest.starts_with("::"))
+}
+
 impl JobRegistry {
     // `pub(crate)` so sibling commands modules (download, media,
     // transcript) can register their spawned children. Private was
@@ -43,6 +54,30 @@ impl JobRegistry {
     }
     pub(crate) fn take(&self, id: &str) -> Option<CommandChild> {
         self.children.lock().ok()?.remove(id)
+    }
+    /// Every child belonging to `job` — the job's own key plus any STAGE key
+    /// (`<job>::<stage>`), removed from the registry.
+    ///
+    /// A job used to mean exactly one live child, because the transcription
+    /// stages ran strictly one after another: whisper, and only once whisper
+    /// had terminated, the diarizer. They now overlap (the diarizer needs the
+    /// same 16kHz WAV, which exists before whisper starts, so making it wait
+    /// put its whole runtime on the wall clock for nothing). Two children are
+    /// alive at once under one job, and Stop has to reach BOTH — killing only
+    /// the one registered under the bare id would leave the other running,
+    /// which is the exact "Stop does not stop" shape this codebase keeps
+    /// meeting.
+    ///
+    /// Stage keys are namespaced with `::`, which cannot occur in a UUID, so
+    /// this can never sweep up a sibling job.
+    pub(crate) fn take_job(&self, job: &str) -> Vec<CommandChild> {
+        let Ok(mut g) = self.children.lock() else { return Vec::new() };
+        let keys: Vec<String> = g.keys().filter(|k| belongs_to_job(k, job)).cloned().collect();
+        keys.into_iter().filter_map(|k| g.remove(&k)).collect()
+    }
+    /// The registry key a named stage of `job` registers its child under.
+    pub(crate) fn stage_key(job: &str, stage: &str) -> String {
+        format!("{job}::{stage}")
     }
     /// Write to a live child's stdin WITHOUT removing it from the registry.
     /// Used by voice dictation to send ffmpeg the interactive `q` command,
@@ -85,7 +120,11 @@ impl JobRegistry {
     /// the cancel set can't accumulate stale entries across a session.
     pub(crate) fn finish_job(&self, id: &str) {
         if let Ok(mut g) = self.cancelled.lock() { g.remove(id); }
-        if let Ok(mut g) = self.children.lock() { g.remove(id); }
+        if let Ok(mut g) = self.children.lock() {
+            // Stage keys too — a `<job>::diarize` left behind would outlive
+            // the job it belongs to and never be reachable by Stop again.
+            g.retain(|k, _| !belongs_to_job(k, id));
+        }
     }
 }
 
@@ -95,12 +134,19 @@ pub fn cancel_job(registry: State<'_, JobRegistry>, job_id: String) -> Result<bo
     // fetch, diarize) notices even though there's no child to kill this
     // instant. `kill()` handles the case where a sidecar is actually running.
     registry.mark_cancelled(&job_id);
-    if let Some(child) = registry.take(&job_id) {
-        child.kill().map_err(|e| format!("kill failed: {e}"))?;
-        Ok(true)
-    } else {
-        Ok(false)
+    // EVERY child of the job, not just the one under the bare id: whisper and
+    // the diarizer now run at the same time. Kill them all before reporting a
+    // failure, so one refusing cannot leave the others running.
+    let children = registry.take_job(&job_id);
+    let killed = !children.is_empty();
+    let mut first_err: Option<String> = None;
+    for child in children {
+        if let Err(e) = child.kill() {
+            if first_err.is_none() { first_err = Some(format!("kill failed: {e}")); }
+        }
     }
+    if let Some(e) = first_err { return Err(e.into()); }
+    Ok(killed)
 }
 
 // ============================================================
@@ -2120,5 +2166,43 @@ mod media_cap_transfers_tests {
         assert_eq!(got.len(), 1, "nested derived cache was skipped");
 
         let _ = std::fs::remove_dir_all(&media);
+    }
+}
+
+#[cfg(test)]
+mod job_key_tests {
+    use super::{belongs_to_job, JobRegistry};
+
+    #[test]
+    fn a_job_owns_its_own_key_and_its_stage_keys() {
+        let job = "5f3a1c2e-0000-4000-8000-abcdefabcdef";
+        assert!(belongs_to_job(job, job));
+        assert!(belongs_to_job(&JobRegistry::stage_key(job, "diarize"), job));
+        assert!(belongs_to_job(&JobRegistry::stage_key(job, "anything"), job));
+    }
+
+    #[test]
+    fn a_job_never_claims_another_job_whose_id_it_prefixes() {
+        // The boundary that matters: whisper and the diarizer now run at the
+        // same time, so Stop sweeps by prefix. A bare starts_with would make
+        // "abc" kill the children of "abcd" — a cross-job kill that surfaces
+        // as somebody else's transcription cancelling itself.
+        assert!(!belongs_to_job("abcd", "abc"));
+        assert!(!belongs_to_job("abcd::diarize", "abc"));
+        assert!(!belongs_to_job("abc-2", "abc"));
+        assert!(!belongs_to_job("abc:diarize", "abc")); // one colon is not the separator
+    }
+
+    #[test]
+    fn an_unrelated_job_is_never_swept() {
+        assert!(!belongs_to_job("other", "abc"));
+        assert!(!belongs_to_job("", "abc"));
+    }
+
+    #[test]
+    fn stage_keys_are_namespaced_so_a_stage_cannot_evict_the_job() {
+        let job = "j1";
+        assert_ne!(JobRegistry::stage_key(job, "diarize"), job);
+        assert!(JobRegistry::stage_key(job, "diarize").contains("::"));
     }
 }

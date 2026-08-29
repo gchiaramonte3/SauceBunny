@@ -1584,6 +1584,13 @@ pub async fn generate_transcript(
         // Wall clock for the pipeline log: users need to be able to read
         // (and paste back) how long a transcription actually took.
         let whisper_started = std::time::Instant::now();
+        // Diarize ALONGSIDE whisper. Both read the same 16kHz WAV and it is
+        // already on disk; the old ordering waited for whisper to terminate
+        // first and so paid the diarizer's whole runtime in wall clock for
+        // nothing. The merge still waits - it needs whisper's SRT.
+        if detect_speakers && !app_for.state::<JobRegistry>().is_cancelled(&job_for) {
+            start_diarizer_early(&app_for, &job_for, &wav_path_for, expected_speakers);
+        }
         let spawn = wsp
             .args(whisper_cli_args(&model_str, &wav_path_str, &output_base_str, &lang, vad_model.as_deref()))
             .spawn();
@@ -2337,6 +2344,13 @@ pub async fn transcribe_prepared_wav(
         // Wall clock for the pipeline log: users need to be able to read
         // (and paste back) how long a transcription actually took.
         let whisper_started = std::time::Instant::now();
+        // Diarize ALONGSIDE whisper. Both read the same 16kHz WAV and it is
+        // already on disk; the old ordering waited for whisper to terminate
+        // first and so paid the diarizer's whole runtime in wall clock for
+        // nothing. The merge still waits - it needs whisper's SRT.
+        if detect_speakers && !app_for.state::<JobRegistry>().is_cancelled(&job_for) {
+            start_diarizer_early(&app_for, &job_for, &wav_path_for, expected_speakers);
+        }
         let spawn = wsp
             // No DYLD override — whisper-cli is statically linked (see the
             // generate_transcript spawn for the full rationale).
@@ -2612,6 +2626,13 @@ pub async fn transcribe_local_file(
         // Wall clock for the pipeline log: users need to be able to read
         // (and paste back) how long a transcription actually took.
         let whisper_started = std::time::Instant::now();
+        // Diarize ALONGSIDE whisper. Both read the same 16kHz WAV and it is
+        // already on disk; the old ordering waited for whisper to terminate
+        // first and so paid the diarizer's whole runtime in wall clock for
+        // nothing. The merge still waits - it needs whisper's SRT.
+        if detect_speakers && !app_for.state::<JobRegistry>().is_cancelled(&job_for) {
+            start_diarizer_early(&app_for, &job_for, &wav_path_for, expected_speakers);
+        }
         let spawn = wsp
             // No DYLD override — whisper-cli is statically linked (see the
             // generate_transcript spawn for the full rationale).
@@ -3065,13 +3086,74 @@ pub fn save_transcript_analysis(srt_path: String, json: String) -> Result<(), cr
         .map_err(|e| crate::AppError::from(format!("write analysis sidecar: {e}")))
 }
 
-async fn run_diarize_and_merge(
+/// Diarizer runs started BEFORE their caller asks to merge, keyed by job id.
+///
+/// The concurrency lives here rather than at the call sites on purpose. There
+/// are SIX places that diarize-and-merge, across three transcription entry
+/// points; rewriting each to fork a task and join it would be six chances to
+/// get cancellation wrong, in the code path where this project has already
+/// shipped "Stop does not stop" more than once. Instead the call sites are
+/// untouched: `run_diarize_and_merge` now ADOPTS a run that was started
+/// earlier, and falls back to running it inline when there is none.
+type DiarizeTask = tauri::async_runtime::JoinHandle<Result<std::path::PathBuf, crate::AppError>>;
+static DIARIZE_TASKS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, DiarizeTask>>> =
+    std::sync::OnceLock::new();
+fn diarize_tasks() -> &'static std::sync::Mutex<std::collections::HashMap<String, DiarizeTask>> {
+    DIARIZE_TASKS.get_or_init(Default::default)
+}
+
+/// Start diarizing NOW, alongside whisper.
+///
+/// The diarizer reads the same 16kHz WAV whisper does, and that file exists
+/// before whisper is spawned - so the old ordering (wait for whisper to
+/// terminate, THEN diarize) put the diarizer's entire runtime on the wall
+/// clock in exchange for nothing. On a 77-minute recording that was minutes
+/// of pure waiting after a transcript was already sitting on disk.
+///
+/// Safe to call and then never adopt: if the job is cancelled the child is
+/// killed by `cancel_job` (which sweeps stage keys), the task resolves to an
+/// error, and the handle is dropped by the next insert for that id.
+pub(crate) fn start_diarizer_early(
     app: &AppHandle,
     job_id: &str,
     wav_path: &std::path::Path,
-    srt_path: &std::path::Path,
     expected_speakers: Option<u32>,
-) -> Result<(), crate::AppError> {
+) {
+    let app_owned = app.clone();
+    let job = job_id.to_string();
+    let wav = wav_path.to_path_buf();
+    let handle = tauri::async_runtime::spawn(async move {
+        // emit_phases:false — whisper owns the phase label while both run.
+        run_diarizer(&app_owned, &job, &wav, expected_speakers, false).await
+    });
+    if let Ok(mut g) = diarize_tasks().lock() {
+        // Drop any handle stranded by a job that was cancelled before its
+        // merge step adopted it. Ids are UUIDs, so this only ever hits the
+        // same job re-running, but the map must not grow across a session.
+        g.retain(|_, h| !h.inner().is_finished());
+        g.insert(job_id.to_string(), handle);
+    }
+}
+
+/// Run the diarizer to completion and return the JSON it wrote.
+///
+/// Split out of the old `run_diarize_and_merge` so this half can start while
+/// WHISPER IS STILL RUNNING. It only needs the 16kHz WAV, which exists before
+/// whisper is spawned; waiting for whisper to terminate first put the
+/// diarizer's entire runtime on the wall clock and bought nothing. Merging
+/// still has to wait, because that needs whisper's SRT — see `merge_diarization`.
+///
+/// `emit_phases` is false while the two overlap. The sidebar shows ONE phase,
+/// so a diarizer announcing "diarize-process" underneath a running whisper
+/// would fight it and flip the label back and forth; the caller emits the
+/// diarize phase itself once whisper is done and the diarizer is what is left.
+async fn run_diarizer(
+    app: &AppHandle,
+    job_id: &str,
+    wav_path: &std::path::Path,
+    expected_speakers: Option<u32>,
+    emit_phases: bool,
+) -> Result<std::path::PathBuf, crate::AppError> {
     let cache = app
         .path()
         .app_cache_dir()
@@ -3108,21 +3190,22 @@ async fn run_diarize_and_merge(
         .spawn()
         .map_err(|e| format!("failed to spawn saucebunny-diarize: {e}"))?;
 
-    // Register the diarize child under the same job-id as the Whisper
-    // run that just finished — the JobRegistry tracks "one child per
-    // job-id at a time" so Stop hits whichever stage is currently
-    // running (Whisper before, diarize now). The Whisper child was
-    // already removed in the calling Terminated handler so there's no
-    // collision.
-    app.state::<JobRegistry>().insert(job_id.to_string(), child);
+    // Registered under a STAGE key, not the bare job id. Whisper is very
+    // likely still running under that id, and inserting here would evict its
+    // handle from the map - Stop would then find only the diarizer and let
+    // whisper run on. `cancel_job` kills every key belonging to the job.
+    let stage = JobRegistry::stage_key(job_id, "diarize");
+    app.state::<JobRegistry>().insert(stage.clone(), child);
 
     // Emit explicit phase events so the Sidebar can label what's
     // happening RIGHT NOW without scraping pipeline-log strings.
     // Channels are job-scoped just like transcript-progress.
-    let _ = app.emit(
-        "transcript-phase",
-        TranscriptPhaseEvent { job_id: job_id.to_string(), phase: "diarize-prepare".into() },
-    );
+    if emit_phases {
+        let _ = app.emit(
+            "transcript-phase",
+            TranscriptPhaseEvent { job_id: job_id.to_string(), phase: "diarize-prepare".into() },
+        );
+    }
 
     let mut stderr_tail = String::new();
     let mut announced_prepare = false;
@@ -3147,10 +3230,12 @@ async fn run_diarize_and_merge(
                         );
                     } else if !announced_process && trimmed.contains("\"phase\":\"process\"") {
                         announced_process = true;
-                        let _ = app.emit(
-                            "transcript-phase",
-                            TranscriptPhaseEvent { job_id: job_id.to_string(), phase: "diarize-process".into() },
-                        );
+                        if emit_phases {
+                            let _ = app.emit(
+                                "transcript-phase",
+                                TranscriptPhaseEvent { job_id: job_id.to_string(), phase: "diarize-process".into() },
+                            );
+                        }
                         emit_transcript_log(
                             app, job_id, "info",
                             "Running diarization on audio…".into(),
@@ -3171,7 +3256,7 @@ async fn run_diarize_and_merge(
                 }
             }
             CommandEvent::Terminated(payload) => {
-                let _ = app.state::<JobRegistry>().take(job_id);
+                let _ = app.state::<JobRegistry>().take(&stage);
                 if payload.signal.is_some() {
                     // Stop / SIGTERM — distinguish so the caller can
                     // surface a friendlier "Diarization cancelled"
@@ -3196,6 +3281,51 @@ async fn run_diarize_and_merge(
         }
     }
 
+    Ok(diar_json)
+}
+
+/// Diarize (adopting an already-running diarizer if one was started with
+/// whisper) and merge the result into the SRT.
+///
+/// The six call sites are unchanged; what changed is that the diarizing half
+/// has usually already finished by the time they get here.
+async fn run_diarize_and_merge(
+    app: &AppHandle,
+    job_id: &str,
+    wav_path: &std::path::Path,
+    srt_path: &std::path::Path,
+    expected_speakers: Option<u32>,
+) -> Result<(), crate::AppError> {
+    let started_early = diarize_tasks().lock().ok().and_then(|mut g| g.remove(job_id));
+    let diar_json = match started_early {
+        Some(task) => {
+            // Whisper is done, so the diarizer is now the only thing left and
+            // owns the phase label. It was suppressed while the two overlapped.
+            let _ = app.emit(
+                "transcript-phase",
+                TranscriptPhaseEvent { job_id: job_id.to_string(), phase: "diarize-process".into() },
+            );
+            task.await
+                .map_err(|e| crate::AppError::internal(format!("diarizer task did not complete: {e}")))??
+        }
+        // No early start (a caller that diarizes an EXISTING transcript, with
+        // no whisper run to overlap with). Behaves exactly as it always did.
+        None => run_diarizer(app, job_id, wav_path, expected_speakers, true).await?,
+    };
+    merge_diarization(app, job_id, &diar_json, srt_path).await
+}
+
+/// Project a finished diarization onto whisper's cue grid and rewrite the SRT.
+///
+/// The second half of the old `run_diarize_and_merge`. This is the part that
+/// genuinely cannot start early: it needs whisper's SRT.
+async fn merge_diarization(
+    app: &AppHandle,
+    job_id: &str,
+    diar_json: &std::path::Path,
+    srt_path: &std::path::Path,
+) -> Result<(), crate::AppError> {
+    let diar_json = diar_json.to_path_buf();
     // Merge phase — instant but worth a phase event so the bar
     // doesn't show "Diarizing…" while we're already writing the SRT.
     let _ = app.emit(
