@@ -123,3 +123,35 @@ test("overlapping roots do not list the same file twice", async ({ page }) => {
   const keyWarnings = noise.filter((t) => /same key|unique .?key/i.test(t));
   expect(keyWarnings, "React duplicate-key warnings").toEqual([]);
 });
+
+test("the FRAMES list tiles too, not just the library's", async ({ page }) => {
+  // FrameListRows reuses .cp-lib-lrow and the shared column variables, so it
+  // inherits the library list's geometry - but "inherits" is an assumption
+  // until something measures it. Frames have no library roots, so the
+  // duplicate-key defect that actually broke the library list cannot occur
+  // here; what is worth pinning is that the rows still tile.
+  await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
+  await page.addInitScript(() => {
+    localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
+    localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
+    localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e-mock/Footage"]));
+    localStorage.setItem("saucebunny.framesBrowser", JSON.stringify({ view: "list", sort: "date", dir: "desc" }));
+  });
+  await page.goto("/");
+  await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press("Meta+2");
+  await page.getByRole("treeitem", { name: "Frames" }).first().click();
+  await expect(page.locator(".cp-lib-lrow").first()).toBeVisible({ timeout: 10_000 });
+
+  const boxes = await rowBoxes(page);
+  expect(boxes.length, "no frame rows were measured").toBeGreaterThan(0);
+  const overlaps: string[] = [];
+  for (let i = 1; i < boxes.length; i++) {
+    const gap = boxes[i].top - boxes[i - 1].bottom;
+    if (gap < -1.5) overlaps.push(`row ${i}: ${gap.toFixed(1)}px into row ${i - 1}`);
+  }
+  expect(overlaps, "frame rows print on top of each other").toEqual([]);
+  const lefts = [...new Set(boxes.map((b) => Math.round(b.left)))];
+  expect(lefts.length, `frame rows start at different x: ${lefts.join(", ")}`).toBe(1);
+});

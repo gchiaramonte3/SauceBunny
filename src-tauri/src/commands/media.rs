@@ -1011,6 +1011,52 @@ pub struct ExtractFrameResult {
     pub format_id: Option<String>,
 }
 
+/// Frame-grab source URLs already resolved this session, with their expiry.
+///
+/// Grabbing a frame from a web source spawned yt-dlp EVERY time - and a yt-dlp
+/// spawn is about 8 seconds, of which roughly 6.7s is PyInstaller bootstrap
+/// (macOS re-validating 102 ad-hoc-signed dylibs unpacked to a fresh random
+/// path; its signature cache is keyed by path, not content). Grabbing frames
+/// is a gesture people repeat many times against ONE source, so the app paid
+/// that toll per frame to re-derive a URL it had just derived.
+///
+/// The signed URL is good for hours, so the second grab onward is ffmpeg only.
+/// Memory-only and per-process: a signed URL is a short-lived credential and
+/// does not belong on disk.
+/// source url -> (media url, format_id, width, height, vcodec, expires_at)
+type FrameMemoEntry = (String, Option<String>, Option<u32>, Option<u32>, Option<String>, u64);
+type FrameUrlMemo = std::collections::HashMap<String, FrameMemoEntry>;
+static FRAME_URLS: std::sync::OnceLock<std::sync::Mutex<FrameUrlMemo>> = std::sync::OnceLock::new();
+fn frame_urls() -> &'static std::sync::Mutex<FrameUrlMemo> {
+    FRAME_URLS.get_or_init(Default::default)
+}
+
+/// Seconds of headroom before a cached URL is treated as expired. A grab plus
+/// its ffmpeg seek is seconds, not minutes; 120 is generous.
+const FRAME_URL_MARGIN_SECS: u64 = 120;
+
+/// The cached entry for `url`, if it is still safe to hand to ffmpeg.
+///
+/// Named and shared so the tests exercise THIS, not a copy. A first version
+/// re-implemented the margin check inside the test helper, so mutating the
+/// production comparison could not fail anything - the exact shape of an
+/// untestable test.
+fn cached_frame_url(url: &str, now: u64) -> Option<FrameMemoEntry> {
+    frame_urls()
+        .lock()
+        .ok()?
+        .get(url)
+        .filter(|e| now + FRAME_URL_MARGIN_SECS < e.5)
+        .cloned()
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 #[tauri::command]
 pub async fn extract_frame(app: AppHandle, args: ExtractFrameArgs) -> Result<ExtractFrameResult, crate::AppError> {
     validate_source_url(&args.url)?;
@@ -1043,6 +1089,12 @@ pub async fn extract_frame(app: AppHandle, args: ExtractFrameArgs) -> Result<Ext
     //   • `--print` twice — line 1 is the URL ffmpeg consumes, line 2 is
     //     human-readable proof of what we picked. Logged to pipeline.
     //   • No height cap — 8K snapshots are fine if YouTube serves them.
+    // Already resolved this session and still valid? Then no spawn.
+    let cached = cached_frame_url(&args.url, now_secs());
+
+    let (direct_url, format_id, width, height, vcodec) = if let Some(e) = cached {
+        (e.0, e.1, e.2, e.3, e.4)
+    } else {
     let yt = ytdlp(&app)?;
     let mut yt_invocation: Vec<String> = vec![
         "--no-playlist".into(),
@@ -1091,6 +1143,21 @@ pub async fn extract_frame(app: AppHandle, args: ExtractFrameArgs) -> Result<Ext
         (fid, w, h, vc)
     } else {
         (None, None, None, None)
+    };
+    // Remember it. The signed URL outlives the grab by hours, so every later
+    // frame from this source is ffmpeg only.
+    if let Some(exp) = crate::commands::download::parse_url_expiry(&direct_url) {
+        if let Ok(mut g) = frame_urls().lock() {
+            // Bounded: one entry per source opened this session, and a session
+            // that opens hundreds of sources has bigger costs than this map.
+            g.retain(|_, e| now_secs() < e.5);
+            g.insert(
+                args.url.clone(),
+                (direct_url.clone(), format_id.clone(), width, height, vcodec.clone(), exp),
+            );
+        }
+    }
+    (direct_url, format_id, width, height, vcodec)
     };
 
     // ── Step 2: ffmpeg seeks to the timestamp and grabs one frame ───────
@@ -3338,5 +3405,45 @@ mod export_cache_key_tests {
         let playback = super::super::download_cache_prefix(u);
         assert!(!export.starts_with(&playback), "export copy would satisfy a playback lookup");
         assert!(!playback.starts_with(&export), "playback copy would satisfy an export lookup");
+    }
+}
+
+#[cfg(test)]
+mod frame_url_memo_tests {
+    use super::{frame_urls, now_secs, FRAME_URL_MARGIN_SECS};
+
+    fn put(url: &str, expires_in: i64) {
+        let exp = (now_secs() as i64 + expires_in).max(0) as u64;
+        let mut g = frame_urls().lock().unwrap();
+        g.insert(url.into(), ("https://media".into(), None, None, None, None, exp));
+    }
+    /// Calls the PRODUCTION predicate, not a copy of its logic.
+    fn hit(url: &str) -> bool {
+        super::cached_frame_url(url, now_secs()).is_some()
+    }
+
+    #[test]
+    fn a_fresh_url_is_reused_so_a_repeat_grab_spawns_nothing() {
+        put("src-fresh", 3600);
+        assert!(hit("src-fresh"), "a URL good for an hour must be reused");
+    }
+
+    #[test]
+    fn an_expired_url_is_not_reused() {
+        put("src-stale", -10);
+        assert!(!hit("src-stale"), "an expired signed URL would 403 mid-grab");
+    }
+
+    #[test]
+    fn a_url_inside_the_safety_margin_is_treated_as_expired() {
+        // The grab plus its ffmpeg seek takes seconds; handing ffmpeg a URL
+        // that dies during the seek is the failure this margin exists for.
+        put("src-edge", (FRAME_URL_MARGIN_SECS as i64) - 5);
+        assert!(!hit("src-edge"));
+    }
+
+    #[test]
+    fn an_unknown_source_is_a_miss() {
+        assert!(!hit("src-never-seen"));
     }
 }
