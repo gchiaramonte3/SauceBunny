@@ -1350,9 +1350,78 @@ pub async fn get_direct_stream_url(
     Ok(resolved)
 }
 
-/// Resolve a playable stream URL through the muxed → DASH-split → HLS tiers for
-/// one cookie setting. Each yt-dlp call is wall-clock-bounded (`output_timed`)
-/// so a wedged extractor can't hang the resolve.
+/// One --print template serving BOTH selection shapes.
+///
+/// `requested_formats` exists only for a `+` (split) selection; for a muxed one
+/// those fields print the literal "NA" and `%(url)s` carries the single URL.
+/// That difference is how the parse tells the two apart without asking twice.
+pub(crate) const STREAM_PRINT_TEMPLATE: &str =
+    "%(requested_formats.0.url)s\t%(requested_formats.1.url)s\t%(url)s\t%(width)s\t%(height)s\t%(vcodec)s\t%(acodec)s\t%(requested_formats.1.acodec)s";
+
+/// The format selector: every tier's alternatives, in the old tier order.
+///
+/// Built from parts so the reasoning lives in real Rust comments. An earlier
+/// version put `//` notes inside the format string and stripped them at
+/// runtime, which was silently wrong - a `\`-continued string literal joins its
+/// lines, so the first comment swallowed the rest of the selector. It compiled,
+/// and would have shipped a one-alternative selector.
+pub(crate) fn stream_selector(max_height: Option<u32>) -> String {
+    let hc = max_height.map(|h| format!("[height<={h}]")).unwrap_or_default();
+    [
+        // 1. Muxed progressive, capped. One URL, no merge: fastest to first frame.
+        format!("b{hc}[acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]"),
+        "b[acodec!=none][vcodec!=none][ext=mp4]".to_string(),
+        // 2. H.264 + AAC as separate URLs, capped. The proxy merges them, and
+        //    H.264+AAC is what WKWebView can decode out of the remux.
+        format!("bv*[vcodec^=avc1]{hc}[protocol^=http][protocol!*=m3u8]+ba[acodec^=mp4a][protocol^=http][protocol!*=m3u8]"),
+        format!("bv*[vcodec^=avc1]{hc}+ba[ext=m4a]"),
+        // 3. Any split pair - non-YouTube hosts without an avc1/mp4a pair.
+        format!("bv*{hc}+ba"),
+        "bv*+ba".to_string(),
+        // 4. HLS and last resort (some Twitter/X serve only an m3u8).
+        "b[acodec!=none][vcodec!=none]".to_string(),
+        "b".to_string(),
+    ]
+    .join("/")
+}
+
+/// Resolve a playable stream URL in ONE yt-dlp extraction.
+///
+/// This used to be three: a muxed tier, then a DASH-split tier, then an HLS
+/// tier, each its own process. That cost what it sounds like it costs.
+///
+/// Tier 1 could only ever match a single-file progressive format, and in
+/// yt-dlp `b` (best) means "best format carrying BOTH video and audio" - so
+/// every one of its four alternatives, right down to the bare `/b`, required a
+/// muxed format. On YouTube the only format that has ever satisfied that is
+/// itag 18, and YouTube has stopped serving it on many videos: a 53-format
+/// dump of one test video contains ZERO muxed formats. So tier 1 did not
+/// merely lose, it lost after a full extraction, and tier 2 then paid for a
+/// second one. Measured on the same video with the bundled yt-dlp:
+///
+///     tier 1  11.03s  exit 1, "Requested format is not available"
+///     tier 2  12.05s  exit 0, usable video+audio pair
+///     ------  ------
+///     total   23.10s  for one resolve
+///
+/// yt-dlp's own format grammar already expresses "try this, else that": the
+/// alternatives below are the three tiers' selectors concatenated with `/`,
+/// in the same preference order, so the fallback happens INSIDE one extraction
+/// instead of costing another process. Measured at 11.55s for the same work,
+/// and unchanged when the first alternative wins.
+///
+/// The preference order is deliberately identical to the old tier order, so
+/// this is a change in process count and not in what gets played:
+///   1. capped muxed progressive   - one URL, no merge, fastest to first frame
+///   2. capped H.264 + AAC split   - two URLs, the proxy merges them
+///   3. capped anything split      - non-YouTube hosts without an avc1/mp4a pair
+///   4. HLS / last resort          - some Twitter/X, where the best is an m3u8
+///
+/// One more thing improves for free. The old code reported TIER ONE's stderr
+/// when all three failed, which on YouTube was always "Requested format is not
+/// available" - a message about the muxed probe, not about why playback failed.
+/// A single call reports the real error, which is what the sign-in and
+/// extractor-rot heuristics downstream are matching against.
 async fn resolve_stream_tiers(
     app: &AppHandle,
     url: &str,
@@ -1360,41 +1429,18 @@ async fn resolve_stream_tiers(
     max_height: Option<u32>,
 ) -> Result<DirectStreamResult, crate::AppError> {
     let yt = ytdlp(app)?;
-    // Optional height cap injected into the primary selector terms. Fallback
-    // terms stay uncapped so resolution never fails for lack of an exact match.
-    let hc = max_height.map(|h| format!("[height<={h}]")).unwrap_or_default();
+    // The protocol filters (`http`-prefixed, never `m3u8`) plus the muxed-only
+    // clause are the same pattern mpv and VLC use to get a single playable URL.
+    // WKWebView claims native HLS support, but an m3u8 served from
+    // `tauri://localhost` carries no Access-Control-Allow-Origin and silently
+    // never fires loadedmetadata - see the r53-r66 notes in CLAUDE.md.
+    let selector = stream_selector(max_height);
 
-    // r54: Force a **single-file progressive** stream (both A+V in one
-    // URL, NOT HLS or DASH split tracks). The previous selector
-    // `b[ext=mp4]/b/best` happily picked YouTube's HLS playlist
-    // (`manifest.googlevideo.com/.../index.m3u8`) — WKWebView claims
-    // native HLS support, but the m3u8 doesn't carry
-    // `Access-Control-Allow-Origin`, so <video src=m3u8> from our
-    // `tauri://localhost` origin silently fails to load (loadedmetadata
-    // never fires; our 5s watchdog falls back to the download path).
-    //
-    // The protocol filter (`http`-prefix, not `m3u8`) plus the
-    // `acodec!=none][vcodec!=none]` muxed-only filter is the same
-    // pattern mpv and VLC use when they want a single playable URL.
-    // For YouTube this means format 18 (640×360 H.264+AAC, the only
-    // progressive option). 360p is the price of in-app preview; the
-    // export path uses its OWN yt-dlp call and is unaffected — users
-    // still get full-quality output.
-    //
-    // For non-YouTube hosts (Vimeo, TikTok, Twitter, Reddit, …) most
-    // sites still serve at least one progressive variant in the
-    // bestquality range, so they're unaffected. Final `/b` is the
-    // last-resort fallback if literally no progressive exists.
     let mut args: Vec<String> = vec![
         "--no-playlist".into(),
         "--no-warnings".into(),
         "--socket-timeout".into(), "20".into(),
-        "-f".into(),
-        format!(
-            "b{hc}[acodec!=none][vcodec!=none][protocol^=http][protocol!*=m3u8]/\
-             b[acodec!=none][vcodec!=none][ext=mp4]/\
-             b[ext=mp4]/b"
-        ),
+        "-f".into(), selector,
         "-S".into(), "res,vbr,ext".into(),
         YT_EXTRACTOR_ARGS[0].into(),
         YT_EXTRACTOR_ARGS[1].into(),
@@ -1404,178 +1450,49 @@ async fn resolve_stream_tiers(
         YT_JS_RUNTIME_ARGS[3].into(),
         YT_JS_RUNTIME_ARGS[4].into(),
         YT_JS_RUNTIME_ARGS[5].into(),
-        "--print".into(), "url".into(),
-        "--print".into(), "%(width)s\t%(height)s\t%(vcodec)s\t%(acodec)s".into(),
+        // ONE template serving both shapes. `requested_formats` exists only for
+        // a `+` (split) selection; for a muxed one those fields print "NA" and
+        // `%(url)s` carries the single URL. That difference is how the parse
+        // below tells the two apart without a second call to ask.
+        "--print".into(),
+        STREAM_PRINT_TEMPLATE.into(),
     ];
     args.extend(cookies_args(cookies_browser));
     args.push(url.to_string());
 
-    // A timeout/spawn failure here is systemic (wedged or slow extractor — often
-    // the logged-in-page case), so propagate it: the caller retries WITHOUT
-    // cookies rather than burning two more equally-slow tier calls.
     let out = output_timed(yt.args(args), RESOLVE_TIMEOUT_SECS).await?;
-    if out.status.success() {
-        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-        let mut lines = stdout.lines().filter(|l| !l.trim().is_empty());
-        if let Some(direct) = lines.next() {
-            let (w, h, vcodec, acodec) = if let Some(meta) = lines.next() {
-                let parts: Vec<&str> = meta.split('\t').collect();
-                let w  = parts.first().and_then(|s| s.parse::<u32>().ok());
-                let h  = parts.get(1).and_then(|s| s.parse::<u32>().ok());
-                let vc = parts.get(2).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
-                let ac = parts.get(3).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
-                (w, h, vc, ac)
-            } else { (None, None, None, None) };
-            return Ok(DirectStreamResult { url: direct.to_string(), audio_url: None, width: w, height: h, vcodec, acodec });
-        }
-    }
-    // No single muxed progressive (a DASH-split source — Reddit, YouTube >360p,
-    // etc.). Resolve best H.264 video + best AAC audio as SEPARATE URLs so the
-    // proxy can merge them on the fly and the source still STREAMS.
-    let muxed_stderr = String::from_utf8_lossy(&out.stderr).to_string();
-    if let Some(split) = resolve_split_stream(app, url, cookies_browser, max_height).await {
-        return Ok(split);
-    }
-    // Tier 3: HLS-only sources (some Twitter/X). The best format is an m3u8;
-    // the proxy's ffmpeg reads the HLS server-side and remuxes it to fMP4
-    // (with aac_adtstoasc for the TS→MP4 audio). Single input — no `?audio=`.
-    if let Some(hls) = resolve_hls_stream(app, url, cookies_browser).await {
-        return Ok(hls);
-    }
-    Err(humanize_ytdlp_error(&muxed_stderr).into())
-}
-
-/// DASH-split resolve: best H.264 video + best AAC audio as two separate URLs
-/// (for the proxy's 2-input fMP4 remux). H.264+AAC so WKWebView can decode the
-/// remuxed output. Returns None when the source has no such split (the caller
-/// then surfaces the original muxed error).
-async fn resolve_split_stream(
-    app: &AppHandle,
-    url: &str,
-    cookies_browser: Option<&str>,
-    max_height: Option<u32>,
-) -> Option<DirectStreamResult> {
-    let yt = ytdlp(app).ok()?;
-    let hc = max_height.map(|h| format!("[height<={h}]")).unwrap_or_default();
-    let mut args: Vec<String> = vec![
-        "--no-playlist".into(),
-        "--no-warnings".into(),
-        "--socket-timeout".into(), "20".into(),
-        "-f".into(),
-        format!(
-            "bv*[vcodec^=avc1]{hc}[protocol^=http][protocol!*=m3u8]+ba[acodec^=mp4a][protocol^=http][protocol!*=m3u8]/\
-             bv*[vcodec^=avc1]{hc}+ba[ext=m4a]/\
-             bv*+ba"
-        ),
-        YT_EXTRACTOR_ARGS[0].into(),
-        YT_EXTRACTOR_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[0].into(),
-        YT_JS_RUNTIME_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[2].into(),
-        YT_JS_RUNTIME_ARGS[3].into(),
-        YT_JS_RUNTIME_ARGS[4].into(),
-        YT_JS_RUNTIME_ARGS[5].into(),
-        // requested_formats.0 = video, .1 = audio for a merged (v+a) selection.
-        "--print".into(),
-        "%(requested_formats.0.url)s\t%(requested_formats.1.url)s\t%(width)s\t%(height)s\t%(vcodec)s\t%(requested_formats.1.acodec)s".into(),
-    ];
-    args.extend(cookies_args(cookies_browser));
-    args.push(url.to_string());
-
-    let out = output_timed(yt.args(args), RESOLVE_TIMEOUT_SECS).await.ok()?;
     if !out.status.success() {
-        return None;
+        return Err(humanize_ytdlp_error(&String::from_utf8_lossy(&out.stderr)).into());
     }
+
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-    let line = stdout.lines().find(|l| !l.trim().is_empty())?;
-    let parts: Vec<&str> = line.split('\t').collect();
-    let video = parts.first().copied().filter(|s| s.starts_with("http"))?;
-    let audio = parts.get(1).copied().filter(|s| s.starts_with("http"))?;
-    let w  = parts.get(2).and_then(|s| s.parse::<u32>().ok());
-    let h  = parts.get(3).and_then(|s| s.parse::<u32>().ok());
-    let vc = parts.get(4).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
-    let ac = parts.get(5).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
-    Some(DirectStreamResult {
-        url: video.to_string(),
-        audio_url: Some(audio.to_string()),
-        width: w,
-        height: h,
-        vcodec: vc,
-        acodec: ac,
+    let line = stdout.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+    let f: Vec<&str> = line.split('\t').collect();
+    // yt-dlp prints the literal "NA" for a field a selection does not have.
+    let get = |i: usize| f.get(i).map(|s| s.trim()).filter(|s| !s.is_empty() && *s != "NA");
+
+    let (video, audio, acodec) = match (get(0), get(1)) {
+        // Split: two URLs, and the audio codec comes off the audio format.
+        (Some(v), Some(a)) => (v.to_string(), Some(a.to_string()), get(7).map(str::to_string)),
+        // Muxed: one URL carrying both tracks.
+        _ => match get(2) {
+            Some(u) => (u.to_string(), None, get(6).map(str::to_string)),
+            None => return Err(crate::AppError::internal(
+                "yt-dlp resolved no stream URL for this source",
+            )),
+        },
+    };
+
+    Ok(DirectStreamResult {
+        url: video,
+        audio_url: audio,
+        width: get(3).and_then(|s| s.parse().ok()),
+        height: get(4).and_then(|s| s.parse().ok()),
+        vcodec: get(5).map(str::to_string),
+        acodec,
     })
 }
 
-/// HLS-only resolve: the best SINGLE format allowing m3u8 (some Twitter/X
-/// videos are HLS-only). Returns one URL — the proxy's ffmpeg reads the HLS
-/// playlist server-side and remuxes to fMP4. Last resort before the download
-/// fallback. Returns None if nothing resolves.
-async fn resolve_hls_stream(
-    app: &AppHandle,
-    url: &str,
-    cookies_browser: Option<&str>,
-) -> Option<DirectStreamResult> {
-    let yt = ytdlp(app).ok()?;
-    let mut args: Vec<String> = vec![
-        "--no-playlist".into(),
-        "--no-warnings".into(),
-        "--socket-timeout".into(), "20".into(),
-        // Best muxed format, ANY protocol (this is the tier that finally allows
-        // HLS); fall back to the overall best single format.
-        "-f".into(),
-        "b[acodec!=none][vcodec!=none]/b".into(),
-        YT_EXTRACTOR_ARGS[0].into(),
-        YT_EXTRACTOR_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[0].into(),
-        YT_JS_RUNTIME_ARGS[1].into(),
-        YT_JS_RUNTIME_ARGS[2].into(),
-        YT_JS_RUNTIME_ARGS[3].into(),
-        YT_JS_RUNTIME_ARGS[4].into(),
-        YT_JS_RUNTIME_ARGS[5].into(),
-        "--print".into(),
-        "%(url)s\t%(width)s\t%(height)s\t%(vcodec)s\t%(acodec)s".into(),
-    ];
-    args.extend(cookies_args(cookies_browser));
-    args.push(url.to_string());
-
-    let out = output_timed(yt.args(args), RESOLVE_TIMEOUT_SECS).await.ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-    let line = stdout.lines().find(|l| !l.trim().is_empty())?;
-    let parts: Vec<&str> = line.split('\t').collect();
-    let url_out = parts.first().copied().filter(|s| s.starts_with("http"))?;
-    let w = parts.get(1).and_then(|s| s.parse::<u32>().ok());
-    let h = parts.get(2).and_then(|s| s.parse::<u32>().ok());
-    let vc = parts.get(3).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
-    let ac = parts.get(4).filter(|s| !s.is_empty() && **s != "NA").map(|s| s.to_string());
-    Some(DirectStreamResult {
-        url: url_out.to_string(),
-        audio_url: None,
-        width: w,
-        height: h,
-        vcodec: vc,
-        acodec: ac,
-    })
-}
-
-// ────────────────────────────────────────────────────────────────────────
-// DOWNLOAD WEB PREVIEW  (fallback for Referer-gated CDNs)
-//
-// LinkedIn (licdn.com), Twitter/X (twimg.com), Instagram (cdninstagram.com),
-// Facebook (fbcdn.net) — every major social platform — returns 403 to
-// cross-origin fetches because their CDNs check the `Referer` header. Our
-// WKWebView sends `Referer: tauri://localhost/` for media requests, which
-// gets rejected, so <video src="..."> silently fails to load. yt-dlp
-// sends the correct `Referer` itself, so the fix is to download via
-// yt-dlp into the app cache and point the player at the local file via
-// asset:// (no cross-origin concerns once the bytes are on disk).
-//
-// Reuses the playback-prep event channels (`playback-prep-progress` /
-// `playback-prep-done`) so the existing pipeline UI light up the same
-// way as a local-file ffmpeg prep — single user-facing pattern for
-// "preparing playback".
-// ────────────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct DownloadWebPreviewArgs {
@@ -2886,5 +2803,77 @@ mod ytdlp_channel_tests {
             assert!(base.ends_with("/releases/download/2026.08.18.122307"), "{base}");
             assert!(!base.contains("/latest/"), "mutable pointer crept back in: {base}");
         }
+    }
+}
+
+#[cfg(test)]
+mod stream_selector_tests {
+    use super::{stream_selector, STREAM_PRINT_TEMPLATE};
+
+    #[test]
+    fn every_tier_is_present_in_one_selector() {
+        // The whole point: the three tiers that used to be three yt-dlp
+        // processes are alternatives inside one selector, so the fallback
+        // happens during a single extraction.
+        let s = stream_selector(Some(480));
+        assert!(s.contains("[acodec!=none][vcodec!=none][protocol^=http]"), "muxed tier missing: {s}");
+        assert!(s.contains("bv*[vcodec^=avc1]"), "H.264+AAC split tier missing: {s}");
+        assert!(s.contains("bv*+ba"), "generic split fallback missing: {s}");
+        assert!(s.ends_with("/b"), "last-resort fallback missing: {s}");
+        assert_eq!(s.matches('/').count(), 7, "expected 8 alternatives: {s}");
+    }
+
+    #[test]
+    fn the_preference_order_is_muxed_then_split_then_last_resort() {
+        // Order is behaviour. Muxed first is one URL and no merge, which is the
+        // fastest to first frame; putting a split ahead of it would change what
+        // plays, not just how fast it resolves.
+        let s = stream_selector(None);
+        let muxed = s.find("[acodec!=none][vcodec!=none][protocol^=http]").unwrap();
+        let split = s.find("bv*[vcodec^=avc1]").unwrap();
+        let generic = s.find("bv*+ba").unwrap();
+        assert!(muxed < split, "split overtook muxed");
+        assert!(split < generic, "generic split overtook the H.264+AAC pair");
+    }
+
+    #[test]
+    fn the_height_cap_reaches_every_capped_alternative() {
+        let s = stream_selector(Some(720));
+        assert_eq!(s.matches("[height<=720]").count(), 4, "a capped alternative lost its cap: {s}");
+        // The tail stays uncapped so a resolve never fails purely for want of
+        // an exact match.
+        assert!(s.ends_with("/b[acodec!=none][vcodec!=none]/b"));
+    }
+
+    #[test]
+    fn no_cap_produces_no_height_filter_at_all() {
+        let s = stream_selector(None);
+        assert!(!s.contains("height<="), "uncapped selector still filters height: {s}");
+    }
+
+    #[test]
+    fn the_selector_is_never_truncated_by_a_stray_comment() {
+        // Regression: an earlier version embedded `//` notes in the format
+        // string and stripped them at runtime. A backslash-continued literal
+        // joins its lines, so the first comment swallowed everything after it,
+        // leaving ONE alternative. It compiled. This pins the shape.
+        for cap in [None, Some(360), Some(1080)] {
+            let s = stream_selector(cap);
+            assert!(!s.contains("//"), "comment leaked into the selector: {s}");
+            assert!(s.len() > 200, "selector looks truncated at {} chars: {s}", s.len());
+        }
+    }
+
+    #[test]
+    fn the_print_template_covers_both_selection_shapes() {
+        // Split needs requested_formats.{0,1}; muxed needs %(url)s. One template
+        // carries both, which is what removes the second call.
+        assert!(STREAM_PRINT_TEMPLATE.contains("%(requested_formats.0.url)s"));
+        assert!(STREAM_PRINT_TEMPLATE.contains("%(requested_formats.1.url)s"));
+        assert!(STREAM_PRINT_TEMPLATE.contains("%(url)s"));
+        assert!(STREAM_PRINT_TEMPLATE.contains("%(requested_formats.1.acodec)s"));
+        // Tab-separated, and the parse indexes these positions.
+        assert_eq!(STREAM_PRINT_TEMPLATE.matches('\t').count(), 7);
+        assert!(!STREAM_PRINT_TEMPLATE.contains(' '), "a space would break the field split");
     }
 }
