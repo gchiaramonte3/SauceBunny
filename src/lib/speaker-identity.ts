@@ -23,6 +23,7 @@
 
 import { reviewFingerprint } from "./review";
 import { speakerOverridesKey } from "../components/transcript/helpers";
+import { reportStorageProblem } from "./storage";
 
 const FP_INDEX_KEY = "saucebunny.speakerNames.fpindex";
 
@@ -40,8 +41,13 @@ function loadIndex(): Record<string, string> {
 function saveIndex(idx: Record<string, string>): void {
   try {
     localStorage.setItem(FP_INDEX_KEY, JSON.stringify(idx));
-  } catch {
-    /* quota — the path key still holds the names for this session */
+  } catch (err) {
+    // Reported, not swallowed. The path key still holds the names for THIS
+    // session, so nothing is lost right now - what is lost is the bridge that
+    // restores them after the file moves or is re-transcribed, which the user
+    // finds out about weeks later when the names are gone. That is precisely
+    // the failure worth a word at the time.
+    reportStorageProblem(FP_INDEX_KEY, err);
   }
 }
 
@@ -85,7 +91,11 @@ export function seedSpeakerOverridesFromFingerprint(path: string, fp: string | n
   try {
     localStorage.setItem(speakerOverridesKey(path), blob);
     return true;
-  } catch {
+  } catch (err) {
+    // The caller uses the boolean, so this one was never truly silent - but it
+    // reports up as "no names to restore", which is indistinguishable from a
+    // source that never had any.
+    reportStorageProblem(speakerOverridesKey(path), err);
     return false;
   }
 }

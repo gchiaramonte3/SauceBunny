@@ -271,10 +271,32 @@ they have no per-record version, not because their shape is wrong.
 | # | Finding | Harm | Status |
 |---|---|---|---|
 | **F1** | Schema version written but never read: a newer build's file is silently rewritten with its unknown fields stripped | **data loss** | **fixed** |
-| **F2** | Speaker renames, in/out marks, source timecodes and the export queue are work product living only in evictable `localStorage` | **data loss** | open, needs a product call |
+| **F2** | Speaker renames, in/out marks, source timecodes and the export queue are work product living only in evictable `localStorage` | **data loss** | open, needs a product call — but its SILENCE is fixed (see below) |
 | F3 | `projects.json` `posterPath` and a review index entry have no defined behaviour when the target file is gone | silent drift | open |
 | F4 | `localStorage` is last-write-wins across two windows, coordinated by convention and one event rather than by anything enforced | silent drift | open |
 | F5 | The panel window hydrated the whole review store at boot for a store it cannot reach | inefficiency | **fixed** |
+
+### F2's silence is fixed; F2 itself still needs the decision
+
+The sharper half of F2 was not that this work product lives in evictable
+storage. It was that losing it is SILENT. All five families write through
+`saveJson`, which caught the quota and called `console.warn` — and in a
+packaged `.app` the WKWebView console needs Safari's inspector attached, so it
+reached nobody. Past the quota the app kept working perfectly and simply
+stopped remembering: rename twelve speakers, set chapters, mark a range,
+relaunch, and it is all gone with no error and nothing in any log the user can
+open.
+
+`saveJson` now reports through a rate-limited listener (the shape
+`review-store` already used), `speaker-identity`'s two direct writes go through
+the same reporter, and App turns it into a notification naming the key and
+suggesting what frees space. `store-problem-contract` pins that all three of
+the app's store reporters have a subscriber that NOTIFIES rather than only
+logging — a reporter whose subscriber is deleted fires into an empty Set and
+reads as complete from either end.
+
+What that does NOT settle is whether these five belong in files. That is still
+the product call, and it is still open.
 
 ### F4 is smaller than it first looked, and worth writing down
 

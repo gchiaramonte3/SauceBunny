@@ -18,11 +18,62 @@ export function loadJson<T>(key: string, fallback: T): T {
   return fallback;
 }
 
+/**
+ * A localStorage write that FAILED, usually the quota.
+ *
+ * WHY THIS EXISTS. Five families of real work product live only in
+ * localStorage: speaker renames, chapters, in/out marks, source timecodes and
+ * the export queue. Every one of them writes through here, and this function
+ * caught the failure and called console.warn - which in a packaged .app
+ * reaches nobody, because the WKWebView console needs Safari's inspector
+ * attached. CLAUDE.md says so outright about a different swallow.
+ *
+ * So past the quota the app kept working perfectly and simply stopped
+ * remembering: rename twelve speakers, set chapters, mark a range, and none of
+ * it survives a relaunch, with no error, no banner and nothing in any log the
+ * user can open. That is worse than an error. `docs/DATA-MODEL.md` F2 records
+ * this work product as living in evictable storage; the sharper problem is
+ * that its loss is SILENT.
+ *
+ * Whether these five should move to files is the product call F2 asks for and
+ * this does not answer it. It answers the smaller question that needs no
+ * decision: when a write is lost, say so.
+ *
+ * Same shape as review-store's `onReviewStoreProblem` - a rate-limited
+ * listener set, subscribed by App - because that seam already exists and a
+ * second style of reporting failures is how you get two.
+ */
+export type StorageProblem = { key: string; err: unknown };
+const problemListeners = new Set<(p: StorageProblem) => void>();
+
+/** Subscribe to localStorage write failures. Returns an unsubscribe fn. */
+export function onStorageProblem(cb: (p: StorageProblem) => void): () => void {
+  problemListeners.add(cb);
+  return () => { problemListeners.delete(cb); };
+}
+
+/** Rate-limited: a full disk fails on EVERY keystroke that persists, and one
+ *  notification per keystroke is its own kind of unusable. */
+let lastProblemAt = 0;
+export function reportStorageProblem(key: string, err: unknown): void {
+  console.warn(`storage: write to ${key} failed:`, err);
+  const now = Date.now();
+  if (now - lastProblemAt < 30_000) return;
+  lastProblemAt = now;
+  for (const cb of problemListeners) cb({ key, err });
+}
+
+/** Test-only: drop subscribers and the rate limit so each case starts cold. */
+export function resetStorageProblemsForTests(): void {
+  problemListeners.clear();
+  lastProblemAt = 0;
+}
+
 export function saveJson(key: string, v: unknown): void {
   try {
     localStorage.setItem(key, JSON.stringify(v));
   } catch (err) {
-    console.warn(`saveJson(${key}) failed:`, err);
+    reportStorageProblem(key, err);
   }
 }
 

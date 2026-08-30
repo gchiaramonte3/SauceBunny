@@ -127,6 +127,7 @@ import { decodeHtmlEntities } from "./lib/text";
 import { EXPECTED_BACKEND_BUILD_ID, type BuildIdCheck } from "./lib/build-id";
 import { capabilitySummary, probePlatformCapabilities } from "./lib/platform-capabilities";
 import { onReviewStoreProblem } from "./lib/review-store";
+import { onStorageProblem } from "./lib/storage";
 import { onFutureStoreVersion } from "./lib/store-schema";
 import { assetUrl } from "./lib/asset-url";
 import { buildDiagnosticsReport, diagnosticsFilename, type SessionDiagnostics } from "./lib/diagnostics";
@@ -1466,10 +1467,23 @@ export default function App() {
       appendLog("warn", "media", message);
       pushNotification("error", `Not saving ${label}`, message);
     });
+    // The same courtesy for localStorage. Speaker renames, chapters, in/out
+    // marks, source timecodes and the export queue live only there, and their
+    // writer caught the quota and called console.warn - in an app with no
+    // console. Past the quota everything kept working and simply stopped
+    // being remembered, which the user discovers on the next launch with
+    // nothing to explain it. Rate-limited in the store, since a full quota
+    // fails on every keystroke that persists.
+    const unsubStorage = onStorageProblem(({ key }) => {
+      const msg = `Ran out of room to save "${key}". Recent renames, chapters or marks may not survive a relaunch. Clearing old transcripts from the library frees space.`;
+      appendLog("err", "media", msg);
+      pushNotification("error", "Couldn't save your changes", msg);
+    });
     return () => {
       window.removeEventListener("unhandledrejection", onRejection);
       unsubReview();
       unsubFuture();
+      unsubStorage();
     };
   }, [appendLog, pushNotification]);
 
