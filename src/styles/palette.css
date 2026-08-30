@@ -68,7 +68,14 @@
   font-weight: var(--weight-normal);
   letter-spacing: var(--track-tight);
 }
-.cp-palette-input::placeholder { color: var(--fg-5); }
+/* fg-4, not fg-5. Measured on this surface (--bg-2): fg-5 is 3.81:1, below
+   AA's 4.5 for text - and a placeholder IS text. Twelve of the app's
+   fourteen placeholder rules already use fg-4 (5.10:1 here); these two were
+   the outliers. Neither contrast sweep could see it: both read
+   getComputedStyle(el).color with no pseudo-element argument, so no
+   ::placeholder can enter their population - and contrast.spec.ts opens
+   this exact dialog on purpose. */
+.cp-palette-input::placeholder { color: var(--fg-4); }
 .cp-palette-count {
   font-family: var(--font-ui);
   font-size: var(--text-sm);

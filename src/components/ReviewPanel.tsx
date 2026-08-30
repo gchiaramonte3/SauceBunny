@@ -1289,15 +1289,25 @@ function ReviewToolbar({
             <IconDownload size={14} strokeWidth={2} className="cp-review-glyph" />
           </button>
           {exportOpen && (
+            /* onClick, NOT onMouseDown. These nine were mousedown-only, which
+               means Enter and Space on a focused button did nothing at all -
+               a keyboard user could open this menu, tab to Markdown, press
+               Enter and get silence. Verified in webkit as well as chromium,
+               since webkit is the engine this app ships in.
+
+               The outside-click dismisser above listens on `pointerdown` and
+               is scoped by exportWrapRef.contains(target), so a click inside
+               the menu cannot close it before the click lands: mousedown was
+               never load-bearing here. */
             <div className="cp-review-export-menu">
               <div className="cp-review-export-group">Notes</div>
-              <button onMouseDown={() => doExport("md")}>Markdown</button>
+              <button onClick={() => doExport("md")}>Markdown</button>
               <div className="cp-review-export-group">Markers</div>
-              <button onMouseDown={() => doExport("avid")}>Avid Media Composer</button>
-              <button onMouseDown={() => doExport("premiere")}>Adobe Premiere</button>
-              <button onMouseDown={() => doExport("resolve")}>DaVinci Resolve</button>
-              <button onMouseDown={() => doExport("fcpx")}>Final Cut Pro</button>
-              <button onMouseDown={() => doExport("csv")}>CSV</button>
+              <button onClick={() => doExport("avid")}>Avid Media Composer</button>
+              <button onClick={() => doExport("premiere")}>Adobe Premiere</button>
+              <button onClick={() => doExport("resolve")}>DaVinci Resolve</button>
+              <button onClick={() => doExport("fcpx")}>Final Cut Pro</button>
+              <button onClick={() => doExport("csv")}>CSV</button>
               <MarkerSettingsRow settings={markerSettings} onChange={onMarkerSettingsChange} />
             </div>
           )}
@@ -1321,7 +1331,7 @@ function ReviewToolbar({
                   <div key={h.key} className="cp-review-history-item">
                     <button
                       className="cp-review-history-open"
-                      onMouseDown={() => { setHistoryOpen(false); onOpenReview(h.path); }}
+                      onClick={() => { setHistoryOpen(false); onOpenReview(h.path); }}
                       title={h.path}
                     >
                       <span className="cp-review-history-title">{h.title}</span>
@@ -1329,7 +1339,7 @@ function ReviewToolbar({
                     </button>
                     <button
                       className="cp-review-history-del"
-                      onMouseDown={(e) => { e.stopPropagation(); removeReviewHistory(h.key); setHistory(loadReviewHistory()); }}
+                      onClick={(e) => { e.stopPropagation(); removeReviewHistory(h.key); setHistory(loadReviewHistory()); }}
                       title="Remove from history"
                     >✕</button>
                   </div>
@@ -1339,7 +1349,7 @@ function ReviewToolbar({
                 {history.length > 0 && (
                   <button
                     className="cp-review-history-clear"
-                    onMouseDown={() => { clearReviewHistory(); setHistory([]); }}
+                    onClick={() => { clearReviewHistory(); setHistory([]); }}
                     title="Clear the list. Review notes themselves are kept"
                   >Clear all</button>
                 )}
