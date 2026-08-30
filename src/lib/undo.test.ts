@@ -112,3 +112,79 @@ describe("UndoManager", () => {
     expect(ticks).toBe(4);
   });
 });
+
+/**
+ * SCOPED CLEARING, so a boundary drops what it invalidates and not the rest.
+ *
+ * App cleared the WHOLE stack on both source change and co-review join/leave.
+ * The join case is right for review entries and only for those: replayOps
+ * captures `inSession` when an entry is made, so a solo entry replayed in a
+ * session writes the local file while peers hold the shared doc, and a session
+ * entry replayed solo relays into a room. That capture is protective.
+ *
+ * What was wrong is the collateral. Mark an in and an out, join a screening,
+ * press cmd+Z — and the mark was gone, for a reason that had nothing to do
+ * with marks.
+ */
+describe("clearScope", () => {
+  const entry = (label: string, scope?: string) => ({
+    label, scope, undo: () => {}, redo: () => {},
+  });
+
+  it("drops one scope and keeps the others, in order", () => {
+    const u = new UndoManager();
+    u.push(entry("mark in", "marks"));
+    u.push(entry("add comment", "review"));
+    u.push(entry("mark out", "marks"));
+    u.clearScope("review");
+
+    // The survivors keep their order: the newest non-review entry is next.
+    expect(u.getSnapshot().undoLabel).toBe("mark out");
+    u.undo();
+    expect(u.getSnapshot().undoLabel).toBe("mark in");
+    u.undo();
+    expect(u.getSnapshot().canUndo, "only the review entry should have gone").toBe(false);
+  });
+
+  it("keeps untagged entries, which is the safe default", () => {
+    // An entry with no scope belongs to nothing in particular, so no scoped
+    // boundary may assume it is safe to discard.
+    const u = new UndoManager();
+    u.push(entry("something", undefined));
+    u.clearScope("review");
+    expect(u.getSnapshot().canUndo).toBe(true);
+  });
+
+  it("drops the redo branch entirely", () => {
+    // A redo spanning the boundary being crossed is exactly what this guards
+    // against, and half a branch is worth nothing.
+    const u = new UndoManager();
+    u.push(entry("mark in", "marks"));
+    u.undo();
+    expect(u.getSnapshot().canRedo).toBe(true);
+    u.clearScope("review"); // touches no past entry at all
+    expect(u.getSnapshot().canRedo, "the future must go regardless").toBe(false);
+  });
+
+  it("notifies subscribers when it changes something", () => {
+    const u = new UndoManager();
+    let ticks = 0;
+    u.subscribe(() => { ticks += 1; });
+    u.push(entry("add comment", "review"));
+    const before = ticks;
+    u.clearScope("review");
+    expect(ticks, "the HUD has to learn the stack shrank").toBeGreaterThan(before);
+  });
+
+  it("stays quiet when there is nothing to drop", () => {
+    // CANARY for the case above: a clear that always emits would satisfy it
+    // while waking every subscriber on every boundary crossing.
+    const u = new UndoManager();
+    u.push(entry("mark in", "marks"));
+    u.undo(); u.redo(); // leave the future empty
+    let ticks = 0;
+    u.subscribe(() => { ticks += 1; });
+    u.clearScope("review");
+    expect(ticks).toBe(0);
+  });
+});

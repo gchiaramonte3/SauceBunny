@@ -178,3 +178,35 @@ test("a wobble on a row is not a drag", async ({ page }) => {
 
   expect((await shown(page)).map((r) => r.name)).toEqual(["alpha", "bravo", "charlie"]);
 });
+
+/**
+ * A QUEUE ROW COMES BACK.
+ *
+ * use-clip-queue's own comment on handleQueueRetry calls a row "a range
+ * somebody marked by hand ... the one thing in the workspace that cannot be
+ * recreated by pressing a button again". Removing one was a single click on a
+ * trash icon, with no confirm and no way back: you re-found the moment and
+ * re-marked in and out.
+ *
+ * The data model needed nothing. QueuedClip is immutable and id-keyed, so the
+ * removed object plus its index is a complete inverse.
+ */
+test("cmd+Z brings back a removed queue row, in its place", async ({ page }) => {
+  await bootQueue(page);
+  expect(await shown(page)).toEqual([
+    { num: "1", name: "alpha" }, { num: "2", name: "bravo" }, { num: "3", name: "charlie" },
+  ]);
+
+  // Remove the MIDDLE row, so "restored at its index" is distinguishable from
+  // "appended" - which is a different plan, not the same queue.
+  await page.locator(ROWS).nth(1).locator('button[aria-label*="Remove" i], button[title*="Remove" i]').first().click();
+  await expect(page.locator(ROWS)).toHaveCount(2);
+
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("Meta+z");
+
+  await expect(page.locator(ROWS)).toHaveCount(3);
+  expect(await shown(page), "bravo must return to position 2, not to the end").toEqual([
+    { num: "1", name: "alpha" }, { num: "2", name: "bravo" }, { num: "3", name: "charlie" },
+  ]);
+});

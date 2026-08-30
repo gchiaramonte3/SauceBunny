@@ -826,6 +826,9 @@ export function ReviewPanel({
 
     appUndo.push({
       label,
+      // The scope the session boundary drops: replayOps captured `inSession`
+      // when this entry was made, so it is only valid in the mode it was made in.
+      scope: "review",
       undo: () => {
         if (op.t === "add") {
           const now = freshest();
@@ -878,6 +881,7 @@ export function ReviewPanel({
     else mutate((d) => ops.reduce((acc, op) => applyReviewOp(acc, op), d));
     appUndo.push({
       label: `import ${comments.length} ${comments.length === 1 ? "note" : "notes"}`,
+      scope: "review",
       undo: () => { const at = Date.now(); replayOps(inverse.map((o) => restampReviewOp(o, at))); },
       redo: () => { const at = Date.now(); replayOps(ops.map((o) => restampReviewOp(o, at))); },
     });

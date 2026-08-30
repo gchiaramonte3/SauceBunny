@@ -3917,7 +3917,20 @@ export default function App() {
   // closures route to different docs). Drop the whole stack on either
   // boundary. The annotation-draft history is reset by the source-change
   // effect below, which already clears the draft itself.
-  useEffect(() => { appUndo.clear(); }, [reviewSourceKey, coSession.role]);
+  // TWO BOUNDARIES, TWO SCOPES. This used to be one clear() on both triggers,
+  // which threw away every entry the app had whenever either changed.
+  //
+  // A source change invalidates everything: marks are per-source, and a review
+  // entry replayed against a different doc is meaningless. Clear it all.
+  useEffect(() => { appUndo.clear(); }, [reviewSourceKey]);
+  // Joining or leaving a session invalidates REVIEW entries only. replayOps
+  // captures `inSession` when an entry is made, so a solo entry replayed in a
+  // session writes the local file while peers hold the shared doc, and a
+  // session entry replayed solo relays into a room. That capture is
+  // protective; what was wrong is that marks, speaker overrides and queue
+  // rows - pure local-state restores - went with them. Mark an in and an out,
+  // join a screening, press cmd+Z, and the mark was simply gone.
+  useEffect(() => { appUndo.clearScope("review"); }, [coSession.role]);
   // Session-first: a session can be hosted at any time — start it, then load a
   // web source and it propagates to guests (the hook pushes activeSourceUrl).
   // A local file is the one source guests can't receive yet, so flag it for a

@@ -19,6 +19,29 @@ export type UndoEntry = {
   label: string;
   undo: () => void;
   redo: () => void;
+  /**
+   * Which state this entry restores, so a boundary can drop the entries it
+   * invalidates WITHOUT dropping the rest.
+   *
+   * App used to clear the whole stack on both source change and co-review
+   * join/leave. The join case is right for REVIEW entries and only for those:
+   * `replayOps` captures `inSession` when the entry is made, so a solo entry
+   * replayed inside a session writes the local file while peers hold the
+   * shared doc, and a session entry replayed solo relays into a room. That
+   * capture is protective, not a bug - the fix is not to make entries
+   * mode-agnostic, it is to stop taking everything else down with them.
+   * Marks, speaker overrides and queue rows are pure local-state restores and
+   * survive a join fine.
+   *
+   * THE CONDITION THAT MAKES SELECTIVE CLEARING SOUND, and the reason to be
+   * careful widening it: removing entries from the middle of a stack is safe
+   * only when what stays does not share state with what goes. Marks, speaker
+   * overrides, review ops and the export queue are four independent domains,
+   * so undoing a mark is correct whatever happened to the review doc in
+   * between. Tag two things that DO share state and this becomes a bug
+   * generator.
+   */
+  scope?: string;
 };
 
 export type UndoSnapshot = {
@@ -72,6 +95,22 @@ export class UndoManager {
   clear(): void {
     if (this.past.length === 0 && this.future.length === 0) return;
     this.past = [];
+    this.future = [];
+    this.emit();
+  }
+
+  /**
+   * Drop only the entries of one scope, keeping the rest in order.
+   *
+   * The redo branch goes ENTIRELY, not filtered. A redo that spans the
+   * boundary being crossed is exactly what this is protecting against, and
+   * keeping half of one buys nothing - the standard undo model already
+   * discards the future on any new action.
+   */
+  clearScope(scope: string): void {
+    const kept = this.past.filter((e) => e.scope !== scope);
+    if (kept.length === this.past.length && this.future.length === 0) return;
+    this.past = kept;
     this.future = [];
     this.emit();
   }

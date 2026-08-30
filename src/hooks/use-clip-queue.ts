@@ -1,4 +1,5 @@
 import { applyOrderToSlots } from "../lib/reorder";
+import { appUndo } from "../lib/undo";
 import { useCallback, type Dispatch, type SetStateAction } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
@@ -188,14 +189,63 @@ export function useClipQueue(p: ClipQueueDeps) {
    */
   const handleQueueReorder = useCallback((orderedIds: readonly string[]) => {
     if (queueRunning) return;
+    // Captured BY ID, not by index: an index-keyed inverse is wrong the moment
+    // anything else in the queue changes, and rows can be removed between a
+    // reorder and its undo.
+    const before = clipQueueRef.current
+      .filter((c) => c.status === "queued").map((c) => c.id);
     setClipQueue((prev) => applyOrderToSlots(
       prev, (c) => c.status === "queued", (c) => c.id, orderedIds,
     ));
-  }, [queueRunning, setClipQueue]);
+    const put = (ids: readonly string[]) => setClipQueue((prev) => applyOrderToSlots(
+      prev, (c) => c.status === "queued", (c) => c.id, ids,
+    ));
+    appUndo.push({
+      label: "reorder queue",
+      scope: "queue",
+      undo: () => put(before),
+      redo: () => put(orderedIds),
+    });
+  }, [queueRunning, setClipQueue, clipQueueRef]);
 
+  /**
+   * Remove one row from the queue — undoably.
+   *
+   * This file already says what a row is worth: handleQueueRetry's comment
+   * calls it "a range somebody marked by hand ... the one thing in the
+   * workspace that cannot be recreated by pressing a button again". Deleting
+   * one meant re-finding the moment and re-marking in and out, and it is a
+   * single click on a trash icon with no confirm.
+   *
+   * THE DATA MODEL NEEDED NOTHING. QueuedClip is immutable and id-keyed, so
+   * the removed object plus its index is a complete inverse - restore it and
+   * the row is byte-identical, in the place it was, filename and format and
+   * marks intact.
+   *
+   * `prev` is read from the ref rather than inside the updater: an updater
+   * must stay pure (updater-purity-contract), and React may run it more than
+   * once.
+   */
   const handleQueueRemove = useCallback((id: string) => {
-    setClipQueue((prev) => prev.filter((c) => c.id !== id));
-  }, [setClipQueue]);
+    const prev = clipQueueRef.current;
+    const at = prev.findIndex((c) => c.id === id);
+    if (at < 0) return;
+    const removed = prev[at];
+    setClipQueue((q) => q.filter((c) => c.id !== id));
+    appUndo.push({
+      label: `remove ${removed.filename || "clip"}`,
+      scope: "queue",
+      // Re-inserted at its INDEX, not appended: the queue is an ordered plan
+      // and putting a row back at the end is a different plan.
+      undo: () => setClipQueue((q) => {
+        if (q.some((c) => c.id === id)) return q; // already back
+        const out = q.slice();
+        out.splice(Math.min(at, out.length), 0, removed);
+        return out;
+      }),
+      redo: () => setClipQueue((q) => q.filter((c) => c.id !== id)),
+    });
+  }, [setClipQueue, clipQueueRef]);
 
   /**
    * Put a failed row back in the queue.
@@ -241,11 +291,27 @@ export function useClipQueue(p: ClipQueueDeps) {
   const handleQueueRenameAll = useCallback((rawBase: string) => {
     const base = sanitizeFilename(rawBase);
     if (!base) return;
+    // Prior names BY ID. A bulk rename is one gesture that overwrites every
+    // queued row's name at once, and the names it replaces were often typed
+    // one at a time.
+    const before = new Map(clipQueueRef.current.map((c) => [c.id, c.filename]));
     setClipQueue((prev) => {
       let n = 1;
       return prev.map((c) => c.status === "queued" ? { ...c, filename: `${base}-${n++}` } : c);
     });
-  }, [setClipQueue]);
+    appUndo.push({
+      label: "rename all",
+      scope: "queue",
+      undo: () => setClipQueue((prev) => prev.map((c) => {
+        const was = before.get(c.id);
+        return was !== undefined && c.status === "queued" ? { ...c, filename: was } : c;
+      })),
+      redo: () => setClipQueue((prev) => {
+        let n = 1;
+        return prev.map((c) => c.status === "queued" ? { ...c, filename: `${base}-${n++}` } : c);
+      }),
+    });
+  }, [setClipQueue, clipQueueRef]);
 
   const handleQueueClearAll = useCallback(() => {
     // Confirmed, like every other destructive action in the app — clearing
