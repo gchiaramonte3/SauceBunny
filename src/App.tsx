@@ -4978,8 +4978,14 @@ export default function App() {
                     onAnnotationDismiss={annPinned ? () => { setAnnotationDisplay(null); setAnnotationDisplayTime(null); } : undefined}
                     annotationLabelMode={annDrawing && reviewLabelMode}
                     annotationLabelColor={annLabelColor}
+                    /* Reactions belong ON the picture. This used to be a
+                       sibling of Monitor and Transport, and `.cp-monitor-wrap`
+                       is position: static — so the absolutely-positioned layer
+                       resolved against an ancestor spanning the whole column
+                       and a clap surfaced over the timecode field instead of
+                       over the video. */
+                    stageOverlay={roomActive ? <ReactionLayer /> : null}
                   />
-                  {roomActive && <ReactionLayer />}
                   <Transport
                     status={status}
                     isPlaying={isPlaying}

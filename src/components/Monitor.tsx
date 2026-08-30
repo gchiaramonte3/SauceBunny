@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { KeepAction } from "../lib/stream-keep";
 import { IconAlert, IconHistory } from "./Icons";
 import { BunnyLoader } from "./BunnyLoader";
@@ -140,6 +141,24 @@ type Props = {
   onMediaError?: (msg: string) => void;
   /** Transient toast — auto-fades after a few seconds. */
   toast: { id: number; kind: ToastKind; title: string; body?: string } | null;
+  /**
+   * Anything that belongs ON THE PICTURE rather than beside it — today, the
+   * co-review reaction floaters.
+   *
+   * It is a slot rather than a `showReactions` flag because the picture box is
+   * the only thing Monitor can offer here: what goes in it is App's business,
+   * and Monitor has no reason to import the session's reaction store.
+   *
+   * Why it exists at all: the reaction layer used to be a SIBLING of Monitor
+   * and Transport inside `.cp-monitor-wrap`, which is `position: static`. Its
+   * `position: absolute` therefore resolved against a far-away ancestor
+   * spanning the whole column, so `bottom: 90px` measured up from below the
+   * transport and the emoji surfaced over the timecode field. `.cp-monitor` is
+   * the box that is actually sized to the video (inline width/height from
+   * useContainSize, `overflow: hidden`), which is why captions and annotations
+   * already live in here.
+   */
+  stageOverlay?: ReactNode;
   onToastDismiss: () => void;
   onPlayerTimeUpdate?: (seconds: number) => void;
   onPlayerStateChange?: (playing: boolean) => void;
@@ -309,7 +328,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
     streamRung, onStreamStall, onStreamInfo, streamRungBadge, streamRungBadgeTitle, streamKeepBadge, streamKeepAction, onStreamKeepAction,
     playbackPrepBusy, playbackPrepProgress, onCancelPlaybackPrep, useWebCodecs, scrubAudio,
     streamLoadingPhase,
-    toast, onToastDismiss,
+    toast, onToastDismiss, stageOverlay,
     onPlayerTimeUpdate, onPlayerStateChange, onPlayerReady, onSurfaceClick,
     transcriptPath, transcriptReloadToken, fps, captionsOn, captionStyle, tcOverlay,
     shuttleRate, playbackRateHud,
@@ -416,6 +435,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               </div>
             )}
           </div>
+          {stageOverlay}
           {toastEl}
         </div>
       </div>
@@ -444,6 +464,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               {sourceKind === "file" ? "ffmpeg · reading headers" : "yt-dlp · probing manifests"}
             </div>
           </div>
+          {stageOverlay}
           {toastEl}
         </div>
       </div>
@@ -489,6 +510,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
               </div>
             )}
           </div>
+          {stageOverlay}
           {toastEl}
         </div>
       </div>
@@ -781,7 +803,8 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
 
         {/* Completion is announced via the floating toast + the notification
             bell up in the toolbar — the canvas stays clean. */}
-        {toastEl}
+        {stageOverlay}
+          {toastEl}
       </div>
     </div>
   );

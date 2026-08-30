@@ -544,12 +544,24 @@
 .cp-react-pick-hand:hover { background: rgba(255,255,255,0.06); }
 .cp-react-pick-hand.up { border-color: var(--warning); color: var(--warning); }
 
-/* ── Live reaction floaters: rise along the LEFT edge of the stage (the
-      Meet pattern - shared content stays unobscured). ── */
+/* ── Live reaction floaters: rise along the LEFT edge of the PICTURE (the
+      Meet pattern - shared content stays unobscured).
+
+      Anchored to `.cp-monitor`, which is the box sized to the video itself.
+      This layer used to be a sibling of Monitor and Transport inside
+      `.cp-monitor-wrap`, and that wrapper is position: static - so `absolute`
+      resolved against a far ancestor spanning the whole column and `bottom:
+      90px` measured up from below the transport. A clap landed on the timecode
+      field rather than on the shot it was reacting to.
+
+      `bottom` clears the caption band (`.cp-caption-overlay` sits at 4%) so a
+      floater is never born underneath a subtitle; z-index 11 keeps it above
+      the captions (6) for the moment the two do share the left edge on a
+      narrow monitor. ── */
 .cp-reactions-layer {
   position: absolute;
   left: 14px;
-  bottom: 90px;
+  bottom: 9%;
   top: 0;
   width: 130px;
   pointer-events: none;
@@ -586,11 +598,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 300px, not 360: the layer is now clipped to the picture box rather than to
+   a full-height column, and `.cp-monitor` is `overflow: hidden`. A rise longer
+   than a short monitor is tall gets cut off while the glyph is still opaque -
+   the fade only starts at 75%. */
 @keyframes cp-react-rise {
   0%   { transform: translateY(0) scale(0.6); opacity: 0; }
   8%   { transform: translateY(-8%) scale(1); opacity: 1; }
   75%  { opacity: 1; }
-  100% { transform: translateY(-360px) scale(0.9); opacity: 0; }
+  100% { transform: translateY(-300px) scale(0.9); opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .cp-reaction-float { animation: cp-react-fade 4.6s ease var(--rd, 0ms) forwards; }
