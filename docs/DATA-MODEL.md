@@ -275,7 +275,7 @@ they have no per-record version, not because their shape is wrong.
 | F3 | `projects.json` `posterPath` and a review index entry have no defined behaviour when the target file is gone | silent drift | open |
 | F4 | `localStorage` is last-write-wins across two windows, coordinated by convention and one event rather than by anything enforced | silent drift | open |
 | F5 | The panel window hydrated the whole review store at boot for a store it cannot reach | inefficiency | **fixed** |
-| **F6** | The Reviews folder is durable; the map from a RENAMED file to its notes is not. `saucebunny.review.fpindex` lives in evictable `localStorage`, and no review doc records its own fingerprint | **notes become unreachable** | open, and the fix is small |
+| **F6** | The Reviews folder is durable; the map from a RENAMED file to its notes is not. `saucebunny.review.fpindex` lives in evictable `localStorage`, and no review doc records its own fingerprint | **notes become unreachable** | **fixed** |
 
 ### F6: the notes are durable, the way back to them is not
 
@@ -312,8 +312,32 @@ rebuild `fpindex` from the folder when it is empty. That makes `Documents`
 self-describing: a folder restored on its own is enough, and the localStorage
 index becomes a cache rather than the only copy.
 
-Not done here, because it changes the shape of the user's documents and that
-deserves its own change rather than being folded into a reporting fix.
+**Fixed.** `ReviewDoc` gained an optional `fingerprints: string[]`, written by
+`linkFingerprint` where the value was already computed and thrown away after
+indexing. `rebuildFingerprintIndex` walks the hydrated docs and puts back any
+link the index has lost; `main.tsx` runs it once after hydration. Documents is
+now self-describing: a folder restored on its own is enough, and the
+localStorage index is a cache rather than the only copy.
+
+Three properties worth knowing:
+
+- **It adds only.** The index legitimately holds links no doc carries — entries
+  written before docs recorded fingerprints, and links made for a doc that does
+  not exist yet — so an existing entry always wins. This is a repair, not a
+  resync.
+- **A list, not a value.** `linkAsReviewVersion` deliberately points several
+  cuts at one doc, and a fingerprint written before NFC normalisation differs
+  from today's for the same file.
+- **The change is safe downgrading.** The doc file carries no version of its
+  own (only `index.json` does, unchanged at 1), `looksLikeReviewDoc` checks for
+  known fields rather than rejecting extras, and the writer is a whole-object
+  `JSON.stringify` — so an older build that opens and re-saves one of these
+  docs preserves the field rather than stripping it.
+
+The repair runs from `main.tsx` rather than inside the store on purpose:
+`review.ts` owns the index and already imports `review-store`, so calling it
+from the store would turn a type-only import cycle into a runtime one, where
+whichever module initialises first sees `undefined`.
 
 ### F2's silence is fixed; F2 itself still needs the decision
 

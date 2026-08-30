@@ -230,6 +230,20 @@ export function reviewDocHasContent(d: ReviewDoc): boolean {
 
 // ── store API (review.ts delegates here) ─────────────────────────────────────
 
+/**
+ * Every hydrated doc, for a caller that needs to walk the corpus.
+ *
+ * Exists so the fingerprint-index repair can live in `review.ts` (which owns
+ * that index) without `review-store` importing a VALUE back from `review` -
+ * the two already form a type-only cycle, and adding a runtime edge to it
+ * would mean the module that happens to initialise first sees `undefined`.
+ * The repair runs from main.tsx after hydration instead, where both modules
+ * are long since ready.
+ */
+export function allReviewDocs(): Iterable<ReviewDoc> {
+  return docs.values();
+}
+
 export function getReviewDoc(sourceKey: string): ReviewDoc | undefined {
   return docs.get(sourceKey);
 }

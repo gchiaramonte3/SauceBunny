@@ -46,7 +46,8 @@ if (platform.wasm) registerLocalDecoders(platform.blobWorker);
 
 import "./styles/app.css";
 
-import { hydrateReviewStore } from "./lib/review-store";
+import { hydrateReviewStore, allReviewDocs } from "./lib/review-store";
+import { rebuildFingerprintIndex } from "./lib/review";
 import { hydrateCastStore, listenForCastChanges } from "./lib/cast-store";
 
 // Single-bundle multi-window: the floating side-panel window loads the
@@ -101,7 +102,26 @@ if (isPanelWindow) {
   renderApp();
 } else {
   void Promise.race([
-    hydrateReviewStore({ migrate: true }).catch((err) => {
+    hydrateReviewStore({ migrate: true }).then(() => {
+      // REPAIR THE FINGERPRINT INDEX from the docs themselves. That index is
+      // what reconnects a RENAMED source to its notes, and it lives in
+      // localStorage - evictable, clearable, and never part of a backup of
+      // Documents. When it goes, every note is still on disk and the app can
+      // find none of them for anything renamed since. Docs carry their own
+      // fingerprints now, so the folder can put the map back.
+      //
+      // Here rather than inside the store: review.ts owns the index and
+      // already imports the store, so calling it from there would turn a
+      // type-only import cycle into a runtime one.
+      try {
+        const added = rebuildFingerprintIndex(allReviewDocs());
+        if (added > 0) console.info(`review: rebuilt ${added} fingerprint link(s) from the docs`);
+      } catch (err) {
+        // Never take hydration down with a repair: the app works without the
+        // index, it just cannot follow a rename.
+        console.warn("review: fingerprint index rebuild failed:", err);
+      }
+    }).catch((err) => {
       console.warn("review-store hydration failed; starting empty:", err);
     }),
     hydrateDeadline,

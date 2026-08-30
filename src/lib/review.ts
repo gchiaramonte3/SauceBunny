@@ -163,6 +163,27 @@ export type ReviewDoc = {
   comments: ReviewComment[];
   /** Per-version approval state, keyed by versionId. */
   status: Record<string, ReviewStatus>;
+  /**
+   * Content fingerprints this doc can be reached by, so the FILE knows how to
+   * be found again.
+   *
+   * `sourceKey` is a path, and a renamed or moved source no longer matches it.
+   * The thing that reconnects them is `resolveByFingerprint`, whose index
+   * lived only in localStorage - evictable, and written through the same
+   * `saveJson` that used to swallow a full quota in silence. So every note
+   * could be sitting safely in Documents while the app had lost the only map
+   * to it, and restoring Documents from a backup would not help, because the
+   * map was never in Documents. See docs/DATA-MODEL.md F6.
+   *
+   * A LIST, not one value: `linkAsReviewVersion` deliberately points several
+   * cuts of the same material at one doc, and a fingerprint written before
+   * NFC normalisation can differ from today's for the same file.
+   *
+   * Optional, so every doc written before this parses unchanged. The
+   * localStorage index stays as the fast path; this makes it a cache rather
+   * than the only copy.
+   */
+  fingerprints?: string[];
 };
 
 export type CommentSort = "time" | "newest" | "oldest";
@@ -310,6 +331,38 @@ export function reviewFingerprint(
   return `${name}|${dur}|${w ?? 0}x${h ?? 0}${size}`;
 }
 
+/**
+ * Rebuild the fingerprint index from the docs themselves.
+ *
+ * THE POINT: the index lives in localStorage, which is evictable and which the
+ * user can clear. The docs live in Documents, which is what people back up. So
+ * the index is the half that goes missing, and when it does every note is
+ * still on disk while the app can find none of them for any source that has
+ * been renamed since. Restoring Documents does not fix that, because the map
+ * was never in Documents.
+ *
+ * Runs at hydration and only ADDS: an existing entry always wins. The index
+ * can hold links a doc does not carry - it was written before docs recorded
+ * their own fingerprints, and some links are made for docs that do not exist
+ * yet - so treating the folder as authoritative would throw those away. This
+ * is a repair, not a resync.
+ *
+ * Returns how many links it added, which is what the caller logs.
+ */
+export function rebuildFingerprintIndex(docs: Iterable<ReviewDoc>): number {
+  const idx = loadJson<Record<string, string>>(FP_INDEX_KEY, {});
+  let added = 0;
+  for (const doc of docs) {
+    for (const fp of doc.fingerprints ?? []) {
+      if (idx[fp] !== undefined) continue;
+      idx[fp] = doc.sourceKey;
+      added += 1;
+    }
+  }
+  if (added > 0) saveJson(FP_INDEX_KEY, idx);
+  return added;
+}
+
 /** The review key a fingerprint maps to (null if this clip hasn't been reviewed). */
 export function resolveByFingerprint(fp: string): string | null {
   const idx = loadJson<Record<string, string>>(FP_INDEX_KEY, {});
@@ -325,12 +378,29 @@ export function resolveByFingerprint(fp: string): string | null {
   return null;
 }
 
-/** Remember that this fingerprint belongs to this review key. */
+/**
+ * Remember that this fingerprint belongs to this review key - in BOTH places.
+ *
+ * The localStorage index is the fast path and stays. The doc gets a copy so
+ * the file is self-describing: `rebuildFingerprintIndex` can then reconstruct
+ * the whole index from the folder, which is what makes a Documents-only
+ * restore sufficient. Before this the value was computed at every call site
+ * and thrown away after indexing.
+ */
 export function linkFingerprint(fp: string, key: string): void {
   const idx = loadJson<Record<string, string>>(FP_INDEX_KEY, {});
-  if (idx[fp] === key) return;
-  idx[fp] = key;
-  saveJson(FP_INDEX_KEY, idx);
+  if (idx[fp] !== key) {
+    idx[fp] = key;
+    saveJson(FP_INDEX_KEY, idx);
+  }
+  // Stamp the doc. Only for a doc that EXISTS: linking a fingerprint to a key
+  // with no doc yet would create an empty file for a source nobody has
+  // reviewed, and the shelf counts files.
+  const doc = getReviewDoc(key);
+  if (!doc) return;
+  const have = doc.fingerprints ?? [];
+  if (have.includes(fp)) return;
+  putReviewDoc({ ...doc, fingerprints: [...have, fp] });
 }
 
 export type ReviewHistoryEntry = { key: string; title: string; path: string; updatedAt: number; count: number };
