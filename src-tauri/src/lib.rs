@@ -427,9 +427,30 @@ pub fn run() {
                 if let Ok(data) = app.path().app_data_dir() {
                     if data.join(commands::CLEAR_ON_QUIT_FLAG).is_file() {
                         if let Ok(cache) = app.path().app_cache_dir() {
-                            let media = cache.join("saucebunny-media");
-                            if media.is_dir() && std::fs::remove_dir_all(&media).is_ok() {
-                                eprintln!("[shutdown] cleared the media cache (clear-on-quit)");
+                            // NOT `cache.join("saucebunny-media")`, which is what
+                            // this was: that is the LEGACY name, renamed to
+                            // "media" by migrate_cache_layout, so on every
+                            // upgraded install the is_dir() was false and
+                            // clear-on-quit silently did nothing at all.
+                            //
+                            // And not remove_dir_all on the whole tree either.
+                            // `transfers/` holds files received from a peer -
+                            // the only copy - so sweeping it would turn a
+                            // setting that did nothing into one that destroys
+                            // multi-GB masters on every quit. See
+                            // quit_clearable_media_entries for the full note.
+                            let media = cache.join(commands::MEDIA_CACHE_DIRNAME);
+                            let mut cleared = 0usize;
+                            for entry in commands::quit_clearable_media_entries(&media) {
+                                let ok = if entry.is_dir() {
+                                    std::fs::remove_dir_all(&entry).is_ok()
+                                } else {
+                                    std::fs::remove_file(&entry).is_ok()
+                                };
+                                if ok { cleared += 1; }
+                            }
+                            if cleared > 0 {
+                                eprintln!("[shutdown] cleared {cleared} media cache entr(ies) (clear-on-quit; transfers kept)");
                             }
                         }
                     }

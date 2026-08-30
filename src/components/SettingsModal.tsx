@@ -2026,12 +2026,29 @@ const CACHE_CATEGORIES = [
 
 /**
  * Settings row that surfaces cache sizes + user-controlled purges.
- * Cache = `saucebunny-*` in `app_cache_dir()`: the persistent media cache
- * (`saucebunny-media/` — downloads, audio, metadata; reused across sessions,
- * exempt from the startup sweep), keyed thumbnails, and short-lived working
- * files. Files NOT under that prefix (e.g. whisper-models/) are never
- * touched. Per-category sizes + Clear buttons — no automatic size caps,
- * just visibility and control (everything regenerates on demand).
+ *
+ * Cache lives in `app_cache_dir()`: the persistent media cache (`media/` —
+ * downloads, audio, metadata, transfers; reused across sessions, exempt from
+ * the startup sweep), keyed thumbnails, and short-lived working files. Files
+ * outside it (e.g. whisper-models/) are never touched.
+ *
+ * TWO CORRECTIONS, because this comment was wrong in both halves and the
+ * second was load-bearing.
+ *
+ * It named `saucebunny-media/`. That is the LEGACY directory;
+ * `migrate_cache_layout` renamed it to `media/` — and the same stale string
+ * hardcoded in the shutdown handler is why clear-on-quit silently did nothing
+ * on every upgraded install.
+ *
+ * It also said "everything regenerates on demand", which is FALSE for
+ * `transfers/`: those are files received from a peer, and after the session
+ * ends they are the only copy. That sentence is the reasoning that would
+ * justify sweeping the whole tree, which is precisely what must not happen.
+ * The size cap and clear-on-quit both skip transfers; an explicit Clear button
+ * is the only thing that removes them, which is deliberate.
+ *
+ * There IS an automatic size cap now (the GB selector below), which this also
+ * denied.
  */
 function CacheControls({ excludePaths, capGb, clearOnQuit, onRetentionChange }: {
   excludePaths?: string[];

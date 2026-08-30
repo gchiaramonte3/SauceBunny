@@ -499,6 +499,44 @@ pub fn set_clear_cache_on_quit(app: AppHandle, enabled: bool) -> Result<(), crat
 /// an `AppHandle` and the `JobRegistry`, which is why the cap had no test at
 /// all, which is how it spent its life quietly deleting files that do not come
 /// back.
+/// What clear-on-quit may delete: every entry directly under the media cache
+/// EXCEPT `transfers/`.
+///
+/// TWO BUGS MET HERE, and the second is the dangerous one.
+///
+/// First, clear-on-quit was walking the LEGACY directory name. `lib.rs` joined
+/// the literal "saucebunny-media" while `migrate_cache_layout` had long since
+/// renamed it to `media` — so on every install that has ever been upgraded,
+/// `is_dir()` was false, the block did nothing, and a user who turned on a
+/// disk-and-privacy setting got no cache clearing and no sign of it.
+///
+/// Second, and the reason this is a function rather than a one-word fix:
+/// pointing that sweep at the right directory would have removed
+/// `transfers/` on every quit. That directory holds files RECEIVED FROM A
+/// PEER — the only copy, since the session is over, the sender is gone, and
+/// the frontend has already registered it as the permanent copy for that
+/// source's fingerprint. `evictable_media_files` below exempts it from the
+/// size cap for exactly that reason. A setting that quietly did nothing would
+/// have become one that silently destroyed multi-GB screening masters at every
+/// quit, which is a considerably worse bug than the one being fixed.
+///
+/// Exempt from an automatic sweep is not the same as undeletable: Settings
+/// still lists `transfers` with its own Clear button, and that is a deliberate
+/// act by someone looking at the size. This is the third place that walks the
+/// media cache and the third that must know, which is why
+/// `cache-category-contract` now checks all three rather than two.
+///
+/// Lifted out of the shutdown handler so the exemption is testable — the same
+/// reason `evictable_media_files` sits out here, and that one earned it by
+/// spending its life quietly deleting files that do not come back.
+pub(crate) fn quit_clearable_media_entries(media: &std::path::Path) -> Vec<PathBuf> {
+    let Ok(rd) = std::fs::read_dir(media) else { return Vec::new() };
+    rd.flatten()
+        .map(|e| e.path())
+        .filter(|p| p.file_name().and_then(|n| n.to_str()) != Some(TRANSFERS_DIRNAME))
+        .collect()
+}
+
 fn evictable_media_files(media: &std::path::Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
     fn walk(dir: &std::path::Path, out: &mut Vec<(PathBuf, u64, std::time::SystemTime)>) {
         let Ok(rd) = std::fs::read_dir(dir) else { return };
@@ -2226,5 +2264,54 @@ mod job_key_tests {
         let job = "j1";
         assert_ne!(JobRegistry::stage_key(job, "diarize"), job);
         assert!(JobRegistry::stage_key(job, "diarize").contains("::"));
+    }
+}
+
+#[cfg(test)]
+mod quit_clear_tests {
+    use super::{quit_clearable_media_entries, MEDIA_CACHE_DIRNAME, TRANSFERS_DIRNAME};
+
+    /// A media cache with one of every category, plus a loose file, in a temp
+    /// dir that cleans itself up.
+    fn fixture() -> std::path::PathBuf {
+        let base = std::env::temp_dir()
+            .join(format!("sb-quit-clear-{}-{:p}", std::process::id(), &0u8));
+        let media = base.join(MEDIA_CACHE_DIRNAME);
+        let _ = std::fs::remove_dir_all(&base);
+        for sub in ["downloads", "audio", "meta", TRANSFERS_DIRNAME] {
+            std::fs::create_dir_all(media.join(sub)).unwrap();
+        }
+        std::fs::write(media.join("stray.tmp"), b"x").unwrap();
+        media
+    }
+
+    #[test]
+    fn the_sweep_never_takes_transfers() {
+        // THE POINT. A received co-review file is the only copy: the session
+        // is over and the sender is gone. Clearing it on quit destroys a
+        // multi-GB master that both machines deliberately paid to transfer.
+        let media = fixture();
+        let names: Vec<String> = quit_clearable_media_entries(&media)
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
+            .collect();
+
+        // Canary: the sweep found the fixture. An empty list would satisfy the
+        // assertion below while proving nothing at all.
+        assert!(names.len() >= 4, "swept nothing: {names:?}");
+        assert!(!names.iter().any(|n| n == TRANSFERS_DIRNAME), "transfers was swept: {names:?}");
+        for expected in ["downloads", "audio", "meta", "stray.tmp"] {
+            assert!(names.iter().any(|n| n == expected), "{expected} was not swept: {names:?}");
+        }
+        let _ = std::fs::remove_dir_all(media.parent().unwrap());
+    }
+
+    #[test]
+    fn a_missing_media_cache_is_nothing_to_do_rather_than_an_error() {
+        // The normal state on a fresh install, and on any machine that has
+        // never played a web source.
+        let missing = std::env::temp_dir().join("sb-quit-clear-does-not-exist");
+        let _ = std::fs::remove_dir_all(&missing);
+        assert!(quit_clearable_media_entries(&missing).is_empty());
     }
 }
