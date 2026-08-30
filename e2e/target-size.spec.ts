@@ -51,7 +51,13 @@ async function targets(page: Page): Promise<Target[]> {
     // keyboard affordances, not things anyone clicks - and counting them as
     // neighbours invented crowding that does not exist. SC 2.5.8 is about
     // pointer targets; a div earns its place here by carrying a widget role.
-    const sel = 'button, [role="button"], a[href], input:not([type="hidden"]), select, textarea, [role="switch"], [role="tab"], [role="menuitem"], [role="menuitemcheckbox"], [role="checkbox"], [role="radio"], [role="option"], [role="slider"]';
+    // `[role="separator"]` earns its place the way the others do: a FOCUSABLE
+    // separator is an ARIA window splitter - a control you drag to set a value
+    // - and the list columns use exactly that. Its absence here is why a
+    // 10px-wide drag handle went unmeasured while this file's own test name
+    // cites SC 2.5.8. A static separator has no tabindex and is filtered out
+    // below with everything else that is not operable.
+    const sel = 'button, [role="button"], a[href], input:not([type="hidden"]), select, textarea, [role="switch"], [role="tab"], [role="menuitem"], [role="menuitemcheckbox"], [role="checkbox"], [role="radio"], [role="option"], [role="slider"], [role="separator"][tabindex]';
     const out: Array<{ label: string; box: { x: number; y: number; w: number; h: number }; path: string }> = [];
     for (const el of Array.from(document.querySelectorAll(sel))) {
       const e = el as HTMLElement;
@@ -159,4 +165,55 @@ test("the settings modal's controls clear the bar too", async ({ page }) => {
   await expect(page.locator('.cp-modal, [role="dialog"]').first()).toBeVisible();
   const bad = failures(await targets(page));
   expect(bad, `Undersized AND crowded in Settings:\n${bad.join("\n")}`).toEqual([]);
+});
+
+/**
+ * THE LIST HEADER, which this file could not see at all.
+ *
+ * Two layers hid a 10px-wide drag handle from a suite whose own test name
+ * cites SC 2.5.8. First the selector above listed `[role="slider"]` and not
+ * `[role="separator"]`, so a column divider was not a target as far as this
+ * file was concerned. Fixing that alone changed nothing, and the mutation
+ * proved it: `boot()` walks to the CLIP workbench, where no list view exists,
+ * so the widened selector matched zero elements and the suite went on passing
+ * with the divider shrunk to 3x3.
+ *
+ * A selector that matches nothing reports perfect conformance. That is the
+ * failure this repo has met four times, and it met it again here.
+ */
+async function bootLibraryList(page: Page): Promise<void> {
+  await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
+  await page.addInitScript(() => {
+    localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
+    localStorage.setItem("saucebunny.welcomed", "1");
+    localStorage.setItem("saucebunny.permissioned", "1");
+    localStorage.setItem("saucebunny.libraryRoots", JSON.stringify(["/e2e-mock/Footage"]));
+    localStorage.setItem("e2e.manyFiles", "40");
+  });
+  await page.goto("/");
+  await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
+  await page.keyboard.press("Meta+2");
+  await expect(page.locator(".cp-lib-pane")).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: /List view/i }).click();
+  await expect(page.locator(".cp-lib-list")).toBeVisible();
+}
+
+test("the list view's targets clear the bar too", async ({ page }) => {
+  await bootLibraryList(page);
+  const found = await targets(page);
+
+  // CANARY, and the whole reason this test exists rather than just a wider
+  // selector: without it the widened selector passes by matching nothing,
+  // which is exactly what it did. Measured by breaking it - the divider was
+  // shrunk to 3x3 and the suite stayed green.
+  const dividers = found.filter((t) => /Resize .* column/i.test(t.label));
+  expect(dividers.length, "no column dividers measured - the scan is not reaching them")
+    .toBeGreaterThanOrEqual(3);
+
+  // Judged by THIS FILE'S rule - undersized AND crowded - rather than a
+  // stricter bare-size one applied to the dividers alone. SC 2.5.8's spacing
+  // exception is the standard the rest of the app is held to here, and
+  // holding one control to a different bar is how a suite stops being read.
+  const bad = failures(found);
+  expect(bad, `Undersized AND crowded in the library list:\n${bad.join("\n")}`).toEqual([]);
 });

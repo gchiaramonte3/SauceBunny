@@ -47,7 +47,7 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
   selected?: ReadonlySet<string>;
   onSelect?: (path: string, e: React.MouseEvent) => void;
 }) {
-  const { cols, dragCol, startColDrag } = useListColumns(COLS_KEY, COL_DEFAULT);
+  const { cols, dragCol, startColDrag, nudgeCol, bounds } = useListColumns(COLS_KEY, COL_DEFAULT);
 
   return (
     <div
@@ -63,16 +63,22 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
       <div className="cp-lib-list-head">
         <span className="cp-lib-lrow-art" aria-hidden="true" />
         <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort}>
-          <ColDivider onDown={startColDrag("source")} active={dragCol === "source"} />
+          <ColDivider onDown={startColDrag("source")} active={dragCol === "source"}
+              label="Source" value={cols.source} min={bounds.min} max={bounds.max}
+              onNudge={(d) => nudgeCol("source", d)} />
         </SortHeader>
         {/* Source has no sort key of its own - the shelves already group by
             it, so a Source sort would duplicate the grouping. */}
         <span className="cp-lib-lrow-kind">
           Source
-          <ColDivider onDown={startColDrag("size")} active={dragCol === "size"} />
+          <ColDivider onDown={startColDrag("size")} active={dragCol === "size"}
+              label="Size" value={cols.size} min={bounds.min} max={bounds.max}
+              onNudge={(d) => nudgeCol("size", d)} />
         </span>
         <SortHeader className="cp-lib-lrow-size" label="Size" col="size" sort={sort} dir={dir} onSort={onSort}>
-          <ColDivider onDown={startColDrag("date")} active={dragCol === "date"} />
+          <ColDivider onDown={startColDrag("date")} active={dragCol === "date"}
+              label="Date" value={cols.date} min={bounds.min} max={bounds.max}
+              onNudge={(d) => nudgeCol("date", d)} />
         </SortHeader>
         <SortHeader className="cp-lib-lrow-date" label="Grabbed" col="date" sort={sort} dir={dir} onSort={onSort} />
       </div>

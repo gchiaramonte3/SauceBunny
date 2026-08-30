@@ -24,18 +24,27 @@ export function ReactionLayer() {
   }, [latest]);
 
   return (
-    <div className="cp-reactions-layer" aria-hidden={reactions.length === 0}>
-      {reactions.map((r, i) => (
-        <span
-          key={r.id}
-          className="cp-reaction-float"
-          style={{ ["--rx" as string]: `${(r.id % 5) * 14}px`, ["--rd" as string]: `${(i % 3) * 180}ms` }}
-        >
-          <span className="cp-reaction-glyph">{reactionGlyph(r.emote)}</span>
-          <span className="cp-reaction-name">{r.name}</span>
-        </span>
-      ))}
+    <>
+      {/* The live region is a SIBLING of the floaters, not a child.
+          It used to sit inside the layer below, whose aria-hidden toggles with
+          `reactions.length === 0` - and aria-hidden on an ancestor removes the
+          whole subtree from the accessibility tree, so this region was being
+          torn out and reinserted on every burst rather than updated in place.
+          A live region has to be present and stable to announce reliably;
+          one that keeps disappearing is a coin flip. */}
       <span className="cp-visually-hidden" role="status" aria-live="polite">{announce}</span>
-    </div>
+      <div className="cp-reactions-layer" aria-hidden={reactions.length === 0}>
+        {reactions.map((r, i) => (
+          <span
+            key={r.id}
+            className="cp-reaction-float"
+            style={{ ["--rx" as string]: `${(r.id % 5) * 14}px`, ["--rd" as string]: `${(i % 3) * 180}ms` }}
+          >
+            <span className="cp-reaction-glyph">{reactionGlyph(r.emote)}</span>
+            <span className="cp-reaction-name">{r.name}</span>
+          </span>
+        ))}
+      </div>
+    </>
   );
 }

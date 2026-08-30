@@ -51,7 +51,7 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
   selected?: ReadonlySet<string>;
   onSelect?: (url: string, e: React.MouseEvent) => void;
 }) {
-  const { cols, dragCol, startColDrag } = useListColumns(COLS_KEY, COL_DEFAULT);
+  const { cols, dragCol, startColDrag, nudgeCol, bounds } = useListColumns(COLS_KEY, COL_DEFAULT);
 
   return (
     <div
@@ -67,17 +67,23 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
       <div className="cp-lib-list-head">
         <span className="cp-lib-lrow-art" aria-hidden="true" />
         <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort}>
-          <ColDivider onDown={startColDrag("site")} active={dragCol === "site"} />
+          <ColDivider onDown={startColDrag("site")} active={dragCol === "site"}
+              label="Site" value={cols.site} min={bounds.min} max={bounds.max}
+              onNudge={(d) => nudgeCol("site", d)} />
         </SortHeader>
         {/* Site has no sort key of its own - the shelves already group by it,
             so a Site sort would duplicate the grouping. Plain label, like the
             folder list's Kind. */}
         <span className="cp-lib-lrow-kind">
           Site
-          <ColDivider onDown={startColDrag("size")} active={dragCol === "size"} />
+          <ColDivider onDown={startColDrag("size")} active={dragCol === "size"}
+              label="Size" value={cols.size} min={bounds.min} max={bounds.max}
+              onNudge={(d) => nudgeCol("size", d)} />
         </span>
         <SortHeader className="cp-lib-lrow-size" label="Size" col="size" sort={sort} dir={dir} onSort={onSort}>
-          <ColDivider onDown={startColDrag("date")} active={dragCol === "date"} />
+          <ColDivider onDown={startColDrag("date")} active={dragCol === "date"}
+              label="Date" value={cols.date} min={bounds.min} max={bounds.max}
+              onNudge={(d) => nudgeCol("date", d)} />
         </SortHeader>
         <SortHeader className="cp-lib-lrow-date" label="Fetched" col="date" sort={sort} dir={dir} onSort={onSort} />
       </div>

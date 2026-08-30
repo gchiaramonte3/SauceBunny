@@ -30,6 +30,12 @@ export function useListColumns<K extends string>(
   /** The column being dragged, for the divider's active state. */
   dragCol: K | null;
   startColDrag: (key: K) => (e: React.MouseEvent) => void;
+  /** Adjust one column by `delta` px, clamped the same way a drag is.
+   *  The keyboard path for a control that was mouse-only. */
+  nudgeCol: (key: K, delta: number) => void;
+  /** The bounds, so a divider can report aria-valuemin / aria-valuemax
+   *  without re-typing numbers this hook owns. */
+  bounds: { min: number; max: number };
 } {
   const [cols, setCols] = useState<Record<K, number>>(() => {
     try {
@@ -79,5 +85,20 @@ export function useListColumns<K extends string>(
     document.addEventListener("mouseup", onUp);
   };
 
-  return { cols, dragCol, startColDrag };
+  /**
+   * THE KEYBOARD PATH. Column resizing was mouse-only in all three copies of
+   * this before it was extracted: `ColDivider` is a span with `onMouseDown`
+   * and nothing else - no tabIndex, no key handler - so the width could not be
+   * changed by keyboard at all (WCAG 2.1.1, Level A).
+   *
+   * It shares the clamp with the drag rather than repeating it, which is the
+   * point of putting it here: two code paths that each round and bound a value
+   * their own way drift, and then the keyboard stops at a different width than
+   * the mouse does.
+   */
+  const nudgeCol = (key: K, delta: number) => {
+    setCols((c) => ({ ...c, [key]: Math.max(COL_MIN, Math.min(COL_MAX, c[key] + delta)) }));
+  };
+
+  return { cols, dragCol, startColDrag, nudgeCol, bounds: { min: COL_MIN, max: COL_MAX } };
 }

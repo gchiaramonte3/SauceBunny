@@ -131,7 +131,7 @@ export function LibraryBrowserPane({
   // Column widths, persisted. Applied on the list CONTAINER so the header and
   // every row inherit the same variables — resizing one element and not the
   // other is how a table goes crooked.
-  const { cols, dragCol, startColDrag } = useListColumns(COLS_KEY, COL_DEFAULT);
+  const { cols, dragCol, startColDrag, nudgeCol, bounds } = useListColumns(COLS_KEY, COL_DEFAULT);
 
   const marquee = useMarquee({
     containerRef: paneRef,
@@ -282,14 +282,20 @@ export function LibraryBrowserPane({
             {/* Each divider sits on the header cell to its RIGHT and widens the
                 column it borders. stopPropagation on the press is what keeps a
                 resize from also firing that column's sort. */}
-            <ColDivider onDown={startColDrag("kind")} active={dragCol === "kind"} />
+            <ColDivider onDown={startColDrag("kind")} active={dragCol === "kind"}
+              label="Kind" value={cols.kind} min={bounds.min} max={bounds.max}
+              onNudge={(d) => nudgeCol("kind", d)} />
           </SortHeader>
           <span className="cp-lib-lrow-kind">
             Kind
-            <ColDivider onDown={startColDrag("size")} active={dragCol === "size"} />
+            <ColDivider onDown={startColDrag("size")} active={dragCol === "size"}
+              label="Size" value={cols.size} min={bounds.min} max={bounds.max}
+              onNudge={(d) => nudgeCol("size", d)} />
           </span>
           <SortHeader className="cp-lib-lrow-size" label="Size" col="size" sort={sort} dir={dir} onSort={onSort}>
-            <ColDivider onDown={startColDrag("date")} active={dragCol === "date"} />
+            <ColDivider onDown={startColDrag("date")} active={dragCol === "date"}
+              label="Date" value={cols.date} min={bounds.min} max={bounds.max}
+              onNudge={(d) => nudgeCol("date", d)} />
           </SortHeader>
           <SortHeader className="cp-lib-lrow-date" label="Modified" col="date" sort={sort} dir={dir} onSort={onSort} />
         </div>
@@ -339,14 +345,66 @@ export function LibraryBrowserPane({
  */
 /** The 6px grab strip between two header cells. Exported: the web cache's
  *  list view mounts the same header machinery (see WebListRows). */
-export function ColDivider({ onDown, active }: { onDown: (e: React.MouseEvent) => void; active: boolean }) {
+/**
+ * The drag handle between two list columns.
+ *
+ * THIS WAS MOUSE-ONLY: a span with `onMouseDown` and nothing else - no
+ * tabIndex, no key handler - while carrying `role="separator"` and
+ * `aria-label="Resize column"`. That combination advertises an interactive
+ * control to a screen reader and then offers no way to operate it (WCAG 2.1.1
+ * Keyboard, Level A), and ARIA's own definition of a focusable separator is a
+ * window splitter, which is expected to carry a value and respond to arrows.
+ *
+ * Nothing caught it. `target-size.spec.ts` enumerates pointer targets by role
+ * and its selector lists `[role="slider"]` but not `[role="separator"]`, so a
+ * 10px-wide drag target was invisible to it; `popover-focus.spec.ts` exercises
+ * three named triggers and never reaches a list header.
+ *
+ * The app already knew how to do this. `Timeline` is `role="slider"` with
+ * tabIndex, aria-valuemin/max/now, an `aria-valuetext` that reads a timecode
+ * instead of a frame count, and arrow keys - and all three of the app's
+ * sliders are built that way. This is the same shape of control and simply
+ * had not been given the same treatment.
+ *
+ * Arrow keys move by 8px, shift-arrow by 24, Home/End jump to the bounds. The
+ * clamp lives in the hook so the keyboard and the mouse cannot stop at
+ * different widths.
+ */
+export function ColDivider({ onDown, active, label, value, min, max, onNudge }: {
+  onDown: (e: React.MouseEvent) => void;
+  active: boolean;
+  /** Which column, so the name is not three identical "Resize column"s. */
+  label?: string;
+  value?: number;
+  min?: number;
+  max?: number;
+  onNudge?: (delta: number) => void;
+}) {
+  const step = 8;
   return (
     <span
       className={"cp-lib-coldiv" + (active ? " dragging" : "")}
       role="separator"
       aria-orientation="vertical"
-      aria-label="Resize column"
+      aria-label={label ? `Resize ${label} column` : "Resize column"}
+      // A separator only becomes a splitter - operable, with a value - once it
+      // is focusable. Without tabIndex the value attributes below mean nothing.
+      tabIndex={onNudge ? 0 : undefined}
+      aria-valuenow={value}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      aria-valuetext={value != null ? `${Math.round(value)} pixels` : undefined}
+      title="Drag, or focus and use the arrow keys"
       onMouseDown={onDown}
+      onKeyDown={onNudge && ((e) => {
+        const big = e.shiftKey ? 3 : 1;
+        if (e.key === "ArrowLeft") { e.preventDefault(); onNudge(-step * big); }
+        else if (e.key === "ArrowRight") { e.preventDefault(); onNudge(step * big); }
+        // Home/End are the splitter idiom for "as small / as large as it goes".
+        // A large delta is enough because the hook clamps.
+        else if (e.key === "Home") { e.preventDefault(); onNudge(-9999); }
+        else if (e.key === "End") { e.preventDefault(); onNudge(9999); }
+      })}
       // The header cell is a sort BUTTON; without this the divider's click
       // bubbles into it and every resize also re-sorts the table.
       onClick={(e) => e.stopPropagation()}

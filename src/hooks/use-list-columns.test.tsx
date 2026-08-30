@@ -60,6 +60,28 @@ describe("persisted list columns", () => {
     expect(Object.keys(seen?.cols ?? {}).sort()).toEqual(["date", "size", "source"]);
   });
 
+  it("nudges by keyboard, sharing the drag's clamp", () => {
+    // The column was mouse-only: ColDivider had onMouseDown and no key
+    // handler, so the width could not be changed by keyboard at all (2.1.1,
+    // Level A). The clamp lives in the hook precisely so these two paths
+    // cannot stop at different widths.
+    render(<Probe />);
+    act(() => { seen?.nudgeCol("size", 8); });
+    expect(seen?.cols.size).toBe(92); // 84 + 8
+
+    act(() => { seen?.nudgeCol("size", 9999); });
+    expect(seen?.cols.size, "same maximum the drag clamps to").toBe(240);
+    act(() => { seen?.nudgeCol("size", -9999); });
+    expect(seen?.cols.size, "same minimum").toBe(48);
+  });
+
+  it("reports the bounds rather than making the divider retype them", () => {
+    // aria-valuemin / aria-valuemax have to be the REAL bounds. A divider that
+    // hardcodes 48 and 240 announces a lie the moment the hook changes.
+    render(<Probe />);
+    expect(seen?.bounds).toEqual({ min: 48, max: 240 });
+  });
+
   it("drags a column, clamps it, and cleans up after itself", () => {
     render(<Probe />);
     act(() => {

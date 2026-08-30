@@ -1766,6 +1766,20 @@
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 .cp-lib-coldiv:hover::after { opacity: 0.55; }
+/* The divider became FOCUSABLE when it gained its keyboard path, and a tab
+   stop that looks identical focused and unfocused fails 2.4.7 - so the same
+   bar the hover reveals goes to full strength in the focus-ring colour.
+   Never the green accent: focus-contract forbids it, and this file is one of
+   the places that rule is checked. */
+.cp-lib-coldiv:focus-visible { outline: none; }
+.cp-lib-coldiv:focus-visible::after {
+  opacity: 1;
+  background: var(--focus-ring);
+  /* Widened as well as recoloured. At 2px in a 10px handle, colour alone is a
+     difference someone could miss, and it would be the only carrier. */
+  left: 3px;
+  width: 4px;
+}
 .cp-lib-coldiv.dragging::after { opacity: 1; background: var(--fg-1); }
 
 /* Audio card art: the file's own waveform, in place of the shared glyph.
