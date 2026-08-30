@@ -350,3 +350,52 @@ accessibility tree; only VoiceOver proves it is announced.
   motion on: open Settings, the command palette, and a live session, and
   confirm things APPEAR rather than arrive, with nothing off-centre and no
   hover control that has stopped appearing.
+
+---
+
+## This branch: reactions, caption diarization, and the session record
+
+Five things that only a running app can settle. The first two are quick; the
+session ones need two machines, or one machine and patience.
+
+**1. A reaction lands on the picture.** Start a session, play something, send a
+clap from the reaction picker. It should rise up the LEFT EDGE OF THE VIDEO and
+fade, never appearing over the timecode field or the transport. Check it at a
+small window too: the monitor box shrinks with the window, and the rise is a
+fixed 300px, so what you are looking for is that the glyph fades out rather than
+getting sliced off at the bottom of the frame. Turn captions on and send one
+while a subtitle is up - they share the bottom of the frame and the emoji should
+paint over the caption, not under it.
+
+**2. Speakers on a YouTube caption file, without a re-transcribe.** Open a
+YouTube video with auto-captions, let them load, and open the transcript's
+Improve popover. It should offer "Add speaker labels" with the action button
+reading **Detect speakers** (not Regenerate), and Tools should read **Detect
+speakers** rather than "Re-detect speakers". Press it: the diarizer alone runs
+against the cached audio and speaker labels merge into the captions you already
+have. THE TEXT MUST NOT CHANGE - if the wording of the captions is different
+afterwards, Whisper ran and the routing is wrong. On a transcript that already
+has speakers, both should read "Re-detect speakers".
+
+If it errors with "Source audio isn't cached", that is the honest fallback and
+not this bug: the audio pre-cache had not finished. Wait and retry.
+
+**3. A guest's session is remembered.** Two machines. Join as the guest, make a
+note, end the session, and look in `~/Documents/Sauce Bunny/Screenings/`. There
+should be a file on the GUEST's machine too - before this branch there was never
+one. Its `participants` should name both people with real `joinedAt` times, and
+`role` should be "guest".
+
+**4. Quitting mid-session keeps the record.** Start a session, load a source,
+wait a few seconds, then quit the app WITHOUT pressing End. The screening file
+should already be on disk. (Before this branch it was written only when the
+session ended cleanly, so this left nothing at all.)
+
+**5. The shelf tells the truth about old records.** The lobby's "Past
+screenings" list: sessions recorded before this branch have no roster, and their
+rows must NOT say "0 people" - they should simply omit any mention of people
+while still showing the time, the source count and the note count.
+
+Worth noting while you are in there: the reaction rise and the screening
+write-through are both timed, so if you are watching for either, give it a
+couple of seconds before concluding it did not happen.
