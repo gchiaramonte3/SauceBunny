@@ -853,15 +853,43 @@ export function TranscriptViewer({
     if (turns.length === 0 || !canRegenerate) return out;
     // Speaker labels first: re-running for them ALSO re-times the captions,
     // so offering it above the timing fix is what stops a double transcribe.
-    if (roster.length === 1 && roster[0].tag === "Speaker" && onRegenerate) {
-      out.push({
-        id: "speakers",
-        title: "Add speaker labels",
-        detail: "This transcript has one unnamed speaker. Turn on Detect speakers in Settings, then re-run.",
-        action: "Regenerate",
-        hint: "Re-run transcription with current Settings (model · speaker detection)",
-        run: onRegenerate,
-      });
+    if (roster.length === 1 && roster[0].tag === "Speaker") {
+      // TWO ways to get speakers onto a transcript, and they are not close in
+      // cost. Diarizing ALONE reuses this transcript and the already-cached
+      // source audio, runs the Swift diarizer, and merges labels into the
+      // existing SRT in place - seconds. Regenerating throws the transcript
+      // away and re-runs Whisper over the whole source - minutes on anything
+      // long.
+      //
+      // This offered only the expensive one. That was most wrong in exactly
+      // the case it fires most: YouTube auto-captions, where the text was
+      // fetched rather than transcribed, has no speakers, and the cheap path
+      // applies perfectly. Regenerating there also DISCARDS the captions and
+      // replaces them with Whisper's own text, which is a different edit than
+      // the one the user asked for.
+      if (canRedetect && onRedetectSpeakers) {
+        out.push({
+          id: "speakers",
+          title: "Add speaker labels",
+          detail: "This transcript has one unnamed speaker. Detecting them keeps the text you have.",
+          action: "Detect speakers",
+          hint: "Runs only the speaker detector against the cached audio; the transcript text is untouched",
+          run: onRedetectSpeakers,
+        });
+      } else {
+        // Not `else if (onRegenerate)`: the prop is `() => void`, required, so
+        // that guard could never be false. It read as if regeneration might be
+        // unavailable, which is exactly the condition this branch exists to
+        // handle - and it does not come from here.
+        out.push({
+          id: "speakers",
+          title: "Add speaker labels",
+          detail: "This transcript has one unnamed speaker. Turn on Detect speakers in Settings, then re-run.",
+          action: "Regenerate",
+          hint: "Re-run transcription with current Settings (model · speaker detection)",
+          run: onRegenerate,
+        });
+      }
     }
     if (origin === "captions" && sourceKind === "youtube" && onFixCaptionTiming) {
       out.push({
@@ -874,7 +902,7 @@ export function TranscriptViewer({
       });
     }
     return out;
-  }, [turns.length, canRegenerate, roster, origin, sourceKind, onRegenerate, onFixCaptionTiming]);
+  }, [turns.length, canRegenerate, roster, origin, sourceKind, onRegenerate, onFixCaptionTiming, canRedetect, onRedetectSpeakers]);
 
   // True when the transcript actually carries speaker identity — either
   // more than one speaker, or a single one that's been labeled (not the
@@ -1789,7 +1817,9 @@ export function TranscriptViewer({
                     disabled={regenerateBusy}
                     onClick={() => { setToolsOpen(false); onRedetectSpeakers(); }}
                   >
-                    {regenerateBusy ? "Detecting speakers…" : "Re-detect speakers"}
+                    {regenerateBusy
+                      ? "Detecting speakers…"
+                      : hasRealSpeakers ? "Re-detect speakers" : "Detect speakers"}
                   </button>
                 )}
                 <button role="menuitem" onClick={() => { setToolsOpen(false); setHistoryOpen(true); }}>
