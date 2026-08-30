@@ -783,8 +783,22 @@ export function useCoReview({
       // would re-run this whole source-follow effect the moment a title
       // arrived - closing and reopening a segment for no reason.
       const s = coSessionRef.current;
+      // NOT `s.code`. That is the iroh JOIN TICKET - a live capability to
+      // enter the room - and it was being written verbatim into
+      // ~/Documents/Sauce Bunny/Screenings/*.json and used as a key in
+      // index.json. Documents is a user-visible, frequently cloud-synced
+      // folder; a capability does not belong in it, and the app has a
+      // contract (secret-persistence) devoted to keeping secret-shaped values
+      // out of persisted state. This slipped past it only because the
+      // screening doc is not part of Defaults.
+      //
+      // It was also wrong as an identity. The comment it replaced claimed the
+      // id was "minted by the host so every attendee's record shares one id",
+      // but a guest's `code` is None, so no attendee could ever share it. A
+      // genuinely shared id has to travel on the wire; until it does, a local
+      // random id is honest about being local.
       screeningRef.current = newScreening(
-        s.code ?? `local-${Date.now()}`,
+        crypto.randomUUID(),
         s.title || metadataRef.current?.title || "Screening",
         "host",
       );

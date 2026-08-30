@@ -715,7 +715,7 @@ human can check.
 
 ## Enforced contracts
 
-Sixty-nine rules in this file are checked by a test rather than remembered. If you
+Seventy rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -808,6 +808,7 @@ written after finding the rule already broken somewhere.
 | `modal-focus-contract` | An `aria-modal` dialog traps and restores focus; a dialog behind a scrim declares `aria-modal` (the cmd+F guard reads it) |
 | `select-contract` | Every `<select>` carries `cp-select`, that primitive kills the native control, and no rule on a select's class uses the `background` shorthand (which resets the chevron and leaves no arrow at all) |
 | `transcribe-args-contract` | Every transcription invoke passes every per-run setting. A field omitted at one call site deserialises to None and the setting silently does nothing — Speed shipped reaching 2 of 5 sites |
+| `session-identity-contract` | A screening's id is never the iroh join ticket. `SessionState.code` is a live capability to enter the room, and it was being persisted into ~/Documents and keyed into index.json |
 | `contract-register` | This table describes itself: the spelled-out count matches the rows, and every row names a test file that exists |
 | `e2e-mock-shape-contract` | The two object literals in `e2e/tauri-mock.ts` carry exactly the fields of their ts-rs binding, so 100 Playwright tests cannot certify a backend shape that no longer exists |
 | `cancellable-download-contract` | The Parakeet model download holds its job id and offers a cancel, and a killed download is not reported as a failure. The backend registered the child and said it was cancellable; the renderer minted the id and dropped it, so a half-gigabyte download that reports no progress at all could only be escaped by quitting |
