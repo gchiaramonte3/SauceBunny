@@ -1045,7 +1045,10 @@ export function ReviewPanel({
           {search && <button className="cp-review-search-clear" onClick={() => setSearch("")} title="Clear">✕</button>}
         </div>
       )}
-      {exportMsg && <div className="cp-review-export-msg" onClick={() => setExportMsg(null)} title="Dismiss">{exportMsg}</div>}
+      {/* The only report an export gives. Silent before this: the file
+          either appeared or it did not, and a failure said so in a div nothing
+          announced. */}
+      {exportMsg && <div className="cp-review-export-msg" role="status" onClick={() => setExportMsg(null)} title="Dismiss">{exportMsg}</div>}
 
       {/* Version stack row — only once the doc actually IS a stack. */}
       {!inSession && versions.length > 1 && (

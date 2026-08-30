@@ -1393,7 +1393,22 @@ export function SettingsModal(props: Props) {
                             </div>
                             {progress && (
                               <div className="cp-model-progress">
-                                <div className="bar"><span style={{ width: `${progress.percent}%` }} /></div>
+                                {/* A real progressbar, not a painted div. The
+                                    percentage was in the DOM as text but nothing
+                                    exposed it as a VALUE, so a screen reader user
+                                    watching a multi-gigabyte model download had no
+                                    way to ask whether it was moving or hung.
+                                    Queryable on focus rather than announced on
+                                    every tick: announcing each percent of a 2 GB
+                                    download is a firehose, not a status. */}
+                                <div
+                                  className="bar"
+                                  role="progressbar"
+                                  aria-label={`Downloading ${m.name}`}
+                                  aria-valuemin={0}
+                                  aria-valuemax={100}
+                                  aria-valuenow={Math.round(progress.percent)}
+                                ><span style={{ width: `${progress.percent}%` }} /></div>
                                 <span className="meta">
                                   {progress.percent.toFixed(0)}%
                                   {progress.total > 0 && ` · ${formatMB(progress.done)} / ${formatMB(progress.total)}`}
@@ -1437,7 +1452,7 @@ export function SettingsModal(props: Props) {
                     })}
                   </div>
                   {downloadError && (
-                    <div className="cp-source-hint err" style={{ marginTop: 12 }}>
+                    <div className="cp-source-hint err" role="alert" style={{ marginTop: 12 }}>
                       {downloadError}
                     </div>
                   )}
@@ -1537,7 +1552,7 @@ export function SettingsModal(props: Props) {
                       </div>
                     )}
                     {parakeetError && (
-                      <div className="cp-source-hint err" style={{ marginTop: 10 }}>
+                      <div className="cp-source-hint err" role="alert" style={{ marginTop: 10 }}>
                         {parakeetError}
                       </div>
                     )}
@@ -1727,7 +1742,7 @@ export function SettingsModal(props: Props) {
                     )}
                   </div>
                   {diarizerPrepareState === "error" && diarizerPrepareError && (
-                    <div className="cp-source-hint err" style={{ marginTop: 8 }}>
+                    <div className="cp-source-hint err" role="alert" style={{ marginTop: 8 }}>
                       {diarizerPrepareError}
                     </div>
                   )}
@@ -1772,7 +1787,14 @@ export function SettingsModal(props: Props) {
                             <div className="cp-model-blurb">{m.blurb}</div>
                             {prog && (
                               <div className="cp-model-progress">
-                                <div className="bar"><span style={{ width: `${prog.percent}%` }} /></div>
+                                <div
+                                  className="bar"
+                                  role="progressbar"
+                                  aria-label={`Downloading ${m.name}`}
+                                  aria-valuemin={0}
+                                  aria-valuemax={100}
+                                  aria-valuenow={Math.round(prog.percent)}
+                                ><span style={{ width: `${prog.percent}%` }} /></div>
                                 <span className="meta">
                                   {prog.percent.toFixed(0)}%
                                   {prog.total > 0 && ` · ${formatMB(prog.done)} / ${formatMB(prog.total)}`}
@@ -1812,7 +1834,7 @@ export function SettingsModal(props: Props) {
                       );
                     })}
                   </div>
-                  {downloadError && <div className="cp-source-hint err" style={{ marginTop: 12 }}>{downloadError}</div>}
+                  {downloadError && <div className="cp-source-hint err" role="alert" style={{ marginTop: 12 }}>{downloadError}</div>}
                 </CollapsibleSection>
 
                 <CollapsibleSection id="ai-style" label="Summary style" open={sectionOpen("ai-style")} onToggle={() => toggleSection("ai-style")}>

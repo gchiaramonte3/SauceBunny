@@ -88,8 +88,14 @@ function CloudProviderCard({ p }: { p: (typeof CLOUD)[number] }) {
         <span>{p.modelHint}</span>
         <button type="button" className="cp-aiapi-link" onClick={() => openExternal(p.keyUrl)}>Get a key ↗</button>
       </div>
+      {/* status for a success, alert for a failure: saving a key is a
+          deliberate act whose result the user is waiting on, and a wrong key
+          reported only in colour is reported to nobody. */}
       {msg && (
-        <p className={"cp-aiapi-msg" + (msg.ok ? " ok" : " err")}>
+        <p
+          className={"cp-aiapi-msg" + (msg.ok ? " ok" : " err")}
+          role={msg.ok ? "status" : "alert"}
+        >
           {msg.ok ? <IconCheck size={12} /> : <IconAlert size={12} />} {msg.text}
         </p>
       )}

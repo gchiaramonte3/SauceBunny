@@ -97,6 +97,7 @@ test("form controls outside Settings are named too", async ({ page }) => {
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
 
   const bad: string[] = [];
+  let scanned = 0;
   const VIEWS: Array<[string, string]> = [
     ["Library", ".cp-view-library"],
     ["Clip", ".cp-view-clip"],
@@ -107,8 +108,25 @@ test("form controls outside Settings are named too", async ({ page }) => {
   for (const [label, root] of VIEWS) {
     await page.getByRole("button", { name: label, exact: true }).click();
     await expect(page.locator(root)).toBeVisible();
-    const { found } = await unlabelledIn(page);
+    const { found, total } = await unlabelledIn(page);
+    scanned += total;
     for (const f of found) bad.push(`[${label}] <${f.tag} type=${f.type} class="${f.cls}">`);
   }
+  // CANARY, which this test did not have. It walks five views accumulating
+  // offenders and asserts the list is empty - so a run where no view happened
+  // to render a visible form control reports a clean pass over nothing. Its
+  // sibling above already counts what it scanned; this is the same guard, and
+  // it is the exact shape CLAUDE.md records the repo being burned by four
+  // times.
+  //
+  // AND THE NUMBER IS THE FINDING. Five whole views yield FOUR visible form
+  // controls, because most of this app's inputs live behind something: a
+  // search box that opens on click, a rename field that appears on
+  // double-click, a URL bar on one view only. So this test has always been
+  // thinner than its name suggests - it is a floor against the population
+  // collapsing to zero, not real coverage of the five views. Widening it means
+  // driving each view to reveal its inputs, which is a bigger piece of work
+  // than adding the guard that revealed the problem.
+  expect(scanned, "no form controls were scanned across five views").toBeGreaterThanOrEqual(4);
   expect(bad, `unlabelled controls:\n${bad.join("\n")}`).toEqual([]);
 });
