@@ -179,11 +179,15 @@ export function YouTubeSettings({
           <div className="v">
             <div
               className="cp-segmented"
+              role="radiogroup"
+              aria-label="Browser cookies"
               style={{ minWidth: 320, ["--seg-count"]: BROWSERS.length, ["--seg-active"]: Math.max(0, BROWSERS.indexOf(browser)) } as CSSProperties}
             >
               {BROWSERS.map((b) => (
                 <button
                   key={b}
+                  role="radio"
+                  aria-checked={browser === b}
                   className={browser === b ? "active" : ""}
                   onClick={() => setDefaults({ ...defaults, ytCookiesBrowser: b })}
                   title={b === "none" ? "Don't send cookies" : `Read cookies from ${b}`}
@@ -232,11 +236,15 @@ export function YouTubeSettings({
           <div className="v">
             <div
               className="cp-segmented"
+              role="radiogroup"
+              aria-label="Preview quality"
               style={{ minWidth: 240, ["--seg-count"]: PREVIEW_HEIGHTS.length, ["--seg-active"]: Math.max(0, PREVIEW_HEIGHTS.indexOf(defaults.previewMaxHeight)) } as CSSProperties}
             >
               {PREVIEW_HEIGHTS.map((h) => (
                 <button
                   key={h}
+                  role="radio"
+                  aria-checked={defaults.previewMaxHeight === h}
                   className={defaults.previewMaxHeight === h ? "active" : ""}
                   onClick={() => setDefaults({ ...defaults, previewMaxHeight: h })}
                   title={`Download web previews at up to ${h}p`}

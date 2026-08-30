@@ -906,10 +906,12 @@ export function SettingsModal(props: Props) {
                       <span className="desc">Which yt-dlp format selector to use by default.</span>
                     </div>
                     <div className="v">
-                      <div className="cp-segmented" style={segStyle(FORMATS.findIndex((f) => f.id === defaults.format), FORMATS.length, { minWidth: 260 })}>
+                      <div className="cp-segmented" style={segStyle(FORMATS.findIndex((f) => f.id === defaults.format), FORMATS.length, { minWidth: 260 })} role="radiogroup" aria-label="Default quality">
                         {FORMATS.map((f) => (
                           <button
                             key={f.id}
+                            role="radio"
+                            aria-checked={defaults.format === f.id}
                             className={defaults.format === f.id ? "active" : ""}
                             onClick={() => setDefaults({ ...defaults, format: f.id })}
                           >
@@ -1142,10 +1144,12 @@ export function SettingsModal(props: Props) {
                       <span className="desc">Used when the source doesn't report a frame rate.</span>
                     </div>
                     <div className="v">
-                      <div className="cp-segmented" style={segStyle(["24", "25", "30"].indexOf(defaults.timecode), 3, { minWidth: 200 })}>
+                      <div className="cp-segmented" style={segStyle(["24", "25", "30"].indexOf(defaults.timecode), 3, { minWidth: 200 })} role="radiogroup" aria-label="Frame rate fallback">
                         {(["24","25","30"] as const).map((f) => (
                           <button
                             key={f}
+                            role="radio"
+                            aria-checked={defaults.timecode === f}
                             className={defaults.timecode === f ? "active" : ""}
                             onClick={() => setDefaults({ ...defaults, timecode: f })}
                           >
@@ -1818,10 +1822,12 @@ export function SettingsModal(props: Props) {
                       <span className="desc">How answers are structured.</span>
                     </div>
                     <div className="v">
-                      <div className="cp-segmented" style={segStyle(["bullets", "numbered", "prose"].indexOf(defaults.summaryFormat), 3, { minWidth: 270 })}>
+                      <div className="cp-segmented" style={segStyle(["bullets", "numbered", "prose"].indexOf(defaults.summaryFormat), 3, { minWidth: 270 })} role="radiogroup" aria-label="Summary format">
                         {(["bullets", "numbered", "prose"] as const).map((f) => (
                           <button
                             key={f}
+                            role="radio"
+                            aria-checked={defaults.summaryFormat === f}
                             className={defaults.summaryFormat === f ? "active" : ""}
                             onClick={() => setDefaults({ ...defaults, summaryFormat: f })}
                           >
@@ -1837,10 +1843,12 @@ export function SettingsModal(props: Props) {
                       <span className="desc">Roughly how much detail the model includes.</span>
                     </div>
                     <div className="v">
-                      <div className="cp-segmented" style={segStyle(["brief", "standard", "detailed"].indexOf(defaults.summaryLength), 3, { minWidth: 270 })}>
+                      <div className="cp-segmented" style={segStyle(["brief", "standard", "detailed"].indexOf(defaults.summaryLength), 3, { minWidth: 270 })} role="radiogroup" aria-label="Summary length">
                         {(["brief", "standard", "detailed"] as const).map((l) => (
                           <button
                             key={l}
+                            role="radio"
+                            aria-checked={defaults.summaryLength === l}
                             className={defaults.summaryLength === l ? "active" : ""}
                             onClick={() => setDefaults({ ...defaults, summaryLength: l })}
                           >

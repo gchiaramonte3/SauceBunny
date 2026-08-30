@@ -737,10 +737,12 @@ export function Sidebar(props: Props) {
               {/* Use the source-aware availableFormats list (filtered
                   above) — drops Audio for local files so the user
                   doesn't click into a "coming soon" dead end. */}
-              <div className="cp-segmented" style={{ ["--seg-count"]: availableFormats.length, ["--seg-active"]: Math.max(0, availableFormats.findIndex((f) => f.id === exportOpts.format)) } as CSSProperties}>
+              <div className="cp-segmented" role="radiogroup" aria-label="Export format" style={{ ["--seg-count"]: availableFormats.length, ["--seg-active"]: Math.max(0, availableFormats.findIndex((f) => f.id === exportOpts.format)) } as CSSProperties}>
                 {availableFormats.map((f) => (
                   <button
                     key={f.id}
+                    role="radio"
+                    aria-checked={exportOpts.format === f.id}
                     className={exportOpts.format === f.id ? "active" : ""}
                     onClick={() => setExportOpts({ ...exportOpts, format: f.id })}
                   >
