@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { usePaneWidth } from "../hooks/use-pane-width";
 import { inertWhen } from "../lib/inert";
 import { dropIndexAt, moveItem } from "../lib/reorder";
 import { invoke } from "@tauri-apps/api/core";
@@ -251,15 +252,6 @@ const DRAWER_WIDTH_DEFAULT = 440;
 // avatar) fits on one row; below it the toolbar wraps onto two lines.
 const REVIEW_COMFORT_WIDTH = 520;
 
-function loadDrawerWidth(): number {
-  try {
-    const raw = localStorage.getItem(DRAWER_WIDTH_KEY);
-    if (!raw) return DRAWER_WIDTH_DEFAULT;
-    const n = parseInt(raw, 10);
-    if (!Number.isFinite(n)) return DRAWER_WIDTH_DEFAULT;
-    return Math.max(DRAWER_WIDTH_MIN, Math.min(DRAWER_WIDTH_MAX, n));
-  } catch { return DRAWER_WIDTH_DEFAULT; }
-}
 
 export function QueueDrawer({
   open, viewActive = true, onClose, queue, fps, running, hasFolder,
@@ -291,47 +283,34 @@ export function QueueDrawer({
   // persists across sessions via localStorage. While dragging we set
   // a body-class so global cursors and pointer-events apply uniformly
   // (without that, hovering over an <iframe> would interrupt the drag).
-  const [drawerWidth, setDrawerWidth] = useState<number>(loadDrawerWidth);
-  // Drives the shared handle's `.dragging` bright state (resize.css).
-  const [resizing, setResizing] = useState(false);
-  const dragStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const onResizeMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    dragStateRef.current = { startX: e.clientX, startWidth: drawerWidth };
-    setResizing(true);
-    document.body.classList.add("cp-resizing-ew");
-    function onMove(ev: MouseEvent) {
-      const st = dragStateRef.current;
-      if (!st) return;
-      // Drawer grows when you drag LEFT (toward the canvas) and shrinks
-      // when you drag right — opposite of the cursor delta sign.
-      const dx = st.startX - ev.clientX;
-      const next = Math.max(
-        DRAWER_WIDTH_MIN,
-        Math.min(DRAWER_WIDTH_MAX, st.startWidth + dx),
-      );
-      setDrawerWidth(next);
-    }
-    function onUp() {
-      const st = dragStateRef.current;
-      dragStateRef.current = null;
-      setResizing(false);
-      document.body.classList.remove("cp-resizing-ew");
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-      // Commit to localStorage once on release rather than on every
-      // mousemove tick — saves dozens of writes during a typical drag.
-      if (st) {
-        try { localStorage.setItem(DRAWER_WIDTH_KEY, String(loadDrawerWidth())); } catch { /* quota */ }
-      }
-    }
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  };
-  // Persist whenever width settles (after a re-render).
-  useEffect(() => {
-    try { localStorage.setItem(DRAWER_WIDTH_KEY, String(drawerWidth)); } catch { /* quota */ }
-  }, [drawerWidth]);
+  /**
+   * The drawer's width, via the shared pane-resize hook.
+   *
+   * This was hand-rolled - its own state, clamp, drag listeners, body cursor
+   * class and persist effect - beside a LibraryTree that already used
+   * usePaneWidth for the identical job. Two consequences.
+   *
+   * The handle had NO KEYBOARD PATH: no tabIndex, no onKeyDown, while carrying
+   * role="separator" and aria-label="Resize transcript panel". Two of the
+   * app's four resize handles were already done properly and this was not one
+   * of them (WCAG 2.1.1, Level A). The hook brings arrows and Home.
+   *
+   * And the copy carried a bug the shared one cannot have: on mouse-up it did
+   * `setItem(KEY, String(loadDrawerWidth()))` - writing back the value it had
+   * just READ out of storage rather than the width just dragged to. Harmless
+   * only because the effect below persisted the real value a moment later.
+   *
+   * side: "right" is this drawer's own geometry - it grows as the pointer
+   * moves LEFT, toward the canvas - which the hook has a parameter for.
+   */
+  const {
+    width: drawerWidth, setWidth: setDrawerWidth, resizing,
+    onMouseDown: onResizeMouseDown, onKeyDown: onResizeKeyDown,
+  } = usePaneWidth({
+    key: DRAWER_WIDTH_KEY,
+    min: DRAWER_WIDTH_MIN, max: DRAWER_WIDTH_MAX, fallback: DRAWER_WIDTH_DEFAULT,
+    side: "right",
+  });
   const queuedCount = counts.queued ?? 0;
   const doneCount = counts.done ?? 0;
   const errorCount = counts.error ?? 0;
@@ -388,8 +367,11 @@ export function QueueDrawer({
     const prev = prevTabRef.current;
     prevTabRef.current = activeTab;
     if (embedded || activeTab !== "review" || prev === "review") return;
-    setDrawerWidth((w) => (w < REVIEW_COMFORT_WIDTH ? REVIEW_COMFORT_WIDTH : w));
-  }, [activeTab, embedded]);
+    setDrawerWidth((w: number) => (w < REVIEW_COMFORT_WIDTH ? REVIEW_COMFORT_WIDTH : w));
+    // setDrawerWidth is a stable useCallback from usePaneWidth, so naming it
+    // here costs nothing - the old hand-rolled setState had the same identity
+    // and the linter simply could not see across the hook boundary before.
+  }, [activeTab, embedded, setDrawerWidth]);
   // Keep-alive: a tab body mounts on first visit and stays mounted (hidden)
   // afterward, so per-tab state — transcript search + scroll, an in-progress
   // AI chat, a running dictation in Review — survives tab switches. Lazy so
@@ -692,11 +674,14 @@ export function QueueDrawer({
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize transcript panel"
+          tabIndex={0}
           onMouseDown={onResizeMouseDown}
+          onKeyDown={onResizeKeyDown}
           // Double-click resets to default width — a small kindness
-          // for anyone who drags the drawer to a useless size.
+          // for anyone who drags the drawer to a useless size. Home does the
+          // same from the keyboard.
           onDoubleClick={() => setDrawerWidth(DRAWER_WIDTH_DEFAULT)}
-          title="Drag to resize · double-click to reset"
+          title="Drag to resize · arrow keys to nudge · Home to reset"
         />
       )}
       {/* Tab strip — single-source-of-truth iteration over TABS so a new

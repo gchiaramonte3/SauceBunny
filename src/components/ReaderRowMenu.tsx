@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useMenuKeys } from "../hooks/use-menu-keys";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -38,6 +38,23 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
   // Home/End, type-ahead, Tab to leave. It is portalled to document.body,
   // so without focus moving in on open there is no way to reach it at all.
   const menuRef = useRef<HTMLDivElement>(null);
+  /**
+   * The dialog's accessible name.
+   *
+   * It declared role="dialog" aria-modal="true" with NEITHER aria-label nor
+   * aria-labelledby, while rendering an <h4> title two lines below that
+   * nothing pointed at - so a screen reader announced "dialog" and left the
+   * user to work out which one. In this file that includes the DELETE
+   * confirmation.
+   *
+   * ONE id for all modes: they are mutually exclusive, so exactly one <h4>
+   * is ever in the tree, and the mode is already in the title text ("Rename
+   * project", "Delete X"), which is what makes the announcement distinct.
+   *
+   * modal-focus-contract parses this very tag for four other properties and
+   * never asked for a name; it does now.
+   */
+  const titleId = useId();
   useMenuKeys(menuRef, mode === "menu", onClose);
 
   // Outside-click / Escape closes the whole thing.
@@ -106,10 +123,10 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
   const ext = target.entry.srtPath.split(".").pop() || "srt";
   return createPortal(
     <div className="cp-rowmenu-scrim modal" onMouseDown={onClose}>
-      <div ref={dialogRef} tabIndex={-1} className="cp-rowmenu-dialog" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+      <div ref={dialogRef} tabIndex={-1} className="cp-rowmenu-dialog" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         {mode === "rename" ? (
           <>
-            <h4 className="cp-rowmenu-title">Rename transcript</h4>
+            <h4 id={titleId} className="cp-rowmenu-title">Rename transcript</h4>
             <input
               className="cp-rowmenu-input" value={nameInput} autoFocus spellCheck={false}
               onChange={(e) => { setNameInput(e.target.value); setErr(null); }}
@@ -127,7 +144,7 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
           </>
         ) : (
           <>
-            <h4 className="cp-rowmenu-title">Move “{target.title}”</h4>
+            <h4 id={titleId} className="cp-rowmenu-title">Move “{target.title}”</h4>
             <div className="cp-rowmenu-folders">
               {folderOptions.map((f) => (
                 <button key={f.dir} className="cp-rowmenu-folder" onClick={() => doMove(f.dir)} disabled={busy}>{f.label}</button>

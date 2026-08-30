@@ -75,5 +75,21 @@ export function usePaneWidth({ key, min, max, fallback, side = "left" }: {
     }
   }, [min, max, fallback, side]);
 
-  return { width, resizing, onMouseDown, onKeyDown, min, max };
+  /**
+   * Set the width programmatically, CLAMPED like every other path.
+   *
+   * For the callers that resize for a reason other than a drag - a
+   * double-click reset, or widening to fit a toolbar that would otherwise
+   * wrap. Exposing the raw setter instead would let those bypass the bounds
+   * this hook exists to hold, which is how one pane comes to have two
+   * different minimum widths.
+   */
+  const setClamped = useCallback((next: number | ((w: number) => number)) => {
+    setWidth((w) => {
+      const v = typeof next === "function" ? next(w) : next;
+      return Math.max(min, Math.min(max, v));
+    });
+  }, [min, max]);
+
+  return { width, setWidth: setClamped, resizing, onMouseDown, onKeyDown, min, max };
 }

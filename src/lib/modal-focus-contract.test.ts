@@ -129,6 +129,28 @@ describe("modal dialogs", () => {
     expect(bad, "aria-modal dialogs whose container cannot take focus").toEqual([]);
   });
 
+  it("have an accessible name", () => {
+    // A dialog announces as its NAME. Without one a screen reader says
+    // "dialog" and stops, leaving the user to work out which one opened -
+    // and two of these were the rename and DELETE confirmations for a
+    // project, which are the dialogs where knowing matters most.
+    //
+    // This guard was one line away from catching it the whole time: it
+    // already parses these very tags, brace-aware, for four other
+    // properties. It simply never asked.
+    //
+    // Per TAG, not per file: a file can hold several dialogs and only some
+    // of them named, which a per-file check reads as fine.
+    const bad: string[] = [];
+    for (const f of modalFiles) {
+      for (const tag of f.tags.filter(isModal)) {
+        if (/aria-label(ledby)?=/.test(tag)) continue;
+        bad.push(f.file);
+      }
+    }
+    expect(bad, "aria-modal dialog with neither aria-label nor aria-labelledby").toEqual([]);
+  });
+
   it("declare aria-modal whenever they sit behind a scrim", () => {
     // The other direction, and the one with a non-obvious cost: the attribute
     // is what TranscriptViewer's cmd+F / cmd+G guard reads. A modal that omits

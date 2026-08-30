@@ -1,5 +1,5 @@
 import { COMMENT_REACTION_EMOJI } from "../lib/reactions";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMenuKeys } from "../hooks/use-menu-keys";
 import { ColorSwatches } from "./ColorSwatches";
 import { useModalFocus } from "../hooks/use-modal-focus";
@@ -412,6 +412,30 @@ export function ReviewPanel({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   // Panel root — measured for the composer-resize 60%-of-panel cap.
   const rootRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Where focus goes when a comment or reply is deleted.
+   *
+   * The delete button sits INSIDE the card it destroys, so React unmounts the
+   * focused node and focus falls to <body> - the keyboard then restarts from
+   * the top of the document, which on this screen is a long way from the
+   * comment you were reading (WCAG 2.4.3, Level A). Nothing caught it: the
+   * focus specs check dialogs and popovers, not a list that loses a row.
+   *
+   * The list itself is the catcher rather than the neighbouring card. Focusing
+   * a neighbour reads better, but it needs the surviving id captured before
+   * the dispatch and re-focused after the re-render, in two components, with
+   * an empty-list case anyway. The container is one line, always correct, and
+   * leaves the next Tab where the user was.
+   */
+  const listRef = useRef<HTMLDivElement>(null);
+  const catchFocus = useCallback(() => {
+    // Only if the delete actually orphaned focus. A row whose menu moved focus
+    // somewhere deliberate must keep it.
+    if (document.activeElement === document.body || document.activeElement == null) {
+      listRef.current?.focus();
+    }
+  }, []);
   // ── Composer height (drag-resizable split vs the comment list) ──────
   // null = auto-size; a number = user-dragged fixed height. Mirrored into a
   // ref because autosizeComposer is also called from once-registered
@@ -665,6 +689,34 @@ export function ReviewPanel({
     }
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
+  };
+
+  /**
+   * The keyboard half of the composer resize.
+   *
+   * The handle carried role="separator" and aria-label="Resize comment box"
+   * with onMouseDown and nothing else, so the composer height could not be
+   * changed by keyboard at all (WCAG 2.1.1, Level A). Two of the app's four
+   * resize handles already had tabIndex + arrows; this was one of the two that
+   * did not.
+   *
+   * Up/Down rather than Left/Right, because this splitter is horizontal and
+   * moves the boundary vertically - and it grows UPWARD, matching the drag
+   * (dragging up grows the composer). Home clears the manual height, which is
+   * the same thing the double-click reset does. The 60%-of-panel cap is read
+   * the same way the drag reads it, so the two paths stop at the same place.
+   */
+  const onComposerResizeKey = (e: React.KeyboardEvent) => {
+    const step = e.shiftKey ? 32 : 8;
+    if (e.key === "Home") { e.preventDefault(); setComposerHeight(null); return; }
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const cap = rootRef.current ? Math.round(rootRef.current.clientHeight * 0.6) : COMPOSER_LOAD_MAX;
+    const current = composerHeightRef.current
+      ?? composerRef.current?.getBoundingClientRect().height
+      ?? COMPOSER_MIN;
+    const delta = e.key === "ArrowUp" ? step : -step;
+    setComposerHeight(Math.max(COMPOSER_MIN, Math.min(cap, Math.round(current + delta))));
   };
 
   // Load (and ensure a version exists) whenever the source changes.
@@ -1078,7 +1130,7 @@ export function ReviewPanel({
       )}
 
       {/* Comment list */}
-      <div className="cp-review-list">
+      <div className="cp-review-list" ref={listRef} tabIndex={-1}>
         {roots.length === 0 && carried.length === 0 && (
           <div className="cp-review-hint">No comments yet. Scrub to a spot and add one below.</div>
         )}
@@ -1101,11 +1153,11 @@ export function ReviewPanel({
             onQueueRange={onQueueRange}
             onShowAnnotation={onShowAnnotation}
             onResolve={() => { const at = Date.now(), v = !c.resolved; dispatchUndoable(v ? "resolve comment" : "reopen comment", { t: "resolve", id: c.id, resolved: v, at }, (d) => setResolved(d, c.id, v, at)); }}
-            onDelete={() => dispatchUndoable("delete comment", { t: "del", id: c.id }, (d) => deleteComment(d, c.id))}
+            onDelete={() => { dispatchUndoable("delete comment", { t: "del", id: c.id }, (d) => deleteComment(d, c.id)); catchFocus(); }}
             onEdit={(body) => { const at = Date.now(); dispatchUndoable("edit comment", { t: "edit", id: c.id, body, at }, (d) => editComment(d, c.id, body, at)); }}
             onLike={(emoji) => { if (!ensureNamed()) return; const liked = !(reactionsOf(c)[emoji] ?? []).includes(author); dispatch({ t: "like", id: c.id, name: author, liked, emoji }, (d) => setLike(d, c.id, author, liked, emoji)); }}
             onEditReply={(replyId, body) => { const at = Date.now(); dispatchUndoable("edit reply", { t: "editReply", versionId, commentId: c.id, replyId, body, at }, (d) => editReply(d, versionId, c.id, replyId, body, at)); }}
-            onDeleteReply={(replyId) => dispatchUndoable("delete reply", { t: "delReply", versionId, commentId: c.id, replyId }, (d) => removeReply(d, versionId, c.id, replyId))}
+            onDeleteReply={(replyId) => { dispatchUndoable("delete reply", { t: "delReply", versionId, commentId: c.id, replyId }, (d) => removeReply(d, versionId, c.id, replyId)); catchFocus(); }}
             onLikeReply={(replyId, emoji) => { if (!ensureNamed()) return; const r = viewDoc.comments.find((x) => x.id === replyId); if (!r) return; const liked = !(reactionsOf(r)[emoji] ?? []).includes(author); dispatch({ t: "like", id: replyId, name: author, liked, emoji }, (d) => setLike(d, replyId, author, liked, emoji)); }}
             collapsed={collapsedThreads.has(c.id)}
             onToggleCollapse={() => toggleThread(c.id)}
@@ -1170,6 +1222,7 @@ export function ReviewPanel({
         text={text} setText={setTextLatching} anchorSec={anchorSec}
         composerRef={composerRef} autosize={autosizeComposer}
         onResizeStart={onComposerResizeStart}
+        onResizeKey={onComposerResizeKey}
         resizing={composerResizing}
         onResizeReset={() => setComposerHeight(null)}
         submit={submit} hasDraft={annotationHasContent(draft)}
@@ -1432,7 +1485,7 @@ function ReviewComposer({
   dictError, clearDictError, dictNote, clearDictNote,
   toggleDictation, levelRef,
   text, setText, anchorSec, composerRef, autosize,
-  onResizeStart, resizing, onResizeReset,
+  onResizeStart, onResizeKey, resizing, onResizeReset,
   submit, hasDraft, playheadActive, fps,
   rangeIn, rangeOut, onRangeTap, onRangeClear, rangeColor,
   onPasteNotes,
@@ -1458,6 +1511,7 @@ function ReviewComposer({
   autosize: () => void;
   /** Start the composer-height drag (handle on the composer's top edge). */
   onResizeStart: (e: React.MouseEvent) => void;
+  onResizeKey: (e: React.KeyboardEvent) => void;
   /** True while the height drag is live — brightens the shared handle rail. */
   resizing: boolean;
   /** Double-click reset — back to auto-size. */
@@ -1598,9 +1652,11 @@ function ReviewComposer({
           role="separator"
           aria-orientation="horizontal"
           aria-label="Resize comment box"
+          tabIndex={0}
           onMouseDown={onResizeStart}
+          onKeyDown={onResizeKey}
           onDoubleClick={onResizeReset}
-          title="Drag to resize · double-click to reset"
+          title="Drag to resize · arrow keys to nudge · Home to reset"
         />
         {onToggleDraw && (
           <button
