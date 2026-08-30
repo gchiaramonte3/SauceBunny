@@ -138,6 +138,28 @@ describe("both sides of a session record it", () => {
     }
   });
 
+  it("the segment effect reads what the ROOM is on, not what we opened", () => {
+    // THE LIMIT OF THE TEST ABOVE, found the hard way. "Has a production
+    // caller" is not the same as "the caller can make the updater do work".
+    //
+    // markWatched passed that check while being incapable of changing
+    // anything: the segment effect drove off `sessionSource` (what THIS
+    // machine has loaded) and early-returned on kind === "none", so it could
+    // not run without a resolved local source, so openSegment always set
+    // watched true. A guest locked out of the source got no segment at all -
+    // their record said the room watched nothing.
+    //
+    // `pendingSource` is the room's announced source before this machine has
+    // opened it. Reading it is what makes the unwatched case reachable, so it
+    // is the load-bearing fact rather than the presence of the call.
+    const bodies = [...hook.matchAll(/useEffect\(\(\) => \{([\s\S]*?)\n  \}, \[/g)]
+      .map((m) => m[1])
+      .filter((b) => /openSegment\(/.test(b));
+    expect(bodies.length, "no segment effect found").toBe(1);
+    expect(bodies[0], "the segment effect ignores pendingSource, so `watched` can never be false")
+      .toMatch(/pendingSource/);
+  });
+
   it("the record reaches disk before the session ends", () => {
     // saveScreening had exactly ONE production caller, in the role->off
     // branch. Quit mid-session and the whole record was gone - while the

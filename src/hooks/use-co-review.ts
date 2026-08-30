@@ -1085,19 +1085,45 @@ export function useCoReview({
     }, 1500);
   }, []);
 
-  // What the room watched, in order.
+  // What THE ROOM watched, in order - which is not the same as what this
+  // machine managed to open, and reading the second for the first left two
+  // holes.
+  //
+  // This used to drive off `sessionSource` alone and early-return on
+  // kind === "none". `sessionSource` is what THIS machine has loaded, so:
+  //
+  //   1. A guest who could not open the source got NO SEGMENT AT ALL. Their
+  //      record said the room watched nothing, when the room watched something
+  //      they were locked out of - the single most useful thing that record
+  //      could have told them.
+  //   2. `watched` could never be false, because the effect could not run
+  //      without a resolved local source, so openSegment always set it true
+  //      and markWatched was a call that could not change anything. Exactly
+  //      the "declared, indexed, rendered, never actually written" shape that
+  //      screening-record-contract was written about - hiding BEHIND that
+  //      contract, which asks whether a production caller exists and not
+  //      whether the caller can ever make the updater do work.
+  //
+  // `pendingSource` is what the room announced via loadSource and this machine
+  // has not opened yet; it clears on success AND on failure. So the room's
+  // source is the pending one if there is one, else what we have open.
   useEffect(() => {
     if (coSession.role === "off") return;
-    if (sessionSource.kind === "none") return;
+    const room = pendingSource ?? sessionSource;
+    // Nothing has ever been on. Do not mint a screening for a room that has
+    // not watched anything yet.
+    if (room.kind === "none" && !screeningRef.current) return;
     const before = ensureScreening();
-    let next = openSegment(before, sessionSource, reviewSourceKey || null);
-    // A segment opened before this machine resolved the source locally is
-    // recorded UNWATCHED, and this is what later flips it. markWatched had no
-    // caller at all while only the host recorded, because the host's own
-    // effect could not run without a resolved key - so the flag could never be
-    // anything but true and the "the room watched this, I could not open it"
-    // case had no way to exist.
-    if (reviewSourceKey) next = markWatched(next, reviewSourceKey);
+    // The local key belongs to the segment ONLY when we are actually on the
+    // room's source. While a source is pending, `reviewSourceKey` still names
+    // the PREVIOUS one, and handing that over would file the new segment as
+    // watched, against the wrong document.
+    const onIt = pendingSource == null && sessionSource.kind !== "none";
+    let next = openSegment(before, room, onIt ? (reviewSourceKey || null) : null);
+    // ...and this is what flips it when the guest finally lands on the source:
+    // openSegment sees the same source and no-ops, then markWatched does the
+    // one field. That sequence is the whole reason markWatched exists.
+    if (onIt && reviewSourceKey) next = markWatched(next, reviewSourceKey);
     if (next === before) return;
     screeningRef.current = next;
     saveScreeningSoon();
@@ -1107,7 +1133,7 @@ export function useCoReview({
     // unchanged source so that was harmless, but harmless churn is still churn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coSession.role, sessionSource.kind, sessionSource.url, sessionSource.fingerprint,
-      sessionSource.title, sessionSource.duration, reviewSourceKey,
+      sessionSource.title, sessionSource.duration, reviewSourceKey, pendingSource,
       ensureScreening, saveScreeningSoon]);
 
   // A pending write-through must not outlive the hook. Without this, quitting

@@ -188,3 +188,65 @@ describe("who was in the room", () => {
     expect(screeningIsWorthKeeping(d)).toBe(false);
   });
 });
+
+/**
+ * `watched` exists for one case: THE ROOM watched something and this machine
+ * could not open it. That case was unreachable for the whole life of the
+ * field, because the effect that fills segments read `sessionSource` - what
+ * THIS machine has loaded - so it could not run at all without a resolved
+ * local source, and openSegment therefore always set watched true.
+ *
+ * markWatched was a call that could not change anything, and a locked-out
+ * guest got no segment whatsoever: their record said the room watched
+ * nothing. It is the same declared-indexed-rendered-never-written shape as the
+ * other four, and it survived BEHIND screening-record-contract, which asks
+ * whether a production caller exists rather than whether that caller can ever
+ * make the updater do work.
+ */
+describe("a segment the room watched and we could not open", () => {
+  it("is recorded, unwatched, rather than not recorded at all", () => {
+    let d = newScreening("s", "R", "guest", 0);
+    // The room announced a source; this machine has not opened it. That is
+    // what a null local key means at this call.
+    d = openSegment(d, web("https://a", "Cut A"), null, 100);
+    expect(d.segments).toHaveLength(1);
+    expect(d.segments[0].watched, "the room watched it; we did not").toBe(false);
+    expect(d.segments[0].title, "and the record still says WHAT").toBe("Cut A");
+  });
+
+  it("flips to watched when the source finally resolves", () => {
+    // The real sequence: openSegment sees the same source and no-ops, then
+    // markWatched does the one field. Without both halves the flag is either
+    // permanently false or permanently true.
+    let d = newScreening("s", "R", "guest", 0);
+    d = openSegment(d, web("https://a", "Cut A"), null, 100);
+    const beforeFlip = d;
+    d = openSegment(d, web("https://a", "Cut A"), "keyA", 150);
+    expect(d, "the same source must not start a second segment").toBe(beforeFlip);
+    d = markWatched(d, "keyA");
+    expect(d.segments[0].watched).toBe(true);
+    expect(d.segments[0].localSourceKey, "and now it knows where the notes are").toBe("keyA");
+  });
+
+  it("stays unwatched when the open fails and the room moves on", () => {
+    let d = newScreening("s", "R", "guest", 0);
+    d = openSegment(d, web("https://a", "Cut A"), null, 100);
+    d = openSegment(d, web("https://b", "Cut B"), "keyB", 200);
+    expect(d.segments).toHaveLength(2);
+    expect(d.segments[0].watched, "we never got into Cut A").toBe(false);
+    expect(d.segments[0].endedAt, "and it is closed, not left open").toBe(200);
+    expect(d.segments[1].watched).toBe(true);
+  });
+
+  it("markWatched does nothing to a segment that is already closed", () => {
+    // CANARY for the three above: if markWatched flipped any segment rather
+    // than the OPEN one, the first test would still pass while the flag became
+    // meaningless.
+    let d = newScreening("s", "R", "guest", 0);
+    d = openSegment(d, web("https://a", "Cut A"), null, 100);
+    d = openSegment(d, web("https://b", "Cut B"), "keyB", 200);
+    const before = d;
+    expect(markWatched(d, "keyA"), "the closed Cut A must not be touched").toBe(before);
+    expect(before.segments[0].watched).toBe(false);
+  });
+});

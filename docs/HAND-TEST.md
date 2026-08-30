@@ -399,3 +399,26 @@ while still showing the time, the source count and the note count.
 Worth noting while you are in there: the reaction rise and the screening
 write-through are both timed, so if you are watching for either, give it a
 couple of seconds before concluding it did not happen.
+
+### Phase 4 additions
+
+**6. Adopt a range the room agreed on.** In a session, post a review comment
+with a RANGE (shift-I / shift-O arm it, then post) rather than a point. Its
+chip row should now show **Mark** and **Queue** beside the timecode. Mark sets
+your own in/out; Queue adds that span to your export queue. Check on the GUEST
+too: adopting a range the host posted should set the guest's own marks and
+change nothing on the host's screen. A point comment must show neither button.
+
+**7. A guest who cannot open the source still gets a record.** The awkward one,
+and the one worth the setup. Have the host load a source the guest cannot open
+(a local file the guest does not have is easiest). The guest's screening file
+should still list that segment, with `"watched": false` and the title of what
+the room was on. Before this branch the guest's record said the room watched
+nothing at all. Then have the host switch to something the guest CAN open: the
+new segment should read `"watched": true`.
+
+**8. Clear on quit actually clears now, and keeps what it must.** Turn on
+Settings ▸ General ▸ Cache ▸ Clear on quit. Note the per-category sizes, quit,
+relaunch, and look again: downloads/audio/meta should be gone. **Received
+files must NOT be** - that is a peer's transfer and the only copy. Clearing
+those is still possible, deliberately, via their own Clear button.
