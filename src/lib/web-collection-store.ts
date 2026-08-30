@@ -201,6 +201,32 @@ export function deleteWebCollection(id: string): void {
   notify();
 }
 
+/**
+ * Put a deleted collection back, with its own id and in its own place.
+ *
+ * The one thing the model lacked for undo. `createWebCollection` always mints
+ * a fresh id and appends, so "create it again" gives a DIFFERENT collection in
+ * a different position - every card that referenced the old id stays orphaned,
+ * and the shelf order changes. A restore has to be able to say which id and
+ * which index.
+ *
+ * Idempotent by id, matching hydrate's own merge rule, so a double undo or a
+ * replay cannot produce two of the same collection. The cap is honoured: if
+ * the shelf filled up while the collection was gone, the restore declines
+ * rather than pushing past MAX_COLLECTIONS, and reports it.
+ */
+export function restoreWebCollection(c: WebCollection, index: number): boolean {
+  if (collections.some((x) => x.id === c.id)) return true; // already back
+  if (collections.length >= MAX_COLLECTIONS) return false;
+  const at = Math.max(0, Math.min(index, collections.length));
+  const next = collections.slice();
+  next.splice(at, 0, c);
+  collections = next;
+  save();
+  notify();
+  return true;
+}
+
 export function renameWebCollection(id: string, name: string): void {
   const trimmed = name.trim();
   if (!trimmed) return;

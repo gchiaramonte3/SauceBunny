@@ -4,6 +4,7 @@ import {
   filterCachedWeb, groupBySite, siteName, sortCachedWeb, type CachedWebItem,
 } from "../lib/web-source";
 import { formatBytes } from "../lib/library";
+import { appUndo } from "../lib/undo";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { secondsToClock } from "../lib/timecode";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
@@ -15,7 +16,7 @@ import { useCardDrag } from "../hooks/use-card-drag";
 import { WebListRows } from "./WebListRows";
 import { WebCollectionMenu } from "./WebCollectionMenu";
 import {
-  createWebCollection, addToWebCollection, deleteWebCollection, flushWebCollections, getWebCollections, hydrateWebCollections, subscribeWebCollections, type WebCollection,
+  createWebCollection, addToWebCollection, deleteWebCollection, restoreWebCollection, flushWebCollections, getWebCollections, hydrateWebCollections, subscribeWebCollections, type WebCollection,
 } from "../lib/web-collection-store";
 
 /** View prefs for the web pane, persisted separately from the folder pane's:
@@ -374,8 +375,25 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
                   ? `Confirm deleting the collection ${c.name}`
                   : `Delete the collection ${c.name}`}
                 onClick={() => {
-                  if (colArmed) { setArmedCollection(null); deleteWebCollection(c.id); }
-                  else setArmedCollection(c.id);
+                  if (!colArmed) { setArmedCollection(c.id); return; }
+                  setArmedCollection(null);
+                  // Captured BEFORE the delete: afterwards the collection is
+                  // gone from the store and its index with it. The arming
+                  // click is a confirm, not an undo - it stops the accident,
+                  // and does nothing for the deliberate press you regret.
+                  const at = getWebCollections().findIndex((x) => x.id === c.id);
+                  const removed = c;
+                  deleteWebCollection(c.id);
+                  appUndo.push({
+                    label: `delete ${c.name}`,
+                    scope: "collections",
+                    // restoreWebCollection is the one thing the model lacked:
+                    // createWebCollection always mints a NEW id and appends, so
+                    // "make it again" leaves every card that referenced the old
+                    // id orphaned and puts the shelf in a different order.
+                    undo: () => { restoreWebCollection(removed, at < 0 ? 0 : at); },
+                    redo: () => deleteWebCollection(removed.id),
+                  });
                 }}
               >
                 {colArmed ? "Delete collection" : "×"}

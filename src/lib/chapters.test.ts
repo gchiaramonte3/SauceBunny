@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   parseChapters, sampleTranscriptEvenly, chaptersToYouTube, chapterTimestamp,
-  loadChapters, saveChapters,
+  loadChapters, saveChapters, adoptSourceChapters, hasCreatorChapters,
 } from "./chapters";
 
 describe("parseChapters", () => {
@@ -169,5 +171,69 @@ describe("persistence round-trip", () => {
       JSON.stringify([{ time: 5, title: "ok" }, { time: "x", title: "bad" }, null, { time: 9, title: " " }]));
     expect(loadChapters(key)).toEqual([{ time: 5, title: "ok" }]);
     localStorage.removeItem("saucebunny.chapters." + key);
+  });
+});
+
+/**
+ * PROVENANCE, because "did you edit it" is a different question.
+ *
+ * The Regenerate confirm was gated on `editedRef` — "have you deleted a
+ * chapter since the last generate". A list ADOPTED FROM THE CREATOR and never
+ * touched has that flag false, so Regenerate replaced the publisher's own
+ * chapter list with model output silently: the one case where what is already
+ * there is more trustworthy than anything the app can make.
+ */
+describe("a chapter remembers where it came from", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("marks adopted chapters as the creator's", () => {
+    adoptSourceChapters("k", [{ time: 0, title: "Intro" }, { time: 60, title: "Part two" }]);
+    const got = loadChapters("k");
+    expect(got).toHaveLength(2);
+    expect(got.every((c) => c.origin === "creator")).toBe(true);
+    expect(hasCreatorChapters(got)).toBe(true);
+  });
+
+  it("says no for a hand-made or generated list", () => {
+    // CANARY for the case above: a predicate that always returned true would
+    // satisfy it while making every Regenerate ask the wrong question.
+    saveChapters("k", [{ time: 0, title: "typed by hand" }]);
+    expect(hasCreatorChapters(loadChapters("k"))).toBe(false);
+    saveChapters("k2", [{ time: 0, title: "made up", origin: "generated" }]);
+    expect(hasCreatorChapters(loadChapters("k2"))).toBe(false);
+  });
+
+  it("reads a list written before the field existed", () => {
+    // Every chapter list already on disk. They must parse, and they must not
+    // claim a provenance nobody recorded.
+    localStorage.setItem("saucebunny.chapters.k", JSON.stringify([{ time: 0, title: "Old" }]));
+    const got = loadChapters("k");
+    expect(got).toHaveLength(1);
+    expect(got[0].origin).toBeUndefined();
+    expect(hasCreatorChapters(got), "unknown is not creator").toBe(false);
+  });
+
+  it("keeps refusing to adopt over a list that already exists", () => {
+    // The pre-existing rule, re-checked because the map() now adds a field
+    // and it would be easy to change what this returns by accident.
+    saveChapters("k", [{ time: 0, title: "mine" }]);
+    expect(adoptSourceChapters("k", [{ time: 5, title: "theirs" }])).toBe(false);
+    expect(loadChapters("k")[0].title).toBe("mine");
+  });
+});
+
+describe("the Regenerate confirm consults provenance", () => {
+  it("asks hasCreatorChapters, not only editedRef", () => {
+    // A wiring fact the unit tests above cannot see: they prove the predicate
+    // is right, not that anything calls it. Deleting the call leaves both the
+    // stamping and the predicate perfect and the warning gone - which is the
+    // bug, exactly as it shipped.
+    const src = readFileSync(
+      join(__dirname, "..", "components", "AiChapters.tsx"), "utf8",
+    ).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+    expect(src, "the confirm no longer asks where the chapters came from")
+      .toMatch(/hasCreatorChapters\(chapters\)/);
+    // And generated lists still say so, or the predicate has nothing to read.
+    expect(src, "generated chapters are not stamped").toMatch(/origin: "generated"/);
   });
 });

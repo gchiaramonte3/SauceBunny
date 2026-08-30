@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { streamChat } from "../lib/ai-chat";
 import { formatError } from "../lib/error-format";
-import {
+import { hasCreatorChapters,
   type Chapter, loadChapters, saveChapters, parseChapters,
   buildChapterPrompt, chaptersToYouTube, chapterTimestamp,
 } from "../lib/chapters";
@@ -98,8 +98,21 @@ export function AiChapters({
 
   async function detect() {
     if (busy || chatBusy || !lines || lines.length === 0) return;
-    if (chapters.length > 0 && editedRef.current
-      && !confirm("Regenerate chapters? Your edits to the current list will be replaced.")) return;
+    // ASK ABOUT PROVENANCE, not only about edits. `editedRef` means "have you
+    // deleted a chapter since the last generate", which is a different
+    // question: a list ADOPTED FROM THE CREATOR and never touched had
+    // editedRef false, so Regenerate replaced the publisher's own chapters
+    // with model output silently - the one case where what is already there
+    // is more trustworthy than anything we can make.
+    if (chapters.length > 0) {
+      const fromCreator = hasCreatorChapters(chapters);
+      if (fromCreator || editedRef.current) {
+        const what = fromCreator
+          ? "These chapters came with the video. Replace them with generated ones?"
+          : "Regenerate chapters? Your edits to the current list will be replaced.";
+        if (!confirm(what)) return;
+      }
+    }
     setBusy(true);
     onBusyChange?.(true);
     setError(null);
@@ -143,7 +156,9 @@ export function AiChapters({
       // has been told the feature failed. The remembered preference is about
       // reading room, not about hiding work that was just asked for.
       setCollapsedPersisted(false);
-      commit(parsed);
+      // Stamped as generated, so a later Regenerate can tell model output
+      // from a list the creator published.
+      commit(parsed.map((c) => ({ ...c, origin: "generated" as const })));
     } catch (e) {
       if (!ctrl.signal.aborted) setError(formatError(e));
     } finally {

@@ -18,7 +18,34 @@ export type Chapter = {
   /** Start time in seconds (absolute source time — same clock as the SRT). */
   time: number;
   title: string;
+  /**
+   * WHERE THIS CHAPTER CAME FROM. Absent on every list written before this
+   * field existed, and on anything the user typed by hand.
+   *
+   * "creator" means the source published it - `adoptSourceChapters` took it
+   * off the site - and it is the real thing, not a guess. "generated" means a
+   * local model wrote it from the transcript.
+   *
+   * WHY IT MATTERS: the Regenerate confirm used to be gated on
+   * `editedRef.current`, a flag meaning "have you deleted a chapter since the
+   * last generate". That answers a DIFFERENT question. A list adopted from the
+   * creator and never touched has editedRef false, so Regenerate replaced the
+   * publisher's own chapter list with model output silently - the one case
+   * where the existing list is more trustworthy than anything we could make.
+   *
+   * On the CHAPTER rather than in an envelope around the list: an optional
+   * field leaves every stored array parsing unchanged, where widening the
+   * stored shape would need a migration, and a parallel
+   * `chaptersOrigin.<key>` would add a sixth unbounded localStorage family -
+   * which docs/DATA-MODEL.md has just finished arguing against.
+   */
+  origin?: "creator" | "generated";
 };
+
+/** True when any chapter in the list came from the source itself. */
+export function hasCreatorChapters(chapters: readonly Chapter[]): boolean {
+  return chapters.some((c) => c.origin === "creator");
+}
 
 // ── persistence ──────────────────────────────────────────────────────────────
 // Keyed by the SAME source identity the Review tab uses (App's
@@ -220,7 +247,7 @@ export function adoptSourceChapters(
   const clean = sourceChapters
     .filter((c) => typeof c?.time === "number" && isFinite(c.time) && c.time >= 0
       && typeof c?.title === "string" && c.title.trim().length > 0)
-    .map((c) => ({ time: c.time, title: c.title.trim() }))
+    .map((c) => ({ time: c.time, title: c.title.trim(), origin: "creator" as const }))
     .sort((a, b) => a.time - b.time);
   if (clean.length === 0) return false;
   saveChapters(sourceKey, clean);

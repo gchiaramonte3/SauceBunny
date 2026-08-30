@@ -5,7 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...
 
 const {
   __resetWebCollectionStore, addToWebCollection, createWebCollection,
-  deleteWebCollection, flushWebCollections, getWebCollections,
+  deleteWebCollection, restoreWebCollection, flushWebCollections, getWebCollections,
   hydrateWebCollections, parseWebCollections, removeFromWebCollection,
   renameWebCollection,
 } = await import("./web-collection-store");
@@ -120,5 +120,59 @@ describe("parseWebCollections", () => {
     expect(parseWebCollections(null)).toEqual([]);
     expect(parseWebCollections([1, 2])).toEqual([]);
     expect(parseWebCollections({ collections: "nope" })).toEqual([]);
+  });
+});
+
+/**
+ * RESTORING A COLLECTION IS NOT THE SAME AS MAKING ONE AGAIN.
+ *
+ * `createWebCollection` always mints a fresh id and appends. So "just create
+ * it again" after a delete gives a DIFFERENT collection in a different place:
+ * every card that referenced the old id stays orphaned, and the shelf order
+ * changes. This is the one function the model actually lacked for undo — the
+ * ability to say which id, and which index.
+ */
+describe("restoreWebCollection", () => {
+  it("comes back with its own id, in its own place", () => {
+    const a = createWebCollection("first")!;
+    const b = createWebCollection("second")!;
+    const c = createWebCollection("third")!;
+    expect(getWebCollections().map((x) => x.id)).toEqual([a.id, b.id, c.id]);
+
+    // The MIDDLE one, so "its own place" is distinguishable from "appended".
+    deleteWebCollection(b.id);
+    expect(getWebCollections().map((x) => x.id)).toEqual([a.id, c.id]);
+
+    expect(restoreWebCollection(b, 1)).toBe(true);
+    expect(getWebCollections().map((x) => x.id), "back in the middle, same id")
+      .toEqual([a.id, b.id, c.id]);
+  });
+
+  it("is idempotent by id, so a double undo cannot duplicate it", () => {
+    const a = createWebCollection("only")!;
+    expect(restoreWebCollection(a, 0)).toBe(true);
+    expect(getWebCollections().filter((x) => x.id === a.id)).toHaveLength(1);
+  });
+
+  it("keeps the collection's urls, not just its name", () => {
+    // CANARY: a restore that rebuilt from the name alone would satisfy the
+    // ordering tests above while silently emptying the collection.
+    const a = createWebCollection("with clips")!;
+    addToWebCollection(a.id, "https://example.com/one");
+    const snapshot = getWebCollections().find((x) => x.id === a.id)!;
+    expect(snapshot.urls).toHaveLength(1);
+
+    deleteWebCollection(a.id);
+    restoreWebCollection(snapshot, 0);
+    expect(getWebCollections().find((x) => x.id === a.id)?.urls).toEqual(snapshot.urls);
+  });
+
+  it("declines rather than pushing past the cap", () => {
+    // The shelf filled up while the collection was gone. Silently exceeding
+    // the cap here would be a worse outcome than a failed undo.
+    const saved = createWebCollection("doomed")!;
+    deleteWebCollection(saved.id);
+    while (createWebCollection(`filler-${getWebCollections().length}`)) { /* to the cap */ }
+    expect(restoreWebCollection(saved, 0)).toBe(false);
   });
 });
