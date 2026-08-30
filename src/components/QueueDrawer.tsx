@@ -1100,6 +1100,10 @@ export function QueueDrawer({
           sessionActive={!!reviewSessionActive}
           sessionDoc={reviewSessionDoc ?? null}
           onSessionOp={onReviewSessionOp}
+          /* The two verbs this drawer has been handing TranscriptViewer all
+             along, finally reaching the panel where a shared range lives. */
+          onMarkRange={onMarkRange}
+          onQueueRange={onQueueRange}
         />
         </div>
       )}

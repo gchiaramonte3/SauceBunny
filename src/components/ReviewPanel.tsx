@@ -150,7 +150,7 @@ export function ReviewPanel({
   playheadActive,
   fps,
   durationSec = null,
-  onSeek,
+  onSeek, onMarkRange, onQueueRange,
   drawActive = false,
   draft = null,
   onToggleDraw,
@@ -184,6 +184,25 @@ export function ReviewPanel({
   durationSec?: number | null;
   /** Click-to-seek — receives seconds. */
   onSeek: (seconds: number) => void;
+  /**
+   * Adopt a range NOTE into this machine's own clip marks / export queue.
+   *
+   * The two halves of "mark a range" are deliberately separate here and stay
+   * that way. A range COMMENT says "look at this span": it is shared, lands on
+   * every peer's timeline, and exports as a duration marker to Avid, Premiere,
+   * Resolve and FCPX. Clip marks say "cut this span": they are this machine's
+   * export plan, which App.tsx and session-msg-contract both keep off the wire
+   * by name.
+   *
+   * What was missing was not a schema or a message - it was the BRIDGE. The
+   * transcript has had exactly these two verbs for a while (QueueDrawer passes
+   * them straight to TranscriptViewer); the review panel never received them,
+   * so a range the whole room had just agreed on could only be jumped to.
+   *
+   * Optional, so the panel still mounts anywhere these do not apply.
+   */
+  onMarkRange?: (startSeconds: number, endSeconds: number) => void;
+  onQueueRange?: (startSeconds: number, endSeconds: number) => void;
   /** True while drawing on the frame (the monitor overlay is capturing). */
   drawActive?: boolean;
   /** Live draft strokes drawn over the frame — attached to the next comment. */
@@ -1074,6 +1093,8 @@ export function ReviewPanel({
             myColor={authorColor}
             replies={repliesByParent.get(c.id) ?? NO_REPLIES}
             onSeek={onSeek}
+            onMarkRange={onMarkRange}
+            onQueueRange={onQueueRange}
             onShowAnnotation={onShowAnnotation}
             onResolve={() => { const at = Date.now(), v = !c.resolved; dispatchUndoable(v ? "resolve comment" : "reopen comment", { t: "resolve", id: c.id, resolved: v, at }, (d) => setResolved(d, c.id, v, at)); }}
             onDelete={() => dispatchUndoable("delete comment", { t: "del", id: c.id }, (d) => deleteComment(d, c.id))}
@@ -1690,7 +1711,7 @@ function NameGateModal({
 }
 
 function CommentRow({
-  c, now, fps, myName, myColor, replies, onSeek, onShowAnnotation, onResolve, onDelete, onEdit, onLike,
+  c, now, fps, myName, myColor, replies, onSeek, onMarkRange, onQueueRange, onShowAnnotation, onResolve, onDelete, onEdit, onLike,
   onEditReply, onDeleteReply, onLikeReply, collapsed, onToggleCollapse,
   replyOpen, onToggleReply, replyDraft, setReplyDraft, onSubmitReply,
 }: {
@@ -1701,6 +1722,8 @@ function CommentRow({
   myColor: string;
   replies: ReviewComment[];
   onSeek: (s: number) => void;
+  onMarkRange?: (startSeconds: number, endSeconds: number) => void;
+  onQueueRange?: (startSeconds: number, endSeconds: number) => void;
   onShowAnnotation?: (a: AnnotationStrokes | null, color?: string, time?: number) => void;
   onResolve: () => void;
   onDelete: () => void;
@@ -1719,6 +1742,9 @@ function CommentRow({
   onSubmitReply: () => void;
 }) {
   const hasDrawing = annotationHasContent(c.annotation);
+  /** A real span, not a point. The same test the timecode chip already makes
+   *  twice; named once so the three cannot drift apart. */
+  const isRange = c.timeEnd != null && c.timeEnd > c.timeStart;
   // Label chips on the overlay are tinted to the note author's colour —
   // same resolution the Avatar uses (my chosen colour for me, hash otherwise).
   const authorTint = c.author === myName ? myColor : avatarColor(c.author);
@@ -1746,12 +1772,12 @@ function CommentRow({
       {/* Timecode chip (+ drawing badge) — click to jump. */}
       <div className="cp-review-chiprow">
         <button
-          className={"cp-review-tc" + (c.timeEnd != null && c.timeEnd > c.timeStart ? " range" : "")}
+          className={"cp-review-tc" + (isRange ? " range" : "")}
           onClick={() => { onSeek(c.timeStart); if (hasDrawing) onShowAnnotation?.(c.annotation, authorTint, c.timeStart); }}
-          title={c.timeEnd != null && c.timeEnd > c.timeStart ? "Jump to range start" : (hasDrawing ? "Jump + show drawing" : "Jump to this point")}
+          title={isRange ? "Jump to range start" : (hasDrawing ? "Jump + show drawing" : "Jump to this point")}
         >
           <ClockGlyph /> {secondsToTc(c.timeStart, fps)}
-          {c.timeEnd != null && c.timeEnd > c.timeStart && <> → {secondsToTc(c.timeEnd, fps)}</>}
+          {isRange && <> → {secondsToTc(c.timeEnd as number, fps)}</>}
         </button>
         {hasDrawing && (
           <button
@@ -1760,6 +1786,34 @@ function CommentRow({
             title="Show this drawing on the frame"
           >
             ✎ drawing
+          </button>
+        )}
+        {/* THE BRIDGE. A range note could only be jumped to; the same two verbs
+            have existed on a transcript selection all along. Shown only on a
+            real range - a point comment has nothing to adopt - and only when
+            the host actually passed the handlers.
+
+            Both are LOCAL acts on this machine. Marks and the export queue are
+            private per-machine state that never goes on the wire (App.tsx
+            suppresses queue bands in a session, and session-msg-contract
+            forbids marks by name), so adopting a peer's range sets YOUR marks
+            and touches nothing anyone else can see. */}
+        {isRange && onMarkRange && (
+          <button
+            className="cp-review-adopt"
+            onClick={() => onMarkRange(c.timeStart, c.timeEnd as number)}
+            title="Set your in and out marks to this range"
+          >
+            Mark
+          </button>
+        )}
+        {isRange && onQueueRange && (
+          <button
+            className="cp-review-adopt"
+            onClick={() => onQueueRange(c.timeStart, c.timeEnd as number)}
+            title="Add this range to your export queue"
+          >
+            Queue
           </button>
         )}
       </div>

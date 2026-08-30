@@ -904,6 +904,24 @@
 }
 .cp-review-drawbadge:hover { background: rgba(255,255,255,0.12); color: var(--fg-1); }
 
+/* Adopt a range note into THIS machine's marks or export queue. Deliberately
+   the drawing badge's treatment rather than a new one: they sit in the same
+   chip row, they are the same weight of action, and a second style here would
+   be the drift button-variant-contract exists to catch. */
+.cp-review-adopt {
+  font-size: var(--text-sm);
+  line-height: var(--leading-none);
+  font-weight: var(--weight-semibold);
+  color: var(--fg-3);
+  background: rgba(255,255,255,0.06);
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 3px 7px;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.cp-review-adopt:hover { background: rgba(255,255,255,0.12); color: var(--fg-1); }
+
 /* ── Approval status (chip shared by panel/sidebar/room/cards) ────── */
 .cp-status-chip {
   display: inline-flex;
