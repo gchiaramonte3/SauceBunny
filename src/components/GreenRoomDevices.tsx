@@ -1,7 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { IconChevronRight, IconMic, IconMicOff, IconVideo, IconVideoOff } from "./Icons";
-import { nativeAvStatus } from "../lib/media-devices";
+import { nativeAvStatus, type AvAuthState } from "../lib/media-devices";
 import { METER_SEGMENTS, meterZoneClass, startLevelMeter } from "../lib/level-meter";
 import type { useMediaCapture } from "../hooks/use-media-capture";
 import { DeviceSelect } from "./DeviceSelect";
@@ -22,6 +22,32 @@ export function GreenRoomDevices({ cap, onContinue }: {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const barsRef = useRef<(HTMLSpanElement | null)[]>([]);
   const camLive = !!cap.stream && cap.stream.getVideoTracks().length > 0 && !cap.choice.cameraOff;
+
+  // ── Already granted? Then start, and do not ask again ─────────────────
+  //
+  // Settings ▸ Camera & Mic has auto-started the preview when TCC says
+  // authorized since it was written - the pane where you expect to see
+  // yourself. This step did not, so a user who had already granted access,
+  // and could see themselves in Settings, arrived here to "Your camera is off
+  // until you enable it" and a button captioned "Enable camera and mic". Both
+  // read as a permission request for permission they had already given.
+  //
+  // The grant is the decision. Acquiring is just acting on it, and macOS
+  // shows no prompt when the answer is already recorded.
+  const [tcc, setTcc] = useState<{ camera: AvAuthState; microphone: AvAuthState } | null>(null);
+  useEffect(() => { void nativeAvStatus().then((s) => setTcc(s ? { camera: s.camera, microphone: s.microphone } : null)); }, []);
+  const granted = tcc?.camera === "authorized" || tcc?.microphone === "authorized";
+
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (autoStartedRef.current || cap.stream || !granted) return;
+    // Respect a deliberate "join with camera off": acquire still gives us the
+    // mic and the level meter, and cameraOff keeps the video track dark, so
+    // this never overrides that choice.
+    autoStartedRef.current = true;
+    void cap.acquire(cap.choice);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on the grant
+  }, [granted]);
 
   // Preview follows the owned stream. camLive is a dep: the <video>
   // remounts when the camera toggles off->on (same stream, fresh element).
@@ -77,9 +103,15 @@ export function GreenRoomDevices({ cap, onContinue }: {
         ) : !cap.stream ? (
           <div className="cp-gr-preview-state">
             <IconVideoOff size={26} />
-            <p className="cp-gr-state-line">Your camera is off until you enable it.</p>
+            {/* The copy follows the PERMISSION, not the stream. "Enable camera
+                and mic" is a request for access; once access is granted the
+                only thing left to do is turn the camera on, and saying
+                otherwise implies the earlier grant did not take. */}
+            <p className="cp-gr-state-line">
+              {granted ? "Starting your camera…" : "Your camera is off until you enable it."}
+            </p>
             <button type="button" className="btn cp-colobby-cta" onClick={() => { void cap.acquire(cap.choice); }}>
-              <IconVideo size={14} /><IconMic size={14} /> Enable camera and mic
+              <IconVideo size={14} /><IconMic size={14} /> {granted ? "Turn on camera and mic" : "Enable camera and mic"}
             </button>
           </div>
         ) : !camLive ? (
