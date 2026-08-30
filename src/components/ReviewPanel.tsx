@@ -753,6 +753,10 @@ export function ReviewPanel({
   const inSession = sessionActive;
   const connecting = inSession && !sessionDoc;
   const viewDoc = inSession ? sessionDoc : doc;
+  /** The doc as of the LAST RENDER, for closures that run later than they were
+   *  made. `dispatchUndoable` needs it: an undo fires long after the push. */
+  const viewDocRef = useRef<ReviewDoc | null>(viewDoc);
+  viewDocRef.current = viewDoc;
   const dispatch = (op: ReviewOp, localFn: (d: ReviewDoc) => ReviewDoc) => {
     if (inSession) onSessionOp?.(op);
     else mutate(localFn);
@@ -794,10 +798,50 @@ export function ReviewPanel({
     dispatch(op, localFn);
     if (!before) return;
     const inverse = inverseReviewOps(before, op); // `at` is a placeholder — re-stamped on undo
+
+    /**
+     * WHAT REDO PUTS BACK, decided at UNDO time rather than here.
+     *
+     * The inverse of an `add` is `{t:"del", id}`, and `deleteComment` filters
+     * `c.parentId !== id` — so it takes every REPLY under that comment too.
+     * At push time there are none, which is why the eager inverse looked
+     * exact; in a live session a peer can reply seconds later. Then ⌘Z on
+     * "add comment" deletes their words, on every machine (postSessionOp
+     * relays the del), and redo replays only the comment captured here, which
+     * predates the replies. Nothing on the stack could bring them back.
+     *
+     * `case "del"` in inverseReviewOps already solves exactly this — it
+     * captures the removed set and resurrects "peers' replies included". It
+     * can, because a delete knows what it is deleting. An add does not, yet.
+     *
+     * So the redo set is computed when undo runs, off the freshest doc, using
+     * that same del-inverse. Memory stays bounded — the whole reason the
+     * inverse is eager (fifty pinned ReviewDocs was a leak) — because this
+     * grows only by replies that actually exist.
+     */
+    let redoOps: ReviewOp[] = [op];
+    const freshest = () => (inSession
+      ? viewDocRef.current
+      : (sourceKey ? loadReview(sourceKey) : viewDocRef.current));
+
     appUndo.push({
       label,
-      undo: () => { const at = Date.now(); replayOps(inverse.map((o) => restampReviewOp(o, at))); },
-      redo: () => replayOps([restampReviewOp(op, Date.now())]),
+      undo: () => {
+        if (op.t === "add") {
+          const now = freshest();
+          // The resurrect set for what the del is about to remove: the root
+          // plus any reply that has arrived since. Falls back to the original
+          // op when there is no doc to read, which is the old behaviour.
+          if (now) redoOps = inverseReviewOps(now, { t: "del", id: op.comment.id });
+          if (redoOps.length === 0) redoOps = [op];
+        }
+        const at = Date.now();
+        replayOps(inverse.map((o) => restampReviewOp(o, at)));
+      },
+      redo: () => {
+        const at = Date.now();
+        replayOps(redoOps.map((o) => restampReviewOp(o, at)));
+      },
     });
   };
 

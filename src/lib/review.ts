@@ -670,6 +670,18 @@ export function inverseReviewOps(before: ReviewDoc, op: ReviewOp, at = Date.now(
     case "add":
       // Works for roots and replies alike: deleteComment drops replies only
       // via parentId === id, and a reply's id is never another's parentId.
+      //
+      // READ THAT CAREFULLY, because it answers a different question than it
+      // looks like it answers. It is about undoing an add-of-a-REPLY, which
+      // cannot cascade. Undoing an add-of-a-ROOT that has SINCE acquired
+      // replies does cascade - deleteComment takes them all - and this
+      // inverse, computed when the comment is posted, cannot know about
+      // replies that do not exist yet.
+      //
+      // That is why `dispatchUndoable` recomputes what REDO restores at undo
+      // time, using the `del` case below against the freshest doc. Nothing to
+      // fix here: an eager inverse cannot see the future, and the memory
+      // reason for it being eager still holds.
       return [{ t: "del", id: op.comment.id }];
     case "del": {
       // deleteComment removes the root AND its replies — resurrect all of
