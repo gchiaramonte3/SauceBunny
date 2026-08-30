@@ -278,8 +278,33 @@
   font-size: var(--text-sm);
   color: var(--fg-4);
 }
+/* TEXT OVER LIVE VIDEO HAS NO MEASURABLE CONTRAST RATIO.
+   `.cp-person-meta` sits over the peer's camera feed, so whatever the app
+   chooses for the name and the Presenting badge is composited against frames
+   nobody controls. A text-shadow (which the name has) helps and is not
+   something WCAG credits; a background is. The app had already answered this
+   three times over video - `.cp-person-share`, `.cp-reaction-name` and
+   `.cp-caption-cue` all paint a dark plate behind their text - and this row
+   was the one that had not.
+
+   A gradient on the tile rather than a solid bar on the row: it is what video
+   players do for exactly this, it bounds BOTH children at once, and it does
+   not draw a hard edge across every tile. Pointer-transparent, and behind the
+   meta row's own z-index. */
+.cp-person::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 38%;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, rgba(0,0,0,0.62));
+}
+
 .cp-person-meta {
   position: absolute;
+  z-index: 1;
   left: 6px;
   right: 6px;
   bottom: 5px;
@@ -415,7 +440,7 @@
   left: 6px;
   padding: 1px 6px;
   border-radius: var(--r-pill);
-  background: rgba(0,0,0,0.55);
+  background: rgba(0,0,0,0.72); /* see .cp-person-presenting: 0.55 is 3.73:1 over white video */
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: var(--text-xs);
@@ -582,7 +607,7 @@
 .cp-reaction-name {
   padding: 1px 7px;
   border-radius: var(--r-pill);
-  background: rgba(0,0,0,0.55);
+  background: rgba(0,0,0,0.72); /* see .cp-person-presenting: 0.55 is 3.73:1 over white video */
   color: var(--fg-1);
   font-family: var(--font-ui);
   font-size: var(--text-sm);
@@ -871,6 +896,20 @@
   padding: 1px 6px;
   border-radius: var(--r-pill);
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  /* The same plate `.cp-person-share` uses two rules above. This badge is the
+     ONLY indicator of who controls playback, and it was the one element in the
+     tile with neither a background nor a text-shadow - accent green composited
+     straight onto arbitrary video.
+
+     0.72, and the number is measured rather than picked. The worst case for
+     a dark plate is WHITE video showing through it. At 0.55 the composite is
+     rgb(115,115,115), on which accent green #6CFF8D reads 3.69:1 - under AA
+     for text this size. At 0.72 it is 7.22:1 and holds against any frame.
+
+     Its two siblings were raised to 0.72 with it: at 0.55 their near-white
+     --fg-1 measures 3.73:1 on that same worst case, so they were not "getting
+     away with it" either - I checked, having first assumed they were. */
+  background: rgba(0,0,0,0.72);
   color: var(--accent);
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
