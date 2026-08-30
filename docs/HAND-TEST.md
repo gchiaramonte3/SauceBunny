@@ -422,3 +422,40 @@ Settings ▸ General ▸ Cache ▸ Clear on quit. Note the per-category sizes, q
 relaunch, and look again: downloads/audio/meta should be gone. **Received
 files must NOT be** - that is a peer's transfer and the only copy. Clearing
 those is still possible, deliberately, via their own Clear button.
+
+---
+
+## Two claims that only two machines can settle
+
+Both came out of the Phase 4 session analysis. Neither is a patch yet, because
+both are conclusions from reading rather than from running, and one of them
+would be serious enough that guessing at a fix is worse than measuring first.
+
+**1. Does a guest's note about a LOCAL FILE come back when they open it alone?**
+
+This is the founding invariant of the whole session design, in its acid-test
+form: *opening a source solo, with no screening file present, must still show
+every note made about it in a session.* The concern is that during a session a
+guest's notes may be filed under the wire FINGERPRINT, while a later solo open
+of the same file resolves to a local PATH key - in which case the notes are on
+disk, under a key nothing looks for.
+
+To settle it: two machines, host shares a LOCAL file (not a web URL), guest
+receives it and posts a comment. End the session. On the GUEST, open that same
+file on its own and look at the review panel. The comment must be there. If it
+is not, look in `~/Documents/Sauce Bunny/Reviews/` on the guest for a file
+whose name is a fingerprint rather than a path slug - that is the symptom.
+
+Do this before building anything else on the session record.
+
+**2. The source-level verdict cannot be set by anyone.**
+
+Not a hand test so much as a thing to see for yourself: open any source, look
+for a way to mark it Approved or Needs changes, and note that there is none.
+The chips render, the Markdown export has a line for it, the co-review protocol
+relays it and Rust has anti-spoofing code naming it - and no user can reach any
+of that. Every source reads Pending permanently, including in the Markdown a
+client receives.
+
+`review-writer-contract` now records this. Deleting its `setStatus` entry is
+the acceptance test for whenever the verdict UI gets built.
