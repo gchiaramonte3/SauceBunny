@@ -26,7 +26,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { sanitizeCastFile, MAX_CASTS, type Cast } from "./cast";
 import { mergeCasts } from "./cast-merge";
-import { futureVersionIn, futureVersionMessage, reportFutureVersion } from "./store-schema";
+import { STORE_SCHEMA_VERSION, futureVersionIn, futureVersionMessage, reportFutureVersion } from "./store-schema";
 
 const FILE = "casts.json";
 const READ_CAP = 8 * 1024 * 1024;
@@ -244,7 +244,7 @@ async function flush(): Promise<void> {
       // No file yet, unreadable, or too slow — preserve rather than merge.
       merged = casts;
     }
-    const text = JSON.stringify({ version: 1, casts: merged }, null, 2);
+    const text = JSON.stringify({ version: STORE_SCHEMA_VERSION, casts: merged }, null, 2);
     await invoke("write_text_to_path", { path: `${dir}/${FILE}`, text, atomic: true });
     // Only after the write lands: until then those edits are still owed, and
     // clearing them early would drop them from the NEXT merge if this write
@@ -268,15 +268,41 @@ async function flush(): Promise<void> {
   }
 }
 
-/** Force any pending write out now — called before the window closes, so the
- *  last 400ms of edits are not lost to the debounce. */
+/**
+ * Force any pending write out now.
+ *
+ * The docstring here used to say "called before the window closes". It was
+ * not: the only caller was a React unmount cleanup in CastShelf, which does
+ * not run when the window closes. So the last debounce interval of cast edits
+ * was lost on quit, silently, in a store whose whole job is to survive one.
+ * `registerCastQuitFlush` below is the half that makes the sentence true.
+ */
 export async function flushCasts(): Promise<void> {
   if (pendingWrite) await flush();
+}
+
+/**
+ * Flush on `pagehide`, the way review-store already does.
+ *
+ * Registered from hydrate rather than from a component, so it does not depend
+ * on what happens to be mounted - which is exactly how the unmount-cleanup
+ * version came to miss the case it was written for.
+ */
+let quitFlushRegistered = false;
+function registerCastQuitFlush(): void {
+  if (quitFlushRegistered) return;
+  quitFlushRegistered = true;
+  try {
+    window.addEventListener("pagehide", () => void flushCasts());
+  } catch {
+    /* non-DOM context (tests) */
+  }
 }
 
 let hydrating = false;
 
 export async function hydrateCastStore(): Promise<void> {
+  registerCastQuitFlush();
   if (hydrated || hydrating) return;
   hydrating = true;
   try {

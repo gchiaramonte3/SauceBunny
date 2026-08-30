@@ -3,7 +3,7 @@ import {
   parseProjects, reconcileProjects, updateProject,
   type TranscriptProject,
 } from "./transcript-projects";
-import { futureVersionIn, reportFutureVersion } from "./store-schema";
+import { STORE_SCHEMA_VERSION, futureVersionIn, reportFutureVersion } from "./store-schema";
 
 /**
  * Where a project's metadata lives, and the one rule that matters.
@@ -71,7 +71,7 @@ async function flush(): Promise<void> {
       await invoke("ensure_dir_exists", { path: dir });
       dirEnsured = true;
     }
-    const text = JSON.stringify({ version: 1, projects }, null, 2);
+    const text = JSON.stringify({ version: STORE_SCHEMA_VERSION, projects }, null, 2);
     await invoke("write_text_to_path", { path: `${dir}/${FILE}`, text, atomic: true });
   } catch {
     // Re-arm rather than dropping the edit; a transient write failure should
@@ -99,10 +99,31 @@ async function flush(): Promise<void> {
  * not there: every project reconciled away, every poster and colour lost, and
  * a metadata file left behind in a directory the app no longer reads.
  */
+/**
+ * Force the pending projects write out now, and flush on quit.
+ *
+ * This store had no flush export at all: a rename or a poster choice made in
+ * the last debounce interval before quitting was simply lost. Its two siblings
+ * at least had a flush function (one of them wired to a React unmount that
+ * never runs on close); this one had nothing.
+ */
+export async function flushProjects(): Promise<void> {
+  if (pendingWrite) await flush();
+}
+
+let quitFlushRegistered = false;
+function registerQuitFlush(): void {
+  if (quitFlushRegistered) return;
+  quitFlushRegistered = true;
+  try { window.addEventListener("pagehide", () => void flushProjects()); }
+  catch { /* non-DOM context (tests) */ }
+}
+
 export async function hydrateProjects(
   libraryPath: string,
   foldersOnDisk: readonly string[],
 ): Promise<void> {
+  registerQuitFlush();
   if (hydrated || hydrating) return;
   hydrating = true;
   try {

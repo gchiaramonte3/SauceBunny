@@ -270,7 +270,7 @@ they have no per-record version, not because their shape is wrong.
 
 | # | Finding | Harm | Status |
 |---|---|---|---|
-| **F1** | Schema version written but never read: a newer build's file is silently rewritten with its unknown fields stripped | **data loss** | **fixed** |
+| **F1** | Schema version written but never read: a newer build's file is silently rewritten with its unknown fields stripped | **data loss** | **fixed** — but see F7, its guard could not arm |
 | **F2** | Speaker renames, in/out marks, source timecodes and the export queue are work product living only in evictable `localStorage` | **data loss** | open, needs a product call — but its SILENCE is fixed (see below) |
 | F3 | `projects.json` `posterPath` and a review index entry have no defined behaviour when the target file is gone | silent drift | open |
 | F4 | `localStorage` is last-write-wins across two windows, coordinated by convention and one event rather than by anything enforced | silent drift | open |
@@ -338,6 +338,37 @@ The repair runs from `main.tsx` rather than inside the store on purpose:
 `review.ts` owns the index and already imports `review-store`, so calling it
 from the store would turn a type-only import cycle into a runtime one, where
 whichever module initialises first sees `undefined`.
+
+### F7: F1's guard was inert, and F1 said it was fixed
+
+`futureVersionIn` compares a file's `version` against `STORE_SCHEMA_VERSION`.
+Every one of the five writers stamped a bare `version: 1` instead of using that
+constant. So bumping it would have changed what this build REFUSES while
+changing nothing about what it WRITES: a v2 build stamping v1 files, which a v1
+build then clobbers with the old shape — precisely the loss F1 exists to
+prevent, inside the mechanism built to prevent it.
+
+Fixed by stamping the constant at all five sites. `store-version-contract` now
+requires it, and gained a canary, because widening the writers broke its own
+sweep: it matched `/version:\s*\d+/`, so the moment the literals became the
+constant it stopped matching anything and went green over an empty set —
+reporting perfect conformance for the very change it should have checked.
+
+### F8: overrides were deleted rather than saved
+
+Not a storage-placement problem like the rest of this file; a plain bug found
+while auditing the same surface. `SpeakerOverrides` has eight sub-maps and
+TranscriptViewer decided emptiness with a hand-listed disjunction over five —
+missing `cueTag`, `icons` and `splits`. The branch that emptiness guards calls
+`localStorage.removeItem`. So a user whose only edit was a per-cue
+reassignment — the layer that exists to separate two people the diarizer merged
+into one, and the most worthwhile speaker edit there is — was measured as having
+changed nothing, and their overrides were removed from disk.
+
+The check is derived from the object now, so a ninth sub-map is free, and the
+write reports a quota failure instead of swallowing it: this was the one
+work-product write that still bypassed `saveJson`, in the family the silence fix
+was named after.
 
 ### F2's silence is fixed; F2 itself still needs the decision
 

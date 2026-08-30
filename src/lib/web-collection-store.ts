@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { futureVersionIn, reportFutureVersion } from "./store-schema";
+import { STORE_SCHEMA_VERSION, futureVersionIn, reportFutureVersion } from "./store-schema";
 
 /**
  * User collections for web sources - the "organize everything" the cache's
@@ -115,7 +115,7 @@ async function flush(): Promise<void> {
       await invoke("ensure_dir_exists", { path: dir });
       dirEnsured = true;
     }
-    const text = JSON.stringify({ version: 1, collections }, null, 2);
+    const text = JSON.stringify({ version: STORE_SCHEMA_VERSION, collections }, null, 2);
     await invoke("write_text_to_path", { path: `${dir}/${FILE}`, text, atomic: true });
   } catch {
     // Re-arm rather than dropping the edit - a transient failure must not
@@ -129,7 +129,18 @@ export async function flushWebCollections(): Promise<void> {
   if (pendingWrite) await flush();
 }
 
+/** Flush on quit, for the same reason cast-store does: a debounced write that
+ *  only runs on a React unmount is lost when the window closes. */
+let quitFlushRegistered = false;
+function registerQuitFlush(): void {
+  if (quitFlushRegistered) return;
+  quitFlushRegistered = true;
+  try { window.addEventListener("pagehide", () => void flushWebCollections()); }
+  catch { /* non-DOM context (tests) */ }
+}
+
 export async function hydrateWebCollections(): Promise<void> {
+  registerQuitFlush();
   if (hydrated || hydrating) return;
   hydrating = true;
   try {

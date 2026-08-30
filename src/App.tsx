@@ -1475,7 +1475,12 @@ export default function App() {
     // nothing to explain it. Rate-limited in the store, since a full quota
     // fails on every keystroke that persists.
     const unsubStorage = onStorageProblem(({ key }) => {
-      const msg = `Ran out of room to save "${key}". Recent renames, chapters or marks may not survive a relaunch. Clearing old transcripts from the library frees space.`;
+      // No advice about clearing transcripts: they are FILES in Documents and
+      // free none of this quota. Measured, the irreplaceable work here is 0.81%
+      // of the 5 MiB ceiling while a regenerable poster cache was 85.6% of
+      // everything stored - so the honest message names what failed and stops,
+      // rather than sending someone to delete their work for nothing.
+      const msg = `Ran out of room to save "${key}". Recent renames, chapters or marks may not survive a relaunch.`;
       appendLog("err", "media", msg);
       pushNotification("error", "Couldn't save your changes", msg);
     });

@@ -174,6 +174,7 @@ describe("every file store consults the version it writes", () => {
   it("no store writes a version field without checking for a newer one", () => {
     const dir = new URL(".", import.meta.url).pathname;
     const offenders: string[] = [];
+    const stampers: string[] = [];
     for (const name of readdirSync(dir)) {
       if (!name.endsWith(".ts") || name.includes(".test.")) continue;
       if (name === "store-schema.ts") continue;
@@ -182,14 +183,47 @@ describe("every file store consults the version it writes", () => {
       // owns an on-disk format, and every one of those has the same downgrade
       // hazard. Catching it here is the point: a fifth store added next year
       // fails this test rather than shipping the bug that motivated the file.
-      const stamps = /version:\s*\d+\s*,/.test(src) || /"version":\s*\d+/.test(src);
+      // Matches the CONSTANT as well as a literal. This used to test only
+      // `/version:\s*\d+/`, and when the five write sites moved to
+      // STORE_SCHEMA_VERSION the sweep stopped matching anything at all and
+      // went green over an empty set - reporting perfect conformance for the
+      // very change it should have been checking.
+      const stamps = /version:\s*(\d+|STORE_SCHEMA_VERSION)\s*[,}]/.test(src)
+        || /"version":\s*\d+/.test(src);
       if (!stamps) continue;
+      stampers.push(name);
       if (!src.includes("futureVersionIn")) offenders.push(name);
     }
+    // CANARY. Without this the loop above passes by finding no stampers, which
+    // is exactly what it did the moment the literals were replaced.
+    expect(stampers.length, "no store stamps a version - the sweep matched nothing")
+      .toBeGreaterThanOrEqual(5);
     expect(
       offenders,
       "these stamp a schema version but never read one back — see store-schema.ts",
     ).toEqual([]);
+  });
+
+  it("stamps the CONSTANT, never a bare number", () => {
+    // The guard compares a file's version against STORE_SCHEMA_VERSION. Every
+    // writer hardcoded `version: 1` instead of using it, so bumping the
+    // constant would have changed what this build REFUSES while changing
+    // nothing about what it WRITES - a v2 build stamping v1 files that a v1
+    // build then clobbers with the old shape. That is precisely the data loss
+    // F1 exists to prevent, in the mechanism built to prevent it.
+    const dir = new URL(".", import.meta.url).pathname;
+    const bad: string[] = [];
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith(".ts") || name.includes(".test.") || name === "store-schema.ts") continue;
+      const src = readFileSync(join(dir, name), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^[ \t]*\/\/.*$/gm, "");
+      if (!src.includes("futureVersionIn")) continue; // not a versioned store
+      // A numeric stamp in a VALUE position. `version: number` in a type is
+      // fine and is what these files now declare.
+      if (/version:\s*\d+\s*[,}]/.test(src)) bad.push(name);
+    }
+    expect(bad, "writes a bare version number instead of STORE_SCHEMA_VERSION").toEqual([]);
   });
 
   it("covers the five stores that exist today, so the sweep is not vacuous", () => {

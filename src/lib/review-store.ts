@@ -51,7 +51,7 @@ export type ReviewIndexEntry = {
   bytes: number;
 };
 
-import { futureVersionIn, reportFutureVersion } from "./store-schema";
+import { STORE_SCHEMA_VERSION, futureVersionIn, reportFutureVersion } from "./store-schema";
 
 const INDEX_FILE = "index.json";
 const WRITE_DEBOUNCE_MS = 500;
@@ -170,7 +170,7 @@ export function reviewFileName(sourceKey: string): string {
 
 // ── index serialization ──────────────────────────────────────────────────────
 
-type ReviewIndexFile = { version: 1; docs: Record<string, ReviewIndexEntry> };
+type ReviewIndexFile = { version: number; docs: Record<string, ReviewIndexEntry> };
 
 /** Tolerant parse: anything malformed (null from a mocked read, corrupt JSON,
  *  wrong shape) yields an empty index — hydration then starts fresh. */
@@ -201,7 +201,7 @@ export function parseReviewIndex(text: unknown): Map<string, ReviewIndexEntry> {
 }
 
 export function serializeReviewIndex(entries: Map<string, ReviewIndexEntry>): string {
-  const file: ReviewIndexFile = { version: 1, docs: Object.fromEntries(entries) };
+  const file: ReviewIndexFile = { version: STORE_SCHEMA_VERSION, docs: Object.fromEntries(entries) };
   return JSON.stringify(file);
 }
 

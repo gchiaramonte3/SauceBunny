@@ -116,14 +116,15 @@ export function saveClipQueue<T extends { status: string }>(queue: readonly T[])
   // What re-running actually does, corrected after checking rather than
   // assuming: it does NOT overwrite the partial. Both export paths pick a
   // free name before writing (`x-unique` on the local route,
-  // unique_output_path for create_clip), and the local write is not atomic,
-  // so a crash mid-export leaves a truncated file holding the name the user
-  // chose and the re-run lands beside it as "clip-2.mov". That behaviour
-  // predates this rescue; what the rescue changes is that re-running is now
-  // one click instead of re-marking the range by hand, so it is met more
-  // often. Making the write atomic would remove the truncated file entirely
-  // and is the better fix, but it is a change to a multi-GB write path that
-  // wants exercising on a real export.
+  // unique_output_path for create_clip). This used to add that "the local
+  // write is not atomic, so a crash mid-export leaves a truncated file", and
+  // proposed making it atomic as a better fix "that wants exercising on a real
+  // export". That work has since shipped: `write_raw_to_path` passes
+  // atomic=true unconditionally (system.rs), staging a sibling dotfile,
+  // fsyncing and renaming, and a Rust test asserts it still does. A crash
+  // mid-export now leaves the staged dotfile, not a truncated clip under the
+  // name the user chose. The comment was describing a to-do that was already
+  // done, which is worse than saying nothing.
   //
   // The cost of being wrong here is one row to delete, against the cost of
   // being wrong the other way, which is a range to mark out again by hand.

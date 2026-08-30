@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useDismiss } from "../hooks/use-dismiss";
+import { reportStorageProblem } from "../lib/storage";
 import { useMenuKeys } from "../hooks/use-menu-keys";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
@@ -297,15 +298,31 @@ export function TranscriptViewer({
   useEffect(() => {
     if (!storageKey) { persistKeyRef.current = storageKey; return; }
     if (persistKeyRef.current !== storageKey) { persistKeyRef.current = storageKey; return; }
-    const empty = Object.keys(overrides.global).length === 0
-               && Object.keys(overrides.turn).length === 0
-               && Object.keys(overrides.aliases).length === 0
-               && Object.keys(overrides.colors).length === 0
-               && Object.keys(overrides.turnTag).length === 0;
+    // DERIVED from the shape, not a hand-listed disjunction. That list tested
+    // FIVE of the eight sub-maps - it never knew about `cueTag`, `icons` or
+    // `splits` - and the branch it guards calls removeItem. So a user whose
+    // only edit was a per-cue reassignment (the layer that exists to fix two
+    // people merged into one speaker, and the one most worth doing) hit
+    // `empty === true` and had their overrides DELETED from disk rather than
+    // saved. Not "failed to persist": actively removed.
+    //
+    // Every field is a Record, so `every(...)` is exact today and a ninth
+    // sub-map is free tomorrow - the same reason cloneOverrides was written
+    // after this rot happened once already.
+    const empty = Object.values(overrides).every(
+      (m) => !m || Object.keys(m).length === 0,
+    );
     if (empty) {
       localStorage.removeItem(storageKey);
     } else {
-      try { localStorage.setItem(storageKey, JSON.stringify(overrides)); } catch { /* quota */ }
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(overrides));
+      } catch (err) {
+        // Reported, not swallowed. Speaker renames are the family the storage
+        // notification was built for, and this write - the one that actually
+        // persists them - bypassed saveJson and so bypassed the report.
+        reportStorageProblem(storageKey, err);
+      }
     }
     // Tell live consumers (the on-video caption overlay) to re-read, so a
     // rename shows up on the video immediately. Two buses, one name:

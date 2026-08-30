@@ -20,7 +20,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ScreeningDoc } from "./screening";
 import { screeningCommentCount } from "./screening";
-import { futureVersionIn, reportFutureVersion } from "./store-schema";
+import { STORE_SCHEMA_VERSION, futureVersionIn, reportFutureVersion } from "./store-schema";
 
 /** One row in the index: everything a library card needs WITHOUT opening the
  *  full document. */
@@ -82,7 +82,7 @@ export function screeningFileName(doc: ScreeningDoc): string {
   return `${date}-${slug || "screening"}-${fnv1a(doc.id)}.json`;
 }
 
-type ScreeningIndexFile = { version: 1; screenings: Record<string, ScreeningIndexEntry> };
+type ScreeningIndexFile = { version: number; screenings: Record<string, ScreeningIndexEntry> };
 
 /** Tolerant parse: malformed, absent, or future-version content yields an
  *  empty index rather than throwing. A bad file must never stop the app from
@@ -265,7 +265,7 @@ export async function saveScreening(doc: ScreeningDoc): Promise<void> {
     await invoke("write_text_to_path", { path: `${dir}/${file}`, text: json, atomic: true });
     index.set(doc.id, indexEntryFor(doc, json.length));
     const indexJson = JSON.stringify(
-      { version: 1, screenings: Object.fromEntries(index) } satisfies ScreeningIndexFile,
+      { version: STORE_SCHEMA_VERSION, screenings: Object.fromEntries(index) } satisfies ScreeningIndexFile,
       null, 2,
     );
     await invoke("write_text_to_path", { path: `${dir}/${INDEX_FILE}`, text: indexJson, atomic: true });
