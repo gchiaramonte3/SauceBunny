@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useListColumns } from "../hooks/use-list-columns";
 import { formatBytes } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { siteName, type CachedWebItem } from "../lib/web-source";
@@ -22,8 +22,6 @@ import { IconCircleX, IconDownload, IconLink } from "./Icons";
  */
 
 const COLS_KEY = "saucebunny.webListCols";
-const COL_MIN = 48;
-const COL_MAX = 240;
 const COL_DEFAULT = { site: 88, size: 84, date: 96 };
 
 /** "Yesterday", "3 Aug" - matches the folder list's date shape closely
@@ -53,45 +51,7 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
   selected?: ReadonlySet<string>;
   onSelect?: (url: string, e: React.MouseEvent) => void;
 }) {
-  const [cols, setCols] = useState<{ site: number; size: number; date: number }>(() => {
-    try {
-      const raw = JSON.parse(localStorage.getItem(COLS_KEY) ?? "null");
-      if (raw && typeof raw === "object") {
-        const pick = (v: unknown, d: number) =>
-          typeof v === "number" && v >= COL_MIN && v <= COL_MAX ? v : d;
-        return {
-          site: pick((raw as Record<string, unknown>).site, COL_DEFAULT.site),
-          size: pick((raw as Record<string, unknown>).size, COL_DEFAULT.size),
-          date: pick((raw as Record<string, unknown>).date, COL_DEFAULT.date),
-        };
-      }
-    } catch { /* mangled value costs the defaults, not a crash */ }
-    return COL_DEFAULT;
-  });
-  useEffect(() => {
-    try { localStorage.setItem(COLS_KEY, JSON.stringify(cols)); } catch { /* quota */ }
-  }, [cols]);
-  const [dragCol, setDragCol] = useState<null | keyof typeof COL_DEFAULT>(null);
-  const startColDrag = (key: keyof typeof COL_DEFAULT) => (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const startW = cols[key];
-    setDragCol(key);
-    document.body.classList.add("cp-resizing-ew");
-    const onMove = (ev: MouseEvent) => {
-      const next = Math.max(COL_MIN, Math.min(COL_MAX, startW + (ev.clientX - startX)));
-      setCols((c) => ({ ...c, [key]: next }));
-    };
-    const onUp = () => {
-      setDragCol(null);
-      document.body.classList.remove("cp-resizing-ew");
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  };
+  const { cols, dragCol, startColDrag } = useListColumns(COLS_KEY, COL_DEFAULT);
 
   return (
     <div

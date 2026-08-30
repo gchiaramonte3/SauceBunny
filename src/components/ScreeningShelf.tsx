@@ -81,17 +81,22 @@ export function ScreeningShelf() {
       {open && (
       <ul className="cp-screenings-list">
         {rows.map((r) => {
-          const people = r.participants.length === 1
-            ? r.participants[0]
-            : `${r.participants.length} people`;
+          // Built from parts, because a screening saved before participants
+          // were ever written has NONE - and "0 people" is not a smaller
+          // number, it is a false statement: there was at least the person
+          // reading the row. Say nothing about a roster we never recorded.
+          const parts = [formatTimeAgo(r.endedAt)];
+          if (r.participants.length === 1) parts.push(r.participants[0]);
+          else if (r.participants.length > 1) parts.push(`${r.participants.length} people`);
+          if (r.segmentCount > 0) {
+            parts.push(`${r.segmentCount} ${r.segmentCount === 1 ? "source" : "sources"}`);
+          }
+          parts.push(`${r.commentCount} ${r.commentCount === 1 ? "note" : "notes"}`);
           return (
             <li key={r.id} className="cp-screenings-row">
               <IconReview size={13} />
               <span className="cp-screenings-name" title={r.title}>{r.title}</span>
-              <span className="cp-screenings-meta">
-                {formatTimeAgo(r.endedAt)} · {people} · {r.commentCount}{" "}
-                {r.commentCount === 1 ? "note" : "notes"}
-              </span>
+              <span className="cp-screenings-meta">{parts.join(" \u00b7 ")}</span>
               <button
                 type="button"
                 className="cp-screenings-reveal"

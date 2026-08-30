@@ -128,3 +128,51 @@ describe("the screenings shelf", () => {
     expect(await screen.findByText("Friday review")).toBeTruthy();
   });
 });
+
+/**
+ * `participants` was never assigned in production, so every screening saved
+ * before that was fixed carries an EMPTY list - and the row said "0 people",
+ * which is not a smaller number but a false statement: there was at least the
+ * person reading it.
+ */
+describe("a row says only what the record actually knows", () => {
+  const meta = () => document.querySelector(".cp-screenings-meta")?.textContent ?? "";
+
+  it("says nothing about people when the roster was never recorded", async () => {
+    h.rows = [row({ participants: [], segmentCount: 1, commentCount: 2 })];
+    render(<ScreeningShelf />);
+    await openShelf();
+    await screen.findByText("Friday review");
+    expect(meta(), "the legacy record's empty roster").not.toContain("0 people");
+    expect(meta(), "but the rest of the row is still reported").toContain("2 notes");
+  });
+
+  // Two cases, not one with a cleanup() between: the shelf remembers whether
+  // it is open in localStorage, which beforeEach clears per TEST - so a second
+  // render inside one test reads back "open" and openShelf() closes it.
+  it("names the single person rather than counting to one", async () => {
+    h.rows = [row({ participants: ["Ada"] })];
+    render(<ScreeningShelf />);
+    await openShelf();
+    await screen.findByText("Friday review");
+    expect(meta()).toContain("Ada");
+  });
+
+  it("counts more than one", async () => {
+    h.rows = [row({ participants: ["Ada", "Lin", "Sam"] })];
+    render(<ScreeningShelf />);
+    await openShelf();
+    await screen.findByText("Friday review");
+    expect(meta()).toContain("3 people");
+  });
+
+  it("reports what the room watched", async () => {
+    // The segment count is the fact a session shelf exists to carry, and the
+    // row never showed it at all.
+    h.rows = [row({ participants: ["Ada"], segmentCount: 2 })];
+    render(<ScreeningShelf />);
+    await openShelf();
+    await screen.findByText("Friday review");
+    expect(meta()).toContain("2 sources");
+  });
+});

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
+import { useListColumns } from "../hooks/use-list-columns";
 import { LibraryCard } from "./LibraryCard";
 import { LibraryListRow } from "./LibraryListRow";
 import { LibraryFolderCard } from "./LibraryFolderCard";
@@ -86,6 +87,9 @@ type Props = {
  *  memo, and through it the roving grid, on every parent render. */
 const EMPTY_FOLDERS: LibraryFolder[] = [];
 
+const COLS_KEY = "saucebunny.libraryListCols";
+const COL_DEFAULT = { kind: 64, size: 84, date: 96 };
+
 export function LibraryBrowserPane({
   folders = EMPTY_FOLDERS, onOpenFolder,
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
@@ -127,51 +131,7 @@ export function LibraryBrowserPane({
   // Column widths, persisted. Applied on the list CONTAINER so the header and
   // every row inherit the same variables — resizing one element and not the
   // other is how a table goes crooked.
-  const COLS_KEY = "saucebunny.libraryListCols";
-  const COL_MIN = 48;
-  const COL_MAX = 240;
-  const COL_DEFAULT = { kind: 64, size: 84, date: 96 };
-  const [cols, setCols] = useState<{ kind: number; size: number; date: number }>(() => {
-    try {
-      const raw = JSON.parse(localStorage.getItem(COLS_KEY) ?? "null");
-      if (raw && typeof raw === "object") {
-        const pick = (v: unknown, d: number) =>
-          typeof v === "number" && v >= COL_MIN && v <= COL_MAX ? v : d;
-        return {
-          kind: pick(raw.kind, COL_DEFAULT.kind),
-          size: pick(raw.size, COL_DEFAULT.size),
-          date: pick(raw.date, COL_DEFAULT.date),
-        };
-      }
-    } catch { /* mangled value costs the defaults, not a crash */ }
-    return COL_DEFAULT;
-  });
-  useEffect(() => {
-    try { localStorage.setItem(COLS_KEY, JSON.stringify(cols)); } catch { /* quota */ }
-  }, [cols]);
-  const [dragCol, setDragCol] = useState<null | keyof typeof COL_DEFAULT>(null);
-  const startColDrag = (key: keyof typeof COL_DEFAULT) => (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation(); // never let the divider press also sort the column
-    const startX = e.clientX;
-    const startW = cols[key];
-    setDragCol(key);
-    document.body.classList.add("cp-resizing-ew");
-    const onMove = (ev: MouseEvent) => {
-      // Dragging RIGHT widens the column to the divider's left, which is the
-      // one the handle belongs to.
-      const next = Math.max(COL_MIN, Math.min(COL_MAX, startW + (ev.clientX - startX)));
-      setCols((c: { kind: number; size: number; date: number }) => ({ ...c, [key]: next }));
-    };
-    const onUp = () => {
-      setDragCol(null);
-      document.body.classList.remove("cp-resizing-ew");
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  };
+  const { cols, dragCol, startColDrag } = useListColumns(COLS_KEY, COL_DEFAULT);
 
   const marquee = useMarquee({
     containerRef: paneRef,
