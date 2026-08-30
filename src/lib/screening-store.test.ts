@@ -10,7 +10,7 @@ import {
 
 const LIB = "/docs/Sauce Bunny/Transcripts";
 const DIR = "/docs/Sauce Bunny/Screenings";
-import { newScreening, openSegment, noteComment } from "./screening";
+import { newScreening, openSegment, noteComment, noteParticipants } from "./screening";
 import type { SessionSource } from "../hooks/use-co-review";
 
 const web = (url: string, title: string): SessionSource => ({
@@ -72,7 +72,7 @@ describe("screeningFileName", () => {
 describe("indexEntryFor", () => {
   it("summarises a screening without opening its segments", () => {
     let d = newScreening("s1", "Friday", "host", 1000);
-    d.participants = [{ name: "Me", isHost: true }, { name: "Gasper", isHost: false }];
+    d = noteParticipants(d, [{ name: "Me", isHost: true }, { name: "Gasper", isHost: false }], 1000);
     d = openSegment(d, web("https://a", "A"), "kA", 1000);
     d = noteComment(d, "c1");
     d = openSegment(d, web("https://b", "B"), "kB", 2000);

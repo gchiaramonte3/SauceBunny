@@ -24,8 +24,8 @@ import { listen } from "@tauri-apps/api/event";
 import { formatError } from "../lib/error-format";
 import { loadInstallId } from "../lib/identity";
 import {
-  newScreening, openSegment, closeSegment, noteComment, unnoteComment,
-  screeningIsWorthKeeping, type ScreeningDoc,
+  newScreening, openSegment, closeScreening, noteComment, unnoteComment,
+  noteParticipants, markWatched, screeningIsWorthKeeping, type ScreeningDoc,
 } from "../lib/screening";
 import { saveScreening } from "../lib/screening-store";
 import { getLastUserSeekAt, getPlayheadFrames } from "../lib/playhead-store";
@@ -314,6 +314,18 @@ export function useCoReview({
    *  and which comments were made against each. Holds no comment bodies -
    *  those live in the per-source review docs (see lib/screening.ts). */
   const screeningRef = useRef<ScreeningDoc | null>(null);
+  /** When the SESSION began, which is not when its first source loaded.
+   *  newScreening stamps startedAt from `now`, and the screening is created on
+   *  the first source - so a room that spent ten minutes gathering before
+   *  anyone pressed play recorded a start ten minutes late, and the shelf's
+   *  duration was the watching time rather than the session. */
+  const sessionStartedAtRef = useRef<number>(0);
+  /** Debounced write-through. The screening used to reach disk EXACTLY ONCE,
+   *  in the role->off branch: quit mid-session, lose the renderer, or close
+   *  the window without pressing End and the whole record was gone - while the
+   *  comments survived, because the review store's own write-through was
+   *  fixed for precisely this reason. */
+  const screeningSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Latest recordOpInScreening, for the once-registered message handler. */
   const recordOpRef = useRef<(op: ReviewOp) => void>(() => {});
   // Am I the one driving source + transport? Defaults to the host until a
@@ -721,14 +733,22 @@ export function useCoReview({
     const prev = prevCoRoleRef.current;
     prevCoRoleRef.current = coSession.role;
 
+    if (coSession.role !== "off" && prev === "off") sessionStartedAtRef.current = Date.now();
+
     if (coSession.role === "off" && prev !== "off") {
       persistDoc(sessionDocRef.current);
       // Close the running segment and keep the screening - unless nothing was
       // ever watched and nobody else showed up, which is not a memory worth
       // cluttering the library with.
       const sc = screeningRef.current;
+      if (screeningSaveRef.current) {
+        // A debounced write-through may still be pending. Let this final save
+        // supersede it rather than racing it: the doc below is strictly newer.
+        clearTimeout(screeningSaveRef.current);
+        screeningSaveRef.current = null;
+      }
       if (sc) {
-        const finished = closeSegment(sc);
+        const finished = closeScreening(sc);
         if (screeningIsWorthKeeping(finished)) {
           void saveScreening(finished).catch((e) => {
             // The session is already over, so there is nothing to retry into -
@@ -774,46 +794,6 @@ export function useCoReview({
     prevDocKeyRef.current = reviewSourceKey;
     setSessionDoc(doc);
 
-    // Record what the room is watching. The screening starts on the first
-    // source rather than at session start, so a room that never loads
-    // anything leaves nothing behind.
-    if (!screeningRef.current) {
-      // Read the code and title off the ref, not the render closure: they are
-      // used ONCE, to name a screening at creation, and depending on them
-      // would re-run this whole source-follow effect the moment a title
-      // arrived - closing and reopening a segment for no reason.
-      const s = coSessionRef.current;
-      // NOT `s.code`. That is the iroh join ticket, and it was written
-      // verbatim into ~/Documents/Sauce Bunny/Screenings/*.json and used as a
-      // key in index.json.
-      //
-      // Be precise about why that is wrong, because the obvious reason is not
-      // the real one. It is NOT a live capability afterwards: session_host
-      // builds its Endpoint with a fresh keypair and persists no secret, so
-      // the ticket is dead once the session ends. What it actually contains is
-      // the host's node id plus its direct socket addresses - LAN and
-      // reflexive - and index.json is keyed by doc.id, so every session filed
-      // the host's network addresses into a user-visible, frequently
-      // cloud-synced folder, permanently.
-      //
-      // The app has wire-path-contract forbidding local filesystem paths from
-      // going OUT on the wire. This is the inverse: network identity coming IN
-      // to disk, and nothing checked it.
-      //
-      // It was also wrong as an identity. The comment it replaced claimed the
-      // id was "minted by the host so every attendee's record shares one id",
-      // but a guest's `code` is None, so no attendee could ever share it. A
-      // genuinely shared id has to travel on the wire; until it does, a local
-      // random id is honest about being local.
-      screeningRef.current = newScreening(
-        crypto.randomUUID(),
-        s.title || metadataRef.current?.title || "Screening",
-        "host",
-      );
-    }
-    screeningRef.current = openSegment(
-      screeningRef.current, sessionSourceRef.current, reviewSourceKey,
-    );
     // Guests are still holding the OUTGOING doc, so push the new one now.
     // Previously the snapshot only went out when a peer joined, which meant a
     // mid-session source change left every guest editing the old source.
@@ -1028,6 +1008,96 @@ export function useCoReview({
     // no "you" styling. That is a real divergence between what the host's
     // screen shows and what the guest's does, not a lint nit.
   }, [coSession.role, coSession.peers, coSession.selfId]);
+
+  // ── The screening record ────────────────────────────────────────────
+  // Three effects, all of them running for BOTH roles. Screening recording
+  // used to live inside the host-only doc-seeding effect, which early-returns
+  // on `role !== "host"`, so a guest left a session with NO record at all -
+  // their comments survived in the per-source review doc, but nothing said
+  // those notes came from a session, who else was in the room, or what else
+  // the room watched.
+  //
+  // Each machine records what it OBSERVED. The ids are local (see
+  // ScreeningDoc.id): nothing correlates two attendees' files, because nothing
+  // needs to yet and inventing a shared id means putting one on the wire.
+
+  /** The screening for this session, created on demand. */
+  const ensureScreening = useCallback((): ScreeningDoc => {
+    if (!screeningRef.current) {
+      const s = coSessionRef.current;
+      screeningRef.current = newScreening(
+        crypto.randomUUID(),
+        s.title || metadataRef.current?.title || "Screening",
+        s.role === "host" ? "host" : "guest",
+        // The SESSION's start, not this moment. See sessionStartedAtRef.
+        sessionStartedAtRef.current || Date.now(),
+      );
+    }
+    return screeningRef.current;
+  }, [metadataRef]);
+
+  /** Write through, debounced. Skips a record not yet worth keeping so a
+   *  session that goes nowhere never creates a file; the predicate is
+   *  monotonic (segments and participants only accumulate), so anything that
+   *  becomes worth keeping is written the moment it does. */
+  const saveScreeningSoon = useCallback(() => {
+    if (screeningSaveRef.current) clearTimeout(screeningSaveRef.current);
+    screeningSaveRef.current = setTimeout(() => {
+      screeningSaveRef.current = null;
+      const sc = screeningRef.current;
+      if (!sc || !screeningIsWorthKeeping(sc)) return;
+      void saveScreening(sc).catch((e) => {
+        appendLogRef.current("warn", "session",
+          `This screening could not be saved: ${formatError(e)}`);
+      });
+    }, 1500);
+  }, []);
+
+  // What the room watched, in order.
+  useEffect(() => {
+    if (coSession.role === "off") return;
+    if (sessionSource.kind === "none") return;
+    const before = ensureScreening();
+    let next = openSegment(before, sessionSource, reviewSourceKey || null);
+    // A segment opened before this machine resolved the source locally is
+    // recorded UNWATCHED, and this is what later flips it. markWatched had no
+    // caller at all while only the host recorded, because the host's own
+    // effect could not run without a resolved key - so the flag could never be
+    // anything but true and the "the room watched this, I could not open it"
+    // case had no way to exist.
+    if (reviewSourceKey) next = markWatched(next, reviewSourceKey);
+    if (next === before) return;
+    screeningRef.current = next;
+    saveScreeningSoon();
+    // Granular source deps, matching sendLoadSource's own effect below.
+    // `sessionSource` is a fresh object on most App renders; depending on it
+    // whole re-runs this on every one. openSegment returns identity for an
+    // unchanged source so that was harmless, but harmless churn is still churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coSession.role, sessionSource.kind, sessionSource.url, sessionSource.fingerprint,
+      sessionSource.title, sessionSource.duration, reviewSourceKey,
+      ensureScreening, saveScreeningSoon]);
+
+  // A pending write-through must not outlive the hook. Without this, quitting
+  // during the debounce window fires a save into a torn-down renderer.
+  useEffect(() => () => {
+    if (screeningSaveRef.current) clearTimeout(screeningSaveRef.current);
+  }, []);
+
+  // Who was in the room. theaterParticipants is the normalised roster - the
+  // host's `peers` excludes itself while a guest's includes everyone - so this
+  // reads the same on both sides rather than reconstructing that difference.
+  useEffect(() => {
+    if (coSession.role === "off") return;
+    const before = ensureScreening();
+    const next = noteParticipants(
+      before,
+      theaterParticipants.map((p) => ({ name: p.name, isHost: p.isHost })),
+    );
+    if (next === before) return;
+    screeningRef.current = next;
+    saveScreeningSoon();
+  }, [coSession.role, theaterParticipants, ensureScreening, saveScreeningSoon]);
 
   // In a session, the shared doc drives the timeline markers + annotations
   // (so everyone's live comments show on every timeline).
