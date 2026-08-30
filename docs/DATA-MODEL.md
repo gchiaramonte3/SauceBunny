@@ -275,6 +275,45 @@ they have no per-record version, not because their shape is wrong.
 | F3 | `projects.json` `posterPath` and a review index entry have no defined behaviour when the target file is gone | silent drift | open |
 | F4 | `localStorage` is last-write-wins across two windows, coordinated by convention and one event rather than by anything enforced | silent drift | open |
 | F5 | The panel window hydrated the whole review store at boot for a store it cannot reach | inefficiency | **fixed** |
+| **F6** | The Reviews folder is durable; the map from a RENAMED file to its notes is not. `saucebunny.review.fpindex` lives in evictable `localStorage`, and no review doc records its own fingerprint | **notes become unreachable** | open, and the fix is small |
+
+### F6: the notes are durable, the way back to them is not
+
+F2 is about work product stored in the wrong place. This is different and was
+missed because the Reviews folder looks — correctly — like the durable one.
+
+A review doc is a real file in `~/Documents/Sauce Bunny/Reviews/`, named from a
+slug of the source path plus a hash. Its `sourceKey` is that path. So when the
+user renames or moves the source, the only thing that reconnects the file to
+its notes is `resolveByFingerprint`, and the fingerprint index it reads lives
+in `localStorage` under `saucebunny.review.fpindex` — the same evictable store,
+written through the same `saveJson`, that F2 is about.
+
+Lose it and nothing looks broken. Every note is still on disk. The app simply
+cannot find any of them for any source that has since been renamed, and the
+doc files are named after paths that no longer exist. Restoring `Documents`
+from a backup does not help, because the map was never in `Documents`.
+
+**Measured on this machine, 30 August 2026.** 72 index entries: 33 keyed by an
+absolute path, 39 by URL or fingerprint. Of the 33, **eight point at files that
+no longer exist**, carrying 18 comments between them. Index and folder are
+otherwise perfectly consistent — 0 orphan files, 0 missing files — so the
+store's own bookkeeping is sound; the dangling is at the source level. And none
+of those eight docs records a fingerprint, because **no review doc records one
+at all**: `ReviewDoc` has no such field. Whether those eight are recoverable
+depends entirely on whether `fpindex` still holds an entry for them, which is
+not knowable from outside the app.
+
+The fix is small and follows this document's own placement rule — nothing the
+user's folder needs should live outside it. Give `ReviewDoc` an optional
+fingerprint list, write it where `linkFingerprint` is already called (the value
+is computed there today and thrown away after indexing), and let the store
+rebuild `fpindex` from the folder when it is empty. That makes `Documents`
+self-describing: a folder restored on its own is enough, and the localStorage
+index becomes a cache rather than the only copy.
+
+Not done here, because it changes the shape of the user's documents and that
+deserves its own change rather than being folded into a reporting fix.
 
 ### F2's silence is fixed; F2 itself still needs the decision
 
