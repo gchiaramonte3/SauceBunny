@@ -189,10 +189,13 @@ export function ReviewPanel({
    *
    * The two halves of "mark a range" are deliberately separate here and stay
    * that way. A range COMMENT says "look at this span": it is shared, lands on
-   * every peer's timeline, and exports as a duration marker to Avid, Premiere,
-   * Resolve and FCPX. Clip marks say "cut this span": they are this machine's
-   * export plan, which App.tsx and session-msg-contract both keep off the wire
-   * by name.
+   * every peer's timeline, and exports to all four NLE marker formats (as a
+   * duration marker in Premiere, Resolve and FCPX; Avid has no spanned-marker
+   * import, so markers.ts emits a >> RANGE START / << RANGE END bracket pair
+   * there instead).
+   *
+   * CLIP MARKS say "cut this span": they are this machine's export plan, which
+   * App.tsx and session-msg-contract both keep off the wire by name.
    *
    * What was missing was not a schema or a message - it was the BRIDGE. The
    * transcript has had exactly these two verbs for a while (QueueDrawer passes

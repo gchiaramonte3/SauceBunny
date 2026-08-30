@@ -7,8 +7,9 @@ import { join } from "node:path";
  *
  * A range COMMENT says "look at this span". It is shared: it crosses the wire
  * on the existing `add` op, lands on every peer's timeline as a tinted band,
- * survives to disk, and exports as a duration marker to Avid, Premiere,
- * Resolve and FCPX.
+ * survives to disk, and exports to all four NLE marker formats (a duration
+ * marker in Premiere, Resolve and FCPX; Avid has no spanned-marker import, so
+ * markers.ts emits a >> RANGE START / << RANGE END bracket pair there).
  *
  * CLIP MARKS say "cut this span". They are this machine's export plan, and
  * they are deliberately local - `session-msg-contract` forbids them on the

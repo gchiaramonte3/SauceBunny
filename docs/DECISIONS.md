@@ -17,6 +17,114 @@ than a reference.
 
 ---
 
+## The three session gaps: two closed, one declined (2026-08-29)
+
+The Sessions design work ended with three items filed as "decide, don't
+drift". This is the deciding. Each was investigated against the tree and then
+adversarially verified; the frames recommendation was **refuted** by that
+second pass, which is why it is a non-fix rather than a feature.
+
+### Marked ranges: the premise was wrong, and the gap was a verb — FIXED
+
+The item read "in/out marks have no home in a session record; that is a
+feature, not a schema fix." Half right. There are **two** range systems here,
+both deliberate:
+
+| | range comment | clip marks |
+|---|---|---|
+| means | "look at this span" | "cut this span" |
+| hotkeys | shift-I / shift-O | I / O |
+| shared? | yes, on the existing `add` op | never, forbidden by name |
+| lands on | every peer's timeline, disk, four NLE exporters | this machine's export queue |
+
+So "the room marked this range" was never unserved — it is a range comment,
+and has been all along. What was missing was the **bridge**: `onMarkRange` and
+`onQueueRange` flowed from App into QueueDrawer and QueueDrawer handed them to
+TranscriptViewer and nothing else. A range selected in a transcript could be
+cut; a range the whole room had just agreed on could only be jumped to.
+
+Two buttons, 81 lines across three files, no schema, no wire, no screening
+change. Pinned by `range-adopt-contract`. Adopting is a LOCAL act, which is
+what keeps it inside the existing rule instead of needing a new one.
+
+**Do not "improve" this by broadcasting the adopted marks.** That is the line
+`session-msg-contract` draws, and the contract now says so. Note its real
+shape while you are here: it is a five-identifier string scan
+(`inFrames|outFrames|queuedRange|clipQueue|QueuedClip`), so a future variant
+named `MarkRange { start, end }` would pass it untouched. The promise is
+enforced against the current vocabulary, not the concept.
+
+### Recording: correctly deferred, and one open question now has an answer
+
+`docs/RECORDING-PLAN.md` is a real five-pass plan marked NOT YET IMPLEMENTED,
+with its load-bearing claims spot-verified. It is not an oversight and nothing
+here supersedes it. It ends with **ten open questions for the user**, and they
+are genuine product calls, not analysis gaps.
+
+One of them can be closed now. Question 6 asks `~/Documents` or `~/Movies`,
+noting Documents is iCloud-synced for many users and a 15 GB session would try
+to upload. That is no longer hypothetical on at least one dev machine: iCloud
+Desktop sync duplicated `.git/refs/remotes/origin/main` as `main 2`, and
+because git reads every file under `refs/` as a ref, the resulting
+space-containing ref name broke `git fetch` outright. Seven more `.git` files
+were duplicated the same way. **A sync tool that corrupts a git repo will not
+handle a multi-GB `.part` file gracefully.** Whatever else is decided, the
+recording root must not be a synced folder by default.
+
+### Frames: no link back to their session — DECLINED
+
+The claim was true (a frame carries no session id, and nothing records that
+one was grabbed) and the proposed fix was an extended attribute. Adversarial
+verification refuted the reasoning behind it, on four counts:
+
+1. **The exclusivity claim fails.** The argument was that an xattr is the only
+   way to attach a field without adding a second copy of anything. But
+   `folder` is already exactly that: a path-borne field, written by
+   `move_frame_to_folder`, derived by `walk_frames`, rendered by the shelf.
+   Filing a session's grabs into a directory records the same link with no new
+   storage, no new command, and a reader that already exists.
+2. **The cost was wishful.** "About 25 lines" counted only the write.
+   The read needs a new `FrameItem` field (so `cargo test --lib` regenerates
+   the binding), an `xattr::get` per entry inside a listing that re-runs on
+   every window focus, async screening-index hydration to turn an id into a
+   title, and a **build-ID bump in two places** the estimate never mentioned.
+   Realistically 6-9 files.
+3. **The two directions were conflated.** "There is no screening viewer" is
+   true of session → frames, and was used to inflate the cost of the
+   frame → session change being recommended, which needs no viewer at all.
+4. **The zero-storage correlation is not identity.** A frame's stem is the
+   title through `sanitizeFilename` (character substitution, dot stripping,
+   UTF-8 truncation); the screening segment stores the RAW title. Matching
+   them means re-deriving the sanitiser and is lossy for any title that was
+   truncated or contained a replaced character. The other axis, mtime, is
+   rewritten by any later touch.
+
+And the option nobody surveyed: `docs/RECORDING-PLAN.md` already specifies
+`~/Documents/Sauce Bunny/Sessions/<date>-<slug>/` for per-session artifacts,
+explicitly names Frames as the pattern to copy, and sanctions a `session.json`
+**inside** its own session folder as not-an-index. If a frame ever needs to
+know its session, that is where the answer starts.
+
+**Left alone.** Screening ids are local to each machine by design, so any such
+link is per-machine anyway; there is no consumer for it today; and every
+storage option either breaks the property the Frames design exists to protect
+(a Finder rename must not break anything) or degrades silently outside the Mac
+— xattrs survive `mv` and `cp` and are lost through zip, measured on this
+machine.
+
+### What else has no home, checked and dismissed
+
+Verdicts, the presenter timeline, reactions, raised hands and screen sharing
+were all examined for the same gap. Only one looked promising and it does not
+survive contact: a screen share renders in the **PeoplePanel tile**, replacing
+that person's camera, not on the stage. The room is still watching the loaded
+media. Recording it as a segment would claim the room stopped watching
+something it never stopped watching. Verdicts already persist correctly — in
+the ReviewDoc, per version, which is where the invariant says a fact about the
+SOURCE belongs. Reactions fade in 4.6 seconds by design.
+
+---
+
 ## Making every mechanical CLAUDE.md contract a test
 
 Eight guards added, taking the register from 43 to 51. Four of the eight claims
