@@ -253,6 +253,29 @@ export type CoReview = {
   leaveCoReview: () => void;
 };
 
+/**
+ * Stamp a new comment with the session and segment it was made in.
+ *
+ * Module scope and pure, so it is testable without mounting the hook. Returns
+ * the op unchanged when there is no screening (solo editing) or when the op is
+ * not an add - a stamp is a fact about creation, so re-stamping an edit or a
+ * relayed op would be inventing one.
+ */
+export function stampOpWithSession(op: ReviewOp, sc: ScreeningDoc | null): ReviewOp {
+  if (op.t !== "add" || !sc) return op;
+  const open = sc.segments[sc.segments.length - 1];
+  return {
+    ...op,
+    comment: {
+      ...op.comment,
+      sessionId: sc.id,
+      // Only a segment still OPEN describes what was on screen. A closed one
+      // is what the room used to be watching.
+      segmentId: open && open.endedAt === 0 ? open.id : undefined,
+    },
+  };
+}
+
 export function useCoReview({
   isPlaying, fps, playbackRate,
   sessionSource, activeSourceUrlRef, reviewSourceKey,
@@ -415,6 +438,15 @@ export function useCoReview({
   }, [sendSessionMsg]);
 
   const postSessionOp = useCallback((op: ReviewOp) => {
+    // STAMP BEFORE ANYTHING ELSE SEES IT. A note gets the session and segment
+    // it was made in here, once, so the local doc, the file on disk and every
+    // peer's copy all carry the same value - stamping after the local apply or
+    // after the stringify would leave the copies disagreeing.
+    //
+    // No wire change: the stamp rides inside the comment on the existing `add`
+    // op, which the Rust relay treats as an opaque string, so a peer on an
+    // older build carries the fields through untouched.
+    op = stampOpWithSession(op, screeningRef.current);
     if (!sessionDocRef.current) pendingOpsRef.current.push(op);
     else setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
     recordOpInScreening(op);

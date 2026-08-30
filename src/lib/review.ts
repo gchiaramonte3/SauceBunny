@@ -116,6 +116,29 @@ export type ReviewComment = {
    *  Optional, and absent on every doc written before it existed - which is
    *  why the merge falls back to unioning names it has no history for. */
   reactedAt?: Record<string, Record<string, { on: boolean; at: number }>>;
+  /**
+   * WHICH SESSION THIS NOTE WAS MADE IN, and which of that session's segments
+   * was on screen. Absent on every note made alone, and on every doc written
+   * before these existed.
+   *
+   * This is the one idea worth taking from the W3C Web Annotation Data Model:
+   * its `scope`, the observation that "which context was this made in" belongs
+   * on the annotation rather than being reconstructed later. A note already
+   * carries two clocks - `timeStart` is media time, `createdAt` is wall time -
+   * and this is the third: which room, watching what.
+   *
+   * The DIRECTION matters and is the whole design. The note points at the
+   * session; the session never holds the note. A screening records who was
+   * there and what was watched, plus comment IDS - never a body, never a time,
+   * never an author. The test that keeps it honest: opening a source solo,
+   * with no screening file present, must still show every note made about it
+   * in a session. Anything that would break that belongs somewhere else.
+   *
+   * Without these, "which cut was on screen when this was written" is only
+   * answerable by opening every screening file looking for the comment id.
+   */
+  sessionId?: string;
+  segmentId?: string;
 };
 
 export type ReviewVersion = {
