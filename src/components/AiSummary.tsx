@@ -9,6 +9,7 @@ import { loadAiProvider, cloudChat } from "../lib/ai-provider";
 import { formatError } from "../lib/error-format";
 import { scrollBehavior } from "../lib/motion";
 import { useDismiss } from "../hooks/use-dismiss";
+import { useMenuKeys } from "../hooks/use-menu-keys";
 import { IconAiSummary } from "./Icons";
 import { Markdown } from "./Markdown";
 import { AiChapters } from "./AiChapters";
@@ -573,6 +574,9 @@ export function AiSummary({
   // menu in the app closed. That is the exact pair of symptoms use-dismiss.ts
   // was written for, after the same split was found in the transcript history.
   useDismiss(dlRef, () => setDlOpen(false), dlOpen);
+  // ...and the arrow keys role="menu" promises, which useDismiss does not
+  // cover: it answers Escape and an outside click, not navigation.
+  useMenuKeys(dlRef, dlOpen, () => setDlOpen(false));
 
   // Strip leaked emphasis for the plain-text export (the renderer does this for
   // the on-screen view; .txt has no renderer).

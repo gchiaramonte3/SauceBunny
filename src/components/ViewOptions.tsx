@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useMenuKeys } from "../hooks/use-menu-keys";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { IconAspect, IconFullscreen, IconFullscreenExit, IconInfo } from "./Icons";
 import type { AspectId } from "./Monitor";
@@ -26,6 +27,8 @@ export function ViewOptions({ aspect, onAspectChange, waveformVisible, onWavefor
   const [open, setOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // role="menu" promises arrow-key navigation; this is where it is kept.
+  useMenuKeys(ref, open, () => setOpen(false));
   const current = ASPECTS.find((a) => a.id === aspect) ?? ASPECTS[0];
 
   useEffect(() => {

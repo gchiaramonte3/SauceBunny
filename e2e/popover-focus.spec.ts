@@ -123,6 +123,29 @@ for (const label of TRIGGERS) {
     await trigger.press("Enter");
     await expect(trigger, "Enter did not open it").toHaveAttribute("aria-expanded", "true");
 
+    // A MENU IS ONE TAB STOP, so "reachable by Tab" is the wrong question for
+    // one. role="menu" tells a screen reader to navigate with the arrow keys,
+    // and implementing that means every item carries tabIndex=-1 and focus
+    // moves INTO the menu on open - so a Tab walk correctly finds nothing and
+    // this test used to fail on a menu that had just been made more accessible.
+    //
+    // Same intent, right mechanism: for a menu, assert focus landed on an item
+    // and that an arrow moves to a different one.
+    const menu = page.locator('[role="menu"]:visible').first();
+    if (await menu.count()) {
+      const onItem = () => page.evaluate(() => {
+        const a = document.activeElement;
+        return !!a && /^menuitem/.test(a.getAttribute("role") ?? "");
+      });
+      expect(await onItem(), "opening a menu must move focus onto an item").toBe(true);
+      const before = await activeLabel(page);
+      await page.keyboard.press("ArrowDown");
+      await page.waitForTimeout(50);
+      expect(await onItem(), "ArrowDown left the menu").toBe(true);
+      expect(await activeLabel(page), "ArrowDown did not move between items").not.toBe(before);
+      return;
+    }
+
     const appeared = await page.evaluate((attr) =>
       Array.from(document.querySelectorAll<HTMLElement>("button, input, select, textarea, [tabindex]:not([tabindex='-1'])"))
         .filter((e) => !e.hasAttribute(attr) && e.checkVisibility())

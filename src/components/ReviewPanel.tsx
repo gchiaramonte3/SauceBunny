@@ -1,5 +1,6 @@
 import { COMMENT_REACTION_EMOJI } from "../lib/reactions";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useMenuKeys } from "../hooks/use-menu-keys";
 import { ColorSwatches } from "./ColorSwatches";
 import { useModalFocus } from "../hooks/use-modal-focus";
 import { invoke } from "@tauri-apps/api/core";
@@ -1934,6 +1935,10 @@ function ReplyRow({
  *  palette IS the picker. */
 function ReactionBar({ c, myName, onReact }: { c: ReviewComment; myName: string; onReact: (emoji: string) => void }) {
   const [open, setOpen] = useState(false);
+  const popRef = useRef<HTMLSpanElement>(null);
+  // A single horizontal row of emoji. role="menu" was already here promising
+  // arrow navigation; this is what keeps it.
+  useMenuKeys(popRef, open, () => setOpen(false));
   const map = reactionsOf(c);
   const entries = Object.entries(map);
   return (
@@ -1963,7 +1968,7 @@ function ReactionBar({ c, myName, onReact }: { c: ReviewComment; myName: string;
           <SmileGlyph />
         </button>
         {open && (
-          <span className="cp-react-pop" role="menu" aria-label="Pick a reaction">
+          <span ref={popRef} className="cp-react-pop" role="menu" aria-orientation="horizontal" aria-label="Pick a reaction">
             {COMMENT_REACTION_EMOJI.map((emoji) => (
               <button key={emoji} role="menuitem" className="cp-react-pop-btn"
                 onClick={() => { onReact(emoji); setOpen(false); }} aria-label={`React with ${emoji}`}>

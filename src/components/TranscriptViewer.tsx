@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useDismiss } from "../hooks/use-dismiss";
+import { useMenuKeys } from "../hooks/use-menu-keys";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
@@ -1457,6 +1458,9 @@ export function TranscriptViewer({
     return () => window.clearTimeout(t);
   }, [dlError]);
   const dlRef = useRef<HTMLDivElement>(null);
+  // The Download menu is the SECOND role="menu" in this file; both get the
+  // keyboard model, or the one that does not becomes the odd one out.
+  useMenuKeys(dlRef, dlOpen, () => setDlOpen(false));
   useEffect(() => {
     if (!dlOpen) return;
     function onDoc(e: MouseEvent) {
@@ -1471,6 +1475,9 @@ export function TranscriptViewer({
   // primary actions stay visible and the bar scales as features are added.
   const [toolsOpen, setToolsOpen] = useState(false);
   const toolsRef = useRef<HTMLDivElement>(null);
+  // Ten items in this one, which is the menu where arrow keys and type-ahead
+  // stop being a nicety.
+  useMenuKeys(toolsRef, toolsOpen, () => setToolsOpen(false));
   useEffect(() => {
     if (!toolsOpen) return;
     function onDoc(e: MouseEvent) {

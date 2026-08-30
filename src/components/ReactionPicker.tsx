@@ -1,3 +1,5 @@
+import { useRef } from "react";
+import { useMenuKeys } from "../hooks/use-menu-keys";
 import { HAND_GLYPH, REACTION_EMOTES } from "../lib/reactions";
 
 /**
@@ -12,8 +14,12 @@ export function ReactionPicker({ onReact, handRaised, onToggleHand, onClose }: {
   onToggleHand: () => void;
   onClose: () => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Mounted only while open. Horizontal, so a screen reader suggests
+  // Left/Right - the hook answers either pair.
+  useMenuKeys(ref, true, onClose);
   return (
-    <div className="cp-react-pick" role="menu" aria-label="Send a reaction">
+    <div ref={ref} className="cp-react-pick" role="menu" aria-orientation="horizontal" aria-label="Send a reaction">
       <div className="cp-react-pick-row">
         {REACTION_EMOTES.map((e) => (
           <button

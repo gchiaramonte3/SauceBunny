@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useMenuKeys } from "../hooks/use-menu-keys";
 import { PLAYBACK_RATES, formatPlaybackRate } from "../lib/playback-rate";
 
 type Props = {
@@ -24,6 +25,10 @@ type Props = {
 export function SpeedControl({ rate, supported, onRateChange }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // role="menu" is a promise of arrow-key navigation; this keeps it. The ref
+  // wraps the trigger AND the popover, which is what we want: while open, an
+  // arrow pressed anywhere in the cluster moves between the rates.
+  useMenuKeys(ref, open, () => setOpen(false));
 
   // Capability can flip while the menu is open (player swap mid-source) —
   // don't leave a live rate menu attached to a disabled badge.
@@ -55,6 +60,7 @@ export function SpeedControl({ rate, supported, onRateChange }: Props) {
           : "Speed control isn't available for the WebCodecs player"}
         aria-label={`Playback speed: ${formatPlaybackRate(rate)}`}
         aria-expanded={open}
+        aria-haspopup="menu"
         disabled={!supported}
         onClick={() => setOpen((o) => !o)}
         onContextMenu={(e) => { e.preventDefault(); if (supported) onRateChange(1); }}

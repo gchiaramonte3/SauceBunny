@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useMenuKeys } from "../hooks/use-menu-keys";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
@@ -33,6 +34,11 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
   const [err, setErr] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   useModalFocus(true, dialogRef);
+  // The menu half needs the OTHER keyboard model: arrows between items,
+  // Home/End, type-ahead, Tab to leave. It is portalled to document.body,
+  // so without focus moving in on open there is no way to reach it at all.
+  const menuRef = useRef<HTMLDivElement>(null);
+  useMenuKeys(menuRef, mode === "menu", onClose);
 
   // Outside-click / Escape closes the whole thing.
   useEffect(() => {
@@ -87,7 +93,7 @@ export function ReaderRowMenu({ target, onClose, folderOptions, libraryPath, onR
     return createPortal(
       <>
         <div className="cp-rowmenu-scrim" onMouseDown={onClose} />
-        <div className="cp-rowmenu" style={{ left, top }} role="menu">
+        <div ref={menuRef} className="cp-rowmenu" style={{ left, top }} role="menu">
           <button role="menuitem" onClick={() => { setNameInput(target.title); setErr(null); setMode("rename"); }}>Rename…</button>
           <button role="menuitem" onClick={() => { setErr(null); setMode("move"); }}>Move to folder…</button>
           <button role="menuitem" onClick={() => { void revealInFinder(); }}>Reveal in Finder</button>

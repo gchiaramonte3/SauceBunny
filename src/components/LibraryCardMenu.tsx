@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useMenuKeys } from "../hooks/use-menu-keys";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview, IconPencil, IconTrash, IconFolderSolid } from "./Icons";
@@ -82,7 +83,6 @@ export function LibraryCardMenu({
   tags, onToggleTagColor, onClearTagColors, onRename, onDelete, deleteLabel, onMove,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
-  const btnRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: anchor.x, top: anchor.y });
 
   const items: Item[] = [];
@@ -128,13 +128,13 @@ export function LibraryCardMenu({
     setPos({ left, top });
   }, [anchor.x, anchor.y, align]);
 
-  // Focus the first enabled item on open (keyboard entry point).
-  useEffect(() => {
-    const first = items.findIndex((it) => !it.disabled);
-    btnRefs.current[first >= 0 ? first : 0]?.focus();
-    // Open-once: item set is stable for a given card.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Focus-on-open, arrows, Home/End, type-ahead, Tab-to-leave and focus
+  // restoration all come from the shared hook now. This component had the
+  // best hand-rolled version of the eleven - it focused the first enabled item
+  // and wrapped the arrows - and it was still missing Home/End, type-ahead,
+  // roving tabindex (so every item was a tab stop) and Tab-closes. Ten other
+  // menus had less than this; one implementation is how they stop diverging.
+  useMenuKeys(popoverRef, true, onClose);
 
   // Outside-click + Escape dismissal (Escape captures so it beats App's global keys).
   useEffect(() => {
@@ -150,18 +150,6 @@ export function LibraryCardMenu({
     };
   }, [onClose]);
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    e.preventDefault();
-    const enabled = items.map((it, i) => (it.disabled ? -1 : i)).filter((i) => i >= 0);
-    if (enabled.length === 0) return;
-    const focused = btnRefs.current.findIndex((b) => b === document.activeElement);
-    const at = enabled.indexOf(focused);
-    const dir = e.key === "ArrowDown" ? 1 : -1;
-    const next = at < 0 ? 0 : (at + dir + enabled.length) % enabled.length;
-    btnRefs.current[enabled[next]]?.focus();
-  };
-
   return createPortal(
     <div
       ref={popoverRef}
@@ -169,7 +157,6 @@ export function LibraryCardMenu({
       role="menu"
       aria-label="Card actions"
       style={{ position: "fixed", left: pos.left, top: pos.top }}
-      onKeyDown={onKeyDown}
     >
       {/* Colour first, above the verbs — where Finder puts it, and one click
           from right-click, which is the whole reason tags get used. */}
@@ -180,10 +167,9 @@ export function LibraryCardMenu({
           onClear={onClearTagColors}
         />
       )}
-      {items.map((it, i) => (
+      {items.map((it) => (
         <button
           key={it.label}
-          ref={(el) => { btnRefs.current[i] = el; }}
           type="button"
           role="menuitem"
           className={"cp-lib-menu-item" + (it.danger ? " danger" : "")}

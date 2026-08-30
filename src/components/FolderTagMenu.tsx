@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useMenuKeys } from "../hooks/use-menu-keys";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { TagColorRow } from "./TagColorRow";
@@ -37,6 +38,8 @@ export function FolderTagMenu({
 }) {
   const [tags, setTags] = useState<FinderTag[]>([]);
   const boxRef = useRef<HTMLDivElement>(null);
+  // Mounted only while open, so `true` is the honest open flag here.
+  useMenuKeys(boxRef, true, onClose);
   const [pos, setPos] = useState(anchor);
 
   useEffect(() => {

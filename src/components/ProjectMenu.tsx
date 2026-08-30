@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useMenuKeys } from "../hooks/use-menu-keys";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
@@ -44,6 +45,11 @@ export function ProjectMenu({ target, libraryPath, onClose, onRenamed, onDeleted
   const [err, setErr] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   useModalFocus(mode !== "menu", dialogRef);
+  // The menu half needs the OTHER keyboard model: arrows between items,
+  // Home/End, type-ahead, Tab to leave. It is portalled to document.body,
+  // so without focus moving in on open there is no way to reach it at all.
+  const menuRef = useRef<HTMLDivElement>(null);
+  useMenuKeys(menuRef, mode === "menu", onClose);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
@@ -80,7 +86,7 @@ export function ProjectMenu({ target, libraryPath, onClose, onRenamed, onDeleted
     return createPortal(
       <>
         <div className="cp-rowmenu-scrim" onMouseDown={onClose} />
-        <div className="cp-rowmenu" style={{ left, top }} role="menu">
+        <div ref={menuRef} className="cp-rowmenu" style={{ left, top }} role="menu">
           <button role="menuitem" onClick={() => { setNameInput(target.title); setErr(null); setMode("rename"); }}>Rename project…</button>
           <button role="menuitem" disabled={target.items.length === 0} onClick={() => { setErr(null); setMode("poster"); }}>Choose picture…</button>
           <button role="menuitem" onClick={() => { setErr(null); setMode("delete"); }}>Delete project…</button>
