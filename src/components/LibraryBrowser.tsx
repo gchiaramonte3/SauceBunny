@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
+import { appUndo } from "../lib/undo";
 import { newFolderPath } from "../lib/library-folder";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LibraryTree } from "./LibraryTree";
@@ -14,7 +15,7 @@ import { FramesPane } from "./FramesPane";
 import { marqueeSelection } from "../lib/marquee";
 import { RenameDialog } from "./RenameDialog";
 import { LibraryQuickLook } from "./LibraryQuickLook";
-import { applyRenamePlan, probeIdentity, repathIdentity } from "../lib/rename-apply";
+import { applyRenamePlan, probeIdentity, repathIdentity, type RenameIdentity } from "../lib/rename-apply";
 import {
   clickSelect, contextMenuSelect, EMPTY_SELECTION, pruneSelection, selectAll, selectedInOrder,
   type SelectionState,
@@ -257,6 +258,9 @@ export function LibraryBrowser({
     const copying = opts.copy === true;
     let moved = 0;
     const failures: string[] = [];
+    /** Successful MOVES, for the undo entry. A copy has nothing to undo -
+     *  the original never left - so it is deliberately not collected. */
+    const done: { from: string; to: string; id: RenameIdentity | null }[] = [];
     for (const from of paths) {
       // Probed BEFORE the move: afterwards the old path no longer resolves.
       // A COPY keeps the original where it is, so the poster and the review
@@ -268,7 +272,11 @@ export function LibraryBrowser({
           copying ? "copy_library_file" : "move_library_file",
           { srcPath: from, destDir: dest },
         );
-        if (to !== from) { if (id) repathIdentity(from, to, id); moved += 1; }
+        if (to !== from) {
+          if (id) repathIdentity(from, to, id);
+          moved += 1;
+          if (!copying) done.push({ from, to, id });
+        }
       } catch (e) {
         failures.push(`${from.split("/").pop() ?? from}: ${formatError(e)}`);
       }
@@ -277,6 +285,57 @@ export function LibraryBrowser({
     setDetailItem(null);
     if (moved > 0) rescanAll();
     if (failures.length > 0) setMoveError(failures.join(" · "));
+
+    /**
+     * UNDO, for a move that had none.
+     *
+     * `trashItem` a few lines below explains that it may ship BECAUSE the OS
+     * offers Put Back, "which is also why this is allowed to ship at all when
+     * a drag-to-move between folders is not: one is recoverable and the other
+     * would not be". Drag-to-move shipped anyway - this function is reached
+     * from the card drop, the Move dialog and the row menu - so the rail was
+     * written down and then crossed. (That comment also says "this app has no
+     * undo", which stopped being true when appUndo landed.)
+     *
+     * The data model needed NOTHING for this. `move_library_file` is its own
+     * inverse with the arguments swapped, and it refuses when a file of that
+     * name is already there, so an undo cannot silently overwrite whatever has
+     * since taken the old name. `repathIdentity` is symmetric, and the
+     * identity it needs was already probed before the move.
+     *
+     * ONE entry for the whole batch: dragging nine files onto a folder is one
+     * act, and nine separate undos would be nine cmd+Zs for it.
+     */
+    if (done.length === 0) return;
+    const label = done.length === 1
+      ? `move ${done[0].from.split("/").pop() ?? "file"}`
+      : `move ${done.length} files`;
+    const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
+    const shuttle = async (
+      pairs: { from: string; to: string; id: RenameIdentity | null }[],
+      back: boolean,
+    ) => {
+      const errs: string[] = [];
+      for (const m of pairs) {
+        const src = back ? m.to : m.from;
+        const destDir = dirOf(back ? m.from : m.to);
+        try {
+          const landed = await invoke<string>("move_library_file", { srcPath: src, destDir });
+          if (m.id && landed !== src) repathIdentity(src, landed, m.id);
+        } catch (e) {
+          errs.push(`${src.split("/").pop() ?? src}: ${formatError(e)}`);
+        }
+      }
+      rescanAll();
+      // A failed undo must SAY so. The files are where they were and the user
+      // needs to know their cmd+Z did not take.
+      if (errs.length > 0) setMoveError(errs.join(" · "));
+    };
+    appUndo.push({
+      label,
+      undo: () => { void shuttle(done, true); },
+      redo: () => { void shuttle(done, false); },
+    });
   }, [rescanAll]);
 
   /**
@@ -313,11 +372,15 @@ export function LibraryBrowser({
    * file wall had none, so the one shelf holding somebody's actual footage
    * was the only one with no way to get rid of anything.
    *
-   * The TRASH, not a delete. This app has no undo, and these are the user's
-   * own media files - macOS already offers Put Back on anything in there,
-   * which makes the OS the recovery path rather than there being none. That
-   * is also why this is allowed to ship at all when a drag-to-move between
-   * folders is not: one is recoverable and the other would not be.
+   * The TRASH, not a delete. These are the user's own media files, and macOS
+   * already offers Put Back on anything in there, which makes the OS the
+   * recovery path rather than there being none.
+   *
+   * This used to add "this app has no undo" and to say that a drag-to-move
+   * between folders "is not" allowed to ship for that reason. Both halves had
+   * gone stale: appUndo exists, and drag-to-move shipped anyway - moveToFolder
+   * above is reached from the card drop, the Move dialog and the row menu. It
+   * has an undo entry now, so the rail this comment describes is real again.
    */
   const trashItem = useCallback(async (item: LibraryItem) => {
     const ok = confirm(

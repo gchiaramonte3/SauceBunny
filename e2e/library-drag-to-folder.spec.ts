@@ -398,3 +398,45 @@ test("a new folder can be made from inside the move dialog", async ({ page }) =>
   await page.getByRole("button", { name: /Create and move/ }).click();
   await expect(page.locator(".cp-rowmenu-dialog")).toBeHidden({ timeout: 10_000 });
 });
+
+/**
+ * FILING A FILE IS UNDOABLE.
+ *
+ * LibraryBrowser's `trashItem` explains that it may ship BECAUSE macOS offers
+ * Put Back — "which is also why this is allowed to ship at all when a
+ * drag-to-move between folders is not: one is recoverable and the other would
+ * not be". Drag-to-move shipped anyway: `moveToFolder` is reached from the card
+ * drop, the Move dialog and the row menu. The rail was written down and then
+ * crossed, and the comment saying so had also gone stale about the app having
+ * no undo at all.
+ *
+ * The data model needed nothing: move_library_file is its own inverse with the
+ * arguments swapped, and it refuses when the old name is taken, so an undo
+ * cannot overwrite whatever moved in behind it.
+ */
+test("cmd+Z puts a filed file back where it came from", async ({ page }) => {
+  await bootLibrary(page, "grid");
+  const file = page.locator(".cp-lib-pane .cp-lib-card:not(.cp-lib-foldercard)").first();
+  const folder = page.locator(".cp-lib-pane .cp-lib-foldercard").first();
+  await expect(file).toBeVisible({ timeout: 10_000 });
+  await expect(folder).toBeVisible();
+  const src = await file.getAttribute("data-path");
+  const dest = await folder.getAttribute("data-drop");
+
+  await dragTo(page, centre((await file.boundingBox())!), centre((await folder.boundingBox())!));
+  await page.mouse.up();
+  await expect.poll(() => moves(page)).toEqual([{ srcPath: src, destDir: dest }]);
+
+  // Outside a text field, so the app claims the chord rather than the browser.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("Meta+z");
+
+  // The second call is the inverse: the file's NEW path, back to the directory
+  // it started in. Asserted as a pair rather than a count, so an undo that
+  // fired the original move again would fail rather than look like success.
+  const home = src!.slice(0, src!.lastIndexOf("/"));
+  await expect.poll(() => moves(page)).toEqual([
+    { srcPath: src, destDir: dest },
+    { srcPath: `${dest}/${src!.split("/").pop()}`, destDir: home },
+  ]);
+});
