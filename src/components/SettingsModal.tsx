@@ -1217,15 +1217,23 @@ export function SettingsModal(props: Props) {
                     <div className="k">
                       Join code identity
                       <span className="desc">
-                        Your Mac keeps one identity for co-review, so a join code you shared still
-                        works after a restart. Resetting it makes a new one, which stops every code
-                        you have already handed out. It does not affect a session that is running.
+                        Your Mac keeps one identity for co-review, so the next session you start
+                        is reachable by a code you already shared. That also means a code does not
+                        expire: anyone who still has one can join a later session. Resetting stops
+                        every code at once, and takes effect on your next session rather than one
+                        that is already running.
                       </span>
                     </div>
                     <div className="v">
                       <button
                         className="btn btn-ghost"
-                        disabled={hasIdentity !== true}
+                        /* Enabled when the answer is yes OR unknown. `null`
+                           means the Keychain could not be read, and the entry
+                           may well exist - disabling the only control that
+                           could clear it locked the user out of the fix for
+                           exactly the state that needs one. Only a definite
+                           "nothing stored" disables. */
+                        disabled={hasIdentity === false}
                         onClick={() => {
                           void invoke("reset_review_identity")
                             .then(() => { setHasIdentity(false); setIdentityReset(true); })
@@ -1236,9 +1244,9 @@ export function SettingsModal(props: Props) {
                             above report their outcome. It read "Reset" while
                             disabled, which says the button is the thing to
                             press and then refuses. */}
-                        {hasIdentity === true
-                          ? "Reset"
-                          : (identityReset ? "Cleared" : "Not set up yet")}
+                        {hasIdentity === false
+                          ? (identityReset ? "Cleared" : "Not set up yet")
+                          : "Reset"}
                       </button>
                     </div>
                   </div>

@@ -30,7 +30,10 @@
 //!     carry GIGABYTES of E2E-encrypted media rather than kilobytes of
 //!     control traffic (see the R6 decision still open in the peer-media
 //!     plan: refuse Tier B on a relay path, or force the lowest rung).
-//!   - A relay-URL override setting + LAN-only mode is Phase 3.
+//!   - A relay-URL override setting + LAN-only mode is Phase 3. NOTE: LAN-only
+//!     got FURTHER away, not closer. The join code now carries only the
+//!     endpoint key, so dialing depends on n0's DNS resolving it; the code no
+//!     longer carries the direct addresses a LAN dial would use.
 //!
 //! Topology: star. The host accepts up to `MAX_PEERS` peer connections; each
 //! peer opens ONE bi-directional stream and immediately sends `Hello`. The
@@ -136,8 +139,23 @@ const FETCH_READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// End-to-end budget for a peer joining (connect + open_bi + Hello).
 const JOIN_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// How long the host waits to become relay-reachable before minting the
-/// ticket anyway (LAN-only sessions still work off direct addresses).
+/// How long the host waits to become relay-reachable before minting the code.
+///
+/// This used to add "(LAN-only sessions still work off direct addresses)",
+/// and the id-only code made that FALSE. `presets::N0` is a pkarr publisher,
+/// a DNS lookup and relays - there is no mDNS - so a code carrying only a key
+/// has nothing to dial until n0's DNS answers. Two Macs on a LAN with no
+/// internet can no longer join each other; they get the join timeout.
+///
+/// That is a real trade this app has not decided deliberately. Restoring it
+/// means either local discovery in the preset, or a code that carries direct
+/// addresses ALONGSIDE the key. The second is the smaller change and keeps
+/// the durability, since the key resolves when the addresses go stale.
+///
+/// The wait itself proves less than it looks: iroh's own docs say `online()`
+/// "does not interact with AddressLookup services", so it says nothing about
+/// whether the pkarr record was written. It is kept because it costs a
+/// bounded 8s and a relay-attached host is likelier to have published.
 const ONLINE_TIMEOUT: Duration = Duration::from_secs(8);
 
 // ============================================================
@@ -528,6 +546,18 @@ pub async fn session_start(
     // and an old address-bearing code minted by an earlier build still parses
     // and dials. Both ends already run DnsAddressLookup via presets::N0, so
     // the guest needs no change at all.
+    // THE CODE IS NOW PERMANENT, and nothing downstream gates on it. The
+    // accept loop checks the ALPN and reads a Hello; there is no allowlist and
+    // no per-code identity, so every session this Mac ever hosts answers to
+    // the same string. Before the key was persisted, a code expired when the
+    // app quit - accidental, but it was the only bound there was.
+    //
+    // Consequence to be honest about: a code shared in September silently
+    // admits its holder to a session in November, and the only revocation is
+    // reset_review_identity, which invalidates every code at once. Per-code
+    // grants are the fix and they are a later phase; until then this is a
+    // convenience for people you trust with the whole shelf, not a link to
+    // hand to a client.
     let ticket = EndpointTicket::new(EndpointAddr::new(endpoint.id())).to_string();
     let title = title
         .map(|t| t.trim().chars().take(80).collect::<String>())

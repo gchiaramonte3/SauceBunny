@@ -51,10 +51,13 @@ fn entry() -> Result<keyring::Entry, AppError> {
 /// indistinguishable from no key and refusing to host over it helps nobody.
 ///
 /// It returns the key and NOT whether the key is durable, because that
-/// question already has an answer the UI can ask for: `has_review_identity`
-/// reads the store directly and is false in every case this function falls
-/// back — Keychain unavailable, read refused, or the write that would have
-/// saved a fresh key failing. One source of truth beats two that can disagree.
+/// question has its own answer in `has_review_identity`, which reads the store
+/// directly. Be precise about what that answers, because an earlier version of
+/// this comment was not: `has_review_identity` returns `Ok(false)` only when
+/// the store is READABLE and empty. When the Keychain is unavailable or the
+/// read is refused it returns `Err`, which the caller has to decide about —
+/// "no identity" and "cannot tell" are different states and the UI must not
+/// collapse them into one.
 pub fn load_or_create_host_key() -> SecretKey {
     let Ok(entry) = entry() else { return SecretKey::generate() };
 
@@ -138,12 +141,18 @@ mod tests {
     /// and no network - it is the pure half of the claim.
     #[tokio::test]
     async fn one_key_binds_to_one_identity() {
+        // `presets::Minimal`, not N0. This proves a pure local property - the
+        // same key gives the same EndpointId - and N0 would start a pkarr
+        // publisher and relay actor against production infrastructure to
+        // prove it. The suite is fast enough that nothing lands, but a unit
+        // test in `npm run verify` reaching n0 at all is the wrong default
+        // in an app whose first promise is that it runs on your machine.
         use iroh::endpoint::presets;
         let secret = SecretKey::generate();
         let expected = secret.public();
 
         for attempt in 0..2 {
-            let ep = iroh::Endpoint::builder(presets::N0)
+            let ep = iroh::Endpoint::builder(presets::Minimal)
                 .secret_key(secret.clone())
                 .bind()
                 .await

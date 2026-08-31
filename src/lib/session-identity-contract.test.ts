@@ -107,15 +107,30 @@ describe("co-review identity", () => {
     // The one difference from the TURN password next door, which IS readable
     // because the RTCPeerConnection is built in JS. This key is used at
     // Endpoint::builder and nowhere else, so a getter would be a pure loss.
-    const commands = [...KEYFILE.matchAll(/#\[tauri::command\]\s*pub fn (\w+)[^{]*\{/g)];
-    expect(commands.length, "no commands found to check").toBeGreaterThan(0);
-    for (const m of commands) {
+    //
+    // AN ALLOWLIST, NOT A DENYLIST, and that polarity is the whole point. The
+    // first version of this matched `pub fn` only and forbade `Result<String`.
+    // A reviewer broke it in one minute by adding
+    // `pub async fn export_session_key() -> Result<String, AppError>` and
+    // `pub fn dump_key_bytes() -> Result<Vec<u8>, AppError>`, both returning
+    // the secret: the first slipped past on `async`, the second on the type.
+    // The suite reported seven passes. Enumerating the ways a secret can leave
+    // is a losing game; enumerating the two shapes that may leave is not.
+    const commands = [
+      ...KEYFILE.matchAll(/#\[tauri::command\]\s*pub (?:async )?fn (\w+)\s*\([^)]*\)\s*->\s*([^{]+)\{/g),
+    ];
+    expect(commands.length, "no commands found to check").toBeGreaterThan(1);
+
+    /** Everything this module is allowed to return. Nothing here can carry
+     *  32 bytes of key: a bool answers "is one stored", and unit answers
+     *  "it is gone". */
+    const ALLOWED = ["Result<bool, AppError>", "Result<(), AppError>"];
+    for (const [, name, ret] of commands) {
       expect(
-        m[0],
-        `${m[1]} returns a String; the endpoint secret must not cross the IPC boundary`,
-      ).not.toMatch(/Result<\s*String/);
+        ALLOWED,
+        `${name} returns ${ret.trim()}, which is not one of the two shapes that may cross the IPC boundary`,
+      ).toContain(ret.trim());
     }
-    expect(KEYFILE, "a getter was added").not.toMatch(/fn get_review_identity|fn get_host_key/);
   });
 
   it("it has its own Keychain service", () => {
