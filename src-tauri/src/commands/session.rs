@@ -3121,6 +3121,94 @@ mod invite_tests {
         drop(conn);
     }
 
+    /// THE FOUNDATION OF THE REVIEW DESK, proved before anything is built on
+    /// it: one endpoint can accept TWO protocols, and the accept side can tell
+    /// which one arrived.
+    ///
+    /// The design this replaces stood one endpoint down and bound another. It
+    /// was killed by a stale pkarr record - close() clears the publisher
+    /// locally but never unpublishes, so a reviewer dialling in the gap
+    /// resolves the old record, dials a dead socket and hangs for
+    /// JOIN_TIMEOUT. One endpoint with both ALPNs has no gap because it never
+    /// stops.
+    ///
+    /// Everything here was asserted in review and is checked rather than
+    /// trusted: that a second ALPN does not disturb the first, that
+    /// Connection::alpn() is readable on the ACCEPT side, and that an
+    /// unlisted ALPN is refused rather than silently accepted.
+    #[tokio::test]
+    #[ignore = "nightly: needs live n0 discovery"]
+    async fn nightly_one_endpoint_serves_two_protocols() {
+        const DESK_ALPN: &[u8] = b"saucebunny/reviewdesk/1";
+
+        let host = Endpoint::builder(presets::N0)
+            .alpns(vec![ALPN.to_vec(), DESK_ALPN.to_vec()])
+            .bind()
+            .await
+            .expect("host bind");
+        let _ = tokio::time::timeout(ONLINE_TIMEOUT, host.online()).await;
+        let target = EndpointAddr::new(host.id());
+
+        let accept = tokio::spawn(async move {
+            let mut seen: Vec<Vec<u8>> = Vec::new();
+            for _ in 0..2 {
+                let incoming = host.accept().await.expect("no inbound connection");
+                let conn = incoming.await.expect("handshake");
+                // The dispatch the desk depends on.
+                seen.push(conn.alpn().to_vec());
+            }
+            seen
+        });
+
+        // Both protocols, over the SAME endpoint id, one after the other.
+        for alpn in [ALPN, DESK_ALPN] {
+            let guest = Endpoint::builder(presets::N0).bind().await.expect("guest bind");
+            tokio::time::timeout(JOIN_TIMEOUT, guest.connect(target.clone(), alpn))
+                .await
+                .expect("dial timed out")
+                .unwrap_or_else(|e| panic!("dial failed for {}: {e}", String::from_utf8_lossy(alpn)));
+        }
+
+        let seen = tokio::time::timeout(JOIN_TIMEOUT, accept)
+            .await
+            .expect("accept timed out")
+            .expect("accept panicked");
+        assert_eq!(
+            seen,
+            vec![ALPN.to_vec(), DESK_ALPN.to_vec()],
+            "the accept side could not tell the two protocols apart",
+        );
+    }
+
+    /// And the other half: an ALPN the host did NOT declare is refused.
+    ///
+    /// This is what stops the desk protocol being reachable before it is
+    /// armed. If an undeclared ALPN connected anyway, "armed" would be a
+    /// frontend opinion rather than a property of the endpoint.
+    #[tokio::test]
+    #[ignore = "nightly: needs live n0 discovery"]
+    async fn nightly_an_undeclared_protocol_is_refused() {
+        let host = Endpoint::builder(presets::N0)
+            .alpns(vec![ALPN.to_vec()])
+            .bind()
+            .await
+            .expect("host bind");
+        let _ = tokio::time::timeout(ONLINE_TIMEOUT, host.online()).await;
+        let target = EndpointAddr::new(host.id());
+        // Keep accepting, so a refusal is the protocol's doing and not an
+        // absent accept loop.
+        let _accept = tokio::spawn(async move { while host.accept().await.is_some() {} });
+
+        let guest = Endpoint::builder(presets::N0).bind().await.expect("guest bind");
+        let out = tokio::time::timeout(
+            JOIN_TIMEOUT,
+            guest.connect(target, b"saucebunny/not-a-real-protocol/1"),
+        )
+        .await
+        .expect("dial timed out rather than being refused");
+        assert!(out.is_err(), "an undeclared ALPN connected");
+    }
+
     #[test]
     fn a_legacy_addressed_code_still_joins() {
         // Back-compat, in the direction that actually happens: an OLD host
