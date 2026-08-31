@@ -1353,3 +1353,18 @@
 @media (prefers-reduced-motion: reduce) {
   .cp-ai-chapters-caret { transition: none; }
 }
+
+
+/* Notes queued because nobody could receive them. Quiet on purpose: it is a
+   report, not a warning. Nothing has been lost and there is nothing to press,
+   so it must not look like an error the reader has to act on. */
+.cp-review-outbox {
+  margin: 0;
+  padding: var(--s-2) var(--s-3);
+  border-top: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}

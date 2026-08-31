@@ -52,6 +52,7 @@ import { ShareController, type ShareState } from "../lib/share-machine";
 import { mixShareAudio, openShareStream } from "../lib/share-stream";
 import { getSessionCapture } from "./use-media-capture";
 import type { ShareSourceArg } from "../bindings/ShareSourceArg";
+import { clearDelivered, enqueueOp, pendingCount, pendingOps } from "../lib/review-outbox";
 
 /** Timeline/monitor read-model of one review comment marker. Shared by the
  *  solo path (App's local-review reload effect) and the session path (the
@@ -244,6 +245,9 @@ export type CoReview = {
   startCoReview: (title?: string) => Promise<void>;
   joinCoReview: (ticket: string, name: string) => Promise<void>;
   leaveCoReview: () => void;
+  /** How many notes are waiting to be delivered, across every review.
+   *  Zero when everything the user wrote has gone out. */
+  outboxDepth: number;
   /** A join code delivered by a clicked link, or null. The lobby pre-fills
    *  it; nothing connects until the user presses Join. */
   pendingJoinCode: string | null;
@@ -390,6 +394,24 @@ export function useCoReview({
     void invoke(cmd, { msg }).catch(() => {});
   }, []);
 
+  /* The same send, but it TELLS YOU whether it worked.
+     
+     sendSessionMsg swallows its rejection, which is right for a presence beat
+     or a transport tick - those are re-sent constantly and a dropped one is
+     invisible by design. It is wrong for a note: that op was applied to the
+     author's screen and, if the send failed, reached nobody, and the author
+     was never told. Review content gets the version that can fail. */
+  const trySendSessionMsg = useCallback(async (msg: SessionMsg): Promise<boolean> => {
+    if (coRoleRef.current === "off") return false;
+    const cmd = coRoleRef.current === "host" ? "session_broadcast" : "session_send";
+    try {
+      await invoke(cmd, { msg });
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   // Apply a review op to the shared doc + relay it (called by the Review panel
   // for every mutation while in session). Optimistic: apply locally now and
   // send; the host relays to all-but-sender so we never receive our own op back.
@@ -416,6 +438,10 @@ export function useCoReview({
    *  dedups, edits/resolves are LWW), so an op the snapshot already contains
    *  is a no-op. */
   const pendingOpsRef = useRef<ReviewOp[]>([]);
+
+  /** How many notes are waiting to be delivered, for the UI. A queue nobody
+   *  can see is the failure this replaces, wearing different clothes. */
+  const [outboxDepth, setOutboxDepth] = useState(() => pendingCount());
 
   /**
    * The room's live drawing, shared while a note is being composed.
@@ -449,8 +475,37 @@ export function useCoReview({
     recordOpInScreening(op);
     // `from` is stamped by the HOST on relay; whatever we put here is
     // overwritten, so send it empty rather than asserting an identity.
-    sendSessionMsg({ kind: "reviewOp", op: JSON.stringify(op), from: "" });
-  }, [sendSessionMsg, recordOpInScreening]);
+    void trySendSessionMsg({ kind: "reviewOp", op: JSON.stringify(op), from: "" })
+      .then((sent) => {
+        /* A note that did not go out is KEPT, on disk, under the review it
+           belongs to. Before this it was applied to the author's own screen
+           and then dropped: the send was fire-and-forget with a swallowed
+           catch, so a host that had gone away cost the note with no sign
+           anything had happened. */
+        if (sent) return;
+        const key = sessionDocRef.current?.sourceKey ?? sessionSourceRef.current?.reviewKey ?? null;
+        if (key) setOutboxDepth(enqueueOp(key, op));
+      });
+  }, [trySendSessionMsg, recordOpInScreening]);
+
+  /* Deliver what is waiting for a review, then forget exactly what landed.
+     
+     Sequential rather than Promise.all: these go down one QUIC stream and the
+     host applies them in order, and an edit that overtakes the add it edits
+     would be dropped by the LWW guard rather than applied. Stops at the first
+     failure - if the connection has gone again, the rest stay queued. */
+  const drainOutbox = useCallback(async (sourceKey: string, ops: readonly ReviewOp[]) => {
+    const sent: ReviewOp[] = [];
+    for (const op of ops) {
+      const ok = await trySendSessionMsg({ kind: "reviewOp", op: JSON.stringify(op), from: "" });
+      if (!ok) break;
+      sent.push(op);
+    }
+    if (sent.length) clearDelivered(sourceKey, sent);
+    setOutboxDepth(pendingCount());
+  }, [trySendSessionMsg]);
+  const drainOutboxRef = useRef(drainOutbox);
+  drainOutboxRef.current = drainOutbox;
 
   // Latest-closure ref so the once-registered session:msg listener never stales.
   const coApplyRef = useRef<(m: SessionMsg) => void>(() => {});
@@ -569,7 +624,23 @@ export function useCoReview({
           // was still null, so their own comments reappear.
           const replay = prev ? [] : pendingOpsRef.current;
           if (replay.length) pendingOpsRef.current = [];
-          setSessionDoc((cur) => adoptSnapshot(cur, incoming, replay));
+
+          /* EVERY adoption drains the durable outbox, not just the first.
+             
+             A snapshot is the one moment we know a host is listening and which
+             review they are on. Gating this on `prev` being null - the way the
+             in-memory replay above is gated - means a reconnect inside a live
+             session delivers nothing, which is the common case: the host went
+             away, the reviewer kept working, the host came back.
+             
+             Re-sending an op the host already has is a no-op. `add` carries
+             the fully-built comment so inserts are id-idempotent, and
+             resolve/like/status are SET rather than toggle, so an eager drain
+             costs nothing while a missed one costs a note. */
+          const waiting = pendingOps(incoming.sourceKey);
+          const merged = [...replay, ...waiting];
+          setSessionDoc((cur) => adoptSnapshot(cur, incoming, merged));
+          if (waiting.length) void drainOutboxRef.current(incoming.sourceKey, waiting);
         } catch { /* malformed snapshot */ }
         return;
       case "reviewOp":
@@ -1549,6 +1620,8 @@ export function useCoReview({
     sendReaction,
     toggleHand,
     startCoReview, joinCoReview, leaveCoReview,
+    /** Notes written that nobody has received yet. */
+    outboxDepth,
     /** A code from a clicked link, for the lobby to pre-fill. */
     pendingJoinCode, clearPendingJoinCode: () => setPendingJoinCode(null),
   };

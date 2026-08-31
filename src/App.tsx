@@ -3718,7 +3718,7 @@ export default function App() {
     offeredFile, transfer, offerCurrentFile, offerError, fetchOfferedFile, watchOfferedStream, keepOfferedCopy, canKeepCopy, placeReceivedRef, cancelFetch,
     keepBadge, keepAction, onKeepCancel, onKeepResume, keepEnabled, setKeepEnabled,
     onKeepStall, onKeepStreamInfo,
-    startCoReview, joinCoReview, leaveCoReview, pendingJoinCode, clearPendingJoinCode,
+    startCoReview, joinCoReview, leaveCoReview, pendingJoinCode, clearPendingJoinCode, outboxDepth,
   } = useCoReview({
     isPlaying, fps, playbackRate,
     sessionSource, activeSourceUrlRef, reviewSourceKey,
@@ -5125,6 +5125,7 @@ export default function App() {
               {/* The room's review rail overrides detachment - a session
                   with no review panel is a session you can't comment in. */}
               {(roomActive || !panelDetached) && <QueueDrawer
+            outboxDepth={outboxDepth}
                 onUndo={performUndo}
                 onRedo={performRedo}
                 onGrabFace={grabFaceFromFrame}

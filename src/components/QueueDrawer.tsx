@@ -37,6 +37,9 @@ type TabDef = {
 };
 
 type Props = {
+  /** Notes written that nobody has received yet, for the review panel's
+   *  status line. Passed through rather than read here. */
+  outboxDepth?: number;
   open: boolean;
   /**
    * Is the view hosting this drawer actually on screen? Keep-alive views stay
@@ -272,6 +275,7 @@ export function QueueDrawer({
   reviewSessionActive, reviewSessionDoc, onReviewSessionOp,
   onRenameClip, onRenameAll, onReorderQueue,
   onPopOut, embedded = false, roomFace = false, focusItem = null,
+  outboxDepth,
 }: Props) {
   const counts = queue.reduce(
     (acc, c) => ((acc[c.status] = (acc[c.status] ?? 0) + 1), acc),
@@ -1062,6 +1066,7 @@ export function QueueDrawer({
       {visited.has("review") && (
         <div className="cp-tab-keep" role="tabpanel" id="cp-tabpanel-review" aria-labelledby="cp-tab-review" hidden={shownTab !== "review"}>
         <ReviewPanel
+          outboxDepth={outboxDepth}
           sourceKey={reviewSourceKey ?? null}
           sourceTitle={reviewSourceTitle}
           /* Playhead only while ACTIVE — see the transcript note above. */

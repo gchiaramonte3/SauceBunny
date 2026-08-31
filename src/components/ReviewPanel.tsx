@@ -168,7 +168,10 @@ export function ReviewPanel({
   sessionActive = false,
   sessionDoc = null,
   onSessionOp,
+  outboxDepth = 0,
 }: {
+  /** Notes queued because a send failed; shown above the composer. */
+  outboxDepth?: number;
   /** Stable id for the current source (local path or URL); null when none loaded. */
   sourceKey: string | null;
   /** Human label for the source (for the version row). */
@@ -1259,6 +1262,7 @@ export function ReviewPanel({
       </div>
 
       <ReviewComposer
+        outboxDepth={outboxDepth}
         drawActive={drawActive}
         onToggleDraw={onToggleDraw}
         labelActive={labelActive}
@@ -1540,7 +1544,10 @@ function ReviewComposer({
   submit, hasDraft, playheadActive, fps,
   rangeIn, rangeOut, onRangeTap, onRangeClear, rangeColor,
   onPasteNotes,
+  outboxDepth = 0,
 }: {
+  /** Notes queued because a send failed. Zero when everything has gone. */
+  outboxDepth?: number;
   drawActive: boolean;
   /** The latched moment this comment is about, or null before composing. */
   anchorSec: number | null;
@@ -1665,6 +1672,20 @@ function ReviewComposer({
           </div>
         );
       })()}
+      {/* Notes written that nobody has received yet.
+          
+          A queue the author cannot see is the failure this whole store exists
+          to end, wearing different clothes: before it, a note whose send
+          failed appeared on screen and was simply gone. It reports and asks
+          for nothing, because there is nothing useful to press - the notes go
+          out on their own the moment the host is back. */}
+      {outboxDepth > 0 && (
+        <p className="cp-review-outbox" role="status">
+          {outboxDepth === 1
+            ? "1 note waiting to send. It will go out when you reconnect."
+            : `${outboxDepth} notes waiting to send. They will go out when you reconnect.`}
+        </p>
+      )}
       {/* Composer — draw + voice + comment, anchored at the current playhead. */}
       <div className="cp-review-composer">
         {/* THE TEXT GETS ITS OWN ROW.
