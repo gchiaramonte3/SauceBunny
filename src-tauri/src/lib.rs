@@ -211,6 +211,8 @@ pub fn run() {
             commands::cloud_chat_cancel,
             commands::set_turn_password,
             commands::get_turn_password,
+            commands::has_review_identity,
+            commands::reset_review_identity,
             commands::probe_local_file,
             commands::get_file_size,
             commands::read_file_range,

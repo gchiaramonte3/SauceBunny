@@ -88,6 +88,16 @@ export function withoutHidden<T extends { path: string }>(items: readonly T[]): 
   return set.size === 0 ? [...items] : items.filter((it) => !set.has(pathKey(it.path)));
 }
 
+/** The current set, as a STABLE reference.
+ *
+ *  This is the getSnapshot half of useSyncExternalStore, which is why the
+ *  memoised Set matters: returning a fresh Set per call would make React
+ *  believe the store changed on every render and loop. `save` replaces the
+ *  cache exactly when the contents change, so identity tracks meaning. */
+export function hiddenSnapshot(): ReadonlySet<string> {
+  return load();
+}
+
 /** Test seam: drop the memoised set so a fresh localStorage is re-read. */
 export function __resetHiddenCache(): void {
   cache = null;

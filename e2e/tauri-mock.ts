@@ -12,6 +12,7 @@
  * dependency-free — it executes in the page, not in Node.
  */
 export function tauriMockInit(expectedBuildId: string): void {
+  let mockHasIdentity = true;
   const callbacks = new Map<number, (payload: unknown) => void>();
   // event name → handler callback ids, recorded from plugin:event|listen so
   // tests can push Tauri events (e.g. tauri://drag-*) into the app.
@@ -275,6 +276,12 @@ export function tauriMockInit(expectedBuildId: string): void {
        rather than merely missing. "Interviews" carries colour 3 (purple) so
        there is something to see; everything else is untagged, which is also
        the case worth rendering correctly. */
+    /* The co-review identity. Without these the Settings row falls to its
+       catch and shows "Not set up yet" forever, which is a state the app can
+       be in but not the one worth exercising. Starts present, and reset
+       actually clears it, so both of the row's states are reachable. */
+    has_review_identity: () => Promise.resolve(mockHasIdentity),
+    reset_review_identity: () => { mockHasIdentity = false; return Promise.resolve(null); },
     read_finder_tags: (args: unknown) => {
       const paths = (args as { paths?: unknown } | undefined)?.paths;
       const list = Array.isArray(paths) ? paths.map(String) : [];

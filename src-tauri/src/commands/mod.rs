@@ -43,6 +43,8 @@ pub mod llm;
 pub use llm::*;
 pub mod cloud_ai;
 pub use cloud_ai::*;
+pub mod session_key;
+pub use session_key::*;
 // Tier B bridge (no invoke commands of its own; used by stream_proxy + session).
 pub mod peer_stream;
 // Tier B quality ladder (host half of src/lib/stream-rung.ts).

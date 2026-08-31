@@ -435,12 +435,20 @@ export function SettingsModal(props: Props) {
    *  not claim a stale number. */
   const [hiddenClips, setHiddenClips] = useState(0);
   const [clipsRestored, setClipsRestored] = useState(false);
+  /** Whether a co-review identity is stored, so this row can say whether a
+   *  join code will still work tomorrow rather than implying it will. */
+  const [hasIdentity, setHasIdentity] = useState<boolean | null>(null);
+  const [identityReset, setIdentityReset] = useState(false);
   useEffect(() => {
     if (!open) return;
     setHiddenCount(countHiddenNotices());
     setRestored(0);
     setHiddenClips(hiddenLibraryCount());
     setClipsRestored(false);
+    setIdentityReset(false);
+    void invoke<boolean>("has_review_identity")
+      .then(setHasIdentity)
+      .catch(() => setHasIdentity(null));
   }, [open]);
   useEffect(() => {
     if (!open) return;
@@ -1202,6 +1210,35 @@ export function SettingsModal(props: Props) {
                         {hiddenCount === 0
                           ? (restored > 0 ? `Restored ${restored}` : "Nothing hidden")
                           : `Restore ${hiddenCount}`}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Join code identity
+                      <span className="desc">
+                        Your Mac keeps one identity for co-review, so a join code you shared still
+                        works after a restart. Resetting it makes a new one, which stops every code
+                        you have already handed out. It does not affect a session that is running.
+                      </span>
+                    </div>
+                    <div className="v">
+                      <button
+                        className="btn btn-ghost"
+                        disabled={hasIdentity !== true}
+                        onClick={() => {
+                          void invoke("reset_review_identity")
+                            .then(() => { setHasIdentity(false); setIdentityReset(true); })
+                            .catch(() => { /* the row simply stays as it was */ });
+                        }}
+                      >
+                        {/* Past tense once it has happened, the way the rows
+                            above report their outcome. It read "Reset" while
+                            disabled, which says the button is the thing to
+                            press and then refuses. */}
+                        {hasIdentity === true
+                          ? "Reset"
+                          : (identityReset ? "Cleared" : "Not set up yet")}
                       </button>
                     </div>
                   </div>

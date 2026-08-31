@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
 import { newFolderPath } from "../lib/library-folder";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { LibraryTree } from "./LibraryTree";
 import { LibraryBrowserBar, type LibraryViewMode } from "./LibraryBrowserBar";
 import { LibraryMoveDialog } from "./LibraryMoveDialog";
@@ -30,7 +30,8 @@ import {
 import { loadJson, saveJson } from "../lib/storage";
 import type { TranscriptHistoryEntry } from "../lib/transcript-history";
 import type { LibraryFolder, LibraryItem } from "../types";
-import { hidePaths, isHidden, subscribeHidden, unhidePaths, withoutHidden } from "../lib/library-hidden";
+import { hiddenSnapshot, hidePaths, isHidden, subscribeHidden, unhidePaths } from "../lib/library-hidden";
+import { pathKey } from "../lib/repath";
 import { appUndo } from "../lib/undo";
 
 type BrowserPrefs = {
@@ -383,13 +384,13 @@ export function LibraryBrowser({
    * above is reached from the card drop, the Move dialog and the row menu. It
    * has an undo entry now, so the rail this comment describes is real again.
    */
-  /* The exclusion set lives outside React (it is read by the scan filter and
-     written from a menu three components down), so a version counter is what
-     brings a change back into render. useSyncExternalStore would be the
-     idiomatic answer for a value, but there is no value here - only "it
-     changed". */
-  const [hiddenTick, setHiddenTick] = useState(0);
-  useEffect(() => subscribeHidden(() => setHiddenTick((n) => n + 1)), []);
+  /* The exclusion set lives outside React: the scan filter reads it and a menu
+     three components down writes it. This subscribes to the SET rather than to
+     a change counter, so the memo below depends on the data it actually uses.
+     The counter version type-checked and lint flagged it correctly - the memo
+     listed a dependency it never read, which is a promise the code was not
+     keeping. */
+  const hiddenPaths = useSyncExternalStore(subscribeHidden, hiddenSnapshot);
 
   /**
    * Take a clip off the shelf without touching the file.
@@ -518,12 +519,12 @@ export function LibraryBrowser({
     // "remove this" can only mean an exclusion the scan filters through -
     // there is no curated list to delete a row from. hiddenTick re-runs this
     // memo when the set changes, without waiting for a rescan.
-    const visible = withoutHidden(base);
+    const visible = hiddenPaths.size === 0 ? base : base.filter((i) => !hiddenPaths.has(pathKey(i.path)));
     const byKind = prefs.kind === "all" ? visible : visible.filter((i) => i.kind === prefs.kind);
     const q = needle.trim().toLowerCase();
     const bySearch = q ? byKind.filter((i) => i.name.toLowerCase().includes(q)) : byKind;
     return sortLibraryItems(bySearch, prefs.sort, prefs.dir);
-  }, [selected, selectedNode, trees, prefs, needle, hiddenTick]);
+  }, [selected, selectedNode, trees, prefs, needle, hiddenPaths]);
 
   /** Subfolders of the current selection, as container tiles. Empty in the
    *  "All" view and while searching, both of which are flat answers. */

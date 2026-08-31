@@ -45,7 +45,7 @@
 
 use super::*;
 use iroh::endpoint::{presets, Connection, SendStream};
-use iroh::Endpoint;
+use iroh::{Endpoint, EndpointAddr};
 use iroh_tickets::endpoint::EndpointTicket;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -491,18 +491,44 @@ pub async fn session_start(
         return Err(crate::AppError::invalid("A co-review session is already active"));
     }
 
+    // The identity is LOADED, not generated. Without `.secret_key(...)` iroh
+    // mints a fresh one per bind ("If not set, a new secret key will be
+    // generated"), so the EndpointId a join code names changed on every
+    // launch and yesterday's code was undialable for an invisible reason.
+    // `load_or_create_host_key` never fails: a Keychain that refuses gives
+    // back an ephemeral key, which is exactly how this behaved before, rather
+    // than turning a dismissed prompt into "you cannot host". Whether the
+    // identity is durable is answered by `has_review_identity`, not here.
     let endpoint = Endpoint::builder(presets::N0)
+        .secret_key(crate::commands::session_key::load_or_create_host_key())
         .alpns(vec![ALPN.to_vec()])
         .bind()
         .await
         .map_err(|e| crate::AppError::internal(format!("co-review endpoint bind: {e}")))?;
 
-    // Wait (bounded) until we're relay-reachable so the ticket works across
-    // NATs. On timeout we mint the ticket anyway — direct addresses still
-    // cover the LAN case, and n0 discovery can fill in the rest later.
+    // Wait (bounded) to be relay-reachable before minting the code.
+    //
+    // This no longer feeds addresses INTO the ticket - see below - but it is
+    // not vestigial: an id-only code is dialled by looking the key up in
+    // discovery, and `presets::N0` publishes that record. Being relay-attached
+    // is the closest signal available that publication has had a chance to
+    // land. It is NOT a confirmation of it. `online()` waits on the home
+    // relay's connection, not on the pkarr write, so a code pasted seconds
+    // after minting can still fail to resolve. Anything promising the user a
+    // working link needs a real reachability check, not this timeout.
     let _ = tokio::time::timeout(ONLINE_TIMEOUT, endpoint.online()).await;
 
-    let ticket = EndpointTicket::new(endpoint.addr()).to_string();
+    // ADDRESS-FREE. `endpoint.addr()` packs the live relay URL and the
+    // observed IP set, including LAN addresses, which iroh's own "don't use
+    // tickets when" list warns against for long-lived links: "You can cache
+    // EndpointIDs and let iroh resolve dialing details at runtime."
+    //
+    // The ticket ENVELOPE stays, and that is the whole trick: format_invite
+    // and parse_invite are untouched, the tag strip and restore still work,
+    // and an old address-bearing code minted by an earlier build still parses
+    // and dials. Both ends already run DnsAddressLookup via presets::N0, so
+    // the guest needs no change at all.
+    let ticket = EndpointTicket::new(EndpointAddr::new(endpoint.id())).to_string();
     let title = title
         .map(|t| t.trim().chars().take(80).collect::<String>())
         .filter(|t| !t.is_empty());
@@ -2815,6 +2841,47 @@ mod invite_tests {
     fn real_ticket() -> String {
         let secret = iroh::SecretKey::generate();
         EndpointTicket::new(iroh::EndpointAddr::from(secret.public())).to_string()
+    }
+
+    /// The LEGACY form: a ticket carrying addresses, the way every build
+    /// before the id-only change minted one. Kept because a host on one build
+    /// shares a code with a guest on another, so `parse_invite` has to keep
+    /// accepting these forever. Nothing tested this shape before, because the
+    /// fixture above happened to be address-free while the app was not.
+    fn addressed_ticket() -> String {
+        let secret = iroh::SecretKey::generate();
+        let mut addr = iroh::EndpointAddr::from(secret.public());
+        addr.addrs.insert(iroh::TransportAddr::Ip("192.0.2.7:41641".parse().unwrap()));
+        EndpointTicket::new(addr).to_string()
+    }
+
+    #[test]
+    fn the_code_we_mint_carries_no_address() {
+        // THE PHASE 2 PROPERTY. `endpoint.addr()` packs the live relay URL and
+        // the observed IP set, including LAN addresses, which is both a
+        // durability problem (they go stale) and a disclosure one. An id-only
+        // ticket names the key and lets discovery resolve the rest.
+        let t = real_ticket();
+        let parsed = EndpointTicket::from_str(&t).expect("fixture parses");
+        let addr: iroh::EndpointAddr = parsed.into();
+        assert!(
+            addr.addrs.is_empty(),
+            "the minted code carries {} address(es); it should carry only the key",
+            addr.addrs.len(),
+        );
+    }
+
+    #[test]
+    fn a_legacy_addressed_code_still_joins() {
+        // Back-compat, in the direction that actually happens: an OLD host
+        // hands a NEW guest a code. If this breaks, upgrading strands people
+        // mid-project with no error that explains why.
+        let t = addressed_ticket();
+        let recovered = parse_invite(&format_invite(&t));
+        assert_eq!(recovered, t, "a legacy code did not survive the invite dress");
+        let parsed = EndpointTicket::from_str(&recovered).expect("legacy code must still parse");
+        let addr: iroh::EndpointAddr = parsed.into();
+        assert!(!addr.addrs.is_empty(), "the legacy fixture lost its address, so this proves nothing");
     }
 
     #[test]
