@@ -718,7 +718,7 @@ human can check.
 
 ## Enforced contracts
 
-Ninety-one rules in this file are checked by a test rather than remembered. If you
+Ninety-two rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -787,6 +787,7 @@ written after finding the rule already broken somewhere.
 | `token-usage-contract` | No stylesheet writes a literal hex that an existing token already holds (comments and `var(--x, #fallback)` excluded) |
 | `duplicated-tables-contract` (3rd block) | No component re-implements a helper `lib/` already exports |
 | `control-naming-contract` | A control's tooltip and accessible name never use different words for the same thing |
+| `review-link-contract` | The `saucebunny://review/<code>` scheme means the same thing in the plist that routes the click, the Rust that parses it, the TypeScript that builds it and the `RunEvent::Opened` arm that receives it; and the link carries no query, fragment or extra path |
 | `session-identity-contract` | The co-review host binds a PERSISTED endpoint key and the guest does not, the join code names that key rather than `endpoint.addr()`, and no command hands the secret to the webview |
 | `folder-tag-contract` | Every surface that draws a folder (sidebar tree, grid tile, list row) opens the tag menu by pointer AND keyboard and tints the folder, and the browse pane asks for folder tags rather than file tags alone (see also `e2e/folder-colours.spec.ts`, which checks the menu opens and the colour renders) |
 | `list-columns-contract` | A list view's grid tracks, header cells and row cells all derive from one column model, so a column can be hidden or reordered without three literals having to agree (see also `e2e/list-columns.spec.ts`, which checks that they DO agree once rendered) |

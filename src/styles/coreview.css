@@ -622,3 +622,19 @@ select.cp-colobby-input { padding-right: calc(var(--sel-chev) + 14px); }
   cursor: pointer;
 }
 .cp-colobby-taken-fix:hover { background: var(--bg-4); }
+
+
+/* A clicked review link arrived and its code is parked in the Join card two
+   steps away. Without this someone lands on a camera picker with no sign the
+   link was received. Quiet: it reports, it does not ask for anything. */
+.cp-colobby-linkbanner {
+  margin: 0 0 var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+}

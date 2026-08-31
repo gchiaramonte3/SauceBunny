@@ -3814,7 +3814,7 @@ export default function App() {
     offeredFile, transfer, offerCurrentFile, offerError, fetchOfferedFile, watchOfferedStream, keepOfferedCopy, canKeepCopy, placeReceivedRef, cancelFetch,
     keepBadge, keepAction, onKeepCancel, onKeepResume, keepEnabled, setKeepEnabled,
     onKeepStall, onKeepStreamInfo,
-    startCoReview, joinCoReview, leaveCoReview,
+    startCoReview, joinCoReview, leaveCoReview, pendingJoinCode, clearPendingJoinCode,
   } = useCoReview({
     isPlaying, fps, playbackRate,
     sessionSource, activeSourceUrlRef, reviewSourceKey,
@@ -3826,6 +3826,20 @@ export default function App() {
     stunUrl: defaults.stunUrl,
     appendLog,
   });
+
+  /* A clicked review link takes you to the lobby, where the code is already in
+     the field and Join is one press away.
+     
+     Gated on the welcome being closed. A link clicked on a brand-new install
+     launches the app into first run, and navigating underneath would put the
+     lobby's identity step behind the welcome sheet - e2e/first-run asserts
+     that onboarding modals SEQUENCE rather than stack, and this is exactly the
+     kind of thing that stacks them. The code is held, not dropped, so it still
+     arrives once the welcome is dismissed. */
+  useEffect(() => {
+    if (!pendingJoinCode || showWelcome) return;
+    setActiveView("coreview");
+  }, [pendingJoinCode, showWelcome, setActiveView]);
 
   // Two subsystems read the same two signals off the peer player: the quality
   // ladder (which rung to ask for) and the background copy (whether to get out
@@ -5350,6 +5364,8 @@ export default function App() {
               onStart={(title) => { void startCoReview(title); }}
               onJoin={joinCoReview}
               onLeave={leaveCoReview}
+              initialCode={pendingJoinCode}
+              onInitialCodeUsed={clearPendingJoinCode}
             />
           </div>
         </div>

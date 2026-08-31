@@ -36,5 +36,31 @@
     <string>Sauce Bunny uses your microphone for live review sessions (so members can talk) and for voice dictation in review comments. Dictation is transcribed entirely on this Mac. Session audio is encrypted end to end and is never stored or processed by Sauce Bunny servers; on restrictive networks it may pass through a STUN or TURN relay.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Sauce Bunny transcribes your voice into review comments using on-device speech recognition. Speech is recognized entirely on this Mac and never leaves your computer.</string>
+    <!--
+        The saucebunny:// scheme, so a review link opens this app.
+
+        This is the whole registration: LaunchServices reads it, macOS routes
+        the click to `application:openURLs:`, tao surfaces it, and Tauri hands
+        it over as RunEvent::Opened. No plugin is involved, which matters -
+        tauri-plugin-deep-link would be a fourth plugin and CLAUDE.md gates
+        that behind "explain what existing capability is insufficient". Nothing
+        is insufficient; the event has been in tauri since 2.x.
+
+        One scheme, no host component. A link is saucebunny://review/<code>
+        and carries nothing else: no sender name, no cut title. Those travel
+        through Slack, clipboard managers, MDM logs and crash reports, and a
+        title is often a client's name.
+    -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.saucebunny.desktop.review</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>saucebunny</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

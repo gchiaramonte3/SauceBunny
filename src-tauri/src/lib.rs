@@ -182,6 +182,7 @@ pub fn run() {
         .manage(commands::JobRegistry::default())
         .manage(commands::LlmServer::default())
         .manage(commands::SessionManager::default())
+        .manage(commands::PendingReviewLink::default())
         .invoke_handler(tauri::generate_handler![
             commands::fetch_metadata,
             commands::create_clip,
@@ -213,6 +214,7 @@ pub fn run() {
             commands::get_turn_password,
             commands::has_review_identity,
             commands::reset_review_identity,
+            commands::take_pending_review_link,
             commands::probe_local_file,
             commands::get_file_size,
             commands::read_file_range,
@@ -405,6 +407,15 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            // A clicked saucebunny://review/<code> link. Buffered AND emitted:
+            // the emit serves a link opened while the app is already running,
+            // the buffer serves a cold launch, where the URL arrives before any
+            // webview exists and an event would be dropped rather than queued.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = &event {
+                let strings: Vec<String> = urls.iter().map(|u| u.to_string()).collect();
+                commands::remember_and_announce(app, &strings);
+            }
             // Kill the resident llama-server on quit — it holds a multi-GB
             // model in memory and would otherwise survive as an orphan.
             if let tauri::RunEvent::Exit = event {

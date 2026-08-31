@@ -14,6 +14,7 @@ import { shortJoinCode } from "../lib/join-code";
 import { ScreeningShelf } from "./ScreeningShelf";
 import { hydrateScreeningIndex, listScreenings, SCREENINGS_CHANGED } from "../lib/screening-store";
 import { isSessionNameTaken, nextFreeSessionName } from "../lib/session-name";
+import { reviewInviteMessage } from "../lib/review-link";
 
 /**
  * The Review lobby - the GREEN ROOM. Three calm steps in one tone-card
@@ -28,7 +29,7 @@ import { isSessionNameTaken, nextFreeSessionName } from "../lib/session-name";
  */
 type Step = "identity" | "devices" | "ready";
 
-export function CoReviewLobby({ session, localSource, participants, onStart, onJoin, onLeave }: {
+export function CoReviewLobby({ session, localSource, participants, onStart, onJoin, onLeave, initialCode, onInitialCodeUsed }: {
   session: SessionState;
   /** A local file is loaded - guests can't receive it yet (hosting still allowed). */
   localSource: boolean;
@@ -37,6 +38,11 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
   /** Resolves when the attempt has ENDED, succeeded or not — the lobby
    *  needs that to clear "Connecting…". */
   onJoin: (ticket: string, name: string) => void | Promise<void>;
+  /** A code from a clicked saucebunny:// link. Pre-fills the field; it does
+   *  NOT join. A link is an instruction from someone else, and joining opens a
+   *  connection to whoever's key is in it, so the last step stays a press. */
+  initialCode?: string | null;
+  onInitialCodeUsed?: () => void;
   onLeave: () => void;
 }) {
   const cap = useMediaCapture();
@@ -153,10 +159,34 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
     try { await onJoin(t, v); } catch { /* surfaced by the handler */ }
     finally { setJoining(false); }
   };
+  /* A code from a clicked link.
+     
+     It fills the field and it does NOT skip ahead to Join, which is the
+     tempting shortcut and the wrong one: the device defaults are cameraOff
+     false and micMuted false, so jumping a first-time reviewer past the device
+     step would put them on camera and mic live because they clicked a link in
+     Slack. The steps stay.
+     
+     What the link DOES buy is knowing it arrived. Without this banner someone
+     clicks a link, lands on a camera picker, and has no sign their code was
+     received at all. Clearing the code back tells the hook to forget it, so
+     returning to the lobby later does not re-fill one already dismissed. */
+  const [linkArrived, setLinkArrived] = useState(false);
+  useEffect(() => {
+    if (!initialCode) return;
+    setTicket(initialCode);
+    setLinkArrived(true);
+    onInitialCodeUsed?.();
+  }, [initialCode, onInitialCodeUsed]);
+
   const copyCode = async () => {
     if (!session.code) return;
     try {
-      await navigator.clipboard.writeText(session.code);
+      // The LINK plus where to get the app, not the bare code. A recipient
+      // clicking saucebunny:// on a Mac without Sauce Bunny gets nothing at
+      // all - no error, no prompt - which reads as a broken link, and that is
+      // the common case for a first-time reviewer.
+      await navigator.clipboard.writeText(reviewInviteMessage(session.code));
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch { /* clipboard unavailable */ }
@@ -199,6 +229,11 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                   </span>
                 ))}
               </nav>
+            )}
+            {linkArrived && step !== "ready" && (
+              <p className="cp-colobby-linkbanner" role="status">
+                Your review link is ready. Finish these two steps and the code will be waiting.
+              </p>
             )}
             {step === "identity" && (
               <section className="cp-colobby-card" aria-label="Your identity">
@@ -337,7 +372,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
             {isHost && session.code && (
               <div className="cp-colobby-share">
                 <button type="button" className="cp-keycap cp-colobby-code"
-                  onClick={copyCode} aria-label="Copy the full invite" title="Copy the full invite">
+                  onClick={copyCode} aria-label="Copy the review link" title="Copy the review link, and where to get the app">
                   {/* The invite renders COLLAPSED (SAUC- handle + first
                       groups); the click copies the full dressed ticket. Cut on
                       a GROUP boundary - a character cut left a fragment that
@@ -345,7 +380,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                   {shortJoinCode(session.code)}
                 </button>
                 <span className={"cp-colobby-code-hint" + (copied ? " copied" : "")} aria-live="polite">
-                  {copied ? "Invite copied" : "Copy invite"}
+                  {copied ? "Link copied" : "Copy link"}
                 </span>
               </div>
             )}

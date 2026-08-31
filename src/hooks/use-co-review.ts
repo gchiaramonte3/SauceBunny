@@ -251,6 +251,10 @@ export type CoReview = {
   startCoReview: (title?: string) => Promise<void>;
   joinCoReview: (ticket: string, name: string) => Promise<void>;
   leaveCoReview: () => void;
+  /** A join code delivered by a clicked link, or null. The lobby pre-fills
+   *  it; nothing connects until the user presses Join. */
+  pendingJoinCode: string | null;
+  clearPendingJoinCode: () => void;
 };
 
 /**
@@ -695,6 +699,35 @@ export function useCoReview({
       }
     }
   };
+  /* A clicked saucebunny://review/<code> link.
+     
+     It fills the join field and takes you to the lobby; it does NOT connect.
+     A link is an instruction from someone else, and joining opens a network
+     connection to whoever's key is in it, so the last step stays a press. The
+     lobby is also where identity and devices are chosen, and skipping it would
+     put a stranger on your camera because you clicked a link in Slack.
+     
+     Two arrivals, because there are two cases. A link clicked while the app
+     runs comes as the event. A link clicked while it is CLOSED launches the
+     app, and the URL lands before any webview exists - Tauri drops events
+     rather than queueing them for a listener that has not registered - so the
+     code is buffered in Rust and pulled here on mount. Same shape as the
+     panel window's request-state handshake. */
+  const [pendingJoinCode, setPendingJoinCode] = useState<string | null>(null);
+  const onDeeplinkReview = useCallback((code: string) => {
+    const trimmed = code.trim();
+    if (trimmed) setPendingJoinCode(trimmed);
+  }, []);
+  useEffect(() => {
+    const un = listen<string>("deeplink:review", (e) => onDeeplinkReview(e.payload));
+    // The cold-launch half. `take` rather than `read`: a link opens once, and
+    // leaving it in place would re-fill the field on every remount.
+    void invoke<string | null>("take_pending_review_link")
+      .then((code) => { if (code) onDeeplinkReview(code); })
+      .catch(() => { /* no link waiting is the normal case */ });
+    return () => { void un.then((f) => f()); };
+  }, [onDeeplinkReview]);
+
   useEffect(() => {
     const unState = listen<CoSessionState>("session:state", (e) => {
       // Diff against what we believed BEFORE adopting it: the roster and the
@@ -1515,6 +1548,8 @@ export function useCoReview({
     sendReaction,
     toggleHand,
     startCoReview, joinCoReview, leaveCoReview,
+    /** A code from a clicked link, for the lobby to pre-fill. */
+    pendingJoinCode, clearPendingJoinCode: () => setPendingJoinCode(null),
   };
 }
 
