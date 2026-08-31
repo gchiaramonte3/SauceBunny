@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  parseChapters, sampleTranscriptEvenly, chaptersToYouTube, chapterTimestamp,
+  parseChapters, chaptersToYouTube, chapterTimestamp,
   loadChapters, saveChapters, adoptSourceChapters, hasCreatorChapters,
 } from "./chapters";
 
@@ -98,32 +98,14 @@ describe("parseChapters", () => {
   });
 });
 
-describe("sampleTranscriptEvenly", () => {
-  const lines = Array.from({ length: 100 }, (_, i) => `[${i}:00] line number ${i}`);
-
-  it("returns everything verbatim when under budget", () => {
-    const r = sampleTranscriptEvenly(lines, 1_000_000);
-    expect(r.sampled).toBe(false);
-    expect(r.text).toBe(lines.join("\n"));
-  });
-
-  it("samples across the WHOLE duration — first and last lines survive", () => {
-    const r = sampleTranscriptEvenly(lines, 600);
-    expect(r.sampled).toBe(true);
-    expect(r.text.length).toBeLessThanOrEqual(600);
-    const picked = r.text.split("\n");
-    expect(picked[0]).toBe(lines[0]);
-    expect(picked[picked.length - 1]).toBe(lines[lines.length - 1]);
-    // Evenly spread, not a head-truncation: something from the middle made it.
-    expect(picked.some((l) => /line number 4\d$/.test(l))).toBe(true);
-  });
-
-  it("degrades to first+last on a tiny budget", () => {
-    const r = sampleTranscriptEvenly(lines, 10);
-    expect(r.sampled).toBe(true);
-    expect(r.text.split("\n").length).toBe(2);
-  });
-});
+// The `sampleTranscriptEvenly` block that stood here went with the function.
+// Chapters no longer window their own transcript; `fitTranscript` in
+// lib/prompt-prefix.ts is the app's one windower and carries the equivalent
+// coverage in `prompt-prefix-contract.test.ts`: it asserts the same three
+// properties this block did - stays inside the budget, does not sample when
+// the whole thing fits, and (the one that matters) keeps reaching the back
+// half of the video rather than truncating the head, so a chapter late in a
+// long video is still discoverable.
 
 describe("chaptersToYouTube / chapterTimestamp", () => {
   it("formats MM:SS lines for sub-hour content", () => {

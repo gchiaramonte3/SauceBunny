@@ -1,5 +1,5 @@
 import { useListColumns } from "../hooks/use-list-columns";
-import { formatBytes } from "../lib/library";
+import { formatBytes, formatListDate } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { formatFrameTimecode, type FrameItem } from "../lib/frames";
 import { assetUrl } from "../lib/asset-url";
@@ -32,19 +32,6 @@ const FRAME_COL_SPECS: readonly ColSpec<FrameColKey>[] = [
   { key: "size", label: "Size", className: "cp-lib-lrow-size", sort: "size" },
   { key: "date", label: "Grabbed", className: "cp-lib-lrow-date", sort: "date" },
 ];
-
-function grabbedLabel(unixSeconds: number): string {
-  if (!(unixSeconds > 0)) return "";
-  const d = new Date(unixSeconds * 1000);
-  const now = new Date();
-  const days = Math.floor((now.getTime() - d.getTime()) / 86_400_000);
-  if (days <= 0) return "Today";
-  if (days === 1) return "Yesterday";
-  return d.toLocaleDateString(undefined, {
-    day: "numeric", month: "short",
-    year: d.getFullYear() === now.getFullYear() ? undefined : "numeric",
-  });
-}
 
 export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame, selected, onSelect }: {
   items: readonly FrameItem[];
@@ -106,7 +93,7 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
                   ? <span key={k} className="cp-lib-lrow-kind" title={it.source}>{it.source}</span>
                   : k === "size"
                     ? <span key={k} className="cp-lib-lrow-size">{formatBytes(it.size_bytes)}</span>
-                    : <span key={k} className="cp-lib-lrow-date">{grabbedLabel(it.created_at)}</span>
+                    : <span key={k} className="cp-lib-lrow-date">{formatListDate(it.created_at)}</span>
               ))}
             </button>
             {/* A list ROW has no ⋯ menu, so the verb is inline here - but

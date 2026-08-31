@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  mergeTranscriptLibrary, groupTranscriptsByFolder, monthLabel, synthesizeEntry,
+  mergeTranscriptLibrary, monthLabel, synthesizeEntry,
 } from "./transcript-library";
 import type { TranscriptFile } from "../bindings/TranscriptFile";
 import type { TranscriptHistoryEntry } from "./transcript-history";
@@ -65,25 +65,12 @@ describe("mergeTranscriptLibrary", () => {
   });
 });
 
-describe("groupTranscriptsByFolder", () => {
-  it("groups by month with the newest group first", () => {
-    const files = [
-      file({ path: "/tx/2026-06/Old.srt", folder: "2026-06", modified_ms: 1000 }),
-      file({ path: "/tx/2026-07/New.srt", folder: "2026-07", modified_ms: 5000 }),
-      file({ path: "/tx/2026-07/Newer.srt", folder: "2026-07", modified_ms: 6000 }),
-    ];
-    const groups = groupTranscriptsByFolder(mergeTranscriptLibrary(files, []));
-    expect(groups.map((g) => g.label)).toEqual(["July 2026", "June 2026"]);
-    expect(groups[0].items).toHaveLength(2);
-  });
-
-  it("labels a root-level transcript group 'Other'", () => {
-    const groups = groupTranscriptsByFolder(
-      mergeTranscriptLibrary([file({ path: "/tx/Loose.srt", folder: "" })], []),
-    );
-    expect(groups[0].label).toBe("Other");
-  });
-});
+// The `groupTranscriptsByFolder` block that stood here went with the function.
+// Its second case asserted that a root-level group is labelled "Other" - which
+// is the very behaviour `folderLabel` replaced, since it read as the app having
+// lost the user's own folder name. Grouping is covered where it now lives, in
+// `transcript-organize.test.ts`, which asserts the labels the list actually
+// renders ("Loose transcripts", and a named folder keeping its name).
 
 describe("monthLabel", () => {
   it("maps YYYY-MM to a readable month", () => {
