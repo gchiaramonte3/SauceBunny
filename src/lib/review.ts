@@ -19,6 +19,7 @@
 import { loadJson, saveJson } from "./storage";
 import { getReviewDoc, putReviewDoc } from "./review-store";
 import { secondsToHms } from "./timecode";
+import { pathKey } from "./repath";
 
 export type ReviewStatusState = "pending" | "approved" | "changes";
 
@@ -294,6 +295,25 @@ export function ensureVersion(
 // list powers the panel's "past reviews" popover.
 
 const FP_INDEX_KEY = "saucebunny.review.fpindex";
+/**
+ * Local files that arrived through a session, mapped to the review key that
+ * session was using.
+ *
+ * This exists because a guest's notes were being filed under one key and read
+ * back under another. In session the doc is saved under `sourceKey`, which
+ * comes off the wire as the HOST's `reviewKey` - a FINGERPRINT, because
+ * wire-path-contract forbids putting a filesystem path on the wire. Solo, the
+ * key is `resolveByFingerprint(fp) ?? localFilePath`, a PATH, and the guest
+ * computes `fp` from ITS copy, whose filename carries a `<hash8>-` prefix the
+ * host's never had. Different title, different fingerprint, index miss, path
+ * fallback. Two documents for one film.
+ *
+ * The fingerprint index cannot fix it: at fetch time the guest has a path but
+ * no metadata, so it cannot compute its own fingerprint to link. What it does
+ * know is "this exact file arrived as part of THAT review", which is what this
+ * records. Keyed by pathKey() like every other path store here.
+ */
+const RECEIVED_KEY = "saucebunny.review.receivedAs";
 const HISTORY_KEY = "saucebunny.review.history";
 
 /**
@@ -364,6 +384,26 @@ export function rebuildFingerprintIndex(docs: Iterable<ReviewDoc>): number {
 }
 
 /** The review key a fingerprint maps to (null if this clip hasn't been reviewed). */
+/** Record that `path` arrived through a session that was reviewing `key`. */
+export function rememberReceivedAs(path: string, key: string): void {
+  if (!path || !key) return;
+  const idx = loadJson<Record<string, string>>(RECEIVED_KEY, {});
+  const k = pathKey(path);
+  if (idx[k] === key) return;
+  idx[k] = key;
+  saveJson(RECEIVED_KEY, idx);
+}
+
+/** The review key a received file belongs to, or null if it did not arrive
+ *  through a session. Checked BEFORE the fingerprint index, because it is the
+ *  stronger statement: the fingerprint says "this looks like that file", this
+ *  says "this IS the file that review was about". */
+export function receivedReviewKey(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const idx = loadJson<Record<string, string>>(RECEIVED_KEY, {});
+  return idx[pathKey(path)] ?? null;
+}
+
 export function resolveByFingerprint(fp: string): string | null {
   const idx = loadJson<Record<string, string>>(FP_INDEX_KEY, {});
   const hit = idx[fp];

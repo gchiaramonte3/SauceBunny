@@ -35,14 +35,7 @@ import {
 import { clearReactions, pushReaction } from "../lib/reaction-store";
 import { useStreamKeep } from "./use-stream-keep";
 import { acceptTransport, createClockEstimator, expectedPosition } from "../lib/session-clock";
-import {
-  loadReview, saveReview, ensureVersion, applyReviewOp, attributeReviewOp, mergeReviewDoc,
-  adoptSnapshot,
-  resolveByFingerprint, linkFingerprint, sanitizeDocForWire,
-  commentMarkers as reviewMarkersOf, annotationsOf,
-  loadReviewer, reviewerColorFor, initialsOf,
-  type AnnotationStrokes, type ReviewDoc, type ReviewOp,
-} from "../lib/review";
+import { loadReview, saveReview, ensureVersion, applyReviewOp, attributeReviewOp, mergeReviewDoc, adoptSnapshot, resolveByFingerprint, linkFingerprint, sanitizeDocForWire, commentMarkers as reviewMarkersOf, annotationsOf, loadReviewer, reviewerColorFor, initialsOf, type AnnotationStrokes, type ReviewDoc, type ReviewOp, rememberReceivedAs } from "../lib/review";
 import type { PlayerHandle } from "../components/player-handle";
 import type { Participant } from "../components/PeoplePanel";
 import type { ToastKind } from "../components/CanvasToast";
@@ -1364,6 +1357,14 @@ export function useCoReview({
         blake3Hex: offer.blake3, name: offer.name,
       });
       if (pending?.fingerprint) linkFingerprint(pending.fingerprint, path);
+      /* Remember which review this file belongs to. Without it a guest's notes
+         are filed under the host's reviewKey during the session and read back
+         under a path-derived key afterwards, so reopening the film shows an
+         empty review while the notes sit on disk under a key nothing looks up.
+         The fingerprint index cannot cover this: the guest has no metadata yet
+         here, so it cannot compute its own fingerprint to link, and the copy's
+         filename carries a <hash8>- prefix that changes it anyway. */
+      if (pending?.reviewKey) rememberReceivedAs(path, pending.reviewKey);
       await loadLocalPath(path);
       setPendingSource(null);
       sendSessionMsg({ kind: "sourceStatus", from: "", state: "ready", detail: null });

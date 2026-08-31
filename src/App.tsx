@@ -1,109 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { notifyFramesChanged } from "./lib/frames";
-import { getVersion } from "@tauri-apps/api/app";
-import { listen } from "@tauri-apps/api/event";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification,
-} from "@tauri-apps/plugin-notification";
-import { Toolbar } from "./components/Toolbar";
-import { NavRail } from "./components/NavRail";
-
-import { LibraryView } from "./components/LibraryView";
-import { LibraryBrowser } from "./components/LibraryBrowser";
-import { useTranscriptListeners } from "./hooks/use-transcript-listeners";
-import { useDiarizerPrepare } from "./hooks/use-diarizer-prepare";
-import { useLibraryScan } from "./hooks/use-library-scan";
-import { Sidebar } from "./components/Sidebar";
-import { PeoplePanel } from "./components/PeoplePanel";
-import { ReactionLayer } from "./components/ReactionLayer";
-import { MediaSpikePanel } from "./components/MediaSpikePanel";
-import { PeerStreamSpike } from "./components/PeerStreamSpike";
-import { CoReviewLobby } from "./components/CoReviewLobby";
-import { Monitor, type AspectId } from "./components/Monitor";
-import type { Notif } from "./components/NotificationBell";
-import type { ToastKind } from "./components/CanvasToast";
-import { playSuccess, playError, playInfo } from "./lib/sound";
-import { Transport } from "./components/Transport";
-import { Timeline } from "./components/Timeline";
-import { ViewOptions } from "./components/ViewOptions";
-import { LogsPanel } from "./components/LogsPanel";
-import { RoomControlBar } from "./components/RoomControlBar";
-import { ReviewStatusChip } from "./components/ReviewStatusChip";
-import { useMediaCapture, subscribeCaptureError, setCaptureLogSink } from "./hooks/use-media-capture";
-import { SettingsModal, type Defaults } from "./components/SettingsModal";
-import { YouTubeAuthModal } from "./components/YouTubeAuthModal";
-import type { PlayerHandle } from "./components/player-handle";
-import type {
-  AppStatus, ClientLog, ExportOpts,
-  LocalFileMeta, Metadata, QueuedClip, RecentClip,
-  SourceKind, WhisperModel,
-  ReviewRangeDraft,
-} from "./types";
-import { isQueuedClip } from "./types";
-import { asLogTag } from "./types";
-import { formatError } from "./lib/error-format";
-import { fmtElapsed, stageLabel } from "./lib/elapsed";
-import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase";
-import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek } from "./lib/playhead-store";
-import { usePanelBus } from "./hooks/use-panel-bus";
-import { useStreamRung } from "./hooks/use-stream-rung";
-import type { YtdlpStatus } from "./bindings/YtdlpStatus";
-import { clipTranscriptPath, type ActiveTranscript } from "./lib/transcript-owner";
-import { useTransport } from "./hooks/use-transport";
-import { useSourceMarks } from "./hooks/use-source-marks";
-import { useTranscriptJobs } from "./hooks/use-transcript-jobs";
-import { useFetchSource } from "./hooks/use-fetch-source";
-import { useLocalSource } from "./hooks/use-local-source";
-import { useWebPlayback } from "./hooks/use-web-playback";
-import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView, type SessionSource } from "./hooks/use-co-review";
-import { QueueDrawer } from "./components/QueueDrawer";
-import { TranscriptReader } from "./components/TranscriptReader";
-import { TranscriptViewer } from "./components/TranscriptViewer";
-import { ReaderPlayerStage, type ReaderSource } from "./components/ReaderPlayerStage";
-import { useReaderMarkers } from "./hooks/use-reader-markers";
-import { ReaderAnalysis } from "./components/ReaderAnalysis";
-import { CommandPalette } from "./components/CommandPalette";
-import { ShortcutSheet } from "./components/ShortcutSheet";
-import { DropTarget } from "./components/DropTarget";
-import { WelcomeScreen } from "./components/WelcomeScreen";
-import { PermissionsOnboarding } from "./components/PermissionsOnboarding";
-import { RoomSourceBar } from "./components/RoomSourceBar";
-import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from "./lib/import-extensions";
-import {
-  findForSource,
-  touchEntry,
-  renameEntryPath as renameTranscriptEntryPath,
-  notifyTranscriptsChanged,
-  getHistory as getTranscriptHistory,
-  type TranscriptHistoryEntry,
-} from "./lib/transcript-history";
-import { prepareCues, renameSpeakerOverridesPath } from "./components/transcript/helpers";
-import {
-  deriveOnboardingSteps, onboardingComplete,
-  loadOnboardingDismissed, saveOnboardingDismissed,
-  type OnboardingStepId,
-} from "./lib/onboarding";
-import type { Command } from "./lib/commands";
-import { buildCommands } from "./lib/commands";
-import { markRangeFromSeconds as markRange } from "./lib/mark-range";
-import { useBatchTranscribe } from "./hooks/use-batch-transcribe";
-import { TranscriptSearchModal } from "./components/TranscriptSearchModal";
-import { batchSummary } from "./lib/batch-queue";
-import {
-  loadKeybindings, saveKeybindings, buildComboMap, bindingsFor, formatCombo, KEY_ACTION_BY_ID, type KeyActionId, type KeybindingOverrides,
-} from "./lib/keybindings";
-import { migrateLegacyStorageKeys } from "./lib/migrate-storage";
-import { sanitizePlaybackRate, stepPlaybackRate } from "./lib/playback-rate";
-import { parseSrt } from "./lib/srt";
-import { speakerLanes } from "./lib/speaker-stats";
-import { speakerColor, loadSpeakerOverrides, resolveAliasChain, SPEAKERS_CHANGED_EVENT } from "./components/transcript/helpers";
-import { speakerFingerprint, seedSpeakerOverridesFromFingerprint, linkSpeakerOverridesToFingerprint } from "./lib/speaker-identity";
-import { MediaInfoModal } from "./components/MediaInfoModal";
-import { loadReview, saveReview, ensureVersion, setActiveVersion, removeVersion, unlinkFingerprint, canUnlinkVersion, carriedComments, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes } from "./lib/review";
+  useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"; import { invoke } from "@tauri-apps/api/core"; import { notifyFramesChanged } from "./lib/frames"; import { getVersion } from "@tauri-apps/api/app"; import { listen } from "@tauri-apps/api/event"; import { save as saveDialog } from "@tauri-apps/plugin-dialog"; import {   isPermissionGranted, requestPermission, sendNotification, } from "@tauri-apps/plugin-notification"; import { Toolbar } from "./components/Toolbar"; import { NavRail } from "./components/NavRail";  import { LibraryView } from "./components/LibraryView"; import { LibraryBrowser } from "./components/LibraryBrowser"; import { useTranscriptListeners } from "./hooks/use-transcript-listeners"; import { useDiarizerPrepare } from "./hooks/use-diarizer-prepare"; import { useLibraryScan } from "./hooks/use-library-scan"; import { Sidebar } from "./components/Sidebar"; import { PeoplePanel } from "./components/PeoplePanel"; import { ReactionLayer } from "./components/ReactionLayer"; import { MediaSpikePanel } from "./components/MediaSpikePanel"; import { PeerStreamSpike } from "./components/PeerStreamSpike"; import { CoReviewLobby } from "./components/CoReviewLobby"; import { Monitor, type AspectId } from "./components/Monitor"; import type { Notif } from "./components/NotificationBell"; import type { ToastKind } from "./components/CanvasToast"; import { playSuccess, playError, playInfo } from "./lib/sound"; import { Transport } from "./components/Transport"; import { Timeline } from "./components/Timeline"; import { ViewOptions } from "./components/ViewOptions"; import { LogsPanel } from "./components/LogsPanel"; import { RoomControlBar } from "./components/RoomControlBar"; import { ReviewStatusChip } from "./components/ReviewStatusChip"; import { useMediaCapture, subscribeCaptureError, setCaptureLogSink } from "./hooks/use-media-capture"; import { SettingsModal, type Defaults } from "./components/SettingsModal"; import { YouTubeAuthModal } from "./components/YouTubeAuthModal"; import type { PlayerHandle } from "./components/player-handle"; import type {   AppStatus, ClientLog, ExportOpts, LocalFileMeta, Metadata, QueuedClip, RecentClip, SourceKind, WhisperModel, ReviewRangeDraft, } from "./types"; import { isQueuedClip } from "./types"; import { asLogTag } from "./types"; import { formatError } from "./lib/error-format"; import { fmtElapsed, stageLabel } from "./lib/elapsed"; import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase"; import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek } from "./lib/playhead-store"; import { usePanelBus } from "./hooks/use-panel-bus"; import { useStreamRung } from "./hooks/use-stream-rung"; import type { YtdlpStatus } from "./bindings/YtdlpStatus"; import { clipTranscriptPath, type ActiveTranscript } from "./lib/transcript-owner"; import { useTransport } from "./hooks/use-transport"; import { useSourceMarks } from "./hooks/use-source-marks"; import { useTranscriptJobs } from "./hooks/use-transcript-jobs"; import { useFetchSource } from "./hooks/use-fetch-source"; import { useLocalSource } from "./hooks/use-local-source"; import { useWebPlayback } from "./hooks/use-web-playback"; import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView, type SessionSource } from "./hooks/use-co-review"; import { QueueDrawer } from "./components/QueueDrawer"; import { TranscriptReader } from "./components/TranscriptReader"; import { TranscriptViewer } from "./components/TranscriptViewer"; import { ReaderPlayerStage, type ReaderSource } from "./components/ReaderPlayerStage"; import { useReaderMarkers } from "./hooks/use-reader-markers"; import { ReaderAnalysis } from "./components/ReaderAnalysis"; import { CommandPalette } from "./components/CommandPalette"; import { ShortcutSheet } from "./components/ShortcutSheet"; import { DropTarget } from "./components/DropTarget"; import { WelcomeScreen } from "./components/WelcomeScreen"; import { PermissionsOnboarding } from "./components/PermissionsOnboarding"; import { RoomSourceBar } from "./components/RoomSourceBar"; import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from "./lib/import-extensions"; import {   findForSource, touchEntry, renameEntryPath as renameTranscriptEntryPath, notifyTranscriptsChanged, getHistory as getTranscriptHistory, type TranscriptHistoryEntry, } from "./lib/transcript-history"; import { prepareCues, renameSpeakerOverridesPath } from "./components/transcript/helpers"; import {   deriveOnboardingSteps, onboardingComplete, loadOnboardingDismissed, saveOnboardingDismissed, type OnboardingStepId, } from "./lib/onboarding"; import type { Command } from "./lib/commands"; import { buildCommands } from "./lib/commands"; import { markRangeFromSeconds as markRange } from "./lib/mark-range"; import { useBatchTranscribe } from "./hooks/use-batch-transcribe"; import { TranscriptSearchModal } from "./components/TranscriptSearchModal"; import { batchSummary } from "./lib/batch-queue"; import {   loadKeybindings, saveKeybindings, buildComboMap, bindingsFor, formatCombo, KEY_ACTION_BY_ID, type KeyActionId, type KeybindingOverrides, } from "./lib/keybindings"; import { migrateLegacyStorageKeys } from "./lib/migrate-storage"; import { sanitizePlaybackRate, stepPlaybackRate } from "./lib/playback-rate"; import { parseSrt } from "./lib/srt"; import { speakerLanes } from "./lib/speaker-stats"; import { speakerColor, loadSpeakerOverrides, resolveAliasChain, SPEAKERS_CHANGED_EVENT } from "./components/transcript/helpers"; import { speakerFingerprint, seedSpeakerOverridesFromFingerprint, linkSpeakerOverridesToFingerprint } from "./lib/speaker-identity"; import { MediaInfoModal } from "./components/MediaInfoModal"; import { loadReview, saveReview, ensureVersion, setActiveVersion, removeVersion, unlinkFingerprint, canUnlinkVersion, carriedComments, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes, receivedReviewKey,
+} from "./lib/review";
 import { loadChapters, adoptSourceChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
 import { appUndo } from "./lib/undo";
 import { loadClipQueue, loadJson, saveClipQueue, saveJson } from "./lib/storage";
@@ -3588,7 +3485,14 @@ export default function App() {
   const [txSearchOpen, setTxSearchOpen] = useState(false);
   const reviewSourceKey = useMemo(
     () => ((sourceKind === "file" && localFilePath && metadata)
-      ? (resolveByFingerprint(reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize)) ?? localFilePath)
+      /* receivedReviewKey FIRST. A file that arrived through a session belongs
+         to that session's review, and that is a stronger statement than the
+         fingerprint's "this looks like that file" - the received copy's name
+         carries a <hash8>- prefix, so its fingerprint deliberately does not
+         match the host's. Without this the guest's own notes read back empty. */
+      ? (receivedReviewKey(localFilePath)
+          ?? resolveByFingerprint(reviewFingerprint(metadata.title ?? localFilePath, metadata.duration ?? 0, metadata.width, metadata.height, localFileSize))
+          ?? localFilePath)
       : (metadata?.webpage_url ?? null)),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fpIndexBump tracks the localStorage index the linter can't see
     [sourceKind, localFilePath, metadata, localFileSize, fpIndexBump],
