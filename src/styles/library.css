@@ -1024,6 +1024,16 @@
 }
 .cp-lib-tree-tw.open { transform: rotate(90deg); }
 .cp-lib-tree-tw.empty { color: var(--fg-5); }
+/* A folder the scan stopped short of. It has contents and it cannot be
+   opened, so it must read as neither a leaf nor a working chevron: an ellipsis
+   in the twisty's own well, saying "there is more here" without offering a
+   control that would do nothing. The row's title says what to do about it, in
+   the same words as unscannedDepthNote. */
+.cp-lib-tree-tw.empty.deeper::after {
+  content: "…";
+  font-size: var(--text-md);
+  color: var(--fg-4);
+}
 .cp-lib-tree-tw:hover { color: var(--fg-1); }
 .cp-lib-tree-name {
   flex: 1;

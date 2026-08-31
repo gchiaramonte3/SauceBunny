@@ -7,6 +7,10 @@ import { FolderTagMenu } from "./FolderTagMenu";
 import { useFinderTags } from "../hooks/use-finder-tags";
 import { primarySwatch } from "../lib/finder-tags";
 
+/** Which folders are open. Persisted so a deep library does not cost the
+ *  same four expansions on every launch. */
+const EXPANDED_KEY = "saucebunny.libraryTreeExpanded";
+
 type Props = {
   trees: LibraryFolder[];
   /** Current selection chain, or null for the "All" aggregate. */
@@ -41,12 +45,24 @@ type Props = {
 };
 
 type Row = {
-  /** "all", a shelf id, or `<rootIndex>:<absolute path>` — see buildRows. */
+  /** "all", a shelf id, or `<rootIndex>:<absolute path>` — see buildRows.
+   *  IDENTITY ONLY. It is unique per POSITION, which is what React and the
+   *  roving tabindex need and what nothing else should use: five things once
+   *  read it as a filesystem path and silently got `0:/Users/...`. */
   key: string;
+  /** The folder's actual path, or null on "All" and the two shelf rows.
+   *  Everything that means a PLACE uses this - expansion, the selection
+   *  highlight, drop targets, the context menu, tag colours. */
+  path: string | null;
   chain: LibraryCrumb[] | null;
   depth: number;
   name: string;
   hasChildren: boolean;
+  /** The scan stopped short of this folder's contents. It is NOT a leaf,
+   *  and drawing it as one is how a folder with things in it looked
+   *  empty. LibraryView already prints the global note this row is
+   *  about; the row itself said nothing. */
+  deeper: boolean;
   expanded: boolean;
   /** Root rows only — the first video under the root, for the folder art. */
   artPath?: string | null;
@@ -65,12 +81,12 @@ const KIND_CHIPS: Array<{ kind: LibraryKindFilter; label: string }> = [
 
 function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
   const rows: Row[] = [
-    { key: "all", chain: null, depth: 0, name: "All", hasChildren: false, expanded: false },
+    { key: "all", path: null, chain: null, depth: 0, name: "All", hasChildren: false, deeper: false, expanded: false },
     // Directly under "All" because they are the same KIND of thing - a view
     // over everything of a category - rather than folders that happen to live
     // somewhere. Below the roots they would read as one more drive.
-    { key: "shelf:web", chain: null, depth: 0, name: "From the web", hasChildren: false, expanded: false, shelf: "web" },
-    { key: "shelf:frames", chain: null, depth: 0, name: "Frames", hasChildren: false, expanded: false, shelf: "frames" },
+    { key: "shelf:web", path: null, chain: null, depth: 0, name: "From the web", hasChildren: false, deeper: false, expanded: false, shelf: "web" },
+    { key: "shelf:frames", path: null, chain: null, depth: 0, name: "Frames", hasChildren: false, deeper: false, expanded: false, shelf: "frames" },
   ];
   const walk = (node: LibraryFolder, chain: LibraryCrumb[], depth: number, rootIdx: number) => {
     const isExp = expanded.has(node.path);
@@ -81,8 +97,8 @@ function buildRows(trees: LibraryFolder[], expanded: Set<string>): Row[] {
       // once as a root and once inside its parent. Keying on node.path alone
       // made those two rows collide, and React is then free to reuse the wrong
       // DOM node for the wrong folder.
-      key: `${rootIdx}:${node.path}`, chain, depth, name: node.name,
-      hasChildren: node.folders.length > 0, expanded: isExp,
+      key: `${rootIdx}:${node.path}`, path: node.path, chain, depth, name: node.name,
+      hasChildren: node.folders.length > 0, deeper: node.deeper, expanded: isExp,
       // Roots carry small folder art (first video's poster, BFS) — the
       // Spotify library-row read. Subfolders stay text rows.
       artPath: depth === 0 ? (libraryPosterPaths(node, 1)[0] ?? null) : undefined,
@@ -112,11 +128,34 @@ export function LibraryTree({
   trees, selection, onSelect, kind, onKind, onCollapse,
   addFolder, rescanAll, scanning, removeRoot, shelf, onSelectShelf, dropOver,
 }: Props) {
-  // Roots open by default; ancestors of the current selection are auto-revealed.
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  /* Roots open by default; ancestors of the current selection are revealed
+     when the selection CHANGES. Persisted, because a deep library otherwise
+     costs the same four expansions on every launch, and every other list
+     preference in this app is remembered. */
+  const stored = useMemo(() => {
+    try {
+      const raw: unknown = JSON.parse(localStorage.getItem(EXPANDED_KEY) ?? "null");
+      if (Array.isArray(raw)) {
+        return { set: new Set(raw.filter((p): p is string => typeof p === "string")), had: true };
+      }
+    } catch { /* a mangled value costs the expansions, not a crash */ }
+    // `had` is the difference between "the user has never expressed a
+    // preference" and "they have, and it says collapsed". Without it the
+    // launch-time reveal below either never runs (so a fresh install cannot
+    // see the folder it is inside) or always runs (so it undoes a collapse on
+    // every launch). Both were tried.
+    return { set: new Set<string>(), had: false };
+  }, []);
+  const [expanded, setExpanded] = useState<Set<string>>(stored.set);
+  useEffect(() => {
+    try { localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expanded])); } catch { /* quota */ }
+  }, [expanded]);
   // Each root is default-opened only ONCE (on first appearance) — re-adding it
   // on every selection change would spring a manually-collapsed root back open.
   const seededRoots = useRef<Set<string>>(new Set());
+  /** The selection this component last revealed, so a rescan is not
+   *  mistaken for the user navigating somewhere. */
+  const lastSelection = useRef<string | null>(null);
   useEffect(() => {
     // Which roots are new is decided BEFORE the updater, and the ref is
     // mutated here rather than inside it. A setState updater must be pure:
@@ -125,13 +164,29 @@ export function LibraryTree({
     // root quietly failed to open.
     const fresh = trees.filter((t) => !seededRoots.current.has(t.path)).map((t) => t.path);
     for (const path of fresh) seededRoots.current.add(path);
+    /* Reveal the way to the selection only when the selection has actually
+       MOVED. This used to run on [trees, selection], and `trees` gets a fresh
+       identity on every rescan - so collapsing the folder you were inside
+       lasted until the next scan and then sprang back open. Roots were
+       guarded against exactly this with seededRoots; the ancestor path was
+       not. Navigating somewhere new still opens the way to it, which is the
+       behaviour worth keeping. */
+    const selKeyNow = selection ? selection.map((c) => c.path).join("\u0000") : "";
+    /* The FIRST run never reveals. The persisted set already holds whatever
+       was open when the app was last closed, so re-revealing the selection's
+       ancestors on launch would undo a collapse the user had made
+       deliberately - the one gesture this whole store exists to remember. */
+    const first = lastSelection.current === null;
+    const moved = (first ? !stored.had : selKeyNow !== lastSelection.current);
+    lastSelection.current = selKeyNow;
+    if (fresh.length === 0 && !moved) return;
     setExpanded((prev) => {
       const next = new Set(prev);
       for (const path of fresh) next.add(path);
-      if (selection) for (const c of selection) next.add(c.path);
+      if (moved && selection) for (const c of selection) next.add(c.path);
       return next;
     });
-  }, [trees, selection]);
+  }, [trees, selection, stored.had]);
 
   const rows = useMemo(() => buildRows(trees, expanded), [trees, expanded]);
   const selKey = selection ? selection[selection.length - 1].path : "all";
@@ -164,12 +219,12 @@ export function LibraryTree({
       case "End":       e.preventDefault(); focusRow(rows[rows.length - 1].key); break;
       case "ArrowRight":
         e.preventDefault();
-        if (row.hasChildren && !row.expanded) toggle(row.key);
+        if (row.hasChildren && !row.expanded && row.path) toggle(row.path);
         else if (row.hasChildren && rows[i + 1]) focusRow(rows[i + 1].key);
         break;
       case "ArrowLeft":
         e.preventDefault();
-        if (row.hasChildren && row.expanded) toggle(row.key);
+        if (row.hasChildren && row.expanded && row.path) toggle(row.path);
         else { // step out to the parent (first shallower row above)
           for (let j = i - 1; j >= 0; j--) if (rows[j].depth < row.depth) { focusRow(rows[j].key); break; }
         }
@@ -267,7 +322,7 @@ export function LibraryTree({
       </div>
       <div className="cp-lib-tree-scroll" role="tree" aria-label="Library folders" onKeyDown={onKeyDown}>
         {rows.map((row) => {
-          const isSel = row.shelf ? shelf === row.shelf : (row.key === selKey && shelf === null);
+          const isSel = row.shelf ? shelf === row.shelf : ((row.path ?? "all") === selKey && shelf === null);
           return (
             <button
               key={row.key}
@@ -281,14 +336,21 @@ export function LibraryTree({
               className={"cp-lib-tree-row"
                 + (row.shelf ? " cp-lib-tree-web" : "")
                 + (isSel ? " selected" : "")
-                + (dropOver && dropOver === row.key ? " dropping" : "")}
+                + (dropOver && dropOver === row.path ? " dropping" : "")}
               // A DROP TARGET, but only where a real directory is named.
               // "All" is an aggregate and the two shelf rows are views over a
               // category, so neither is a place a file can be put - and a
               // target that lights up and then refuses is worse than one that
               // never offered.
-              data-drop={row.key !== "all" && !row.shelf ? row.key : undefined}
+              data-drop={row.path && !row.shelf ? row.path : undefined}
               style={{ ["--depth" as string]: String(row.depth) }}
+              /* A capped folder has contents this scan never reached, so the
+                 row has to say why it will not open. Same wording as
+                 unscannedDepthNote, which LibraryView prints for the tree as
+                 a whole. */
+              title={row.deeper
+                ? `${row.name} goes deeper than this view scans. Add it as a library root to see inside.`
+                : undefined}
               onClick={() => {
                 setActiveKey(row.key);
                 if (row.shelf) { onSelectShelf(row.shelf); return; }
@@ -299,19 +361,23 @@ export function LibraryTree({
                 // or reveal.
                 if (row.key === "all" || row.shelf) return;
                 e.preventDefault();
-                setMenu({ path: row.key, x: e.clientX, y: e.clientY, isRoot: row.depth === 0 });
+                if (!row.path) return;
+                setMenu({ path: row.path, x: e.clientX, y: e.clientY, isRoot: row.depth === 0 });
               }}
             >
               {row.hasChildren ? (
                 <span
                   className={"cp-lib-tree-tw" + (row.expanded ? " open" : "")}
                   aria-hidden="true"
-                  onClick={(e) => { e.stopPropagation(); toggle(row.key); }}
+                  onClick={(e) => { e.stopPropagation(); if (row.path) toggle(row.path); }}
                 >
                   <IconChevronRight size={13} />
                 </span>
               ) : (
-                <span className="cp-lib-tree-tw empty" aria-hidden="true">
+                <span
+                  className={"cp-lib-tree-tw empty" + (row.deeper ? " deeper" : "")}
+                  aria-hidden="true"
+                >
                   {row.key === "all" ? <IconStack size={13} /> : null}
                   {row.shelf === "web" ? <IconLink size={13} /> : null}
                   {row.shelf === "frames" ? <IconCamera size={13} /> : null}
@@ -325,7 +391,7 @@ export function LibraryTree({
                   // already a filled folder shape, so tinting it IS the Finder
                   // treatment, with no extra dot competing for row space.
                   style={(() => {
-                    const sw = primarySwatch(finderTags.tags.get(row.key) ?? []);
+                    const sw = primarySwatch(finderTags.tags.get(row.path ?? "") ?? []);
                     return sw ? { color: sw.hex } : undefined;
                   })()}
                 />
