@@ -27,7 +27,62 @@ describe("persisted list columns", () => {
   it("starts at the defaults and writes them through", () => {
     render(<Probe />);
     expect(seen?.cols).toEqual(DEFAULTS);
-    expect(JSON.parse(localStorage.getItem(KEY) ?? "null")).toEqual(DEFAULTS);
+    // The stored shape is {w, order, hidden} now. v1 wrote the bare width
+    // map and is still READ, which the migration test below covers.
+    expect(JSON.parse(localStorage.getItem(KEY) ?? "null")).toEqual({
+      w: DEFAULTS, order: Object.keys(DEFAULTS), hidden: [],
+    });
+  });
+
+  it("reads a v1 store, which is the bare width map", () => {
+    // Every existing install has widths under the flat shape. Discarding them
+    // to add ordering would trade a saved preference for a new feature.
+    localStorage.setItem(KEY, JSON.stringify({ ...DEFAULTS, size: 150 }));
+    render(<Probe />);
+    expect(seen?.cols.size).toBe(150);
+    expect(seen?.order).toEqual(Object.keys(DEFAULTS));
+    expect(seen?.visible).toEqual(Object.keys(DEFAULTS));
+  });
+
+  it("appends a column the stored order never knew about", () => {
+    // What happens when a build ADDS a column: an order saved before it
+    // existed must not make the new one permanently invisible.
+    localStorage.setItem(KEY, JSON.stringify({ w: DEFAULTS, order: ["date", "source"], hidden: [] }));
+    render(<Probe />);
+    expect(seen?.order).toEqual(["date", "source", "size"]);
+  });
+
+  it("hides and shows a column, and the template follows", () => {
+    render(<Probe />);
+    const before = seen?.template ?? "";
+    act(() => seen?.toggleCol("size"));
+    expect(seen?.visible).toEqual(["source", "date"]);
+    expect(seen?.template, "a hidden column still reserves its track").not.toContain("84px");
+    act(() => seen?.toggleCol("size"));
+    expect(seen?.template).toBe(before);
+  });
+
+  it("refuses to hide the last visible column", () => {
+    // The menu that turns one back on is opened FROM a header cell, so a list
+    // with none is stranded.
+    render(<Probe />);
+    act(() => seen?.toggleCol("size"));
+    act(() => seen?.toggleCol("date"));
+    act(() => seen?.toggleCol("source"));
+    expect(seen?.visible.length, "hid every column").toBe(1);
+  });
+
+  it("reorders, and the template reorders with it", () => {
+    render(<Probe />);
+    act(() => seen?.moveCol("date", 0));
+    expect(seen?.order).toEqual(["date", "source", "size"]);
+    expect(seen?.template).toBe("34px minmax(0, 1fr) 96px 120px 84px");
+  });
+
+  it("drops a stored hidden set that would leave nothing visible", () => {
+    localStorage.setItem(KEY, JSON.stringify({ w: DEFAULTS, order: ["source", "size", "date"], hidden: ["source", "size", "date"] }));
+    render(<Probe />);
+    expect(seen?.visible.length).toBe(3);
   });
 
   it("restores a stored width", () => {

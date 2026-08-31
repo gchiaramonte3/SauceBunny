@@ -3,11 +3,16 @@ import { primarySwatch, type TagColorIndex } from "../lib/finder-tags";
 import type { FinderTag } from "../bindings/FinderTag";
 import { IconFilm, IconVolume } from "./Icons";
 import { LibraryCardMenu } from "./LibraryCardMenu";
-import { chosenPosterFor, formatBytes, formatModifiedDate } from "../lib/library";
+import { chosenPosterFor, formatBytes, formatModifiedDate, DEFAULT_LIB_COLUMNS } from "../lib/library";
+import type { LibColKey } from "../lib/library";
 import { useLazyThumbnails } from "../hooks/use-lazy-thumbnails";
 import type { LibraryItem } from "../types";
 
 type Props = {
+  /** The optional columns to render, in the header's current order and with
+   *  hidden ones already removed. Omitted keeps the default three, so the
+   *  grid view and any caller that does not manage columns is unchanged. */
+  columns?: readonly LibColKey[];
   item: LibraryItem;
   selected: boolean;
   /** Single click / Space → show the detail panel. */
@@ -47,7 +52,7 @@ type Props = {
  */
 export function LibraryListRow({
   item, selected, onSelect, onContextSelect, onRename, onDelete, deleteLabel, onMove, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
-  tags, onToggleTagColor, onClearTagColors,
+  tags, onToggleTagColor, onClearTagColors, columns,
 }: Props) {
   const swatch = primarySwatch(tags ?? []);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -120,15 +125,24 @@ export function LibraryListRow({
           )}
           {item.name}
         </span>
-        {/* `capitalize` lives on THIS cell rather than the shared class: the
-            Library's kind is a lowercase enum, while the same column holds a
-            filename in Frames and a hostname in the web shelf - where
-            capitalising turned "turbores-sample.mov" into
-            "Turbores-Sample.Mov", because a hyphen and a dot are both word
-            boundaries. */}
-        <span className="cp-lib-lrow-kind cp-lib-lrow-kindword">{item.kind}</span>
-        <span className="cp-lib-lrow-size">{formatBytes(item.size_bytes)}</span>
-        <span className="cp-lib-lrow-date">{formatModifiedDate(item.modified_ms)}</span>
+        {/* The optional cells, in the order the header is showing them and
+            with the hidden ones absent. Rendering them literally here is what
+            made the columns unmovable: the grid template, the header and this
+            list all have to name the same sequence, and three literals cannot
+            be kept in step by anything but attention. */}
+        {(columns ?? DEFAULT_LIB_COLUMNS).map((k) => (
+          k === "kind"
+            /* `capitalize` lives on THIS cell rather than the shared class:
+               the Library's kind is a lowercase enum, while the same column
+               holds a filename in Frames and a hostname in the web shelf -
+               where capitalising turned "turbores-sample.mov" into
+               "Turbores-Sample.Mov", because a hyphen and a dot are both word
+               boundaries. */
+            ? <span key={k} className="cp-lib-lrow-kind cp-lib-lrow-kindword">{item.kind}</span>
+            : k === "size"
+              ? <span key={k} className="cp-lib-lrow-size">{formatBytes(item.size_bytes)}</span>
+              : <span key={k} className="cp-lib-lrow-date">{formatModifiedDate(item.modified_ms)}</span>
+        ))}
       </button>
       {menuAnchor && (
         <LibraryCardMenu

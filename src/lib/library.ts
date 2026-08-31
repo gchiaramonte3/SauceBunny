@@ -495,3 +495,18 @@ export function artFirst(items: readonly LibraryItem[]): LibraryItem[] {
   for (const it of items) (it.kind === "video" ? withArt : without).push(it);
   return [...withArt, ...without];
 }
+
+/**
+ * The optional columns of the Library's list view, in their default order.
+ *
+ * "Optional" is the operative word: the thumbnail well and the Name column
+ * are fixed grid tracks that cannot be hidden or moved, which is also true of
+ * Finder's Name column. Everything here can be resized, reordered by dragging
+ * its header, and switched off from the header's right-click menu.
+ *
+ * Declared here rather than in a component because four things have to agree
+ * on it - the persisted order, the grid template, the header cells and the
+ * row cells - and the moment any of them keeps its own literal they drift.
+ */
+export type LibColKey = "kind" | "size" | "date";
+export const DEFAULT_LIB_COLUMNS: readonly LibColKey[] = ["kind", "size", "date"];

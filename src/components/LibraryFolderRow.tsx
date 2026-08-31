@@ -1,8 +1,12 @@
 import { countLibraryItems } from "../lib/library";
 import { IconFolder } from "./Icons";
 import type { LibraryFolder } from "../types";
+import { DEFAULT_LIB_COLUMNS } from "../lib/library";
+import type { LibColKey } from "../lib/library";
 
 type Props = {
+  /** See LibraryListRow: the header's current column order. */
+  columns?: readonly LibColKey[];
   folder: LibraryFolder;
   onOpen: () => void;
   /** Highlighted because a drag is hovering it. */
@@ -30,7 +34,7 @@ type Props = {
  * worth printing and no poster, so the Size column carries its item count and
  * Modified stays empty rather than inventing a date.
  */
-export function LibraryFolderRow({ folder, onOpen, dropActive }: Props) {
+export function LibraryFolderRow({ folder, onOpen, dropActive, columns }: Props) {
   const count = countLibraryItems(folder);
   return (
     <button
@@ -48,9 +52,15 @@ export function LibraryFolderRow({ folder, onOpen, dropActive }: Props) {
     >
       <span className="cp-lib-lrow-art"><IconFolder size={13} /></span>
       <span className="cp-lib-lrow-name">{folder.name}</span>
-      <span className="cp-lib-lrow-kind cp-lib-lrow-kindword">folder</span>
-      <span className="cp-lib-lrow-size">{count === 1 ? "1 item" : `${count} items`}</span>
-      <span className="cp-lib-lrow-date" />
+      {/* Same order the header is showing, hidden ones absent. A folder row
+          and a file row share one grid, so they have to agree. */}
+      {(columns ?? DEFAULT_LIB_COLUMNS).map((k) => (
+        k === "kind"
+          ? <span key={k} className="cp-lib-lrow-kind cp-lib-lrow-kindword">folder</span>
+          : k === "size"
+            ? <span key={k} className="cp-lib-lrow-size">{count === 1 ? "1 item" : `${count} items`}</span>
+            : <span key={k} className="cp-lib-lrow-date" />
+      ))}
     </button>
   );
 }

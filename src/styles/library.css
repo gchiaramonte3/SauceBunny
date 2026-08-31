@@ -1220,12 +1220,12 @@
   /* Driven by variables so the header and every row share ONE definition:
      a resize that moved only one of them would misalign the whole table, and
      the header is a separate element from the rows. */
-  grid-template-columns:
-    34px
-    minmax(0, 1fr)
-    var(--col-kind, 64px)
-    var(--col-size, 84px)
-    var(--col-date, 96px);
+  /* Read from the container, which computes it from the column model: one
+     track list for the header and every row. It was five literal tracks with
+     three --col-* variables poked into the middle, which could express a
+     width but never a hidden or reordered column. The fallback is the old
+     default, for anything that renders a row outside a .cp-lib-list. */
+  grid-template-columns: var(--lrow-cols, 34px minmax(0, 1fr) 64px 84px 96px);
   align-items: center;
   gap: var(--s-3);
 }
@@ -2410,4 +2410,72 @@
 .cp-lib-bcrumbs button.dropping {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+
+/* ── List column headers ───────────────────────────────────────────────────
+   A header cell is three controls in one: click to sort, drag the right edge
+   to resize, drag the cell itself to reorder. The cursor says which. */
+.cp-lib-colhead {
+  position: relative;
+  cursor: pointer;
+  user-select: none;
+}
+/* The cell being carried. Kept legible rather than ghosted: you are aiming
+   it, and a 40%-opacity label is hard to aim. */
+.cp-lib-colhead.is-moving { opacity: 0.55; }
+/* Where it would land. A leading edge, the way Finder shows an insertion
+   point, rather than a fill - a filled cell reads as selected. */
+.cp-lib-colhead.is-drop::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: var(--r-2xs);
+  background: var(--fg-1);
+}
+
+/* ── Column show/hide menu ─────────────────────────────────────────────── */
+.cp-colmenu {
+  position: fixed;
+  z-index: var(--z-menu);
+  min-width: 168px;
+  padding: var(--s-1);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.5);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+}
+.cp-colmenu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-height: 26px;
+  padding: 3px var(--s-2);
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--fg-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cp-colmenu-item:hover:not(:disabled) { background: var(--bg-4); color: var(--fg-1); }
+.cp-colmenu-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+/* The last visible column: shown as unavailable rather than hidden, so the
+   reason it will not turn off is visible instead of mysterious. */
+.cp-colmenu-item:disabled { opacity: 0.45; cursor: not-allowed; }
+/* A fixed well, so the labels line up whether or not a row is checked. */
+.cp-colmenu-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--fg-1);
 }

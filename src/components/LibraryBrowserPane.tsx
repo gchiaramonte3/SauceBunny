@@ -10,6 +10,9 @@ import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { useRovingGrid } from "../hooks/use-roving-grid";
 import { useMarquee } from "../hooks/use-marquee";
 import type { LibraryFolder, LibraryItem } from "../types";
+import { ListColumnHeaders } from "./ListColumnHeaders";
+import type { ColSpec } from "./ListColumnHeaders";
+import type { LibColKey } from "../lib/library";
 
 type Props = {
   items: LibraryItem[];
@@ -90,6 +93,15 @@ const EMPTY_FOLDERS: LibraryFolder[] = [];
 const COLS_KEY = "saucebunny.libraryListCols";
 const COL_DEFAULT = { kind: 64, size: 84, date: 96 };
 
+/** The three optional columns, and what each one is called and sorts by.
+ *  "Kind" has no sort key of its own - the browse bar filters by kind
+ *  instead - so it stays a plain label rather than pretending to sort. */
+const LIB_COL_SPECS: readonly ColSpec<LibColKey>[] = [
+  { key: "kind", label: "Kind", className: "cp-lib-lrow-kind" },
+  { key: "size", label: "Size", className: "cp-lib-lrow-size", sort: "size" },
+  { key: "date", label: "Modified", className: "cp-lib-lrow-date", sort: "date" },
+];
+
 export function LibraryBrowserPane({
   folders = EMPTY_FOLDERS, onOpenFolder,
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
@@ -131,7 +143,8 @@ export function LibraryBrowserPane({
   // Column widths, persisted. Applied on the list CONTAINER so the header and
   // every row inherit the same variables — resizing one element and not the
   // other is how a table goes crooked.
-  const { cols, dragCol, startColDrag, nudgeCol, bounds } = useListColumns(COLS_KEY, COL_DEFAULT);
+  const colModel = useListColumns(COLS_KEY, COL_DEFAULT);
+  const { visible, template } = colModel;
 
   const marquee = useMarquee({
     containerRef: paneRef,
@@ -263,11 +276,12 @@ export function LibraryBrowserPane({
         className="cp-lib-list"
         role="list"
         aria-label="Files"
-        style={{
-          ["--col-kind" as string]: `${cols.kind}px`,
-          ["--col-size" as string]: `${cols.size}px`,
-          ["--col-date" as string]: `${cols.date}px`,
-        }}
+        /* ONE track list, on the container, read by the header and by every
+           row. It was three separate --col-* variables against a hardcoded
+           five-track template, which cannot express a hidden or reordered
+           column: the width would still be reserved and the cells would still
+           come out in source order. */
+        style={{ ["--lrow-cols" as string]: template }}
       >
         {/* Column headers that SORT.
             These were decorative aria-hidden spans that looked exactly like
@@ -276,28 +290,14 @@ export function LibraryBrowserPane({
             pref the bar's picker does, so the two stay in step. "Kind" has no
             sort key of its own (the bar filters by kind instead), so it stays
             a plain label rather than pretending. */}
-        <div className="cp-lib-list-head">
+        <div className="cp-lib-list-head" onContextMenu={(e) => e.preventDefault()}>
           <span className="cp-lib-lrow-art" aria-hidden="true" />
-          <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort}>
-            {/* Each divider sits on the header cell to its RIGHT and widens the
-                column it borders. stopPropagation on the press is what keeps a
-                resize from also firing that column's sort. */}
-            <ColDivider onDown={startColDrag("kind")} active={dragCol === "kind"}
-              label="Kind" value={cols.kind} min={bounds.min} max={bounds.max}
-              onNudge={(d) => nudgeCol("kind", d)} />
-          </SortHeader>
-          <span className="cp-lib-lrow-kind">
-            Kind
-            <ColDivider onDown={startColDrag("size")} active={dragCol === "size"}
-              label="Size" value={cols.size} min={bounds.min} max={bounds.max}
-              onNudge={(d) => nudgeCol("size", d)} />
-          </span>
-          <SortHeader className="cp-lib-lrow-size" label="Size" col="size" sort={sort} dir={dir} onSort={onSort}>
-            <ColDivider onDown={startColDrag("date")} active={dragCol === "date"}
-              label="Date" value={cols.date} min={bounds.min} max={bounds.max}
-              onNudge={(d) => nudgeCol("date", d)} />
-          </SortHeader>
-          <SortHeader className="cp-lib-lrow-date" label="Modified" col="date" sort={sort} dir={dir} onSort={onSort} />
+          <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort} />
+          {/* Every other column: sortable, resizable, draggable to reorder,
+              and hideable from a right-click menu. Name stays outside because
+              it is the 1fr track and, as in Finder, cannot be moved or turned
+              off. */}
+          <ListColumnHeaders specs={LIB_COL_SPECS} model={colModel} sort={sort} dir={dir} onSort={onSort} />
         </div>
         {/* Containers first, exactly as the grid does it - and as `names`
             above assumes. Rendering only files here both hid a folder of
@@ -306,6 +306,7 @@ export function LibraryBrowserPane({
         {folders.map((f) => (
           <LibraryFolderRow
             key={f.path}
+            columns={visible}
             folder={f}
             dropActive={cardDrag?.drag?.over === f.path}
             onOpen={() => onOpenFolder?.(f)}
@@ -314,6 +315,7 @@ export function LibraryBrowserPane({
         {items.map((it) => (
           <LibraryListRow
             key={`${it.path}#${posterVersions[it.path] ?? 0}`}
+            columns={visible}
             item={it}
             selected={selectedPaths ? selectedPaths.has(it.path) : selectedPath === it.path}
             tags={tagsByPath?.get(it.path)}
@@ -412,7 +414,7 @@ export function ColDivider({ onDown, active, label, value, min, max, onNudge }: 
   );
 }
 
-export function SortHeader({ className, label, col, sort, dir, onSort, children }: {
+export function SortHeader({ className, label, col, sort, dir, onSort, children, cellProps }: {
   className: string;
   label: string;
   col: LibrarySortKey;
@@ -421,12 +423,17 @@ export function SortHeader({ className, label, col, sort, dir, onSort, children 
   onSort: (key: LibrarySortKey) => void;
   /** The resize divider on this cell's right edge, if it has one. */
   children?: React.ReactNode;
+  /** Drag-to-reorder handlers and the context menu, when this header is one
+   *  of the movable columns. Spread FIRST so the sort click below cannot be
+   *  overwritten by a caller. */
+  cellProps?: React.HTMLAttributes<HTMLButtonElement> & { draggable?: boolean };
 }) {
   const active = sort === col;
   return (
     <button
+      {...cellProps}
       type="button"
-      className={`${className} cp-lib-sorthead` + (active ? " active" : "")}
+      className={`${className} cp-lib-sorthead` + (active ? " active" : "") + (cellProps?.className ? ` ${cellProps.className}` : "")}
       // Screen readers get the state as a real sort contract, not an arrow
       // glyph they cannot see.
       aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}

@@ -3,7 +3,9 @@ import { formatBytes } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { formatFrameTimecode, type FrameItem } from "../lib/frames";
 import { assetUrl } from "../lib/asset-url";
-import { ColDivider, SortHeader } from "./LibraryBrowserPane";
+import { SortHeader } from "./LibraryBrowserPane";
+import { ListColumnHeaders } from "./ListColumnHeaders";
+import type { ColSpec } from "./ListColumnHeaders";
 import { IconCircleX } from "./Icons";
 
 /**
@@ -21,6 +23,15 @@ import { IconCircleX } from "./Icons";
 
 const COLS_KEY = "saucebunny.frameListCols";
 const COL_DEFAULT = { source: 120, size: 84, date: 96 };
+
+/** Source has no sort key of its own: the shelves already group by it, so a
+ *  Source sort would duplicate the grouping. */
+type FrameColKey = "source" | "size" | "date";
+const FRAME_COL_SPECS: readonly ColSpec<FrameColKey>[] = [
+  { key: "source", label: "Source", className: "cp-lib-lrow-kind" },
+  { key: "size", label: "Size", className: "cp-lib-lrow-size", sort: "size" },
+  { key: "date", label: "Grabbed", className: "cp-lib-lrow-date", sort: "date" },
+];
 
 function grabbedLabel(unixSeconds: number): string {
   if (!(unixSeconds > 0)) return "";
@@ -47,40 +58,21 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
   selected?: ReadonlySet<string>;
   onSelect?: (path: string, e: React.MouseEvent) => void;
 }) {
-  const { cols, dragCol, startColDrag, nudgeCol, bounds } = useListColumns(COLS_KEY, COL_DEFAULT);
+  const colModel = useListColumns(COLS_KEY, COL_DEFAULT);
+  const { visible, template } = colModel;
 
   return (
     <div
       className="cp-lib-list"
       role="list"
       aria-label="Grabbed frames"
-      style={{
-        ["--col-kind" as string]: `${cols.source}px`,
-        ["--col-size" as string]: `${cols.size}px`,
-        ["--col-date" as string]: `${cols.date}px`,
-      }}
+      /* One track list from the column model; see WebListRows. */
+      style={{ ["--lrow-cols" as string]: template }}
     >
-      <div className="cp-lib-list-head">
+      <div className="cp-lib-list-head" onContextMenu={(e) => e.preventDefault()}>
         <span className="cp-lib-lrow-art" aria-hidden="true" />
-        <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort}>
-          <ColDivider onDown={startColDrag("source")} active={dragCol === "source"}
-              label="Source" value={cols.source} min={bounds.min} max={bounds.max}
-              onNudge={(d) => nudgeCol("source", d)} />
-        </SortHeader>
-        {/* Source has no sort key of its own - the shelves already group by
-            it, so a Source sort would duplicate the grouping. */}
-        <span className="cp-lib-lrow-kind">
-          Source
-          <ColDivider onDown={startColDrag("size")} active={dragCol === "size"}
-              label="Size" value={cols.size} min={bounds.min} max={bounds.max}
-              onNudge={(d) => nudgeCol("size", d)} />
-        </span>
-        <SortHeader className="cp-lib-lrow-size" label="Size" col="size" sort={sort} dir={dir} onSort={onSort}>
-          <ColDivider onDown={startColDrag("date")} active={dragCol === "date"}
-              label="Date" value={cols.date} min={bounds.min} max={bounds.max}
-              onNudge={(d) => nudgeCol("date", d)} />
-        </SortHeader>
-        <SortHeader className="cp-lib-lrow-date" label="Grabbed" col="date" sort={sort} dir={dir} onSort={onSort} />
+        <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort} />
+        <ListColumnHeaders specs={FRAME_COL_SPECS} model={colModel} sort={sort} dir={dir} onSort={onSort} />
       </div>
       {items.map((it) => {
         const tc = formatFrameTimecode(it.timecode);
@@ -108,9 +100,14 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
               </span>
               {/* The clamp hides the tail of a long source title, so the
                   whole thing lives on the hover. */}
-              <span className="cp-lib-lrow-kind" title={it.source}>{it.source}</span>
-              <span className="cp-lib-lrow-size">{formatBytes(it.size_bytes)}</span>
-              <span className="cp-lib-lrow-date">{grabbedLabel(it.created_at)}</span>
+              {/* In the header's order, hidden ones absent. */}
+              {visible.map((k) => (
+                k === "source"
+                  ? <span key={k} className="cp-lib-lrow-kind" title={it.source}>{it.source}</span>
+                  : k === "size"
+                    ? <span key={k} className="cp-lib-lrow-size">{formatBytes(it.size_bytes)}</span>
+                    : <span key={k} className="cp-lib-lrow-date">{grabbedLabel(it.created_at)}</span>
+              ))}
             </button>
             {/* A list ROW has no ⋯ menu, so the verb is inline here - but
                 it asks before it deletes, the same confirm the grid's menu
