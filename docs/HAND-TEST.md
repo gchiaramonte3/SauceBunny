@@ -423,30 +423,97 @@ relaunch, and look again: downloads/audio/meta should be gone. **Received
 files must NOT be** - that is a peer's transfer and the only copy. Clearing
 those is still possible, deliberately, via their own Clear button.
 
+### Build 2026083101 additions
+
+The marquee item is **review links**, and most of it needs a second machine.
+What one machine can settle is listed first.
+
+**1. A join code survives a relaunch.** The highest-value check here, because
+it never worked before and the failure was invisible. Start a session, copy the
+join code, quit the app entirely, relaunch, start a session again. **The code
+must be the same string.** Before this the host minted a fresh identity on
+every launch, so a code shared yesterday was undialable today and nothing said
+so. Expect a **Keychain prompt** on the first run of a new build: the ACL names
+the binary that created the item, so a rebuild asks again. Allow it. Dismissing
+it is also a valid test: the app must still start a session, just without a
+durable code.
+
+**2. A link opens the app from cold.** Issue a link, quit the app completely,
+then click the link. The app should launch AND land on the review, not launch
+to an empty window. The running-app case is the easy half; the cold launch is
+the one that needed a buffer, because the URL arrives before any webview
+exists.
+
+**3. Remove from Library is not Move to Trash.** Right-click an item ▸ Remove
+from Library. It leaves the app; **the file must still be on disk in Finder.**
+Check it in list view AND grid view, and in a sub-library, since the whole
+complaint was that it worked in one place only.
+
+**4. The library tree's chevrons.** Expand and collapse folders. This did
+nothing at all before, so treat it as new rather than as a regression check.
+Then quit and relaunch: the expanded set should come back the way you left it.
+While you are there, confirm the same rows still select, still highlight, still
+take a drop, and still open their right-click menu.
+
+**5. Folder colours.** A folder given a colour in Finder should wear it in the
+app, and the app's own right-click ▸ colour should stick, in the tree, the list
+and the grid.
+
+**6. Columns behave like Finder's.** Drag a column edge to resize, drag a
+header to reorder, right-click the header to hide and show columns. Quit and
+relaunch: the layout should be as you left it.
+
+**Needs two machines:**
+
+**7. The name on a note is the one the HOST typed.** Issue a link labelled
+"Dana", have the guest join through it and set their own display name to
+something else. Every note they post must be signed **Dana**. This is the point
+of grants: a forwarded link cannot sign someone else's comments.
+
+**8. Withdrawing a link disconnects them now, not later.** With the guest
+connected and reading, revoke their link on the host. **They should drop
+immediately.** Marking alone used to mean revocation took effect at their next
+visit, so the person you had just removed kept reading. Any OTHER outstanding
+link must keep working.
+
+**9. Invite only.** Turn it on. A peer with the lobby join code but no link is
+turned away. Turn it off: they get in again. Off is the default, deliberately.
+
+**10. A note written while the link is down is kept.** With a session running,
+put the guest's machine offline (turn off Wi-Fi is enough), post a note. It
+must show as **waiting**, not vanish and not claim it sent. Bring the network
+back: it should arrive on the host. Watch for the bad case, which is the note
+disappearing from the guest's screen without ever reaching the host.
+
+---
+
+
 ---
 
 ## Two claims that only two machines can settle
 
-Both came out of the Phase 4 session analysis. Neither is a patch yet, because
-both are conclusions from reading rather than from running, and one of them
-would be serious enough that guessing at a fix is worse than measuring first.
+The first was settled by finding it in the code and fixing it, so it is now a
+regression check rather than an open question. The second is still true.
 
 **1. Does a guest's note about a LOCAL FILE come back when they open it alone?**
+*(Found, and fixed in build 2026083101. Verify it stays fixed.)*
 
 This is the founding invariant of the whole session design, in its acid-test
 form: *opening a source solo, with no screening file present, must still show
-every note made about it in a session.* The concern is that during a session a
-guest's notes may be filed under the wire FINGERPRINT, while a later solo open
-of the same file resolves to a local PATH key - in which case the notes are on
-disk, under a key nothing looks for.
+every note made about it in a session.* The concern was that during a session a
+guest's notes were filed under the wire FINGERPRINT, while a later solo open of
+the same file resolved to a local PATH key, leaving the notes on disk under a
+key nothing looked for.
 
-To settle it: two machines, host shares a LOCAL file (not a web URL), guest
+That is exactly what was happening. A guest now records which review key a file
+arrived as (`rememberReceivedAs` / `receivedReviewKey` in `src/lib/review.ts`),
+so the solo open resolves to the same document.
+
+To verify: two machines, host shares a LOCAL file (not a web URL), guest
 receives it and posts a comment. End the session. On the GUEST, open that same
 file on its own and look at the review panel. The comment must be there. If it
 is not, look in `~/Documents/Sauce Bunny/Reviews/` on the guest for a file
 whose name is a fingerprint rather than a path slug - that is the symptom.
-
-Do this before building anything else on the session record.
 
 **2. The source-level verdict cannot be set by anyone.**
 
