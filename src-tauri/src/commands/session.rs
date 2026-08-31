@@ -490,6 +490,15 @@ struct PeerConn {
     /// Session-scoped member id ("m1", "m2", ...) - the roster/signaling key.
     member: String,
     name: String,
+    /// The grant this connection arrived on, when it came through a review
+    /// link. Withdrawing that link disconnects them; without this, revocation
+    /// only took effect at the NEXT join, so the person you just removed kept
+    /// reading and commenting until they happened to leave.
+    grant: Option<String>,
+    /// Kept so a kick can actually close the connection. Resetting the send
+    /// stream alone stops us writing to them and leaves their read loop
+    /// running, which is not a removal.
+    conn: Connection,
     /// How many times this member id has been claimed. Rides the roster so
     /// the mesh can distinguish a reconnect from an unchanged member.
     epoch: u32,
@@ -945,7 +954,6 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
         crate::commands::review_grant::Admission::Granted { id, label } => (clean_name(&label), Some(id)),
         crate::commands::review_grant::Admission::Ungranted => (clean_name(&raw_name), None),
     };
-    let _ = &grant_id;
     // Untrusted install ids only enter the persistent install→member map when
     // they are token-shaped and bounded; anything else is treated as absent
     // (mint-only, no insert), so rejected or hostile connects can't grow the
@@ -1016,7 +1024,11 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
             conn.close(1u32.into(), b"session is full");
             return;
         }
-        peers.push(PeerConn { id, member: member.clone(), name, epoch: member_epoch, send });
+        peers.push(PeerConn {
+            id, member: member.clone(), name, epoch: member_epoch, send,
+            grant: grant_id.clone(),
+            conn: conn.clone(),
+        });
     }
     broadcast_peer_list(&shared).await;
     emit_state_now(&app).await;
@@ -1159,6 +1171,77 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
     }
     broadcast_peer_list(&shared).await;
     emit_state_now(&app).await;
+}
+
+/// Close every connection matching `pred`, and tell the room who is left.
+///
+/// Closing the CONNECTION, not just the send stream. Resetting the stream
+/// stops us writing to them and leaves their read loop running, which is a
+/// half-removal: they stop receiving updates and keep believing they are in
+/// the session.
+///
+/// Returns how many went, so a caller can say "removed 1" rather than
+/// guessing.
+async fn disconnect_peers(
+    app: &AppHandle,
+    shared: &Arc<HostShared>,
+    reason: &[u8],
+    pred: impl Fn(&PeerConn) -> bool,
+) -> usize {
+    let doomed: Vec<Connection> = {
+        let mut peers = shared.peers.lock().await;
+        let (go, stay): (Vec<_>, Vec<_>) = std::mem::take(&mut *peers).into_iter().partition(&pred);
+        *peers = stay;
+        go.into_iter().map(|p| p.conn).collect()
+    };
+    if doomed.is_empty() {
+        return 0;
+    }
+    let n = doomed.len();
+    for c in doomed {
+        c.close(1u32.into(), reason);
+    }
+    broadcast_peer_list(shared).await;
+    emit_state_now(app).await;
+    n
+}
+
+/// Remove one person from the session.
+///
+/// There was no way to do this at all. A forwarded join code was three slots
+/// of MAX_PEERS the host could only clear by destroying every outstanding
+/// code, and a withdrawn review link left its holder connected until they
+/// chose to leave.
+#[tauri::command]
+pub async fn session_kick(
+    app: AppHandle,
+    state: State<'_, SessionManager>,
+    member: String,
+) -> Result<usize, crate::AppError> {
+    let shared = {
+        let inner = state.inner.lock().await;
+        let Session::Host { shared, .. } = &inner.session else {
+            return Err(crate::AppError::invalid("Only the host can remove someone."));
+        };
+        shared.clone()
+    };
+    Ok(disconnect_peers(&app, &shared, b"removed by the host", |p| p.member == member).await)
+}
+
+/// Disconnect anyone holding a particular grant. Called when it is withdrawn.
+///
+/// Silent when there is no session: revoking a link while nothing is running
+/// is a perfectly ordinary thing to do and is not an error.
+pub async fn disconnect_grant(app: &AppHandle, state: &SessionManager, grant_id: &str) -> usize {
+    let shared = {
+        let inner = state.inner.lock().await;
+        let Session::Host { shared, .. } = &inner.session else { return 0 };
+        shared.clone()
+    };
+    disconnect_peers(app, &shared, b"that link was withdrawn", |p| {
+        p.grant.as_deref() == Some(grant_id)
+    })
+    .await
 }
 
 // ============================================================

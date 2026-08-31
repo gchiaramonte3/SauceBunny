@@ -215,6 +215,7 @@ pub fn run() {
             commands::has_review_identity,
             commands::reset_review_identity,
             commands::take_pending_review_link,
+            commands::session_kick,
             commands::create_review_grant,
             commands::list_review_grants,
             commands::revoke_review_grant,

@@ -80,4 +80,26 @@ describe("review grants", () => {
     expect(GRANT).toContain("blake3::hash");
     expect(GRANT, "a password KDF crept in").not.toMatch(/argon2|bcrypt|scrypt|pbkdf2/i);
   });
+
+  it("withdrawing a link disconnects whoever holds it, now", () => {
+    // Marking alone made revocation take effect at the NEXT join: the person
+    // you had just removed kept reading and commenting until they happened to
+    // leave. And it is ONE command rather than two the caller must remember -
+    // a rule like that is followed once and then forgotten.
+    expect(GRANT, "revoke does not disconnect").toContain("disconnect_grant");
+    expect(SESSION, "there is no way to close a connection").toContain("fn disconnect_peers");
+    expect(SESSION, "the grant disconnect does not match on the grant").toMatch(
+      /p\.grant\.as_deref\(\) == Some\(grant_id\)/,
+    );
+  });
+
+  it("a kick closes the connection, not just the stream", () => {
+    // Resetting the send stream stops the host writing to them and leaves
+    // their read loop running: they stop receiving updates and keep believing
+    // they are in the session. That is a half-removal.
+    const fn = SESSION.slice(SESSION.indexOf("async fn disconnect_peers"), SESSION.indexOf("async fn disconnect_peers") + 900);
+    expect(fn, "disconnect_peers is gone").toBeTruthy();
+    expect(fn, "it closes a stream rather than the connection").toContain("c.close(");
+    expect(fn, "the roster is not told who is left").toContain("broadcast_peer_list");
+  });
 });

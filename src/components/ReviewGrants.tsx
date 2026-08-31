@@ -63,10 +63,16 @@ export function ReviewGrants({ code }: {
     } catch (e) { setError(formatError(e)); }
   };
 
-  const revoke = async (id: string) => {
+  const [removed, setRemoved] = useState<string | null>(null);
+  const revoke = async (id: string, label: string) => {
     setError(null);
     try {
-      await invoke("revoke_review_grant", { id });
+      // Returns how many live connections it closed, so the confirmation can
+      // say what actually happened rather than "done".
+      const closed = await invoke<number>("revoke_review_grant", { id });
+      setRemoved(closed > 0
+        ? `${label} was disconnected and the link no longer works.`
+        : `${label}'s link no longer works.`);
       await refresh();
     } catch (e) { setError(formatError(e)); }
   };
@@ -126,6 +132,7 @@ export function ReviewGrants({ code }: {
       )}
 
       {error && <p className="cp-grants-error" role="alert">{error}</p>}
+      {removed && <p className="cp-grants-made-line" role="status">{removed}</p>}
 
       {grants && grants.length > 0 && (
         <ul className="cp-grants-list">
@@ -139,7 +146,7 @@ export function ReviewGrants({ code }: {
                   className="cp-grants-revoke"
                   aria-label={`Withdraw the link for ${g.label}`}
                   title={`Withdraw the link for ${g.label}`}
-                  onClick={() => void revoke(g.id)}
+                  onClick={() => void revoke(g.id, g.label)}
                 >
                   <IconCircleX size={13} />
                 </button>

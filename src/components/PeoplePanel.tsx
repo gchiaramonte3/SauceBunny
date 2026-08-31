@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useReactionFlashes } from "../lib/reaction-store";
-import { IconCrown, IconMic, IconMicOff, IconVideo, IconVideoOff, IconChevronRight } from "./Icons";
+import { IconCrown, IconMic, IconMicOff, IconVideo, IconVideoOff, IconChevronRight, IconCircleX } from "./Icons";
 import { initialsOf } from "../lib/review";
 import { subscribeSessionCapture, getSessionCapture } from "../hooks/use-media-capture";
 import type { MeshPeerState } from "../lib/rtc-mesh";
@@ -35,7 +35,7 @@ function rosterAnnouncement(joined: readonly string[], left: readonly string[]):
   return [phrase(joined, "joined"), phrase(left, "left")].filter(Boolean).join(". ");
 }
 
-export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream, raisedHands, strip = false, presenter = "m0", canGrantPresenter = false, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic, mutedForMe, onToggleMuteForMe }: {
+export function PeoplePanel({ active, participants, remoteStreams, peerStates, sharingMembers, shareStream, raisedHands, strip = false, presenter = "m0", canGrantPresenter = false, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic, mutedForMe, onToggleMuteForMe, onRemovePerson }: {
   active: boolean;
   participants: Participant[];
   /** Member id currently driving source + transport. */
@@ -51,6 +51,10 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
   /** Peers YOU muted locally ("Mute for me") - never signalled to them. */
   mutedForMe?: ReadonlySet<string>;
   onToggleMuteForMe?: (memberId: string, muted: boolean) => void;
+  /** Remove someone from the session. Host only, and absent for everyone
+   *  else, so the control does not exist rather than existing and refusing.
+   *  Unlike the two beside it, this is NOT local-only: it disconnects them. */
+  onRemovePerson?: (memberId: string, name: string) => void;
   remoteStreams: ReadonlyMap<string, MediaStream>;
   peerStates: ReadonlyMap<string, MeshPeerState>;
   /** Members flagged as screen-sharing (their tile badges "Sharing screen"). */
@@ -141,6 +145,7 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
             onToggleMic={onToggleMic}
             mutedForMe={mutedForMe?.has(p.id) ?? false}
             onToggleMuteForMe={onToggleMuteForMe}
+            onRemovePerson={onRemovePerson}
           />
         ))}
       </div>
@@ -151,7 +156,7 @@ export function PeoplePanel({ active, participants, remoteStreams, peerStates, s
 /** One member: camera tile when a video track flows, avatar card when not.
  *  Speaking glow rides an AnalyserNode threshold on the tile's own audio
  *  (reduced motion: no glow animation, static ring). */
-function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, canGrant, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic, mutedForMe, onToggleMuteForMe }: {
+function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, canGrant, onMakePresenter, selfCamOff, selfMicMuted, onToggleCam, onToggleMic, mutedForMe, onToggleMuteForMe, onRemovePerson }: {
   p: Participant;
   stream: MediaStream | null;
   state: MeshPeerState;
@@ -171,6 +176,7 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
   /** YOU muted this peer locally (remote tiles only). */
   mutedForMe?: boolean;
   onToggleMuteForMe?: (memberId: string, muted: boolean) => void;
+  onRemovePerson?: (memberId: string, name: string) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // "Hide video" is pure presentation on THIS machine - the track keeps
@@ -302,6 +308,22 @@ function PersonTile({ p, stream, state, sharing, handUp, flash, isPresenter, can
           >
             {mutedForMe ? <IconMicOff size={13} /> : <IconMic size={13} />}
           </button>
+          {/* The one control here that reaches the OTHER machine. Its two
+              siblings above are deliberately local-only - hiding a video or
+              muting a voice for yourself is not a social act - and this is,
+              so it is host-only and says what it does rather than hiding
+              behind an icon that could be mistaken for them. */}
+          {onRemovePerson && (
+            <button
+              type="button"
+              className="cp-person-ctl remote danger"
+              title={`Remove ${p.name} from the session`}
+              aria-label={`Remove ${p.name} from the session`}
+              onClick={() => onRemovePerson(p.id, p.name)}
+            >
+              <IconCircleX size={13} />
+            </button>
+          )}
         </div>
       )}
       {sharing && <span className="cp-person-share">Sharing screen</span>}

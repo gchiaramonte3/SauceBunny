@@ -3740,6 +3740,16 @@ export default function App() {
      that onboarding modals SEQUENCE rather than stack, and this is exactly the
      kind of thing that stacks them. The code is held, not dropped, so it still
      arrives once the welcome is dismissed. */
+  /* Remove someone from the session. Host only - the prop is undefined for
+     everyone else, so the control does not exist rather than existing and
+     refusing. Confirmed because it reaches the other person's machine and
+     there is no undo: they are disconnected. */
+  const removePerson = useCallback((memberId: string, name: string) => {
+    if (!confirm(`Remove ${name} from this session?\n\nThey will be disconnected. If they have a review link they can rejoin with it, so withdraw the link too if you want them out for good.`)) return;
+    void invoke("session_kick", { member: memberId })
+      .catch((e) => pushNotification("error", "Couldn't remove them", formatError(e)));
+  }, [pushNotification]);
+
   useEffect(() => {
     if (!pendingJoinCode || showWelcome) return;
     setActiveView("coreview");
@@ -4455,6 +4465,7 @@ export default function App() {
                   sibling of <main> so entering the room never remounts the
                   player; renders nothing outside the room. */}
               <PeoplePanel
+                onRemovePerson={coSession.role === "host" ? removePerson : undefined}
                 active={roomActive && !theater}
                 participants={theaterParticipants}
                 remoteStreams={meshStreams}
@@ -5045,6 +5056,7 @@ export default function App() {
                       Partial-mark guidance stays (it completes the gesture). */}
                   {roomActive && theater && (
                     <PeoplePanel
+                      onRemovePerson={coSession.role === "host" ? removePerson : undefined}
                       active
                       strip
                       participants={theaterParticipants}

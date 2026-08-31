@@ -233,16 +233,27 @@ pub fn list_review_grants(app: AppHandle) -> Result<Vec<GrantSummary>, AppError>
 /// Withdraw one link. The others keep working, which is the whole point.
 ///
 /// Marks rather than deletes, so the list can say "withdrawn" instead of
-/// forgetting the person. Disconnecting anyone currently holding it is the
-/// caller's job: this owns the record, not the sockets.
+/// forgetting the person. Returns how many live connections it closed.
 #[tauri::command]
-pub fn revoke_review_grant(app: AppHandle, id: String) -> Result<(), AppError> {
-    let mut file = read(&app);
-    let Some(g) = file.grants.iter_mut().find(|g| g.id == id) else {
-        return Err(AppError::not_found("That link is already gone."));
-    };
-    g.revoked = true;
-    write(&app, &file)
+pub async fn revoke_review_grant(
+    app: AppHandle,
+    state: tauri::State<'_, crate::commands::SessionManager>,
+    id: String,
+) -> Result<usize, AppError> {
+    {
+        let mut file = read(&app);
+        let Some(g) = file.grants.iter_mut().find(|g| g.id == id) else {
+            return Err(AppError::not_found("That link is already gone."));
+        };
+        g.revoked = true;
+        write(&app, &file)?;
+    }
+    // AND disconnect anyone holding it, right now. Marking alone made
+    // revocation take effect at the NEXT join, so the person you had just
+    // removed kept reading and commenting until they happened to leave. Doing
+    // both in one command rather than two the caller must remember: a rule
+    // like that is followed once and then forgotten.
+    Ok(crate::commands::session::disconnect_grant(&app, &state, &id).await)
 }
 
 /// Whether a connection with no grant is turned away.
