@@ -25,7 +25,6 @@
 
 /** Browsers whose cookies we can read with no system permission. */
 export const NO_PERMISSION_BROWSERS = ["chrome", "brave", "firefox", "edge"] as const;
-export type CookieBrowser = (typeof NO_PERMISSION_BROWSERS)[number] | "safari" | "none";
 
 export function browserLabel(b: string): string {
   return b === "none" ? "your default browser" : b.charAt(0).toUpperCase() + b.slice(1);

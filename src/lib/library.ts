@@ -322,6 +322,31 @@ export function formatModifiedDate(ms: number, now = new Date()): string {
   });
 }
 
+/**
+ * The list view's date cell, from a UNIX time in SECONDS: "Today",
+ * "Yesterday", then "3 Aug" ("3 Aug 2024" outside this year). "" when the
+ * source would not say (0 or negative).
+ *
+ * Distinct from `formatModifiedDate` above, which takes MILLISECONDS and has
+ * no Today/Yesterday step - the grid cards want a stable date, the list rows
+ * want recency. Both spellings are wanted; what was not wanted is the third
+ * and fourth copies. FrameListRows and WebListRows each carried this function
+ * privately, byte for byte, under different names (`grabbedLabel` and
+ * `fetchedLabel`) - so the same column in two sibling panes was formatted by
+ * two functions that had to be edited in lockstep with nothing saying so.
+ */
+export function formatListDate(unixSeconds: number, now = new Date()): string {
+  if (!(unixSeconds > 0)) return "";
+  const d = new Date(unixSeconds * 1000);
+  const days = Math.floor((now.getTime() - d.getTime()) / 86_400_000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return d.toLocaleDateString(undefined, {
+    day: "numeric", month: "short",
+    year: d.getFullYear() === now.getFullYear() ? undefined : "numeric",
+  });
+}
+
 // ── localStorage wrappers (best-effort, via lib/storage) ────────────────
 
 export function loadLibraryRoots(): string[] {

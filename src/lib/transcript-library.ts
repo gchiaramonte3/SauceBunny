@@ -138,23 +138,14 @@ export async function loadTranscriptLibrary(libraryPath: string): Promise<Librar
   return mergeTranscriptLibrary(files, getHistory());
 }
 
-/** Group a transcript list by its folder label (the YYYY-MM month), newest
- *  group first, for the "auto-sort folder" view. Root-level ("") sorts last
- *  under a friendly label. */
-export function groupTranscriptsByFolder(
-  list: LibraryTranscript[],
-): { folder: string; label: string; items: LibraryTranscript[] }[] {
-  const groups = new Map<string, LibraryTranscript[]>();
-  for (const t of list) {
-    const arr = groups.get(t.folder);
-    if (arr) arr.push(t);
-    else groups.set(t.folder, [t]);
-  }
-  return [...groups.entries()]
-    .map(([folder, items]) => ({ folder, label: monthLabel(folder), items }))
-    // The lists are already newest-first; order groups by their newest item.
-    .sort((a, b) => (b.items[0]?.modifiedMs ?? 0) - (a.items[0]?.modifiedMs ?? 0));
-}
+// Grouping does NOT live here. `organizeTranscripts` in lib/transcript-organize
+// owns it, and the difference is not cosmetic: this module's grouper labelled
+// every folder with `monthLabel`, which turns anything that is not a YYYY-MM
+// month into "Other" - so a folder the user deliberately named with "Move to
+// folder…" lost its name in the list, and the root said "Other" rather than
+// "Loose transcripts". `folderLabel` was written to fix exactly that. The old
+// grouper had no caller left and was the tempting wrong one to reach for, so
+// it is gone; `monthLabel` below stays because `folderLabel` is built on it.
 
 /** "2026-07" → "July 2026"; anything else (incl. "") → "Other". */
 export function monthLabel(folder: string): string {

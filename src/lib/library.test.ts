@@ -7,6 +7,7 @@ import {
   findLibraryFolder,
   formatBytes,
   formatModifiedDate,
+  formatListDate,
   libraryPosterPaths,
   dedupeLibraryItems,
   sanitizeLibraryRoots,
@@ -235,6 +236,49 @@ describe("formatModifiedDate", () => {
     expect(thisYear).toContain("3");
     expect(thisYear).not.toContain("2026");
     expect(formatModifiedDate(Date.UTC(2024, 5, 3, 12), now)).toContain("2024");
+  });
+});
+
+/**
+ * This function is the merge of two byte-identical private copies that lived
+ * in FrameListRows (`grabbedLabel`) and WebListRows (`fetchedLabel`), neither
+ * of which had a single test. So these cases are new coverage, not moved
+ * coverage - and the seconds-vs-milliseconds split from `formatModifiedDate`
+ * above is the part worth pinning, since the two take different units and
+ * passing ms to this one silently reports every file as far in the future.
+ */
+describe("formatListDate", () => {
+  const now = new Date("2026-07-14T12:00:00Z");
+  const secs = (d: string) => Math.floor(new Date(d).getTime() / 1000);
+
+  it("is blank when the source would not say", () => {
+    expect(formatListDate(0, now)).toBe("");
+    expect(formatListDate(-1, now)).toBe("");
+  });
+
+  it("names the last two days rather than dating them", () => {
+    expect(formatListDate(secs("2026-07-14T09:00:00Z"), now)).toBe("Today");
+    expect(formatListDate(secs("2026-07-13T09:00:00Z"), now)).toBe("Yesterday");
+  });
+
+  it("dates anything older, with the year only outside this one", () => {
+    const thisYear = formatListDate(secs("2026-07-01T12:00:00Z"), now);
+    expect(thisYear).toContain("1");
+    expect(thisYear).not.toContain("2026");
+    expect(formatListDate(secs("2024-06-03T12:00:00Z"), now)).toContain("2024");
+  });
+
+  it("reads SECONDS, and a milliseconds caller fails SILENTLY as 'Today'", () => {
+    // Worth pinning because of HOW it goes wrong. Handing over ms puts the
+    // date ~55,000 years out, so `days` is hugely NEGATIVE, `days <= 0` is
+    // true, and every row reads "Today" - a plausible-looking answer rather
+    // than a visibly broken one. Nothing in the types catches it: both units
+    // are `number`. Both call sites pass a seconds field (`created_at`,
+    // `fetched_at`); a future one that passes `modified_ms` gets a list where
+    // everything was apparently touched today.
+    const ms = new Date("2026-07-01T12:00:00Z").getTime();
+    expect(formatListDate(ms / 1000, now)).toContain("1");
+    expect(formatListDate(ms, now)).toBe("Today");
   });
 });
 

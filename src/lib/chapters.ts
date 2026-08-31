@@ -78,36 +78,20 @@ export function saveChapters(sourceKey: string, chapters: Chapter[]): void {
 }
 
 // ── transcript windowing ─────────────────────────────────────────────────────
-
-/**
- * Fit timestamped transcript lines into a character budget by sampling EVENLY
- * across the whole duration — never by cutting the tail, so chapters late in a
- * long video are still discoverable. Under budget returns everything verbatim.
- *
- * The budget the caller passes mirrors the AI Summary chat's context math:
- * ~3.5 chars/token and ~65% of the server's context window reserved for the
- * transcript (see AiSummary's transcriptForModel) — that is the documented
- * limit for how much transcript a chapter run can see.
- */
-export function sampleTranscriptEvenly(
-  lines: string[], budgetChars: number,
-): { text: string; sampled: boolean } {
-  const full = lines.join("\n");
-  if (full.length <= budgetChars || lines.length <= 2) return { text: full, sampled: false };
-
-  const avg = Math.max(1, full.length / lines.length);
-  let keep = Math.min(lines.length, Math.max(2, Math.floor(budgetChars / avg)));
-  // Average line length can under-estimate the picked set; shrink until it fits.
-  for (;;) {
-    const step = (lines.length - 1) / (keep - 1);
-    const idx = new Set<number>();
-    for (let i = 0; i < keep; i++) idx.add(Math.round(i * step));
-    const picked = [...idx].sort((a, b) => a - b).map((i) => lines[i]);
-    const text = picked.join("\n");
-    if (text.length <= budgetChars || keep <= 2) return { text, sampled: true };
-    keep = Math.max(2, Math.floor(keep * 0.9));
-  }
-}
+//
+// There is NO windower here any more. Chapters used to carry their own
+// (`sampleTranscriptEvenly`), which is what `fitTranscript`'s docstring means
+// by "Chapters already worked this way"; the windowing then moved into
+// `lib/prompt-prefix.ts` so every local-model feature shares one prefix and
+// pays for the transcript once. AiChapters reaches it through
+// `buildSourcePrefix(lines, info.ctx)`.
+//
+// Keeping the old copy beside its replacement was the hazard: a second
+// windowing of one transcript is a second prompt that shares no prefix, and
+// the regression is invisible - the app just becomes slow again, which is
+// indistinguishable from "local models are slow". That is the failure
+// `prompt-prefix-contract.test.ts` exists to catch. Window through
+// prompt-prefix, never here.
 
 // ── prompt ───────────────────────────────────────────────────────────────────
 

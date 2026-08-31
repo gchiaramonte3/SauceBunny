@@ -1,5 +1,5 @@
 import { useListColumns } from "../hooks/use-list-columns";
-import { formatBytes } from "../lib/library";
+import { formatBytes, formatListDate } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { siteName, type CachedWebItem } from "../lib/web-source";
 import { secondsToClock } from "../lib/timecode";
@@ -34,21 +34,6 @@ const WEB_COL_SPECS: readonly ColSpec<WebColKey>[] = [
   { key: "size", label: "Size", className: "cp-lib-lrow-size", sort: "size" },
   { key: "date", label: "Fetched", className: "cp-lib-lrow-date", sort: "date" },
 ];
-
-/** "Yesterday", "3 Aug" - matches the folder list's date shape closely
- *  enough to sit in the same column without a new formatter. */
-function fetchedLabel(unixSeconds: number): string {
-  if (!(unixSeconds > 0)) return "";
-  const d = new Date(unixSeconds * 1000);
-  const now = new Date();
-  const days = Math.floor((now.getTime() - d.getTime()) / 86_400_000);
-  if (days <= 0) return "Today";
-  if (days === 1) return "Yesterday";
-  return d.toLocaleDateString(undefined, {
-    day: "numeric", month: "short",
-    year: d.getFullYear() === now.getFullYear() ? undefined : "numeric",
-  });
-}
 
 export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, selected, onSelect }: {
   items: readonly CachedWebItem[];
@@ -120,7 +105,7 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
                   ? <span key={k} className="cp-lib-lrow-kind">{siteName(it.url)}</span>
                   : k === "size"
                     ? <span key={k} className="cp-lib-lrow-size">{it.size_bytes ? formatBytes(it.size_bytes) : ""}</span>
-                    : <span key={k} className="cp-lib-lrow-date">{fetchedLabel(it.fetched_at)}</span>
+                    : <span key={k} className="cp-lib-lrow-date">{formatListDate(it.fetched_at)}</span>
               ))}
             </button>
             {/* A list ROW has no ⋯ menu, so the verb is inline - and the
