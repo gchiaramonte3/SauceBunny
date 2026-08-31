@@ -485,6 +485,55 @@ must show as **waiting**, not vanish and not claim it sent. Bring the network
 back: it should arrive on the host. Watch for the bad case, which is the note
 disappearing from the guest's screen without ever reaching the host.
 
+### Build 2026083102 additions
+
+Four defects in the library, all reported from use. Every one is visible on
+one machine in under a minute.
+
+**1. Finder colours on folders.** The decisive one, because it was reported as
+a regression twice and "fixed" twice without working. In the sidebar tree, a
+folder tagged in Finder must wear that colour on its folder glyph. On this
+machine `_Desktop` is Purple, `01_Novella` Blue, `02_Showtime Ventura Website`
+Red, `03_Chiaramonte Media` Yellow, `04_Personal` Green, `06_Dan's Research`
+Gray and `Organzie` Yellow, so the sidebar should read as a colour chart
+rather than a column of identical grey folders. Then tag a folder in Finder
+while the app is open and come back to the window: it re-reads on focus, so
+the colour should appear without a rescan.
+
+**What a regression looks like:** every folder plain. Note that this is also
+exactly what an untagged library looks like, which is why it survived twice.
+Confirm at least one folder really is tagged in Finder before concluding
+anything.
+
+**2. The column dividers are visible without hunting.** Switch the library to
+list view and look at the header WITHOUT moving the pointer. You should see a
+hairline between every pair of columns. Before this they were invisible until
+the pointer happened to cross a 10px strip, so the only way to learn a column
+could be resized was to find it by accident.
+
+**3. Dragging a column header does not ask you to import a file.** Press on
+the Size header and drag it left or right. What must NOT happen is the
+full-window "drop a video, audio or SRT file" card appearing. The column
+should lift, an insertion line should show where it will land, and the other
+columns should part around it. Release outside the window too: nothing should
+stay stuck mid-drag.
+
+**Also check the gesture did not eat the click:** a plain click on a header
+still sorts, because a drag only begins after 4px of movement.
+
+**4. Resizing a column no longer squashes the filename away.** Drag the right
+edge of Size or Modified outward, hard. The Name column shrinks, but it must
+STOP at a readable width rather than collapsing to nothing; past that point
+the list scrolls sideways and the header scrolls with its rows, staying in
+register. Before this the Name track had a floor of zero, so pulling a column
+on the right made the filenames on the left disappear.
+
+**Known gap, deliberately not fixed here:** Name cannot be resized directly.
+It is the flexible track and has no divider of its own, unlike Finder's.
+
+---
+
+
 ---
 
 
