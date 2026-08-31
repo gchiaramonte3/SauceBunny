@@ -31,11 +31,12 @@
     "lint": "eslint src e2e --max-warnings 0",
     "verify:packaged": "bash scripts/verify-packaged.sh",
     "verify": "bash scripts/verify-all.sh",
-    "build:dmg": "bash scripts/detach-stale-dmg.sh && bash scripts/set-version.sh && tauri build",
+    "build:dmg": "bash scripts/detach-stale-dmg.sh && bash scripts/set-version.sh && tauri build && bash scripts/archive-dmg.sh",
     "release:dmg": "bash scripts/release-dmg.sh",
     "check:licenses": "bash scripts/check-licenses.sh",
     "check:changelog": "bash scripts/check-changelog.sh",
-    "harness:firstframe": "node harness-firstframe/run.mjs"
+    "harness:firstframe": "node harness-firstframe/run.mjs",
+    "archive:dmg": "bash scripts/archive-dmg.sh"
   },
   "dependencies": {
     "@fontsource/nunito-sans": "^5.2.7",

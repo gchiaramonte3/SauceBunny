@@ -17,17 +17,22 @@
 #      tree does not help: the mount is at the device level.
 #
 # So: clean first, stamp deliberately, build, retry once if the bundler trips
-# over a mount, verify the artifact, print an absolute path.
+# over a mount, verify the artifact, keep a copy under its build number, and
+# print an absolute path.
+#
+#   4. The bundler writes to one filename per semver, and a test build does not
+#      move the semver, so each build silently replaced the last. Step 5 copies
+#      it out to an archive keyed by CFBundleVersion. See scripts/archive-dmg.sh.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 WANT_VERSION="${1:-}"
 
-echo "── 1/5  clearing stale staging volumes"
+echo "── 1/6  clearing stale staging volumes"
 bash scripts/detach-stale-dmg.sh
 
-echo "── 2/5  stamping version"
+echo "── 2/6  stamping version"
 if [ -n "$WANT_VERSION" ]; then
   bash scripts/set-version.sh "$WANT_VERSION"
 else
@@ -42,7 +47,7 @@ if [ -n "$WANT_VERSION" ]; then
   bash scripts/check-changelog.sh
 fi
 
-echo "── 3/5  building (this is the slow part)"
+echo "── 3/6  building (this is the slow part)"
 # Bundling is the only step that trips over a mount, and it happens last, so a
 # retry costs the bundler and not the whole compile.
 if ! npx tauri build; then
@@ -57,10 +62,20 @@ if [ ! -f "$DMG" ]; then
   exit 1
 fi
 
-echo "── 4/5  verifying the artifact"
+echo "── 4/6  verifying the artifact"
 npm run --silent verify:bundle
 
-echo "── 5/5  done"
+echo "── 5/6  keeping this build"
+# Not fatal, and not quiet either. The build succeeded and the DMG is on disk
+# whatever happens here, so failing the whole command would misreport that.
+# But an archive that silently stopped working is how you lose a build without
+# noticing, so it gets a line in the summary either way.
+ARCHIVED="yes"
+if ! bash scripts/archive-dmg.sh; then
+  ARCHIVED="FAILED - see above; this build is only in the build tree"
+fi
+
+echo "── 6/6  done"
 BUILD_NO="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' \
   "src-tauri/target/release/bundle/macos/Sauce Bunny.app/Contents/Info.plist" 2>/dev/null || echo '?')"
 # Leave the volumes clean for the NEXT build rather than for this one.
@@ -68,4 +83,5 @@ bash scripts/detach-stale-dmg.sh
 echo
 echo "  version  v${VERSION} (${BUILD_NO})"
 echo "  dmg      $(cd "$(dirname "$DMG")" && pwd)/$(basename "$DMG")"
+echo "  archived ${ARCHIVED}"
 echo
