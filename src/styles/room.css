@@ -325,7 +325,9 @@
   text-shadow: 0 1px 2px rgba(0,0,0,0.8);
 }
 .cp-person-crown { color: var(--gold); display: flex; flex-shrink: 0; }
-.cp-person-muted { color: var(--fg-2); display: flex; flex-shrink: 0; margin-left: auto; }
+/* The roster badge states exactly what .cp-person-ctl.off states, so it is
+   drawn in the same red rather than in body grey. */
+.cp-person-muted { color: var(--danger-text); display: flex; flex-shrink: 0; margin-left: auto; }
 
 /* Spine mode: 72px avatar column; tiles pop over on hover/focus. */
 .cp-people.spine { width: 72px; }
@@ -393,7 +395,9 @@
   transition: all var(--dur-fast) var(--ease-out);
 }
 .cp-room-bar-btn:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); }
-.cp-room-bar-btn.off { color: var(--warning); }
+/* Muted is not a warning. Same red as .cp-person-ctl.off, which says the same
+   thing about the same device. See that rule for the contrast numbers. */
+.cp-room-bar-btn.off { color: var(--danger-text); }
 .cp-room-bar-btn.active {
   background: var(--bg-5);
   border-color: var(--line-3);
@@ -981,9 +985,20 @@
 .cp-person-ctl.remote:hover { color: var(--fg-1); }
 .cp-person-ctl:hover { background: var(--bg-0); }
 .cp-person-ctl:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-/* Off is a state, not an error: muted red so it reads as "you turned this off". */
+/* Off is a state, not an error: red so it reads as "you turned this off", and
+   the SAME red everywhere the app says a device is off. It used to be three
+   colours on one tile: this control drew solid --danger, the badge 20px below
+   it in .cp-person-meta drew --fg-2 grey, and the same mute in the room bar
+   drew --warning amber. One fact, one colour.
+
+   The glyph is --danger-text, not the solid --danger, because it sits on a
+   translucent plate over live video. Measured over a bright frame the plate
+   composites to about #4F4F50, where solid --danger is 1.85:1 and fails 1.4.11
+   outright; --danger-text is 3.61:1 there and 8.05:1 on the dark bar. The
+   BORDER stays a --danger tint, which is decoration and carries no meaning on
+   its own. Guarded by src/lib/device-state-contract.test.ts. */
 .cp-person-ctl.off {
-  color: var(--danger);
+  color: var(--danger-text);
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
 }
 @media (prefers-reduced-motion: reduce) {

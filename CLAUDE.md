@@ -716,7 +716,7 @@ human can check.
 
 ## Enforced contracts
 
-Eighty-four rules in this file are checked by a test rather than remembered. If you
+Eighty-five rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -785,6 +785,7 @@ written after finding the rule already broken somewhere.
 | `token-usage-contract` | No stylesheet writes a literal hex that an existing token already holds (comments and `var(--x, #fallback)` excluded) |
 | `duplicated-tables-contract` (3rd block) | No component re-implements a helper `lib/` already exports |
 | `control-naming-contract` | A control's tooltip and accessible name never use different words for the same thing |
+| `device-state-contract` | "Your device is off" is one colour everywhere it says so (the self tile switch, the room bar, the roster badge), and it is the token that stays legible on a plate over live video |
 | `dismiss-parity-contract` | No NEW hand-rolled click-outside dismisser; use `useDismiss`, which brings Escape with it |
 | `diarizer-envelope-contract` | Swift and Rust name the same turn fields, and the SPEAKER_UNK sentinel agrees across Rust and the SRT parser |
 | `dictate-protocol-contract` | Swift emits every key Rust reads off a dictation line, and every line reporting `final` carries the text |

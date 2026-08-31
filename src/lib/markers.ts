@@ -80,8 +80,24 @@ function foldNote(rootBody: string, replies: ReviewComment[], multiline: boolean
   return [root, ...replyStrs.map((s) => `↳ ${s}`)].join("\n");
 }
 
-function buildMarkers(doc: ReviewDoc): ExportMarker[] {
-  return rootComments(doc, doc.activeVersionId, "time").map((c) => {
+/**
+ * What the NLE exporters put in the file.
+ *
+ * `includeResolved` defaults to TRUE, which is what every exporter did before
+ * this existed: a resolved note went into the marker file exactly like an open
+ * one. That is right for an archive of the whole review and wrong for the
+ * common case, which is handing an editor the list of things still to do -
+ * where the signed-off notes are the ones you do not want cluttering the
+ * timeline. So it is a choice at export time rather than a new default
+ * imposed on files people already rely on.
+ */
+export type MarkerExportOptions = { includeResolved?: boolean };
+
+function buildMarkers(doc: ReviewDoc, opts?: MarkerExportOptions): ExportMarker[] {
+  const includeResolved = opts?.includeResolved !== false;
+  return rootComments(doc, doc.activeVersionId, "time")
+    .filter((c) => includeResolved || !c.resolved)
+    .map((c) => {
     const replies = repliesOf(doc, c.id);
     const body = c.body + labelSuffix(c);
     return {
