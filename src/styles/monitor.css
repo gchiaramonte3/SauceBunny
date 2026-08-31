@@ -119,10 +119,46 @@
    says a chip that takes a click while looking exactly like the label next to
    it is how people stop trusting either - and the brightening it describes was
    silently not happening. Guarded by src/lib/css-var-contract.test.ts. */
-.cp-stream-rung {
+/* ── Monitor status stack ──────────────────────────────────────────────────
+   ONE container owns every floating status surface in the canvas's top-left
+   corner, and flow keeps them apart. Before this each surface positioned
+   itself and guessed where its neighbours were:
+
+     .cp-stream-keep   hardcoded `top: 40px` to clear .cp-stream-rung
+     .cp-shuttle-badge sat at top:14px/left:14px, directly over that rung
+     .cp-canvas-toast  measured the prep banner through a --prep-h custom
+                       property so it could lift itself clear
+
+   Two of the three were already wrong on screen. The toast overlapped the
+   prep banner in a live session because the measured height had not reached
+   it and the 62px fallback was short of the banner's wrapped 115px, and the
+   shuttle badge overlapped the rung outright whenever both were up. A box
+   that tracks another box is the bug; a column that cannot overlap is the
+   fix, and it costs one element.
+
+   The corner is chosen, not inherited. Bottom-centre belongs to captions
+   (.cp-caption-overlay is max-width 96%, so a long cue crosses the whole
+   frame), top-centre and top-right to the
+   annotation toolbar. Top-left is the only band nothing else claims, and it
+   is already where this app puts source status.
+
+   Guarded by src/lib/monitor-stack-contract.test.ts. */
+.cp-monitor-stack {
   position: absolute;
-  left: 10px;
   top: 10px;
+  left: 10px;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: calc(100% - 20px);
+  /* The stack is a lane, not a lid: clicks land on the video between chips. */
+  pointer-events: none;
+}
+.cp-monitor-stack > * { pointer-events: auto; }
+
+.cp-stream-rung {
   padding: 3px 8px;
   border-radius: var(--r-sm);
   font-size: var(--text-sm);
@@ -141,7 +177,8 @@
    as one stack rather than two unrelated overlays. `pointer-events` stays off
    with its sibling: neither is a control. */
 .cp-stream-keep {
-  top: 40px;
+  /* Was `top: 40px`, a guess at the rung's height. The stack spaces it. */
+  align-self: flex-start;
 }
 
 /* The actionable variant. Its sibling is deliberately inert, so this one has
@@ -214,9 +251,6 @@
    speed ("◀◀ 4×") while a shuttle is engaged. Indicative only: no pointer
    events, same stacking band as the timecode HUD. */
 .cp-shuttle-badge {
-  position: absolute;
-  top: 14px;
-  left: 14px;
   padding: 3px 10px;
   border-radius: var(--r-pill);
   background: rgba(0, 0, 0, 0.55);
@@ -379,9 +413,7 @@
    the monitor while ffmpeg normalises an imported file. The player itself
    stays interactive underneath. */
 .cp-prep-banner {
-  position: absolute;
-  left: 12px;
-  bottom: 12px;
+
   z-index: 4;
   display: flex;
   align-items: center;
@@ -836,10 +868,6 @@
 
 /* ── Floating canvas toast (replaces the full-screen success overlay) ── */
 .cp-canvas-toast {
-  position: absolute;
-  left: 50%;
-  bottom: 20px;
-  transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -853,24 +881,11 @@
   box-shadow: 0 6px 12px rgba(0,0,0,0.45);
   font-family: var(--font-sans);
   cursor: pointer;
-  z-index: 6;
   animation: cp-toast-in 220ms var(--ease-out);
 }
 @keyframes cp-toast-in {
-  from { opacity: 0; transform: translate(-50%, 8px); }
-  to   { opacity: 1; transform: translate(-50%, 0); }
-}
-/* Stacked above the bottom-left prep banner (download/transcode in progress)
-   so the centered toast and the banner never overlap in the same bottom band.
-   The translateX(-50%) centering is preserved — only the bottom offset lifts.
-
-   --prep-h is the banner's MEASURED height (Monitor publishes it on
-   .cp-monitor). This was a flat 72px, which guessed that height and guessed
-   it low, so the toast still clipped the banner's top-right corner. The
-   fallback matches a one-line banner for the frame before the measurement
-   lands. 12px is the banner's own bottom inset; 12px more is the gap. */
-.cp-canvas-toast.cp-canvas-toast--above-banner {
-  bottom: calc(var(--prep-h, 62px) + 24px);
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
 }
 .cp-canvas-toast .icon {
   width: 26px; height: 26px;
@@ -1139,7 +1154,15 @@
   z-index: 6;
   transition: opacity var(--dur-fast) linear;
 }
-.cp-annot.drawing { cursor: crosshair; transition: none; }
+/* While a stroke is being drawn the canvas owns the pointer, so it outranks
+   the status lane above it. Without this the prep banner -- a 390px-wide
+   interactive surface with its own Cancel -- swallowed mousedown wherever it
+   happened to sit, and on a short frame that is a third of the drawing area.
+   The same hazard existed before the lane was introduced; it was only ever
+   hidden by the banner being in a corner the e2e strokes did not cross.
+   9 beats .cp-monitor-stack's 8. Both are local integers, not --z-* rungs,
+   which is the rule for stacking inside one component. */
+.cp-annot.drawing { cursor: crosshair; transition: none; z-index: 9; }
 .cp-annot-canvas {
   position: absolute;
   inset: 0;

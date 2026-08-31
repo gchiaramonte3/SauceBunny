@@ -3,24 +3,29 @@ import { EXPECTED_BACKEND_BUILD_ID } from "../src/lib/build-id";
 import { tauriMockInit } from "./tauri-mock";
 
 /**
- * The canvas toast and the prep banner must never overlap.
+ * Nothing that floats over the video may land on anything else.
  *
- * Reported as notifications stacking: a "Downloading preview…" toast printed
- * across the top-right corner of a "Downloading preview…" prep banner that
- * said the same thing. Two faults, and this covers the second.
+ * Reported twice from live sessions. First the canvas toast printed across the
+ * top-right corner of the prep banner while both said "Downloading preview…";
+ * then the same corner showed the stream-quality chip and the shuttle badge on
+ * top of each other. Two faults behind both: duplicate copy (fixed at the
+ * source -- the banner carries progress and a Cancel, so it is the surface
+ * that event gets), and geometry.
  *
- * The duplicate copy is gone (the banner carries progress and a Cancel
- * button, so it is the one surface that event gets). The geometry is fixed
- * separately, because ANY toast — an export finishing, a failed drop — can
- * land while a transcode runs. The lift used to be a flat 72px guessing the
- * banner's height; it now reads --prep-h, which Monitor measures.
+ * The geometry fix used to be a lift: the toast read the banner's measured
+ * height from a --prep-h custom property and raised itself clear. That is a
+ * box tracking another box, it needed a fallback for the frame before the
+ * measurement landed, and the fallback is what the user photographed -- 62px
+ * of lift against a banner that had wrapped to 115px.
  *
- * This drives the CSS relationship directly rather than the app state: there
- * is no harness route to a live playbackPrepBusy, and the rule under test is
- * a stylesheet one. Both elements are built from the real classes inside a
- * real .cp-monitor so the shipped rules are what decide the boxes.
+ * Now every top-left surface is a child of .cp-monitor-stack and flow keeps
+ * them apart. This measures the rendered result with the shipped stylesheet,
+ * at the sizes that actually broke: a wrapped banner, a two-line toast, and
+ * both chips present at once. src/lib/monitor-stack-contract.test.ts holds the
+ * declaration side, which is the half that catches a NEW surface claiming an
+ * occupied corner.
  */
-test("a toast lifted above the prep banner does not touch it", async ({ page }) => {
+test("no two canvas overlays intersect, at their tallest", async ({ page }) => {
   await page.addInitScript(tauriMockInit, EXPECTED_BACKEND_BUILD_ID);
   await page.addInitScript(() => {
     localStorage.setItem("cp-defaults-v2", JSON.stringify({ ytAuthOnboarded: true }));
@@ -30,55 +35,74 @@ test("a toast lifted above the prep banner does not touch it", async ({ page }) 
   await page.goto("/");
   await expect(page.locator(".cp-view-home")).toBeVisible({ timeout: 15_000 });
 
-  const boxes = await page.evaluate(() => {
+  const result = await page.evaluate(() => {
     const stage = document.createElement("div");
     stage.className = "cp-monitor";
-    // A realistic player box; the banner is bottom-left, the toast centered.
+    // A realistic player box. Narrow enough that the banner's subtitle wraps,
+    // which is the case the retired constant was too small for.
     Object.assign(stage.style, { position: "relative", width: "900px", height: "506px" });
 
-    // The banner, with a subtitle long enough to WRAP — which is what made
-    // the old constant too small in the first place.
+    // Every top-left surface, all present at once. They are mutually exclusive
+    // in some app states and not in others; the stack must hold either way.
+    const stackEl = document.createElement("div");
+    stackEl.className = "cp-monitor-stack";
+    stackEl.innerHTML =
+      '<div class="cp-stream-rung">360p</div>' +
+      '<div class="cp-stream-rung cp-stream-keep">Saving a copy · 10%</div>' +
+      '<div class="cp-shuttle-badge">▶▶ 4×</div>' +
+      '<div class="cp-canvas-toast"><span class="icon"></span>' +
+      '<div class="text"><div class="title">Downloading preview…</div>' +
+      "<div class=\"body\">Couldn't stream this source in-app. Fetching the file " +
+      'so you can scrub and mark.</div></div></div>';
+
+    // The prep banner is a stack member too: at bottom-left it ran under a
+    // full-width caption, and captions are the one thing app chrome may not
+    // cover. Captions are the only surface left outside the stack.
     const banner = document.createElement("div");
     banner.className = "cp-prep-banner";
     banner.innerHTML =
       '<div style="width:44px;height:44px"></div>' +
       '<div class="cp-prep-text"><div class="cp-prep-title">Downloading preview…</div>' +
-      '<div class="cp-prep-sub">CDN blocked in-app streaming. Fetching via yt-dlp so you can scrub.</div></div>' +
-      '<button class="cp-prep-cancel">Cancel</button>';
+      '<div class="cp-prep-sub">CDN blocked in-app streaming. Fetching via yt-dlp ' +
+      'so you can scrub.</div></div><button class="cp-prep-cancel">Cancel</button>';
+    stackEl.append(banner);
 
-    const toast = document.createElement("div");
-    toast.className = "cp-canvas-toast cp-canvas-toast--above-banner";
-    toast.innerHTML =
-      '<span class="icon"></span><div><div>Export finished</div>' +
-      '<div>Your clip is in the output folder.</div></div>';
+    const caps = document.createElement("div");
+    caps.className = "cp-caption-overlay";
+    caps.innerHTML =
+      '<div class="cp-caption-cue">um what a little treat maybe I\'ll do it, and ' +
+      "then some more words so the cue runs the full width of the frame</div>";
 
-    stage.append(banner, toast);
+    stage.append(stackEl, caps);
     document.body.append(stage);
 
-    // Publish the measured height exactly as Monitor does.
-    stage.style.setProperty("--prep-h", `${banner.offsetHeight}px`);
-
-    const b = banner.getBoundingClientRect();
-    const t = toast.getBoundingClientRect();
-    const out = {
-      bannerTop: b.top, bannerHeight: b.height,
-      toastBottom: t.bottom,
-      // Do the two rectangles intersect at all?
-      overlapY: Math.min(b.bottom, t.bottom) - Math.max(b.top, t.top),
-      overlapX: Math.min(b.right, t.right) - Math.max(b.left, t.left),
-    };
+    const named: Array<{ name: string; r: DOMRect }> = [];
+    for (const el of [...Array.from(stackEl.children), caps]) {
+      named.push({ name: (el as HTMLElement).className, r: el.getBoundingClientRect() });
+    }
+    const stackBox = stackEl.getBoundingClientRect();
     stage.remove();
-    return out;
+
+    const overlaps: string[] = [];
+    for (let i = 0; i < named.length; i++) {
+      for (let j = i + 1; j < named.length; j++) {
+        const a = named[i], b = named[j];
+        const x = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left);
+        const y = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
+        if (x > 0 && y > 0) overlaps.push(`${a.name} × ${b.name} (${Math.round(x)}×${Math.round(y)}px)`);
+      }
+    }
+    return { overlaps, count: named.length, boxes: named.map((n) => ({ n: n.name, h: n.r.height })), stackH: stackBox.height };
   });
 
-  // Canary: if the banner never laid out, everything below passes vacuously.
-  expect(boxes.bannerHeight, "the banner did not render").toBeGreaterThan(40);
-  // They share a horizontal band (the toast is centered, the banner is wide),
-  // so the vertical separation is the only thing keeping them apart.
-  expect(boxes.overlapX, "the two never share an x band; the test proves nothing").toBeGreaterThan(0);
-  expect(
-    boxes.toastBottom,
-    `toast bottom ${boxes.toastBottom} is below the banner top ${boxes.bannerTop}`,
-  ).toBeLessThanOrEqual(boxes.bannerTop);
-  expect(boxes.overlapY, "the toast and the prep banner overlap").toBeLessThanOrEqual(0);
+  // Canaries. Every one of these has been the reason a scan like this passed
+  // while measuring nothing: an element that failed to lay out has a zero box,
+  // and a zero box never intersects anything.
+  expect(result.count, "not every overlay was built").toBe(6);
+  for (const b of result.boxes) {
+    expect(b.h, `${b.n} laid out at zero height; it cannot overlap anything`).toBeGreaterThan(10);
+  }
+  expect(result.stackH, "the stack collapsed; its children are not being spaced").toBeGreaterThan(100);
+
+  expect(result.overlaps, "overlays are on top of each other").toEqual([]);
 });

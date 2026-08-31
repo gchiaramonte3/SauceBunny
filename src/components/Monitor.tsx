@@ -344,32 +344,12 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
                       : aspect === "2.39" ? 2.39
                       : natural;
   const { ref: monitorRef, dims } = useContainSize(ratio);
-  /* How tall the prep banner actually is, published to CSS so the toast can
-     clear it. The lift used to be a hardcoded 72px guessing that height, and
-     the guess was low: the banner is a 44px loader plus padding and border,
-     and its subtitle wraps, so the centered toast still clipped its top-right
-     corner. A magic number tracking another element's box cannot stay
-     correct - measure it instead. */
-  const prepRef = useRef<HTMLDivElement>(null);
-  const [prepH, setPrepH] = useState(0);
-  useEffect(() => {
-    const el = prepRef.current;
-    if (!playbackPrepBusy || !el) { setPrepH(0); return; }
-    const ro = new ResizeObserver(() => setPrepH(el.offsetHeight));
-    ro.observe(el);
-    setPrepH(el.offsetHeight);
-    return () => ro.disconnect();
-  }, [playbackPrepBusy]);
-
-  const monitorStyle = {
-    ...(dims ? { width: `${dims.w}px`, height: `${dims.h}px` } : {}),
-    ["--prep-h" as string]: `${prepH}px`,
-  };
+  const monitorStyle = dims ? { width: `${dims.w}px`, height: `${dims.h}px` } : undefined;
 
   /* Floating toast — hoisted above the status early-returns so feedback that
      fires with NO source loaded (a rejected drag-and-drop, a transcript that
      failed to open) is still visible instead of only ticking the bell. */
-  const toastEl = toast && (
+  const toastEl = toast ? (
     <CanvasToast
       /* Keyed on the monotonic id: replacing a visible toast remounts
          with a FRESH countdown instead of inheriting the old timer. */
@@ -377,13 +357,23 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
       kind={toast.kind}
       title={toast.title}
       body={toast.body}
-      /* When the bottom-left prep banner is up (e.g. a transcode), lift the
-         centered toast clear of it. The distance comes from --prep-h, which
-         is measured above, not from a constant. */
-      className={playbackPrepBusy ? "cp-canvas-toast--above-banner" : undefined}
       onDismiss={onToastDismiss}
     />
-  );
+  ) : null;
+
+  /* Everything that floats in the canvas's top-left corner goes in ONE flow
+     container, so two notices cannot land on each other. This replaced three
+     separate absolute boxes that each guessed where the others were; see the
+     .cp-monitor-stack comment in monitor.css for what each of them guessed
+     and which two were already wrong on screen.
+
+     Rendered per branch rather than once, because the early-return branches
+     (empty / fetching / error) have a toast but no source chips. `chips` is
+     always a fragment, so the emptiness test is on the members. */
+  const statusStack = (chips?: ReactNode) =>
+    (toastEl || chips) ? (
+      <div className="cp-monitor-stack">{chips}{toastEl}</div>
+    ) : null;
 
   if (status === "empty") {
     return (
@@ -436,7 +426,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             )}
           </div>
           {stageOverlay}
-          {toastEl}
+          {statusStack()}
         </div>
       </div>
     );
@@ -465,7 +455,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             </div>
           </div>
           {stageOverlay}
-          {toastEl}
+          {statusStack()}
         </div>
       </div>
     );
@@ -511,7 +501,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             )}
           </div>
           {stageOverlay}
-          {toastEl}
+          {statusStack()}
         </div>
       </div>
     );
@@ -670,44 +660,103 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
           <ProximityAnnotation annotations={proximityAnnotations} fps={fps} />
         )}
 
-        {/* Streaming-quality chip. Present only when there is something the
-            viewer could not otherwise know: that the picture has been reduced,
-            or — the case that actually matters — that their host's file is
-            crossing a public relay rather than a direct link between the two
-            Macs. Silent when auto is sitting at its default rung, because a
-            badge that is always on screen stops being read. */}
-        {streamRungBadge && (
-          <div className="cp-stream-rung" title={streamRungBadgeTitle}>
-            {streamRungBadge}
-          </div>
-        )}
+        {statusStack(
+          <>
+            {/* Streaming-quality chip. Present only when there is something the
+                viewer could not otherwise know: that the picture has been reduced,
+                or — the case that actually matters — that their host's file is
+                crossing a public relay rather than a direct link between the two
+                Macs. Silent when auto is sitting at its default rung, because a
+                badge that is always on screen stops being read. */}
+            {streamRungBadge && (
+              <div className="cp-stream-rung" title={streamRungBadgeTitle}>
+                {streamRungBadge}
+              </div>
+            )}
 
-        {/* The background copy. Same chip language as the quality one, stacked
-            under it, and deliberately understated: nobody asked for this, so it
-            reports and never interrupts. */}
-        {streamKeepBadge && (
-          streamKeepAction ? (
-            /* The chip is the only place the copy is visible, so it is also
-               the only sane place to stop one. Stopping is NOT the Settings
-               toggle: that is a standing preference, and making it stand in
-               for "not this file" would force someone with one huge file to
-               disable the feature and remember to turn it back on. */
-            <button
-              type="button"
-              className="cp-stream-rung cp-stream-keep is-action"
-              title={streamKeepAction.title}
-              onClick={onStreamKeepAction}
-            >
-              {streamKeepBadge}
-            </button>
-          ) : (
-            <div
-              className="cp-stream-rung cp-stream-keep"
-              title="While you watch, the host's file is being saved to this Mac. When it finishes, playback switches to your own copy and you can scrub the whole thing."
-            >
-              {streamKeepBadge}
-            </div>
-          )
+            {/* The background copy. Same chip language as the quality one, stacked
+                under it, and deliberately understated: nobody asked for this, so it
+                reports and never interrupts. */}
+            {streamKeepBadge && (
+              streamKeepAction ? (
+                /* The chip is the only place the copy is visible, so it is also
+                   the only sane place to stop one. Stopping is NOT the Settings
+                   toggle: that is a standing preference, and making it stand in
+                   for "not this file" would force someone with one huge file to
+                   disable the feature and remember to turn it back on. */
+                <button
+                  type="button"
+                  className="cp-stream-rung cp-stream-keep is-action"
+                  title={streamKeepAction.title}
+                  onClick={onStreamKeepAction}
+                >
+                  {streamKeepBadge}
+                </button>
+              ) : (
+                <div
+                  className="cp-stream-rung cp-stream-keep"
+                  title="While you watch, the host's file is being saved to this Mac. When it finishes, playback switches to your own copy and you can scrub the whole thing."
+                >
+                  {streamKeepBadge}
+                </div>
+              )
+            )}
+
+            {/* J-K-L shuttle badge — direction + speed while shuttling (App owns
+                the rate; K/Space or landing on +1 clears it). Purely indicative,
+                so it's pointer-transparent and hidden from the a11y tree. */}
+            {typeof shuttleRate === "number" && shuttleRate !== 0 && (
+              <div className="cp-shuttle-badge" aria-hidden>
+                {shuttleRate < 0 ? "◀◀" : "▶▶"} {Math.abs(shuttleRate)}×
+              </div>
+            )}
+
+            {/* Playback-speed HUD — same pill, flashed briefly when the user's
+                persistent rate changes (speed picker / [ ] \ shortcuts). The
+                shuttle badge wins while a shuttle is engaged: the shuttle rate is
+                what's actually playing at that moment. */}
+            {typeof playbackRateHud === "number" && !shuttleRate && (
+              <div className="cp-shuttle-badge" aria-hidden>
+                {formatPlaybackRate(playbackRateHud)}
+              </div>
+            )}
+            {/* Non-blocking prep banner — sits at the bottom-left of the canvas
+                so the player itself is still visible and clickable.
+                r55: was gated on `sourceKind === "file"`, which meant the
+                web-preview download fallback ran invisibly — the user saw a
+                black canvas with no indication anything was happening and no
+                on-screen cancel point (Pipeline panel defaults collapsed).
+                Now shows for any prep-busy state with source-aware copy and
+                an inline Cancel button. */}
+            {playbackPrepBusy && (
+              <div className="cp-prep-banner">
+                <BunnyLoader size={44} label="Preparing" />
+                <div className="cp-prep-text">
+                  <div className="cp-prep-title">
+                    {sourceKind === "file" ? "Preparing playback copy…" : "Downloading preview…"}
+                  </div>
+                  <div className="cp-prep-sub">
+                    {sourceKind === "file"
+                      ? "Transcoding via ffmpeg for in-app compatibility"
+                      : "CDN blocked in-app streaming. Fetching via yt-dlp so you can scrub."}
+                    {playbackPrepProgress != null && playbackPrepProgress > 0
+                      ? ` · ${Math.round(playbackPrepProgress)}%`
+                      : ""}
+                  </div>
+                </div>
+                {onCancelPlaybackPrep && (
+                  <button
+                    type="button"
+                    className="cp-prep-cancel"
+                    onClick={onCancelPlaybackPrep}
+                    title="Cancel the running preparation"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
+          </>,
         )}
 
         {/* Type-a-timecode HUD — appears the moment the user types a digit
@@ -721,61 +770,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
           </div>
         )}
 
-        {/* J-K-L shuttle badge — direction + speed while shuttling (App owns
-            the rate; K/Space or landing on +1 clears it). Purely indicative,
-            so it's pointer-transparent and hidden from the a11y tree. */}
-        {typeof shuttleRate === "number" && shuttleRate !== 0 && (
-          <div className="cp-shuttle-badge" aria-hidden>
-            {shuttleRate < 0 ? "◀◀" : "▶▶"} {Math.abs(shuttleRate)}×
-          </div>
-        )}
 
-        {/* Playback-speed HUD — same pill, flashed briefly when the user's
-            persistent rate changes (speed picker / [ ] \ shortcuts). The
-            shuttle badge wins while a shuttle is engaged: the shuttle rate is
-            what's actually playing at that moment. */}
-        {typeof playbackRateHud === "number" && !shuttleRate && (
-          <div className="cp-shuttle-badge" aria-hidden>
-            {formatPlaybackRate(playbackRateHud)}
-          </div>
-        )}
-
-        {/* Non-blocking prep banner — sits at the bottom-left of the canvas
-            so the player itself is still visible and clickable.
-            r55: was gated on `sourceKind === "file"`, which meant the
-            web-preview download fallback ran invisibly — the user saw a
-            black canvas with no indication anything was happening and no
-            on-screen cancel point (Pipeline panel defaults collapsed).
-            Now shows for any prep-busy state with source-aware copy and
-            an inline Cancel button. */}
-        {playbackPrepBusy && (
-          <div className="cp-prep-banner" ref={prepRef}>
-            <BunnyLoader size={44} label="Preparing" />
-            <div className="cp-prep-text">
-              <div className="cp-prep-title">
-                {sourceKind === "file" ? "Preparing playback copy…" : "Downloading preview…"}
-              </div>
-              <div className="cp-prep-sub">
-                {sourceKind === "file"
-                  ? "Transcoding via ffmpeg for in-app compatibility"
-                  : "CDN blocked in-app streaming. Fetching via yt-dlp so you can scrub."}
-                {playbackPrepProgress != null && playbackPrepProgress > 0
-                  ? ` · ${Math.round(playbackPrepProgress)}%`
-                  : ""}
-              </div>
-            </div>
-            {onCancelPlaybackPrep && (
-              <button
-                type="button"
-                className="cp-prep-cancel"
-                onClick={onCancelPlaybackPrep}
-                title="Cancel the running preparation"
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-        )}
 
         {/* r62: full-canvas "preparing your video" overlay for web sources.
             Covers the ~8s yt-dlp resolve + MSE buffer window with a dimmed
@@ -804,7 +799,6 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
         {/* Completion is announced via the floating toast + the notification
             bell up in the toolbar — the canvas stays clean. */}
         {stageOverlay}
-          {toastEl}
       </div>
     </div>
   );
