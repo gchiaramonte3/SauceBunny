@@ -392,7 +392,11 @@
   font-size: var(--text-base);
   font-weight: var(--weight-bold);
   cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
 }
 .cp-room-bar-btn:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); }
 /* Muted is not a warning. Same red as .cp-person-ctl.off, which says the same

@@ -97,7 +97,10 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
   font-size: var(--text-xl);
 }
 .cp-modal-close:hover { background: rgba(255,255,255,0.04); color: var(--fg-1); border-color: var(--line-2); }
@@ -132,7 +135,11 @@
   font-weight: var(--weight-normal);
   text-align: left;
   cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 .cp-modal-tab .tab-icon { color: var(--fg-4); flex-shrink: 0; }
 .cp-modal-tab:hover { background: rgba(255,255,255,0.03); color: var(--fg-1); }
@@ -339,7 +346,10 @@
   justify-content: center;
   cursor: pointer;
   padding: 0;
-  transition: all var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 .cp-model-info-btn:hover { color: var(--fg-1); background: rgba(255,255,255,0.06); }
 .cp-model-info-popover {

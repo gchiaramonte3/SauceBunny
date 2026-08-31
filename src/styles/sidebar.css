@@ -314,7 +314,13 @@
   font-weight: var(--weight-normal);
   color: var(--fg-1);
   outline: none;
-  transition: all var(--dur-fast) var(--ease-out);
+  /* Explicit, not `all`. These fields also set padding-right on a
+     .with-suffix variant, and padding is layout: `all` had the browser
+     animating it. */
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
   font-variant-numeric: tabular-nums;
   width: 100%;
 }
@@ -397,8 +403,13 @@
   border-radius: var(--r-pill);
   position: relative;
   cursor: pointer;
-  transition: background var(--dur-base) var(--ease-out),
-              box-shadow var(--dur-base) var(--ease-out);
+  /* --dur-fast, not --dur-base: the token's own comment reserves 120ms for
+     "small state changes on a control", and a switch is the smallest one
+     there is. At 180ms the track was still fading after the thumb had
+     landed, which is what reads as lag rather than weight. */
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
   flex-shrink: 0;
   border: 1px solid var(--line-2);
   padding: 0;
@@ -416,7 +427,20 @@
   box-shadow:
     0 1px 2px rgba(0,0,0,0.50),
     inset 0 1px 0 rgba(255,255,255,0.4);
-  transition: all var(--dur-base) var(--ease-out);
+  /* The thumb travels on `transform`, not `left`. `left` is a layout
+     property: every frame of the slide put this element through layout and
+     paint, on the main thread, which is the stutter. A translate stays on
+     the compositor. `transition: all` also meant the browser was watching
+     every animatable property on the element to find the two that change.
+
+     --ease-spring is the app's own overshoot curve, and a switch thumb is
+     the canonical place for it: it should arrive with a small snap rather
+     than decelerate into position. Colour and shadow keep --ease-out, since
+     a tint that overshoots reads as a flicker. */
+  transition:
+    transform var(--dur-fast) var(--ease-spring),
+    background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 .cp-toggle-switch.on {
   /* Green-tinted track + outer accent halo when ON. The pulse glow
@@ -429,7 +453,7 @@
     0 0 6px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 .cp-toggle-switch.on::after {
-  left: 14px;
+  transform: translateX(12px);
   background: linear-gradient(180deg, var(--fg-0), var(--fg-2));
   box-shadow:
     0 0 8px color-mix(in srgb, var(--accent) 65%, transparent),
@@ -677,5 +701,6 @@
   .cp-segmented button,
   .cp-segmented::before,
   .cp-thumb-actions,
+  .cp-toggle-switch,
   .cp-toggle-switch::after { transition-duration: 0s; }
 }

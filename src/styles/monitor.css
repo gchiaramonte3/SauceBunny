@@ -544,7 +544,10 @@
   font-weight: var(--weight-semibold);
   letter-spacing: var(--track-wide);
   cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
   font-variant-numeric: tabular-nums;
 }
 .cp-view-trigger:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); border-color: var(--line-3); }
@@ -858,7 +861,10 @@
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   text-align: center;
-  transition: all var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 .cp-speed-option:hover { background: rgba(255,255,255,0.06); color: var(--fg-1); }
 .cp-speed-option.current {

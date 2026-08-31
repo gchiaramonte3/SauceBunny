@@ -397,7 +397,10 @@ body.cp-tab-dragging { cursor: grabbing; }
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all var(--dur-fast) var(--ease-out);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 .cp-queue-iconbtn:hover { color: var(--fg-1); background: rgba(255,255,255,0.05); }
 .cp-queue-iconbtn.danger:hover { color: var(--danger-text); background: color-mix(in srgb, var(--danger) 10%, transparent); }
