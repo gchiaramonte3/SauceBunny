@@ -153,24 +153,58 @@
 }
 .cp-transfer-cancel:hover { color: var(--fg-1); }
 
+/* The layer only centres the card. It used to BE the surface: `inset: 0`
+   filled with an opaque --bg-0, so a single sentence and a ghost chip took
+   over the whole stage and read as a modal that had swallowed the page.
+   Transparent and pointer-transparent now, the same lane-not-lid rule the
+   monitor's status stack follows. */
 .cp-room-waiting {
   position: absolute;
   inset: 0;
   z-index: 5;
   display: flex;
-  /* Column now: the line, then the "Open my copy" action beneath it. */
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--s-3);
   padding: var(--s-4);
+  pointer-events: none;
+}
+.cp-room-waiting-card {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  max-width: 30rem;
+  padding: var(--s-5) var(--s-5) var(--s-4);
   text-align: center;
-  background: var(--bg-0);
-  border-radius: var(--r-lg);
-  margin: var(--s-2) 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.45);
   font-family: var(--font-ui);
+}
+.cp-room-waiting-title {
   font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  color: var(--fg-1);
+  /* The filename is the thing being scanned for and it can be very long, so
+     it wraps rather than pushing the card wider than its max. */
+  overflow-wrap: anywhere;
+  line-height: var(--leading-snug);
+}
+.cp-room-waiting-body {
+  font-size: var(--text-md);
   color: var(--fg-3);
+  line-height: var(--leading-normal);
+}
+/* The actions read as a row of peers, not a stack of afterthoughts. It wraps,
+   because "Get \"<filename>\" (1.4 GB)" has no upper bound on its label. */
+.cp-room-waiting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
 }
 
 /* The review drawer is the room's right panel: no tab strip, no queue

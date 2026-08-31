@@ -4699,7 +4699,14 @@ export default function App() {
                     emits ("off" | "host" | "peer"), so it never rendered and
                     a non-presenter just saw the solo empty state. */}
                 {roomActive && !isPresenter && pendingSource && (
+                  /* A bounded card, not a full-bleed cover. This used to be
+                     `inset: 0` filled with --bg-0, so one sentence and a ghost
+                     chip took the entire stage and read as a modal that had
+                     eaten the page. The layer still spans the stage, because
+                     that is what centres the card, but it is transparent and
+                     pointer-transparent; only the card is either. */
                   <div className="cp-room-waiting">
+                   <div className="cp-room-waiting-card">
                     {transfer && (transfer.phase === "receiving" || transfer.phase === "checking") ? (
                       /* Tier C, receiver side: determinate progress in place
                          of the waiting affordances (spec 5c). The partial is
@@ -4722,15 +4729,21 @@ export default function App() {
                       </div>
                     ) : (
                       <>
-                        <span>
+                        {/* Title then reason, rather than one sentence that
+                            buries the filename mid-clause. The name is the
+                            thing a guest scans for, so it gets its own line and
+                            its own weight. Short, because by the time anyone
+                            reads this the stream has already failed to be
+                            possible: the old copy explained where the file
+                            lived, which is the host's business, not a thing to
+                            make a guest read before they can see anything. */}
+                        <span className="cp-room-waiting-title">
+                          {pendingSource.title ?? (pendingSource.kind === "file" ? "A local file" : "The shared source")}
+                        </span>
+                        <span className="cp-room-waiting-body">
                           {pendingSource.kind === "file"
-                            /* Short, because by the time anyone reads this the
-                               stream has already failed to be possible. The old
-                               copy explained where the file lived, which is the
-                               host's business, not a thing to make a guest
-                               read before they can see anything. */
-                            ? `${presenterName} is showing ${pendingSource.title ?? "a local file"}, and it cannot be streamed to you.`
-                            : `Loading ${pendingSource.title ?? "the shared source"}…`}
+                            ? `${presenterName} is showing this, and it cannot be streamed to you.`
+                            : "Loading…"}
                         </span>
                         {/* No "Watch now" button any more: a streamable offer
                             starts on its own (see the auto-watch effect), so
@@ -4738,6 +4751,7 @@ export default function App() {
                             What is left are the two things that still need a
                             decision - taking their copy, or pointing at your
                             own. */}
+                        <div className="cp-room-waiting-actions">
                         {pendingSource.kind === "file" && offeredFile && (
                           /* The chip names the file and its size; clicking it
                              IS the consent to a multi-GB write on this disk. */
@@ -4760,8 +4774,10 @@ export default function App() {
                             Open my copy…
                           </button>
                         )}
+                        </div>
                       </>
                     )}
+                   </div>
                   </div>
                 )}
                 <div className="cp-monitor-wrap">
