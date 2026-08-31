@@ -2489,3 +2489,20 @@
   flex-shrink: 0;
   color: var(--fg-1);
 }
+
+
+/* The tag colour on a folder tile that is showing a poster stack. The glyph
+   branch tints itself; a stack has no glyph, so the colour needs a home. Kept
+   small and cornered rather than tinting the posters, which are someone's
+   footage and not ours to recolour. */
+.cp-lib-foldercard-tag {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: flex;
+  padding: 2px;
+  border-radius: var(--r-2xs);
+  background: color-mix(in srgb, var(--bg-0) 72%, transparent);
+  backdrop-filter: blur(4px);
+}

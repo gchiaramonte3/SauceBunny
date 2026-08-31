@@ -193,10 +193,21 @@ export function LibraryTree({
   const [activeKey, setActiveKey] = useState<string>(selKey);
   const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
-  // Keep the roving stop valid as rows collapse/expand; follow the selection.
-  // A selected shelf keeps the roving stop, rather than the tree snapping the
-  // tab stop back to "All" behind the user.
-  useEffect(() => { setActiveKey(shelf ? `shelf:${shelf}` : selKey); }, [selKey, shelf]);
+  /* Keep the roving stop valid as rows collapse/expand; follow the selection.
+     A selected shelf keeps the roving stop, rather than the tree snapping the
+     tab stop back to "All" behind the user.
+
+     selKey is a PLAIN path and row.key is `<rootIndex>:<path>`, so this has to
+     resolve one to the other. Assigning selKey straight into activeKey meant
+     the `rows.some(r => r.key === activeKey)` check below never matched, and
+     `active` fell back to "all" the moment a folder was selected: the roving
+     tab stop left the folder you had just clicked, and every key the tree
+     handles then acted on the "All" row instead. This is the same identity /
+     path confusion that broke expansion, five rows further down the file. */
+  useEffect(() => {
+    if (shelf) { setActiveKey(`shelf:${shelf}`); return; }
+    setActiveKey(rows.find((r) => r.path === selKey)?.key ?? "all");
+  }, [selKey, shelf, rows]);
   const active = rows.some((r) => r.key === activeKey) ? activeKey : "all";
 
   const toggle = (key: string) =>
@@ -236,6 +247,26 @@ export function LibraryTree({
         // "All" instead.
         if (row.shelf) { setActiveKey(row.key); onSelectShelf(row.shelf); break; }
         onSelect(row.chain);
+        break;
+      /* The keyboard route to the folder's colour menu. It was pointer-only:
+         onContextMenu and nothing else, so a folder's tags could not be
+         reached from the keyboard at all (WCAG 2.1.1, Level A). Anchored to
+         the focused row's own box, the way a context menu opened by keyboard
+         is expected to appear next to what it acts on. */
+      case "ContextMenu":
+      case "F10":
+        if (e.key === "F10" && !e.shiftKey) break;
+        if (!row.path || row.shelf) break;
+        e.preventDefault();
+        {
+          const r = rowRefs.current.get(row.key)?.getBoundingClientRect();
+          setMenu({
+            path: row.path,
+            x: (r?.left ?? 0) + 12,
+            y: (r?.bottom ?? 0) - 4,
+            isRoot: row.depth === 0,
+          });
+        }
         break;
     }
   };

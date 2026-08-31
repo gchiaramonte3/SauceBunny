@@ -592,7 +592,16 @@ export function LibraryBrowser({
   // Real Finder tags for what is listed. A colour set here lands on the file's
   // own xattr, so it shows in Finder too, and folders already tagged in Finder
   // arrive wearing their colour.
-  const finderTags = useFinderTags(itemPaths);
+  /* FILES AND FOLDERS. This read used to be itemPaths alone, so a folder in
+     the browse area never learned its Finder colour and was drawn plain, while
+     the same folder in the sidebar tree wore its tag correctly - one library,
+     two answers. Folders are the thing the tag work was asked for in the first
+     place. */
+  const taggedPaths = useMemo(
+    () => [...folders.map((f) => f.path), ...itemPaths],
+    [folders, itemPaths],
+  );
+  const finderTags = useFinderTags(taggedPaths);
 
   // The "All" view aggregates every root with no ceiling, and every card is a
   // real DOM node with its own IntersectionObserver and two window listeners.
@@ -790,6 +799,7 @@ export function LibraryBrowser({
             selectedPath={detailItem?.path ?? null}
             selectedPaths={sel.selected}
             tagsByPath={finderTags.tags}
+            onTagsChanged={() => finderTags.refresh()}
             onToggleTagColor={(path, index) => {
               // A colour picked from the menu of a file that is PART of a
               // multi-selection applies to the whole set — the menu belongs to

@@ -29,6 +29,8 @@ type Props = {
   tagsByPath?: ReadonlyMap<string, readonly import("../bindings/FinderTag").FinderTag[]>;
   onToggleTagColor?: (path: string, index: import("../lib/finder-tags").TagColorIndex) => void;
   onClearTagColors?: (path: string) => void;
+  /** A folder's tags were written from its own menu; re-read them. */
+  onTagsChanged?: () => void;
   posterVersions: Record<string, number>;
   requestThumb: (path: string) => Promise<string | null>;
   onOpen: (path: string) => void;
@@ -107,7 +109,7 @@ const LIB_COL_SPECS: readonly ColSpec<LibColKey>[] = [
 
 export function LibraryBrowserPane({
   folders = EMPTY_FOLDERS, onOpenFolder,
-  items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
+  items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, onTagsChanged, posterVersions, requestThumb,
   onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onRemoveItems, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, onMoveToFolder, onRequestMove, onKeyboardSelect, cardDrag, emptyText,
   sort, dir, onSort,
 }: Props) {
@@ -232,6 +234,12 @@ export function LibraryBrowserPane({
             dropKey={f.path}
             dropActive={cardDrag?.drag?.over === f.path}
             onOpen={() => onOpenFolder?.(f)}
+            /* Folders get the same right-click as files: the tag row and
+               Reveal. Both were missing here, so the browse area was the one
+               place in the app where a folder had no colour and no menu. */
+            path={f.path}
+            tags={tagsByPath?.get(f.path)}
+            onTagsChanged={onTagsChanged}
           />
         ))}
         {items.map((it) => (
@@ -318,6 +326,8 @@ export function LibraryBrowserPane({
             folder={f}
             dropActive={cardDrag?.drag?.over === f.path}
             onOpen={() => onOpenFolder?.(f)}
+            tags={tagsByPath?.get(f.path)}
+            onTagsChanged={onTagsChanged}
           />
         ))}
         {items.map((it) => (

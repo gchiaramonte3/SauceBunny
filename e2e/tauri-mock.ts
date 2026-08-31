@@ -269,6 +269,21 @@ export function tauriMockInit(expectedBuildId: string): void {
     // the requested root: two files + one subfolder with one file. Roots
     // containing "missing" reject with a typed AppError, exercising the
     // fail-loud inline error row.
+    /* Finder tags. Without a handler here the hook's read rejected, every
+       tag came back empty, and a folder's TINT could not be tested at all -
+       which is the half of the folder-colour regression that is invisible
+       rather than merely missing. "Interviews" carries colour 3 (purple) so
+       there is something to see; everything else is untagged, which is also
+       the case worth rendering correctly. */
+    read_finder_tags: (args: unknown) => {
+      const paths = (args as { paths?: unknown } | undefined)?.paths;
+      const list = Array.isArray(paths) ? paths.map(String) : [];
+      return Promise.resolve(list.map((path) => ({
+        path,
+        tags: path.endsWith("/Interviews") ? [{ name: "Purple", color: 3 }] : [],
+      })));
+    },
+    set_finder_tags: () => Promise.resolve(null),
     scan_library_folder: (args: unknown) => {
       const path = String((args as { path?: unknown } | undefined)?.path ?? "");
       if (path.includes("missing")) {

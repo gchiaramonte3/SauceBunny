@@ -718,7 +718,7 @@ human can check.
 
 ## Enforced contracts
 
-Eighty-nine rules in this file are checked by a test rather than remembered. If you
+Ninety rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -787,6 +787,7 @@ written after finding the rule already broken somewhere.
 | `token-usage-contract` | No stylesheet writes a literal hex that an existing token already holds (comments and `var(--x, #fallback)` excluded) |
 | `duplicated-tables-contract` (3rd block) | No component re-implements a helper `lib/` already exports |
 | `control-naming-contract` | A control's tooltip and accessible name never use different words for the same thing |
+| `folder-tag-contract` | Every surface that draws a folder (sidebar tree, grid tile, list row) opens the tag menu by pointer AND keyboard and tints the folder, and the browse pane asks for folder tags rather than file tags alone (see also `e2e/folder-colours.spec.ts`, which checks the menu opens and the colour renders) |
 | `list-columns-contract` | A list view's grid tracks, header cells and row cells all derive from one column model, so a column can be hidden or reordered without three literals having to agree (see also `e2e/list-columns.spec.ts`, which checks that they DO agree once rendered) |
 | `list-zebra-contract` | List rows alternate rather than carrying hairlines, and the row ladder stays monotonic: stripe < hover < focus < selected (see also `e2e/list-zebra.spec.ts`, which measures the rendered stripes and the header's place in the child order) |
 | `transition-target-contract` | A transition names the properties it animates rather than saying `all`, and animates no layout property outside a listed progress fill (shrink-only, and a listed entry must still match) |
