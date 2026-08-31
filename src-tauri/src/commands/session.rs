@@ -504,6 +504,12 @@ pub async fn session_start(
     name: Option<String>,
     title: Option<String>,
 ) -> Result<String, crate::AppError> {
+    // BEFORE the lock, deliberately. Reading the Keychain can raise a macOS
+    // prompt and sit on it indefinitely; doing that while holding `inner`
+    // would queue every other session command behind a modal dialog. It is
+    // memoised, so only the first session in a process pays anything at all.
+    let host_key = crate::commands::session_key::host_key().await;
+
     let mut inner = state.inner.lock().await;
     if !matches!(inner.session, Session::Off) {
         return Err(crate::AppError::invalid("A co-review session is already active"));
@@ -518,7 +524,7 @@ pub async fn session_start(
     // than turning a dismissed prompt into "you cannot host". Whether the
     // identity is durable is answered by `has_review_identity`, not here.
     let endpoint = Endpoint::builder(presets::N0)
-        .secret_key(crate::commands::session_key::load_or_create_host_key())
+        .secret_key(host_key)
         .alpns(vec![ALPN.to_vec()])
         .bind()
         .await

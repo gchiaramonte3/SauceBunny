@@ -44,6 +44,42 @@ fn entry() -> Result<keyring::Entry, AppError> {
         .map_err(|e| AppError::internal(format!("Keychain unavailable: {e}")))
 }
 
+/// The process-wide key, loaded at most once.
+///
+/// Two reasons this is not just a function call at the use site.
+///
+/// It BLOCKS. macOS gates Keychain reads on an ACL naming the binary that
+/// created the item, so a binary it does not recognise raises a modal and the
+/// call sits there until somebody answers. That is not theoretical: a test run
+/// against a freshly rebuilt binary reported a duration of 26,112 seconds,
+/// which is seven hours parked on exactly that prompt. Anything on the async
+/// runtime that can do this has to be on `spawn_blocking`, and it must not be
+/// holding a lock that other commands need.
+///
+/// And it should happen once. The key does not change within a run, so the
+/// second session should not re-ask the Keychain, let alone risk a second
+/// prompt.
+static HOST_KEY: tokio::sync::OnceCell<SecretKey> = tokio::sync::OnceCell::const_new();
+
+/// The key, loaded off the async runtime and cached for the process.
+///
+/// Call this BEFORE taking any lock the rest of the app contends: on the run
+/// that prompts, everything queued behind that lock is stuck behind a dialog.
+pub async fn host_key() -> SecretKey {
+    HOST_KEY
+        .get_or_init(|| async {
+            tokio::task::spawn_blocking(load_or_create_host_key)
+                .await
+                // The blocking pool only fails a join if the task panicked or
+                // the runtime is shutting down. Neither is a reason to refuse
+                // to host, and the fallback is the one this module already
+                // documents.
+                .unwrap_or_else(|_| SecretKey::generate())
+        })
+        .await
+        .clone()
+}
+
 /// Read the stored key, minting and saving one on first run.
 ///
 /// Infallible by design — see the module note. A stored value that no longer

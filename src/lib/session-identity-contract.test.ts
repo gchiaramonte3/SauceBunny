@@ -77,12 +77,35 @@ describe("co-review identity", () => {
     expect(SESSION, "the strip cut into production code").toContain("EndpointTicket::new(");
   });
 
+  it("the Keychain is read off the runtime, and not under the session lock", () => {
+    // A Keychain read can raise a macOS prompt and block until answered. A
+    // test run against a rebuilt binary sat on one for 26,112 seconds. Doing
+    // that inline in an async command, while holding the lock every other
+    // session command takes, parks a tokio worker AND queues the rest of the
+    // app behind a dialog.
+    expect(KEYFILE, "the loader is not moved off the async runtime").toContain("spawn_blocking");
+    expect(KEYFILE, "the key is re-read per session rather than memoised").toContain("OnceCell");
+
+    const body = fnBody(SESSION, "session_start");
+    const load = body.indexOf("session_key::host_key()");
+    const lock = body.indexOf("state.inner.lock()");
+    expect(load, "session_start does not load the key through host_key()").toBeGreaterThan(-1);
+    expect(lock, "the session lock moved; this check needs rewriting").toBeGreaterThan(-1);
+    expect(
+      load,
+      "the Keychain is read while holding the session lock, so a prompt blocks every other command",
+    ).toBeLessThan(lock);
+  });
+
   it("the host binds a persisted key", () => {
     expect(
       fnBody(SESSION, "session_start"),
       "session_start binds without .secret_key(), so its identity changes every launch",
     ).toMatch(/\.secret_key\(/);
-    expect(SESSION, "the key is not loaded from the store").toContain("load_or_create_host_key");
+    // session.rs reaches the store through host_key(), which is the memoised,
+    // off-runtime front door; the store read itself lives in session_key.rs.
+    expect(SESSION, "the key is not loaded from the store").toContain("session_key::host_key()");
+    expect(KEYFILE, "the store read is gone").toContain("load_or_create_host_key");
   });
 
   it("the guest does not", () => {
