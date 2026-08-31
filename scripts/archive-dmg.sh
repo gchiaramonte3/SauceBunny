@@ -56,6 +56,32 @@ if [ ! -f "$DMG" ]; then
   echo "✗ nothing to archive: $DMG does not exist" >&2
   exit 1
 fi
+
+# THE DMG MUST BE AT LEAST AS NEW AS THE NAME IT IS ABOUT TO WEAR.
+#
+# Found by this script mislabelling a real build, one hour after the change
+# that caused it. `tauri build` writes the .app and then, seconds later, the
+# DMG - measured at 12:24:06 and 12:24:41 on the run that exposed it. Inside
+# that window the .app already carries the NEW CFBundleVersion while the file
+# at the DMG path is still the PREVIOUS build. Archiving there produces a file
+# named for a build whose bytes it does not contain, which is worse than not
+# archiving at all: the whole point of this folder is that the name tells you
+# which build you are holding.
+#
+# The manifest fallback has the same hazard by a different route. set-version.sh
+# stamps tauri.conf.json at the START of a build, and during the build the .app
+# is momentarily absent, so the fallback reports the number of the build being
+# made rather than the one on disk.
+#
+# One mtime comparison closes both. A DMG older than the metadata naming it is
+# from an earlier build, and refusing costs nothing - the caller re-runs after
+# the bundle finishes, which is where release-dmg.sh calls this anyway.
+if [ -f "$APP_PLIST" ] && [ "$APP_PLIST" -nt "$DMG" ]; then
+  echo "✗ refusing to archive: the .app is newer than the DMG, so this DMG is" >&2
+  echo "  from an earlier build and would be filed under $BUILD, which is not" >&2
+  echo "  what is inside it. Re-run once the bundle has finished." >&2
+  exit 1
+fi
 if [ -z "$BUILD" ]; then
   # Without a build number two DMGs of one semver are indistinguishable, which
   # is the exact problem this script exists to solve. Refuse rather than
