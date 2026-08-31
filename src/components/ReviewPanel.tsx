@@ -1647,7 +1647,9 @@ function ReviewComposer({
         return (
           <div className="cp-review-rangebar" style={{ ["--marker-color" as string]: rangeColor }}>
             <span className="cp-review-range-pill">
-              <IconRange size={11} strokeWidth={2.4} className="cp-review-glyph" />
+              {/* No strokeWidth: IconRange is a filled glyph now, drawn from the mark
+                  family, so a stroke width on it was doing nothing. */}
+              <IconRange size={11} className="cp-review-glyph" />
               <span className={rangeIn == null ? "live" : undefined}>{startTc}</span>
               <span className="cp-review-range-arrow">→</span>
               <span className={rangeOut == null ? "live" : undefined}>{endTc}</span>

@@ -284,15 +284,35 @@ export const IconClearMarks = (p: IconProps) => (
 // different thing from a clip range, drawn in a different colour
 // (--marker-color, the reviewer's) on the same track, and after the clip
 // marks became chevrons this is the glyph that keeps the two apart.
+// The comment range: the app's OWN in and out marks, with the span between
+// them. It used to be a generic square bracket pair with a dumbbell inside -
+// a stroked glyph borrowed from nowhere, sitting one row away from the two
+// buttons that leave the real marks on the timeline. Marking an in and an out
+// for a comment is the same gesture as marking one for a clip, and it was
+// drawn in a different language.
+//
+// Built from IconMarkIn and IconMarkOut under the transform IconClearMarks
+// already uses - x' = 12 + 0.78(x - 12) + dx, y' = 12 + 0.78(y - 12) - so the
+// three of them are provably one family rather than three drawings that look
+// alike. The transform was checked by reproducing IconClearMarks' published
+// coordinates exactly before it was used here.
+//
+// The one difference from IconClearMarks is the sign of the push. It puts the
+// marks 2.2 apart so their stems sit ADJACENT, which is what "clear both"
+// means. A range means the opposite: 4.6 apart, with the span drawn between
+// the stems. Wings still point outward, so the pair reads as the same two
+// marks with something held between them.
+//
+// Extent x 2.79..21.21 in the 24 viewBox: symmetric padding, and the same
+// 3.81..20.19 height as the two glyphs it is made of, so it does not sit
+// taller or shorter than its own family.
 export const IconRange = (p: IconProps) => (
-  <Icon {...p} strokeWidth={2}>
-    <path d="M5 5v14" strokeLinecap="square" />
-    <path d="M5 5h4M5 19h4" />
-    <path d="M19 5v14" strokeLinecap="square" />
-    <path d="M19 5h-4M19 19h-4" />
-    <path d="M9 12h6" strokeWidth={2.4} />
-    <circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none" />
-    <circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none" />
+  <Icon {...p}>
+    <path
+      d="M6.5225 14.8473V20.19H8.57V13.8327L6.1637 12L8.57 10.1673V3.81H6.5225V9.1527L2.7862 12Z M8.57 11.25H15.43V12.75H8.57Z M17.4775 14.8473V20.19H15.43V13.8327L17.8363 12L15.43 10.1673V3.81H17.4775V9.1527L21.2138 12Z"
+      fill="currentColor"
+      stroke="none"
+    />
   </Icon>
 );
 export const IconAspect = (p: IconProps) => (
