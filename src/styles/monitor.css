@@ -948,8 +948,13 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  /* Unread marker. "There is something here" is a count, not a verdict. */
-  background: var(--accent);
+  /* GREEN, at the user's direction (2026-08-30). This said "there is something
+     here is a count, not a verdict" and used the neutral accent, which was
+     consistent but left the one thing in the toolbar that means SOMETHING
+     FINISHED looking like chrome. Almost everything that notifies here is a
+     completion - a transcript, an export, a download - so the dot reads as a
+     positive outcome far more often than not. */
+  background: var(--ella-green);
 }
 .cp-notif-popover {
   /* `position` + `top`/`right` come from inline style (NotificationBell

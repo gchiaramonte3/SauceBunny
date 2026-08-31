@@ -40,6 +40,18 @@ import { join, resolve } from "node:path";
  *
  * SHRINK-ONLY. Deleting a row is always fine. Adding one means arguing that a
  * new surface reports an outcome or a live feed, and if it does, say so here.
+ *
+ * Two more were added on 2026-08-30, at the user's direction, for the same
+ * reason as the first pair - the de-greening had gone further than intended:
+ *
+ *   · THE GENERATIVE MARK - the sparkle on the left of the Generate button.
+ *     The brand-mark category above already covers the loader and the welcome
+ *     glow; this is the same thing on the one control that makes something.
+ *   · AN UNREAD NOTIFICATION - the bell's dot. Its own comment argued green
+ *     was wrong because "there is something here is a count, not a verdict".
+ *     That is consistent and it ignores what actually notifies in this app: a
+ *     transcript, an export, a download finishing. It reports a completion far
+ *     more often than a count, which is the outcome category.
  */
 
 const ROOT = resolve(__dirname, "../..");
@@ -56,8 +68,8 @@ const GREEN = /var\(--(ella-green|success|stroke-green|color-accent-green)\b/;
  */
 const ALLOWED: Record<string, string[]> = {
   // ── positive outcome ───────────────────────────────────────────────
-  "buttons.css": ["cp-sbtn-result", "cp-gen-result", "cp-gen-btn"],
-  "monitor.css": ["cp-getting-started-check"],
+  "buttons.css": ["cp-sbtn-result", "cp-gen-result", "cp-gen-btn", "cp-gen-svg"],
+  "monitor.css": ["cp-getting-started-check", "cp-notif-dot"],
   "review.css": ["cp-review-export-msg", "cp-status-chip"],
   "settings.css": ["cp-spike-row", "cp-aiapi-set", "cp-settings-ready", "cp-aiapi-msg"],
   "shell.css": ["cp-drop-card"],
@@ -65,6 +77,17 @@ const ALLOWED: Record<string, string[]> = {
   // ── work actually running, and timecodes (2026-08-29) ──────────────
   "ai.css": ["cp-md-ts"],
   "transcript.css": ["cp-tx-jump"],
+  // ── the generative mark, and a completion waiting to be read
+  //    (2026-08-30, at the user's direction) ───────────────────────────
+  //  · cp-gen-svg — the sparkle on the LEFT of the Generate button. Same
+  //    category as the loader: a brand mark, not chrome. It was --fg-2, so
+  //    the one control in the sidebar that means "this produces something"
+  //    looked like furniture.
+  //  · cp-notif-dot — the unread marker. Its old comment argued green was
+  //    wrong because "there is something here is a count, not a verdict",
+  //    which is consistent but ignores WHAT notifies here: a transcript, an
+  //    export, a download finishing. The dot reports a completion far more
+  //    often than not, which is the outcome category this file already keeps.
   // ── live broadcast ─────────────────────────────────────────────────
   "room.css": ["cp-room-live"],
   "nav.css": ["cp-nav-badge"],

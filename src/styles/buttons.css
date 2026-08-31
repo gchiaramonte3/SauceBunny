@@ -380,8 +380,11 @@
 .cp-gen-btn.loading::before {
   opacity: 1;
   background:
+    /* 260deg, not 100: the fill underneath grows LEFT to right, and a green
+       that arrived from the right was travelling against it - the two halves
+       of one progress indicator pointing opposite ways. */
     linear-gradient(
-      100deg,
+      260deg,
       transparent 48%,
       color-mix(in srgb, var(--ella-green) 18%, transparent) 100%
     ),
@@ -426,7 +429,12 @@
   flex-shrink: 0;
   z-index: 2;
   overflow: visible;
-  color: var(--fg-2);
+  /* GREEN, and on the left, which is where it already sat. The sparkle is the
+     generative mark - the thing that says this button makes something - and
+     the brand mark is a category the green rule already keeps (the loader and
+     the welcome glow). It had been --fg-2, so the one element in the sidebar
+     that means "this produces work" read as chrome. */
+  color: var(--ella-green);
   transition: color var(--dur-slower) var(--ease-out);
 }
 .cp-gen-btn:hover:not(:disabled) .cp-gen-svg,

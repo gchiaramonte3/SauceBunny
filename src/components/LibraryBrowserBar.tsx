@@ -52,9 +52,28 @@ type Props = {
    * Rejecting the name is the caller's job - it is the one that knows what
    * already exists on disk - so this reports back what it is told.
    */
-  onNewFolder?: (name: string) => Promise<string | null> | string | null | void;
+  onNewFolder?: (name: string, destination: string) => Promise<string | null> | string | null | void;
   /** "New folder" unless a shelf calls its containers something else. */
   newFolderLabel?: string;
+  /**
+   * WHERE the new container can go. One entry means no question to ask; more
+   * than one puts a chooser in the form.
+   *
+   * This exists because "nothing happens" was the Library's most common
+   * outcome. At "All" - the view you land on - the button did not render at
+   * all, on the reasoning that a union of roots has no single directory to
+   * create in. The reasoning is right and the outcome is wrong: a control
+   * present on one screen and absent on the next, with nothing said, reads as
+   * broken rather than as honest.
+   *
+   * The ambiguity is real, so the fix is to ANSWER it rather than to hide from
+   * it. One root and there was never a question. Several and the form asks,
+   * which is the one moment a chooser earns its place.
+   *
+   * A shelf that has a single obvious destination (frames, collections) passes
+   * one entry and sees no chooser at all - the behaviour it had before.
+   */
+  newFolderTargets?: readonly { path: string; label: string }[];
 };
 
 /**
@@ -67,7 +86,7 @@ type Props = {
  */
 export function LibraryBrowserBar({
   chain, onCrumb, location, dateLabel, searchLabel, query, onQuery, sort, dir, view, onPrefs, treeOpen, onShowTree, dropOver,
-  onNewFolder, newFolderLabel,
+  onNewFolder, newFolderLabel, newFolderTargets,
 }: Props) {
   const last = chain ? chain.length - 1 : -1;
   const [naming, setNaming] = useState(false);
@@ -77,7 +96,12 @@ export function LibraryBrowserBar({
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { if (naming) inputRef.current?.focus(); }, [naming]);
 
-  const closeNaming = () => { setNaming(false); setName(""); setErr(null); setBusy(false); };
+  // The chosen destination, only ever asked about when there is more than one.
+  const targets = newFolderTargets ?? [];
+  const [dest, setDest] = useState<string>("");
+  const chosen = dest || targets[0]?.path || "";
+
+  const closeNaming = () => { setNaming(false); setName(""); setErr(null); setBusy(false); setDest(""); };
   const submitName = async () => {
     const trimmed = name.trim();
     if (!trimmed || busy) return;
@@ -88,7 +112,7 @@ export function LibraryBrowserBar({
     // shelf was missing: its create swallowed every error, so a refused name
     // and a broken command looked identical, and both looked like nothing
     // happening.
-    const refusal = await onNewFolder?.(trimmed);
+    const refusal = await onNewFolder?.(trimmed, chosen);
     if (typeof refusal === "string" && refusal) { setErr(refusal); setBusy(false); return; }
     closeNaming();
   };
