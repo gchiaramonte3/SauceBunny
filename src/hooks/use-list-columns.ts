@@ -31,12 +31,22 @@ import type React from "react";
  */
 const COL_MIN = 48;
 const COL_MAX = 240;
+/* Name gets its own bounds. COL_MAX is 240, which is a sensible ceiling for
+   "Size" and a silly one for a filename: the library is full of names like
+   `Ex-Oil-Engineer-Turned-Climate-Whistleblower_-We-Face-COLLAPSE...mp4`, and
+   a column that cannot pass 240px can never show one. The floor matches the
+   auto-mode floor so the column behaves the same whichever mode it is in. */
+const NAME_MIN = 150;
+const NAME_MAX = 900;
 
 /** What is persisted. v1 was the bare width map; it still parses. */
 type Stored<K extends string> = {
   w?: Partial<Record<K, number>>;
   order?: K[];
   hidden?: K[];
+  /** The Name column's explicit width, or absent for "size to the pane".
+   *  Absent is the default and the state every install starts in. */
+  name?: number | null;
 };
 
 export function useListColumns<K extends string>(
@@ -58,7 +68,11 @@ export function useListColumns<K extends string>(
      overflow-y, which per CSS makes overflow-x compute to auto, and the
      header renders inside that same scroller - so the columns scroll together
      rather than the header sliding out of register with its rows. */
-  leadingTracks = "34px minmax(150px, 1fr)",
+  /* Only the ART well is a caller's business now. The name track used to be
+     baked into this string, which is exactly why Name could not be resized:
+     a literal `minmax(150px, 1fr)` has no width to change. The hook builds it
+     from state instead. */
+  artTrack = "34px",
 ): {
   cols: Record<K, number>;
   /** Every optional column, in display order, including hidden ones. */
@@ -82,6 +96,23 @@ export function useListColumns<K extends string>(
   /** The bounds, so a divider can report aria-valuemin / aria-valuemax
    *  without re-typing numbers this hook owns. */
   bounds: { min: number; max: number };
+  /** The Name column's explicit width, or null while it sizes to the pane. */
+  nameWidth: number | null;
+  dragName: boolean;
+  /** Grab the divider on Name's right edge. Takes the event so it can measure
+   *  what the browser is currently giving the column - in auto mode there is
+   *  no stored width to start the drag from, and starting from a guess makes
+   *  the column jump under the pointer on the first pixel of movement. */
+  startNameDrag: (e: React.MouseEvent) => void;
+  /** `host` is the header cell, so the keyboard path can measure a column
+   *  that has no stored width yet. Optional: a caller that knows the width
+   *  does not need it. */
+  nudgeName: (delta: number, host?: HTMLElement | null) => void;
+  /** Back to sizing with the pane. Finder resets a column on a double-click
+   *  of its divider, and without a way back an explicit width is a one-way
+   *  door. */
+  resetName: () => void;
+  nameBounds: { min: number; max: number };
 } {
   const keys = Object.keys(defaults) as K[];
 
@@ -89,10 +120,11 @@ export function useListColumns<K extends string>(
      with three lazy initialisers and the same JSON gets parsed three times on
      every mount, and the three can disagree about whether the value was
      usable. */
-  const [state, setState] = useState<{ w: Record<K, number>; order: K[]; hidden: K[] }>(() => {
+  const [state, setState] = useState<{ w: Record<K, number>; order: K[]; hidden: K[]; name: number | null }>(() => {
     const w = { ...defaults } as Record<K, number>;
     let order = [...keys];
     let hidden: K[] = [];
+    let name: number | null = null;
     try {
       const raw: unknown = JSON.parse(localStorage.getItem(storageKey) ?? "null");
       if (raw && typeof raw === "object") {
@@ -118,18 +150,21 @@ export function useListColumns<K extends string>(
           // Never restore a state with nothing visible; see toggleCol.
           if (hidden.length >= keys.length) hidden = [];
         }
+        // Same rule as the column widths: a value this build would not have
+        // written is treated as absent rather than clamped into range.
+        if (typeof r.name === "number" && r.name >= NAME_MIN && r.name <= NAME_MAX) name = r.name;
       }
     } catch { /* mangled value costs the defaults, not a crash */ }
-    return { w, order, hidden };
+    return { w, order, hidden, name };
   });
 
-  const { w: cols, order, hidden } = state;
+  const { w: cols, order, hidden, name: nameWidth } = state;
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey, JSON.stringify({ w: cols, order, hidden } satisfies Stored<K>));
+      localStorage.setItem(storageKey, JSON.stringify({ w: cols, order, hidden, name: nameWidth } satisfies Stored<K>));
     } catch { /* quota */ }
-  }, [storageKey, cols, order, hidden]);
+  }, [storageKey, cols, order, hidden, nameWidth]);
 
   const visible = order.filter((k) => !hidden.includes(k));
   const isVisible = (key: K) => !hidden.includes(key);
@@ -162,7 +197,18 @@ export function useListColumns<K extends string>(
   /* The ONE definition of the track list. The header and every row read it,
      so a hidden column cannot leave its width reserved and a reorder cannot
      move the header without the cells. */
-  const template = [leadingTracks, ...visible.map((k) => `${cols[k]}px`)].join(" ");
+  const nameTrack = nameWidth == null ? `minmax(${NAME_MIN}px, 1fr)` : `${nameWidth}px`;
+  const tracks = [artTrack, nameTrack, ...visible.map((k) => `${cols[k]}px`)];
+  /* With an explicit Name width, NO track flexes any more - so without this
+     the row would stop wherever the columns happen to end and leave a bare
+     strip down the right of the pane where the hover and selection fills do
+     not reach. A trailing filler absorbs the slack when the pane is wider than
+     the columns, and collapses to nothing when it is narrower, which is what
+     lets the pane scroll sideways instead of squashing. Nothing is placed into
+     it: the row's cells are auto-placed in order and there is no cell left by
+     the time this track comes round. */
+  if (nameWidth != null) tracks.push("minmax(0, 1fr)");
+  const template = tracks.join(" ");
 
 
   const [dragCol, setDragCol] = useState<K | null>(null);
@@ -205,8 +251,59 @@ export function useListColumns<K extends string>(
     setCols((c) => ({ ...c, [key]: Math.max(COL_MIN, Math.min(COL_MAX, c[key] + delta)) }));
   };
 
+  const [dragName, setDragName] = useState(false);
+
+  /**
+   * Resize Name itself, which Finder allows and this did not.
+   *
+   * Name was the flexible track with its width written into a literal, so
+   * there was no number to change and no divider to grab: it could only be
+   * resized INDIRECTLY, by making some other column wider and letting Name
+   * absorb the loss. That is backwards, and it is why dragging Size felt like
+   * it was resizing the wrong column.
+   *
+   * The start width is MEASURED rather than assumed. In auto mode there is no
+   * stored width, so beginning the drag from a constant would snap the column
+   * to that constant on the first pixel of movement - a jump under the
+   * pointer, which is the specific thing that makes a resize feel broken.
+   */
+  const startNameDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const host = (e.currentTarget as HTMLElement).parentElement;
+    const startW = nameWidth ?? (host ? Math.round(host.getBoundingClientRect().width) : NAME_MIN);
+    const startX = e.clientX;
+    setDragName(true);
+    document.body.classList.add("cp-resizing-ew");
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.max(NAME_MIN, Math.min(NAME_MAX, startW + (ev.clientX - startX)));
+      setState((st) => ({ ...st, name: next }));
+    };
+    const onUp = () => {
+      setDragName(false);
+      document.body.classList.remove("cp-resizing-ew");
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  /** The keyboard path, and it measures for the same reason the drag does: an
+   *  arrow key pressed while Name is sizing to the pane must nudge the width
+   *  the user can SEE, not collapse a 600px column to the floor. */
+  const nudgeName = (delta: number, host?: HTMLElement | null) => {
+    const base = nameWidth ?? (host ? Math.round(host.getBoundingClientRect().width) : NAME_MIN);
+    const next = Math.max(NAME_MIN, Math.min(NAME_MAX, base + delta));
+    setState((st) => ({ ...st, name: next }));
+  };
+
+  const resetName = () => setState((st) => ({ ...st, name: null }));
+
   return {
     cols, order, visible, isVisible, toggleCol, moveCol, template,
     dragCol, startColDrag, nudgeCol, bounds: { min: COL_MIN, max: COL_MAX },
+    nameWidth, dragName, startNameDrag, nudgeName, resetName,
+    nameBounds: { min: NAME_MIN, max: NAME_MAX },
   };
 }

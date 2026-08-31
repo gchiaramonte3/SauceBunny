@@ -3,7 +3,7 @@ import { formatBytes } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { siteName, type CachedWebItem } from "../lib/web-source";
 import { secondsToClock } from "../lib/timecode";
-import { SortHeader } from "./LibraryBrowserPane";
+import { NameHeader } from "./ListColumnHeaders";
 import { IconCircleX, IconDownload, IconLink } from "./Icons";
 import { ListColumnHeaders } from "./ListColumnHeaders";
 import type { ColSpec } from "./ListColumnHeaders";
@@ -78,7 +78,7 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
     >
       <div className="cp-lib-list-head" onContextMenu={(e) => e.preventDefault()}>
         <span className="cp-lib-lrow-art" aria-hidden="true" />
-        <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort} />
+        <NameHeader sort={sort} dir={dir} onSort={onSort} model={colModel} />
         <ListColumnHeaders specs={WEB_COL_SPECS} model={colModel} sort={sort} dir={dir} onSort={onSort} />
       </div>
       {items.map((it) => {

@@ -10,7 +10,7 @@ import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { useRovingGrid } from "../hooks/use-roving-grid";
 import { useMarquee } from "../hooks/use-marquee";
 import type { LibraryFolder, LibraryItem } from "../types";
-import { ListColumnHeaders } from "./ListColumnHeaders";
+import { ListColumnHeaders, NameHeader } from "./ListColumnHeaders";
 import type { ColSpec } from "./ListColumnHeaders";
 import type { LibColKey } from "../lib/library";
 
@@ -308,7 +308,7 @@ export function LibraryBrowserPane({
             a plain label rather than pretending. */}
         <div className="cp-lib-list-head" onContextMenu={(e) => e.preventDefault()}>
           <span className="cp-lib-lrow-art" aria-hidden="true" />
-          <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort} />
+          <NameHeader sort={sort} dir={dir} onSort={onSort} model={colModel} />
           {/* Every other column: sortable, resizable, dragged to reorder,
               and hideable from a right-click menu. Name stays outside because
               it is the 1fr track and, as in Finder, cannot be moved or turned
@@ -395,7 +395,7 @@ export function LibraryBrowserPane({
  * clamp lives in the hook so the keyboard and the mouse cannot stop at
  * different widths.
  */
-export function ColDivider({ onDown, active, label, value, min, max, onNudge }: {
+export function ColDivider({ onDown, active, label, value, min, max, onNudge, onReset }: {
   onDown: (e: React.MouseEvent) => void;
   active: boolean;
   /** Which column, so the name is not three identical "Resize column"s. */
@@ -403,7 +403,14 @@ export function ColDivider({ onDown, active, label, value, min, max, onNudge }: 
   value?: number;
   min?: number;
   max?: number;
-  onNudge?: (delta: number) => void;
+  /** `host` is the header cell this divider sits in. The Name column has no
+   *  stored width while it sizes to the pane, so its keyboard path has to
+   *  measure what is on screen; passing the element is how it can. Callers
+   *  that already know their width ignore the second argument. */
+  onNudge?: (delta: number, host: HTMLElement | null) => void;
+  /** Double-click to give the column back to the layout. Finder does this;
+   *  without it, setting an explicit width is a one-way door. */
+  onReset?: () => void;
 }) {
   const step = 8;
   return (
@@ -423,13 +430,19 @@ export function ColDivider({ onDown, active, label, value, min, max, onNudge }: 
       onMouseDown={onDown}
       onKeyDown={onNudge && ((e) => {
         const big = e.shiftKey ? 3 : 1;
-        if (e.key === "ArrowLeft") { e.preventDefault(); onNudge(-step * big); }
-        else if (e.key === "ArrowRight") { e.preventDefault(); onNudge(step * big); }
+        const host = e.currentTarget.parentElement;
+        if (e.key === "ArrowLeft") { e.preventDefault(); onNudge(-step * big, host); }
+        else if (e.key === "ArrowRight") { e.preventDefault(); onNudge(step * big, host); }
         // Home/End are the splitter idiom for "as small / as large as it goes".
         // A large delta is enough because the hook clamps.
-        else if (e.key === "Home") { e.preventDefault(); onNudge(-9999); }
-        else if (e.key === "End") { e.preventDefault(); onNudge(9999); }
+        else if (e.key === "Home") { e.preventDefault(); onNudge(-9999, host); }
+        else if (e.key === "End") { e.preventDefault(); onNudge(9999, host); }
+        // The keyboard equivalent of the double-click below.
+        else if (onReset && (e.key === "Backspace" || e.key === "Delete")) {
+          e.preventDefault(); onReset();
+        }
       })}
+      onDoubleClick={onReset && ((e) => { e.preventDefault(); e.stopPropagation(); onReset(); })}
       // The header cell is a sort BUTTON; without this the divider's click
       // bubbles into it and every resize also re-sorts the table.
       onClick={(e) => e.stopPropagation()}

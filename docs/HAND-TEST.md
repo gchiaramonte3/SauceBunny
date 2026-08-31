@@ -531,6 +531,41 @@ on the right made the filenames on the left disappear.
 **Known gap, deliberately not fixed here:** Name cannot be resized directly.
 It is the flexible track and has no divider of its own, unlike Finder's.
 
+### Build 2026083103 additions
+
+**The Name column resizes.** It is the one Finder property the list view got
+wrong, and it was wrong invisibly: Name was the flexible track with its width
+written into a string literal, so there was no number to change and no divider
+to grab. The only way to affect it was to widen some OTHER column and let Name
+absorb the loss, which is why dragging Size felt like it resized the wrong
+thing.
+
+- [ ] In list view, hover the right edge of the **Name** header. There is a
+      divider there now, like every other column has.
+- [ ] Drag it. Name should follow the pointer with no jump on the first pixel.
+      The jump is the specific thing to watch for: in its default state Name
+      has no stored width, so a drag that started from a guess would snap the
+      column before moving it.
+- [ ] Drag it wide, past where the other columns fit. The list should scroll
+      sideways, and the header should scroll WITH its rows rather than sliding
+      out of register.
+- [ ] **Double-click the divider.** Name goes back to sizing itself to the
+      pane. Without this, setting a width would be a one-way door.
+- [ ] Quit and relaunch. The width you set is still there. (This one had a
+      real bug: the width was computed and never persisted, so it reset on
+      every launch. Nothing on screen would have told you.)
+- [ ] Focus the divider with Tab and press the arrow keys. Same widths as the
+      mouse gives, and Backspace resets it.
+- [ ] Check the **web** and **frames** shelves too. All three lists share one
+      Name header now; before this each had its own copy, which is why none of
+      them had a divider.
+
+**What a regression looks like:** the column jumps to a narrow width the
+instant you start dragging, or the width is forgotten on relaunch.
+
+---
+
+
 ---
 
 

@@ -27,10 +27,12 @@ describe("persisted list columns", () => {
   it("starts at the defaults and writes them through", () => {
     render(<Probe />);
     expect(seen?.cols).toEqual(DEFAULTS);
-    // The stored shape is {w, order, hidden} now. v1 wrote the bare width
-    // map and is still READ, which the migration test below covers.
+    // The stored shape is {w, order, hidden, name} now. v1 wrote the bare
+    // width map and is still READ, which the migration test below covers.
+    // `name` is null until the Name column is given an explicit width, which
+    // is the state every install starts in.
     expect(JSON.parse(localStorage.getItem(KEY) ?? "null")).toEqual({
-      w: DEFAULTS, order: Object.keys(DEFAULTS), hidden: [],
+      w: DEFAULTS, order: Object.keys(DEFAULTS), hidden: [], name: null,
     });
   });
 
@@ -166,5 +168,83 @@ describe("persisted list columns", () => {
     const after = seen?.cols.size;
     act(() => { document.dispatchEvent(new MouseEvent("mousemove", { clientX: 500 })); });
     expect(seen?.cols.size).toBe(after);
+  });
+});
+
+describe("the Name column resizes too", () => {
+  /**
+   * Name was the flexible track with its width written into a string literal,
+   * so it was the one column Finder lets you resize and this did not: there
+   * was no number to change and no divider to grab. The only way to affect it
+   * was to widen a DIFFERENT column and let Name absorb the loss, which is
+   * backwards and is why dragging Size felt like it resized the wrong thing.
+   */
+
+  it("sizes to the pane until it is told otherwise", () => {
+    render(<Probe />);
+    expect(seen?.nameWidth).toBe(null);
+    expect(seen?.template).toContain("minmax(150px, 1fr)");
+    // Nothing trails it: Name IS the flexible track in this mode, so a filler
+    // would be a second one and the two would split the slack.
+    expect(seen?.template).not.toContain("minmax(0, 1fr)");
+  });
+
+  it("takes an explicit width, and grows a filler behind it", () => {
+    render(<Probe />);
+    act(() => seen?.nudgeName(50));
+    expect(seen?.nameWidth).toBe(200);
+    expect(seen?.template).toContain("200px");
+    expect(seen?.template).not.toContain("1fr) 120px");
+    // With Name fixed, NO track flexes - so without a filler the row would
+    // end where the columns end and leave a dead strip down the pane where
+    // hover and selection do not paint.
+    expect(seen?.template?.endsWith("minmax(0, 1fr)")).toBe(true);
+  });
+
+  it("gives the column back to the layout", () => {
+    render(<Probe />);
+    act(() => seen?.nudgeName(50));
+    expect(seen?.nameWidth).toBe(200);
+    act(() => seen?.resetName());
+    expect(seen?.nameWidth).toBe(null);
+    expect(seen?.template).toContain("minmax(150px, 1fr)");
+  });
+
+  it("clamps to its own bounds, not the other columns'", () => {
+    render(<Probe />);
+    // COL_MAX is 240, which is right for "Size" and absurd for a filename -
+    // the library is full of names no 240px column could ever show.
+    act(() => seen?.nudgeName(9999));
+    expect(seen?.nameWidth).toBe(900);
+    act(() => seen?.nudgeName(-9999));
+    expect(seen?.nameWidth).toBe(150);
+  });
+
+  it("measures the rendered width when there is none stored", () => {
+    render(<Probe />);
+    // The reason the drag and the keyboard both take the host element: in
+    // auto mode there is no stored width, so starting from a constant would
+    // snap a 600px column to the floor on the first arrow key.
+    const host = { getBoundingClientRect: () => ({ width: 612 }) } as HTMLElement;
+    act(() => seen?.nudgeName(8, host));
+    expect(seen?.nameWidth).toBe(620);
+  });
+
+  it("survives a remount", () => {
+    render(<Probe />);
+    act(() => seen?.nudgeName(100));
+    expect(seen?.nameWidth).toBe(250);
+    cleanup();
+    render(<Probe />);
+    expect(seen?.nameWidth).toBe(250);
+    expect(seen?.template).toContain("250px");
+  });
+
+  it("ignores a stored width this build would never have written", () => {
+    // Same rule the column widths follow: honouring an out-of-range value is
+    // guessing at intent, so it falls back to sizing with the pane.
+    localStorage.setItem(KEY, JSON.stringify({ w: DEFAULTS, order: Object.keys(DEFAULTS), hidden: [], name: 5000 }));
+    render(<Probe />);
+    expect(seen?.nameWidth).toBe(null);
   });
 });

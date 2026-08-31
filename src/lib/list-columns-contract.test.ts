@@ -55,6 +55,22 @@ describe("list columns", () => {
     }
   });
 
+  it("every one gets its Name header from the shared component", () => {
+    // Name is resizable now, and the reason it was not for so long is exactly
+    // what this forbids: all three lists wrote their own bare
+    // `<SortHeader label="Name">`, so giving Name a divider would have meant
+    // making the same change in three files, and it was made in none.
+    //
+    // A fourth list that hand-writes this header gets a Name column that
+    // silently cannot be resized, which looks like the feature not existing
+    // rather than like a bug.
+    for (const [name, src] of heads) {
+      expect(src, `${name} builds its own Name header`).toContain("<NameHeader");
+      expect(src, `${name} still hand-writes a Name SortHeader`)
+        .not.toMatch(/<SortHeader[^>]*label="Name"/);
+    }
+  });
+
   it("none places a resize divider by hand any more", () => {
     // A ColDivider outside ListColumnHeaders is a header cell resizing a
     // column the model does not know it owns -- which is how the divider

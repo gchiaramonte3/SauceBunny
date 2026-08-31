@@ -3,7 +3,7 @@ import { formatBytes } from "../lib/library";
 import type { LibrarySortDir, LibrarySortKey } from "../lib/library";
 import { formatFrameTimecode, type FrameItem } from "../lib/frames";
 import { assetUrl } from "../lib/asset-url";
-import { SortHeader } from "./LibraryBrowserPane";
+import { NameHeader } from "./ListColumnHeaders";
 import { ListColumnHeaders } from "./ListColumnHeaders";
 import type { ColSpec } from "./ListColumnHeaders";
 import { IconCircleX } from "./Icons";
@@ -71,7 +71,7 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
     >
       <div className="cp-lib-list-head" onContextMenu={(e) => e.preventDefault()}>
         <span className="cp-lib-lrow-art" aria-hidden="true" />
-        <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort} />
+        <NameHeader sort={sort} dir={dir} onSort={onSort} model={colModel} />
         <ListColumnHeaders specs={FRAME_COL_SPECS} model={colModel} sort={sort} dir={dir} onSort={onSort} />
       </div>
       {items.map((it) => {

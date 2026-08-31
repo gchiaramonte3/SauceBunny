@@ -27,8 +27,11 @@ import { IconCheck } from "./Icons";
  *     to the right of the grab point - the opposite of Finder, and the
  *     opposite of what the hand expects.
  *
- *   · Name is not in here. It is the 1fr track, it cannot be hidden and it
- *     cannot be moved out of first place, which is also true in Finder.
+ *   · Name is not one of the movable `specs`: it cannot be hidden and cannot
+ *     be moved out of first place, which is also true in Finder. It IS
+ *     resizable, via NameHeader below - that was the one of the three Finder
+ *     properties this got wrong, and it was wrong because Name's width lived
+ *     in a string literal with no number to change.
  */
 
 export type ColSpec<K extends string> = {
@@ -55,6 +58,49 @@ export type ColumnModel<K extends string> = {
   nudgeCol: (key: K, delta: number) => void;
   bounds: { min: number; max: number };
 };
+
+/**
+ * The Name column's header, and the divider that finally makes it resizable.
+ *
+ * ONE component rather than the same lines pasted into three list views. The
+ * library, the cached-web shelf and the frames shelf each rendered their own
+ * bare `<SortHeader label="Name">`, and that duplication is precisely why Name
+ * had no divider in any of them: a fix would have had to be made three times
+ * and was made none.
+ *
+ * Name is still not reorderable and still cannot be hidden, which matches
+ * Finder. Resizable is the only one of the three it was wrong about.
+ */
+export function NameHeader({ sort, dir, onSort, model }: {
+  sort: LibrarySortKey;
+  dir: LibrarySortDir;
+  onSort: (key: LibrarySortKey) => void;
+  model: {
+    nameWidth: number | null;
+    dragName: boolean;
+    startNameDrag: (e: React.MouseEvent) => void;
+    nudgeName: (delta: number, host?: HTMLElement | null) => void;
+    resetName: () => void;
+    nameBounds: { min: number; max: number };
+  };
+}) {
+  return (
+    <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort}>
+      <ColDivider
+        onDown={model.startNameDrag}
+        active={model.dragName}
+        label="Name"
+        // undefined while the column sizes to the pane: there is no width to
+        // report, and reporting a made-up one would be worse than silence.
+        value={model.nameWidth ?? undefined}
+        min={model.nameBounds.min}
+        max={model.nameBounds.max}
+        onNudge={(d, host) => model.nudgeName(d, host)}
+        onReset={model.resetName}
+      />
+    </SortHeader>
+  );
+}
 
 export function ListColumnHeaders<K extends string>({
   specs, model, sort, dir, onSort,
