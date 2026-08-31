@@ -10,6 +10,50 @@ or released, so everything below is unreleased and sits on top of `v0.4.3`.
 The build in your hands is identified by its CFBundleVersion, shown in
 Settings ▸ About.
 
+Since build `2026082903`: **review links**, a Finder-style library list, and
+a library tree whose chevrons had never actually worked.
+
+### Added
+- **Review links.** A link you issue to one named person, which opens the
+  review in their copy of the app. The name on their notes is the one YOU
+  typed, so a forwarded link cannot sign someone else's comments, and each
+  link can be withdrawn on its own without touching the others. Withdrawing
+  one also disconnects whoever is holding it, rather than taking effect at
+  their next visit.
+- **Invite only.** Off by default, because the lobby's join code is a
+  different door. Turned on, a connection with no link is turned away.
+- **A join code that survives a relaunch.** The host's identity was
+  regenerated on every launch, so a code shared on Monday was undialable on
+  Tuesday for a reason nobody could see. It now lives in the Keychain.
+- **Notes written while the link is down are kept**, shown as waiting, and
+  sent when it comes back, instead of dying with the session.
+- **A Finder-style library list.** Columns you can resize, reorder and hide,
+  a right-click menu on the header to choose which ones show, and
+  alternating rows.
+- **Remove from Library**, which is not Move to Trash. It takes the item out
+  of the app and leaves the file where it is.
+- **Folders wear their Finder colour** across every library surface, and can
+  be given one from inside the app.
+- The About panel credits **mediabunny**, which it had never named.
+
+### Fixed
+- **The library tree's chevrons had never worked.** Rows were keyed one way
+  and the expanded set another, so clicking a chevron did nothing at all.
+  The same mismatch was breaking the selection highlight, the drop target,
+  the right-click menu and folder colours.
+- **A guest's notes were filed under a key nothing read back**, so they were
+  written and then invisible.
+- **A note that arrived before the review did was dropped silently**, which
+  the outbox made worse: the sender's copy clears on send, so the note went
+  from both machines with no log on either.
+- **Canvas notices stacked on top of each other.** They now share one lane.
+- **"Your device is off" was three different colours**, one of them at
+  1.85:1 against its own tile.
+- **The waiting stage covered the whole page** instead of being a card.
+- The nav rail's "you are here" edge is the logo green again.
+- Toggles animate what actually moves, rather than every property at once.
+- A marked range you removed from the queue comes back.
+
 `0.4.8` adds the first-run permissions step and fixes a paused-playback
 regression, a library duplication bug, and the app's missing select style.
 
