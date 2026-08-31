@@ -32,12 +32,21 @@ function when(ms: bigint | null): string {
   return `used ${days} days ago`;
 }
 
-export function ReviewGrants({ code }: {
-  /** The current join code, which the link is built around. Null when no
-   *  session is running: a link is useless without one, and saying so beats
-   *  handing someone a link that cannot work. */
-  code: string | null;
+export function ReviewGrants({ sessionCode }: {
+  /** The LIVE session's code, or null when nothing is running. Used only to
+   *  say whether the link is reachable right now - the link itself no longer
+   *  depends on it. */
+  sessionCode: string | null;
 }) {
+  /* The code is a pure function of this Mac's persisted key, so it can be
+     minted without starting anything. Until review_code existed, a host could
+     not copy a link without first opening a session for nobody - which is the
+     wrong shape for a feature whose whole point is reaching someone who is not
+     in the room yet. */
+  const [code, setCode] = useState<string | null>(null);
+  useEffect(() => {
+    void invoke<string>("review_code").then(setCode).catch(() => setCode(null));
+  }, []);
   const [grants, setGrants] = useState<GrantSummary[] | null>(null);
   const [label, setLabel] = useState("");
   const [invitedOnly, setInvitedOnly] = useState(false);
@@ -47,8 +56,16 @@ export function ReviewGrants({ code }: {
 
   const refresh = useCallback(async () => {
     try {
-      setGrants(await invoke<GrantSummary[]>("list_review_grants"));
-      setInvitedOnly(await invoke<boolean>("review_invited_only"));
+      /* Checked, not trusted. `invoke<T>` is an assertion about what the
+         backend returns, not a guarantee, and this panel is mounted inside the
+         lobby: a command answering with an unexpected shape took the whole
+         lobby down with "(grants ?? []).filter is not a function", which is a
+         blank screen for a feature the user was not even using. An empty list
+         is the right answer to a reply we cannot read. */
+      const list = await invoke<GrantSummary[]>("list_review_grants");
+      setGrants(Array.isArray(list) ? list : []);
+      const only = await invoke<boolean>("review_invited_only");
+      setInvitedOnly(only === true);
     } catch (e) { setError(formatError(e)); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
@@ -119,13 +136,16 @@ export function ReviewGrants({ code }: {
           <p className="cp-grants-made-line">
             Link for <strong>{justMade.label}</strong>. This is the only time it can be copied.
           </p>
-          {code ? (
-            <button type="button" className="btn btn-ghost" onClick={() => void copyLink(justMade.secret)}>
-              {copied ? "Copied" : "Copy link"}
-            </button>
-          ) : (
+          <button type="button" className="btn btn-ghost" disabled={!code} onClick={() => void copyLink(justMade.secret)}>
+            {copied ? "Copied" : "Copy link"}
+          </button>
+          {/* Having a link and being reachable are different things, and the
+              panel must not let one imply the other. A code names this Mac;
+              answering still needs something listening. */}
+          {!sessionCode && (
             <p className="cp-grants-made-line">
-              Start a session and the link will work. It is saved either way.
+              Send it whenever. It only opens while Sauce Bunny is running here and you are
+              in a session.
             </p>
           )}
         </div>

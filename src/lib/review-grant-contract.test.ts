@@ -102,4 +102,20 @@ describe("review grants", () => {
     expect(fn, "it closes a stream rather than the connection").toContain("c.close(");
     expect(fn, "the roster is not told who is left").toContain("broadcast_peer_list");
   });
+
+  it("a link can be issued without starting a session", () => {
+    // A grant is for someone who is NOT in the room yet, so requiring a live
+    // session to copy one had the shape backwards: you would start a call for
+    // nobody in order to invite somebody. review_code mints from the persisted
+    // key with no bind, so the panel works idle.
+    expect(SESSION, "review_code is gone").toContain("pub async fn review_code()");
+    const fn = SESSION.slice(SESSION.indexOf("pub async fn review_code()"), SESSION.indexOf("pub async fn review_code()") + 400);
+    expect(fn, "review_code binds an endpoint, which is the thing it exists to avoid")
+      .not.toContain("Endpoint::builder");
+    expect(fn, "it does not mint from the persisted key").toContain("host_key()");
+
+    const panel = readFileSync(join(ROOT, "src/components/ReviewGrants.tsx"), "utf8");
+    expect(panel, "the panel still takes the code from a live session").toContain('invoke<string>("review_code")');
+  });
+
 });

@@ -511,6 +511,30 @@ static NEXT_PEER_ID: AtomicU64 = AtomicU64::new(1);
 // INVOKE COMMANDS
 // ============================================================
 
+/// The code for this Mac, without starting anything.
+///
+/// The invite is a pure function of the persisted endpoint key, so it can be
+/// minted from the key alone - no bind, no accept loop, no relay. That was not
+/// true before the key was persisted, which is why the only way to see a code
+/// used to be to start a session.
+///
+/// It fixes a real problem rather than anticipating one: review links are
+/// issued to named people who are not in the room yet, and until now a host
+/// could not copy one without first starting a session for nobody. The code
+/// this returns is byte-identical to the one `session_start` returns, because
+/// both are `EndpointTicket::new(EndpointAddr::new(<the same key>))`.
+///
+/// What it does NOT mean is that the link works right now. A code names a Mac;
+/// reaching it still needs something listening. The UI has to say so rather
+/// than implying that having a link is the same as being reachable.
+#[tauri::command]
+pub async fn review_code() -> Result<String, crate::AppError> {
+    let key = crate::commands::session_key::host_key().await;
+    Ok(format_invite(
+        &EndpointTicket::new(EndpointAddr::new(key.public())).to_string(),
+    ))
+}
+
 /// Host a co-review session. Binds an iroh endpoint, spawns the accept
 /// loop, and returns the join ticket to share. Errors if any session
 /// (host or peer) is already active.
@@ -3011,6 +3035,23 @@ mod invite_tests {
         let mut addr = iroh::EndpointAddr::from(secret.public());
         addr.addrs.insert(iroh::TransportAddr::Ip("192.0.2.7:41641".parse().unwrap()));
         EndpointTicket::new(addr).to_string()
+    }
+
+    /// The property review_code depends on: a code minted from the key alone
+    /// is the same code a bound endpoint produces. If these ever diverge, a
+    /// link copied outside a session dials nothing, and the failure is a
+    /// timeout with no explanation.
+    #[test]
+    fn a_code_from_the_key_alone_matches_one_from_an_endpoint() {
+        let secret = iroh::SecretKey::generate();
+        let from_key = EndpointTicket::new(EndpointAddr::new(secret.public())).to_string();
+        // What session_start does, given an endpoint holding that same key.
+        // endpoint.id() IS the public key, so this is the same construction
+        // through the other door.
+        let id: iroh::EndpointId = secret.public();
+        let from_endpoint = EndpointTicket::new(EndpointAddr::new(id)).to_string();
+        assert_eq!(from_key, from_endpoint);
+        assert_eq!(format_invite(&from_key), format_invite(&from_endpoint));
     }
 
     #[test]

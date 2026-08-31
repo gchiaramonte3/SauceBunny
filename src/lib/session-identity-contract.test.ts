@@ -67,7 +67,10 @@ describe("co-review identity", () => {
     expect(SESSION).toContain("pub async fn session_start(");
     expect(SESSION).toContain("pub async fn session_join(");
     // Exactly two in production: the host's and the guest's. A third would
-    // mean an endpoint nothing here checks the identity policy of.
+    // mean an endpoint nothing here checks the identity policy of. Note
+    // review_code deliberately adds none - it mints the code from the key
+    // without binding, which is the whole reason a link can be issued before
+    // a session exists.
     expect((SESSION.match(/Endpoint::builder\(/g) ?? []).length).toBe(2);
     // And prove the test-module strip cut tests rather than production: the
     // slice must have removed something AND kept the functions under test.

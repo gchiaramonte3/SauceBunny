@@ -328,6 +328,14 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                 )}
 
 
+                {/* Links issued to named people, available BEFORE a session.
+                    A grant is for someone who is not in the room yet, so
+                    requiring a running session to copy one had the shape
+                    exactly backwards: you would start a call for nobody in
+                    order to invite somebody. review_code mints the code from
+                    the persisted key, so this works idle. */}
+                <ReviewGrants sessionCode={session.code} />
+
                 <section className="cp-colobby-card">
                   <h2 className="cp-colobby-card-title">Join</h2>
                   <label className="cp-colobby-field">
@@ -388,7 +396,7 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
             {/* Links issued to named people. Below the shared code because it
                 is the other door: the code is for whoever is in the call, a
                 grant is for one person who can be named and removed. */}
-            {isHost && <ReviewGrants code={session.code} />}
+            {isHost && <ReviewGrants sessionCode={session.code} />}
 
             <ul className="cp-colobby-people" aria-label={`In the room: ${participants.length}`}>
               {participants.map((p, i) => (
