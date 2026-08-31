@@ -31,7 +31,7 @@
     "lint": "eslint src e2e --max-warnings 0",
     "verify:packaged": "bash scripts/verify-packaged.sh",
     "verify": "bash scripts/verify-all.sh",
-    "build:dmg": "bash scripts/detach-stale-dmg.sh && bash scripts/set-version.sh && tauri build && bash scripts/archive-dmg.sh",
+    "build:dmg": "bash scripts/detach-stale-dmg.sh && bash scripts/set-version.sh && tauri build && { bash scripts/archive-dmg.sh || echo \"⚠ the build succeeded but archiving failed; the DMG is only in the build tree\"; }",
     "release:dmg": "bash scripts/release-dmg.sh",
     "check:licenses": "bash scripts/check-licenses.sh",
     "check:changelog": "bash scripts/check-changelog.sh",
