@@ -47,6 +47,15 @@ import { join, resolve } from "node:path";
  *   · THE GENERATIVE MARK - the sparkle on the left of the Generate button.
  *     The brand-mark category above already covers the loader and the welcome
  *     glow; this is the same thing on the one control that makes something.
+ *   · WAYFINDING ON THE RAIL - the "you are here" edge beside the active nav
+ *     item. Added 2026-08-30, at the user's direction, and it is the one
+ *     entry here that does NOT fit the rule as stated: it is selection, which
+ *     everything above deliberately excludes. It is listed anyway rather than
+ *     smuggled in, because the de-greening left the rail carrying the green
+ *     bunny mark with no green anywhere below it, and --accent being a
+ *     neutral meant the edge rendered #F5F5F5. One mark on one piece of brand
+ *     furniture, not a licence for selected rows generally.
+ *
  *   · AN UNREAD NOTIFICATION - the bell's dot. Its own comment argued green
  *     was wrong because "there is something here is a count, not a verdict".
  *     That is consistent and it ignores what actually notifies in this app: a
@@ -90,7 +99,7 @@ const ALLOWED: Record<string, string[]> = {
   //    often than not, which is the outcome category this file already keeps.
   // ── live broadcast ─────────────────────────────────────────────────
   "room.css": ["cp-room-live"],
-  "nav.css": ["cp-nav-badge"],
+  "nav.css": ["cp-nav-badge", "cp-nav-item"],
   // ── outcome + live, in one file ────────────────────────────────────
   "coreview.css": ["cp-colobby-live", "cp-colobby-code-hint", "cp-gr-meter-bar"],
   // ── the brand mark, which is not system chrome ─────────────────────
