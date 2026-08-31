@@ -31,12 +31,20 @@ import { join } from "node:path";
 
 const ROOT = join(__dirname, "../..");
 
-/** Rust source with comments stripped, so this file's own prose and the
- *  explanatory comments beside the code cannot satisfy a check. */
+/** PRODUCTION Rust, with comments and `#[cfg(test)]` modules stripped.
+ *
+ *  Comments go so this file's own prose, and the explanatory notes beside the
+ *  code, cannot satisfy a check. Test modules go because they legitimately do
+ *  the things this contract forbids in production: a nightly test builds two
+ *  more endpoints to prove an id-only code dials, and counting those broke the
+ *  builder canary the moment it was added. In this file every `#[cfg(test)]`
+ *  module runs to the end of the file, which the caller asserts. */
 function rust(rel: string): string {
-  return readFileSync(join(ROOT, rel), "utf8")
+  const full = readFileSync(join(ROOT, rel), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "");
+  const firstTest = full.indexOf("#[cfg(test)]");
+  return firstTest === -1 ? full : full.slice(0, firstTest);
 }
 
 const SESSION = rust("src-tauri/src/commands/session.rs");
@@ -58,7 +66,15 @@ describe("co-review identity", () => {
     expect(KEYFILE.length).toBeGreaterThan(500);
     expect(SESSION).toContain("pub async fn session_start(");
     expect(SESSION).toContain("pub async fn session_join(");
+    // Exactly two in production: the host's and the guest's. A third would
+    // mean an endpoint nothing here checks the identity policy of.
     expect((SESSION.match(/Endpoint::builder\(/g) ?? []).length).toBe(2);
+    // And prove the test-module strip cut tests rather than production: the
+    // slice must have removed something AND kept the functions under test.
+    const raw = readFileSync(join(ROOT, "src-tauri/src/commands/session.rs"), "utf8");
+    expect(raw.length, "the strip removed nothing, so tests are being scanned")
+      .toBeGreaterThan(SESSION.length);
+    expect(SESSION, "the strip cut into production code").toContain("EndpointTicket::new(");
   });
 
   it("the host binds a persisted key", () => {

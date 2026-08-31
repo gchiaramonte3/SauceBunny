@@ -1,4 +1,11 @@
-//! Shared support for the NIGHTLY real-sidecar smoke tests.
+//! Shared support for the NIGHTLY integration tests.
+//!
+//! The `nightly_*` prefix started as "real sidecar binaries" and now also
+//! covers tests that need something else CI cannot give a per-push job: live
+//! network discovery, and the login Keychain. The prefix is what the workflow
+//! filters on, so a test that needs any of those has to carry it or it runs
+//! nowhere at all - which is exactly what happened to the two co-review
+//! identity tests before they were renamed.
 //!
 //! Per-push CI stubs every sidecar binary, so the riskiest code — the whisper
 //! invocation flags, the ffmpeg playback-prep/fMP4-remux arg surfaces, the

@@ -2871,6 +2871,57 @@ mod invite_tests {
         );
     }
 
+    /// THE CLAIM PHASE 2 RESTS ON, and the one nothing else here proves:
+    /// that a code carrying only a key can actually be dialled.
+    ///
+    /// Every other test in this module is about string handling. They would
+    /// all pass on a build where id-only dialing silently never connects,
+    /// which would mean nobody could join a session at all. An earlier pass
+    /// at this recorded that "NodeId-only dialing is not verifiable on our
+    /// setup without live discovery" and took the address-bearing option
+    /// instead - deferred, not disproven. This is the verification that was
+    /// missing.
+    ///
+    /// Needs the network: both ends publish to and resolve from n0's DNS.
+    #[tokio::test]
+    #[ignore = "nightly: needs live n0 discovery"]
+    async fn nightly_a_key_only_code_actually_dials() {
+        let host = Endpoint::builder(presets::N0)
+            .alpns(vec![ALPN.to_vec()])
+            .bind()
+            .await
+            .expect("host bind");
+        // Publication is what an addr-less dial depends on, so give it the
+        // same bounded wait session_start gives it.
+        let _ = tokio::time::timeout(ONLINE_TIMEOUT, host.online()).await;
+
+        // Exactly what session_start now mints, through the same dress and
+        // parse the user's clipboard puts it through.
+        let code = format_invite(&EndpointTicket::new(EndpointAddr::new(host.id())).to_string());
+        let parsed: EndpointTicket = parse_invite(&code).parse().expect("code parses");
+        let target: EndpointAddr = parsed.into();
+        assert!(target.addrs.is_empty(), "fixture carried addresses, so this proves nothing");
+
+        let accept = tokio::spawn(async move {
+            let incoming = host.accept().await.expect("no inbound connection");
+            incoming.await.expect("handshake")
+        });
+
+        let guest = Endpoint::builder(presets::N0).bind().await.expect("guest bind");
+        let conn = tokio::time::timeout(JOIN_TIMEOUT, guest.connect(target, ALPN))
+            .await
+            .expect("dial timed out: discovery did not resolve the key")
+            .expect("dial failed");
+
+        let served = tokio::time::timeout(JOIN_TIMEOUT, accept).await
+            .expect("accept timed out").expect("accept panicked");
+        assert_eq!(
+            served.remote_id(), guest.id(),
+            "the connection that landed is not the one we dialled",
+        );
+        drop(conn);
+    }
+
     #[test]
     fn a_legacy_addressed_code_still_joins() {
         // Back-compat, in the direction that actually happens: an OLD host
@@ -2982,6 +3033,29 @@ mod invite_tests {
         for junk in ["\u{201c}SAUC-ABCDE\u{201d}", "🐰SAUC-ABCDE", "…", "\u{201c}\u{201d}"] {
             let _ = parse_invite(junk);
         }
+    }
+
+    /// What the two forms actually MEASURE, because the host chip truncates
+    /// at 26 characters and a code that got longer would show less of itself.
+    /// Printed rather than asserted tightly: the addressed length varies with
+    /// how many addresses were advertised, which is the reason the id-only
+    /// form is worth having.
+    #[test]
+    fn the_id_only_code_is_not_longer_than_the_addressed_one() {
+        let id_only = format_invite(&real_ticket());
+        let addressed = format_invite(&addressed_ticket());
+        println!("id-only   {} chars: {id_only}", id_only.len());
+        println!("addressed {} chars: {addressed}", addressed.len());
+        assert!(
+            id_only.len() <= addressed.len(),
+            "the id-only code ({}) is longer than an addressed one ({}), so the \
+             host chip would show less of it, not more",
+            id_only.len(), addressed.len(),
+        );
+        // Fixed length is the property that matters: an id-only code is always
+        // the same size, so the chip's truncation is predictable.
+        let second = format_invite(&real_ticket());
+        assert_eq!(id_only.len(), second.len(), "id-only codes vary in length");
     }
 
     #[test]
