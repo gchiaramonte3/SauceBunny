@@ -1251,12 +1251,43 @@
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out);
 }
-/* Zebra-free hairline separation — one weight (--line-1), no alternating fills. */
-.cp-lib-list .cp-lib-lrow + .cp-lib-lrow { border-top: 1px solid var(--line-1); }
-.cp-lib-lrow:hover { background: rgba(255, 255, 255, 0.04); }
-.cp-lib-lrow:focus-visible { outline: none; background: rgba(255, 255, 255, 0.07); }
-/* Neutral selection — bg-3 fill, fg-1 text (green = primary + live only). */
-.cp-lib-lrow.selected { background: var(--bg-3); color: var(--fg-1); }
+/* Alternating row fills, the way Finder's list view does it. This block used
+   to read "zebra-free hairline separation - one weight, no alternating
+   fills", and that is now reversed on purpose: a hairline tells you where one
+   row ends, a fill tells you which row your eye is ON, which is the thing
+   that matters when a name and its size are 900px apart. It is also the
+   cheaper cue for anyone tracking across a wide row.
+
+   Stripes REPLACE the hairlines rather than joining them: Finder does not
+   draw both, and two separators per boundary is noise.
+
+   .cp-lib-list-head is child 1 of .cp-lib-list in all three lists (library,
+   web, frames), so nth-child(even) is the FIRST data row and the stripe runs
+   1, 3, 5. Pinned by src/lib/list-zebra-contract.test.ts, which fails if a
+   list stops leading with its header - that would silently invert every
+   stripe rather than break anything visible.
+
+   0.028 white, not more: it has to survive being layered under :hover
+   (0.04) and stay quieter than .selected, which is a real state. Hover and
+   selection are declared after it and win on source order at equal
+   specificity. */
+.cp-lib-list .cp-lib-lrow:nth-child(even) { background: rgba(255, 255, 255, 0.028); }
+
+/* One monotonic ladder, and the stripe is its bottom rung. Composited over
+   --bg-1 these land at 21 / 26 / 32 / 40 against a plain row's 14, so a row
+   never looks more selected than the selected one.
+
+   Getting this wrong is easy and invisible. Adding the stripe, hover was
+   raised to 0.075 so it would clearly beat it - which put hover at 32 against
+   .selected's --bg-3 at 30, and a hovered row read as more selected than the
+   selection. Selection moved up to --bg-4 rather than hover moving back down,
+   because the stripe genuinely did compress the bottom of the ramp.
+   Pinned by src/lib/list-zebra-contract.test.ts. */
+.cp-lib-lrow:hover { background: rgba(255, 255, 255, 0.05); }
+.cp-lib-lrow:focus-visible { outline: none; background: rgba(255, 255, 255, 0.075); }
+/* Neutral selection — the ladder's top rung, fg-1 text (green = primary +
+   live only). */
+.cp-lib-lrow.selected { background: var(--bg-4); color: var(--fg-1); }
 .cp-lib-lrow-art {
   display: flex;
   align-items: center;

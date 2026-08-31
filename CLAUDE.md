@@ -716,7 +716,7 @@ human can check.
 
 ## Enforced contracts
 
-Eighty-seven rules in this file are checked by a test rather than remembered. If you
+Eighty-eight rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -785,6 +785,7 @@ written after finding the rule already broken somewhere.
 | `token-usage-contract` | No stylesheet writes a literal hex that an existing token already holds (comments and `var(--x, #fallback)` excluded) |
 | `duplicated-tables-contract` (3rd block) | No component re-implements a helper `lib/` already exports |
 | `control-naming-contract` | A control's tooltip and accessible name never use different words for the same thing |
+| `list-zebra-contract` | List rows alternate rather than carrying hairlines, and the row ladder stays monotonic: stripe < hover < focus < selected (see also `e2e/list-zebra.spec.ts`, which measures the rendered stripes and the header's place in the child order) |
 | `transition-target-contract` | A transition names the properties it animates rather than saying `all`, and animates no layout property outside a listed progress fill (shrink-only, and a listed entry must still match) |
 | `monitor-stack-contract` | Everything that floats over the video is a child of one stack rather than positioning itself, and nothing but captions sits in the bottom-centre band |
 | `device-state-contract` | "Your device is off" is one colour everywhere it says so (the self tile switch, the room bar, the roster badge), and it is the token that stays legible on a plate over live video |
