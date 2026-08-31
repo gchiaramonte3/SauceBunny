@@ -1978,6 +1978,19 @@ export function SettingsModal(props: Props) {
                   <div className="cp-about-row"><span className="k">Engine</span><span className="v">Tauri 2 + Wry</span></div>
                   <div className="cp-about-row"><span className="k">UI</span><span className="v">React 18 + Vite 6</span></div>
                   <div className="cp-about-row"><span className="k">Sidecars</span><span className="v">yt-dlp · ffmpeg · whisper-cli · diarizer · llama-server</span></div>
+                  {/* mediabunny is the one engine here that is a library rather
+                      than a bundled binary, so it was missing from a panel that
+                      credits everything else the app is built on. It decodes and
+                      scrubs frame-accurately, cuts the clips and encodes the MP3s.
+                      Two rows rather than one so the grid stays even. */}
+                  <div className="cp-about-row">
+                    <span className="k">Playback</span>
+                    <span className="v">mediabunny · WebCodecs · MSE</span>
+                  </div>
+                  <div className="cp-about-row">
+                    <span className="k">Clips</span>
+                    <span className="v">mediabunny · ffmpeg · LAME</span>
+                  </div>
                   <div className="cp-about-row">
                     <span className="k">Transcripts</span>
                     <span className="v">yt-dlp captions · whisper.cpp · SpeakerKit</span>
@@ -2011,7 +2024,8 @@ export function SettingsModal(props: Props) {
                     one place bytes actually leave the Mac. */}
                 <p style={{ marginTop: 18, fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-4)", lineHeight: 1.6 }}>
                   Use it on content you have the rights to clip. Bundled binaries are tested releases of
-                  yt-dlp, ffmpeg, whisper.cpp and llama.cpp, all run locally. No telemetry, ever. The app
+                  yt-dlp, ffmpeg, whisper.cpp and llama.cpp, and decode, scrubbing and export run on
+                  mediabunny. All of it runs locally. No telemetry, ever. The app
                   reaches the network only when you ask it to: the web source you fetch, the thumbnail URL
                   when you save or copy a poster, HuggingFace when you download a Whisper model, GitHub when
                   you check for an update, a live co-review session with a peer, and a cloud model only if
