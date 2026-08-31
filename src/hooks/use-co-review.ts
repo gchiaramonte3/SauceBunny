@@ -658,7 +658,30 @@ export function useCoReview({
             return;
           }
           const op = attributeReviewOp(parsed as ReviewOp, nameForMember(m.from));
-          setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
+          /* AN OP WITH NO DOC IS BUFFERED, NOT DROPPED.
+             
+             This was `prev ? applyReviewOp(prev, op) : prev` - a null guard
+             that discarded somebody else's note without a word. It is not
+             hypothetical: a guest's doc is null until the host's first
+             snapshot lands, so an op posted in that window vanished from the
+             receiver, and the only reason it usually survived was that the
+             snapshot which followed happened to contain it. Nothing enforced
+             that, and nothing said so if it did not.
+             
+             It matters more than it used to. The outbox now clears on a
+             successful invoke, so the sender's copy is gone the moment the
+             wire accepts it. A receiver that silently drops the op makes the
+             note disappear from BOTH machines with no log on either - the one
+             failure the outbox was written to make impossible.
+             
+             The buffer is the same one the local author's pre-snapshot ops
+             use, and it is replayed on first adoption for the same reason. */
+          if (sessionDocRef.current) {
+            setSessionDoc((prev) => (prev ? applyReviewOp(prev, op) : prev));
+          } else {
+            pendingOpsRef.current.push(op);
+            slog("info", "Held a note that arrived before the review did; it will apply with the first snapshot.");
+          }
           // Everyone's notes belong to the screening, not just ours.
           recordOpRef.current(op);
         } catch { /* malformed op */ }

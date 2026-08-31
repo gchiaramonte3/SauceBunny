@@ -721,7 +721,7 @@ human can check.
 
 ## Enforced contracts
 
-Ninety-four rules in this file are checked by a test rather than remembered. If you
+Ninety-five rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -790,6 +790,7 @@ written after finding the rule already broken somewhere.
 | `token-usage-contract` | No stylesheet writes a literal hex that an existing token already holds (comments and `var(--x, #fallback)` excluded) |
 | `duplicated-tables-contract` (3rd block) | No component re-implements a helper `lib/` already exports |
 | `control-naming-contract` | A control's tooltip and accessible name never use different words for the same thing |
+| `inbound-op-contract` | An inbound review op with no document yet is buffered and logged, never discarded by a null guard. The sender's outbox clears on a successful send, so a silent drop loses the note on BOTH machines |
 | `review-grant-contract` | A granted connection is named by the HOST's label rather than by its own `Hello`, a revoked or unknown grant is refused rather than downgraded to an ungranted join, the secret is stored only as a BLAKE3 hash, and the grant file lives in `app_data_dir()` rather than iCloud-synced Documents |
 | `review-outbox-contract` | A review op whose send fails is kept on disk and delivered on the next snapshot, every snapshot rather than the first, and the waiting count is visible to the author |
 | `review-link-contract` | The `saucebunny://review/<code>` scheme means the same thing in the plist that routes the click, the Rust that parses it, the TypeScript that builds it and the `RunEvent::Opened` arm that receives it; and the link carries no query, fragment or extra path |
