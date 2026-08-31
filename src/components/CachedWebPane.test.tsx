@@ -36,17 +36,26 @@ const item = (over: Record<string, unknown> = {}) => ({
 
 const forgetCalls = () => h.calls.filter(([c]) => c === "forget_cached_web").length;
 
-/** Open the card's ⋯ menu and return the delete item. */
-async function openDeleteItem() {
+/** Open the card's ⋯ menu and return the item matching `name`.
+ *
+ *  There are TWO verbs here now, and they used to be one. "Forget this
+ *  source" and "Delete the copy…" were a single control that changed label
+ *  and behaviour depending on whether a copy had been downloaded, which meant
+ *  the only way to tidy the shelf was to throw away a file that had taken
+ *  minutes to fetch. They are now "Remove from Library" (always available,
+ *  touches no file) and "Delete the copy…" (only when there is one). */
+async function openMenuItem(name: RegExp) {
   screen.getAllByRole("button", { name: "More actions" })[0].click();
-  return await screen.findByRole("menuitem", { name: /Delete the copy|Forget this source/ });
+  return await screen.findByRole("menuitem", { name });
 }
+const openRemoveItem = () => openMenuItem(/Remove from Library/);
+const openDeleteItem = () => openMenuItem(/Delete the copy/);
 
 describe("CachedWebPane forget", () => {
   beforeEach(() => { h.calls = []; h.items = []; document.body.innerHTML = ""; });
 
   it("puts the verb in the card menu, not on the card", async () => {
-    h.items = [item()];
+    h.items = [item({ path: "/cache/a.mp4", size_bytes: 1024 })];
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
     await screen.findAllByText("Reel");
     // Nothing floating over the art any more.
@@ -54,15 +63,30 @@ describe("CachedWebPane forget", () => {
     expect(await openDeleteItem()).toBeTruthy();
   });
 
-  it("forgets a resolve-only row without asking", async () => {
+  it("removes a row from the shelf without asking, and without a file to lose", async () => {
     const confirmSpy = vi.spyOn(globalThis, "confirm").mockReturnValue(true);
     h.items = [item()];
     render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
     await screen.findAllByText("Reel");
-    (await openDeleteItem()).click();
+    (await openRemoveItem()).click();
     await waitFor(() => expect(forgetCalls()).toBe(1));
-    expect(confirmSpy, "a resolve-only row asked, which trains the confirm away").not.toHaveBeenCalled();
+    expect(confirmSpy, "removing from the shelf asked, which trains the confirm away").not.toHaveBeenCalled();
     confirmSpy.mockRestore();
+  });
+
+  it("offers no copy to delete when nothing was downloaded", async () => {
+    h.items = [item()];
+    render(<CachedWebPane treeOpen onShowTree={() => {}} onOpenUrl={() => {}} />);
+    await screen.findAllByText("Reel");
+    screen.getAllByRole("button", { name: "More actions" })[0].click();
+    expect(
+      await screen.findByRole("menuitem", { name: /Remove from Library/ }),
+      "the always-available verb is missing",
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("menuitem", { name: /Delete the copy/ }),
+      "offered to delete a copy that does not exist",
+    ).toBeNull();
   });
 
   it("asks before deleting a downloaded copy, and names its size", async () => {

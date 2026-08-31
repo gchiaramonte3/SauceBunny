@@ -212,14 +212,21 @@ export function CachedWebPane({ onOpenUrl, treeOpen, onShowTree }: {
         // resolve-only entry costs ten seconds of extraction and goes
         // without ceremony. That distinction was worth keeping when the
         // control moved into the menu.
-        deleteLabel={it.path ? "Delete the copy…" : "Forget this source"}
-        onDelete={() => {
-          if (it.path && !confirm(
+        /* Two verbs, because there are two things here and they were sharing
+           one. Forgetting the entry is a statement about this shelf; deleting
+           the downloaded copy is a statement about the disk. The old single
+           control did the first under one label and both under the other,
+           which meant the only way to tidy the shelf was to throw away a file
+           that had taken minutes to fetch. */
+        onRemove={() => forget(it.url)}
+        deleteLabel="Delete the copy…"
+        onDelete={it.path ? () => {
+          if (!confirm(
             `Delete the ${size ?? ""} copy of ${it.title ?? it.url} from this Mac? `
             + "The source stays online.",
           )) return;
           forget(it.url);
-        }}
+        } : undefined}
         cellControls={<WebCollectionMenu url={it.url} />}
       />
     );

@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { formatError } from "../lib/error-format";
-import { appUndo } from "../lib/undo";
 import { newFolderPath } from "../lib/library-folder";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LibraryTree } from "./LibraryTree";
@@ -31,6 +30,8 @@ import {
 import { loadJson, saveJson } from "../lib/storage";
 import type { TranscriptHistoryEntry } from "../lib/transcript-history";
 import type { LibraryFolder, LibraryItem } from "../types";
+import { hidePaths, isHidden, subscribeHidden, unhidePaths, withoutHidden } from "../lib/library-hidden";
+import { appUndo } from "../lib/undo";
 
 type BrowserPrefs = {
   view: LibraryViewMode; sort: LibrarySortKey; dir: LibrarySortDir; kind: LibraryKindFilter;
@@ -382,6 +383,40 @@ export function LibraryBrowser({
    * above is reached from the card drop, the Move dialog and the row menu. It
    * has an undo entry now, so the rail this comment describes is real again.
    */
+  /* The exclusion set lives outside React (it is read by the scan filter and
+     written from a menu three components down), so a version counter is what
+     brings a change back into render. useSyncExternalStore would be the
+     idiomatic answer for a value, but there is no value here - only "it
+     changed". */
+  const [hiddenTick, setHiddenTick] = useState(0);
+  useEffect(() => subscribeHidden(() => setHiddenTick((n) => n + 1)), []);
+
+  /**
+   * Take a clip off the shelf without touching the file.
+   *
+   * "Move to Trash…" was the only way to get something out of the Library,
+   * which made the app's shelf and someone's footage the same question. They
+   * are not: one is a view, the other is their work. Undoable, and reversible
+   * from Settings, because a file that vanishes with no way back is worse
+   * than one that will not go away.
+   */
+  const removeFromLibrary = useCallback((paths: readonly string[]) => {
+    if (paths.length === 0) return;
+    const already = paths.filter((p) => isHidden(p));
+    // Undo restores only what THIS act hid. Restoring every path in the
+    // argument would un-hide something the user had already removed earlier
+    // and expects to stay gone.
+    const added = paths.filter((p) => !already.includes(p));
+    hidePaths(added);
+    setDetailItem((cur) => (cur && added.includes(cur.path) ? null : cur));
+    appUndo.push({
+      label: added.length === 1 ? "remove from library" : `remove ${added.length} from library`,
+      scope: "library",
+      undo: () => unhidePaths(added),
+      redo: () => hidePaths(added),
+    });
+  }, []);
+
   const trashItem = useCallback(async (item: LibraryItem) => {
     const ok = confirm(
       `Move "${item.name}" to the Trash?\n\nYou can put it back from the Finder.`,
@@ -479,11 +514,16 @@ export function LibraryBrowser({
       // one is listed twice — with the same path, which is the same React
       // key. See dedupeLibraryItems.
       : dedupeLibraryItems(trees.flatMap(collectLibraryItems));
-    const byKind = prefs.kind === "all" ? base : base.filter((i) => i.kind === prefs.kind);
+    // Paths someone has told the Library to forget. This is a LIVE SCAN, so
+    // "remove this" can only mean an exclusion the scan filters through -
+    // there is no curated list to delete a row from. hiddenTick re-runs this
+    // memo when the set changes, without waiting for a rescan.
+    const visible = withoutHidden(base);
+    const byKind = prefs.kind === "all" ? visible : visible.filter((i) => i.kind === prefs.kind);
     const q = needle.trim().toLowerCase();
     const bySearch = q ? byKind.filter((i) => i.name.toLowerCase().includes(q)) : byKind;
     return sortLibraryItems(bySearch, prefs.sort, prefs.dir);
-  }, [selected, selectedNode, trees, prefs, needle]);
+  }, [selected, selectedNode, trees, prefs, needle, hiddenTick]);
 
   /** Subfolders of the current selection, as container tiles. Empty in the
    *  "All" view and while searching, both of which are flat answers. */
@@ -729,6 +769,7 @@ export function LibraryBrowser({
           />
           <LibraryBrowserPane
             onTrashItem={trashItem}
+            onRemoveItems={removeFromLibrary}
             items={shown}
             folders={folders}
             onOpenFolder={(f) => {

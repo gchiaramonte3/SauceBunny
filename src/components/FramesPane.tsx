@@ -18,6 +18,8 @@ import { useMarquee } from "../hooks/use-marquee";
 import { useCardDrag } from "../hooks/use-card-drag";
 import { LibrarySelectionBar } from "./LibrarySelectionBar";
 import { FrameListRows } from "./FrameListRows";
+import { hidePaths, isHidden, subscribeHidden, unhidePaths, withoutHidden } from "../lib/library-hidden";
+import { appUndo } from "../lib/undo";
 
 /**
  * Frames — every still grabbed during a review, bundled by the film it came
@@ -150,6 +152,23 @@ export function FramesPane({ treeOpen, onShowTree }: {
     load();
   }, [load]);
 
+  const [, setHiddenTick] = useState(0);
+  useEffect(() => subscribeHidden(() => setHiddenTick((n) => n + 1)), []);
+
+  /** Take frames off the shelf without deleting the files. Undoable, and
+   *  reversible from Settings, like the Library's. */
+  const removeFromLibrary = useCallback((paths: readonly string[]) => {
+    const added = paths.filter((p) => !isHidden(p));
+    if (added.length === 0) return;
+    hidePaths(added);
+    appUndo.push({
+      label: added.length === 1 ? "remove frame from library" : `remove ${added.length} frames from library`,
+      scope: "library",
+      undo: () => unhidePaths(added),
+      redo: () => hidePaths(added),
+    });
+  }, []);
+
   const remove = useCallback((path: string) => {
     setPreview((p) => (p === path ? null : p));
     // Optimistic: the card goes now, because the disk work is one unlink and
@@ -162,7 +181,11 @@ export function FramesPane({ treeOpen, onShowTree }: {
   // hook below needs the displayed order and hooks cannot be called after a
   // conditional return. `all` stands in for a shelf that has not loaded yet,
   // which is the same shape as an empty one.
-  const all = items ?? [];
+  /* The frames shelf is a scan of a folder, exactly like the Library, so
+     "remove this" means the same thing here and uses the same exclusion set:
+     the frame stops being listed and the jpg stays where it is. hiddenTick
+     re-renders when the set changes without waiting for a rescan. */
+  const all = withoutHidden(items ?? []);
 
   // ONE level at a time. Search and the list view flatten the whole tree
   // instead - the web pane's rule, and the reason is the same: a needle that
@@ -283,6 +306,9 @@ export function FramesPane({ treeOpen, onShowTree }: {
         // asks. No armed second click - that pattern belongs to a control
         // you can press twice, and a menu closes on the first.
         onMove={() => setMoving(it)}
+        onRemove={() => removeFromLibrary(
+          grid.selected.has(it.path) ? [...grid.selected] : [it.path],
+        )}
         deleteLabel="Delete frame…"
         onDelete={() => {
           if (!confirm(`Delete ${it.name}? It is removed from this Mac.`)) return;

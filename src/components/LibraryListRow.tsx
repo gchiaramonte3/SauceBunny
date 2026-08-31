@@ -27,6 +27,8 @@ type Props = {
    *  it; the row did not, so switching to List view quietly removed the only
    *  way to get rid of a file. */
   onDelete?: () => void;
+  /** Take it off the shelf without touching the file. */
+  onRemove?: () => void;
   deleteLabel?: string;
   /** "Move to folder…" — the drag's keyboard-reachable twin. */
   onMove?: () => void;
@@ -51,7 +53,7 @@ type Props = {
  * ContextMenu/Shift+F10 open the same LibraryCardMenu.
  */
 export function LibraryListRow({
-  item, selected, onSelect, onContextSelect, onRename, onDelete, deleteLabel, onMove, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
+  item, selected, onSelect, onContextSelect, onRename, onDelete, onRemove, deleteLabel, onMove, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   tags, onToggleTagColor, onClearTagColors, columns,
 }: Props) {
   const swatch = primarySwatch(tags ?? []);
@@ -148,6 +150,7 @@ export function LibraryListRow({
         <LibraryCardMenu
           onRename={onRename}
           onDelete={onDelete}
+          onRemove={onRemove}
           deleteLabel={deleteLabel}
           onMove={onMove}
           tags={tags}

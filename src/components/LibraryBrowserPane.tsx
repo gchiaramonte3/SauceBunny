@@ -47,6 +47,9 @@ type Props = {
    * rather than a delete because this app has no undo of its own.
    */
   onTrashItem?: (item: LibraryItem) => void;
+  /** Forget these paths without touching the files. Takes a LIST because
+   *  the same verb serves one right-clicked row and a whole selection. */
+  onRemoveItems?: (paths: readonly string[]) => void;
   onChoosePoster: (path: string) => void;
   onResetPoster: (path: string) => void;
   /** Clears the selection on a click in the empty gutter. */
@@ -105,7 +108,7 @@ const LIB_COL_SPECS: readonly ColSpec<LibColKey>[] = [
 export function LibraryBrowserPane({
   folders = EMPTY_FOLDERS, onOpenFolder,
   items, view, selectedPath, selectedPaths, tagsByPath, onToggleTagColor, onClearTagColors, posterVersions, requestThumb,
-  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, onMoveToFolder, onRequestMove, onKeyboardSelect, cardDrag, emptyText,
+  onOpen, onReview, onSelectItem, onContextSelectItem, onRenameItem, onTrashItem, onRemoveItems, onChoosePoster, onResetPoster, onClearSelection, onMarquee, onMarqueeEnd, onMoveToFolder, onRequestMove, onKeyboardSelect, cardDrag, emptyText,
   sort, dir, onSort,
 }: Props) {
 
@@ -244,6 +247,11 @@ export function LibraryBrowserPane({
             onClearTagColors={onClearTagColors ? () => onClearTagColors(it.path) : undefined}
             deleteLabel="Move to Trash…"
             onDelete={onTrashItem ? () => onTrashItem(it) : undefined}
+            /* The whole selection when the row is part of one, otherwise
+               just this row - the same rule the other row verbs follow. */
+            onRemove={onRemoveItems ? () => onRemoveItems(
+              selectedPaths?.has(it.path) ? [...selectedPaths] : [it.path],
+            ) : undefined}
             // The drag's keyboard-reachable twin. This menu item has existed
             // behind LibraryCardMenu's `onMove` all along; the Library was the
             // one pane that never passed it.
@@ -326,6 +334,11 @@ export function LibraryBrowserPane({
             onRename={onRenameItem ? () => onRenameItem(it) : undefined}
             deleteLabel="Move to Trash…"
             onDelete={onTrashItem ? () => onTrashItem(it) : undefined}
+            /* The whole selection when the row is part of one, otherwise
+               just this row - the same rule the other row verbs follow. */
+            onRemove={onRemoveItems ? () => onRemoveItems(
+              selectedPaths?.has(it.path) ? [...selectedPaths] : [it.path],
+            ) : undefined}
             onMove={onMoveToFolder ? () => onRequestMove?.(it.path) : undefined}
             onOpen={() => onOpen(it.path)}
             onReview={onReview ? () => onReview(it.path) : undefined}

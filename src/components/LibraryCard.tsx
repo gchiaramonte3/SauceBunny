@@ -89,6 +89,8 @@ type Props = {
   /** Remove this item; surfaces as the LAST menu item, in danger text.
    *  Cards without it (files) show no delete verb at all. */
   onDelete?: () => void;
+  /** Take it off the shelf without touching the file. */
+  onRemove?: () => void;
   deleteLabel?: string;
   /** File this item into a folder; surfaces as a menu item. */
   onMove?: () => void;
@@ -112,7 +114,7 @@ type Props = {
  * Open in Clip. The menu never triggers the card's open.
  */
 export function LibraryCard({
-  title, detail, art, revealPath: revealPathProp, badge, duration, haveCopy, cellControls, onDelete, deleteLabel, onMove, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
+  title, detail, art, revealPath: revealPathProp, badge, duration, haveCopy, cellControls, onDelete, onRemove, deleteLabel, onMove, large, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
   onSelect, onContextSelect, onRename, selected, selectionPath, tags, onToggleTagColor, onClearTagColors,
 }: Props) {
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -316,6 +318,7 @@ export function LibraryCard({
           onResetThumbnail={() => { if (posterPath) onResetPoster?.(posterPath); }}
           onRename={onRename}
           onDelete={onDelete}
+          onRemove={onRemove}
           deleteLabel={deleteLabel}
           onMove={onMove}
           tags={tags}

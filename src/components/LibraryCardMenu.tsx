@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { useMenuKeys } from "../hooks/use-menu-keys";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview, IconPencil, IconTrash, IconFolderSolid } from "./Icons";
+import { IconCamera, IconRefresh, IconReveal, IconPlay, IconReview, IconPencil, IconTrash, IconFolderSolid, IconCircleX } from "./Icons";
 import { TagColorRow } from "./TagColorRow";
 import type { TagColorIndex } from "../lib/finder-tags";
 import type { FinderTag } from "../bindings/FinderTag";
@@ -50,6 +50,9 @@ type Props = {
    * items (frames, cached web sources) pass it; everything else does not.
    */
   onDelete?: () => void;
+  /** Take it off the shelf without touching the file. A separate verb from
+   *  onDelete on purpose: one is a view, the other is someone's footage. */
+  onRemove?: () => void;
   /** The verb, since it differs by shelf ("Delete", "Forget"). */
   deleteLabel?: string;
   /** File this item somewhere. Shelves whose items live in real folders
@@ -80,7 +83,7 @@ type Item = {
 export function LibraryCardMenu({
   anchor, align = "left", canPickThumbnail, hasChosenThumbnail, revealPath,
   onChooseThumbnail, onResetThumbnail, onOpen, onReview, onClose,
-  tags, onToggleTagColor, onClearTagColors, onRename, onDelete, deleteLabel, onMove,
+  tags, onToggleTagColor, onClearTagColors, onRename, onDelete, onRemove, deleteLabel, onMove,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: anchor.x, top: anchor.y });
@@ -102,6 +105,13 @@ export function LibraryCardMenu({
   items.push({ icon: <IconPlay size={13} />, label: "Open in Clip", onSelect: onOpen });
   if (onReview) {
     items.push({ icon: <IconReview size={13} />, label: "Review this clip", onSelect: onReview });
+  }
+  /* Above the destructive one, and not marked danger: removing a clip from
+     the Library does not touch the file, and colouring it red would say it
+     did. The pairing is the point - offering only "Move to Trash…" meant the
+     one way to get something off the shelf was to bin the footage. */
+  if (onRemove) {
+    items.push({ icon: <IconCircleX size={13} />, label: "Remove from Library", onSelect: onRemove });
   }
   // Last, always: a destructive verb should never sit where a muscle-memory
   // click for the item above it lands.

@@ -44,6 +44,7 @@ import { countHiddenNotices, restoreHiddenNotices } from "../lib/hidden-notices"
 import { EXPECTED_BACKEND_BUILD_ID } from "../lib/build-id";
 import { newJobId } from "../lib/job-id";
 import { DEFAULT_STUN_URL } from "../lib/ice-servers";
+import { clearHidden as clearHiddenLibrary, hiddenCount as hiddenLibraryCount } from "../lib/library-hidden";
 
 type TabId = "general" | "captions" | "devices" | "transcription" | "youtube" | "ai-summary" | "ai-apis" | "commands" | "about" | "credits";
 
@@ -429,10 +430,17 @@ export function SettingsModal(props: Props) {
    *  opens so the row cannot claim a stale number. */
   const [hiddenCount, setHiddenCount] = useState(0);
   const [restored, setRestored] = useState(0);
+  /** Clips removed from the Library without deleting the file. Counted when
+   *  the modal opens for the same reason as the notices above: the row must
+   *  not claim a stale number. */
+  const [hiddenClips, setHiddenClips] = useState(0);
+  const [clipsRestored, setClipsRestored] = useState(false);
   useEffect(() => {
     if (!open) return;
     setHiddenCount(countHiddenNotices());
     setRestored(0);
+    setHiddenClips(hiddenLibraryCount());
+    setClipsRestored(false);
   }, [open]);
   useEffect(() => {
     if (!open) return;
@@ -1194,6 +1202,31 @@ export function SettingsModal(props: Props) {
                         {hiddenCount === 0
                           ? (restored > 0 ? `Restored ${restored}` : "Nothing hidden")
                           : `Restore ${hiddenCount}`}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Clips removed from the Library
+                      <span className="desc">
+                        Remove from Library takes a clip off the shelf and leaves the file
+                        alone, so the only trace is here. This puts them all back. It does not
+                        touch anything you moved to the Trash.
+                      </span>
+                    </div>
+                    <div className="v">
+                      <button
+                        className="btn btn-ghost"
+                        disabled={hiddenClips === 0}
+                        onClick={() => {
+                          clearHiddenLibrary();
+                          setHiddenClips(0);
+                          setClipsRestored(true);
+                        }}
+                      >
+                        {hiddenClips === 0
+                          ? (clipsRestored ? "Restored" : "Nothing removed")
+                          : `Show ${hiddenClips} again`}
                       </button>
                     </div>
                   </div>
