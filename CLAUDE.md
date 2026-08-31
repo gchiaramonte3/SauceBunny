@@ -398,6 +398,7 @@ with the ones still open. The table below is the index into it.
 | Review docs | `~/Documents/Sauce Bunny/Reviews/` — one `<slug>-<hash>.json` per source + `index.json`; hydrated at boot, debounced write-through (`src/lib/review-store.ts`); legacy localStorage docs migrated out on first boot |
 | Screenings | `~/Documents/Sauce Bunny/Screenings/` — one `<date>-<slug>-<hash>.json` per session + `index.json`, FLAT rather than `YYYY-MM/` (the index's no-path-separator guard is worth more than tidy subfolders, and screenings number in the tens). An INDEX over review docs: it records who was there and what the room watched, and holds zero comment bodies, so opening a source solo still shows every note made about it in a session. Boot reads only `index.json`; a full doc is read on demand. See `docs/DATA-MODEL.md` |
 | Library tree state | `localStorage` `saucebunny.libraryTreeExpanded` — which folders are open. Roots seed open once; the selection's ancestors are revealed when the selection MOVES, never on a rescan, and never on first mount when a preference is already recorded |
+| Review grants | `app_data_dir()/review-grants.json` — one record per issued link: label, BLAKE3 of the secret, created/last-seen, revoked. NOT under `~/Documents`, which is iCloud-synced, because it holds secret hashes. Atomic write: a truncated grant file is a host that refuses everyone |
 | Undelivered notes | `localStorage` `saucebunny.review.outbox` — review ops whose send failed, per review key, capped at 500 with the OLDEST dropped. Drained on every snapshot adoption, not just the first; re-sending an op the host already has is a no-op because `add` carries a fully-built comment and resolve/like/status are SET rather than toggle |
 | Received review files | `localStorage` `saucebunny.review.receivedAs` — local path (NFC-keyed) to the review key the session that delivered it was using. Consulted BEFORE the fingerprint index when opening a file: a copy received in a session has a `<hash8>-` filename prefix, so its fingerprint deliberately does not match the host's, and without this a guest's own notes read back empty |
 | Library exclusions | `localStorage` `saucebunny.libraryHidden` — paths "Remove from Library" has taken off the shelf. The Library and Frames are LIVE SCANS, so removal can only be an exclusion the scan filters through; keyed by `pathKey()` so macOS's two spellings of one name cannot diverge. Undoable, and clearable from Settings ▸ General |
@@ -720,7 +721,7 @@ human can check.
 
 ## Enforced contracts
 
-Ninety-three rules in this file are checked by a test rather than remembered. If you
+Ninety-four rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -789,6 +790,7 @@ written after finding the rule already broken somewhere.
 | `token-usage-contract` | No stylesheet writes a literal hex that an existing token already holds (comments and `var(--x, #fallback)` excluded) |
 | `duplicated-tables-contract` (3rd block) | No component re-implements a helper `lib/` already exports |
 | `control-naming-contract` | A control's tooltip and accessible name never use different words for the same thing |
+| `review-grant-contract` | A granted connection is named by the HOST's label rather than by its own `Hello`, a revoked or unknown grant is refused rather than downgraded to an ungranted join, the secret is stored only as a BLAKE3 hash, and the grant file lives in `app_data_dir()` rather than iCloud-synced Documents |
 | `review-outbox-contract` | A review op whose send fails is kept on disk and delivered on the next snapshot, every snapshot rather than the first, and the waiting count is visible to the author |
 | `review-link-contract` | The `saucebunny://review/<code>` scheme means the same thing in the plist that routes the click, the Rust that parses it, the TypeScript that builds it and the `RunEvent::Opened` arm that receives it; and the link carries no query, fragment or extra path |
 | `session-identity-contract` | The co-review host binds a PERSISTED endpoint key and the guest does not, the join code names that key rather than `endpoint.addr()`, and no command hands the secret to the webview |

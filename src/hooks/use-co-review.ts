@@ -53,6 +53,7 @@ import { mixShareAudio, openShareStream } from "../lib/share-stream";
 import { getSessionCapture } from "./use-media-capture";
 import type { ShareSourceArg } from "../bindings/ShareSourceArg";
 import { clearDelivered, enqueueOp, pendingCount, pendingOps } from "../lib/review-outbox";
+import { splitReviewCode } from "../lib/review-link";
 
 /** Timeline/monitor read-model of one review comment marker. Shared by the
  *  solo path (App's local-review reload effect) and the session path (the
@@ -778,9 +779,14 @@ export function useCoReview({
      code is buffered in Rust and pulled here on mount. Same shape as the
      panel window's request-state handshake. */
   const [pendingJoinCode, setPendingJoinCode] = useState<string | null>(null);
-  const onDeeplinkReview = useCallback((code: string) => {
-    const trimmed = code.trim();
-    if (trimmed) setPendingJoinCode(trimmed);
+  /** The grant secret from the same link, held beside the code so joining can
+   *  present it. Not shown anywhere: it is a credential, not a label. */
+  const pendingGrantRef = useRef<string | null>(null);
+  const onDeeplinkReview = useCallback((delivered: string) => {
+    const { code, grant } = splitReviewCode(delivered);
+    if (!code) return;
+    pendingGrantRef.current = grant;
+    setPendingJoinCode(code);
   }, []);
   useEffect(() => {
     const un = listen<string>("deeplink:review", (e) => onDeeplinkReview(e.payload));
@@ -1085,10 +1091,10 @@ export function useCoReview({
     }
     catch (e) { pushNotification("error", "Couldn't start co-review", formatError(e)); }
   }, [pushNotification]);
-  const joinCoReview = useCallback(async (ticket: string, name: string) => {
+  const joinCoReview = useCallback(async (ticket: string, name: string, grant?: string | null) => {
     // install: lets the host hand back the SAME member id if we've been in
     // this session before, instead of adding a duplicate person tile.
-    try { await invoke("session_join", { ticket, name, install: loadInstallId() }); }
+    try { await invoke("session_join", { ticket, name, install: loadInstallId(), grant: grant ?? null }); }
     catch (e) { pushNotification("error", "Couldn't join session", formatError(e)); }
   }, [pushNotification]);
   const leaveCoReview = useCallback(() => { void invoke("session_leave").catch(() => {}); }, []);

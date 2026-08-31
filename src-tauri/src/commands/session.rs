@@ -171,7 +171,15 @@ pub enum SessionMsg {
     /// peer → host right after connect. `install` is a stable per-install
     /// UUID (localStorage saucebunny.installId) so a member who drops and
     /// rejoins RECLAIMS its roster slot instead of minting a duplicate.
-    Hello { name: String, install: String },
+    /// `grant` is the secret half of a review link, absent for the lobby's
+    /// join code. `#[serde(default)]` so a peer on an older build, whose
+    /// Hello has no such field, still parses rather than being refused.
+    Hello {
+        name: String,
+        install: String,
+        #[serde(default)]
+        grant: Option<String>,
+    },
     /// host → the just-registered peer: your session-scoped member id and
     /// the session's display title. (PeerList alone can't tell you which
     /// entry is you - names collide.)
@@ -601,6 +609,9 @@ pub async fn session_join(
     ticket: String,
     name: String,
     install: String,
+    // The secret half of a review link, when the guest arrived through one.
+    // Absent for the lobby's join code, which is a different door.
+    grant: Option<String>,
 ) -> Result<(), crate::AppError> {
     let display_name = clean_name(&name);
 
@@ -626,7 +637,11 @@ pub async fn session_join(
         let (mut send, recv) = conn.open_bi().await.map_err(|e| format!("open stream: {e}"))?;
         write_msg_line(
             &mut send,
-            &SessionMsg::Hello { name: display_name.clone(), install: install.clone() },
+            &SessionMsg::Hello {
+                name: display_name.clone(),
+                install: install.clone(),
+                grant: grant.clone(),
+            },
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -892,21 +907,45 @@ async fn handle_peer_conn(app: AppHandle, conn: Connection, shared: Arc<HostShar
             Err(e) => return Err(format!("bad hello: {e}")),
         };
         match serde_json::from_str::<SessionMsg>(line.trim()) {
-            Ok(SessionMsg::Hello { name, install }) => Ok((send, reader, name, install)),
+            Ok(SessionMsg::Hello { name, install, grant }) => Ok((send, reader, name, install, grant)),
             Ok(_) => Err("expected hello".to_string()),
             Err(e) => Err(format!("bad hello: {e}")),
         }
     })
     .await;
 
-    let (send, mut reader, raw_name, install) = match handshake {
+    let (send, mut reader, raw_name, install, grant) = match handshake {
         Ok(Ok(v)) => v,
         _ => {
             conn.close(1u32.into(), b"expected hello");
             return;
         }
     };
-    let name = clean_name(&raw_name);
+
+    // ADMISSION, and the name that comes with it.
+    //
+    // The display name for a granted connection is the label the HOST typed,
+    // not the one the peer claimed. That is the point of the whole mechanism:
+    // the relay already stamps `from` so a peer cannot forge ANOTHER member's
+    // attribution, but it could not stop a stranger with a forwarded link
+    // simply calling themselves Dana and having every note signed Dana in the
+    // review file, permanently. clean_name defends exactly one reserved word
+    // and was never going to be enough.
+    //
+    // An ungranted connection is today's behaviour and keeps today's name.
+    // The lobby's join code is a different door, for people you are already
+    // in a call with, and refusing them by default would break live co-review
+    // for everyone who has never issued a link. A host who wants the stricter
+    // rule turns on invited-only.
+    let (name, grant_id) = match crate::commands::review_grant::admit(&app, grant.as_deref()) {
+        crate::commands::review_grant::Admission::Refused(why) => {
+            conn.close(1u32.into(), why.as_bytes());
+            return;
+        }
+        crate::commands::review_grant::Admission::Granted { id, label } => (clean_name(&label), Some(id)),
+        crate::commands::review_grant::Admission::Ungranted => (clean_name(&raw_name), None),
+    };
+    let _ = &grant_id;
     // Untrusted install ids only enter the persistent install→member map when
     // they are token-shaped and bounded; anything else is treated as absent
     // (mint-only, no insert), so rejected or hostile connects can't grow the
@@ -2532,7 +2571,7 @@ mod tests {
 
     #[test]
     fn variant_tags_are_camel_case() {
-        let hello = serde_json::to_string(&SessionMsg::Hello { name: "Ada".into(), install: "i1".into() }).unwrap();
+        let hello = serde_json::to_string(&SessionMsg::Hello { name: "Ada".into(), install: "i1".into(), grant: None }).unwrap();
         assert!(hello.contains(r#""kind":"hello""#), "json: {hello}");
         let list = serde_json::to_string(&SessionMsg::PeerList { peers: vec![PeerInfo { id: "m0".into(), name: "Host".into(), epoch: 0 }] }).unwrap();
         assert!(list.contains(r#""kind":"peerList""#), "json: {list}");

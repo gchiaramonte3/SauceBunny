@@ -19,8 +19,22 @@ export const DOWNLOAD_URL = "https://github.com/gchiaramonte3/SauceBunny/release
  * Slack, clipboard managers, MDM logging and crash reports. The host can say
  * who they are in the message they are already writing.
  */
-export function reviewLink(code: string): string {
-  return `saucebunny://review/${encodeURIComponent(code.trim())}`;
+export function reviewLink(code: string, grantSecret?: string | null): string {
+  const base = `saucebunny://review/${encodeURIComponent(code.trim())}`;
+  const g = grantSecret?.trim();
+  // In the PATH, not a fragment or a query. A fragment buys nothing here -
+  // LaunchServices is not HTTP, so there is no Referer to leak to and the
+  // whole string is logged either way - and a query string is an open
+  // invitation to add the sender name and cut title that must never be in a
+  // link.
+  return g ? `${base}/${encodeURIComponent(g)}` : base;
+}
+
+/** Split a link back into its parts. The inverse of reviewLink, and the
+ *  frontend half of Rust's parse_review_url. */
+export function splitReviewCode(delivered: string): { code: string; grant: string | null } {
+  const [code, grant] = delivered.split("/");
+  return { code: (code ?? "").trim(), grant: grant?.trim() || null };
 }
 
 /**
@@ -32,6 +46,6 @@ export function reviewLink(code: string): string {
  * link would read to them as "he sent me a broken link". The second line costs
  * one line of a message and removes the whole failure.
  */
-export function reviewInviteMessage(code: string): string {
-  return `${reviewLink(code)}\n\nNo Sauce Bunny yet? ${DOWNLOAD_URL}`;
+export function reviewInviteMessage(code: string, grantSecret?: string | null): string {
+  return `${reviewLink(code, grantSecret)}\n\nNo Sauce Bunny yet? ${DOWNLOAD_URL}`;
 }

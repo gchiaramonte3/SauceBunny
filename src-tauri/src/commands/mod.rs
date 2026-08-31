@@ -47,6 +47,8 @@ pub mod session_key;
 pub use session_key::*;
 pub mod review_link;
 pub use review_link::*;
+pub mod review_grant;
+pub use review_grant::*;
 // Tier B bridge (no invoke commands of its own; used by stream_proxy + session).
 pub mod peer_stream;
 // Tier B quality ladder (host half of src/lib/stream-rung.ts).

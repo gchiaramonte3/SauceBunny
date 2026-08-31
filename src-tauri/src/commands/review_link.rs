@@ -33,7 +33,7 @@ pub struct PendingReviewLink(pub Mutex<Option<String>>);
 /// The scheme's one path. `saucebunny://review/<code>`.
 const REVIEW_HOST: &str = "review";
 
-/// Pull the join code out of a `saucebunny://review/<code>` URL.
+/// Pull the join code, and any grant secret, out of a review URL.
 ///
 /// Returns `None` for anything else, including other hosts under the same
 /// scheme, so adding `saucebunny://settings/...` later cannot accidentally be
@@ -43,7 +43,14 @@ const REVIEW_HOST: &str = "review";
 /// the ticket parser are the authority on what a code is, they already accept
 /// far messier input than a URL path, and duplicating their rules here would
 /// give two places to disagree.
-pub fn code_from_url(url: &str) -> Option<String> {
+/// The code and, when the link was issued to a named person, their grant
+/// secret: `saucebunny://review/<code>/<secret>`.
+///
+/// The secret rides in the PATH rather than a fragment or a query. A fragment
+/// buys nothing here - LaunchServices is not HTTP, so there is no Referer to
+/// leak to and the whole string is logged either way - and a query string
+/// invites the sender name and cut title that must never be in a link.
+pub fn parse_review_url(url: &str) -> Option<(String, Option<String>)> {
     let rest = url.strip_prefix("saucebunny://")?;
     // Both `saucebunny://review/CODE` and the host-less `saucebunny:///review/
     // CODE` some senders produce. Splitting on '/' handles either.
@@ -52,9 +59,13 @@ pub fn code_from_url(url: &str) -> Option<String> {
         return None;
     }
     let code = parts.next()?.trim();
-    // Anything after the code is ignored rather than rejected: a mail client
+    if code.is_empty() {
+        return None;
+    }
+    // Anything after the secret is ignored rather than rejected: a mail client
     // that appends a tracking segment should not break the link.
-    if code.is_empty() { None } else { Some(code.to_string()) }
+    let grant = parts.next().map(str::trim).filter(|g| !g.is_empty()).map(str::to_string);
+    Some((code.to_string(), grant))
 }
 
 /// Called from the `RunEvent::Opened` arm. Buffers the code and announces it.
@@ -62,7 +73,10 @@ pub fn code_from_url(url: &str) -> Option<String> {
 /// Both, deliberately. The emit serves a link clicked while the app is up; the
 /// buffer serves a cold launch, where no listener exists yet.
 pub fn remember_and_announce(app: &AppHandle, urls: &[String]) {
-    let Some(code) = urls.iter().find_map(|u| code_from_url(u)) else { return };
+    let Some((code, grant)) = urls.iter().find_map(|u| parse_review_url(u)) else { return };
+    // Buffered as one string so the pending slot stays a single value; the
+    // frontend splits on the same separator the URL used.
+    let code = match &grant { Some(g) => format!("{code}/{g}"), None => code };
     if let Some(state) = app.try_state::<PendingReviewLink>() {
         if let Ok(mut slot) = state.0.lock() {
             *slot = Some(code.clone());
@@ -95,46 +109,67 @@ mod tests {
 
     #[test]
     fn it_reads_a_review_link() {
-        assert_eq!(code_from_url("saucebunny://review/SAUC-ABCDE"), Some("SAUC-ABCDE".into()));
+        assert_eq!(parse_review_url("saucebunny://review/SAUC-ABCDE").map(|(c, _)| c), Some("SAUC-ABCDE".into()));
     }
 
     #[test]
     fn it_accepts_the_host_less_form() {
         // Some senders normalise `scheme://host/path` to `scheme:///path`.
-        assert_eq!(code_from_url("saucebunny:///review/SAUC-ABCDE"), Some("SAUC-ABCDE".into()));
+        assert_eq!(parse_review_url("saucebunny:///review/SAUC-ABCDE").map(|(c, _)| c), Some("SAUC-ABCDE".into()));
+    }
+
+    #[test]
+    fn it_reads_the_grant_secret_when_one_is_present() {
+        assert_eq!(
+            parse_review_url("saucebunny://review/SAUC-ABCDE/deadbeef"),
+            Some(("SAUC-ABCDE".into(), Some("deadbeef".into()))),
+        );
+    }
+
+    #[test]
+    fn a_link_without_a_grant_has_none() {
+        // The lobby's join code, pasted as a link. A different door, and it
+        // must not be mistaken for a granted one.
+        assert_eq!(
+            parse_review_url("saucebunny://review/SAUC-ABCDE"),
+            Some(("SAUC-ABCDE".into(), None)),
+        );
     }
 
     #[test]
     fn it_ignores_a_trailing_segment() {
         // A mail client that appends its own tracking segment must not break
         // the link.
-        assert_eq!(code_from_url("saucebunny://review/SAUC-ABCDE/x"), Some("SAUC-ABCDE".into()));
+        assert_eq!(
+            parse_review_url("saucebunny://review/SAUC-ABCDE/secret/tracking"),
+            Some(("SAUC-ABCDE".into(), Some("secret".into()))),
+        );
     }
 
     #[test]
     fn it_refuses_another_host_under_the_same_scheme() {
         // The reason the host is checked at all: adding saucebunny://settings
         // later must not be readable as a review link.
-        assert_eq!(code_from_url("saucebunny://settings/ai"), None);
+        assert_eq!(parse_review_url("saucebunny://settings/ai").map(|(c, _)| c), None);
     }
 
     #[test]
     fn it_refuses_another_scheme() {
-        assert_eq!(code_from_url("https://review/SAUC-ABCDE"), None);
-        assert_eq!(code_from_url("file:///review/SAUC-ABCDE"), None);
+        assert_eq!(parse_review_url("https://review/SAUC-ABCDE").map(|(c, _)| c), None);
+        assert_eq!(parse_review_url("file:///review/SAUC-ABCDE").map(|(c, _)| c), None);
     }
 
     #[test]
     fn it_refuses_an_empty_code() {
-        assert_eq!(code_from_url("saucebunny://review/"), None);
-        assert_eq!(code_from_url("saucebunny://review"), None);
-        assert_eq!(code_from_url("saucebunny://"), None);
+        assert_eq!(parse_review_url("saucebunny://review/").map(|(c, _)| c), None);
+        assert_eq!(parse_review_url("saucebunny://review").map(|(c, _)| c), None);
+        assert_eq!(parse_review_url("saucebunny://").map(|(c, _)| c), None);
     }
 
     #[test]
     fn it_does_not_panic_on_junk() {
         for junk in ["", "saucebunny:", "://", "saucebunny://review//", "🐰"] {
-            let _ = code_from_url(junk);
+            let _ = parse_review_url(junk);
         }
     }
 }

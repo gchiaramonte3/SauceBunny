@@ -87,6 +87,10 @@ keyring = "2"
 # Used only to hex the 32-byte endpoint secret for the Keychain, which stores
 # strings (keyring 2.x has no binary-secret API).
 hex = "0.4"
+# Also already in Cargo.lock as a transitive; direct adds no package. The OS
+# CSPRNG, for the 256-bit review-link secrets. Deliberately not a password KDF:
+# there is no human-chosen password here to stretch.
+getrandom = "0.2"
 # r58: localhost HTTP media proxy. WKWebView's media engine refuses to
 # issue requests for <video src="custom-scheme://"> (verified empirically
 # in r57 — the custom URI scheme handler was never invoked). It WILL

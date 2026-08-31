@@ -15,6 +15,7 @@ import { ScreeningShelf } from "./ScreeningShelf";
 import { hydrateScreeningIndex, listScreenings, SCREENINGS_CHANGED } from "../lib/screening-store";
 import { isSessionNameTaken, nextFreeSessionName } from "../lib/session-name";
 import { reviewInviteMessage } from "../lib/review-link";
+import { ReviewGrants } from "./ReviewGrants";
 
 /**
  * The Review lobby - the GREEN ROOM. Three calm steps in one tone-card
@@ -384,6 +385,10 @@ export function CoReviewLobby({ session, localSource, participants, onStart, onJ
                 </span>
               </div>
             )}
+            {/* Links issued to named people. Below the shared code because it
+                is the other door: the code is for whoever is in the call, a
+                grant is for one person who can be named and removed. */}
+            {isHost && <ReviewGrants code={session.code} />}
 
             <ul className="cp-colobby-people" aria-label={`In the room: ${participants.length}`}>
               {participants.map((p, i) => (

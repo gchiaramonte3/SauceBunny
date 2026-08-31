@@ -638,3 +638,111 @@ select.cp-colobby-input { padding-right: calc(var(--sel-chev) + 14px); }
   font-size: var(--text-md);
   line-height: var(--leading-snug);
 }
+
+
+/* ── Review links, issued to named people ──────────────────────────────── */
+.cp-grants {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line-1);
+}
+.cp-grants-title {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  color: var(--fg-1);
+}
+.cp-grants-hint {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: var(--fg-3);
+}
+.cp-grants-new { display: flex; align-items: flex-end; gap: var(--s-2); }
+.cp-grants-field { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.cp-grants-field-label {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--fg-4);
+}
+.cp-grants-input {
+  width: 100%;
+  padding: var(--s-2);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+}
+.cp-grants-input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+/* Shown once, and it says so. The secret is never stored readable, so there
+   is no second chance to copy and the panel must not imply one. */
+.cp-grants-made {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  align-items: flex-start;
+  padding: var(--s-2) var(--s-3);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-card);
+}
+.cp-grants-made-line {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  color: var(--fg-2);
+}
+.cp-grants-error {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  color: var(--danger-text);
+}
+.cp-grants-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.cp-grants-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) 0;
+  border-top: 1px solid var(--line-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  color: var(--fg-2);
+}
+/* Withdrawn links stay listed rather than vanishing: "you took this back" is
+   more useful than forgetting the person existed. */
+.cp-grants-row.revoked { color: var(--fg-4); }
+.cp-grants-row-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cp-grants-row-when { color: var(--fg-4); font-size: var(--text-sm); }
+.cp-grants-revoke {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  background: none;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.cp-grants-revoke:hover { color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.cp-grants-revoke:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.cp-grants-strict {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  margin-top: var(--s-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+  color: var(--fg-3);
+}
