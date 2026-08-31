@@ -291,7 +291,14 @@ export function LibraryTree({
   // Tags for every visible folder, one bulk read — this is what makes a colour
   // VISIBLE in the tree rather than only inside the menu that set it.
   const folderPaths = useMemo(
-    () => rows.filter((r) => r.key !== "all").map((r) => r.key),
+    // r.path, NOT r.key. The key is `<rootIndex>:<path>`, so reading tags by
+    // it asked the filesystem about "0:/Users/..." - a path that cannot exist.
+    // read_finder_tags returned nothing for every folder, the catch swallowed
+    // it, and every folder in the tree drew plain. Nothing was broken on
+    // screen; the colours were simply never fetched. Filtering on path also
+    // drops "All" and the two shelves, which have none, so the old key !==
+    // "all" test is gone rather than restated.
+    () => rows.map((r) => r.path).filter((p): p is string => p !== null),
     [rows],
   );
   // The focus re-read that used to live here now lives in useFinderTags, so

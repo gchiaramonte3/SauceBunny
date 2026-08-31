@@ -309,7 +309,7 @@ export function LibraryBrowserPane({
         <div className="cp-lib-list-head" onContextMenu={(e) => e.preventDefault()}>
           <span className="cp-lib-lrow-art" aria-hidden="true" />
           <SortHeader className="cp-lib-lrow-name" label="Name" col="name" sort={sort} dir={dir} onSort={onSort} />
-          {/* Every other column: sortable, resizable, draggable to reorder,
+          {/* Every other column: sortable, resizable, dragged to reorder,
               and hideable from a right-click menu. Name stays outside because
               it is the 1fr track and, as in Finder, cannot be moved or turned
               off. */}
@@ -449,7 +449,14 @@ export function SortHeader({ className, label, col, sort, dir, onSort, children,
   /** Drag-to-reorder handlers and the context menu, when this header is one
    *  of the movable columns. Spread FIRST so the sort click below cannot be
    *  overwritten by a caller. */
-  cellProps?: React.HTMLAttributes<HTMLButtonElement> & { draggable?: boolean };
+  /*  `& { draggable?: boolean }` used to widen this, back when reorder was an
+   *  HTML5 drag. It is gone with the gesture, and gone deliberately rather
+   *  than left harmless: on macOS a `draggable` element starts a real
+   *  NSDragging session, which Tauri's webview drag-drop listener reads as a
+   *  file entering the window and answers with the full-screen import card.
+   *  Without this member the type no longer admits the attribute, so the door
+   *  is shut by the compiler instead of by remembering. */
+  cellProps?: React.HTMLAttributes<HTMLButtonElement>;
 }) {
   const active = sort === col;
   return (

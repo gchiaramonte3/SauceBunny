@@ -69,6 +69,12 @@ export function ListColumnHeaders<K extends string>({
   /** The column being dragged to a new position, and where it would land. */
   const [moving, setMoving] = useState<K | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
+  /** The live gesture. A ref, not state: it is read inside window listeners
+   *  that must see the current value, not the one closed over at mousedown. */
+  const dragRef = useRef<{ key: K; x: number; moved: boolean } | null>(null);
+  /** A drag ends with a click on the same cell. Without this the drop also
+   *  re-sorts the list, which is not what the hand asked for. */
+  const swallowClick = useRef(false);
 
   const byKey = new Map(specs.map((s) => [s.key, s]));
 
@@ -99,30 +105,87 @@ export function ListColumnHeaders<K extends string>({
             onNudge={(d) => model.nudgeCol(key, d)}
           />
         );
-        /* draggable on the cell, not on an inner handle: Finder lets you grab
-           the header anywhere. The divider stops its own mousedown, so a
-           resize never starts a move. */
-        const dragProps = {
-          draggable: true,
-          onDragStart: (e: React.DragEvent) => {
-            setMoving(key);
-            e.dataTransfer.effectAllowed = "move";
-            // Firefox will not start a drag without payload; the value is
-            // never read, the component state carries the key.
-            e.dataTransfer.setData("text/plain", key);
-          },
-          onDragOver: (e: React.DragEvent) => {
-            if (!moving) return;
-            e.preventDefault();
-            setOverIdx(i);
-          },
-          onDrop: (e: React.DragEvent) => {
-            e.preventDefault();
-            if (moving && moving !== key) model.moveCol(moving, model.order.indexOf(key));
+        /* POINTER events, deliberately not HTML5 drag-and-drop.
+           Two reasons, and the first one is a bug the user hit.
+
+           On macOS, setting `draggable` and starting a drag opens a real
+           NSDragging session. Tauri's webview drag-drop listener - the one
+           DropTarget uses for FILE imports - sees that session enter the
+           webview and cannot tell it from a Finder drag, so grabbing a column
+           header raised the full-window "drop a video, audio or SRT file"
+           card. Nothing was wrong with DropTarget; the header was making the
+           OS announce a drag. No HTML5 drag, no announcement.
+
+           Second, it is simply the better gesture here. A native drag paints a
+           translucent snapshot the app cannot style, commits on the OS's hit
+           test rather than ours, and gives no control over the threshold - so
+           a 2px wobble while clicking to sort became a reorder. Pointer events
+           give a real threshold, our own insertion line, and a drop we resolve
+           ourselves. Finder's own column reorder behaves this way: the header
+           moves with the pointer, the others part around it. */
+        const beginMove = (e: React.PointerEvent) => {
+          // Left button only, and never when the gesture started on the
+          // divider: that strip owns resizing and a resize must not reorder.
+          if (e.button !== 0) return;
+          if ((e.target as HTMLElement).closest(".cp-lib-coldiv")) return;
+          dragRef.current = { key, x: e.clientX, moved: false };
+
+          const colAt = (x: number, y: number): K | null => {
+            const el = document.elementFromPoint(x, y) as HTMLElement | null;
+            const cell = el?.closest("[data-colkey]") as HTMLElement | null;
+            return (cell?.dataset.colkey as K | undefined) ?? null;
+          };
+          const onMove = (ev: PointerEvent) => {
+            const st = dragRef.current;
+            if (!st) return;
+            // The threshold is what keeps click-to-sort working. Below it this
+            // is still a click and nothing has visibly happened.
+            if (!st.moved) {
+              if (Math.abs(ev.clientX - st.x) < 4) return;
+              st.moved = true;
+              setMoving(st.key);
+            }
+            const over = colAt(ev.clientX, ev.clientY);
+            setOverIdx(over ? model.visible.indexOf(over) : null);
+          };
+          const finish = (ev: PointerEvent | null) => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            window.removeEventListener("pointercancel", onCancel);
+            const st = dragRef.current;
+            dragRef.current = null;
+            // ev === null is the cancel path: commit nothing, just let go.
+            if (ev && st?.moved) {
+              const over = colAt(ev.clientX, ev.clientY);
+              if (over && over !== st.key) model.moveCol(st.key, model.order.indexOf(over));
+              swallowClick.current = true;
+            }
             setMoving(null);
             setOverIdx(null);
+          };
+          const onUp = (ev: PointerEvent) => finish(ev);
+          /* pointercancel is not paranoia. The OS takes the pointer away for
+             things that happen mid-drag in a desktop app - a touchpad gesture
+             claiming the sequence, the window losing the capture - and then
+             pointerup never arrives. Without this the listeners stay on
+             window, `moving` stays set, and the header keeps a column ghosted
+             at 0.55 opacity with an insertion line that follows nothing, until
+             the view remounts. A gesture must have exactly one exit. */
+          const onCancel = () => finish(null);
+          window.addEventListener("pointermove", onMove);
+          window.addEventListener("pointerup", onUp);
+          window.addEventListener("pointercancel", onCancel);
+        };
+
+        const dragProps = {
+          "data-colkey": key,
+          onPointerDown: beginMove,
+          onClickCapture: (e: React.MouseEvent) => {
+            if (!swallowClick.current) return;
+            swallowClick.current = false;
+            e.preventDefault();
+            e.stopPropagation();
           },
-          onDragEnd: () => { setMoving(null); setOverIdx(null); },
           onContextMenu: openMenu,
         };
 

@@ -1796,17 +1796,27 @@
   cursor: ew-resize;
   z-index: 2;
 }
+/* The column line is ALWAYS drawn. It used to be opacity 0 until hover, which
+   meant the only way to discover that a column boundary existed - or that it
+   could be dragged - was to sweep the pointer along the header hoping to hit a
+   10px strip. A divider you cannot see is not a divider; it is a secret.
+   At rest it is a hairline in the border colour, the weight Finder uses. Hover
+   and drag promote it rather than conjure it, so the affordance is a change in
+   an object that was already there. */
 .cp-lib-coldiv::after {
   content: "";
   position: absolute;
   top: 2px; bottom: 2px; left: 4px;
-  width: 2px;
+  width: 1px;
   border-radius: var(--r-pill);
-  background: var(--fg-4);
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-out);
+  background: var(--line-2);
+  opacity: 1;
+  /* background only. Transitioning `width` animates layout on the main thread
+     every frame, which transition-target-contract rejects and which is the
+     wrong tool regardless: the weight step is instant in Finder too. */
+  transition: background var(--dur-fast) var(--ease-out);
 }
-.cp-lib-coldiv:hover::after { opacity: 0.55; }
+.cp-lib-coldiv:hover::after { background: var(--fg-4); width: 2px; left: 4px; }
 /* The divider became FOCUSABLE when it gained its keyboard path, and a tab
    stop that looks identical focused and unfocused fails 2.4.7 - so the same
    bar the hover reveals goes to full strength in the focus-ring colour.

@@ -45,7 +45,20 @@ export function useListColumns<K extends string>(
   /** Grid tracks that come before the optional columns and are never hidden
    *  or reordered - the thumbnail well and the name. Finder does the same:
    *  Name cannot be turned off or moved out of first place. */
-  leadingTracks = "34px minmax(0, 1fr)",
+  /* The Name track has a FLOOR, and that floor is the whole difference
+     between this feeling like Finder and feeling broken.
+     It was `minmax(0, 1fr)`. Zero means the flexible column absorbs every
+     pixel the fixed columns take, all the way down to nothing - so widening
+     Size on the right made the FILENAME on the left shrink and vanish. The
+     hand expects the column it is dragging to change and its neighbours to
+     move; instead the far side of the table quietly evaporated. That is the
+     "stretches and expands weirdly" complaint, and it is a one-value bug.
+     With a floor the name stops shrinking and the grid overflows instead.
+     That is deliberate and it is what Finder does: `.cp-lib-pane` sets
+     overflow-y, which per CSS makes overflow-x compute to auto, and the
+     header renders inside that same scroller - so the columns scroll together
+     rather than the header sliding out of register with its rows. */
+  leadingTracks = "34px minmax(150px, 1fr)",
 ): {
   cols: Record<K, number>;
   /** Every optional column, in display order, including hidden ones. */

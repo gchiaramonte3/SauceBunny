@@ -76,7 +76,7 @@ describe("persisted list columns", () => {
     render(<Probe />);
     act(() => seen?.moveCol("date", 0));
     expect(seen?.order).toEqual(["date", "source", "size"]);
-    expect(seen?.template).toBe("34px minmax(0, 1fr) 96px 120px 84px");
+    expect(seen?.template).toBe("34px minmax(150px, 1fr) 96px 120px 84px");
   });
 
   it("drops a stored hidden set that would leave nothing visible", () => {

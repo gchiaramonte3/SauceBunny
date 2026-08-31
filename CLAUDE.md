@@ -721,7 +721,7 @@ human can check.
 
 ## Enforced contracts
 
-Ninety-five rules in this file are checked by a test rather than remembered. If you
+Ninety-seven rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -826,6 +826,8 @@ written after finding the rule already broken somewhere.
 | `select-contract` | Every `<select>` carries `cp-select`, that primitive kills the native control, and no rule on a select's class uses the `background` shorthand (which resets the chevron and leaves no arrow at all) |
 | `transcribe-args-contract` | Every transcription invoke passes every per-run setting. A field omitted at one call site deserialises to None and the setting silently does nothing — Speed shipped reaching 2 of 5 sites |
 | `session-identity-contract` | A screening's id is never the iroh join ticket. The ticket carries the host's node id and its LAN/reflexive socket addresses, and index.json is keyed by that id — so every session filed the host's network addresses into ~/Documents, permanently |
+| `row-key-path-contract` | A row's identity key is never used as a filesystem path. LibraryTree keys rows `<rootIndex>:<path>`, so passing the key where a path belongs asks the disk about "0:/Users/..." and gets nothing back - no error, just a feature that looks unwired. It happened seven times; the seventh left every folder in the sidebar with no Finder colour and was reported twice as a regression |
+| `native-drag-contract` | No element declares HTML5 `draggable`. On macOS that opens a real NSDragging session, which Tauri's webview drag-drop listener cannot tell from a Finder drag - so dragging a column header raised the full-window "drop a file to import" card. In-app drags are pointer-based. `draggable={false}` on an image is the opposite and is expected |
 | `contract-register` | This table describes itself: the spelled-out count matches the rows, and every row names a test file that exists |
 | `e2e-mock-shape-contract` | The two object literals in `e2e/tauri-mock.ts` carry exactly the fields of their ts-rs binding, so 100 Playwright tests cannot certify a backend shape that no longer exists |
 | `cancellable-download-contract` | The Parakeet model download holds its job id and offers a cancel, and a killed download is not reported as a failure. The backend registered the child and said it was cancellable; the renderer minted the id and dropped it, so a half-gigabyte download that reports no progress at all could only be escaped by quitting |
