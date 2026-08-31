@@ -68,7 +68,7 @@
     "macOS": {
       "minimumSystemVersion": "14.0",
       "entitlements": "entitlements.plist",
-      "bundleVersion": "2026083101"
+      "bundleVersion": "2026083102"
     },
     "category": "public.app-category.video"
   },
