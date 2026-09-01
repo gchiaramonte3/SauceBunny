@@ -1,5 +1,6 @@
 import {
-  useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"; import { invoke } from "@tauri-apps/api/core"; import { notifyFramesChanged } from "./lib/frames"; import { getVersion } from "@tauri-apps/api/app"; import { listen } from "@tauri-apps/api/event"; import { save as saveDialog } from "@tauri-apps/plugin-dialog"; import {   isPermissionGranted, requestPermission, sendNotification, } from "@tauri-apps/plugin-notification"; import { Toolbar } from "./components/Toolbar"; import { NavRail } from "./components/NavRail";  import { LibraryView } from "./components/LibraryView"; import { LibraryBrowser } from "./components/LibraryBrowser"; import { useTranscriptListeners } from "./hooks/use-transcript-listeners"; import { useDiarizerPrepare } from "./hooks/use-diarizer-prepare"; import { useLibraryScan } from "./hooks/use-library-scan"; import { Sidebar } from "./components/Sidebar"; import { PeoplePanel } from "./components/PeoplePanel"; import { ReactionLayer } from "./components/ReactionLayer"; import { MediaSpikePanel } from "./components/MediaSpikePanel"; import { PeerStreamSpike } from "./components/PeerStreamSpike"; import { CoReviewLobby } from "./components/CoReviewLobby"; import { Monitor, type AspectId } from "./components/Monitor"; import type { Notif } from "./components/NotificationBell"; import type { ToastKind } from "./components/CanvasToast"; import { playSuccess, playError, playInfo } from "./lib/sound"; import { Transport } from "./components/Transport"; import { Timeline } from "./components/Timeline"; import { ViewOptions } from "./components/ViewOptions"; import { LogsPanel } from "./components/LogsPanel"; import { RoomControlBar } from "./components/RoomControlBar"; import { ReviewStatusChip } from "./components/ReviewStatusChip"; import { useMediaCapture, subscribeCaptureError, setCaptureLogSink } from "./hooks/use-media-capture"; import { SettingsModal, type Defaults } from "./components/SettingsModal"; import { YouTubeAuthModal } from "./components/YouTubeAuthModal"; import type { PlayerHandle } from "./components/player-handle"; import type {   AppStatus, ClientLog, ExportOpts, LocalFileMeta, Metadata, QueuedClip, RecentClip, SourceKind, WhisperModel, ReviewRangeDraft, } from "./types"; import { isQueuedClip } from "./types"; import { asLogTag } from "./types"; import { formatError } from "./lib/error-format"; import { fmtElapsed, stageLabel } from "./lib/elapsed"; import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase"; import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek } from "./lib/playhead-store"; import { usePanelBus } from "./hooks/use-panel-bus"; import { useStreamRung } from "./hooks/use-stream-rung"; import type { YtdlpStatus } from "./bindings/YtdlpStatus"; import { clipTranscriptPath, type ActiveTranscript } from "./lib/transcript-owner"; import { useTransport } from "./hooks/use-transport"; import { useSourceMarks } from "./hooks/use-source-marks"; import { useTranscriptJobs } from "./hooks/use-transcript-jobs"; import { useFetchSource } from "./hooks/use-fetch-source"; import { useLocalSource } from "./hooks/use-local-source"; import { useWebPlayback } from "./hooks/use-web-playback"; import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView, type SessionSource } from "./hooks/use-co-review"; import { QueueDrawer } from "./components/QueueDrawer"; import { TranscriptReader } from "./components/TranscriptReader"; import { TranscriptViewer } from "./components/TranscriptViewer"; import { ReaderPlayerStage, type ReaderSource } from "./components/ReaderPlayerStage"; import { useReaderMarkers } from "./hooks/use-reader-markers"; import { ReaderAnalysis } from "./components/ReaderAnalysis"; import { CommandPalette } from "./components/CommandPalette"; import { ShortcutSheet } from "./components/ShortcutSheet"; import { DropTarget } from "./components/DropTarget"; import { WelcomeScreen } from "./components/WelcomeScreen"; import { PermissionsOnboarding } from "./components/PermissionsOnboarding"; import { RoomSourceBar } from "./components/RoomSourceBar"; import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from "./lib/import-extensions"; import {   findForSource, touchEntry, renameEntryPath as renameTranscriptEntryPath, notifyTranscriptsChanged, getHistory as getTranscriptHistory, type TranscriptHistoryEntry, } from "./lib/transcript-history"; import { prepareCues, renameSpeakerOverridesPath } from "./components/transcript/helpers"; import {   deriveOnboardingSteps, onboardingComplete, loadOnboardingDismissed, saveOnboardingDismissed, type OnboardingStepId, } from "./lib/onboarding"; import type { Command } from "./lib/commands"; import { buildCommands } from "./lib/commands"; import { markRangeFromSeconds as markRange } from "./lib/mark-range"; import { useBatchTranscribe } from "./hooks/use-batch-transcribe"; import { TranscriptSearchModal } from "./components/TranscriptSearchModal"; import { batchSummary } from "./lib/batch-queue"; import {   loadKeybindings, saveKeybindings, buildComboMap, bindingsFor, formatCombo, KEY_ACTION_BY_ID, type KeyActionId, type KeybindingOverrides, } from "./lib/keybindings"; import { migrateLegacyStorageKeys } from "./lib/migrate-storage"; import { sanitizePlaybackRate, stepPlaybackRate } from "./lib/playback-rate"; import { parseSrt } from "./lib/srt"; import { speakerLanes } from "./lib/speaker-stats"; import { speakerColor, loadSpeakerOverrides, resolveAliasChain, SPEAKERS_CHANGED_EVENT } from "./components/transcript/helpers"; import { speakerFingerprint, seedSpeakerOverridesFromFingerprint, linkSpeakerOverridesToFingerprint } from "./lib/speaker-identity"; import { MediaInfoModal } from "./components/MediaInfoModal"; import { loadReview, saveReview, ensureVersion, setActiveVersion, removeVersion, unlinkFingerprint, canUnlinkVersion, carriedComments, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes, receivedReviewKey,
+  useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"; import { invoke } from "@tauri-apps/api/core"; import { notifyFramesChanged } from "./lib/frames"; import { getVersion } from "@tauri-apps/api/app"; import { listen } from "@tauri-apps/api/event"; import { save as saveDialog } from "@tauri-apps/plugin-dialog"; import {   isPermissionGranted, requestPermission, sendNotification, } from "@tauri-apps/plugin-notification"; import { Toolbar } from "./components/Toolbar"; import { NavRail } from "./components/NavRail";  import { LibraryView } from "./components/LibraryView"; import { LibraryBrowser } from "./components/LibraryBrowser"; import { useTranscriptListeners } from "./hooks/use-transcript-listeners"; import { useDiarizerPrepare } from "./hooks/use-diarizer-prepare"; import { useLibraryScan } from "./hooks/use-library-scan"; import { Sidebar } from "./components/Sidebar"; import { PeoplePanel } from "./components/PeoplePanel"; import { ReactionLayer } from "./components/ReactionLayer"; import { MediaSpikePanel } from "./components/MediaSpikePanel"; import { PeerStreamSpike } from "./components/PeerStreamSpike"; import { CoReviewLobby } from "./components/CoReviewLobby"; import { Monitor, type AspectId } from "./components/Monitor"; import type { Notif } from "./components/NotificationBell"; import type { ToastKind } from "./components/CanvasToast"; import { playSuccess, playError, playInfo } from "./lib/sound"; import { Transport } from "./components/Transport"; import { Timeline } from "./components/Timeline"; import { ViewOptions } from "./components/ViewOptions"; import { LogsPanel } from "./components/LogsPanel"; import { RoomControlBar } from "./components/RoomControlBar"; import { ReviewStatusChip } from "./components/ReviewStatusChip"; import { useMediaCapture, subscribeCaptureError, setCaptureLogSink } from "./hooks/use-media-capture"; import { SettingsModal, type Defaults } from "./components/SettingsModal"; import { YouTubeAuthModal } from "./components/YouTubeAuthModal"; import type { PlayerHandle } from "./components/player-handle"; import type {   AppStatus, ClientLog, ExportOpts, LocalFileMeta, Metadata, QueuedClip, RecentClip, SourceKind, WhisperModel, ReviewRangeDraft, } from "./types"; import { isQueuedClip } from "./types"; import { asLogTag } from "./types"; import { formatError } from "./lib/error-format"; import { fmtElapsed, stageLabel } from "./lib/elapsed"; import { fetchButtonPhase, type StatefulPhase } from "./lib/stateful-phase"; import { getPlayheadFrames, setPlayheadFrames as publishPlayheadFrames, playheadFramesToSeconds, playheadSecondsToFrames, markUserSeek } from "./lib/playhead-store"; import { usePanelBus } from "./hooks/use-panel-bus"; import { useStreamRung } from "./hooks/use-stream-rung"; import type { YtdlpStatus } from "./bindings/YtdlpStatus"; import { clipTranscriptPath, type ActiveTranscript } from "./lib/transcript-owner"; import { useTransport } from "./hooks/use-transport"; import { useSourceMarks } from "./hooks/use-source-marks"; import { useTranscriptJobs } from "./hooks/use-transcript-jobs"; import { useFetchSource } from "./hooks/use-fetch-source"; import { useLocalSource } from "./hooks/use-local-source"; import { useWebPlayback } from "./hooks/use-web-playback"; import { useCoReview, type ReviewMarkerView, type ReviewAnnotationView, type SessionSource } from "./hooks/use-co-review"; import { QueueDrawer } from "./components/QueueDrawer"; import { TranscriptReader } from "./components/TranscriptReader"; import { TranscriptViewer } from "./components/TranscriptViewer"; import { ReaderPlayerStage, type ReaderSource } from "./components/ReaderPlayerStage"; import { useReaderMarkers } from "./hooks/use-reader-markers"; import { ReaderAnalysis } from "./components/ReaderAnalysis"; import { CommandPalette } from "./components/CommandPalette"; import { ShortcutSheet } from "./components/ShortcutSheet"; import { DropTarget } from "./components/DropTarget"; import { WelcomeScreen } from "./components/WelcomeScreen"; import { PermissionsOnboarding } from "./components/PermissionsOnboarding"; import { RoomSourceBar } from "./components/RoomSourceBar";
+import { SourceShareMenu, type ShareOption } from "./components/SourceShareMenu"; import { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from "./lib/import-extensions"; import {   findForSource, touchEntry, renameEntryPath as renameTranscriptEntryPath, notifyTranscriptsChanged, getHistory as getTranscriptHistory, type TranscriptHistoryEntry, } from "./lib/transcript-history"; import { prepareCues, renameSpeakerOverridesPath } from "./components/transcript/helpers"; import {   deriveOnboardingSteps, onboardingComplete, loadOnboardingDismissed, saveOnboardingDismissed, type OnboardingStepId, } from "./lib/onboarding"; import type { Command } from "./lib/commands"; import { buildCommands } from "./lib/commands"; import { markRangeFromSeconds as markRange } from "./lib/mark-range"; import { useBatchTranscribe } from "./hooks/use-batch-transcribe"; import { TranscriptSearchModal } from "./components/TranscriptSearchModal"; import { batchSummary } from "./lib/batch-queue"; import {   loadKeybindings, saveKeybindings, buildComboMap, bindingsFor, formatCombo, KEY_ACTION_BY_ID, type KeyActionId, type KeybindingOverrides, } from "./lib/keybindings"; import { migrateLegacyStorageKeys } from "./lib/migrate-storage"; import { sanitizePlaybackRate, stepPlaybackRate } from "./lib/playback-rate"; import { parseSrt } from "./lib/srt"; import { speakerLanes } from "./lib/speaker-stats"; import { speakerColor, loadSpeakerOverrides, resolveAliasChain, SPEAKERS_CHANGED_EVENT } from "./components/transcript/helpers"; import { speakerFingerprint, seedSpeakerOverridesFromFingerprint, linkSpeakerOverridesToFingerprint } from "./lib/speaker-identity"; import { MediaInfoModal } from "./components/MediaInfoModal"; import { loadReview, saveReview, ensureVersion, setActiveVersion, removeVersion, unlinkFingerprint, canUnlinkVersion, carriedComments, statusOf, commentMarkers as reviewMarkersOf, annotationsOf, reviewFingerprint, resolveByFingerprint, linkFingerprint, upsertReviewHistory, loadReviewer, reviewerColorFor, initialsOf, REVIEW_CHANGED_EVENT, type AnnotationStrokes, receivedReviewKey,
 } from "./lib/review";
 import { loadChapters, adoptSourceChapters, CHAPTERS_CHANGED_EVENT, type Chapter as ChapterMarker } from "./lib/chapters";
 import { appUndo } from "./lib/undo";
@@ -3936,6 +3937,51 @@ export default function App() {
     }
   };
 
+  /* ── The one share control's label, title and menu ──────────────────
+     The header used to carry each of these as its own chip. They are states
+     of ONE action, so they are states of one button. */
+  const [shareMenuAt, setShareMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const sendingPct = transfer && transfer.total > 0
+    ? Math.floor((transfer.received / transfer.total) * 100)
+    : 0;
+  const shareButtonLabel = offerError ? "Share failed"
+    : transfer?.phase === "hashing" ? "Preparing…"
+    : transfer?.phase === "sending" ? `Sending ${sendingPct}%`
+    : viewerShareState === "live" ? "Showing live"
+    : offeredFile ? "Shared"
+    : "Share";
+  /* The names go in the TITLE, not the label. "Gasper can't open this" as a
+     visible chip is what pushed the filename out of the header, and it is a
+     detail you want on hover rather than one you need at all times - the
+     button already turns primary when somebody is stuck. */
+  const shareButtonTitle = offerError ? `Could not offer the file: ${offerError}`
+    : blockedMembers.length > 0
+      ? `${blockedMembers.join(", ")} cannot open this. Show them live, or send them a copy.`
+      : "Show them what you are watching, or send them a copy.";
+  const shareOptions = useMemo(() => {
+    const out: ShareOption[] = [];
+    if (viewerShareState === "live") {
+      out.push({ key: "stop-live", label: "Stop the live view", detail: "Back to your camera",
+        onSelect: () => stopViewerShare() });
+    } else {
+      out.push({ key: "live", label: "Show them live now", detail: "About a second",
+        onSelect: () => { startViewerShare(); } });
+    }
+    if (localFilePath && !offeredFile) {
+      if (playbackPath) {
+        out.push({ key: "preview", label: "Send a preview copy", detail: "Much faster, a transcode",
+          onSelect: () => {
+            const base = (metadata?.title || "source").replace(/\.[^.]+$/, "");
+            void offerCurrentFile(playbackPath, `${base} (preview).mp4`, "h264", "aac");
+          } });
+      }
+      out.push({ key: "original", label: playbackPath ? "Send the original" : "Send them the file",
+        detail: "Full quality, slowest",
+        onSelect: () => { void offerCurrentFile(localFilePath, metadata?.title ?? undefined, metadata?.vcodec ?? null, metadata?.acodec ?? null); } });
+    }
+    return out;
+  }, [viewerShareState, localFilePath, offeredFile, playbackPath, metadata, offerCurrentFile, startViewerShare, stopViewerShare]);
+
   const autoWatchedRef = useRef<string | null>(null);
   useEffect(() => {
     /* EITHER codec, not specifically a video one.
@@ -4571,132 +4617,41 @@ export default function App() {
                       {reviewStatus && reviewStatus.state !== "pending" && (
                         <ReviewStatusChip state={reviewStatus.state} reviewer={reviewStatus.reviewer || undefined} />
                       )}
-                      {/* Who could NOT open what the room is watching. This is
-                          replicated already (SourceStatus) but was never shown,
-                          so a presenter had no way to know a guest was staring
-                          at an empty stage. */}
-                      {blockedMembers.length > 0 && (
-                        <span className="cp-room-blocked" title="They can't open this source">
-                          {blockedMembers.join(", ")} can&apos;t open this
-                        </span>
-                      )}
-                      {/* THE INSTANT ONE, and deliberately first.
-                          Sending a file is minutes; this is about a second. It
-                          taps the presenter's own monitor and pushes it down
-                          the mesh that already carries camera and screen
-                          share, so both people are looking at the same frame
-                          while the real bytes are still moving.
-                          It is a REAL-TIME ENCODE, which CLAUDE.md excludes as
-                          a playback surface because a reviewer judging a grade
-                          must see compression that is in the source and not in
-                          the transport. So the copy says "live view" rather
-                          than naming the file, the room is told, and it is
-                          offered NEXT TO the file options rather than instead
-                          of them. */}
+                      {/* ONE control for every way of getting this in front
+                          of the room, plus the state of doing it.
+                          This was SEVEN elements living in `.cp-room-title` -
+                          a "cannot open this" chip, a live-view button, a
+                          preview-copy button, a send-the-original button, an
+                          error chip, a hashing chip and a sending chip - in
+                          the half of the header whose own comment says it is
+                          the part designed to TRUNCATE. On a laptop they
+                          collided outright: labels overlapping, the filename
+                          reduced to "LPI...", and "End session" - the way OUT
+                          of a session - being pushed toward the edge.
+                          Making them smaller would have produced a cramped row
+                          of small things. One button is what gives the header
+                          its space back, and the transient states become that
+                          button's label rather than three more chips. */}
                       {isPresenter && (
                         <button
                           type="button"
-                          className={"btn btn-compact " + (viewerShareState === "live" ? "btn-primary" : "btn-ghost")}
-                          title={viewerShareState === "live"
-                            ? "Stop the live view and hand the mesh back to your camera."
-                            : "Show them your monitor live, right now, while the file transfers. It is a live view, not the file, so it is not for judging a grade."}
-                          onClick={() => {
-                            if (viewerShareState === "live") stopViewerShare();
-                            else startViewerShare();
+                          className={"btn btn-compact " + (blockedMembers.length > 0 ? "btn-primary" : "btn-ghost")}
+                          aria-haspopup="menu"
+                          title={shareButtonTitle}
+                          onClick={(e) => {
+                            const r = e.currentTarget.getBoundingClientRect();
+                            setShareMenuAt({ x: r.left, y: r.bottom + 6 });
                           }}
                         >
-                          {viewerShareState === "live" ? "Stop live view" : "Show them live now"}
+                          {shareButtonLabel}
                         </button>
                       )}
-                      {/* Tier C, sender side. The click stays the consent step
-                          for a multi-GB read - CLAUDE.md requires it and this
-                          does not weaken it.
-                          What changed is WHEN the button exists. It used to be
-                          gated on `blockedMembers.length > 0`, so it did not
-                          appear until a guest had already tried, failed, and
-                          reported the failure back. The sequence was: host
-                          loads a file, guest resolves and misses, guest sends
-                          SourceStatus "missing", the button finally renders,
-                          and then a human has to NOTICE it and click. That last
-                          step has no upper bound - it is however long it takes
-                          someone to look at the right corner of the screen -
-                          and it sat in front of every other cost in the path.
-                          The host can now offer the moment a file is on the
-                          stage, before anyone has had to fail at it. */}
-                      {isPresenter && sourceKind === "file" && localFilePath
-                        && !offeredFile
-                        && transfer?.phase !== "hashing" && (
-                        <>
-                          {/* THE PREVIEW COPY, when one exists.
-                              Measured, not guessed: the transfer is paced at
-                              TRANSFER_BYTES_PER_SEC = 24 MB/s, so a 40 GB
-                              master is about 28 minutes on the wire. Hashing
-                              it first costs seconds by comparison (blake3 is
-                              disk-bound and this disk reads in GB/s), which is
-                              why the hash is NOT what to optimise.
-                              The prep copy is the same picture at h264/AAC and
-                              a fraction of the size, and the app has already
-                              made it for its own playback. Sending the master
-                              while a compact copy of it sits unused in scratch
-                              was the single largest avoidable wait in the
-                              session path.
-                              It is a TRANSCODE, so it is offered as a named
-                              preview and never silently: the name carries
-                              "(preview)" onto the guest's screen and onto disk
-                              if they keep it. CLAUDE.md permits this - the rule
-                              is "a local copy or a fixed, known-quality
-                              stream", and a prep copy is fixed and known - but
-                              it must never be mistaken for the master by
-                              somebody judging a grade. */}
-                          {playbackPath && (
-                            <button
-                              type="button"
-                              className={"btn btn-compact " + (blockedMembers.length > 0 ? "btn-primary" : "btn-ghost")}
-                              title="Send the compact playback copy. Much faster than the original, and it is a transcode, so it is labelled as a preview."
-                              onClick={() => {
-                                const base = (metadata?.title || "source").replace(/\.[^.]+$/, "");
-                                // h264/aac stated outright rather than passed
-                                // through from the source: that is exactly what
-                                // prepare_local_for_playback writes, and it also
-                                // means the guest's auto-watch gate can never
-                                // fail for want of codec metadata.
-                                void offerCurrentFile(playbackPath, `${base} (preview).mp4`, "h264", "aac");
-                              }}
-                            >
-                              Send a preview copy
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className={"btn btn-compact " + (blockedMembers.length > 0 && !playbackPath ? "btn-primary" : "btn-ghost")}
-                            title="Send your copy of this file over the session. They see the name and size and choose to accept."
-                            onClick={() => { void offerCurrentFile(localFilePath, metadata?.title ?? undefined, metadata?.vcodec ?? null, metadata?.acodec ?? null); }}
-                          >
-                            {playbackPath ? "Send the original" : "Send them the file"}
-                          </button>
-                        </>
-                      )}
-                      {/* An offer that failed used to go to the pipeline log
-                          and nowhere else: the host clicked, nothing visible
-                          happened, and the guests went on reading "That file
-                          lives on their Mac" with nobody able to say why. */}
-                      {offerError && (
-                        <span className="cp-room-blocked" role="alert">
-                          {`Could not offer the file: ${offerError}`}
-                        </span>
-                      )}
-                      {transfer?.phase === "hashing" && (
-                        <span className="cp-room-blocked">Preparing the file…</span>
-                      )}
-                      {transfer?.phase === "sending" && (
-                        <span className="cp-room-blocked">
-                          {`Sending to ${coSession.peers.find((p) => p.id === transfer.member)?.name ?? "a guest"} · ${transfer.total > 0 ? Math.floor((transfer.received / transfer.total) * 100) : 0}%`}
-                        </span>
-                      )}
-                      {isPresenter && offeredFile && transfer?.phase !== "sending" && (
-                        <span className="cp-room-blocked" title="Guests without the file see a Get button">
-                          File offered to the room
-                        </span>
+                      {shareMenuAt && (
+                        <SourceShareMenu
+                          at={shareMenuAt}
+                          options={shareOptions}
+                          onClose={() => setShareMenuAt(null)}
+                        />
                       )}
                     </div>
                     {/* Change what the room is watching without leaving the
