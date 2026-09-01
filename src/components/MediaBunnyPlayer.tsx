@@ -806,6 +806,9 @@ export const MediaBunnyPlayer = memo(forwardRef<PlayerHandle, Props>(function Me
 
   // ─── Public handle ──────────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
+    // The element a live session captures to show a peer what the
+    // presenter is watching. See lib/viewer-capture.ts.
+    getCaptureElement: () => canvasRef.current,
     play: () => {
       if (!readyRef.current) return;
       const ctx = audioCtxRef.current;

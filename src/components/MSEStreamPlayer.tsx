@@ -287,6 +287,9 @@ export const MSEStreamPlayer = memo(forwardRef<PlayerHandle, Props>(function MSE
 
   // ─── Imperative handle ──────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
+    // The element a live session captures to show a peer what the
+    // presenter is watching. See lib/viewer-capture.ts.
+    getCaptureElement: () => videoRef.current,
     play: () => {
       const el = videoRef.current;
       if (!el) return;

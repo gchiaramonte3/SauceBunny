@@ -49,6 +49,7 @@ import type { SessionState as CoSessionState } from "../bindings/SessionState";
 import { useRtcMesh, type TurnConfig } from "./use-rtc-mesh";
 import type { MeshPeerState } from "../lib/rtc-mesh";
 import { ShareController, type ShareState } from "../lib/share-machine";
+import { ViewerShareController, type ViewerShareState } from "../lib/viewer-share";
 import { mixShareAudio, openShareStream } from "../lib/share-stream";
 import { getSessionCapture } from "./use-media-capture";
 import type { ShareSourceArg } from "../bindings/ShareSourceArg";
@@ -188,6 +189,14 @@ export type CoReview = {
   toggleMuteForMe: (memberId: string, muted: boolean) => void;
   /** Screen share (native ffmpeg pipeline; v1 replaces your camera tile). */
   shareState: ShareState;
+  /** Live view of the presenter's own monitor: the bridge that shows a guest
+   *  a picture while the real file is still transferring. A real-time encode,
+   *  so it is announced to the room and is never a delivery mechanism. */
+  viewerShareState: ViewerShareState;
+  /** False when there is no frame to capture yet; the caller should offer the
+   *  file instead of claiming a share that is not running. */
+  startViewerShare: () => boolean;
+  stopViewerShare: () => void;
   shareStream: MediaStream | null;
   /** Member ids currently flagged as sharing (tile badges). */
   sharingMembers: ReadonlySet<string>;
@@ -1378,6 +1387,51 @@ export function useCoReview({
       },
     });
   }
+
+  // ── Live view of the presenter's monitor ──────────────────────────
+  // The bridge that makes a shared asset feel instant: a guest without the
+  // file sees the presenter's own picture in about a second, while the real
+  // bytes are still moving. It rides the SAME mesh senders as screen share,
+  // so the two are mutually exclusive by construction rather than by rule.
+  const [viewerShareState, setViewerShareState] = useState<ViewerShareState>("off");
+  const viewerShareRef = useRef<ViewerShareController | null>(null);
+  if (!viewerShareRef.current) {
+    viewerShareRef.current = new ViewerShareController({
+      getElement: () => playerRef.current?.getCaptureElement?.() ?? null,
+      setOverride: (t) => meshOverrideRef.current(t),
+      setAudioOverride: (t) => meshAudioOverrideRef.current(t),
+      // The same "sharing" message screen share sends, so a guest's tile
+      // already knows how to label a live view rather than needing a second
+      // concept it would have to learn.
+      announce: (on) => {
+        const msg = { kind: "sharing", from: coRoleRef.current === "host" ? "m0" : "", on };
+        const cmd = coRoleRef.current === "host" ? "session_broadcast" : "session_send";
+        void invoke(cmd, { msg }).catch(() => { /* session raced closed */ });
+      },
+      onChange: (st) => setViewerShareState(st),
+      log: (tag, msg) => slog(tag === "err" ? "err" : "warn", msg),
+    });
+  }
+  const startViewerShare = useCallback(() => {
+    const ok = viewerShareRef.current?.start() ?? false;
+    if (!ok) {
+      pushNotification("info", "Nothing to show live yet",
+        "Play the source for a moment, then try again. Sending them the file always works.");
+    }
+    return ok;
+  }, [pushNotification]);
+  const stopViewerShare = useCallback(() => { viewerShareRef.current?.stop(); }, []);
+  /* The source changed under a live view. Re-capture: the old element belongs
+     to something nobody is watching, and an engine that reuses its element
+     would otherwise send the NEW picture under the OLD announcement. */
+  const sharedSourceRef = useRef<string | null>(null);
+  useEffect(() => {
+    const now = activeSourceUrlRef.current ?? null;
+    if (sharedSourceRef.current === now) return;
+    sharedSourceRef.current = now;
+    viewerShareRef.current?.resync();
+  });
+
   /** Host only: hand the presenter floor to another member. This passes a
    *  PERMISSION, not the network star - the invite ticket points at the
    *  original host's endpoint, so the relay itself can never move. Rust
@@ -1617,6 +1671,7 @@ export function useCoReview({
     meshStreams: mesh.remoteStreams, meshStates: mesh.peerStates,
     meshMutedForMe: mesh.peerMutedForMe, toggleMuteForMe: mesh.toggleMuteForMe,
     shareState, shareStream, sharingMembers, startShare, stopShare,
+    viewerShareState, startViewerShare, stopViewerShare,
     raisedHands,
     /** True when WE drive source + transport (host by default). */
     isPresenter,

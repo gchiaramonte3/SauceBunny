@@ -3720,6 +3720,7 @@ export default function App() {
     shareState, shareStream, sharingMembers, startShare, stopShare,
     isPresenter, pendingSource, sourceStatus, makePresenter, adoptPendingSource,
     offeredFile, transfer, offerCurrentFile, offerError, fetchOfferedFile, watchOfferedStream, keepOfferedCopy, canKeepCopy, placeReceivedRef, cancelFetch,
+    viewerShareState, startViewerShare, stopViewerShare,
     keepBadge, keepAction, onKeepCancel, onKeepResume, keepEnabled, setKeepEnabled,
     onKeepStall, onKeepStreamInfo,
     startCoReview, joinCoReview, leaveCoReview, pendingJoinCode, clearPendingJoinCode, outboxDepth,
@@ -4568,6 +4569,34 @@ export default function App() {
                         <span className="cp-room-blocked" title="They can't open this source">
                           {blockedMembers.join(", ")} can&apos;t open this
                         </span>
+                      )}
+                      {/* THE INSTANT ONE, and deliberately first.
+                          Sending a file is minutes; this is about a second. It
+                          taps the presenter's own monitor and pushes it down
+                          the mesh that already carries camera and screen
+                          share, so both people are looking at the same frame
+                          while the real bytes are still moving.
+                          It is a REAL-TIME ENCODE, which CLAUDE.md excludes as
+                          a playback surface because a reviewer judging a grade
+                          must see compression that is in the source and not in
+                          the transport. So the copy says "live view" rather
+                          than naming the file, the room is told, and it is
+                          offered NEXT TO the file options rather than instead
+                          of them. */}
+                      {isPresenter && (
+                        <button
+                          type="button"
+                          className={"btn btn-compact " + (viewerShareState === "live" ? "btn-primary" : "btn-ghost")}
+                          title={viewerShareState === "live"
+                            ? "Stop the live view and hand the mesh back to your camera."
+                            : "Show them your monitor live, right now, while the file transfers. It is a live view, not the file, so it is not for judging a grade."}
+                          onClick={() => {
+                            if (viewerShareState === "live") stopViewerShare();
+                            else startViewerShare();
+                          }}
+                        >
+                          {viewerShareState === "live" ? "Stop live view" : "Show them live now"}
+                        </button>
                       )}
                       {/* Tier C, sender side. The click stays the consent step
                           for a multi-GB read - CLAUDE.md requires it and this

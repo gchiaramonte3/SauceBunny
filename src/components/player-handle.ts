@@ -92,4 +92,17 @@ export type PlayerHandle = {
    * local players rely on the on-demand decode pipeline instead.
    */
   getPosterDataUrl?: () => Promise<string | null>;
+  /**
+   * Optional - the element this engine is painting into, so a live session can
+   * capture it and show a peer what the presenter is watching while the real
+   * file is still transferring.
+   *
+   * The ELEMENT rather than a MediaStream: capturing is the caller's decision
+   * (it costs a real-time encode), and only the caller knows whether a session
+   * is running. Engines differ in what they hand back - the <video>-backed
+   * players return a media element that carries audio, MediaBunnyPlayer
+   * returns its canvas, which does not. An audio-only source hands back an
+   * <audio> element, which captures a sound track and no picture.
+   */
+  getCaptureElement?: () => HTMLMediaElement | HTMLCanvasElement | null;
 };

@@ -102,6 +102,9 @@ export const LocalMediaPlayer = memo(forwardRef<PlayerHandle, Props>(function Lo
   const onPlayStateChangeRef = useRef(onPlayStateChange);
   onPlayStateChangeRef.current = onPlayStateChange;
   useImperativeHandle(ref, () => ({
+    // The element a live session captures to show a peer what the
+    // presenter is watching. See lib/viewer-capture.ts.
+    getCaptureElement: () => mediaRef.current,
     play: () => {
       const el = mediaRef.current;
       if (!el) return;
