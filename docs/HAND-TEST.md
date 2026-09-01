@@ -655,6 +655,31 @@ an audio file offers and the guest gets a title with no player.
 still clicks to offer. That consent step is in CLAUDE.md and none of this
 removes it. What is gone is the requirement that somebody fail first.
 
+**Prep only re-encodes what is actually broken.** The decode probe used to
+collapse "video decodes" and "audio decodes" into one boolean, so a file with
+good H.264 video and an audio track WebCodecs could not handle had every frame
+re-encoded to fix the sound.
+
+- [ ] Load an H.264 file whose audio the WebCodecs path cannot decode (AAC in
+      an older WKWebView is the common one). The log should say
+      "Video is fine; remuxing and re-encoding audio only (no video
+      transcode)" and the wait should be seconds, not minutes.
+- [ ] Load a ProRes or other non-native master. It must STILL do a full
+      transcode: the native player has to be able to open the prep output, and
+      a copied ProRes stream in an MP4 would play as a black canvas.
+- [ ] In both cases the result must actually play, with sound.
+- [ ] Turn the WebCodecs decoder OFF in Settings and load an ordinary
+      h264/aac MP4. It still preps, which is expected, and the log still names
+      the toggle as the cause.
+
+**What a regression looks like:** a ProRes file finishes prep suspiciously
+fast and then plays as a black canvas with correct timecode. That is a copied
+video stream the native player cannot open, and it is the exact failure the
+codec guard exists to prevent.
+
+---
+
+
 ---
 
 
