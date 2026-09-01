@@ -563,6 +563,56 @@ thing.
 **What a regression looks like:** the column jumps to a narrow width the
 instant you start dragging, or the width is forgotten on relaunch.
 
+### Build 2026083104 additions
+
+**1. Selection is finally visible.** It was `--bg-4` on a row and a 1px white
+ring on a tile: one grey step on a list that already had a stripe, a hover
+shade and a focus shade. Reported twice as "there is no highlight colour".
+
+- [ ] Click a clip in list view. The row fills PURPLE, and the Kind, Size and
+      Modified cells stay readable on it rather than going dim.
+- [ ] Shift-click one further down. The whole range fills, so the region you
+      picked is a block you can see at a glance.
+- [ ] Hover a selected row. It stays selected. Before, hover and selection
+      were four percent apart on the same grey scale.
+- [ ] Check the grid: a selected tile wears a 2px purple ring, which survives
+      a bright poster in a way the old white one did not.
+- [ ] Check the web shelf and the frames shelf. They share the row and card
+      classes, so they should look the same.
+- [ ] The folder tree uses a SOFTER tint on purpose: it is a permanent "where
+      you are", not a transient pick.
+
+**2. Columns you invent, like an Avid bin.** In Media Composer a bin in Text
+view is a database you shape. This is that, for the library.
+
+- [ ] List view, right-click the column header, choose **New Column…**. Type
+      a name (say "Scene") and press Enter. A new heading appears.
+- [ ] Select a clip, then click its cell under your new column. A field opens
+      over the cell. Type and press Enter. The value sticks to that clip.
+- [ ] Do the same from the keyboard: right-click the clip and use
+      **Edit Scene…**. The editor must be reachable without a mouse.
+- [ ] Press Escape while editing: nothing is saved. Click away instead: it
+      saves. That is what a bin cell does.
+- [ ] Drag your column narrower, drag it to a different position, and hide it
+      from the header menu. It behaves exactly like Kind or Size, because it
+      is the same machinery.
+- [ ] Rename the column. Everything you typed into it must still be there.
+      (Values are keyed to the column's id, not its name, for this reason.)
+- [ ] Quit and relaunch. Columns and values are both still there.
+- [ ] Delete the column. The menu item says "and its contents" because it
+      means it. Add a fresh column with the same name afterwards: it comes
+      back EMPTY, not carrying the old values.
+
+**What a regression looks like:** a new column shows a copy of the Modified
+date (the cell dispatch used to fall through to the date cell for any key it
+did not recognise), or folder rows misalign with clip rows by one column.
+
+**Not built yet, so do not look for them:** saved column layouts (Avid's Bin
+Views) and sifting/filtering on a column's values.
+
+---
+
+
 ---
 
 
