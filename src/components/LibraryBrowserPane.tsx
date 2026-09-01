@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useListColumns } from "../hooks/use-list-columns";
 import { LibraryCard } from "./LibraryCard";
 import { LibraryListRow } from "./LibraryListRow";
@@ -150,6 +150,12 @@ export function LibraryBrowserPane({
   // every row inherit the same variables — resizing one element and not the
   // other is how a table goes crooked.
   const custom = useCustomColumns();
+  /* The open cell editor. It lives HERE rather than in the row because a row
+     is a <button>: an <input> inside one is invalid content and misbehaves on
+     click, so the editor floats over the cell's box instead of nesting in it. */
+  const [editCell, setEditCell] = useState<
+    { path: string; id: string; box: { x: number; y: number; width: number } } | null
+  >(null);
   /* A custom column is just another key to the column model, which is the
      whole point: it gets resizing, reordering and hide/show from the machinery
      that already exists rather than from a parallel implementation. Merging
@@ -363,6 +369,8 @@ export function LibraryBrowserPane({
             key={`${it.path}#${posterVersions[it.path] ?? 0}`}
             columns={visible}
             customText={(id) => custom.valueFor(it.path, id)}
+            customColumns={custom.columns}
+            onEditCustom={(id, box) => setEditCell({ path: it.path, id, box })}
             item={it}
             selected={selectedPaths ? selectedPaths.has(it.path) : selectedPath === it.path}
             tags={tagsByPath?.get(it.path)}
@@ -387,6 +395,26 @@ export function LibraryBrowserPane({
           />
         ))}
       </div>
+      {editCell && (
+        <input
+          className="cp-lib-cell-edit"
+          autoFocus
+          maxLength={200}
+          aria-label={`${custom.columns.find((c) => c.id === editCell.id)?.label ?? "Column"} for ${editCell.path.split("/").pop() ?? ""}`}
+          defaultValue={custom.valueFor(editCell.path, editCell.id)}
+          style={{ left: editCell.box.x, top: editCell.box.y, width: Math.max(editCell.box.width, 120) }}
+          onKeyDown={(e) => {
+            // Stopped, or the list's own shortcuts (space to preview, delete
+            // to trash, the roving arrows) act on the row while you type.
+            e.stopPropagation();
+            if (e.key === "Enter") { custom.setValue(editCell.path, editCell.id, e.currentTarget.value); setEditCell(null); }
+            else if (e.key === "Escape") { setEditCell(null); }
+          }}
+          // Commit on blur, which is what a bin cell does. Escape above is the
+          // way to leave without saving.
+          onBlur={(e) => { custom.setValue(editCell.path, editCell.id, e.currentTarget.value); setEditCell(null); }}
+        />
+      )}
     </div>
   );
 }

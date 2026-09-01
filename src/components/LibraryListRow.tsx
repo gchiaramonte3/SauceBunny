@@ -16,6 +16,13 @@ type Props = {
   /** The text this file carries in a user-made column. Absent for callers
    *  that have no custom columns, which is every caller but the library. */
   customText?: (columnId: string) => string;
+  /** The user-made columns, so the row's menu can offer to edit each one. */
+  customColumns?: readonly { id: string; label: string }[];
+  /** Open the cell editor. The BOX is passed up because the editor cannot
+   *  live in this row: the row is a <button>, and an <input> inside one is
+   *  invalid content that swallows its own clicks. The pane floats it over
+   *  the box instead. */
+  onEditCustom?: (columnId: string, box: { x: number; y: number; width: number }) => void;
   item: LibraryItem;
   selected: boolean;
   /** Single click / Space → show the detail panel. */
@@ -57,7 +64,7 @@ type Props = {
  */
 export function LibraryListRow({
   item, selected, onSelect, onContextSelect, onRename, onDelete, onRemove, deleteLabel, onMove, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
-  tags, onToggleTagColor, onClearTagColors, columns, customText,
+  tags, onToggleTagColor, onClearTagColors, columns, customText, customColumns, onEditCustom,
 }: Props) {
   const swatch = primarySwatch(tags ?? []);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -156,7 +163,27 @@ export function LibraryListRow({
                    unknown key is visibly empty rather than convincingly
                    wrong. */
                 : isCustomKey(k)
-                  ? <span key={k} className="cp-lib-lrow-custom">{customText?.(k) ?? ""}</span>
+                  ? (
+                    <span
+                      key={k}
+                      className="cp-lib-lrow-custom"
+                      /* The same idiom the name cell uses for rename: a click
+                         on a row that is ALREADY selected. Guarded on
+                         `selected` and on modifiers and detail so it can
+                         never fire as the second half of a
+                         double-click-to-open, and stopped so it does not also
+                         re-select the row underneath. */
+                      onClick={(e) => {
+                        if (!selected || !onEditCustom) return;
+                        if (e.shiftKey || e.metaKey || e.ctrlKey || e.detail > 1) return;
+                        e.stopPropagation();
+                        const r = e.currentTarget.getBoundingClientRect();
+                        onEditCustom(k, { x: r.left, y: r.top, width: r.width });
+                      }}
+                    >
+                      {customText?.(k) ?? ""}
+                    </span>
+                  )
                   : null
         ))}
       </button>
@@ -171,6 +198,11 @@ export function LibraryListRow({
           onToggleTagColor={onToggleTagColor}
           onClearTagColors={onClearTagColors}
           anchor={menuAnchor}
+          customEdits={customColumns}
+          onEditCustom={onEditCustom && ((id) => {
+            onEditCustom(id, { x: menuAnchor.x, y: menuAnchor.y, width: 200 });
+            setMenuAnchor(null);
+          })}
           canPickThumbnail={isVideo}
           hasChosenThumbnail={isVideo && chosenPosterFor(item.path) != null}
           revealPath={item.path}

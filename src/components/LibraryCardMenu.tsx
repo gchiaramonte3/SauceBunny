@@ -66,6 +66,12 @@ type Props = {
   /** Rename this file (or the whole selection it belongs to). Absent for
    *  sources with no path on disk. */
   onRename?: () => void;
+  /** User-made columns this clip can carry a value in. The KEYBOARD route to
+   *  the cell editor: clicking a cell is the fast way, but a click-only
+   *  editor is 2.1.1 Level A, and this repo has already shipped one
+   *  pointer-only feature that a contract caught rather than a person. */
+  customEdits?: readonly { id: string; label: string }[];
+  onEditCustom?: (columnId: string) => void;
   onChooseThumbnail: () => void;
   onResetThumbnail: () => void;
   onOpen: () => void;
@@ -83,7 +89,7 @@ type Item = {
 export function LibraryCardMenu({
   anchor, align = "left", canPickThumbnail, hasChosenThumbnail, revealPath,
   onChooseThumbnail, onResetThumbnail, onOpen, onReview, onClose,
-  tags, onToggleTagColor, onClearTagColors, onRename, onDelete, onRemove, deleteLabel, onMove,
+  tags, onToggleTagColor, onClearTagColors, onRename, onDelete, onRemove, deleteLabel, onMove, customEdits, onEditCustom,
 }: Props) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: anchor.x, top: anchor.y });
@@ -101,6 +107,15 @@ export function LibraryCardMenu({
     });
   }
   if (onRename) items.push({ icon: <IconPencil size={14} />, label: "Rename…", onSelect: onRename });
+  if (onEditCustom) {
+    for (const c of customEdits ?? []) {
+      items.push({
+        icon: <IconPencil size={14} />,
+        label: `Edit ${c.label}…`,
+        onSelect: () => onEditCustom(c.id),
+      });
+    }
+  }
   if (onMove) items.push({ icon: <IconFolderSolid size={13} />, label: "Move to folder…", onSelect: onMove });
   items.push({ icon: <IconPlay size={13} />, label: "Open in Clip", onSelect: onOpen });
   if (onReview) {

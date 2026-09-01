@@ -46,11 +46,9 @@ export function useCustomColumns() {
    * since it would run against whatever `columns` happened to be closed over.
    */
   const remove = useCallback((id: string) => {
-    setColumns((prev) => {
-      const next = removeCustomColumn(prev, id);
-      return next;
-    });
-    setValues((prevValues) => pruneCustomValues(prevValues, removeCustomColumn(columns, id)));
+    const next = removeCustomColumn(columns, id);
+    setColumns(next);
+    setValues((prev) => pruneCustomValues(prev, next));
   }, [columns]);
 
   const setValue = useCallback((path: string, id: string, text: string) => {

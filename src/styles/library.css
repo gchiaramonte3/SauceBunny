@@ -2547,6 +2547,27 @@
   font: inherit;
 }
 .cp-colmenu-field:focus-visible { outline: none; border-color: var(--focus-ring); }
+
+/* The cell editor. Fixed, because it is positioned from a cell's viewport
+   rect - the row it belongs to is a <button>, and an <input> nested in one is
+   invalid content that swallows its own clicks, so the editor floats over the
+   cell rather than living in it.
+   z-index comes from the ladder: this sits above the list and below any
+   dialog, which is what --z-popover is for. */
+.cp-lib-cell-edit {
+  position: fixed;
+  z-index: var(--z-popover);
+  min-height: 22px;
+  padding: 1px var(--s-1);
+  background: var(--bg-1);
+  border: 1px solid var(--focus-ring);
+  border-radius: var(--r-xs);
+  color: var(--fg-1);
+  font: inherit;
+  /* Matches the cell it replaces, so the text does not jump on open. */
+  font-size: var(--text-sm);
+}
+.cp-lib-cell-edit:focus-visible { outline: none; }
 /* A fixed well, so the labels line up whether or not a row is checked. */
 .cp-colmenu-check {
   display: inline-flex;
