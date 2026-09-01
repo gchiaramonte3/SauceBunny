@@ -610,6 +610,54 @@ did not recognise), or folder rows misalign with clip rows by one column.
 **Not built yet, so do not look for them:** saved column layouts (Avid's Bin
 Views) and sifting/filtering on a column's values.
 
+### Session sharing: near-instant assets (needs two machines)
+
+Three changes, and the first two are visible on the HOST alone.
+
+**1. The offer exists before anyone fails.** Start a session, load a local
+file. The "Send them the file" button (or "Send a preview copy") must be there
+IMMEDIATELY. Before this it did not render until the guest had tried, failed,
+and reported back, and then a human had to notice it appear. That wait had no
+upper bound and sat in front of everything else.
+
+- [ ] Host: join a session, load a file, look at the source bar. Buttons are
+      there with nobody blocked yet.
+- [ ] When someone IS blocked, the offer becomes the loud primary button. That
+      is the only thing "blocked" changes now.
+
+**2. Send the preview copy, not the master.** For any source that needed prep
+(ProRes, 10-bit, AV1, most camera masters), the app has already written a
+compact h264 copy for its own playback.
+
+- [ ] Load a ProRes or other non-native file and wait for prep to finish.
+      TWO buttons appear: "Send a preview copy" and "Send the original".
+- [ ] Send the preview. On the GUEST, the name must read "… (preview)".
+      That label is the whole safety story: it is a transcode, and nobody
+      should approve a grade from it thinking it is the master.
+- [ ] If they keep the copy, the file ON THEIR DISK is named "(preview)" too.
+- [ ] Send the original instead and confirm it is NOT labelled preview.
+- [ ] Time both. The preview should land in a fraction of the time: transfers
+      are paced at 24 MB/s, so a 40 GB master is about 28 minutes and a
+      preview of it is minutes.
+
+**3. Audio-only sources stream at all.** This never worked.
+
+- [ ] Host: load a WAV or MP3 (an interview, a podcast) and offer it.
+- [ ] Guest: playback should start on its own. Before this the gate required a
+      VIDEO codec, so an audio file offered, landed, and then nothing happened
+      - no player, no error, no explanation.
+
+**What a regression looks like:** the offer button disappears until someone
+reports a failure; a preview copy arrives without "(preview)" in its name; or
+an audio file offers and the guest gets a title with no player.
+
+**Not changed, deliberately:** the guest still clicks to accept, and the host
+still clicks to offer. That consent step is in CLAUDE.md and none of this
+removes it. What is gone is the requirement that somebody fail first.
+
+---
+
+
 ---
 
 
