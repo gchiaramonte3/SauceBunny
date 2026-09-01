@@ -677,6 +677,38 @@ fast and then plays as a black canvas with correct timecode. That is a copied
 video stream the native player cannot open, and it is the exact failure the
 codec guard exists to prevent.
 
+**Live view: show them what you are watching (needs two machines).** The
+instant path. Sending a file is minutes; this is about a second.
+
+- [ ] Host: in a session with a guest, load any source and press
+      **Show them live now**. The guest should see your picture within a
+      second or two, in the video tile, not the stage.
+- [ ] The guest's tile must say it is a LIVE VIEW, not the file. This is a
+      real-time encode that degrades to fit the link, so nobody should be
+      judging a grade from it. If it ever presents as the source, that is the
+      bug worth reporting first.
+- [ ] Your microphone must keep working while it runs. Talk to them. The
+      mediabunny path carries no audio, and a bad override would take your mic
+      down with it, so the room going silent is the specific regression.
+- [ ] Press it again. The live view stops and your camera comes back.
+- [ ] While live, load a DIFFERENT source. The guest should see the new one,
+      or the live view should stop cleanly. What must NOT happen is the guest
+      staring at a frozen last frame of the old source, which looks like a
+      working share of a stalled video.
+- [ ] Try it before pressing play on a fresh source: you should get "Nothing
+      to show live yet" rather than a black tile that never resolves.
+- [ ] Start a screen share while the live view is running (and the reverse).
+      They use the same mesh senders, so one should take over cleanly rather
+      than both fighting for the tile.
+- [ ] Works for a web source too, not only a local file.
+
+**What a regression looks like:** the guest gets a black tile that never
+fills; the room goes silent when the live view starts; or the live view is
+presented as the file rather than as a live view.
+
+---
+
+
 ---
 
 
