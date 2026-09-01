@@ -706,6 +706,61 @@ instant path. Sending a file is minutes; this is about a second.
 fills; the room goes silent when the live view starts; or the live view is
 presented as the file rather than as a live view.
 
+### Session and panel layout: the bleeding UI (needs two machines for most of it)
+
+Six reports in one sitting, five of them the same defect: a flex row where
+every child can shrink and none is pinned.
+
+**1. The session header is one control, not seven.** It carried a "cannot open
+this" chip, a live button, a preview button, a send-original button, an error
+chip, a hashing chip and a sending chip, all in the half of the header designed
+to truncate. On a laptop they overlapped into "THEM THLEFILE".
+
+- [ ] Host a session on a LAPTOP screen, load a file. There is ONE **Share**
+      button. Nothing overlaps, the filename is readable, and "End session"
+      is not near the edge.
+- [ ] Its label carries the state: "Preparing…", "Sending 42%", "Showing
+      live", "Shared". Hover it to see who cannot open the source.
+- [ ] It turns into the loud primary button when somebody actually is stuck.
+- [ ] Open it: three options, each with its cost. "About a second", "Much
+      faster, a transcode", "Full quality, slowest".
+
+**2. The live view lands on the STAGE.** It used to arrive in the guest's
+people tile, a thumbnail beside a face, which is why it never solved anything.
+
+- [ ] Host: press Share, choose "Show them live now".
+- [ ] Guest: the picture fills the STAGE, not a tile, with a badge reading
+      "Live view of <name>'s screen". That badge must always be visible: it is
+      a real-time encode and nobody should grade from it.
+- [ ] Host audio still comes through their tile once, not twice.
+- [ ] Throw a reaction at it. The emoji lands ON the live view.
+
+**3. A source you cannot open blanks the stage.** It used to leave the
+PREVIOUS video playing under the notice.
+
+- [ ] Host loads something the guest cannot open. The guest's stage goes
+      BLANK behind the notice. What must never happen is a different video
+      still playing under it.
+
+**4. The review toolbar never becomes two rows.**
+
+- [ ] Open the review panel and drag it as narrow as it goes. All / Open /
+      Resolved is now ONE dropdown, and the row stays on a single line at
+      every width.
+- [ ] The counts are still visible in the dropdown labels.
+
+**5. Resolved no longer paints over the timestamp.**
+
+- [ ] Resolve a comment in a narrow panel. The badge sits beside "1m ago"
+      rather than across it.
+
+**What a regression looks like:** any two controls overlapping at laptop
+width, a second row of icons in the review toolbar, or a live view with no
+badge saying it is a live view.
+
+---
+
+
 ---
 
 
