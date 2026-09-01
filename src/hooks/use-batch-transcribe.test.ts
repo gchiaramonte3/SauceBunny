@@ -12,6 +12,10 @@ const h = vi.hoisted(() => ({
   sub: null as null | ((e: { payload: unknown }) => void),
   /** When true, every started job completes on its own on the next tick. */
   auto: true,
+  /** Called the moment the loop attaches its `transcript-done` listener, i.e.
+   *  INSIDE the await that sits between the cancelled-check and the spawn.
+   *  The only way to land Stop in that window from a test. */
+  onListen: null as null | (() => void),
 }));
 
 /**
@@ -50,6 +54,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: async (name: string, cb: (e: { payload: unknown }) => void) => {
     if (name !== "transcript-done") return () => {};
     h.sub = cb;
+    h.onListen?.();
     return () => { if (h.sub === cb) h.sub = null; };
   },
 }));
@@ -100,7 +105,7 @@ async function startParked() {
 }
 
 describe("useBatchTranscribe cancel", () => {
-  beforeEach(() => { h.calls = []; h.args = []; h.waiting = []; h.sub = null; h.auto = true; });
+  beforeEach(() => { h.calls = []; h.args = []; h.waiting = []; h.sub = null; h.auto = true; h.onListen = null; });
 
   it("never asks the backend for a job id", () => {
     // The id is local now. If this ever fails, the round trip is back and the
@@ -126,6 +131,30 @@ describe("useBatchTranscribe cancel", () => {
     expect(killed.jobId).toBeTruthy();
 
     await act(async () => { finishCurrent(true); await started(); });
+  });
+
+  it("does not start the file when Stop lands DURING the wait", async () => {
+    /* The window CLAUDE.md's rule is about, and it was open here. The loop
+       checks `cancelled`, then awaits watchJob - a real listen() round trip to
+       Rust - then spawns. Stop landing inside that await was not re-checked.
+       The consequence is worse than a late stop. cancel_job on an id that has
+       not been spawned finds nothing in the JobRegistry to kill, but it sets
+       the sticky cancelled flag first, so the file went on to run a complete
+       ffmpeg pass and a whole whisper transcription while the UI said the
+       batch was cancelled. */
+    h.auto = false;
+    const { result } = renderHook(() => useBatchTranscribe());
+    // Cancel from inside the listener attach: after the check, before the spawn.
+    h.onListen = () => { h.onListen = null; result.current.cancel(); };
+    await act(async () => {
+      void result.current.start(FILES, SETTINGS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(
+      h.calls.filter((c) => c === "transcribe_local_file"),
+      "a file was transcribed after Stop landed during the wait",
+    ).toHaveLength(0);
   });
 
   it("does not start the next file when Stop lands during the current one", async () => {

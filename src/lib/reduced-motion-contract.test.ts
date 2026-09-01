@@ -141,7 +141,7 @@ describe("prefers-reduced-motion", () => {
     // The one shape that is always a bug is neutralising a `-50%` translate.
     // That is the centring idiom — the element is offset by half its own width
     // or height to sit on a point — so replacing it with anything else moves it
-    // visibly off target. It is why the 41 transition suppressions in this
+    // visibly off target. It is why the transition suppressions in this
     // codebase zero the DURATION instead: `.cp-playhead::before`,
     // `.cp-ai-chip::after` and the follow pill all centre this way.
     const centred = new Set<string>();

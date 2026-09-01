@@ -304,13 +304,25 @@ accessibility tree; only VoiceOver proves it is announced.
       caret should land in the field beside them. Those labels were previously
       decorative and clicking them did nothing.
 
-## 9. Look — token changes, no computed value should have moved
+## 9. Look — token changes
+
+**This section used to be headed "no computed value should have moved" and
+that is no longer true.** It was written on 2026-08-15 against a commit whose
+186 radius substitutions were all value-identical (verified exhaustively, by
+pairing every removed and added line and substituting each token for its
+value: 186 of 186, no exceptions). A week later a second commit finished the
+scale ON PURPOSE and moved about 35 declarations by a pixel or two: 5px to 6,
+7px to 8, 3px to 4, 11px to 12, 14px to 16. Its own message says so.
+
+The checklist was never updated, so it told whoever read it that any
+difference was a regression. That is worse than saying nothing: it sends
+someone hunting for a bug in the ~35 corners that changed correctly.
 
 - [ ] Timecodes, download percentages, cache sizes and the queue's numbers do
       not shimmy or shift width while they count.
-- [ ] Nothing looks unstyled: 186 `border-radius` declarations were swapped to
-      tokens with identical values, so any rounded corner that is now square is
-      a real regression.
+- [ ] Nothing looks UNSTYLED. A corner that is now square is a real
+      regression; a corner that is a pixel rounder than you remember is the
+      scale being finished and is expected.
 - [ ] The green room's step trail, "NO SOURCE LOADED", the URL hint and the
       Settings cache path are all readable — they were moved one step brighter.
 

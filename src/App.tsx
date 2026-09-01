@@ -2749,13 +2749,36 @@ export default function App() {
 
   // Transcode an exotic-codec original into a WKWebView-friendly playback copy,
   // reader-scoped (no Clip state). Mirrors runPlaybackPrep but standalone.
+  /* The id is HELD, and the previous prep is cancelled.
+     This was the one mint site of seventeen that dropped its job id on the
+     floor. Rust registers the child either way (media.rs, JobRegistry insert),
+     so the transcode was cancellable the whole time and nothing in the app
+     could reach it. The cost is not theoretical: readerOpenSeqRef already
+     supersedes an older open, so opening three transcripts in a row left
+     three whole-file ffmpeg transcodes running to completion, each writing a
+     multi-GB scratch file nobody would ever play. */
+  const readerPrepJobRef = useRef<string | null>(null);
   const prepareReaderPlayback = useCallback(async (
     origPath: string, hasVideo: boolean, durationSeconds: number | null,
   ): Promise<string> => {
+    const previous = readerPrepJobRef.current;
+    if (previous) {
+      // Fire and forget: a prep that already finished is not an error, and a
+      // failure to cancel must not stop the new one from starting.
+      void invoke("cancel_job", { jobId: previous }).catch(() => { /* already gone */ });
+    }
     const jobId = newJobId();
-    return await invoke<string>("prepare_local_for_playback", {
-      args: { input_path: origPath, has_video: hasVideo, duration_seconds: durationSeconds, job_id: jobId },
-    });
+    readerPrepJobRef.current = jobId;
+    try {
+      return await invoke<string>("prepare_local_for_playback", {
+        args: { input_path: origPath, has_video: hasVideo, duration_seconds: durationSeconds, job_id: jobId },
+      });
+    } finally {
+      // Only clear if this run is still the current one: a superseding prep
+      // has already installed its own id and must not have it wiped by the
+      // older run finishing afterwards.
+      if (readerPrepJobRef.current === jobId) readerPrepJobRef.current = null;
+    }
   }, []);
 
   // Reader open: attach the transcript for reading, then resolve an ISOLATED
