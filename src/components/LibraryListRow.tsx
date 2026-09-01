@@ -4,7 +4,7 @@ import type { FinderTag } from "../bindings/FinderTag";
 import { IconFilm, IconVolume } from "./Icons";
 import { LibraryCardMenu } from "./LibraryCardMenu";
 import { chosenPosterFor, formatBytes, formatModifiedDate, DEFAULT_LIB_COLUMNS } from "../lib/library";
-import type { LibColKey } from "../lib/library";
+import { isCustomKey } from "../lib/custom-columns";
 import { useLazyThumbnails } from "../hooks/use-lazy-thumbnails";
 import type { LibraryItem } from "../types";
 
@@ -12,7 +12,10 @@ type Props = {
   /** The optional columns to render, in the header's current order and with
    *  hidden ones already removed. Omitted keeps the default three, so the
    *  grid view and any caller that does not manage columns is unchanged. */
-  columns?: readonly LibColKey[];
+  columns?: readonly string[];
+  /** The text this file carries in a user-made column. Absent for callers
+   *  that have no custom columns, which is every caller but the library. */
+  customText?: (columnId: string) => string;
   item: LibraryItem;
   selected: boolean;
   /** Single click / Space → show the detail panel. */
@@ -54,7 +57,7 @@ type Props = {
  */
 export function LibraryListRow({
   item, selected, onSelect, onContextSelect, onRename, onDelete, onRemove, deleteLabel, onMove, onOpen, onReview, requestThumb, onChoosePoster, onResetPoster,
-  tags, onToggleTagColor, onClearTagColors, columns,
+  tags, onToggleTagColor, onClearTagColors, columns, customText,
 }: Props) {
   const swatch = primarySwatch(tags ?? []);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -143,7 +146,18 @@ export function LibraryListRow({
             ? <span key={k} className="cp-lib-lrow-kind cp-lib-lrow-kindword">{item.kind}</span>
             : k === "size"
               ? <span key={k} className="cp-lib-lrow-size">{formatBytes(item.size_bytes)}</span>
-              : <span key={k} className="cp-lib-lrow-date">{formatModifiedDate(item.modified_ms)}</span>
+              : k === "date"
+                ? <span key={k} className="cp-lib-lrow-date">{formatModifiedDate(item.modified_ms)}</span>
+                /* A user-made column. The chain used to END at the date cell,
+                   so ANY key it did not recognise rendered the modified date -
+                   which meant the first custom column would have quietly shown
+                   a column of dates under someone's own heading. The date is
+                   now matched by name and the fallback renders nothing, so an
+                   unknown key is visibly empty rather than convincingly
+                   wrong. */
+                : isCustomKey(k)
+                  ? <span key={k} className="cp-lib-lrow-custom">{customText?.(k) ?? ""}</span>
+                  : null
         ))}
       </button>
       {menuAnchor && (

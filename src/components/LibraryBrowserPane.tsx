@@ -11,6 +11,7 @@ import { useRovingGrid } from "../hooks/use-roving-grid";
 import { useMarquee } from "../hooks/use-marquee";
 import type { LibraryFolder, LibraryItem } from "../types";
 import { ListColumnHeaders, NameHeader } from "./ListColumnHeaders";
+import { useCustomColumns, CUSTOM_COL_WIDTH } from "../hooks/use-custom-columns";
 import type { ColSpec } from "./ListColumnHeaders";
 import type { LibColKey } from "../lib/library";
 
@@ -148,7 +149,34 @@ export function LibraryBrowserPane({
   // Column widths, persisted. Applied on the list CONTAINER so the header and
   // every row inherit the same variables — resizing one element and not the
   // other is how a table goes crooked.
-  const colModel = useListColumns(COLS_KEY, COL_DEFAULT);
+  const custom = useCustomColumns();
+  /* A custom column is just another key to the column model, which is the
+     whole point: it gets resizing, reordering and hide/show from the machinery
+     that already exists rather than from a parallel implementation. Merging
+     the widths in here is the entire integration.
+     useListColumns already handles the two cases this creates - it appends
+     keys the stored order has never seen (a column just added) and drops keys
+     it no longer recognises (one just deleted). */
+  const colDefaults = useMemo(
+    () => ({
+      ...COL_DEFAULT,
+      ...Object.fromEntries(custom.columns.map((c) => [c.id, CUSTOM_COL_WIDTH])),
+    }) as Record<string, number>,
+    [custom.columns],
+  );
+  const colModel = useListColumns(COLS_KEY, colDefaults);
+  const colSpecs = useMemo<readonly ColSpec<string>[]>(
+    () => [
+      ...LIB_COL_SPECS,
+      // No `sort` key: sorting is over the library's own comparators, and a
+      // user-made column has none. A heading that looks sortable and does
+      // nothing is worse than one that plainly does not.
+      ...custom.columns.map((c) => ({
+        key: c.id, label: c.label, className: "cp-lib-lrow-custom",
+      })),
+    ],
+    [custom.columns],
+  );
   const { visible, template } = colModel;
 
   const marquee = useMarquee({
@@ -313,7 +341,7 @@ export function LibraryBrowserPane({
               and hideable from a right-click menu. Name stays outside because
               it is the 1fr track and, as in Finder, cannot be moved or turned
               off. */}
-          <ListColumnHeaders specs={LIB_COL_SPECS} model={colModel} sort={sort} dir={dir} onSort={onSort} />
+          <ListColumnHeaders specs={colSpecs} model={colModel} sort={sort} dir={dir} onSort={onSort} custom={custom} />
         </div>
         {/* Containers first, exactly as the grid does it - and as `names`
             above assumes. Rendering only files here both hid a folder of
@@ -334,6 +362,7 @@ export function LibraryBrowserPane({
           <LibraryListRow
             key={`${it.path}#${posterVersions[it.path] ?? 0}`}
             columns={visible}
+            customText={(id) => custom.valueFor(it.path, id)}
             item={it}
             selected={selectedPaths ? selectedPaths.has(it.path) : selectedPath === it.path}
             tags={tagsByPath?.get(it.path)}

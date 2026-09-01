@@ -1321,7 +1321,8 @@
    rule below, which sets its own muted size colour. */
 .cp-lib-lrow.selected .cp-lib-lrow-kind,
 .cp-lib-lrow.selected .cp-lib-lrow-date,
-.cp-lib-lrow.selected .cp-lib-lrow-size { color: var(--sel-ink); }
+.cp-lib-lrow.selected .cp-lib-lrow-size,
+.cp-lib-lrow.selected .cp-lib-lrow-custom { color: var(--sel-ink); }
 .cp-lib-lrow-art {
   display: flex;
   align-items: center;
@@ -1346,6 +1347,17 @@
 .cp-lib-lrow-folder .cp-lib-lrow-size { color: var(--fg-4); }
 .cp-lib-lrow-name { min-width: 0; font-weight: var(--weight-semibold); color: var(--fg-1); }
 .cp-lib-lrow-kind { min-width: 0; color: var(--fg-4); }
+/* A user-made column's cell. Reads as content the user wrote rather than as
+   metadata the app derived, so it sits at --fg-2 rather than the muted --fg-4
+   the derived columns use. Truncates: the value is capped at 200 characters
+   and the column is often narrow. */
+.cp-lib-lrow-custom {
+  min-width: 0;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* Only where the value really is a lowercase enum. */
 .cp-lib-lrow-kindword { text-transform: capitalize; }
 /* ONE LINE, always - but on the ROWS ONLY.
@@ -2514,6 +2526,27 @@
 /* The last visible column: shown as unavailable rather than hidden, so the
    reason it will not turn off is visible instead of mysterious. */
 .cp-colmenu-item:disabled { opacity: 0.45; cursor: not-allowed; }
+/* Separator between the columns you can show and the ones you can make. */
+.cp-colmenu-sep {
+  height: 1px;
+  margin: var(--s-1) var(--s-2);
+  background: var(--line-1);
+}
+/* Naming a column happens IN the menu, in the row the command occupied, so
+   the act stays where it started rather than throwing a dialog over the list
+   you were looking at. Sized to line up with the items around it: it replaces
+   one, so a different height would make the menu jump as you type. */
+.cp-colmenu-field {
+  width: 100%;
+  min-height: 26px;
+  padding: 3px var(--s-2);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--fg-1);
+  font: inherit;
+}
+.cp-colmenu-field:focus-visible { outline: none; border-color: var(--focus-ring); }
 /* A fixed well, so the labels line up whether or not a row is checked. */
 .cp-colmenu-check {
   display: inline-flex;

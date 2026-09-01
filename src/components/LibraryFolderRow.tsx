@@ -2,7 +2,6 @@ import { countLibraryItems } from "../lib/library";
 import { IconFolder } from "./Icons";
 import type { LibraryFolder } from "../types";
 import { DEFAULT_LIB_COLUMNS } from "../lib/library";
-import type { LibColKey } from "../lib/library";
 import { useState } from "react";
 import { FolderTagMenu } from "./FolderTagMenu";
 import { primarySwatch } from "../lib/finder-tags";
@@ -10,7 +9,7 @@ import type { FinderTag } from "../bindings/FinderTag";
 
 type Props = {
   /** See LibraryListRow: the header's current column order. */
-  columns?: readonly LibColKey[];
+  columns?: readonly string[];
   /** Its Finder tags, for the folder-glyph tint. Absent left the list view's
    *  folders colourless while the sidebar tree's wore their colour. */
   tags?: readonly FinderTag[];
@@ -82,7 +81,15 @@ export function LibraryFolderRow({ folder, onOpen, dropActive, columns, tags, on
           ? <span key={k} className="cp-lib-lrow-kind cp-lib-lrow-kindword">folder</span>
           : k === "size"
             ? <span key={k} className="cp-lib-lrow-size">{count === 1 ? "1 item" : `${count} items`}</span>
-            : <span key={k} className="cp-lib-lrow-date" />
+            : k === "date"
+              ? <span key={k} className="cp-lib-lrow-date" />
+              /* A cell PER COLUMN, even when a folder has nothing to put in
+                 one. The row is a grid whose tracks are shared with the item
+                 rows above and below it; emit one cell fewer and every column
+                 to the right of the gap slides left on that row alone. Folders
+                 carry no custom-column values today - only clips do - so this
+                 is deliberately empty rather than absent. */
+              : <span key={k} className="cp-lib-lrow-custom" />
       ))}
     </button>
     {menuAt && (

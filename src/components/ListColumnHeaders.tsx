@@ -102,16 +102,27 @@ export function NameHeader({ sort, dir, onSort, model }: {
   );
 }
 
+/** The verbs for user-made columns. Optional: the web and frames shelves
+ *  have no custom columns, and passing nothing simply omits that half of the
+ *  menu rather than showing commands that do nothing. */
+export type CustomColumnVerbs = {
+  columns: readonly { id: string; label: string }[];
+  add: (label: string) => void;
+  rename: (id: string, label: string) => void;
+  remove: (id: string) => void;
+};
+
 export function ListColumnHeaders<K extends string>({
-  specs, model, sort, dir, onSort,
+  specs, model, sort, dir, onSort, custom,
 }: {
   specs: readonly ColSpec<K>[];
   model: ColumnModel<K>;
   sort: LibrarySortKey;
   dir: LibrarySortDir;
   onSort: (key: LibrarySortKey) => void;
+  custom?: CustomColumnVerbs;
 }) {
-  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number; key: string | null } | null>(null);
   /** The column being dragged to a new position, and where it would land. */
   const [moving, setMoving] = useState<K | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
@@ -126,7 +137,10 @@ export function ListColumnHeaders<K extends string>({
 
   const openMenu = (e: React.MouseEvent) => {
     e.preventDefault();
-    setMenuAt({ x: e.clientX, y: e.clientY });
+    // Which header was right-clicked, so a user-made column can offer to be
+    // renamed or deleted from the same menu that shows it.
+    const cell = (e.target as HTMLElement).closest("[data-colkey]") as HTMLElement | null;
+    setMenuAt({ x: e.clientX, y: e.clientY, key: cell?.dataset.colkey ?? null });
   };
 
   return (
@@ -263,6 +277,7 @@ export function ListColumnHeaders<K extends string>({
           at={menuAt}
           specs={specs}
           model={model}
+          custom={custom}
           onClose={() => setMenuAt(null)}
         />
       )}
@@ -278,10 +293,11 @@ export function ListColumnHeaders<K extends string>({
  * command. It stays open across toggles, because turning three columns off
  * one at a time through three right-clicks is not a menu, it is a chore.
  */
-function ColumnMenu<K extends string>({ at, specs, model, onClose }: {
-  at: { x: number; y: number };
+function ColumnMenu<K extends string>({ at, specs, model, custom, onClose }: {
+  at: { x: number; y: number; key: string | null };
   specs: readonly ColSpec<K>[];
   model: ColumnModel<K>;
+  custom?: CustomColumnVerbs;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -320,6 +336,99 @@ function ColumnMenu<K extends string>({ at, specs, model, onClose }: {
           </button>
         );
       })}
+      {custom && (
+        <CustomColumnSection
+          custom={custom}
+          onKey={at.key}
+          onDone={onClose}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * The user-made half of the column menu: make one, rename one, delete one.
+ *
+ * The name is typed INLINE rather than in a dialog. That is what Avid does -
+ * you click the empty space past the last heading and type - and it is also
+ * the only option that behaves: window.prompt is unreliable inside WKWebView,
+ * and a modal for one short string is more ceremony than the act deserves.
+ */
+function CustomColumnSection({ custom, onKey, onDone }: {
+  custom: CustomColumnVerbs;
+  /** The column the menu was opened on, if it was opened on one. */
+  onKey: string | null;
+  onDone: () => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const target = custom.columns.find((c) => c.id === onKey) ?? null;
+
+  const field = (initial: string, commit: (v: string) => void) => (
+    <input
+      className="cp-colmenu-field"
+      defaultValue={initial}
+      // The field IS the menu item, so it has to take focus the moment it
+      // appears or the first keystroke goes to the menu's own key handler.
+      autoFocus
+      maxLength={32}
+      aria-label="Column name"
+      onKeyDown={(e) => {
+        // Stopped here so the menu's Escape-to-close and arrow navigation do
+        // not fight the field. Escape cancels the FIELD first; a second press
+        // reaches the menu and closes it.
+        e.stopPropagation();
+        if (e.key === "Enter") { commit(e.currentTarget.value); }
+        else if (e.key === "Escape") { setAdding(false); setRenaming(null); }
+      }}
+      onBlur={(e) => commit(e.currentTarget.value)}
+    />
+  );
+
+  return (
+    <>
+      <div className="cp-colmenu-sep" role="separator" />
+      {adding
+        ? field("", (v) => { custom.add(v); setAdding(false); onDone(); })
+        : (
+          <button
+            type="button"
+            role="menuitem"
+            className="cp-colmenu-item"
+            onClick={() => setAdding(true)}
+          >
+            <span className="cp-colmenu-check" aria-hidden />
+            New Column…
+          </button>
+        )}
+      {target && (renaming === target.id
+        ? field(target.label, (v) => { custom.rename(target.id, v); setRenaming(null); onDone(); })
+        : (
+          <>
+            <button
+              type="button"
+              role="menuitem"
+              className="cp-colmenu-item"
+              onClick={() => setRenaming(target.id)}
+            >
+              <span className="cp-colmenu-check" aria-hidden />
+              Rename “{target.label}”…
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="cp-colmenu-item"
+              /* Says what it takes with it. Deleting the column deletes every
+                 value anyone typed into it, and a menu item reading only
+                 "Delete" would not have said so. */
+              onClick={() => { custom.remove(target.id); onDone(); }}
+            >
+              <span className="cp-colmenu-check" aria-hidden />
+              Delete “{target.label}” and its contents
+            </button>
+          </>
+        ))}
+    </>
   );
 }
