@@ -2945,6 +2945,16 @@ export default function App() {
     notify: pushNotification,
   });
 
+  /* The stage only, for when the ROOM moves to something this Mac cannot
+     open. Deliberately narrower than handleClear: that is the user's own
+     "unload", and it takes the export queue and the mark points with it.
+     Nobody asked for their queue to be emptied because a peer changed source. */
+  const clearStageForPeerSource = useCallback(() => {
+    resetForNewSource("");
+    setStatus("empty");
+    setUrl("");
+  }, [resetForNewSource, setStatus, setUrl]);
+
   const handleClear = useCallback(() => {
     resetForNewSource("");
     setStatus("empty");
@@ -3728,7 +3738,7 @@ export default function App() {
     isPlaying, fps, playbackRate,
     sessionSource, activeSourceUrlRef, reviewSourceKey,
     playerRef, metadataRef,
-    onChaseSeek, setUrl, handleFetch, loadLocalPath, loadPeerStream,
+    onChaseSeek, setUrl, handleFetch, loadLocalPath, loadPeerStream, clearStageForPeerSource,
     pushNotification, setQueueOpen,
     setReviewMarkers, setReviewAnnotations,
     turn: { url: defaults.turnUrl, username: defaults.turnUsername, password: defaults.turnPassword },

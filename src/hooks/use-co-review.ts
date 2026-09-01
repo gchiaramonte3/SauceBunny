@@ -122,6 +122,11 @@ type Args = {
    *  source machine; the hook owns session bookkeeping around it). */
   loadPeerStream: (offer: { name: string; blake3: string; vcodec: string | null; acodec: string | null },
     pending: { title: string | null; duration: number | null }) => Promise<void>;
+  /** Blank the stage when the ROOM moves to something this Mac cannot open.
+   *  Narrower than the user's own "unload", which also empties the export
+   *  queue and the marks - nobody asked for that because a peer changed
+   *  source. */
+  clearStageForPeerSource: () => void;
   pushNotification: (kind: ToastKind, title: string, body: string) => void;
   /** The pipeline log, which the diagnostics export reads. Co-review is the
    *  one subsystem that inherently needs two machines to reproduce, and it
@@ -291,7 +296,7 @@ export function useCoReview({
   isPlaying, fps, playbackRate,
   sessionSource, activeSourceUrlRef, reviewSourceKey,
   playerRef, metadataRef,
-  onChaseSeek, setUrl, handleFetch, loadLocalPath, loadPeerStream,
+  onChaseSeek, setUrl, handleFetch, loadLocalPath, loadPeerStream, clearStageForPeerSource,
   pushNotification, setQueueOpen,
   setReviewMarkers, setReviewAnnotations,
   turn, stunUrl, appendLog,
@@ -583,12 +588,20 @@ export function useCoReview({
             })
             .catch(() => {
               // Indexed but gone (moved, renamed, external drive unplugged).
+              clearStageForPeerSource();
               sendSessionMsg({ kind: "sourceStatus", from: "", state: "missing", detail: null });
             });
           return;
         }
-        // Tier 3: we don't have it. Say so plainly; the room affordance offers
-        // "Open my copy", which links the fingerprint so tier 1 hits next time.
+        /* Tier 3: we do not have it, so STOP SHOWING THE OLD ONE.
+           This used to say "missing" and return, leaving the previous asset
+           playing underneath the notice. The screen then read
+           "<new file> - Anthony is showing this, and it cannot be streamed to
+           you" over a completely different video that was still running, which
+           invites exactly the wrong conclusion: that the thing on screen is
+           what the room is discussing. A blank stage under that notice is
+           worse to look at and far better to trust. */
+        clearStageForPeerSource();
         sendSessionMsg({ kind: "sourceStatus", from: "", state: "missing", detail: null });
         return;
       }

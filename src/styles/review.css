@@ -382,15 +382,37 @@
   gap: 9px;
 }
 .cp-review-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.cp-review-author { font-family: var(--font-ui); font-size: var(--text-md); font-weight: var(--weight-bold); color: var(--fg-1); }
-.cp-review-ago { font-family: var(--font-ui); font-size: var(--text-sm); color: var(--fg-4); }
+/* The NAME is the only thing here allowed to give way, and it truncates
+   rather than wrapping. Everything in this header had `min-width: 0` and
+   nothing had `nowrap`, so under a narrow panel the timestamp broke to two
+   lines and the Resolved badge - which could also shrink - came down on top
+   of it. The result read "1m RESOLVED / ago", with the badge painted over the
+   time. Reported from a screenshot, and it is the same shape as the session
+   header's overflow: a flex row where every child is compressible and none is
+   pinned. */
+.cp-review-author {
+  font-family: var(--font-ui); font-size: var(--text-md); font-weight: var(--weight-bold); color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* "1m ago" is four characters and a space. There is no width at which
+   breaking it is better than letting the name give up a letter. */
+.cp-review-ago {
+  font-family: var(--font-ui); font-size: var(--text-sm); color: var(--fg-4);
+  white-space: nowrap;
+}
 
 .cp-review-badge {
+  /* Pinned. A badge that can shrink stops being a badge and becomes a smear
+     over whatever is beside it. */
+  flex-shrink: 0;
+  white-space: nowrap;
   font-family: var(--font-ui); font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: var(--track-caps);
   text-transform: uppercase; color: var(--fg-1);
   background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: var(--r-xs); padding: 1px 6px;
 }
-.cp-review-actions { margin-left: auto; display: flex; gap: 2px; }
+.cp-review-actions { margin-left: auto; display: flex; gap: 2px; flex-shrink: 0; }
 .cp-review-actions button {
   border: none; background: transparent; color: var(--fg-4);
   font-family: var(--font-ui); font-size: var(--text-sm); padding: 2px 6px; border-radius: var(--r-xs); cursor: pointer;
