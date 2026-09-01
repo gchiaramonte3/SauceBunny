@@ -39,7 +39,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
+  /* NEVER two rows. This was `wrap`, and it did exactly what it was told: in a
+     narrow panel the filter segments, the search icon, the sort select, the
+     export and history icons and the avatar broke onto a second line of
+     icons. Forbidding the wrap only works because the widest control in here
+     collapsed from three segments to one dropdown - otherwise this would trade
+     a second row for a clipped one. */
+  flex-wrap: nowrap;
   gap: 6px 8px;
   padding: 8px 12px;
 }
@@ -47,7 +53,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   min-width: 0;
   /* Stays right-aligned when the toolbar wraps it onto its own row. */
@@ -56,39 +62,6 @@
 /* Inline SVG glyphs inside flex buttons must not shrink. */
 .cp-review-glyph { flex-shrink: 0; }
 
-/* All / Open / Resolved segmented filter (the "All comments" control). */
-.cp-review-filter {
-  display: inline-flex;
-  gap: 2px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-md);
-  padding: 2px;
-}
-.cp-review-filter button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: none;
-  background: transparent;
-  color: var(--fg-3);
-  font-family: var(--font-ui);
-  font-size: var(--text-base);
-  font-weight: var(--weight-semibold);
-  padding: 3px 8px;
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
-}
-.cp-review-filter button:hover { color: var(--fg-1); }
-.cp-review-filter button.active { background: rgba(255,255,255,0.10); color: var(--fg-1); }
-.cp-review-filter .n {
-  font-variant-numeric: tabular-nums;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-bold);
-  color: var(--fg-4);
-}
-.cp-review-filter button.active .n { color: var(--accent); }
 
 /* Icon button (search toggle) — shares the sort/export control height. */
 .cp-review-iconbtn {
@@ -1389,4 +1362,11 @@
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   line-height: var(--leading-snug);
+}
+
+/* The filter, now one control. Sized so the widest option ("Resolved (12)")
+   does not make the row it lives in the reason the row overflows. */
+.cp-review-filter-select {
+  flex-shrink: 0;
+  max-width: 148px;
 }

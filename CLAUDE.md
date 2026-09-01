@@ -816,7 +816,7 @@ written after finding the rule already broken somewhere.
 | `sidecar-naming-contract` | Every sidecar install target in scripts/ carries the `-<arch>-apple-darwin` triple |
 | `token-fallback-contract` | A token tokens.css defines carries no duplicate hex fallback (the palette was retuned; 34 of 40 had drifted) |
 | `no-barrel-contract` | No `index.ts` re-export files, and no module that is nothing but re-exports under another name |
-| `class-prefix-contract` | New CSS classes carry the `cp-` prefix; 69 legacy names pinned as a shrink-only ratchet |
+| `class-prefix-contract` | New CSS classes carry the `cp-` prefix; 68 legacy names pinned as a shrink-only ratchet |
 | `tauri-plugin-contract` | The plugin set is the three declared, the two ejected in r152 appear in no manifest, capability or lockfile |
 | `analyser-buffer-contract` | A `getByteTimeDomainData` buffer is sized `fftSize`, never `frequencyBinCount` (which is half the window) |
 | `css-var-contract` | Every `var(--x)` resolves: defined in CSS, carries a fallback, or is set inline from JSX |

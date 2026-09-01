@@ -41,7 +41,7 @@ const LEGACY = new Set([
   "btn-icon", "btn-primary", "chev", "closed", "crumb", "cur", "desc", "detail", "dismiss",
   "dot", "dragging", "dur", "dur-pill", "err", "filler", "fmt", "grow", "hint", "icon",
   "k", "keys", "label", "lbl", "link", "live", "loading", "log-line", "mark", "meta",
-  "msg", "n", "name", "off", "ok", "path", "progress", "progress-bar", "reveal", "scheme",
+  "msg", "name", "off", "ok", "path", "progress", "progress-bar", "reveal", "scheme",
   "selected", "sep", "size", "status", "status-pill", "step", "strip", "sub", "tab-icon",
   "tag", "tc", "text", "thumb", "tick", "tick-label", "title", "ts", "v", "v-primary",
   "v-secondary", "ver",

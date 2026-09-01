@@ -1351,23 +1351,28 @@ function ReviewToolbar({
 }) {
   return (
     <div className="cp-review-toolbar">
-      <div className="cp-review-filter" role="tablist" aria-label="Filter comments">
-        {([
-          { id: "all", label: "All", n: counts.all },
-          { id: "open", label: "Open", n: counts.open },
-          { id: "resolved", label: "Resolved", n: counts.resolved },
-        ] as const).map((f) => (
-          <button
-            key={f.id}
-            role="tab"
-            aria-selected={filter === f.id}
-            className={filter === f.id ? "active" : ""}
-            onClick={() => setFilter(f.id)}
-          >
-            {f.label}<span className="n">{f.n}</span>
-          </button>
-        ))}
-      </div>
+      {/* ONE control, not three segments.
+          All / Open / Resolved were three buttons beside a search icon, a sort
+          select, an export icon, a history icon and an avatar. In a panel
+          docked narrow that is more than fits, and the toolbar was set to
+          `flex-wrap: wrap` - so it did what it was told and broke into two
+          rows of icons. Wrapping is now forbidden outright (see review.css),
+          which only works if the row actually fits, and collapsing the widest
+          thing in it is what makes that true.
+          The counts stay in the labels: they are the reason to look at this
+          control at all, and a dropdown that hid them would be smaller and
+          useless. */}
+      <select
+        className="cp-select sm cp-review-filter-select"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value as typeof filter)}
+        aria-label="Filter comments"
+        title="Filter comments"
+      >
+        <option value="all">{`All (${counts.all})`}</option>
+        <option value="open">{`Open (${counts.open})`}</option>
+        <option value="resolved">{`Resolved (${counts.resolved})`}</option>
+      </select>
       <div className="cp-review-toolbar-right">
         <button
           ref={searchBtnRef}
