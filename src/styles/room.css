@@ -1082,3 +1082,38 @@
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
+
+/* ── A peer's live view, filling the stage ─────────────────────────────
+   Fills rather than overlays: when the room moves to something this Mac
+   cannot open the stage is deliberately blank, so this IS the picture. */
+.cp-peerstage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-0);
+}
+.cp-peerstage-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--bg-0);
+}
+/* Never not visible. A real-time encode filling the stage is the one place
+   somebody could mistake transport compression for the source, so the label
+   is part of the picture rather than a tooltip. */
+.cp-peerstage-badge {
+  position: absolute;
+  top: var(--s-3);
+  left: var(--s-3);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--bg-0) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--novella-violet) 55%, transparent);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+}

@@ -95,10 +95,31 @@ describe("the reaction layer is anchored to the picture", () => {
     // Each use must be the value of a stageOverlay prop. This is the exact
     // shape of the original bug: a bare `{roomActive && <ReactionLayer />}`
     // beside <Monitor /> type-checks, renders, and lands on the timecode.
+    /* The prop's value, brace-balanced.
+       This used to be a lookbehind for `stageOverlay={` with no `}` in
+       between, which asserted the right thing only while the overlay held
+       exactly ONE element. The moment it held two - a peer's live view under
+       the reactions - the inner `{peerLiveStream && (...)}` closed a brace and
+       the regex reported the layer as unanchored while it was nested exactly
+       where it belongs. A rule that fails on a legitimate second child is a
+       rule people delete, so it balances now. */
+    const ranges: Array<[number, number]> = [];
+    for (const m of app.matchAll(/stageOverlay=\{/g)) {
+      let depth = 0;
+      let i = m.index + m[0].length - 1;
+      for (; i < app.length; i++) {
+        if (app[i] === "{") depth++;
+        else if (app[i] === "}") { depth--; if (depth === 0) break; }
+      }
+      ranges.push([m.index, i]);
+    }
+    // CANARY: the prop is still passed. Without this a rename leaves the loop
+    // below iterating an empty list and passing over nothing.
+    expect(ranges.length, "no stageOverlay prop is passed anywhere").toBeGreaterThan(0);
+
     for (const u of uses) {
-      const before = app.slice(Math.max(0, u.index - 200), u.index);
-      expect(before, "ReactionLayer rendered outside Monitor's stageOverlay slot")
-        .toMatch(/stageOverlay=\{[^}]*$/);
+      const inside = ranges.some(([a, b]) => u.index > a && u.index < b);
+      expect(inside, "ReactionLayer rendered outside Monitor's stageOverlay slot").toBe(true);
     }
   });
 
