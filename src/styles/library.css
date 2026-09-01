@@ -216,17 +216,44 @@
   margin-top: var(--s-2);
 }
 /* Empty hero — the brand wash the canvas empty state uses, centered invite. */
+/* THE FIRST-RUN CANVAS, not a band with shelves under it.
+   An empty library used to render the same short hero as a populated one:
+   a band, a rule across the screen, and a large emptiness below where the
+   shelves would be. That is the first thing a new person sees, and the first
+   thing anyone sees when this app is presented to a room.
+   Two fixes, and the second is the one that was actually shouting. It fills
+   the view rather than sitting as a band; and the bottom border is gone,
+   because a rule drawn under nothing is just a line across an empty screen. */
 .cp-lib-hero.empty {
   align-items: center;
   justify-content: center;
+  min-height: clamp(440px, 72vh, 820px);
   background: var(--grad-brand-wash);
-  border-bottom: 1px solid var(--line-1);
 }
 .cp-lib-hero.empty .cp-lib-hero-content {
   align-items: center;
   justify-content: center;
   text-align: center;
   padding: var(--s-10);
+  /* Above the mark behind it. A local stacking integer, not a --z-* rung:
+     this is two layers inside one section, not an app-level layer. */
+  position: relative;
+  z-index: 1;
+}
+/* The mark, large and nearly invisible, behind the words.
+   Centred with `inset: 0; margin: auto` rather than a centring transform, so
+   it cannot be caught by the reduced-motion rule that neutralises transforms:
+   this thing never moves, and it should not depend on one to sit still. */
+.cp-lib-hero-mark {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: min(56vh, 520px);
+  max-width: 62%;
+  height: auto;
+  opacity: 0.07;
+  pointer-events: none;
+  user-select: none;
 }
 
 /* ============================================================

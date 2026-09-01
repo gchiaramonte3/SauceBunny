@@ -95,7 +95,7 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   // Home item → the Library. Fresh profile = no roots + no recents, so the
   // empty hero invites with enabled actions.
   await rail.getByRole("button", { name: "Home", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Welcome to Sauce Bunny" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add a folder" })).toBeEnabled();
   // KEEP-ALIVE: the Clip view is hidden, NOT unmounted — toolbar/monitor
   // stay in the DOM so playback and running jobs survive the switch.
@@ -114,7 +114,7 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await page.keyboard.press("Meta+1");
-  await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Welcome to Sauce Bunny" })).toBeVisible();
   // Co-Review is a first-class destination: the rail item reads "Review" (short
   // rail label) + ⌘4 → the lobby, a centered green room titled "Review together"
   // with the Host and Join cards stacked. Keep-alive like the others (Clip
@@ -133,10 +133,10 @@ test("nav rail: switches views, keeps the Clip view mounted, persists", async ({
   await page.keyboard.press("Meta+3");
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await page.keyboard.press("Meta+1");
-  await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Welcome to Sauce Bunny" })).toBeVisible();
   // Relaunch always lands on Home (r140) - the view is session state now.
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "Welcome to Sauce Bunny" })).toBeVisible({ timeout: 15_000 });
   expect(pageErrors, `pageerrors:\n${pageErrors.join("\n")}`).toHaveLength(0);
 });
 
@@ -385,7 +385,7 @@ test("library: failed root scan shows the inline error row; remove forgets the r
 test("library hero: empty-state Paste a URL jumps to Clip and focuses the URL bar", async ({ page }) => {
   await boot(page);
   await goHome(page);
-  await expect(page.getByRole("heading", { name: "Your library" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Welcome to Sauce Bunny" })).toBeVisible();
   await page.getByRole("button", { name: "Paste a URL" }).click();
   await expect(page.locator(".cp-view-clip")).toBeVisible();
   await expect(page.locator(".cp-url input")).toBeFocused();
