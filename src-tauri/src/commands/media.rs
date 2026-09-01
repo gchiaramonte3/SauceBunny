@@ -2127,10 +2127,27 @@ pub(crate) async fn probe_playback_color(app: &AppHandle, path: &str) -> Option<
 ///     download.
 ///   • Audio: libmp3lame is universal in WebKit; we keep 320 kbps so audio
 ///     quality is preserved.
+/// `copy_video`: keep the video stream byte for byte and only fix the audio.
+///
+/// This exists because the decode probe is an AND. A file with perfectly good
+/// H.264 video and one audio track WebCodecs cannot decode failed the whole
+/// check and arrived here, where every frame was re-encoded through
+/// h264_videotoolbox to solve a problem in the SOUND. The caller's own comment
+/// names that as the common case - AAC in WKWebView, which has no AudioDecoder
+/// before Safari 26 - so the expensive path was the usual one.
+///
+/// With `-c:v copy` this becomes a remux: no video decode, no video encode,
+/// disk-speed instead of minutes.
+///
+/// The CALLER decides, and must only pass true when the video codec is one
+/// WKWebView plays natively (h264/hevc). Copying e.g. a ProRes stream into an
+/// MP4 produces a file the native player cannot open, which would look exactly
+/// like the black-canvas failure this whole path exists to avoid.
 pub(crate) fn playback_prep_args(
     input_path: &str,
     out_path: &str,
     video_quality_args: Option<&[String]>,
+    copy_video: bool,
 ) -> Vec<String> {
     let mut cmd_args: Vec<String> = vec![
         "-hide_banner".into(),
@@ -2143,9 +2160,13 @@ pub(crate) fn playback_prep_args(
             cmd_args.extend([
                 "-map".into(), "0:v:0".into(),
                 "-map".into(), "0:a:0?".into(), // optional audio track
-                "-c:v".into(), "h264_videotoolbox".into(),
             ]);
-            cmd_args.extend(quality.iter().cloned());
+            if copy_video {
+                cmd_args.extend(["-c:v".into(), "copy".into()]);
+            } else {
+                cmd_args.extend(["-c:v".into(), "h264_videotoolbox".into()]);
+                cmd_args.extend(quality.iter().cloned());
+            }
             cmd_args.extend([
                 "-c:a".into(), "aac".into(),
                 "-b:a".into(), "160k".into(),
@@ -2179,6 +2200,12 @@ pub struct PreparePlaybackArgs {
     /// parsing ffmpeg's `time=HH:MM:SS.MS` stderr lines.
     pub duration_seconds: Option<f64>,
     pub job_id: String,
+    /// Keep the video stream and only re-encode the audio. Set by the caller
+    /// when the decode probe said the VIDEO was fine and the video codec is
+    /// natively playable. Defaults to false so an older frontend, or any
+    /// caller that has not decided, gets the safe full re-encode.
+    #[serde(default)]
+    pub copy_video: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -2229,9 +2256,9 @@ pub async fn prepare_local_for_playback(
             tag: "info".into(),
             line: format!("[playback-prep] color path: {color_label}"),
         });
-        playback_prep_args(&args.input_path, &out_str, Some(&quality_args))
+        playback_prep_args(&args.input_path, &out_str, Some(&quality_args), args.copy_video)
     } else {
-        playback_prep_args(&args.input_path, &out_str, None)
+        playback_prep_args(&args.input_path, &out_str, None, false)
     };
 
     let cmd = app
@@ -2550,7 +2577,9 @@ pub async fn probe_media_info(app: AppHandle, path: String) -> Result<MediaInfo,
 
 #[cfg(test)]
 mod playback_color_tests {
+
     use super::{
+
         classify_playback_color, playback_bitrate, playback_video_quality_args,
         PlaybackColorClass, PlaybackColorProbe,
     };
@@ -2784,7 +2813,7 @@ mod nightly_media_tests {
         let _ = std::fs::remove_file(out);
         let probe = probe_struct(input);
         let (quality, label) = playback_video_quality_args(Some(&probe));
-        let args = playback_prep_args(input.to_str().unwrap(), out.to_str().unwrap(), Some(&quality));
+        let args = playback_prep_args(input.to_str().unwrap(), out.to_str().unwrap(), Some(&quality), false);
         let encoder = nightly::run_playback_prep(&args);
         eprintln!("[nightly] playback prep [{label}] ran with {encoder}");
         label
@@ -2884,7 +2913,7 @@ mod nightly_media_tests {
         let input = nightly::fixture_audio_m4a();
         let out = nightly::scratch_dir().join("prep-audio.mp3");
         let _ = std::fs::remove_file(&out);
-        let args = playback_prep_args(input.to_str().unwrap(), out.to_str().unwrap(), None);
+        let args = playback_prep_args(input.to_str().unwrap(), out.to_str().unwrap(), None, false);
         nightly::run_ok(&nightly::sidecar("ffmpeg"), &args, "audio-only playback prep");
 
         let probe = nightly::probe_json(&out);
@@ -3445,5 +3474,46 @@ mod frame_url_memo_tests {
     #[test]
     fn an_unknown_source_is_a_miss() {
         assert!(!hit("src-never-seen"));
+    }
+}
+
+#[cfg(test)]
+mod playback_prep_remux_tests {
+    use super::playback_prep_args;
+
+    /// Only the audio was undecodable, so only the audio is re-encoded.
+    ///
+    /// The probe that sends a file here is an AND: good H.264 video plus one
+    /// audio track WebCodecs cannot handle failed the whole check, and every
+    /// frame was then re-encoded to fix the SOUND. This is the path that turns
+    /// that transcode into a remux.
+    #[test]
+    fn copy_video_remuxes_instead_of_re_encoding() {
+        let quality: Vec<String> = vec!["-b:v".into(), "8M".into()];
+        let args = playback_prep_args("/in.mp4", "/out.mp4", Some(&quality), true);
+        let joined = args.join(" ");
+
+        assert!(joined.contains("-c:v copy"), "video was not copied: {joined}");
+        assert!(
+            !joined.contains("h264_videotoolbox"),
+            "the video encoder is still in the command, so this is not a remux: {joined}",
+        );
+        // The quality flags belong to the encoder. Leaving them in alongside
+        // `-c:v copy` is not merely untidy - ffmpeg rejects a bitrate for a
+        // stream it is copying.
+        assert!(!joined.contains("-b:v"), "encoder quality args survived: {joined}");
+        // The whole point: the audio IS still fixed.
+        assert!(joined.contains("-c:a aac"), "audio was not re-encoded: {joined}");
+    }
+
+    /// The default stays the full re-encode, so anything that has not decided
+    /// gets the safe answer.
+    #[test]
+    fn without_the_flag_the_video_is_still_re_encoded() {
+        let quality: Vec<String> = vec!["-b:v".into(), "8M".into()];
+        let joined = playback_prep_args("/in.mp4", "/out.mp4", Some(&quality), false).join(" ");
+        assert!(joined.contains("h264_videotoolbox"), "{joined}");
+        assert!(joined.contains("-b:v 8M"), "{joined}");
+        assert!(!joined.contains("-c:v copy"), "{joined}");
     }
 }

@@ -8,7 +8,7 @@ import type { Defaults } from "../components/SettingsModal";
 import { assetUrl } from "../lib/asset-url";
 import { formatError, isAppError } from "../lib/error-format";
 import { chosenPosterFor } from "../lib/library";
-import { canMediabunnyDecode, extractPosterBlob } from "../lib/mediabunny-helpers";
+import { probeMediabunnyDecode, extractPosterBlob } from "../lib/mediabunny-helpers";
 import { setPlayheadFrames as publishPlayheadFrames } from "../lib/playhead-store";
 
 /** Enumerated by tsc from the moved block; each type read from the declaration
@@ -41,6 +41,10 @@ export type LocalSourceProps = {
   seedFilename: (prevName: string, title: string) => string;
   runPlaybackPrep: (
     inputPath: string, hasVideo: boolean, durationSeconds: number | null, seq: number,
+    /** Keep the video stream and re-encode only the audio. See the call site:
+     *  it is set when the probe says the video decodes and the video codec is
+     *  one the native player can open. */
+    copyVideo?: boolean,
   ) => Promise<void>;
   openSourceView: () => void;
   appendLog: (tag: ClientLog["tag"], source: string, message: string) => void;
@@ -287,7 +291,12 @@ export function useLocalSource(p: LocalSourceProps) {
       // inaudible reports nothing, so nothing reroutes. A file that plays with
       // a perfect picture and no sound is the case with no automatic way out,
       // and therefore the case the manual one has to actually work for.
-      const canMb = defaults.useWebCodecsDecoder && await canMediabunnyDecode(lf.path);
+      const probe = defaults.useWebCodecsDecoder
+        ? await probeMediabunnyDecode(lf.path)
+        : { video: "undecodable" as const, audio: "undecodable" as const };
+      const canMb = defaults.useWebCodecsDecoder
+        && !(probe.video === "absent" && probe.audio === "absent")
+        && probe.video !== "undecodable" && probe.audio !== "undecodable";
       if (sourceSeqRef.current !== seq) return null;
       if (canMb) {
         setLocalPlayer("mediabunny");
@@ -314,7 +323,26 @@ export function useLocalSource(p: LocalSourceProps) {
       }
       appendLog("info", "local",
         `Transcoding for playback: ${reasonParts.join(", ")}.`);
-      await runPlaybackPrep(lf.path, lf.has_video, lf.duration, seq);
+      /* ONLY THE AUDIO IS BROKEN? Then only fix the audio.
+         The probe is an AND, so a file with good H.264 video and one
+         undecodable audio track failed the whole check and was sent here to
+         have EVERY FRAME re-encoded through h264_videotoolbox - minutes of
+         work to solve a problem in the sound. The comment above names that as
+         the common case (AAC in WKWebView, which has no AudioDecoder before
+         Safari 26), so the expensive path was the usual one.
+         The video codec must be one the NATIVE player can open, because that
+         is what plays the prep output. mediabunny decodes ProRes through
+         turbores, so "video is fine" does not imply "native can open it" -
+         copying a ProRes stream into an MP4 would produce exactly the black
+         canvas this path exists to avoid. h264/hevc only. */
+      const copyVideo = probe.video === "ok"
+        && probe.audio === "undecodable"
+        && /^(h264|avc1?|hevc|h265|hvc1)/i.test(vc ?? "");
+      if (copyVideo) {
+        appendLog("info", "local",
+          `Video is fine; remuxing and re-encoding audio only (no video transcode).`);
+      }
+      await runPlaybackPrep(lf.path, lf.has_video, lf.duration, seq, copyVideo);
       return null;
     } catch (err) {
       const msg = formatError(err);

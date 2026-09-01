@@ -320,26 +320,46 @@ export async function extractPosterBlob(
  * decode this without help?" without committing to a full player mount.
  * Cheaper than opening a full Input+CanvasSink+AudioBufferSink.
  */
-export async function canMediabunnyDecode(localPath: string): Promise<boolean> {
+export type TrackDecode = "ok" | "undecodable" | "absent";
+export type DecodeProbe = { video: TrackDecode; audio: TrackDecode };
+
+/**
+ * WHICH track mediabunny cannot decode, not merely whether one exists.
+ *
+ * This used to collapse to a single boolean, and that cost real minutes. The
+ * probe is an AND - video must decode and audio must decode - so a file with
+ * perfectly good H.264 video and one audio track WebCodecs cannot handle
+ * failed the whole check and was sent to a full `h264_videotoolbox` re-encode
+ * of EVERY FRAME to fix the sound. The comment above the caller names that as
+ * the common case (AAC in WKWebView, which has no AudioDecoder before Safari
+ * 26), so the expensive path was the usual one.
+ *
+ * Knowing which side failed lets the fallback copy the video stream instead of
+ * re-encoding it, which turns a transcode into a remux.
+ */
+export async function probeMediabunnyDecode(localPath: string): Promise<DecodeProbe> {
   const input = new Input({ source: mediabunnySource(localPath), formats: ALL_FORMATS });
   try {
     const [vt, at] = await Promise.all([
       input.getPrimaryVideoTrack(),
       input.getPrimaryAudioTrack(),
     ]);
-    // If no tracks at all, mediabunny can't help us play anything.
-    if (!vt && !at) return false;
-    // Video track present → must be decodable.
-    if (vt && !(await vt.canDecode())) return false;
-    // Audio track present → must be decodable too (otherwise silent
-    // playback would be worse than the ffmpeg fallback's transcode).
-    if (at && !(await at.canDecode())) return false;
-    return true;
+    const video: TrackDecode = !vt ? "absent" : (await vt.canDecode()) ? "ok" : "undecodable";
+    const audio: TrackDecode = !at ? "absent" : (await at.canDecode()) ? "ok" : "undecodable";
+    return { video, audio };
   } catch {
-    return false;
+    // A file we cannot even open is not a file we can claim anything about.
+    return { video: "undecodable", audio: "undecodable" };
   } finally {
     void input.dispose();
   }
+}
+
+export async function canMediabunnyDecode(localPath: string): Promise<boolean> {
+  const { video, audio } = await probeMediabunnyDecode(localPath);
+  // No tracks at all: mediabunny cannot help us play anything.
+  if (video === "absent" && audio === "absent") return false;
+  return video !== "undecodable" && audio !== "undecodable";
 }
 
 /**

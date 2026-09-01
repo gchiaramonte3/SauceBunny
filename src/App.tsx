@@ -2105,13 +2105,16 @@ export default function App() {
     hasVideo: boolean,
     durationSeconds: number | null,
     seq: number,
+    copyVideo = false,
   ) => {
     try {
       setPlaybackPrepBusy(true);
       setPlaybackPrepProgress(0);
       const jobId = newJobId();
       setPlaybackPrepJobId(jobId);
-      appendLog("info", "local", `Preparing playback copy (h264_videotoolbox)…`);
+      appendLog("info", "local", copyVideo
+        ? `Preparing playback copy (audio only; video copied)…`
+        : `Preparing playback copy (h264_videotoolbox)…`);
       const prepared = await new Promise<string>((resolve, reject) => {
         // Ownership-checked release: a superseding prep installs ITS resolver;
         // this run's late rejection must not clear it (it would strand the new
@@ -2124,6 +2127,7 @@ export default function App() {
             has_video: hasVideo,
             duration_seconds: durationSeconds,
             job_id: jobId,
+            copy_video: copyVideo,
           },
         }).catch((err) => {
           if (playbackPrepResolverRef.current === mine) {

@@ -27,9 +27,20 @@ import { useLocalSource } from "./use-local-source";
 const h = vi.hoisted(() => ({
   canDecode: true,
   probe: null as unknown,
+  /** Overrides the per-track decode answer. Null = derive it from canDecode,
+   *  which is the all-or-nothing behaviour the older tests were written
+   *  against. Set it to say "the picture is fine, the sound is not". */
+  decodeProbe: null as null | { video: string; audio: string },
 }));
 
 vi.mock("../lib/mediabunny-helpers", () => ({
+  // The hook asks WHICH track failed now, not merely whether one did, so that
+  // it can remux instead of re-encoding when only the audio is undecodable.
+  // `h.canDecode` still drives it: false means both tracks fail, which is the
+  // old all-or-nothing behaviour these tests were written against.
+  probeMediabunnyDecode: async () => h.decodeProbe ?? (h.canDecode
+    ? { video: "ok", audio: "ok" }
+    : { video: "undecodable", audio: "undecodable" }),
   canMediabunnyDecode: async () => h.canDecode,
   // The poster path is fire-and-forget; returning null sends it to the ffmpeg
   // branch, which the invoke mock below answers. Not what this file is about.
@@ -68,6 +79,8 @@ function harness(useWebCodecsDecoder: boolean) {
   const calls = {
     player: [] as string[],
     prep: [] as string[],
+    /** Whether each prep was asked to COPY the video rather than re-encode it. */
+    prepCopyVideo: [] as boolean[],
     logs: [] as string[],
   };
   const noop = () => {};
@@ -89,7 +102,10 @@ function harness(useWebCodecsDecoder: boolean) {
     tryAutoLoadTranscript: async () => {},
     recordRecentSource: noop,
     seedFilename: (_p: string, t: string) => t,
-    runPlaybackPrep: async (p: string) => { calls.prep.push(p); },
+    runPlaybackPrep: async (p: string, _hv: boolean, _d: number | null, _seq: number, copyVideo?: boolean) => {
+      calls.prep.push(p);
+      calls.prepCopyVideo.push(copyVideo ?? false);
+    },
     openSourceView: noop,
     appendLog: (_t: string, _s: string, m: string) => { calls.logs.push(m); },
   } as unknown as Props;
@@ -98,6 +114,7 @@ function harness(useWebCodecsDecoder: boolean) {
 }
 
 describe("the WebCodecs decoder toggle", () => {
+  beforeEach(() => { h.decodeProbe = null; });
   beforeEach(() => {
     // The probe spy below REPLACES the module export, and a replacement
     // outlives the test that made it: without this, the last case here read
@@ -133,9 +150,9 @@ describe("the WebCodecs decoder toggle", () => {
     h.canDecode = true;
     let probed = false;
     const spy = await import("../lib/mediabunny-helpers");
-    vi.spyOn(spy, "canMediabunnyDecode").mockImplementation(async () => {
+    vi.spyOn(spy, "probeMediabunnyDecode").mockImplementation(async () => {
       probed = true;
-      return true;
+      return { video: "ok", audio: "ok" };
     });
     const { load } = harness(false);
     await load(ORDINARY.path);
@@ -163,5 +180,48 @@ describe("the WebCodecs decoder toggle", () => {
     await load(ORDINARY.path);
     expect(calls.player).toContain("native");
     expect(calls.prep).toEqual([ORDINARY.path]);
+  });
+});
+
+describe("only the audio is broken, so only the audio is re-encoded", () => {
+  /**
+   * The decode probe is an AND, so a file with good H.264 video and one
+   * undecodable audio track failed the whole check and had EVERY FRAME
+   * re-encoded through h264_videotoolbox to fix the SOUND. The hook's own
+   * comment names that as the common case - AAC in WKWebView, which has no
+   * AudioDecoder before Safari 26 - so the expensive path was the usual one.
+   */
+  beforeEach(() => {
+    h.canDecode = false;
+    h.decodeProbe = { video: "ok", audio: "undecodable" };
+  });
+
+  it("copies the video when the picture decodes and only the sound does not", async () => {
+    h.probe = { ...ORDINARY, vcodec: "h264", acodec: "aac" };
+    const { calls, load } = harness(true);
+    await load(ORDINARY.path);
+    expect(calls.prep, "the fallback did not run at all").toEqual([ORDINARY.path]);
+    expect(calls.prepCopyVideo[0], "the video was re-encoded to fix the audio").toBe(true);
+  });
+
+  it("does NOT copy a codec the native player cannot open", async () => {
+    // mediabunny decodes ProRes through turbores, so "the video is fine" does
+    // not mean the NATIVE player can open it - and the native player is what
+    // plays the prep output. Copying ProRes into an MP4 produces exactly the
+    // black canvas this path exists to avoid.
+    h.probe = { ...ORDINARY, vcodec: "prores", acodec: "pcm_s24le" };
+    const { calls, load } = harness(true);
+    await load(ORDINARY.path);
+    expect(calls.prep).toEqual([ORDINARY.path]);
+    expect(calls.prepCopyVideo[0], "a ProRes stream was copied into an MP4").toBe(false);
+  });
+
+  it("does NOT copy when the video itself is undecodable", async () => {
+    h.decodeProbe = { video: "undecodable", audio: "ok" };
+    h.probe = { ...ORDINARY, vcodec: "h264", acodec: "aac" };
+    const { calls, load } = harness(true);
+    await load(ORDINARY.path);
+    expect(calls.prep).toEqual([ORDINARY.path]);
+    expect(calls.prepCopyVideo[0]).toBe(false);
   });
 });
