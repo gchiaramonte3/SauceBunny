@@ -4552,15 +4552,27 @@ export default function App() {
                           {blockedMembers.join(", ")} can&apos;t open this
                         </span>
                       )}
-                      {/* Tier C, sender side. Offering is explicit (this click
-                          is the consent step for a multi-GB read), and the
-                          transfer row narrates hash + send progress. */}
+                      {/* Tier C, sender side. The click stays the consent step
+                          for a multi-GB read - CLAUDE.md requires it and this
+                          does not weaken it.
+                          What changed is WHEN the button exists. It used to be
+                          gated on `blockedMembers.length > 0`, so it did not
+                          appear until a guest had already tried, failed, and
+                          reported the failure back. The sequence was: host
+                          loads a file, guest resolves and misses, guest sends
+                          SourceStatus "missing", the button finally renders,
+                          and then a human has to NOTICE it and click. That last
+                          step has no upper bound - it is however long it takes
+                          someone to look at the right corner of the screen -
+                          and it sat in front of every other cost in the path.
+                          The host can now offer the moment a file is on the
+                          stage, before anyone has had to fail at it. */}
                       {isPresenter && sourceKind === "file" && localFilePath
-                        && blockedMembers.length > 0 && !offeredFile
+                        && !offeredFile
                         && transfer?.phase !== "hashing" && (
                         <button
                           type="button"
-                          className="btn btn-ghost btn-compact"
+                          className={"btn btn-compact " + (blockedMembers.length > 0 ? "btn-primary" : "btn-ghost")}
                           title="Send your copy of this file over the session. They see the name and size and choose to accept."
                           onClick={() => { void offerCurrentFile(localFilePath, metadata?.title ?? undefined, metadata?.vcodec ?? null, metadata?.acodec ?? null); }}
                         >
