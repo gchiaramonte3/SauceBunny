@@ -563,7 +563,7 @@ thing.
 **What a regression looks like:** the column jumps to a narrow width the
 instant you start dragging, or the width is forgotten on relaunch.
 
-### Build 2026083104 additions
+### Build 2026090101 additions
 
 **1. Selection is finally visible.** It was `--bg-4` on a row and a 1px white
 ring on a tile: one grey step on a list that already had a stripe, a hover
