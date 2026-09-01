@@ -122,6 +122,32 @@
         (Comment text avoids the literal asterisk-slash sequence because
         PostCSS would treat it as the comment terminator and choke on
         whatever follows.) ── */
+  /* ── Selection. A HUE, not another rung on the neutral ladder ──────────
+        Selection used to be `--bg-4` on a row and a 1px white ring on a card:
+        one step up a grey scale that already had a stripe, a hover and a
+        focus shade on it. In a dark UI that is close to invisible, and it was
+        reported exactly that way - "you don't have a highlight color for the
+        clips". The ladder was monotonic and still unreadable, because four
+        greys 6% apart cannot carry a state.
+        Purple is chosen for what it is NOT. Green is spoken for (primary
+        action and live states), and white is the focus ring, which
+        focus-contract exists to keep distinct. Purple collides with neither,
+        so a selected row, a focused row and a live one stay three different
+        things.
+        Aliased rather than using --novella-violet directly: that token is
+        already the primary button and --marker, and a selection that has to
+        be retuned should not drag a button and every timeline marker with
+        it. */
+  --sel-fill: var(--novella-violet);
+  /* For a persistent NAVIGATION selection (the folder tree), where a full
+     fill would shout all day. Finder makes the same distinction between its
+     sidebar and its file list. */
+  --sel-soft: color-mix(in srgb, var(--novella-violet) 26%, transparent);
+  /* Text on the fill. Measured, not guessed: --fg-3 on --sel-fill is 2.0:1,
+     so a selected row's Kind and Date cells have to come up to this or they
+     fail the moment the row is selected. --fg-1 on --sel-fill is 4.72:1. */
+  --sel-ink: var(--fg-1);
+
   --color-surface-elevated:  #1A1A1D;
   --color-text-secondary:    #8A8A8E;
   --color-accent-green:      #6CFF8D;

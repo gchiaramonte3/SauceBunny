@@ -853,9 +853,13 @@
 
 /* Grid-card selection highlight (Library browser only — Home never sets it).
    Neutral ring: selection is not a live state, so no green. */
+/* A 1px WHITE ring was the entire selected state of a tile, against a
+   thumbnail that is frequently mostly white. Two pixels of the selection hue
+   instead: it survives a bright poster, and it says the same thing the list
+   rows say. */
 .cp-lib-card.selected .cp-lib-card-art {
-  border-color: var(--fg-1);
-  box-shadow: 0 0 0 1px var(--fg-1);
+  border-color: var(--sel-fill);
+  box-shadow: 0 0 0 2px var(--sel-fill);
 }
 
 /* ── Reduced motion: hover scale/reveals snap, no transforms. The hover
@@ -1004,10 +1008,14 @@
 }
 .cp-lib-tree-row:hover { background: rgba(255, 255, 255, 0.05); }
 .cp-lib-tree-row:focus-visible { outline: none; background: rgba(255, 255, 255, 0.08); }
-/* Neutral selection (color contract: green is the primary action + live
-   states only) — bg-3 fill, fg-1 text. */
+/* The tree takes the SOFT variant, not the full fill. This is a persistent
+   "where you are" that sits on screen all day, where a saturated bar would
+   shout; the item selection in the browse pane is transient and deliberate,
+   so it gets the full colour. Finder draws the same distinction between its
+   sidebar and its file list. Green stays reserved for the primary action and
+   live states, which is why this is not that. */
 .cp-lib-tree-row.selected {
-  background: var(--bg-3);
+  background: var(--sel-soft);
   color: var(--fg-1);
 }
 /* Row glyph: a plain solid folder, boxless by design. */
@@ -1295,9 +1303,25 @@
    Pinned by src/lib/list-zebra-contract.test.ts. */
 .cp-lib-lrow:hover { background: rgba(255, 255, 255, 0.05); }
 .cp-lib-lrow:focus-visible { outline: none; background: rgba(255, 255, 255, 0.075); }
-/* Neutral selection — the ladder's top rung, fg-1 text (green = primary +
-   live only). */
-.cp-lib-lrow.selected { background: var(--bg-4); color: var(--fg-1); }
+/* Selection is a COLOUR now, not the ladder's top rung.
+   `--bg-4` was one grey step above the focus shade, on a list that already
+   carries a zebra stripe and a hover shade - four neutrals within a few
+   percent of each other, which is why the answer to "which of these is
+   selected" was "none of them, visibly".
+   A hue settles it outright, and it also retires the hazard the ladder
+   comment below describes: hover can no longer read as more selected than
+   the selection, because they are not on the same scale any more. No
+   `.selected:hover` rule is needed either - this is declared after `:hover`
+   at equal specificity, so a hovered selected row simply stays selected,
+   which is what Finder does. */
+.cp-lib-lrow.selected { background: var(--sel-fill); color: var(--sel-ink); }
+/* The secondary cells have to come up with it. They are --fg-3 / --fg-4,
+   which measure 2.0:1 and worse against the fill: legible on a grey row and
+   unreadable the instant it is selected. Specificity beats the folder-row
+   rule below, which sets its own muted size colour. */
+.cp-lib-lrow.selected .cp-lib-lrow-kind,
+.cp-lib-lrow.selected .cp-lib-lrow-date,
+.cp-lib-lrow.selected .cp-lib-lrow-size { color: var(--sel-ink); }
 .cp-lib-lrow-art {
   display: flex;
   align-items: center;

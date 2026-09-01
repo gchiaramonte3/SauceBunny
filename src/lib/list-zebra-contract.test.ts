@@ -20,6 +20,11 @@ import { join } from "node:path";
 
 const CSS = readFileSync(join(__dirname, "../styles/library.css"), "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "");
+/* The selection FILL is declared in tokens.css, not here. Read both, or the
+   "is it a hue" assertion below looks in the wrong file and reports the rule
+   broken while it holds. */
+const TOKENS = readFileSync(join(__dirname, "../styles/tokens.css"), "utf8")
+  .replace(/\/\*[\s\S]*?\*\//g, "");
 
 describe("list zebra", () => {
   it("stripes on nth-child(even)", () => {
@@ -50,11 +55,34 @@ describe("list zebra", () => {
     }
     expect(stripe, "the stripe is not the quietest rung").toBeLessThan(hover);
     expect(hover, "hover is not quieter than focus").toBeLessThan(focus);
-    // Selection is a token, not a percentage; --bg-4 sits above focus's 0.075
-    // over --bg-1 (40 vs 32). Assert the token rather than recompute it.
-    expect(CSS, "selection dropped below the focus rung").toMatch(
-      /\.cp-lib-lrow\.selected \{ background: var\(--bg-4\)/,
+    // Selection is NOT on this ladder any more, and that is the point.
+    //
+    // It used to be `--bg-4`, one grey step above focus, on a list that also
+    // carries a stripe and a hover shade - four neutrals inside a few percent
+    // of each other. The ladder was monotonic and the selection was still
+    // invisible, which is a rule passing while the thing it protects fails.
+    //
+    // So the rule changed rather than the number: selection must be a HUE.
+    // That also makes the original hazard - hover reading as more selected
+    // than the selection - unreachable, because they are no longer on one
+    // scale to be compared on.
+    expect(CSS, "selection fell back onto the neutral ladder").toMatch(
+      /\.cp-lib-lrow\.selected \{ background: var\(--sel-fill\)/,
     );
+    expect(TOKENS, "the selection fill is not a distinct hue").toMatch(
+      /--sel-fill:\s*var\(--novella-violet\)/,
+    );
+  });
+
+  it("a selected row's secondary cells come up with the fill", () => {
+    // The cells that are --fg-3 / --fg-4 measure 2.0:1 and worse against the
+    // fill. Legible on a grey row, unreadable the instant it is selected -
+    // and nothing else in the suite looks at a cell's colour in a state.
+    for (const cell of ["kind", "date", "size"]) {
+      expect(CSS, `a selected row leaves its ${cell} cell dim`).toMatch(
+        new RegExp(`\\.cp-lib-lrow\\.selected \\.cp-lib-lrow-${cell}`),
+      );
+    }
   });
 
   it("hover and selection still outrank the stripe", () => {
