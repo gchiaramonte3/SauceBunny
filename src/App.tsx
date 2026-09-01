@@ -3923,7 +3923,20 @@ export default function App() {
 
   const autoWatchedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!offeredFile?.vcodec || !pendingSource || isPresenter) return;
+    /* EITHER codec, not specifically a video one.
+       This required `vcodec`, so an AUDIO-ONLY source never auto-watched: the
+       offer landed, acodec was set, vcodec was null, and the guest sat looking
+       at a title with no player and nothing explaining why. Sharing a podcast
+       or an interview WAV in a session simply did nothing.
+       The gate is still here rather than deleted, because it is guarding a
+       real dead end: with NO codec information at all the player's MIME stays
+       null, control falls through to a probe that reads the raw peer route,
+       and that route answers 405 by design - which surfaces as a media error
+       whose download fallback has no URL, because the file is on the other
+       Mac. Requiring one codec or the other keeps that closed while letting
+       audio through. */
+    if (!offeredFile || (!offeredFile.vcodec && !offeredFile.acodec)) return;
+    if (!pendingSource || isPresenter) return;
     if (autoWatchedRef.current === offeredFile.blake3) return;
     autoWatchedRef.current = offeredFile.blake3;
     void watchOfferedStream({ keepCopy: defaults.autoKeepSessionCopy });
@@ -4570,14 +4583,55 @@ export default function App() {
                       {isPresenter && sourceKind === "file" && localFilePath
                         && !offeredFile
                         && transfer?.phase !== "hashing" && (
-                        <button
-                          type="button"
-                          className={"btn btn-compact " + (blockedMembers.length > 0 ? "btn-primary" : "btn-ghost")}
-                          title="Send your copy of this file over the session. They see the name and size and choose to accept."
-                          onClick={() => { void offerCurrentFile(localFilePath, metadata?.title ?? undefined, metadata?.vcodec ?? null, metadata?.acodec ?? null); }}
-                        >
-                          Send them the file
-                        </button>
+                        <>
+                          {/* THE PREVIEW COPY, when one exists.
+                              Measured, not guessed: the transfer is paced at
+                              TRANSFER_BYTES_PER_SEC = 24 MB/s, so a 40 GB
+                              master is about 28 minutes on the wire. Hashing
+                              it first costs seconds by comparison (blake3 is
+                              disk-bound and this disk reads in GB/s), which is
+                              why the hash is NOT what to optimise.
+                              The prep copy is the same picture at h264/AAC and
+                              a fraction of the size, and the app has already
+                              made it for its own playback. Sending the master
+                              while a compact copy of it sits unused in scratch
+                              was the single largest avoidable wait in the
+                              session path.
+                              It is a TRANSCODE, so it is offered as a named
+                              preview and never silently: the name carries
+                              "(preview)" onto the guest's screen and onto disk
+                              if they keep it. CLAUDE.md permits this - the rule
+                              is "a local copy or a fixed, known-quality
+                              stream", and a prep copy is fixed and known - but
+                              it must never be mistaken for the master by
+                              somebody judging a grade. */}
+                          {playbackPath && (
+                            <button
+                              type="button"
+                              className={"btn btn-compact " + (blockedMembers.length > 0 ? "btn-primary" : "btn-ghost")}
+                              title="Send the compact playback copy. Much faster than the original, and it is a transcode, so it is labelled as a preview."
+                              onClick={() => {
+                                const base = (metadata?.title || "source").replace(/\.[^.]+$/, "");
+                                // h264/aac stated outright rather than passed
+                                // through from the source: that is exactly what
+                                // prepare_local_for_playback writes, and it also
+                                // means the guest's auto-watch gate can never
+                                // fail for want of codec metadata.
+                                void offerCurrentFile(playbackPath, `${base} (preview).mp4`, "h264", "aac");
+                              }}
+                            >
+                              Send a preview copy
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className={"btn btn-compact " + (blockedMembers.length > 0 && !playbackPath ? "btn-primary" : "btn-ghost")}
+                            title="Send your copy of this file over the session. They see the name and size and choose to accept."
+                            onClick={() => { void offerCurrentFile(localFilePath, metadata?.title ?? undefined, metadata?.vcodec ?? null, metadata?.acodec ?? null); }}
+                          >
+                            {playbackPath ? "Send the original" : "Send them the file"}
+                          </button>
+                        </>
                       )}
                       {/* An offer that failed used to go to the pipeline log
                           and nowhere else: the host clicked, nothing visible

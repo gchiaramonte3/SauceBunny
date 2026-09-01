@@ -72,3 +72,32 @@ describe("offering the file does not wait for a failure", () => {
     expect(call).toContain("offerCurrentFile(localFilePath");
   });
 });
+
+describe("a transcode is never offered as if it were the master", () => {
+  /**
+   * The prep copy is much smaller and far faster to send - a 40 GB master is
+   * about 28 minutes at the 24 MB/s transfer pace, and the prep copy is a
+   * fraction of that - which is exactly why it is tempting to send it quietly.
+   *
+   * It is a re-encode. CLAUDE.md permits sending it ("a local copy OR a fixed,
+   * known-quality stream", and a prep copy is both fixed and known), but the
+   * thing that makes it permissible is that the person on the other end knows
+   * which one they have. A colourist approving a grade from an h264 proxy they
+   * believed was the master is the failure this guards, and nothing else in
+   * the suite would notice it.
+   */
+  it("offers the prep copy under a name that says preview", () => {
+    const i = APP.indexOf("offerCurrentFile(playbackPath");
+    expect(i, "the preview-copy offer is gone; this contract needs rewriting").toBeGreaterThan(-1);
+    // The call's arguments, up to the closing paren of that line.
+    const call = APP.slice(i, APP.indexOf(")", i));
+    expect(call.toLowerCase()).toContain("preview");
+  });
+
+  it("still keeps a way to send the real thing", () => {
+    // A preview-only path would be worse than the slow original: some reviews
+    // genuinely need the master, and there would be no way to ask for it.
+    expect(APP).toContain("Send the original");
+    expect(APP).toContain("offerCurrentFile(localFilePath");
+  });
+});
