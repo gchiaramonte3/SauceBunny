@@ -93,6 +93,49 @@ describe("no call site reopens the window", () => {
     expect(bad, "newJobId is synchronous; awaiting it puts the cancel window back").toEqual([]);
   });
 
+  it("keeps every id it mints, so Stop has something to cancel", () => {
+    /* THE OTHER HALF, and it was open.
+       The tests above pin that the id exists BEFORE the await. They say
+       nothing about whether anyone can still reach it afterwards, and a job id
+       that is minted correctly and then dropped is a job nothing can cancel -
+       while Rust registers the child either way, so the work runs to
+       completion with no handle on it.
+       That is not hypothetical: prepareReaderPlayback was one of seventeen
+       mint sites and the only one that stored its id nowhere. Because the
+       reader supersedes an older open, three transcripts opened in a row left
+       three whole-file ffmpeg transcodes running, each writing a multi-GB
+       scratch file nobody would play.
+       The rule: between `const x = newJobId()` and the first `invoke(` after
+       it, the name must reach somewhere a stop path can read - a ref
+       assignment, a setState, or a dispatch. Deliberately structural rather
+       than a list of approved sites, so the eighteenth call site is covered
+       the day it is written. */
+    const offenders: string[] = [];
+    let minted = 0;
+    for (const [rel, text] of sources()) {
+      const re = /(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*newJobId\s*\(\s*\)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text)) !== null) {
+        minted++;
+        const name = m[1];
+        // The window ends at the first invoke: after that the id has already
+        // been handed to the backend and holding it later is too late.
+        const after = text.slice(m.index);
+        const stop = after.search(/\binvoke\s*(<[^>]*>)?\s*\(/);
+        const window = stop === -1 ? after : after.slice(0, stop);
+        const held = new RegExp(
+          `(\\.current\\s*=\\s*${name}\\b|set[A-Z]\\w*\\(\\s*${name}\\b|dispatch\\([^)]*\\b${name}\\b)`,
+        ).test(window);
+        if (!held) offenders.push(`${rel}: ${name} is minted and never held`);
+      }
+    }
+    // CANARY: the scan found the call sites. A regex that stopped matching
+    // would report a clean bill of health over nothing, which is the failure
+    // this repo keeps meeting.
+    expect(minted, "no newJobId call sites were found at all").toBeGreaterThan(10);
+    expect(offenders, "a job id is minted and dropped; Stop cannot reach it").toEqual([]);
+  });
+
   it("never invokes new_job_id", () => {
     // The CALL, not the name: the module doc and the batch test both discuss
     // the old command by name on purpose, and that history is worth keeping.

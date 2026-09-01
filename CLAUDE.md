@@ -776,7 +776,7 @@ written after finding the rule already broken somewhere.
 | `session-msg-contract` | Every co-review `SessionMsg` kind is handled somewhere, lifecycle in Rust and app messages in the frontend |
 | `secret-persistence-contract` | `turnPassword` is the only secret-shaped field in `Defaults`, and every persist/export/import site blanks it |
 | `duplicated-tables-contract` | The caption-font map and the export-format list agree between the two files that each hold a copy |
-| `job-id` | Job ids are minted locally and never awaited |
+| `job-id` | Job ids are minted locally, never awaited, and KEPT - between the mint and the first invoke the name must reach a ref, a setState or a dispatch. The second half was open: one of seventeen sites minted an id and stored it nowhere, so Rust registered a child nothing could cancel, and three transcripts opened in a row left three whole-file transcodes running |
 | `updater-purity-contract` | No `setX(prev => …)` writes, invokes, persists or touches a ref |
 | `component-reachable-contract` | Every component in `src/components` is imported by something. A component written, styled, tested and then never mounted passes tsc and the suite while being absent from the running app |
 | `selection-bar-contract` | The library's multi-select bar is out of the browse row's flow. In flow inside a `display: flex` row it renders as a full-height column beside the grid rather than as a bar |
