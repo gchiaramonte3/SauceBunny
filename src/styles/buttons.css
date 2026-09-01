@@ -233,6 +233,17 @@
   color: var(--fg-2);
   background: var(--bg-2);
   border: 1px solid var(--line-2);
+  /* THE GREEN EDGE. The sparkle beside the label is already --ella-green, but
+     a 14px glyph is not enough to mark this as the button that produces work:
+     at a glance the whole control read as chrome, which is what the sparkle's
+     own comment two rules down says it was fixed for once already.
+     A left edge is the app's existing vocabulary for "this one matters" - the
+     nav rail marks where you are the same way - so it costs no new idea.
+     Declared AFTER the shorthand so it overrides only that side, and as a
+     BORDER rather than an inset shadow because .cp-gen-fill (the progress
+     bar) is a child that paints over inset shadows: the edge would vanish
+     for the whole run, which is exactly when it should be there. */
+  border-left: 3px solid var(--ella-green);
   border-radius: var(--r-card);
   cursor: pointer;
   /* Bevel: inset top highlight + tight dropped base. */

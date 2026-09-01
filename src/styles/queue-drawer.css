@@ -122,6 +122,12 @@
   display: flex;
   align-items: stretch;
   gap: 2px;
+  /* A CONTAINER, because what squeezes these tabs is the panel's own width,
+     not the window's. Four labelled tabs want about 400px; docked narrow the
+     strip had neither a shrink rule nor a nowrap, so "AI Summary" broke onto
+     two lines and the last tab was cut off mid-word. Same device the session
+     header uses, for the same reason. */
+  container-type: inline-size;
   padding: 6px 6px 0;
   /* Slight dark wash on the tab strip area pulls it back relative to
      the active tab so the active pill reads as "raised forward". */
@@ -134,6 +140,11 @@
   gap: 6px;
   height: 32px;
   padding: 0 10px;
+  /* Neither of these was set, and each caused half the damage: without nowrap
+     a two-word label wraps inside a 32px-tall tab, and without shrink:0 the
+     tabs compress into each other until the text is clipped. */
+  flex-shrink: 0;
+  white-space: nowrap;
   background: transparent;
   border: 1px solid transparent;
   /* Top-rounded only — the tab "merges" into the body when active,
@@ -479,4 +490,16 @@ body.cp-tab-dragging { cursor: grabbing; }
    src/lib/reduced-motion-contract.test.ts. */
 @media (prefers-reduced-motion: reduce) {
   .cp-queue-iconbtn { transition-duration: 0s; }
+}
+
+/* Narrow panel: the tabs become their icons.
+   Four icons fit anywhere, so the strip can no longer crop or wrap however far
+   the panel is dragged in. The name is on the button's aria-label and title,
+   so nothing loses its name - only its width. Chosen over horizontal
+   scrolling because a scrolled tab strip hides tabs behind a gesture nobody
+   goes looking for, and over truncation because "Trans..." and "AI Su..." are
+   not names. */
+@container (max-width: 400px) {
+  .cp-tab-label { display: none; }
+  .cp-tab { padding: 0 8px; }
 }

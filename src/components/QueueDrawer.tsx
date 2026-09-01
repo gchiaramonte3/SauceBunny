@@ -720,6 +720,11 @@ export function QueueDrawer({
                  (handled in pointerup). */
               onClick={() => { if (!t.disabled && (!drag || drag.srcIdx === drag.dropIdx)) setActiveTab(t.id); }}
               title={t.disabled ? `${t.label} (coming soon)` : `${t.label} · drag to reorder`}
+              /* The visible label is hidden when the panel is narrow (see
+                 queue-drawer.css), so the name has to live somewhere that does
+                 not depend on it. title alone would leave the tab named only by
+                 a tooltip nobody on a keyboard sees. */
+              aria-label={t.label}
               onPointerDown={(e) => onTabPointerDown(e, t.id, idx)}
               onPointerMove={onTabPointerMove}
               onPointerUp={onTabPointerUp}
@@ -728,7 +733,7 @@ export function QueueDrawer({
               {/* The icon brightens with the label rather than turning green - see
                   the note on .cp-tab.active. */}
               <Icon size={13} stroke={isActive ? "var(--fg-1)" : "var(--fg-3)"} />
-              <span>{t.label}</span>
+              <span className="cp-tab-label">{t.label}</span>
               {t.badge != null && t.badge > 0 && (
                 <span className="cp-tab-badge">{t.badge}</span>
               )}
