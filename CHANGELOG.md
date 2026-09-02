@@ -22,10 +22,16 @@ a library tree whose chevrons had never actually worked.
   change, so Cmd-Z or the Undo offer restores exactly what you wrote, and undo
   stops being offered once you have typed over the result rather than
   overwriting your edit. It never posts anything; you still press Post.
-- **Spell-check in the comment box.** The app's main writing surface had none,
-  while the sidebar's filename field has had it since r43. Autocorrect stays
-  off: a note carries names, jargon and timecodes, and a silent rewrite of
-  someone's note is worse than a typo in it.
+- **Spell-check actually works now, everywhere.** It never did. WebKit gates
+  the red underline on a user default the app never set, so the `spellcheck`
+  attributes scattered through the app - on the filename field, the transcript
+  search, and now the comment box - were all inert, and a long-standing note in
+  the code blaming a missing `lang` attribute was wrong (the page has declared
+  English since the first commit, and it is inherited). The app sets that
+  default once at startup, and leaves it alone afterwards, so turning it off
+  from the native right-click menu sticks. Autocorrect stays off: a note
+  carries names, jargon and timecodes, and silently rewriting someone's note is
+  worse than a typo in it.
 - **Draw on the picture during a session, and let it go.** A pencil beside
   Share in the room controls turns the frame into a shared surface: every
   mark appears on everyone's picture at once and fades a few seconds later.

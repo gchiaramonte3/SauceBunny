@@ -72,10 +72,15 @@ export const TranscriptSearchBar = forwardRef<HTMLInputElement, Props>(
           /* Spell-check ON in text mode (Whisper output is prose);
              OFF in speaker mode (names like "Tom" or "Speaker 2" get
              squiggle-underlined as misspellings, which is just noise).
-             `lang="en"` is the missing piece that nudges WKWebView to
-             pick a real dictionary — without it the underline often
-             doesn't render at all (per user screenshot r43 of "Thansky ou"
-             not flagged). */
+             The `lang` below is NOT the missing piece, though this comment
+             said so. The r43 screenshot of "Thansky ou" going unflagged had a
+             different cause: WebKit gates the underline on the
+             WebContinuousSpellCheckingEnabled user default, and nothing set
+             it. The app sets it at startup now (commands/system.rs). Measured
+             with a WKWebView probe: with that default absent NOTHING is
+             underlined whatever the markup, and with it set an attribute-free
+             textarea is underlined the same as one carrying spellcheck and
+             lang. lang is inherited from <html lang="en"> regardless. */
           spellCheck={mode === "text"}
           lang={mode === "text" ? "en" : undefined}
           autoComplete="off"

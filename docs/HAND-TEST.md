@@ -895,9 +895,16 @@ The contracts prove the rules; only eyes prove the pixels.
 
 ### Comment enhancement and spell-check
 
-25. **Spell-check.** Type a misspelling in the comment box. It gets the red
-    underline. (It never did before; `lang="en"` is what makes WKWebView draw
-    it.) Confirm nothing you type is silently corrected.
+25. **Spell-check.** Type "recieve " in the comment box: it gets the red
+    dotted underline. Same in the sidebar's Filename field and in transcript
+    search. This never worked before in any of them - WebKit gates the
+    underline on a user default nothing set, which is why the r43 screenshot
+    showed "Thansky ou" unflagged. Confirm too that nothing you type is
+    silently corrected.
+    If you have ever turned spell check OFF from the right-click menu inside
+    this app, it stays off by design; `defaults read com.saucebunny.desktop
+    WebContinuousSpellCheckingEnabled` prints 0 in that case, and deleting the
+    key restores the default.
 26. **Enhance.** Write a rough note ("sound desgin here is thin, fix in the
     mix"). A wand sits between the range button and Post. Click it: the button
     sweeps violet into green while it works, then the note is replaced by a

@@ -1787,16 +1787,24 @@ function ReviewComposer({
              names. Without this the app's main writing surface announced as an
              unlabelled text box. */
           aria-label={drawActive ? "Describe the drawing" : "Comment"}
-          /* Spell-check ON. This is the app's main writing surface and it had
-             none, while the sidebar's FILENAME field has had it since r43 -
-             `lang="en"` is what makes WKWebView actually draw the underline,
-             and without it `spellCheck` alone is silently inert.
-             autoCorrect stays OFF: a review note carries names, jargon and
-             timecodes, and a silent rewrite of someone's note is worse than a
-             typo in it. Rewriting is the enhance button's job, and that one
-             is undoable. */
+          /* Spell-check ON - but the ATTRIBUTE is not what turns it on.
+             WebKit gates the underline on the WebContinuousSpellCheckingEnabled
+             user default (TextCheckerMac.mm); with that key absent nothing is
+             checked no matter what the markup says, and with it set even a
+             textarea carrying no attributes at all is checked. Both measured
+             with a standalone WKWebView probe. The app now sets that default
+             once at startup - see enable_spellcheck_once in commands/system.rs.
+             This attribute is kept because it is the correct declaration and
+             because `false` WOULD opt out; it is simply not the switch.
+             NO `lang` HERE, deliberately. index.html has carried
+             <html lang="en"> since the first commit and lang is inherited, so
+             pinning it at the leaf changes nothing today - but it would
+             override NSSpellChecker's automatic language detection, flagging
+             every word for a reviewer writing notes in French or Spanish.
+             autoCorrect stays OFF: a note carries names, jargon and timecodes,
+             and silently rewriting someone's note is worse than a typo in it.
+             Rewriting is the enhance button's job, and that one is undoable. */
           spellCheck
-          lang="en"
           autoCorrect="off"
         />
         <div className="cp-review-composer-actions">

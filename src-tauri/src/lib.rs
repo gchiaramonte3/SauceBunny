@@ -315,6 +315,11 @@ pub fn run() {
             commands::session_cancel_fetch,
         ])
         .setup(|app| {
+            // Spell-check: WebKit reads a user default, not an HTML attribute.
+            // Set once, before the webview asks. See enable_spellcheck_once.
+            #[cfg(target_os = "macos")]
+            commands::system::enable_spellcheck_once();
+
             // Window geometry: the user's, if they have expressed one.
             //
             // This used to re-fit to ~85%x90% of the monitor and re-center on

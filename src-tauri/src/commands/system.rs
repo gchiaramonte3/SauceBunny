@@ -1049,6 +1049,37 @@ pub struct AvAuthStatus {
     pub screen: String,
 }
 
+/// Turn WebKit's spell checker on, once, for this app.
+///
+/// MEASURED, not assumed. The red underline is gated in the UI process on an
+/// NSUserDefaults key, `WebContinuousSpellCheckingEnabled`, read by WebKit's
+/// TextCheckerMac.mm; an absent key reads as NO and nothing is checked. NO
+/// HTML ATTRIBUTE CAN SWITCH IT ON. A standalone WKWebView probe typed
+/// "teh recieve wrold" into three textareas - one with spellcheck+lang="en",
+/// one with spellcheck only, one with no attributes at all. With the key
+/// absent: no underline in any of them. With it set: underlines in all three,
+/// including the one with no attributes.
+///
+/// This corrects a long-standing belief in the frontend that `lang="en"` was
+/// what enabled it. index.html has carried `<html lang="en">` since the first
+/// commit and `lang` is inherited, so every field in the app already resolved
+/// to English; the attribute never did anything either way.
+///
+/// SET ONLY IF ABSENT. WebKit's own context menu (Spelling and Grammar >
+/// Check Spelling While Typing) writes this same key, so a user who turns it
+/// OFF must stay off across relaunches. Absent means "never asked", which is
+/// the only case we get to decide.
+#[cfg(target_os = "macos")]
+pub fn enable_spellcheck_once() {
+    use objc2_foundation::{NSString, NSUserDefaults};
+    const KEY: &str = "WebContinuousSpellCheckingEnabled";
+    let defaults = NSUserDefaults::standardUserDefaults();
+    let key = NSString::from_str(KEY);
+    if defaults.objectForKey(&key).is_none() {
+        defaults.setBool_forKey(true, &key);
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn av_status(media_type: &objc2_foundation::NSString) -> String {
     use objc2::runtime::AnyClass;

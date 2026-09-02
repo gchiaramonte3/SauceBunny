@@ -696,8 +696,16 @@ export function Sidebar(props: Props) {
                 onChange={(e) => { onFilenameEdit?.(); setExportOpts({ ...exportOpts, filename: e.target.value }); }}
                 /* Spell-check ON — filenames are usually prose ("interview
                    with marc", "demo final cut") and a misspelled file is
-                   hard to find on disk later. `lang="en"` is required for
-                   WKWebView to actually render the underline. (r43) */
+                   hard to find on disk later.
+                   The `lang="en"` below is NOT what enables it, though this
+                   comment said so for a long time and the claim spread from
+                   here. WebKit gates the underline on the
+                   WebContinuousSpellCheckingEnabled user default, which the
+                   app now sets at startup (commands/system.rs); measured with
+                   a WKWebView probe, an attribute-free textarea is checked
+                   just the same. lang is also inherited from <html lang="en">
+                   in index.html, so this has always been a no-op. Harmless
+                   here on a filename; do not copy it onto prose fields. */
                 spellCheck
                 lang="en"
                 autoCorrect="off" /* don't silently rewrite the filename */
