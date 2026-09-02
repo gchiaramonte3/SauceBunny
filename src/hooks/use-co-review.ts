@@ -181,6 +181,14 @@ export type CoReview = {
   liveDraw: DrawState;
   /** Draw locally and relay to the room. */
   postDrawOp: (op: DrawOp) => void;
+  /** Wipe the room's live surface. Relays an erase for every stroke currently
+   *  on it, including other people's: this is a shared scratch surface that
+   *  dies with the session, and "clear the screen" is the verb a room of two
+   *  to four expects. Nothing durable is touched. */
+  clearLiveDraw: () => void;
+  /** Drop faded strokes LOCALLY, with no relay. Each peer fades on its own
+   *  clock (see LiveDrawLayer), so relaying expiry would fight that. */
+  pruneLiveDraw: (ids: string[]) => void;
   /** Peer playheads in frames, tinted per name — the timeline ghost cursors. */
   theater: boolean;
   setTheater: Dispatch<SetStateAction<boolean>>;
@@ -474,6 +482,34 @@ export function useCoReview({
     setLiveDraw((prev) => applyDrawOp(prev, op));
     sendSessionMsg({ kind: "reviewOp", op: JSON.stringify({ t: "draw", op }), from: "" });
   }, [sendSessionMsg]);
+
+  /** Erase everything on the live surface, for everyone. Reads the CURRENT
+   *  state through the setter rather than closing over `liveDraw`, so a clear
+   *  fired from a stale render still erases what is actually on screen. */
+  const clearLiveDraw = useCallback(() => {
+    setLiveDraw((prev) => {
+      const at = Date.now();
+      for (const st of prev.strokes) {
+        sendSessionMsg({
+          kind: "reviewOp",
+          op: JSON.stringify({ t: "draw", op: { t: "strokeErase", id: st.id, at } }),
+          from: "",
+        });
+      }
+      return prev.strokes.reduce(
+        (acc, st) => applyDrawOp(acc, { t: "strokeErase", id: st.id, at }), prev);
+    });
+  }, [sendSessionMsg]);
+
+  /** Local-only expiry. No relay, no tombstone: a faded stroke is gone from
+   *  THIS view, and another peer may still be holding it on a longer fade. */
+  const pruneLiveDraw = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    const gone = new Set(ids);
+    setLiveDraw((prev) => prev.strokes.some((st) => gone.has(st.id))
+      ? { ...prev, strokes: prev.strokes.filter((st) => !gone.has(st.id)) }
+      : prev);
+  }, []);
 
   const postSessionOp = useCallback((op: ReviewOp) => {
     // STAMP BEFORE ANYTHING ELSE SEES IT. A note gets the session and segment
@@ -1679,7 +1715,7 @@ export function useCoReview({
   return {
     coSession, coSessionActive, sessionDoc, postSessionOp,
     // Live shared drawing: the room's scratch surface before anyone posts.
-    liveDraw, postDrawOp,
+    liveDraw, postDrawOp, clearLiveDraw, pruneLiveDraw,
     theater, setTheater, theaterParticipants,
     meshStreams: mesh.remoteStreams, meshStates: mesh.peerStates,
     meshMutedForMe: mesh.peerMutedForMe, toggleMuteForMe: mesh.toggleMuteForMe,

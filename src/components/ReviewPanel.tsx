@@ -1718,6 +1718,17 @@ function ReviewComposer({
              names. Without this the app's main writing surface announced as an
              unlabelled text box. */
           aria-label={drawActive ? "Describe the drawing" : "Comment"}
+          /* Spell-check ON. This is the app's main writing surface and it had
+             none, while the sidebar's FILENAME field has had it since r43 -
+             `lang="en"` is what makes WKWebView actually draw the underline,
+             and without it `spellCheck` alone is silently inert.
+             autoCorrect stays OFF: a review note carries names, jargon and
+             timecodes, and a silent rewrite of someone's note is worse than a
+             typo in it. Rewriting is the enhance button's job, and that one
+             is undoable. */
+          spellCheck
+          lang="en"
+          autoCorrect="off"
         />
         <div className="cp-review-composer-actions">
         {/* Height drag handle — rides the composer's top hairline; the list

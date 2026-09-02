@@ -182,6 +182,9 @@ export type Defaults = {
   /** Where a file received in a session ends up. "cache" is managed and
    *  evictable; "folder" is somewhere you chose and nothing sweeps. */
   sessionCopyDest: "cache" | "folder";
+  /** Seconds a live telestration mark holds before fading. 0 = until cleared.
+   *  Live marks are never saved, so this is purely how long "look here" lasts. */
+  liveDrawFadeSec: 0 | 5 | 10;
   sessionCopyFolder: string | null;
   /**
    * Media-cache size cap in GB (0 = keep everything, the long-standing
@@ -993,6 +996,31 @@ export function SettingsModal(props: Props) {
                             : "Choose folder…"}
                         </button>
                       )}
+                    </div>
+                  </div>
+                  <div className="cp-pane-row">
+                    <div className="k">
+                      Live marks fade after
+                      <span className="desc">
+                        Drawing on the picture during a session shows everyone the same mark and then
+                        lets it go. It is never saved and never becomes a note; the pencil in the
+                        comment box is the one that writes something down.
+                      </span>
+                    </div>
+                    <div className="v">
+                      <select
+                        className="cp-select"
+                        aria-label="How long live marks stay on the picture"
+                        value={String(defaults.liveDrawFadeSec)}
+                        onChange={(e) => setDefaults({
+                          ...defaults,
+                          liveDrawFadeSec: e.target.value === "0" ? 0 : e.target.value === "10" ? 10 : 5,
+                        })}
+                      >
+                        <option value="5">5 seconds</option>
+                        <option value="10">10 seconds</option>
+                        <option value="0">Until I clear them</option>
+                      </select>
                     </div>
                   </div>
                   <div className="cp-pane-row">

@@ -1,8 +1,8 @@
 import type { ShareSourceArg } from "../bindings/ShareSourceArg";
 import { useState } from "react";
 import {
-  IconFullscreen, IconFullscreenExit, IconMic, IconMicOff,
-  IconScreenShare, IconSettings, IconSmile, IconVideo, IconVideoOff,
+  IconClearMarks, IconFullscreen, IconFullscreenExit, IconMic, IconMicOff,
+  IconPencil, IconScreenShare, IconSettings, IconSmile, IconVideo, IconVideoOff,
 } from "./Icons";
 import { DevicePanel } from "./DevicePanel";
 import { ReactionPicker } from "./ReactionPicker";
@@ -17,7 +17,7 @@ import type { ShareState } from "../lib/share-machine";
  * INSIDE the transport row's right side (Transport's roomControls slot),
  * with the snapshot/speed/volume controls - not floating over the timeline.
  */
-export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareState, onStartShare, onStopShare, theater, onToggleTheater, onReact, handRaised, onToggleHand }: {
+export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareState, onStartShare, onStopShare, theater, onToggleTheater, onReact, handRaised, onToggleHand, liveDrawOn, onToggleLiveDraw, onClearLiveDraw, liveDrawHasMarks }: {
   micOn: boolean;
   camOn: boolean;
   onToggleMic: () => void;
@@ -30,6 +30,14 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
   onReact: (emote: string) => void;
   handRaised: boolean;
   onToggleHand: () => void;
+  /** Live telestration: draw over the picture for everyone, then it fades.
+   *  Nothing it draws is ever saved - see LiveDrawLayer. */
+  liveDrawOn: boolean;
+  onToggleLiveDraw: () => void;
+  onClearLiveDraw: () => void;
+  /** Whether anything is on the live surface, so Clear appears only when it
+   *  would actually do something. */
+  liveDrawHasMarks: boolean;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [devicesOpen, setDevicesOpen] = useState(false);
@@ -75,6 +83,31 @@ export function RoomControlBar({ micOn, camOn, onToggleMic, onToggleCam, shareSt
           onPick={onStartShare}
           onClose={() => setPickerOpen(false)}
         />
+      )}
+      {/* Live telestration. Deliberately beside Share: both are "show the
+          room something", as opposed to the composer's pencil, which starts a
+          NOTE. Same pencil glyph as the composer so the gesture reads the
+          same; the difference is that this one never persists. */}
+      <button
+        type="button"
+        className={"cp-room-bar-btn" + (liveDrawOn ? " active" : "")}
+        title={liveDrawOn ? "Stop drawing on the picture" : "Draw on the picture. Everyone sees it live and it fades; nothing is saved."}
+        aria-label={liveDrawOn ? "Stop drawing on the picture" : "Draw on the picture for everyone. Marks fade and are not saved."}
+        aria-pressed={liveDrawOn}
+        onClick={() => { setPickerOpen(false); setDevicesOpen(false); setReactionsOpen(false); onToggleLiveDraw(); }}
+      >
+        <IconPencil size={15} />
+      </button>
+      {liveDrawOn && liveDrawHasMarks && (
+        <button
+          type="button"
+          className="cp-room-bar-btn"
+          title="Clear everyone's marks"
+          aria-label="Clear everyone's marks from the picture"
+          onClick={onClearLiveDraw}
+        >
+          <IconClearMarks size={15} />
+        </button>
       )}
       <button
         type="button"

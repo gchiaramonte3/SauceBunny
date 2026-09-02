@@ -1161,6 +1161,28 @@
 /* ============================================================
    ANNOTATION OVERLAY (review drawing)
    ============================================================ */
+/* ── Live telestration ────────────────────────────────────────────────
+   Everyone's ephemeral strokes over the picture. Sits just UNDER .cp-annot
+   (z 6) so that when someone is composing a note the capture surface still
+   owns the pointer and paints on top of the room's live marks.
+
+   Never interactive: this layer is a read-only view of `liveDraw`. The
+   pointer belongs to the capture overlay above it, and a stray
+   pointer-events here would eat clicks on the player underneath. */
+.cp-livedraw {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+.cp-livedraw-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 .cp-annot {
   position: absolute;
   inset: 0;

@@ -867,6 +867,31 @@ The contracts prove the rules; only eyes prove the pixels.
     semibold mono; the SELECTION label above it matches the FILENAME label.
 18. **Settings > Keyboard.** A shortcut with a description shows it in the
     normal secondary grey under its name, not a dimmer one-off grey.
+
+### Live telestration (needs two machines for the sharing half)
+
+19. **Solo first.** Start a session, open the review view. A pencil sits
+    beside the screen-share button. Click it: the drawing palette appears over
+    the picture (pen, highlighter, arrow, rectangle, ellipse, colours, size).
+    Draw. The mark shows, holds about five seconds, then fades out smoothly
+    rather than blinking off.
+20. **It is not a note.** After drawing, look at the review panel: no new
+    comment, no draft, nothing to post. Reload the app and the marks are gone.
+    This is the whole feature; if a drawing ever appears as a comment from
+    this pencil, that is the bug.
+21. **Clear.** With marks on screen, a second button appears beside the
+    pencil. Click it: everything clears at once.
+22. **Fade setting.** Settings ▸ General ▸ Co-review calls ▸ "Live marks fade
+    after". Set "Until I clear them" and draw: the mark stays indefinitely.
+    Set 10 seconds and confirm it lasts noticeably longer than the default.
+23. **Two machines.** Host draws; the guest sees the same mark on their
+    picture within a moment, in the host's colour, and it fades on each
+    machine independently. Then the guest draws and the host sees it. Clear on
+    either side clears both.
+24. **It does not steal the pointer.** With the pencil OFF, clicking the
+    picture still works normally (play/pause, scrub). With it ON, the composer
+    pencil and this one do not fight: turning one on does not leave the other
+    capturing.
 19. **Library, list view: New Column, all the way through.** Right-click any
     heading, choose New Column, type "Take", press Enter. A Take heading
     appears with an empty cell on every row, lined up under it. Click a row

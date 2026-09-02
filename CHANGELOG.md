@@ -14,6 +14,16 @@ Since build `2026082903`: **review links**, a Finder-style library list, and
 a library tree whose chevrons had never actually worked.
 
 ### Added
+- **Draw on the picture during a session, and let it go.** A pencil beside
+  Share in the room controls turns the frame into a shared surface: every
+  mark appears on everyone's picture at once and fades a few seconds later.
+  It is never saved and never becomes a note, which is the point - the pencil
+  in the comment box is still the one that writes something down. Fade is 5
+  seconds by default, or 10, or hold until you clear it (Settings ▸ General ▸
+  Co-review calls), and a Clear button appears beside the pencil while there
+  is anything to clear. Marks age on the machine showing them rather than on
+  the clock of whoever drew them, so a peer whose clock is off does not get
+  strokes that never fade or vanish on arrival.
 - **Review links.** A link you issue to one named person, which opens the
   review in their copy of the app. The name on their notes is the one YOU
   typed, so a forwarded link cannot sign someone else's comments, and each

@@ -1,10 +1,10 @@
 import { ColorSwatches } from "./ColorSwatches";
 import { useEffect, useRef, useState } from "react";
-import { getStroke } from "perfect-freehand";
 import {
-  DRAW_TOOLS, isShapeTool, shapeGeometry, shapePoints, toolOpacity, toolWidthScale, type DrawTool,
+  DRAW_TOOLS, isShapeTool, shapePoints, toolOpacity, toolWidthScale, type DrawTool,
 } from "../lib/draw-tools";
 import { annotationHasContent, type AnnotationStrokes } from "../lib/review";
+import { paintStroke } from "../lib/draw-paint";
 import {
   IconPencil, IconToolArrow, IconToolEllipse, IconToolHighlighter, IconToolRect,
 } from "./Icons";
@@ -39,19 +39,6 @@ const MAX_SIZE = 24;
 
 type Stroke = AnnotationStrokes["strokes"][number];
 
-/** perfect-freehand outline → a smooth filled Path2D (midpoint-quadratic). */
-function outlineToPath(outline: number[][]): Path2D {
-  const path = new Path2D();
-  if (outline.length < 2) return path;
-  path.moveTo(outline[0][0], outline[0][1]);
-  for (let i = 0; i < outline.length; i++) {
-    const [x0, y0] = outline[i];
-    const [x1, y1] = outline[(i + 1) % outline.length];
-    path.quadraticCurveTo(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
-  }
-  path.closePath();
-  return path;
-}
 
 
 /** Glyph per tool - label and hint stay as the tooltip and accessible name. */
@@ -65,6 +52,7 @@ const TOOL_ICON: Record<DrawTool, (p: { size?: number }) => JSX.Element> = {
 
 export function AnnotationOverlay({
   annotation, drawing, opacity = 1, onChange, onDismiss, labelMode = false, labelColor = "#4dabf7",
+  onStroke,
 }: {
   /** Strokes to render (the live draft while drawing, or a saved one to view). */
   annotation: AnnotationStrokes | null;
@@ -81,6 +69,10 @@ export function AnnotationOverlay({
   /** Reviewer colour for label chips (draft = current reviewer; saved = the
    *  comment author's) — defaults to the panel blue (AVATAR_COLORS[0]). */
   labelColor?: string;
+  /** LIVE mode. Fired once per finished stroke INSTEAD of `onChange`, so the
+   *  stroke can be relayed and forgotten rather than accumulated into a draft
+   *  annotation. Set by live telestration, which must never write a note. */
+  onStroke?: (stroke: AnnotationStrokes["strokes"][number]) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -133,75 +125,9 @@ export function AnnotationOverlay({
     const w = cv.width, h = cv.height;
     const dpr = window.devicePixelRatio || 1;
     ctx.clearRect(0, 0, w, h);
-    const paint = (s: Stroke) => {
-      if (s.pts.length === 0) return;
-      // A SHAPE IS NOT HANDWRITING. Stroked as geometry, so a rectangle has
-      // right angles and an arrow has a point. Everything below this is the
-      // freehand path, and smoothing there is correct.
-      if (s.shape) {
-        const g = shapeGeometry(s.shape.kind, s.shape.from, s.shape.to, w, h);
-        const prevA = ctx.globalAlpha;
-        ctx.globalAlpha = s.opacity ?? 1;
-        ctx.strokeStyle = s.color;
-        ctx.fillStyle = s.color;
-        ctx.lineWidth = Math.max(1, s.size) * (s.widthScale ?? 1) * dpr;
-        // Miter, so a corner is a corner. A round join is part of what
-        // softened these into lozenges.
-        ctx.lineJoin = "miter";
-        ctx.lineCap = "butt";
-        ctx.beginPath();
-        if (g.kind === "rect") ctx.rect(g.x, g.y, g.w, g.h);
-        else if (g.kind === "ellipse") ctx.ellipse(g.cx, g.cy, g.rx, g.ry, 0, 0, Math.PI * 2);
-        else { ctx.moveTo(g.shaft[0][0], g.shaft[0][1]); ctx.lineTo(g.shaft[1][0], g.shaft[1][1]); }
-        ctx.stroke();
-        if (g.kind === "arrow") {
-          ctx.beginPath();
-          ctx.moveTo(g.head[0][0], g.head[0][1]);
-          ctx.lineTo(g.head[1][0], g.head[1][1]);
-          ctx.lineTo(g.head[2][0], g.head[2][1]);
-          ctx.closePath();
-          ctx.fill();
-        }
-        ctx.globalAlpha = prevA;
-        return;
-      }
-      // Pressure rides along when the pen gave us one; 0.5 is the neutral
-      // middle for everything else, which keeps a mouse line even.
-      const input = s.pts.map((pt) => [pt[0] * w, pt[1] * h, pt[2] ?? 0.5]);
-      const outline = getStroke(input, {
-        // `* dpr` is CORRECT and not a bug: the points above are in
-        // backing-store pixels, so the size must be too, and multiplying by dpr
-        // is what makes the slider value mean CSS pixels on screen.
-        size: Math.max(1, s.size) * (s.widthScale ?? 1) * dpr,
-        // NO SIMULATED PRESSURE. This was the blob.
-        //
-        // `norm` records position only, so with simulatePressure the width came
-        // from perfect-freehand's VELOCITY heuristic — drag fast and the stroke
-        // balloons, pause and it pinches. On a mouse that is not expression, it
-        // is a readout of how fast your hand moved, and at thinning 0.6 it
-        // swung the width across most of its range: one gesture came out as a
-        // lumpy sausage with bulbous ends. A review annotation wants to read as
-        // a deliberate mark, so an even line is the correct default and real
-        // pressure (pen only, captured in `norm`) is the only thing allowed to
-        // vary it.
-        simulatePressure: false,
-        // Gentle, so a pen still shows dynamics without the sausage.
-        thinning: 0.35,
-        // Higher than before: these are freehand circles and arrows drawn over
-        // video with a trackpad, where the input is jittery and the intent is
-        // smooth.
-        smoothing: 0.72,
-        streamline: 0.68,
-        last: s !== live.current,
-      });
-      // Opacity rides the stroke, not the toolbar: a saved highlighter must
-      // still read as a highlighter when someone opens the note tomorrow.
-      const prev = ctx.globalAlpha;
-      ctx.globalAlpha = s.opacity ?? 1;
-      ctx.fillStyle = s.color;
-      ctx.fill(outlineToPath(outline));
-      ctx.globalAlpha = prev;
-    };
+    // The painter itself lives in lib/draw-paint so the live telestration
+    // layer paints identical strokes instead of owning a second copy.
+    const paint = (s: Stroke) => paintStroke(ctx, s, w, h, dpr, { inProgress: s === live.current });
     strokes.forEach(paint);
     if (live.current) paint(live.current);
   };
@@ -349,7 +275,11 @@ export function AnnotationOverlay({
     // Carry `labels` too — the labels ride the same payload as the strokes
     // (see the label-commit path above); dropping the field here would erase
     // every placed label on the next pen stroke.
-    if (finished.pts.length > 0) onChange({ strokes: [...strokes, finished], labels });
+    if (finished.pts.length === 0) return;
+    // LIVE mode never accumulates. Handing the stroke straight out is what
+    // keeps telestration off the review doc: there is no draft to post.
+    if (onStroke) { onStroke(finished); return; }
+    onChange({ strokes: [...strokes, finished], labels });
   };
 
   // Leaving draw/label mode with an input still open → drop it (uncommitted).
