@@ -735,6 +735,16 @@ skew is invisible to `npx tsc` and to a local `npm test`, so when a test reaches
 for a filesystem or platform API, prefer the older, duller call — `readdirSync`
 over `globSync` — rather than discovering the floor from a red build.
 
+The third time was the one that kept emailing. `src/test-setup.ts` used to
+install its in-memory `localStorage` only when Node's built-in was present and
+broken (22+); on Node 20 there is no built-in, so jsdom's REAL Storage stayed,
+and jsdom wraps that in a Proxy whose `set` trap files `storage.setItem = spy`
+as a stored ITEM named "setItem". The spy installs and intercepts nothing, so
+`storage-problem.test.ts` failed every CI run for a day while every Mac was
+green. The stub is now unconditional: one Storage for every test on every
+Node. If a storage test passes locally and fails in CI, suspect the
+environment before the code.
+
 **Any guard that SCANS needs a canary**, and this is the failure this repo keeps
 meeting rather than a general principle. `expect(offenders).toEqual([])` passes
 just as happily when the scan found nothing to examine, so a check that quietly

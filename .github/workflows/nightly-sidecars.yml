@@ -158,6 +158,13 @@ jobs:
           # libx264 (loudly) so the rest of the arg surface is still verified.
           # Local runs stay strict — don't set this on a real Mac.
           SB_NIGHTLY_ALLOW_SW_ENCODER: "1"
+          # The two tests that dial by endpoint id alone need n0's pkarr DNS,
+          # and this runner cannot resolve those TXT records: observed
+          # 2026-09-01 as "All address lookup services failed ... Failed to
+          # resolve TXT record" on macos-latest, failing the whole nightly and
+          # emailing about it daily. They print SKIPPED here and run for real
+          # on any developer Mac, where the network is not the runner's.
+          SB_NIGHTLY_NO_N0: "1"
         run: cargo test --lib nightly_ -- --ignored --test-threads=1 --nocapture
 
       - name: File or update a failure issue

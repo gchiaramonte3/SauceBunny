@@ -60,26 +60,37 @@ if (typeof document !== "undefined") {
   // a function. Because the global is already defined, jsdom does not install
   // its own over the top, so the test environment inherits the broken one.
   //
-  // Detect by capability rather than by version and replace it with a plain
-  // in-memory Storage. Checked on `clear` specifically because that is the
-  // first method a test reaches for.
-  const store = g.localStorage as { clear?: unknown } | undefined;
-  if (typeof store?.clear !== "function") {
-    const map = new Map<string, string>();
-    const storage: Storage = {
-      get length() { return map.size; },
-      key: (i: number) => [...map.keys()][i] ?? null,
-      getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
-      setItem: (k: string, v: string) => { map.set(k, String(v)); },
-      removeItem: (k: string) => { map.delete(k); },
-      clear: () => map.clear(),
-    };
-    g.localStorage = storage;
-    g.sessionStorage = storage;
-    if (typeof window !== "undefined") {
-      Object.defineProperty(window, "localStorage", { value: storage, configurable: true });
-      Object.defineProperty(window, "sessionStorage", { value: storage, configurable: true });
-    }
+  // ALWAYS replaced, not only when Node's built-in is broken.
+  //
+  // This used to be detect-by-capability: install the stub only when the
+  // global existed with no `clear`. That left one Node version on each side
+  // of a line nobody could see. On Node 22+ the built-in is present and
+  // broken, so the stub went in and every storage test ran against a plain
+  // object. On Node 20 - which is what CI pins - there is no built-in, so
+  // jsdom's REAL Storage survived. jsdom wraps that in a Proxy whose `set`
+  // trap turns `storage.setItem = spy` into a stored item named "setItem"
+  // rather than shadowing the method: the spy installs "successfully" and
+  // intercepts nothing. storage-problem.test.ts failed on every CI run for a
+  // day while passing on every developer Mac, which is exactly the skew
+  // CLAUDE.md records under "CI runs Node 20; your machine probably does not".
+  //
+  // One Storage implementation for every test on every Node, then. The whole
+  // suite is already green against this stub locally, so this changes CI to
+  // match a known-good state rather than the other way round.
+  const map = new Map<string, string>();
+  const storage: Storage = {
+    get length() { return map.size; },
+    key: (i: number) => [...map.keys()][i] ?? null,
+    getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
+    setItem: (k: string, v: string) => { map.set(k, String(v)); },
+    removeItem: (k: string) => { map.delete(k); },
+    clear: () => map.clear(),
+  };
+  g.localStorage = storage;
+  g.sessionStorage = storage;
+  if (typeof window !== "undefined") {
+    Object.defineProperty(window, "localStorage", { value: storage, configurable: true });
+    Object.defineProperty(window, "sessionStorage", { value: storage, configurable: true });
   }
 
   // matchMedia is how the app reads prefers-reduced-motion and the colour
