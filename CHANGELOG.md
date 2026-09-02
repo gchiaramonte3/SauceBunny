@@ -56,6 +56,11 @@ a library tree whose chevrons had never actually worked.
 
 `0.4.8` adds the first-run permissions step and fixes a paused-playback
 regression, a library duplication bug, and the app's missing select style.
+- **A new column's empty cells can be clicked.** The row centres its
+  items, so a cell with nothing in it was zero pixels tall; New Column
+  appeared to work and then there was nowhere to type. The cell fills the
+  row's height now, and the whole flow is driven end to end in the rendered
+  tests.
 - **The library list's even rows can be hovered and selected again.** The
   zebra stripe was scoped under the list and so outranked hover, focus and
   selection on specificity; every other row refused to highlight and, when

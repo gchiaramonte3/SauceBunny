@@ -181,7 +181,7 @@ export function LibraryListRow({
                         onEditCustom(k, { x: r.left, y: r.top, width: r.width });
                       }}
                     >
-                      {customText?.(k) ?? ""}
+                      <span className="cp-lib-lrow-custom-text">{customText?.(k) ?? ""}</span>
                     </span>
                   )
                   : null

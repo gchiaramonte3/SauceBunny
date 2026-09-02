@@ -1394,14 +1394,29 @@
 /* A user-made column's cell. Reads as content the user wrote rather than as
    metadata the app derived, so it sits at --fg-2 rather than the muted --fg-4
    the derived columns use. Truncates: the value is capped at 200 characters
-   and the column is often narrow. */
+   and the column is often narrow.
+
+   The cell STRETCHES to the row's height. The row centres its items, and an
+   empty span centred in a row is zero pixels tall - so a brand-new column had
+   no cell anyone could click to type into, which read as "New Column does
+   nothing" from the chair. Finder's target is the whole cell; so is this one.
+   The text lives in an inner span because ellipsis needs a block with inline
+   content, which a flex container is not. */
 .cp-lib-lrow-custom {
   min-width: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
   color: var(--fg-2);
+}
+.cp-lib-lrow-custom-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* On a selected row a click on the cell opens the editor: say so. */
+.cp-lib-lrow.selected .cp-lib-lrow-custom { cursor: text; }
 /* Only where the value really is a lowercase enum. */
 .cp-lib-lrow-kindword { text-transform: capitalize; }
 /* ONE LINE, always - but on the ROWS ONLY.

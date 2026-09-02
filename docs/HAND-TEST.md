@@ -867,6 +867,16 @@ The contracts prove the rules; only eyes prove the pixels.
     semibold mono; the SELECTION label above it matches the FILENAME label.
 18. **Settings > Keyboard.** A shortcut with a description shows it in the
     normal secondary grey under its name, not a dimmer one-off grey.
+19. **Library, list view: New Column, all the way through.** Right-click any
+    heading, choose New Column, type "Take", press Enter. A Take heading
+    appears with an empty cell on every row, lined up under it. Click a row
+    to select it, then click its empty Take cell (the cursor turns to a text
+    beam): an editor opens IN the cell. Type A1, Enter. Right-click the Take
+    heading: Rename and Delete are there; deleting it takes the cells with
+    it and nothing else shifts. Before this build the empty cell had no
+    height at all, so there was nothing to click.
+20. **Sort direction.** Click Size once: largest first, like Finder. Again:
+    smallest first. Click Name: A to Z, and Size loses its caret.
 
 ## Two claims that only two machines can settle
 
