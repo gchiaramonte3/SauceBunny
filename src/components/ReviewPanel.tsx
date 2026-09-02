@@ -2,6 +2,7 @@ import { COMMENT_REACTION_EMOJI } from "../lib/reactions";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMenuKeys } from "../hooks/use-menu-keys";
 import { useDismiss } from "../hooks/use-dismiss";
+import { enhanceComment, ENHANCE_MAX_CHARS, NoLocalModelError } from "../lib/enhance-comment";
 import { ColorSwatches } from "./ColorSwatches";
 import { useModalFocus } from "../hooks/use-modal-focus";
 import { invoke } from "@tauri-apps/api/core";
@@ -10,7 +11,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type { DictateDoneEvent, DictateLevelEvent, DictatePartialEvent, ReviewRangeDraft } from "../types";
 import { DictationWave } from "./DictationWave";
 import { EmojiPicker } from "./EmojiPicker";
-import { IconDownload, IconRange } from "./Icons";
+import { IconDownload, IconRange, IconSparkles } from "./Icons";
 import { getPlayheadSeconds, usePlayheadSecondsCoarse } from "../lib/playhead-store";
 import { secondsToHms, secondsToTc } from "../lib/timecode";
 import { loadJson, saveJson } from "../lib/storage";
@@ -260,6 +261,8 @@ export function ReviewPanel({
   sessionDoc?: ReviewDoc | null;
   onSessionOp?: (op: ReviewOp) => void;
 }) {
+
+
   // NOTE: this component deliberately does NOT subscribe to the playhead at
   // the top. It used to, and the cost was the whole thread list — every
   // comment row, every reply, unmemoized — re-rendering 60×/s for the entire
@@ -1587,6 +1590,54 @@ function ReviewComposer({
   /** Open the paste-producer-notes modal (owned by ReviewPanel). */
   onPasteNotes: () => void;
 }) {
+  /**
+   * Enhance: the AI tidy-up of the note in the box.
+   *
+   * `enhancedFrom` holds the author's own words and `enhancedTo` the result.
+   * Undo is offered only while the box still holds exactly `enhancedTo` - once
+   * the reviewer has typed over it, "undo the enhance" is ambiguous and the
+   * textarea's native history is the better answer.
+   */
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceErr, setEnhanceErr] = useState<string | null>(null);
+  const [enhancedFrom, setEnhancedFrom] = useState<string | null>(null);
+  const [enhancedTo, setEnhancedTo] = useState<string | null>(null);
+  const enhanceAbort = useRef<AbortController | null>(null);
+  const canUndoEnhance = enhancedFrom !== null && text === enhancedTo;
+
+  const runEnhance = async () => {
+    const before = text.trim();
+    if (!before || enhancing) return;
+    if (before.length > ENHANCE_MAX_CHARS) {
+      setEnhanceErr("That note is too long to tidy up. Shorten it first.");
+      return;
+    }
+    setEnhanceErr(null);
+    setEnhancing(true);
+    const ctrl = new AbortController();
+    enhanceAbort.current = ctrl;
+    try {
+      const after = await enhanceComment(before, ctrl.signal);
+      if (ctrl.signal.aborted) return;
+      // One setState, so one undo puts the author's words back.
+      if (after !== before) { setEnhancedFrom(before); setEnhancedTo(after); setText(after); }
+    } catch (e) {
+      if (ctrl.signal.aborted) return;
+      setEnhanceErr(e instanceof NoLocalModelError
+        ? "No local AI model yet. Download one in the AI tab, or set a key in Settings ▸ AI APIs."
+        : formatError(e));
+    } finally {
+      if (enhanceAbort.current === ctrl) enhanceAbort.current = null;
+      setEnhancing(false);
+    }
+  };
+
+  const undoEnhance = () => {
+    if (enhancedFrom === null) return;
+    setText(enhancedFrom);
+    setEnhancedFrom(null); setEnhancedTo(null);
+  };
+
   // The composer subscribes to the playhead itself rather than taking it as a
   // prop from ReviewPanel - the re-render stops at this subtree instead of
   // dragging the whole thread list along. And it subscribes COARSE: its two
@@ -1633,6 +1684,16 @@ function ReviewComposer({
       {transcribing && (
         <div className="cp-review-drawhint">
           Transcribing your voice…
+        </div>
+      )}
+      {canUndoEnhance && (
+        <div className="cp-review-drawhint">
+          Tidied up. <button className="cp-review-undoenh" onClick={undoEnhance}>Undo</button>
+        </div>
+      )}
+      {enhanceErr && (
+        <div className="cp-review-drawhint error" onClick={() => setEnhanceErr(null)} title="Dismiss">
+          {enhanceErr}
         </div>
       )}
       {dictError && (
@@ -1703,7 +1764,15 @@ function ReviewComposer({
           onChange={(e) => setText(e.target.value)}
           onInput={autosize}
           onFocus={() => ensureNamed()}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
+          onKeyDown={(e) => {
+            // Cmd-Z undoes the REWRITE, but only while the box still holds it
+            // untouched - after that the textarea's own history is what the
+            // reviewer means, and stealing the chord would lose their typing.
+            if ((e.metaKey || e.ctrlKey) && e.key === "z" && !e.shiftKey && canUndoEnhance) {
+              e.preventDefault(); undoEnhance(); return;
+            }
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+          }}
           // Placeholder uses coarse h:mm:ss (no frames, no zero-padded hour) so
           // it fits a narrow panel without wrapping; posted comments still
           // carry the full SMPTE timecode via secondsToTc.
@@ -1793,6 +1862,18 @@ function ReviewComposer({
           aria-label="Set comment time range"
         >
           <IconRange size={16} className="cp-review-glyph" />
+        </button>
+        {/* Tidy up the note. Sits last in the tool row, next to Post, because
+            it acts on what you have written rather than on the frame. */}
+        <button
+          className={"cp-review-tool cp-review-enhance" + (enhancing ? " working" : "")}
+          onClick={() => { if (ensureNamed()) void runEnhance(); }}
+          disabled={enhancing || !text.trim()}
+          title={enhancing ? "Tidying up…" : "Tidy up this note with AI. One undo puts your words back."}
+          aria-label="Tidy up this note with AI"
+          aria-busy={enhancing}
+        >
+          <IconSparkles size={16} className="cp-review-glyph" />
         </button>
           <span className="cp-review-composer-spacer" />
         <button className="btn btn-primary btn-compact" onClick={submit} disabled={!text.trim() && !hasDraft}>Post</button>

@@ -844,6 +844,52 @@
   border-top-color: color-mix(in srgb, var(--danger) 22%, transparent);
   cursor: pointer;
 }
+/* ── Enhance (AI tidy-up) ──────────────────────────────────────────────
+   The sweep means WORK IS RUNNING, which is the same thing the Generate
+   button's sweep means, so it is the same green with the brand violet leading
+   it. Violet into green rather than a full spectrum: two brand colours read as
+   this app thinking, where a rainbow reads as a loading toy. */
+@keyframes cp-enhance-sweep {
+  from { background-position: 200% 50%; }
+  to   { background-position: -100% 50%; }
+}
+.cp-review-enhance.working {
+  color: var(--fg-0);
+  border-color: color-mix(in srgb, var(--novella-violet) 55%, transparent);
+  background-image: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in srgb, var(--novella-violet) 55%, transparent) 40%,
+    color-mix(in srgb, var(--ella-green) 45%, transparent) 60%,
+    transparent 80%);
+  background-size: 300% 100%;
+  animation: cp-enhance-sweep 1.15s linear infinite;
+}
+/* The glyph leads the sweep rather than sitting flat inside it. */
+.cp-review-enhance.working .cp-review-glyph { color: var(--ella-green); }
+@media (prefers-reduced-motion: reduce) {
+  /* No sweep, but the control must still read as BUSY - a still gradient at
+     rest would say nothing at all, so it keeps a steady brand tint. */
+  .cp-review-enhance.working {
+    animation: none;
+    background-image: none;
+    background-color: color-mix(in srgb, var(--novella-violet) 22%, transparent);
+  }
+}
+/* Undo, offered in the composer's own hint bar. A text button, because it is
+   an offer rather than a control the eye should keep landing on. */
+.cp-review-undoenh {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  font-weight: var(--weight-bold);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* Recording bar — the live mic waveform + label while dictating. */
 .cp-review-recbar {
   display: flex;

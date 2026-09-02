@@ -892,6 +892,27 @@ The contracts prove the rules; only eyes prove the pixels.
     picture still works normally (play/pause, scrub). With it ON, the composer
     pencil and this one do not fight: turning one on does not leave the other
     capturing.
+
+### Comment enhancement and spell-check
+
+25. **Spell-check.** Type a misspelling in the comment box. It gets the red
+    underline. (It never did before; `lang="en"` is what makes WKWebView draw
+    it.) Confirm nothing you type is silently corrected.
+26. **Enhance.** Write a rough note ("sound desgin here is thin, fix in the
+    mix"). A wand sits between the range button and Post. Click it: the button
+    sweeps violet into green while it works, then the note is replaced by a
+    tidier version that says the SAME thing. It must not add an opinion, must
+    not become a paragraph, and must keep any timecode or name verbatim.
+27. **Undo.** Immediately after, press Cmd-Z, or click Undo in the bar that
+    appears under the box. Your exact original text comes back in one step.
+28. **Undo stops being offered once you edit.** Enhance, then type a word. The
+    Undo offer disappears and Cmd-Z now behaves like normal text undo rather
+    than wiping what you just typed.
+29. **No model, no crash.** With the local provider selected and no model
+    downloaded, the wand explains that in a dismissible bar rather than
+    failing silently.
+30. **It never posts.** Nothing above should create a comment until you press
+    Post yourself.
 19. **Library, list view: New Column, all the way through.** Right-click any
     heading, choose New Column, type "Take", press Enter. A Take heading
     appears with an empty cell on every row, lined up under it. Click a row

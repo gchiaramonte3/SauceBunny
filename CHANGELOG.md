@@ -14,6 +14,18 @@ Since build `2026082903`: **review links**, a Finder-style library list, and
 a library tree whose chevrons had never actually worked.
 
 ### Added
+- **Tidy up a note with AI, and one undo puts your words back.** A wand beside
+  Post rewrites the comment in the box for clarity, using whichever model you
+  have set: the local one by default, or your own Claude/ChatGPT key. The
+  control sweeps violet into green while it thinks, the same green the Generate
+  button uses for work that is actually running. The rewrite lands as a single
+  change, so Cmd-Z or the Undo offer restores exactly what you wrote, and undo
+  stops being offered once you have typed over the result rather than
+  overwriting your edit. It never posts anything; you still press Post.
+- **Spell-check in the comment box.** The app's main writing surface had none,
+  while the sidebar's filename field has had it since r43. Autocorrect stays
+  off: a note carries names, jargon and timecodes, and a silent rewrite of
+  someone's note is worse than a typo in it.
 - **Draw on the picture during a session, and let it go.** A pencil beside
   Share in the room controls turns the frame into a shared surface: every
   mark appears on everyone's picture at once and fades a few seconds later.

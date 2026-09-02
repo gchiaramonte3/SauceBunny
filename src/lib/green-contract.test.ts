@@ -84,7 +84,9 @@ const ALLOWED: Record<string, string[]> = {
   "monitor.css": ["cp-getting-started-check", "cp-notif-dot", "cp-canvas-toast.success", "cp-notif-item.success"],
   // cp-review-tc is the jump-to-media timecode, the same object as
   // cp-tx-jump and cp-md-ts below; it was the one blue among three.
-  "review.css": ["cp-review-export-msg", "cp-status-chip", "cp-review-tc"],
+  // cp-review-enhance: the AI tidy-up sweep. WORK ACTUALLY RUNNING, the same
+  // category as the Generate button's sweep - not decoration.
+  "review.css": ["cp-review-export-msg", "cp-status-chip", "cp-review-tc", "cp-review-enhance"],
   "settings.css": ["cp-spike-row", "cp-aiapi-set", "cp-settings-ready", "cp-aiapi-msg"],
   "shell.css": ["cp-drop-card"],
   "transport.css": ["cp-track-queued"],
