@@ -248,3 +248,58 @@ describe("the Name column resizes too", () => {
     expect(seen?.nameWidth).toBe(null);
   });
 });
+
+describe("columns that appear or vanish while the list is open", () => {
+  /**
+   * The lazy initialiser merges stored state with `defaults` ONCE. A commit
+   * claimed the hook "already handled" a key arriving later; it did not.
+   * Custom columns are exactly that case: "New Column..." adds a key to
+   * `defaults` at runtime, and deleting one removes it.
+   */
+  const A = { source: 120, size: 84, date: 96 };
+  const AB = { ...A, "c:new": 110 };
+
+  it("renders a column added after mount", () => {
+    const { rerender } = render(<Probe defaults={A} />);
+    expect(seen?.visible).toEqual(["source", "size", "date"]);
+    rerender(<Probe defaults={AB as unknown as typeof DEFAULTS} />);
+    // It is in the order, it is visible, and its width is in the template.
+    expect(seen?.visible).toContain("c:new");
+    expect(seen?.template).toContain("110px");
+  });
+
+  it("drops a column removed after mount, INCLUDING its width track", () => {
+    // The dangerous half. A stale key left in `order` renders no header cell
+    // (there is no spec for it) but still emits its width, so an invisible
+    // track shoves every column after it sideways.
+    const { rerender } = render(<Probe defaults={AB as unknown as typeof DEFAULTS} />);
+    expect(seen?.template).toContain("110px");
+    rerender(<Probe defaults={A} />);
+    expect(seen?.visible).not.toContain("c:new");
+    expect(seen?.template).not.toContain("110px");
+    // The whole track list, exactly: art, name, then one px track per
+    // visible column and nothing else. Pinned as a string rather than a
+    // count because "minmax(150px, 1fr)" contains a space, and a split on
+    // spaces counted it as two tracks - a test that failed on a correct
+    // template is one people learn to ignore.
+    expect(seen!.template).toBe("34px minmax(150px, 1fr) 120px 84px 96px");
+  });
+
+  it("keeps what the user set on the columns that survive", () => {
+    const { rerender } = render(<Probe defaults={A} />);
+    act(() => seen?.nudgeCol("size", 20));
+    expect(seen?.cols.size).toBe(104);
+    rerender(<Probe defaults={AB as unknown as typeof DEFAULTS} />);
+    // Adding a column must not reset a width the user already chose.
+    expect(seen?.cols.size).toBe(104);
+  });
+
+  it("does not churn when the key set is unchanged", () => {
+    const { rerender } = render(<Probe defaults={A} />);
+    const before = seen?.cols;
+    // A new object with the same keys: an unmemoised caller does this every
+    // render, and the reconcile must not touch state for it.
+    rerender(<Probe defaults={{ ...A }} />);
+    expect(seen?.cols).toBe(before);
+  });
+});

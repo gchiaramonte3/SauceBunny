@@ -2031,7 +2031,14 @@
    which the wrap breaks. */
 .cp-web-lrow-wrap { position: relative; }
 .cp-web-lrow-wrap + .cp-web-lrow-wrap { border-top: 1px solid var(--line-1); }
-.cp-web-lrow-wrap .cp-lib-lrow { width: 100%; padding-right: 40px; }
+.cp-web-lrow-wrap .cp-lib-lrow { width: 100%; }
+/* THE GUTTER IS SHARED. The rows reserve 40px on the right for the forget
+   button; the header did not, so the header's 1fr name track was 40px wider
+   than every row's and each column's values sat 40px LEFT of their heading.
+   Reported from a screenshot as "columns that do not line up". One rule,
+   read by both, so they cannot disagree again. */
+.cp-lib-list-gutter .cp-lib-list-head,
+.cp-lib-list-gutter .cp-lib-lrow { padding-right: 40px; }
 .cp-web-lrow-dur,
 .cp-web-lrow-have {
   margin-left: var(--s-2);

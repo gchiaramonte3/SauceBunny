@@ -160,9 +160,11 @@ export function LibraryBrowserPane({
      whole point: it gets resizing, reordering and hide/show from the machinery
      that already exists rather than from a parallel implementation. Merging
      the widths in here is the entire integration.
-     useListColumns already handles the two cases this creates - it appends
-     keys the stored order has never seen (a column just added) and drops keys
-     it no longer recognises (one just deleted). */
+     useListColumns reconciles the two cases this creates - it appends keys
+     it has never seen (a column just added) and drops keys no longer in the
+     defaults (one just deleted). It only did that at MOUNT until it was
+     caught: a column added at runtime never rendered, and a deleted one left
+     an invisible width track behind. */
   const colDefaults = useMemo(
     () => ({
       ...COL_DEFAULT,

@@ -770,6 +770,26 @@ PREVIOUS video playing under the notice.
 width, a second row of icons in the review toolbar, or a live view with no
 badge saying it is a live view.
 
+**Columns line up, and New Column works.** Two faults, both found from a
+screenshot.
+
+- [ ] Library list, right-click a heading, **New Column…**, type a name, Enter.
+      The column APPEARS in the header immediately. Before this the model only
+      read its column set at mount, so a column added live never rendered.
+- [ ] Delete that column from the same menu. It vanishes and nothing to its
+      right shifts. Before, a deleted column left an invisible width track
+      behind that shoved every later column sideways.
+- [ ] **From the web** and **Frames** in list view: Site / Size / Fetched
+      values sit directly under their headings. They sat ~40px to the left,
+      because the rows reserved a right gutter for the forget button and the
+      header did not.
+
+**What a regression looks like:** a new column that never shows up, or any
+column's values drifting left of its heading on either shelf.
+
+---
+
+
 ---
 
 

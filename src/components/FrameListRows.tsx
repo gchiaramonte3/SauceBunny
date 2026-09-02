@@ -63,7 +63,7 @@ export function FrameListRows({ items, sort, dir, onSort, onDelete, onOpenFrame,
 
   return (
     <div
-      className="cp-lib-list"
+      className="cp-lib-list cp-lib-list-gutter"
       role="list"
       aria-label="Grabbed frames"
       /* One track list from the column model; see WebListRows. */

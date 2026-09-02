@@ -67,7 +67,7 @@ export function WebListRows({ items, sort, dir, onSort, onForget, onOpenUrl, sel
 
   return (
     <div
-      className="cp-lib-list"
+      className="cp-lib-list cp-lib-list-gutter"
       role="list"
       aria-label="Cached web sources"
       /* One track list, computed from the column model and read by the

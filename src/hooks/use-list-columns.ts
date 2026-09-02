@@ -160,6 +160,40 @@ export function useListColumns<K extends string>(
 
   const { w: cols, order, hidden, name: nameWidth } = state;
 
+  /* RECONCILE WHEN THE SET OF COLUMNS CHANGES AT RUNTIME.
+     The lazy initialiser above merges stored state with `defaults` ONCE, at
+     mount. Nothing re-ran when `defaults` gained or lost a key afterwards,
+     and a commit in this repo claimed the hook "already handles" that case.
+     It did not, and both halves failed silently:
+       - a column ADDED at runtime never entered `order`, so it never rendered
+         and "New Column..." appeared to do nothing at all;
+       - a column REMOVED at runtime stayed in `order`, so the header dropped
+         its cell (no spec to draw) while `template` kept emitting its width -
+         an invisible track that shoved every column after it sideways.
+     Keyed on the joined key list, not on `defaults`, so an unmemoised caller
+     does not re-run this every render. The width lookups are done here rather
+     than inside the updater so the updater stays pure. */
+  const keySig = keys.join("\u0000");
+  useEffect(() => {
+    const known = new Set<string>(keys);
+    const addedWidths = keys.map((k) => [k, defaults[k]] as const);
+    setState((st) => {
+      const added = addedWidths.filter(([k]) => !(k in st.w));
+      const removed = (Object.keys(st.w) as K[]).filter((k) => !known.has(k));
+      if (added.length === 0 && removed.length === 0) return st;
+      const w = { ...st.w } as Record<K, number>;
+      for (const k of removed) delete w[k];
+      for (const [k, width] of added) w[k] = width;
+      return {
+        ...st,
+        w,
+        order: [...st.order.filter((k) => known.has(k)), ...added.map(([k]) => k)],
+        hidden: st.hidden.filter((k) => known.has(k)),
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the key SET on purpose; see above
+  }, [keySig]);
+
   useEffect(() => {
     try {
       localStorage.setItem(storageKey, JSON.stringify({ w: cols, order, hidden, name: nameWidth } satisfies Stored<K>));
