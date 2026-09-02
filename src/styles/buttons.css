@@ -233,17 +233,6 @@
   color: var(--fg-2);
   background: var(--bg-2);
   border: 1px solid var(--line-2);
-  /* THE GREEN EDGE. The sparkle beside the label is already --ella-green, but
-     a 14px glyph is not enough to mark this as the button that produces work:
-     at a glance the whole control read as chrome, which is what the sparkle's
-     own comment two rules down says it was fixed for once already.
-     A left edge is the app's existing vocabulary for "this one matters" - the
-     nav rail marks where you are the same way - so it costs no new idea.
-     Declared AFTER the shorthand so it overrides only that side, and as a
-     BORDER rather than an inset shadow because .cp-gen-fill (the progress
-     bar) is a child that paints over inset shadows: the edge would vanish
-     for the whole run, which is exactly when it should be there. */
-  border-left: 3px solid var(--ella-green);
   border-radius: var(--r-card);
   cursor: pointer;
   /* Bevel: inset top highlight + tight dropped base. */
@@ -259,14 +248,19 @@
 }
 .cp-gen-btn:disabled { cursor: default; }
 
-/* Violet bloom on the trailing edge.
+/* Green bloom on the trailing edge.
  *
- * The CTA language is green, and green here means "this runs the machine" —
- * the same accent the app uses for live state. The bloom does not replace it;
- * it warms the far end so the button reads as a gradient rather than a slab,
- * and it borrows --novella-violet, which is the brand purple already carrying
- * the welcome hero and the transcript drop-target. Reached through color-mix
- * rather than a new token or a raw hex, the same way welcome.css does it.
+ * The wash IS the green now, rather than a violet bloom with a green edge
+ * bolted to the other end. A 3px stripe down the left was tried and was the
+ * wrong answer: it read as a slit stuck onto the button rather than as the
+ * button being the green one, and two accents on one control - violet at the
+ * far end, green at the near one - made it look like a mistake either way.
+ * One colour, across the whole face.
+ *
+ * --ella-green is the logo green the sparkle already uses, reached through
+ * color-mix rather than a new token or a raw hex, the same way welcome.css
+ * does it. Green here means "this runs the machine", which is what this
+ * button is for.
  *
  * Anchored at 40% so the sparkle and the first words stay on clean ground:
  * a gradient that starts at the left edge tints the label and costs contrast
@@ -286,8 +280,8 @@
   background: linear-gradient(
     100deg,
     transparent 40%,
-    color-mix(in srgb, var(--novella-violet) 16%, transparent) 76%,
-    color-mix(in srgb, var(--novella-violet) 32%, transparent) 100%
+    color-mix(in srgb, var(--ella-green) 16%, transparent) 76%,
+    color-mix(in srgb, var(--ella-green) 32%, transparent) 100%
   );
   transition: opacity var(--dur-slower) var(--ease-out);
 }
@@ -318,9 +312,10 @@
     inset 0 1px 1px rgba(255, 255, 255, 0.10),
     inset 0 2px 6px rgba(255, 255, 255, 0.04),
     0 1px 2px rgba(0, 0, 0, 0.45),
-    /* The halo is offset RIGHT, so it reads as the violet edge glowing rather
-       than a ring around the whole button. */
-    6px 0 18px -6px color-mix(in srgb, var(--novella-violet) 55%, transparent);
+    /* Offset RIGHT so it reads as the wash's own edge glowing rather than a
+       ring around the whole button. Green, like the wash: a violet halo over
+       a green face was the two-accent problem in miniature. */
+    6px 0 18px -6px color-mix(in srgb, var(--ella-green) 55%, transparent);
 }
 .cp-gen-btn:hover:not(:disabled)::after { opacity: 0.5; }
 .cp-gen-btn:active:not(:disabled) { transform: translateY(0); }
