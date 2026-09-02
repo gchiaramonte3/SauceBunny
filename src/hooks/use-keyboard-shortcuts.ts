@@ -137,7 +137,12 @@ export function useKeyboardShortcuts(p: KeyboardShortcutsDeps): void {
           window.dispatchEvent(new CustomEvent(DISMISS_POPOVERS));
           setShortcutsOpen((p) => !p);
           break;
-        case "app.settings": setSettingsOpen((p) => !p); break;
+        case "app.settings":
+          // Same reason as the palette: a popover left standing under the
+          // Settings backdrop paints ABOVE it (--z-modal is the lowest rung).
+          window.dispatchEvent(new CustomEvent(DISMISS_POPOVERS));
+          setSettingsOpen((p) => !p);
+          break;
         // ⌘Z / ⇧⌘Z — non-global on purpose: in a text field these cases never
         // run (and nothing is preventDefault-ed), so the keystroke falls
         // through to the native Edit ▸ Undo/Redo menu items and the field's

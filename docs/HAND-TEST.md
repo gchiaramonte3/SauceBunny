@@ -816,6 +816,48 @@ column's values drifting left of its heading on either shelf.
 
 ---
 
+### Design audit additions (the build after 2026090202)
+
+Twenty-six wrong states from a design-system audit, all CSS, all visible.
+The contracts prove the rules; only eyes prove the pixels.
+
+1. **Library, list view, a folder with 4+ files.** Hover the SECOND row, then
+   the fourth. Both must lighten; before, every even row stayed flat. Click
+   the second row: violet fill, white text in every column. Shift-click down
+   two rows: three violet rows.
+2. **Web tab and Frames tab, list view.** Rows alternate a faint stripe with
+   no hairline between them, exactly like the Library list. Select a web row:
+   the duration and the have-a-copy mark inside the name are white, not grey.
+3. **Library, grid view.** Click a card. A 2px violet ring on ALL FOUR sides
+   of the card, not a line under the picture. Tab away and back: the ring
+   gains a brighter outer ring while focused.
+4. **List view, drag a file onto a folder row.** The row brightens with an
+   inset outline while the file hovers it. Before: nothing.
+5. **Transcripts.** Shift-click two transcripts. Violet, like the library,
+   not the old grey step.
+6. **Review panel.** A note with a timecode: the chip is green, the same
+   green as the transcript's jump chip beside it.
+7. **Finish any job (transcribe a short file).** The toast icon, the bell's
+   notification row and the queue's Done chip are green; the queue's Running
+   chip is white while it runs, so the two are not the same colour.
+8. **Open a transcript file that cannot be read** (rename its .srt to
+   garbage). The alert icon is red, not pink.
+9. **Keyboard.** Cmd-3 into the drawer, Tab onto the SELECTED tab: a ring.
+   Cmd-, then Tab onto the selected Settings section: a ring. Click into the
+   URL field, Tab twice: the paste and history buttons each show a ring.
+10. **Review panel, Versions popover open.** Escape closes it. Then: open the
+    bell popover, press Cmd-, . The popover is gone; Settings is on top.
+11. **Open the volume, speed, view and notification popovers in turn.** Same
+    corner radius, same shadow. Open Settings, then the speaker dialog
+    (Transcript > speakers): same shadow, same radius, same entrance speed.
+12. **Queue drawer with 2+ items.** The up arrow on the first item and the
+    down arrow on the last are dimmed with a not-allowed cursor and do not
+    light on hover.
+13. **Shortcut sheet (Cmd-/).** The group headings are readable grey, one
+    step brighter than before.
+14. **Anything red.** Error hints in Settings, the review composer's error,
+    the source-URL error, the logs pill: one red, the light one.
+
 ## Two claims that only two machines can settle
 
 The first was settled by finding it in the code and fixing it, so it is now a

@@ -324,7 +324,7 @@ select.cp-colobby-input { padding-right: calc(var(--sel-chev) + 14px); }
   font-family: var(--font-ui);
   font-size: var(--text-base);
   line-height: var(--leading-normal);
-  color: var(--color-destructive);
+  color: var(--danger-text);
 }
 .cp-colobby-err.center { text-align: center; }
 

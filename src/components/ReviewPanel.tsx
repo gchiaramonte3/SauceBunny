@@ -1,6 +1,7 @@
 import { COMMENT_REACTION_EMOJI } from "../lib/reactions";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useMenuKeys } from "../hooks/use-menu-keys";
+import { useDismiss } from "../hooks/use-dismiss";
 import { ColorSwatches } from "./ColorSwatches";
 import { useModalFocus } from "../hooks/use-modal-focus";
 import { invoke } from "@tauri-apps/api/core";
@@ -946,15 +947,10 @@ export function ReviewPanel({
     setVersionsOpen(false);
   };
 
-  // Same deferred-a-tick outside-click dismissal as the other popovers.
-  useEffect(() => {
-    if (!versionsOpen) return;
-    function onDoc(e: MouseEvent) {
-      if (!versionsWrapRef.current?.contains(e.target as Node)) setVersionsOpen(false);
-    }
-    const t = setTimeout(() => document.addEventListener("mousedown", onDoc), 0);
-    return () => { clearTimeout(t); document.removeEventListener("mousedown", onDoc); };
-  }, [versionsOpen]);
+  // Outside click, Escape and the app-wide dismiss in one place. The
+  // hand-rolled mousedown listener this replaced answered neither of the
+  // other two, so this was the one popover in the app Escape did not close.
+  useDismiss(versionsWrapRef, () => setVersionsOpen(false), versionsOpen);
 
   // Replies, bucketed by parent, once per document.
   //

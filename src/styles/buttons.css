@@ -587,7 +587,7 @@
   transform: translateY(0);
 }
 .cp-sbtn-result { color: var(--success); }
-.cp-sbtn[data-phase="error"] .cp-sbtn-result { color: var(--danger); }
+.cp-sbtn[data-phase="error"] .cp-sbtn-result { color: var(--danger-text); }
 
 /* Per-usage width locks (no JS measurement). */
 .cp-sbtn-fetch { min-width: 86px; }
@@ -616,7 +616,7 @@
   font-weight: var(--weight-bold);
   transition: opacity var(--dur-slow) var(--ease-out);
 }
-.cp-gen-btn[data-phase="error"] .cp-gen-result { color: var(--danger); }
+.cp-gen-btn[data-phase="error"] .cp-gen-result { color: var(--danger-text); }
 .cp-gen-btn[data-phase="success"] .cp-gen-result,
 .cp-gen-btn[data-phase="error"]   .cp-gen-result { opacity: 1; }
 .cp-gen-btn[data-phase="success"] .cp-gen-txt,

@@ -883,10 +883,17 @@
 /* A 1px WHITE ring was the entire selected state of a tile, against a
    thumbnail that is frequently mostly white. Two pixels of the selection hue
    instead: it survives a bright poster, and it says the same thing the list
-   rows say. */
-.cp-lib-card.selected .cp-lib-card-art {
+   rows say. On the CARD, not the art: the card clips its overflow and the art
+   fills its padding box, so a ring on the art lost three of its four sides. */
+.cp-lib-card.selected {
   border-color: var(--sel-fill);
   box-shadow: 0 0 0 2px var(--sel-fill);
+}
+/* The card's own ring outranks the global button ring (a class pair beats
+   element+pseudo), so focus on a selected card has to be composed here or it
+   vanishes: keep the violet, add the brightened ring outside it. */
+.cp-lib-card.selected:focus-visible {
+  box-shadow: 0 0 0 2px var(--sel-fill), 0 0 0 3px var(--focus-ring);
 }
 
 /* ── Reduced motion: hover scale/reveals snap, no transforms. The hover
@@ -1315,8 +1322,16 @@
    0.028 white, not more: it has to survive being layered under :hover
    (0.04) and stay quieter than .selected, which is a real state. Hover and
    selection are declared after it and win on source order at equal
-   specificity. */
-.cp-lib-list .cp-lib-lrow:nth-child(even) { background: rgba(255, 255, 255, 0.028); }
+   specificity - and EQUAL is the load-bearing word. This selector used to be
+   scoped under `.cp-lib-list`, which made it (0,3,0) against the others'
+   (0,2,0); specificity is decided before source order, so every even row
+   refused to hover and, when selected, showed white cells on a grey stripe.
+   The web and frames lists wrap each row in `.cp-web-lrow-wrap` (the forget
+   button has to sit beside the row BUTTON), so their parity lives on the
+   wrap; the row's own hover/selection paints over it. Pinned by
+   src/lib/list-zebra-contract.test.ts. */
+.cp-lib-lrow:nth-child(even) { background: rgba(255, 255, 255, 0.028); }
+.cp-web-lrow-wrap:nth-child(even) { background: rgba(255, 255, 255, 0.028); }
 
 /* One monotonic ladder, and the stripe is its bottom rung. Composited over
    --bg-1 these land at 21 / 26 / 32 / 40 against a plain row's 14, so a row
@@ -1349,7 +1364,9 @@
 .cp-lib-lrow.selected .cp-lib-lrow-kind,
 .cp-lib-lrow.selected .cp-lib-lrow-date,
 .cp-lib-lrow.selected .cp-lib-lrow-size,
-.cp-lib-lrow.selected .cp-lib-lrow-custom { color: var(--sel-ink); }
+.cp-lib-lrow.selected .cp-lib-lrow-custom,
+.cp-lib-lrow.selected .cp-web-lrow-dur,
+.cp-lib-lrow.selected .cp-web-lrow-have { color: var(--sel-ink); }
 .cp-lib-lrow-art {
   display: flex;
   align-items: center;
@@ -1578,7 +1595,7 @@
      edges through the verbs. */
   background: var(--bg-3);
   box-shadow: var(--shadow-card);
-  animation: cp-selbar-in 120ms ease-out;
+  animation: cp-selbar-in var(--dur-fast) var(--ease-out);
 }
 @keyframes cp-selbar-in {
   from { opacity: 0; transform: translateX(-50%) translateY(6px); }
@@ -2026,11 +2043,12 @@
 /* Web list rows. The row reuses .cp-lib-lrow and the shared column variables;
    the wrap exists so the armed forget control can overlay the row's right
    edge without living inside the row BUTTON (a button in a button is invalid
-   and unfocusable). The wrap also re-creates the sibling hairline the folder
-   list draws between rows - its selector targets adjacent .cp-lib-lrow,
-   which the wrap breaks. */
+   and unfocusable). The wrap used to draw a hairline between rows as well,
+   from before the lists were striped - so the web and frames lists showed
+   lines and no stripes while the library list showed stripes and no lines,
+   three lists on one row class looking like two tables. The stripe now
+   rides the wrap's parity (see the zebra rules above). */
 .cp-web-lrow-wrap { position: relative; }
-.cp-web-lrow-wrap + .cp-web-lrow-wrap { border-top: 1px solid var(--line-1); }
 .cp-web-lrow-wrap .cp-lib-lrow { width: 100%; }
 /* THE GUTTER IS SHARED. The rows reserve 40px on the right for the forget
    button; the header did not, so the header's 1fr name track was 40px wider
@@ -2119,7 +2137,7 @@
   background: color-mix(in srgb, var(--bg-2) 96%, transparent);
   border: 1px solid var(--line-2);
   border-radius: var(--r-card);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-card);
   backdrop-filter: blur(8px);
   z-index: 3;
 }
@@ -2382,7 +2400,7 @@
 /* Destructive verb in the selection bar. Muted until hover, like every other
    danger affordance here: it should be findable, not loud. */
 .cp-lib-selbar .btn.cp-selbar-danger:hover {
-  color: var(--danger);
+  color: var(--danger-text);
   border-color: color-mix(in srgb, var(--danger) 45.0%, transparent);
 }
 
@@ -2415,6 +2433,14 @@
 .cp-lib-card.cp-lib-foldercard.dropping {
   border-color: var(--fg-2);
   background: var(--bg-3);
+}
+/* The same folder as a LIST row. The class was emitted and nothing matched
+   it, so a drop onto a folder in list view gave no feedback while the tile
+   and the tree row lit up. Same vocabulary: brighten the outline, never the
+   accent. Declared after hover/selected at equal specificity so it wins. */
+.cp-lib-lrow-folder.dropping {
+  background: var(--bg-3);
+  box-shadow: inset 0 0 0 1px var(--fg-2);
 }
 
 /* A collection shelf under a dragged clip. A collection is a TAG rather than
@@ -2468,7 +2494,7 @@
 .cp-newfolder-err {
   font-family: var(--font-ui);
   font-size: var(--text-sm);
-  color: var(--danger);
+  color: var(--danger-text);
   white-space: nowrap;
 }
 /* The reader's inline row gives the shared input the full width it has there;
@@ -2536,7 +2562,7 @@
   background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-card);
-  box-shadow: 0 10px 28px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-card);
   font-family: var(--font-ui);
   font-size: var(--text-md);
 }

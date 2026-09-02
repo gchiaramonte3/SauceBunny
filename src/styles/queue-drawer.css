@@ -181,6 +181,10 @@
   border-bottom-color: var(--bg-1); /* visually merges into the body */
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
 }
+/* .active's box-shadow is a class pair and outranks the element-level ring in
+   base.css, so the selected tab - the first stop in the drawer - had no
+   visible focus. Same rung, declared after, so it wins. */
+.cp-tab:focus-visible { box-shadow: 0 0 0 1px var(--focus-ring); }
 .cp-tab.disabled {
   color: var(--fg-5);
   cursor: not-allowed;
@@ -304,9 +308,12 @@ body.cp-tab-dragging { cursor: grabbing; }
   background: rgba(var(--accent-rgb), 0.05);
   border-color: rgba(var(--accent-rgb), 0.3);
 }
+/* Done is an OUTCOME, so it is green (green-contract); running stays on the
+   neutral so the two are not the same colour at two alphas, which is what
+   they were. */
 .cp-queue-item.done {
-  background: rgba(var(--accent-rgb), 0.04);
-  border-color: rgba(var(--accent-rgb), 0.2);
+  background: color-mix(in srgb, var(--success) 5%, transparent);
+  border-color: color-mix(in srgb, var(--success) 25%, transparent);
 }
 .cp-queue-item.error {
   background: color-mix(in srgb, var(--danger) 6%, transparent);
@@ -316,7 +323,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-sm);
-  color: var(--fg-5);
+  color: var(--fg-4);
   flex-shrink: 0;
   width: 18px;
   text-align: right;
@@ -356,7 +363,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   background: rgba(255,255,255,0.04);
 }
 .cp-queue-status.running { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
-.cp-queue-status.done    { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
+.cp-queue-status.done    { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
 .cp-queue-status.error   { color: var(--danger-text); background: color-mix(in srgb, var(--danger) 14%, transparent); }
 
 .cp-queue-meta {
@@ -391,7 +398,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-sm);
-  color: #ff9a9a;
+  color: var(--danger-text);
   word-break: break-word;
   overflow-wrap: anywhere;
 }
@@ -413,8 +420,11 @@ body.cp-tab-dragging { cursor: grabbing; }
     border-color var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out);
 }
-.cp-queue-iconbtn:hover { color: var(--fg-1); background: rgba(255,255,255,0.05); }
-.cp-queue-iconbtn.danger:hover { color: var(--danger-text); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.cp-queue-iconbtn:hover:not(:disabled) { color: var(--fg-1); background: rgba(255,255,255,0.05); }
+.cp-queue-iconbtn.danger:hover:not(:disabled) { color: var(--danger-text); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+/* The reorder arrows at either end of the queue are `disabled` in JSX and
+   used to keep their pointer, colour and hover while doing nothing. */
+.cp-queue-iconbtn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .cp-queue-foot {
   border-top: 1px solid var(--line-1);
@@ -428,7 +438,7 @@ body.cp-tab-dragging { cursor: grabbing; }
   font-size: var(--text-sm);
   color: var(--fg-4);
 }
-.cp-queue-summary .ok  { color: var(--accent); }
+.cp-queue-summary .ok  { color: var(--success); }
 .cp-queue-summary .err { color: var(--danger-text); }
 .cp-queue-foot-row { display: flex; gap: 8px; }
 .cp-queue-foot-row .btn { flex: 1; }

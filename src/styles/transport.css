@@ -174,7 +174,7 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-xs);
-  color: var(--fg-5);
+  color: var(--fg-4);
   letter-spacing: var(--track-caps);
   /* The ruler sits above the track; clicks must pass through to the track
      for scrub, and the cursor must never flip to a text caret while

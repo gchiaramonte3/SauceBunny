@@ -180,7 +180,7 @@
   background: var(--bg-1);
   border: 1px solid var(--line-2);
   border-radius: var(--r-card);
-  box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+  box-shadow: var(--shadow-modal);
   font-family: var(--font-ui);
 }
 .cp-room-waiting-title {
@@ -458,7 +458,7 @@
   padding: 0 16px;
   font-size: var(--text-md);
   font-weight: var(--weight-bold);
-  color: var(--danger);
+  color: var(--danger-text);
   background: transparent;
   border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
   border-radius: var(--r-md, 8px);
@@ -466,7 +466,7 @@
 .cp-room-end:hover {
   background: color-mix(in srgb, var(--danger) 14%, transparent);
   border-color: var(--danger);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .cp-room-bar-sep {
   width: 1px;
@@ -506,7 +506,7 @@
   padding: var(--s-2);
   background: var(--bg-1);
   border-radius: var(--r-lg);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-card);
 }
 .cp-devpanel-preview {
   aspect-ratio: 16 / 9;
@@ -582,8 +582,8 @@
   gap: var(--s-2);
   padding: var(--s-2);
   background: var(--bg-1);
-  border-radius: var(--r-lg);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
 }
 .cp-react-pick-row { display: flex; gap: 4px; }
 .cp-react-pick-btn {
@@ -718,7 +718,7 @@
   background: var(--bg-1);
   border: 1px solid var(--line-1);
   border-radius: var(--r-lg);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-modal);
 }
 .cp-share-dialog-title {
   margin: 0;
@@ -1054,7 +1054,7 @@
   background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-card);
-  box-shadow: 0 10px 28px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-card);
 }
 .cp-sharemenu-item {
   display: flex;

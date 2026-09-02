@@ -63,9 +63,22 @@ that uses it must also ask for the figures.
 
 ## Colour
 
-**Green is not decoration.** `--accent` (`--ella-green`) means one of exactly
-two things: this is the primary action, or this is a notification. It never
-means "highlighted", "selected", or "nice".
+**`--accent` is the neutral.** It resolves to `--fg-1` (white), and 137
+surfaces lean on it for "brighter": the primary action, the current tab, the
+armed control. It is not green, and it must not become green again
+(`green-contract` pins the declaration).
+
+**Green is not decoration.** `--success` means one of exactly three things: a
+positive outcome (done, saved, passed), work actually running (the Generate
+sweep, the recording dot), or a live feed. `--ella-green` is the same colour
+reserved for the brand mark (loader, welcome, nav edge, the Generate sparkle).
+Green never means "highlighted", "selected", "primary" or "nice" - and the
+rule runs both ways: an outcome surface painted in `--accent` is a wrong
+state, not a quieter choice, because a success then looks like an info.
+
+**Selection is violet.** `--sel-fill` with `--sel-ink` on top, in every list
+and the grid, so "which of these is selected" is never answered by one grey
+step against another.
 
 **Focus is white, never green.** A focused control brightens its existing
 outline toward `--focus-ring`. Composed fields (a wrapper around a borderless
@@ -93,8 +106,9 @@ colour left ninety copies of the old one behind.
 **Three naming generations coexist, and that is the thing to know before
 minting a name.** `--bg-N` / `--fg-N` / `--stroke-N` came first, `--novella-*`
 and `--gold` carry brand colours, and `--color-*` was a semantic-alias pass
-that stalled halfway — some aliases were adopted (`--color-accent-green` beats
-both its older synonyms in usage), the unreferenced ones were deleted, and
+that stalled halfway — some aliases were adopted, some barely
+(`--color-accent-green` is the LEAST used of the three greens; reach for
+`--success`), the unreferenced ones were deleted, and
 what is left sits beside the other two. Several colours still answer to more
 than one name. **Before adding a token, check whether the value already has
 one.** A test fails the build on an unreferenced token, so the pile cannot
@@ -140,12 +154,21 @@ stated gain.
 | `--r-sm` | 6px | small tiles, chips, thumbs, close buttons |
 | `--r-md` | 8px | **controls** — buttons, inputs, rows |
 | `--r-card` | 10px | **surfaces that float** — popovers, cards, panels, toasts |
-| `--r-lg` | 12px | large containers |
-| `--r-xl` | 16px | modals, the command palette |
+| `--r-lg` | 12px | large containers, and **dialogs** (Settings, the speaker sheet, the share and move dialogs, the name gate) |
+| `--r-xl` | 16px | the command palette and its shortcut sheet, the drop overlay |
 | `--r-pill` | 999px | pills |
 
 `--r-card` sits deliberately between a control's 8 and a container's 12. That
-tier existed in fourteen places before it had a name.
+tier existed in fourteen places before it had a name. Every ANCHORED popover
+or menu - anything that opens from a control and carries a shadow - is
+`--r-card`; the r162 conversion had rounded each literal to its nearest rung
+without reconciling the family, so four popovers on one monitor bar opened at
+three different radii.
+
+**Elevation** is two tokens. `--shadow-card` for the popover tier (menus,
+popovers, toasts, HUDs) and `--shadow-modal` for dialogs; `--shadow-soft` is
+the hairline lift for a small in-flow element like an avatar. A hand-typed
+outer shadow with 8px or more of blur fails `elevation-contract`.
 
 `border-radius: 50%` and per-corner shorthands (`0 0 6px 6px`) are shape, not
 size, and are left alone.
@@ -186,10 +209,16 @@ nothing.
 `--dur-slower` (350ms) panel travel.
 
 Easing: `--ease-out` for most things, `--ease-in-out` for symmetric motion,
-`--ease-spring` for the app's overshoot, `--ease-linear` for progress.
+`--ease-spring` for the app's overshoot, plain `linear` for progress (there is
+no `--ease-linear`; this page used to promise one).
 
-These are for **transitions**. `@keyframes` timings are tuned per animation and
-a shared token for them would mean nothing. The library hero's ambient
+**Entrances are tiered.** A popover or menu enters at `--dur-fast`, a sheet,
+palette or toast at `--dur-base`, a dialog at `--dur-slow`. The Settings and
+speaker dialogs used to run the SAME keyframe at 280 and 180ms.
+
+These are for **transitions** and for the `animation:` shorthand of a
+click-driven entrance. The timings INSIDE `@keyframes` are tuned per animation
+and a shared token for them would mean nothing. The library hero's ambient
 crossfades (450ms, 2500ms, 10s) are likewise their own thing — atmosphere, not
 a response to a click.
 

@@ -56,6 +56,49 @@ a library tree whose chevrons had never actually worked.
 
 `0.4.8` adds the first-run permissions step and fixes a paused-playback
 regression, a library duplication bug, and the app's missing select style.
+- **The library list's even rows can be hovered and selected again.** The
+  zebra stripe was scoped under the list and so outranked hover, focus and
+  selection on specificity; every other row refused to highlight and, when
+  selected, showed white cells on a grey stripe. Same rung for all four now,
+  and the Web and Frames lists (which wrap each row) are striped instead of
+  hairlined, so three lists on one row class look like one table.
+- **Selection is one colour everywhere.** The Transcripts picker painted a
+  grey step for the same shift/cmd/lasso gesture the library paints violet;
+  a selected web/frame row left its duration and have-copy marks unreadable
+  on the fill; the grid card's ring was drawn on the art and clipped on three
+  sides, so it showed as an underline.
+- **Dropping onto a folder in list view lights the row.** The class was
+  emitted and no rule matched it.
+- **A finished job is green on every surface that reports it**: the
+  completion toast, the notification row, the logs pill, the queue's done
+  chip (which was byte-identical to running). The Review panel's timecode
+  chip is green like the transcript's and the AI panel's, instead of the one
+  blue among three. The "Couldn't read transcript" icon was hot pink through
+  a token defined nowhere.
+- **Keyboard focus shows on the selected drawer tab, the selected Settings
+  section, the YouTube-auth browser card and the URL pill's buttons**; each
+  had a box-shadow that swallowed the focus ring.
+- **Escape closes the Review panel's Versions popover**, the one popover it
+  did not close. Cmd-, closes standing popovers before Settings opens, so a
+  menu cannot paint over the backdrop.
+- **Popovers share one radius and one shadow, dialogs share another.** Four
+  popovers on one monitor bar opened at three radii with four shadows; eight
+  dialogs used six shadows. Two tokens now, and a contract that fails a
+  hand-typed one. Entrances are tiered too: the Settings and speaker dialogs
+  ran the same keyframe at 280 and 180ms.
+- **Error text is one red.** It was five, including a third hex token and the
+  retired `#ff6b6b` retyped nine times as rgba.
+- **Four controls that receive `disabled` now look disabled** (queue reorder
+  arrows at either end, the Move dialogs' folder rows, an empty project's
+  "Choose picture", the transcript Tools menu while regenerating).
+- Meaningful copy no longer sits on `--fg-5` (3.8:1): shortcut-sheet headings,
+  the permissions screen's notes, the AI role label, ruler timecodes, queue
+  numbers, the collapsed sidebar section's summary.
+- **CI stopped emailing.** Every run on Node 20 failed one storage test that
+  passed on every Mac: jsdom wraps its Storage in a Proxy that swallows a
+  method spy, and the test setup only installed its stub on Node 22+. One
+  stub on every Node now. The nightly's two n0-discovery tests skip, loudly,
+  on the GitHub runner that cannot resolve pkarr DNS.
 
 ### Added
 - **Permissions are asked for at first run**, not half way into a live

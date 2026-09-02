@@ -78,7 +78,7 @@
 
 .cp-ai-error {
   font-size: var(--text-base);
-  color: var(--danger);
+  color: var(--danger-text);
   background: color-mix(in srgb, var(--danger) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
   border-radius: var(--r-md);
@@ -141,7 +141,7 @@
   font-weight: var(--weight-bold);
   letter-spacing: var(--track-caps);
   text-transform: uppercase;
-  color: var(--fg-5);
+  color: var(--fg-4);
 }
 .cp-ai-msg.user .cp-ai-msg-role { color: var(--fg-3); }
 .cp-ai-msg-body {
@@ -430,7 +430,7 @@
   line-height: var(--leading-none);
   cursor: pointer;
 }
-.cp-ai-chapter-del:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.cp-ai-chapter-del:hover { color: var(--danger-text); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 
 /* ── Slash commands in the composer (lib/transcript-prompts.ts) ───────── */
 /* Anchored to the composer (which is position:relative above), opening
@@ -449,7 +449,7 @@
   background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-card);
-  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-card);
 }
 .cp-ai-slash-item {
   display: flex;

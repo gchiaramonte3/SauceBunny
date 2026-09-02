@@ -340,7 +340,7 @@
   justify-content: center;
   border-radius: 50%;
   border: 1px solid rgba(255,255,255,0.35);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.45);
+  box-shadow: var(--shadow-soft);
   color: #1a1410;
   font-family: var(--font-ui);
   font-weight: var(--weight-black);
@@ -404,7 +404,9 @@
 .cp-review-actions .cp-review-like.liked:hover { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
 .cp-review-actions .cp-review-like.liked .cp-review-glyph { stroke-width: 2.6; }
 
-/* Timecode chip row (blue marker pill + clock glyph, like the reference). */
+/* Timecode chip row. The chip is the same click-to-seek object as
+   .cp-tx-jump in the transcript and .cp-md-ts in the AI panel, and those two
+   are on screen beside this one; it was the only blue among three greens. */
 .cp-review-chiprow { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .cp-review-tc {
   display: inline-flex;
@@ -414,14 +416,14 @@
   font-variant-numeric: tabular-nums;
   font-size: var(--text-base);
   font-weight: var(--weight-bold);
-  color: #6db3ff;
-  background: rgba(77,171,247,0.14);
+  color: var(--ella-green);
+  background: color-mix(in srgb, var(--ella-green) 14%, transparent);
   border: none;
   border-radius: var(--r-sm);
   padding: 2px 8px;
   cursor: pointer;
 }
-.cp-review-tc:hover { background: rgba(77,171,247,0.24); }
+.cp-review-tc:hover { background: color-mix(in srgb, var(--ella-green) 24%, transparent); }
 
 .cp-review-body { margin-top: 7px; font-family: var(--font-ui); font-size: var(--text-lg); color: var(--fg-1); line-height: var(--leading-normal); white-space: pre-wrap; }
 .cp-review-edit { margin-top: 7px; display: flex; gap: 6px; }
@@ -523,8 +525,8 @@
   padding: 22px 20px;
   background: var(--bg-2);
   border: 1px solid var(--line-2);
-  border-radius: var(--r-xl);
-  box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-modal);
 }
 .cp-review-namegate-card h3 {
   margin: 4px 0 0;
@@ -708,13 +710,13 @@
 .cp-review-tool:disabled { opacity: 0.5; cursor: default; }
 .cp-review-tool.recording {
   color: var(--danger-text);
-  background: rgba(255, 107, 107, 0.16);
-  border-color: rgba(255, 107, 107, 0.45);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
   animation: cp-mic-pulse 1.3s ease-in-out infinite;
 }
 @keyframes cp-mic-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.0); }
-  50% { box-shadow: 0 0 0 4px rgba(255, 107, 107, 0.22); }
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 0%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 22%, transparent); }
 }
 
 /* Emoji picker — fixed popover anchored above the composer's emoji tool, so it
@@ -729,7 +731,7 @@
   flex-direction: column;
   background: var(--bg-3);
   border: 1px solid var(--line-2);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-card);
   box-shadow: var(--shadow-card), var(--shadow-inset-hair);
   overflow: hidden;
   transform-origin: bottom left;
@@ -826,7 +828,7 @@
   /* Recording-mic halo pulse — steady ring instead. */
   .cp-review-tool.recording {
     animation: none;
-    box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.22);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 22%, transparent);
   }
 }
 
@@ -840,13 +842,13 @@
 }
 .cp-review-drawhint.recording {
   color: var(--danger-text);
-  background: rgba(255, 107, 107, 0.10);
-  border-top-color: rgba(255, 107, 107, 0.22);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-top-color: color-mix(in srgb, var(--danger) 22%, transparent);
 }
 .cp-review-drawhint.error {
-  color: var(--danger);
-  background: rgba(255, 107, 107, 0.10);
-  border-top-color: rgba(255, 107, 107, 0.22);
+  color: var(--danger-text);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-top-color: color-mix(in srgb, var(--danger) 22%, transparent);
   cursor: pointer;
 }
 /* Recording bar — the live mic waveform + label while dictating. */
@@ -978,8 +980,8 @@
   padding: 4px;
   background: var(--bg-1);
   border: 1px solid var(--line-2);
-  border-radius: var(--r-md, 8px);
-  box-shadow: 0 8px 22px rgba(0,0,0,0.5);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
 }
 .cp-react-pop-btn {
   width: 26px;

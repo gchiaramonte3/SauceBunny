@@ -32,7 +32,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: cp-palette-in 180ms var(--ease-out);
+  animation: cp-palette-in var(--dur-base) var(--ease-out);
 }
 @keyframes cp-palette-in {
   from { opacity: 0; transform: translateY(-8px) scale(0.98); }
@@ -218,7 +218,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: cp-palette-in 180ms var(--ease-out);
+  animation: cp-palette-in var(--dur-base) var(--ease-out);
 }
 .cp-shortcuts-head {
   display: flex;
@@ -258,13 +258,13 @@
   font-weight: var(--weight-bold);
   letter-spacing: var(--track-caps-wide);
   text-transform: uppercase;
-  color: var(--fg-5);
+  color: var(--fg-4);
 }
 .cp-shortcuts-ctx-tag {
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
   letter-spacing: var(--track-caps-loose);
-  color: var(--fg-5);
+  color: var(--fg-4);
   border: 1px solid var(--line-1);
   border-radius: var(--r-xs);
   padding: 0 5px;
@@ -286,7 +286,7 @@
   font-style: normal;
   margin-left: 6px;
   font-size: var(--text-sm);
-  color: var(--fg-5);
+  color: var(--fg-4);
 }
 .cp-shortcuts-keys {
   flex-shrink: 0;

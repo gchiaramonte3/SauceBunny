@@ -78,6 +78,26 @@
      crisp 1px lines instead of blur. */
   --shadow-soft:   0 1px 4px rgba(0,0,0,0.35);
   --shadow-card:   0 4px 16px rgba(0,0,0,0.50);
+  /* The dialog tier had no token, so eight dialogs shipped six shadows and
+     twenty popovers shipped twelve. Two tiers, two tokens: a popover, menu,
+     toast or HUD floats on --shadow-card; a dialog sits on --shadow-modal.
+     Pinned by src/lib/elevation-contract.test.ts. */
+  --shadow-modal:  0 24px 64px rgba(0,0,0,0.55);
+  /* The dialog tier had no token, so eight dialogs shipped six shadows and
+     twenty popovers shipped twelve. Two tiers, two tokens: a popover, menu,
+     toast or HUD floats on --shadow-card; a dialog sits on --shadow-modal.
+     Pinned by src/lib/elevation-contract.test.ts. */
+  --shadow-modal:  0 24px 64px rgba(0,0,0,0.55);
+  /* The dialog tier had no token, so eight dialogs shipped six shadows and
+     twenty popovers shipped twelve. Two tiers, two tokens: a popover, menu,
+     toast or HUD floats on --shadow-card; a dialog sits on --shadow-modal.
+     Pinned by src/lib/elevation-contract.test.ts. */
+  --shadow-modal:  0 24px 64px rgba(0,0,0,0.55);
+  /* The dialog tier had no token, so eight dialogs shipped six shadows and
+     twenty popovers shipped twelve. Two tiers, two tokens: a popover, menu,
+     toast or HUD floats on --shadow-card; a dialog sits on --shadow-modal.
+     Pinned by src/lib/elevation-contract.test.ts. */
+  --shadow-modal:  0 24px 64px rgba(0,0,0,0.55);
   --shadow-inset-hair:  inset 0 0 0 1px rgba(255,255,255,0.08);
 
   /* ── Bevel shadow stacks — reused across buttons & cards.
@@ -152,7 +172,6 @@
   --color-text-secondary:    #8A8A8E;
   --color-accent-green:      #6CFF8D;
   --color-accent-purple:     #6D52ED;
-  --color-destructive:       #FF5C5C;
   --color-warning:           #FFB545;
 
   /* Diagonal brand wash — used as background overlay on hero surfaces

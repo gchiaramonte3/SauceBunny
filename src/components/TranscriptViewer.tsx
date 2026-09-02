@@ -1746,7 +1746,7 @@ export function TranscriptViewer({
   if (loadErr) {
     return (
       <div className="cp-pane-empty cp-tx-empty">
-        <IconAlert size={20} stroke="var(--color-warn, #f5a)" />
+        <IconAlert size={20} stroke="var(--danger-text)" />
         <div className="cp-tx-empty-title">Couldn't read transcript</div>
         <div className="cp-tx-empty-body">{loadErr}</div>
       </div>

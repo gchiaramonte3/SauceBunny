@@ -67,6 +67,9 @@
   background: transparent;
   box-shadow: none;
 }
+/* `box-shadow: none` above also removed the focus ring, so the input and its
+   two buttons were three tab stops that looked identical when focused. */
+.cp-url .btn-icon:focus-visible { box-shadow: 0 0 0 1px var(--focus-ring); }
 .cp-url .btn-icon:hover {
   background: rgba(255,255,255,0.08);
   box-shadow: none;
@@ -100,7 +103,7 @@
   background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-card);
-  box-shadow: 0 8px 12px rgba(0,0,0,0.55);
+  box-shadow: var(--shadow-card);
   animation: cp-fade-in var(--dur-fast) var(--ease-out);
   overflow: hidden;
 }

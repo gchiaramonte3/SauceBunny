@@ -44,7 +44,7 @@
   background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
-  box-shadow: 0 0 0 0.5px rgba(255,255,255,0.05), 0 30px 90px rgba(0,0,0,0.6);
+  box-shadow: 0 0 0 0.5px rgba(255,255,255,0.05), var(--shadow-modal);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -148,6 +148,8 @@
   color: var(--fg-1);
   box-shadow: inset 0 0 0 1px var(--line-1);
 }
+/* The selected section's inset outranks the global ring; restate it here. */
+.cp-modal-tab:focus-visible { box-shadow: 0 0 0 1px var(--focus-ring); }
 .cp-modal-tab.active .tab-icon { color: var(--accent); }
 .cp-modal-tab .grow { flex: 1; }
 
@@ -752,6 +754,7 @@
     inset 0 1px 0 rgba(255,255,255,0.10),
     0 0 6px color-mix(in srgb, var(--accent) 9%, transparent);
 }
+.cp-ytauth-browser:focus-visible { box-shadow: 0 0 0 1px var(--focus-ring); }
 .cp-ytauth-browser-tag {
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
@@ -1034,7 +1037,7 @@
 /* The failure variant of the note above: same size and spacing, destructive
    colour. It appears when clear-on-quit could not be armed, which the switch
    snapping back also signals - this says why. */
-.cp-cache-ret-err { color: var(--color-destructive); }
+.cp-cache-ret-err { color: var(--danger-text); }
 .cp-cache-path {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -1072,7 +1075,7 @@
  font-variant-numeric: tabular-nums; font-size: var(--text-sm); color: var(--fg-2); }
 .cp-spike-verdict { flex-shrink: 0; width: 52px; font-weight: var(--weight-bold); }
 .cp-spike-row.pass .cp-spike-verdict { color: var(--success); }
-.cp-spike-row.fail .cp-spike-verdict { color: var(--danger); }
+.cp-spike-row.fail .cp-spike-verdict { color: var(--danger-text); }
 .cp-spike-row.skip .cp-spike-verdict, .cp-spike-row.manual .cp-spike-verdict { color: var(--fg-4); }
 .cp-spike-label { flex-shrink: 0; color: var(--fg-1); }
 .cp-spike-detail { overflow-wrap: anywhere; }
@@ -1128,7 +1131,7 @@
    denied/restricted stay red below: a blocked permission IS actionable. */
 .cp-av-perm.authorized { color: var(--fg-2); border-color: var(--line-2); }
 .cp-av-perm.denied,
-.cp-av-perm.restricted { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.cp-av-perm.restricted { color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 .cp-av-perm svg { flex-shrink: 0; }
 
 /* ── Version + update check (Settings > About) ── */
@@ -1245,7 +1248,7 @@
   font-size: var(--text-base);
 }
 .cp-aiapi-msg.ok { color: var(--color-accent-green); }
-.cp-aiapi-msg.err { color: var(--danger); }
+.cp-aiapi-msg.err { color: var(--danger-text); }
 
 /* Peer-stream spike (dev-only, Tier B 3a) shares .cp-spike chrome. */
 .cp-spike-note {
@@ -1259,7 +1262,7 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--text-base);
-  color: var(--danger);
+  color: var(--danger-text);
   margin: var(--s-2) 0;
 }
 .cp-spike-stage {
@@ -1360,7 +1363,7 @@
   font-family: var(--font-ui);
   font-size: var(--text-2xs);
   letter-spacing: var(--track-wide);
-  color: var(--fg-5);
+  color: var(--fg-4);
   border: 1px solid var(--line-1);
   border-radius: var(--r-2xs);
   padding: 0 4px;

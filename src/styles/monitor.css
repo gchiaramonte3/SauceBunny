@@ -222,7 +222,7 @@
   border-radius: var(--r-md);
   background: color-mix(in srgb, var(--bg-0) 82%, transparent);
   border: 1px solid var(--line-2);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-card);
   backdrop-filter: blur(6px);
   pointer-events: none;
   z-index: 8;
@@ -425,7 +425,7 @@
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--line-2);
   border-radius: var(--r-md);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.45);
+  box-shadow: var(--shadow-card);
   font-family: var(--font-ui);
   animation: cp-fade-in var(--dur-fast) var(--ease-out);
   /* r55: was pointer-events: none so it never blocked clicks on the
@@ -561,8 +561,8 @@
   width: 220px;
   background: var(--bg-2);
   border: 1px solid var(--line-2);
-  border-radius: var(--r-md);
-  box-shadow: 0 8px 12px rgba(0,0,0,0.5), 0 0 0 0.5px var(--line-1);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card), 0 0 0 0.5px var(--line-1);
   padding: 6px;
   z-index: 20;
   animation: cp-fade-in var(--dur-fast) var(--ease-out);
@@ -761,8 +761,8 @@
   right: -4px;
   background: var(--bg-2);
   border: 1px solid var(--line-2);
-  border-radius: var(--r-md);
-  box-shadow: 0 6px 12px rgba(0,0,0,0.55);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
   padding: 8px 10px;
   display: flex;
   align-items: center;
@@ -841,8 +841,8 @@
   right: -4px;
   background: var(--bg-2);
   border: 1px solid var(--line-2);
-  border-radius: var(--r-md);
-  box-shadow: 0 6px 12px rgba(0,0,0,0.55);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -884,10 +884,10 @@
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--line-2);
   border-radius: var(--r-card);
-  box-shadow: 0 6px 12px rgba(0,0,0,0.45);
+  box-shadow: var(--shadow-card);
   font-family: var(--font-sans);
   cursor: pointer;
-  animation: cp-toast-in 220ms var(--ease-out);
+  animation: cp-toast-in var(--dur-base) var(--ease-out);
 }
 @keyframes cp-toast-in {
   from { opacity: 0; transform: translateY(-6px); }
@@ -901,7 +901,7 @@
   justify-content: center;
   flex-shrink: 0;
 }
-.cp-canvas-toast.success .icon { background: rgba(var(--accent-rgb), 0.18); color: var(--accent); }
+.cp-canvas-toast.success .icon { background: color-mix(in srgb, var(--success) 18%, transparent); color: var(--success); }
 .cp-canvas-toast.error   .icon { background: color-mix(in srgb, var(--danger) 18%, transparent);            color: var(--danger-text);      }
 .cp-canvas-toast.info    .icon { background: rgba(255,255,255,0.10);           color: var(--fg-1);  }
 .cp-canvas-toast .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -989,7 +989,7 @@
   background: var(--bg-2);
   border: 1px solid var(--line-2);
   border-radius: var(--r-card);
-  box-shadow: 0 8px 12px rgba(0,0,0,0.55);
+  box-shadow: var(--shadow-card);
   z-index: var(--z-notify);
   display: flex;
   flex-direction: column;
@@ -1051,7 +1051,7 @@
   flex-shrink: 0;
   margin-top: 1px;
 }
-.cp-notif-item.success .cp-notif-icon { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); }
+.cp-notif-item.success .cp-notif-icon { background: color-mix(in srgb, var(--success) 16%, transparent); color: var(--success); }
 .cp-notif-item.error   .cp-notif-icon { background: color-mix(in srgb, var(--danger) 16%, transparent);            color: var(--danger-text);      }
 .cp-notif-item.info    .cp-notif-icon { background: rgba(255,255,255,0.08);           color: var(--fg-2);  }
 
@@ -1119,7 +1119,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--danger);
+  color: var(--danger-text);
 }
 .cp-error-overlay .label {
   font-family: var(--font-sans);
@@ -1194,7 +1194,7 @@
   background: color-mix(in srgb, var(--bg-2) 92%, transparent);
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-card);
   backdrop-filter: blur(8px);
 }
 /* One current-colour well; the full palette is a popover beneath it. */
@@ -1227,7 +1227,7 @@
   background: color-mix(in srgb, var(--bg-2) 96%, transparent);
   border: 1px solid var(--line-2);
   border-radius: var(--r-card);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-card);
   backdrop-filter: blur(8px);
   /* Local stacking over the canvas; the toolbar is the only sibling. */
   z-index: 3;

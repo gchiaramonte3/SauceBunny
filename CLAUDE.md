@@ -721,7 +721,7 @@ human can check.
 
 ## Enforced contracts
 
-Ninety-eight rules in this file are checked by a test rather than remembered. If you
+One hundred rules in this file are checked by a test rather than remembered. If you
 are about to violate one you will meet its failure message, so this table is
 here to save you reverse-engineering the rule from it. Each test explains ITS
 OWN history at the top of the file; that is deliberately not repeated here.
@@ -841,6 +841,8 @@ written after finding the rule already broken somewhere.
 | `offer-readiness-contract` | A host can offer the file BEFORE anyone has failed to open it. The button was gated on a guest having already reported "missing", so a human then had to notice it appear and click - an unbounded wait sitting in front of the hash, the substream and the transfer. The click itself stays: it is the consent step for a multi-GB read |
 | `contract-register` | This table describes itself: the spelled-out count matches the rows, and every row names a test file that exists |
 | `e2e-mock-shape-contract` | The two object literals in `e2e/tauri-mock.ts` carry exactly the fields of their ts-rs binding, so 100 Playwright tests cannot certify a backend shape that no longer exists |
+| `elevation-contract` | Two shadow tiers, two tokens: a popover, menu, toast or HUD floats on `--shadow-card`, a dialog on `--shadow-modal`. Twenty floating surfaces carried twelve hand-typed shadows and the dialog tier had no token; four popovers on one monitor bar cast four different shadows. A literal outer shadow with 8px or more of blur fails, with a shrink-only list for lifts and drag ghosts that are states rather than surfaces |
+| `danger-text-contract` | One red on text. Error copy was drawn in five reds (the solid `--danger`, `--danger-text`, a third hex `--color-destructive`, and three literals plus the retired `#ff6b6b` as rgba nine times) while tokens.css claimed the light red had been "named once". Text and glyphs are `--danger-text`; the solid is for fills, borders and the armed button; no stylesheet retypes a retired red |
 | `cancellable-download-contract` | The Parakeet model download holds its job id and offers a cancel, and a killed download is not reported as a failure. The backend registered the child and said it was cancellable; the renderer minted the id and dropped it, so a half-gigabyte download that reports no progress at all could only be escaped by quitting |
 | `stream-audio-contract` | The fMP4 remux maps the FIRST audio track and transcodes it to stereo AAC. With no map ffmpeg picks the stream with the most channels, so a file carrying stereo mp3 and 5.1 ac3 chose the ac3 - which a fragmented mp4 muxer cannot write at all, killing the whole remux rather than just the sound. And a blanket copy handed WKWebView whatever the source had, which decodes AAC and little else |
 | `button-variant-contract` | No button modifier gives itself a border when its base declares `border: none`. Captions and Snapshot were 32x30 and outlined while Mark in, Mark out and Clear sat beside them at 30x28 with none: five buttons, one row, two treatments. Size variants stay legal (a compact button, a text-bearing speed pill, the primary play control) because those are emphasis; an outline on one sibling of five is drift |

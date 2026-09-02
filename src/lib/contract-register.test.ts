@@ -22,16 +22,25 @@ const claude = readFileSync(join(ROOT, "CLAUDE.md"), "utf8");
 
 const WORDS: Record<string, number> = {
   twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+  ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+  seventeen: 17, eighteen: 18, nineteen: 19,
   one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
 };
 
-/** "Thirty-seven" → 37. Only the shape this sentence actually uses. */
+/** "Thirty-seven" → 37, "One hundred" → 100, "One hundred and three" → 103.
+ *  The register crossed a hundred rows in r163, which the tens-and-ones
+ *  parser this replaced could not read. */
 function spelledToNumber(text: string): number | null {
-  const parts = text.toLowerCase().split("-");
-  if (parts.length === 1) return WORDS[parts[0]] ?? null;
-  const tens = WORDS[parts[0]];
-  const ones = WORDS[parts[1]];
-  return tens != null && ones != null ? tens + ones : null;
+  const parts = text.toLowerCase().replace(/\band\b/g, " ").split(/[\s-]+/).filter(Boolean);
+  let total = 0;
+  let cur = 0;
+  for (const p of parts) {
+    if (p === "hundred") { total += (cur || 1) * 100; cur = 0; continue; }
+    const v = WORDS[p];
+    if (v == null) return null;
+    cur += v;
+  }
+  return parts.length ? total + cur : null;
 }
 
 /** The contiguous rows of the register table, excluding its header. */
@@ -58,7 +67,7 @@ describe("the contract register", () => {
   });
 
   it("states a count that matches the rows beneath it", () => {
-    const m = /^([A-Za-z-]+) rules in this file are checked by a test/m.exec(claude);
+    const m = /^((?:[A-Za-z-]+ )*?[A-Za-z-]+) rules in this file are checked by a test/m.exec(claude);
     expect(m, "the register's opening sentence changed shape").not.toBeNull();
     const claimed = spelledToNumber(m![1]);
     expect(claimed, `could not read "${m![1]}" as a number`).not.toBeNull();

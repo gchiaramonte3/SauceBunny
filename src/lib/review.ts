@@ -951,8 +951,10 @@ export const AUTHOR_KEY = "saucebunny.review.author";
 export const AUTHOR_COLOR_KEY = "saucebunny.review.authorColor";
 
 /** Palette for avatar colours + the name-modal colour picker. Index 0 is the
- *  first-run default, so it leads with the panel's blue (#4dabf7 — the same
- *  hue as the timecode chips); pink/magenta sit at the end of the list. */
+ *  first-run default, so it leads with blue; pink/magenta sit at the end of
+ *  the list. (The blue used to be justified as "the same hue as the timecode
+ *  chips" - those are green now, like every other jump-to-media control, and
+ *  the default is simply the first swatch.) */
 export const AVATAR_COLORS = ["#4dabf7", "#f5a623", "#7b61ff", "#2dd4bf", "#ff6b6b", "#34d399", "#e879f9", "#fb7185"];
 
 /** Stable per-name avatar colour (each person gets a consistent hue). */

@@ -319,12 +319,16 @@
 }
 /* Picked out by shift or cmd click, or by the lasso. Distinct from .active,
    which means "this is the transcript currently open" - you can select rows
-   other than the one you are reading, and both states can sit on one row. */
+   other than the one you are reading, and both states can sit on one row.
+   The selection HUE, not a grey step: this kept --bg-4 (1.30:1 over --bg-1)
+   after the library lists moved to --sel-fill, so the same gesture meant
+   violet in three lists and near-invisible grey in the fourth. */
 .cp-reader-row.selected {
-  background: var(--bg-4);
-  border-color: var(--line-3);
-  color: var(--fg-1);
+  background: var(--sel-fill);
+  border-color: var(--sel-fill);
+  color: var(--sel-ink);
 }
+.cp-reader-row.selected .cp-reader-chip { color: var(--sel-ink); }
 /* Leading 16:9 poster tile — same cache as the Library cards. */
 .cp-reader-row-thumb {
   flex: 0 0 auto;
@@ -470,7 +474,7 @@
 }
 .cp-analysis-empty p { margin: 0; max-width: 42ch; }
 .cp-analysis-actions { display: flex; gap: 8px; margin-top: 4px; }
-.cp-analysis-err { display: flex; align-items: center; gap: 6px; color: var(--danger); }
+.cp-analysis-err { display: flex; align-items: center; gap: 6px; color: var(--danger-text); }
 /* ── The follow-along player stage (far-right dock · thin rail · floating card) ── */
 /* The grid's third column. Docked panel lives inside; the rail toggle sits here
    when collapsed; a floating panel is position:fixed and lifts out of this box
@@ -514,7 +518,7 @@
   border: 1px solid var(--line-2);
   border-radius: var(--r-card);
   background: var(--bg-1);
-  box-shadow: 0 18px 48px rgba(0,0,0,0.55);
+  box-shadow: var(--shadow-modal);
   z-index: 60;
 }
 .cp-reader-stage-head {
@@ -830,7 +834,7 @@
 .cp-drop-card.transcript  { border-color: var(--color-accent-purple); }
 .cp-drop-card.transcript .cp-drop-icon { color: var(--color-accent-purple); }
 .cp-drop-card.unsupported { border-color: var(--danger-2); }
-.cp-drop-card.unsupported .cp-drop-icon { color: var(--danger); }
+.cp-drop-card.unsupported .cp-drop-icon { color: var(--danger-text); }
 .cp-drop-card.busy        { border-color: var(--line-2); }
 @keyframes cp-drop-card-in {
   0%   { opacity: 0; transform: scale(0.97); }
@@ -854,8 +858,8 @@
   padding: 4px;
   background: var(--bg-1);
   border: 1px solid var(--line-2);
-  border-radius: var(--r-md);
-  box-shadow: 0 12px 36px rgba(0,0,0,0.5);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
   z-index: var(--z-top);
 }
 .cp-rowmenu button {
@@ -871,7 +875,8 @@
   font-size: var(--text-md);
   cursor: pointer;
 }
-.cp-rowmenu button:hover { background: var(--bg-3); color: var(--fg-1); }
+.cp-rowmenu button:hover:not(:disabled) { background: var(--bg-3); color: var(--fg-1); }
+.cp-rowmenu button:disabled { opacity: 0.35; cursor: not-allowed; }
 .cp-rowmenu-dialog {
   width: 380px;
   max-width: calc(100vw - 32px);
@@ -879,7 +884,7 @@
   background: var(--bg-1);
   border: 1px solid var(--line-2);
   border-radius: var(--r-lg);
-  box-shadow: 0 24px 60px rgba(0,0,0,0.55);
+  box-shadow: var(--shadow-modal);
   font-family: var(--font-ui);
 }
 /* "Make a folder for them" inside the move dialog. Sits between the folder
@@ -917,7 +922,7 @@
   color: var(--fg-3);
 }
 .cp-rowmenu-warn b { color: var(--fg-1); font-weight: var(--weight-bold); }
-.cp-rowmenu-err { margin: 8px 0 0; font-size: var(--text-base); color: var(--danger); }
+.cp-rowmenu-err { margin: 8px 0 0; font-size: var(--text-base); color: var(--danger-text); }
 .cp-rowmenu-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .cp-rowmenu-actions .cp-tx-iconbtn { height: 28px; padding: 0 12px; }
 .cp-rowmenu-folders { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
@@ -931,7 +936,8 @@
   font-size: var(--text-md);
   cursor: pointer;
 }
-.cp-rowmenu-folder:hover { color: var(--fg-1); background: var(--bg-4); }
+.cp-rowmenu-folder:hover:not(:disabled) { color: var(--fg-1); background: var(--bg-4); }
+.cp-rowmenu-folder:disabled { opacity: 0.35; cursor: not-allowed; }
 .cp-rowmenu-newfolder { display: flex; gap: 6px; margin-top: 10px; }
 .cp-rowmenu-newfolder .cp-tx-iconbtn { flex: 0 0 auto; height: 34px; padding: 0 12px; }
 

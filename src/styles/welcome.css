@@ -220,7 +220,7 @@
   font-style: normal;
   font-size: var(--text-sm);
   font-weight: var(--weight-normal);
-  color: var(--fg-5);
+  color: var(--fg-4);
   text-transform: uppercase;
   letter-spacing: var(--track-wide);
 }
@@ -235,4 +235,4 @@
 }
 .cp-perms-foot { display: flex; flex-direction: column; gap: var(--s-2); align-items: flex-start; margin-top: var(--s-2); }
 .cp-perms-cta { min-width: 132px; }
-.cp-perms-note { margin: 0; font-size: var(--text-base); color: var(--fg-5); }
+.cp-perms-note { margin: 0; font-size: var(--text-base); color: var(--fg-4); }

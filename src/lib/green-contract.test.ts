@@ -78,11 +78,20 @@ const GREEN = /var\(--(ella-green|success|stroke-green|color-accent-green)\b/;
 const ALLOWED: Record<string, string[]> = {
   // ── positive outcome ───────────────────────────────────────────────
   "buttons.css": ["cp-sbtn-result", "cp-gen-result", "cp-gen-btn", "cp-gen-svg"],
-  "monitor.css": ["cp-getting-started-check", "cp-notif-dot"],
-  "review.css": ["cp-review-export-msg", "cp-status-chip"],
+  // The completion toast and the notification row the bell dot points to:
+  // they were the neutral white while the dot was green, so a finished job
+  // was two colours on one screen.
+  "monitor.css": ["cp-getting-started-check", "cp-notif-dot", "cp-canvas-toast.success", "cp-notif-item.success"],
+  // cp-review-tc is the jump-to-media timecode, the same object as
+  // cp-tx-jump and cp-md-ts below; it was the one blue among three.
+  "review.css": ["cp-review-export-msg", "cp-status-chip", "cp-review-tc"],
   "settings.css": ["cp-spike-row", "cp-aiapi-set", "cp-settings-ready", "cp-aiapi-msg"],
   "shell.css": ["cp-drop-card"],
   "transport.css": ["cp-track-queued"],
+  // Outcomes in the logs header and log lines, and the queue's DONE state,
+  // which was byte-identical to RUNNING while both read --accent.
+  "logs.css": ["status-pill.success", "tag.ok"],
+  "queue-drawer.css": ["cp-queue-item.done", "cp-queue-status.done", "cp-queue-summary .ok"],
   // ── work actually running, and timecodes (2026-08-29) ──────────────
   "ai.css": ["cp-md-ts"],
   "transcript.css": ["cp-tx-jump"],
@@ -186,6 +195,33 @@ describe("green is reserved", () => {
         "Those read as BRIGHTER, not greener: use var(--accent) or an --fg-* step.\n" +
         "If it genuinely reports an outcome or a live feed, add it to ALLOWED with a reason:",
     ).toEqual([]);
+  });
+
+  it("an outcome surface is never painted in the neutral", () => {
+    // The other direction. Everything above polices where green IS; nothing
+    // noticed where the rule said green and the sheet said --accent. When
+    // base.css repointed --accent to the neutral white, nine outcome rules
+    // came with it: the completion toast matched the info toast at a
+    // different alpha, and the queue's DONE chip was byte-identical to
+    // RUNNING. A success that looks like an info is a wrong state, not a
+    // style choice, so a `.success`/`.done`/`.ok` selector may not read
+    // --accent at all.
+    const OUTCOME = /\.(success|done|ok|pass|ready)(?![\w-])/;
+    const NEUTRAL = /var\(--accent(-rgb)?\)/;
+    const outcomes: string[] = [];
+    const wrong: string[] = [];
+    for (const [file, lines] of sheets()) {
+      lines.forEach((l, i) => {
+        // A paint declaration, on its own line or inside a one-line rule.
+        if (!/(^|[{;]\s*)(color|background|border-color|background-color):/.test(l)) return;
+        const sel = selectorAt(lines, i);
+        if (!OUTCOME.test(sel)) return;
+        outcomes.push(`${file}:${i + 1}`);
+        if (NEUTRAL.test(l)) wrong.push(`${file}:${i + 1}  ${sel}`);
+      });
+    }
+    expect(outcomes.length, "found no outcome selectors at all - the scan broke").toBeGreaterThan(6);
+    expect(wrong, "an outcome painted in --accent, which is the neutral: use var(--success) and add the selector to ALLOWED").toEqual([]);
   });
 
   it("keeps every allowlist entry earning its place", () => {

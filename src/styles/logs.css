@@ -48,8 +48,8 @@
   letter-spacing: var(--track-caps);
   text-transform: none;
 }
-.cp-logs-header .status-pill.success { color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
-.cp-logs-header .status-pill.error   { color: #ff7a7a; background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.cp-logs-header .status-pill.success { color: var(--success); background: color-mix(in srgb, var(--success) 8%, transparent); }
+.cp-logs-header .status-pill.error   { color: var(--danger-text); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .cp-logs-header .status-pill.working { color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent); }
 .cp-logs-header .progress {
   flex: 1;
@@ -94,7 +94,7 @@
 .cp-logs-stop .dot {
   width: 8px;
   height: 8px;
-  background: #ff5757;
+  background: var(--danger);
   border-radius: var(--r-2xs);
   box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 50%, transparent);
 }
@@ -127,10 +127,10 @@
   padding: 1px 0;
   font-variant-numeric: tabular-nums;
 }
-.log-line .ts { color: var(--fg-5); font-size: var(--text-sm); }
+.log-line .ts { color: var(--fg-4); font-size: var(--text-sm); }
 .log-line .tag { font-size: var(--text-sm); font-weight: var(--weight-semibold); letter-spacing: var(--track-caps); text-transform: uppercase; }
 .log-line .tag.info  { color: var(--fg-3); }
-.log-line .tag.ok    { color: var(--accent); }
+.log-line .tag.ok    { color: var(--success); }
 .log-line .tag.warn  { color: var(--warning); }
 .log-line .tag.err   { color: var(--danger-text); }
 .log-line .tag.muxer { color: #B084FF; }
