@@ -219,13 +219,13 @@ export function ReaderPlayerStage({
               ))}
             </div>
             <div className="cp-reader-transport-row">
-              <button type="button" className="cp-reader-tbtn" onClick={() => skip(-10)} title="Back 10 seconds" aria-label="Back 10 seconds">
+              <button type="button" className="cp-transport-btn" onClick={() => skip(-10)} title="Back 10 seconds" aria-label="Back 10 seconds">
                 <IconSkipBack size={16} />
               </button>
-              <button type="button" className="cp-reader-tbtn primary" onClick={toggle} title={playing ? "Pause" : "Play"} aria-label={playing ? "Pause" : "Play"}>
+              <button type="button" className={"cp-transport-btn play" + (playing ? " active" : "")} onClick={toggle} title={playing ? "Pause" : "Play"} aria-label={playing ? "Pause" : "Play"}>
                 {playing ? <IconPause size={17} /> : <IconPlay size={17} />}
               </button>
-              <button type="button" className="cp-reader-tbtn" onClick={() => skip(10)} title="Forward 10 seconds" aria-label="Forward 10 seconds">
+              <button type="button" className="cp-transport-btn" onClick={() => skip(10)} title="Forward 10 seconds" aria-label="Forward 10 seconds">
                 <IconSkipForward size={16} />
               </button>
               <span className="cp-reader-clock">

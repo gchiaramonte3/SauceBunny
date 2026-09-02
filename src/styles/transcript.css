@@ -570,17 +570,6 @@
 .cp-tx-empty { color: var(--fg-4); }
 /* Icon-over-title, mirroring the AI pane's empty face (.cp-ai-icon tone). */
 .cp-tx-empty-icon { color: var(--fg-3); opacity: 0.85; }
-.cp-tx-empty-title {
-  font-size: var(--text-lg);
-  font-weight: var(--weight-semibold);
-  color: var(--fg-2);
-}
-.cp-tx-empty-body {
-  font-size: var(--text-md);
-  color: var(--fg-4);
-  line-height: var(--leading-normal);
-  max-width: 280px;
-}
 .cp-tx-empty-actions { margin-top: 12px; display: flex; gap: 8px; }
 /* Why-is-the-button-disabled hint under the empty-state actions. */
 .cp-tx-empty-hint {

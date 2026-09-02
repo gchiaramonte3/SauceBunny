@@ -295,6 +295,30 @@
   gap: 10px;
   margin-bottom: 12px;
 }
+/* The Selection row: the eyebrow is .cp-field's own label; the timecode
+   used to carry an inline fontWeight: 500, a face main.tsx never imports,
+   so it rendered at 400. Semibold is the face that exists. */
+.cp-sel-field { margin-top: -4px; margin-bottom: 14px; }
+.cp-sel-row { display: flex; align-items: center; justify-content: space-between; }
+.cp-sel-tc {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--fg-1);
+}
+/* The filename input is prose, not a path: the UI face, not the mono one
+   .cp-input defaults to. */
+.cp-field .cp-input[type="text"] { font-family: var(--font-ui); }
+.cp-export-cta-wide { flex: 1; height: 36px; font-size: var(--text-lg); }
+.cp-export-fmt {
+  margin-top: 8px;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+  text-align: center;
+  letter-spacing: var(--track-caps);
+}
 .cp-field label {
   font-family: var(--font-ui);
   font-size: var(--text-sm);

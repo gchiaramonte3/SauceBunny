@@ -1543,7 +1543,7 @@ export function SettingsModal(props: Props) {
                     open={parakeetOpen}
                     onToggle={() => setParakeetOpen((o) => !o)}
                   >
-                    <div className="cp-source-hint muted" style={{ lineHeight: 1.6, marginBottom: 12 }}>
+                    <div className="cp-source-hint muted" style={{ marginBottom: 12 }}>
                       <strong>Parakeet TDT v3</strong> (NVIDIA) runs fully on-device on Apple
                       Silicon via Core ML and emits <strong>word-level</strong> timestamps.
                       Multilingual, with tighter caption sync than Whisper's segment timing.
@@ -1696,7 +1696,7 @@ export function SettingsModal(props: Props) {
                 </CollapsibleSection>
 
                 <CollapsibleSection id="tx-library" label="Transcript library" open={sectionOpen("tx-library")} onToggle={() => toggleSection("tx-library")}>
-                  <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: "0 0 10px" }}>
+                  <p className="cp-settings-note">
                     All generated transcripts land here, sub-organized by month.
                     Kept separate from your clip-export folder.
                   </p>
@@ -1752,7 +1752,7 @@ export function SettingsModal(props: Props) {
                 </CollapsibleSection>
 
                 <CollapsibleSection id="tx-dictation" label="Dictation microphone" open={sectionOpen("tx-dictation")} onToggle={() => toggleSection("tx-dictation")}>
-                  <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: "0 0 10px" }}>
+                  <p className="cp-settings-note">
                     The mic the review composer records from when you dictate a comment.
                     Leave on <em>System default</em> unless that picks up the wrong
                     input (e.g. a capture card).
@@ -1782,7 +1782,7 @@ export function SettingsModal(props: Props) {
                 </CollapsibleSection>
 
                 <CollapsibleSection id="tx-diarization" label="Speaker diarization" open={sectionOpen("tx-diarization")} onToggle={() => toggleSection("tx-diarization")}>
-                  <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: "0 0 10px" }}>
+                  <p className="cp-settings-note">
                     When <em>Detect speakers</em> is on in the sidebar, the FluidAudio sidecar
                     runs after Whisper and stitches speaker labels into the SRT
                     (<code>SPEAKER_00</code>, <code>SPEAKER_01</code>, etc., renameable in the
@@ -1795,7 +1795,7 @@ export function SettingsModal(props: Props) {
                         <button className="btn btn-ghost" onClick={onCancelDiarizerPrepare}>
                           Cancel download
                         </button>
-                        <span style={{ fontSize: 11, color: "var(--fg-3)" }}>
+                        <span className="cp-diar-status">
                           Downloading speaker models…
                         </span>
                       </>
@@ -1813,7 +1813,7 @@ export function SettingsModal(props: Props) {
                         <button className="btn btn-primary" onClick={onPrepareDiarizerModels}>
                           Download speaker models
                         </button>
-                        <span style={{ fontSize: 11, color: "var(--fg-3)" }}>
+                        <span className="cp-diar-status">
                           Not downloaded · happens on first diarization otherwise
                         </span>
                       </>
@@ -1827,7 +1827,7 @@ export function SettingsModal(props: Props) {
                 </CollapsibleSection>
 
                 <CollapsibleSection id="tx-how" label="How it works" open={sectionOpen("tx-how")} onToggle={() => toggleSection("tx-how")}>
-                  <p style={{ fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, margin: 0 }}>
+                  <p className="cp-settings-note tight">
                     Click <em>Generate transcript</em> on the source card. yt-dlp grabs the audio for
                     your in→out range only (not the whole video), pipes it through ffmpeg, and
                     whisper-cli writes <code>&lt;filename&gt;.srt</code> next to where your clip would
@@ -2004,12 +2004,7 @@ export function SettingsModal(props: Props) {
                               <span className="lbl">
                                 {c.label}
                                 {c.description && (
-                                  <span style={{
-                                    display: "block",
-                                    fontSize: 11,
-                                    color: "var(--text-muted, #888)",
-                                    marginTop: 2,
-                                  }}>
+                                  <span className="cp-shortcut-desc">
                                     {c.description}
                                   </span>
                                 )}
@@ -2084,7 +2079,7 @@ export function SettingsModal(props: Props) {
                   <div className="cp-about-row"><span className="k">Data</span><span className="v">no accounts · no telemetry · cloud AI off unless you add a key</span></div>
                   <div className="cp-about-row">
                     <span className="k">Model dir</span>
-                    <span className="v"><button className="btn btn-ghost" style={{ height: 24, fontSize: 11 }} onClick={async () => {
+                    <span className="v"><button className="btn btn-ghost" onClick={async () => {
                       try {
                         const list = await invoke<WhisperModel[]>("list_whisper_models");
                         const first = list.find((m) => m.downloaded);
@@ -2100,7 +2095,7 @@ export function SettingsModal(props: Props) {
                     directions - it still said the app makes no cloud calls
                     at all, and it never mentioned co-review, which is the
                     one place bytes actually leave the Mac. */}
-                <p style={{ marginTop: 18, fontFamily: "var(--font-ui)", fontSize: 12, color: "var(--fg-4)", lineHeight: 1.6 }}>
+                <p className="cp-settings-note legal">
                   Use it on content you have the rights to clip. Bundled binaries are tested releases of
                   yt-dlp, ffmpeg, whisper.cpp and llama.cpp, and decode, scrubbing and export run on
                   mediabunny. All of it runs locally. No telemetry, ever. The app

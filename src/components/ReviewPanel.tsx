@@ -986,16 +986,16 @@ export function ReviewPanel({
   if (connecting) {
     return (
       <div className="cp-pane-empty cp-review-empty">
-        <p>Connecting to the session…</p>
-        <p className="sub">Loading the shared review from the host.</p>
+        <p className="cp-pane-empty-title">Connecting to the session…</p>
+        <p className="cp-pane-empty-body">Loading the shared review from the host.</p>
       </div>
     );
   }
   if (!viewDoc || !versionId || (!inSession && !sourceKey)) {
     return (
       <div className="cp-pane-empty cp-review-empty">
-        <p>Load a source to start a review.</p>
-        <p className="sub">Timecoded comments, resolved and signed off. All local.</p>
+        <p className="cp-pane-empty-title">Load a source to start a review.</p>
+        <p className="cp-pane-empty-body">Timecoded comments, resolved and signed off. All local.</p>
       </div>
     );
   }

@@ -1708,8 +1708,8 @@ export function TranscriptViewer({
     return (
       <div className="cp-pane-empty cp-tx-empty">
         <IconTranscript size={28} className="cp-tx-empty-icon" />
-        <div className="cp-tx-empty-title">No transcript yet</div>
-        <div className="cp-tx-empty-body">
+        <div className="cp-pane-empty-title">No transcript yet</div>
+        <div className="cp-pane-empty-body">
           Transcribe the loaded source, or import an
           <code> .srt</code> / <code>.vtt</code> from disk.
         </div>
@@ -1740,15 +1740,15 @@ export function TranscriptViewer({
   }
 
   if (loading) {
-    return <div className="cp-pane-empty cp-tx-empty"><div className="cp-tx-empty-title">Loading transcript…</div></div>;
+    return <div className="cp-pane-empty cp-tx-empty"><div className="cp-pane-empty-title">Loading transcript…</div></div>;
   }
 
   if (loadErr) {
     return (
       <div className="cp-pane-empty cp-tx-empty">
         <IconAlert size={20} stroke="var(--danger-text)" />
-        <div className="cp-tx-empty-title">Couldn't read transcript</div>
-        <div className="cp-tx-empty-body">{loadErr}</div>
+        <div className="cp-pane-empty-title">Couldn't read transcript</div>
+        <div className="cp-pane-empty-body">{loadErr}</div>
       </div>
     );
   }
@@ -1756,8 +1756,8 @@ export function TranscriptViewer({
   if (turns.length === 0) {
     return (
       <div className="cp-pane-empty cp-tx-empty">
-        <div className="cp-tx-empty-title">Transcript is empty</div>
-        <div className="cp-tx-empty-body">
+        <div className="cp-pane-empty-title">Transcript is empty</div>
+        <div className="cp-pane-empty-body">
           The SRT file at this path parsed to zero cues. Try regenerating, or
           open the file to inspect it directly.
         </div>

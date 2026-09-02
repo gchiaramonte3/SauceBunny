@@ -450,7 +450,7 @@ export const Monitor = forwardRef<PlayerHandle, Props>(function Monitor(props, r
             <div className="status">
               {sourceKind === "file" ? "READING FILE…" : "RESOLVING SOURCE STREAM…"}
             </div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-5)", letterSpacing: "0.06em" }}>
+            <div className="sub">
               {sourceKind === "file" ? "ffmpeg · reading headers" : "yt-dlp · probing manifests"}
             </div>
           </div>

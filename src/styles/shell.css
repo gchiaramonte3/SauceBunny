@@ -700,23 +700,6 @@
   align-items: center;
   gap: 8px;
 }
-.cp-reader-tbtn {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-md);
-  background: var(--bg-3);
-  color: var(--fg-2);
-  cursor: pointer;
-}
-.cp-reader-tbtn:hover { color: var(--fg-1); background: var(--bg-4); }
-.cp-reader-tbtn.primary {
-  width: 38px;
-  height: 38px;
-  color: var(--fg-1);
-}
 .cp-reader-clock {
   margin-left: auto;
   font-family: var(--font-mono);

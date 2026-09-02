@@ -787,8 +787,8 @@ export function QueueDrawer({
         {queue.length === 0 ? (
           <div className="cp-pane-empty cp-queue-empty">
             <IconStack size={28} stroke="var(--fg-4)" />
-            <div className="cp-queue-empty-title">No clips queued</div>
-            <div className="cp-queue-empty-body">
+            <div className="cp-pane-empty-title">No clips queued</div>
+            <div className="cp-pane-empty-body">
               Mark a section in the timeline, then click <strong>+ Add to queue</strong> in the sidebar.
               Repeat for as many sections as you need, then export them all at once.
             </div>

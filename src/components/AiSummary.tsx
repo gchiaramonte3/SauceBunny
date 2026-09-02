@@ -673,8 +673,8 @@ export function AiSummary({
     return (
       <div className="cp-pane-empty cp-ai-empty">
         <IconAiSummary size={28} className="cp-ai-icon" />
-        <div className="cp-ai-empty-title">No transcript yet</div>
-        <div className="cp-ai-empty-sub">Generate a transcript first, then chat with it here.</div>
+        <div className="cp-pane-empty-title">No transcript yet</div>
+        <div className="cp-pane-empty-body">Generate a transcript first, then chat with it here.</div>
       </div>
     );
   }
@@ -688,8 +688,8 @@ export function AiSummary({
       <div className="cp-ai-wrap">
         <div className="cp-pane-empty cp-ai-setup">
           <IconAiSummary size={28} className="cp-ai-icon" />
-          <div className="cp-ai-empty-title">Set up local AI</div>
-          <div className="cp-ai-empty-sub">
+          <div className="cp-pane-empty-title">Set up local AI</div>
+          <div className="cp-pane-empty-body">
             Download a small AI model to summarize and pull quotes from your
             transcripts. Runs entirely on your Mac.
           </div>
@@ -780,8 +780,8 @@ export function AiSummary({
         {messages.length === 0 && (
           <div className="cp-ai-intro">
             <IconAiSummary size={28} className="cp-ai-icon" />
-            <div className="cp-ai-empty-title">Chat with this transcript</div>
-            <div className="cp-ai-empty-sub">Answers come only from the words in the video, with timestamps.</div>
+            <div className="cp-pane-empty-title">Chat with this transcript</div>
+            <div className="cp-pane-empty-body">Answers come only from the words in the video, with timestamps.</div>
             <div className="cp-ai-suggest">
               {SUGGESTIONS.map((s, i) => (
                 <button key={s} className="cp-ai-chip" style={{ animationDelay: `${i * 40}ms` }} onClick={() => send(s)}>{s}</button>

@@ -539,6 +539,28 @@
   grid-template-columns: repeat(2, 1fr);
   gap: 10px;
 }
+/* Explanatory copy under a Settings section. Five paragraphs used to carry
+   this inline, with lineHeight 1.6 - a rung the leading scale does not
+   have. */
+.cp-settings-note {
+  margin: 0 0 10px;
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: var(--fg-3);
+}
+.cp-settings-note.tight { margin: 0; }
+.cp-settings-note.legal { margin: 18px 0 0; color: var(--fg-4); }
+.cp-diar-status { font-size: var(--text-base); color: var(--fg-3); }
+/* Read from --text-muted before, which no file defines, so the #888
+   fallback painted. */
+.cp-shortcut-row .lbl .cp-shortcut-desc {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-base);
+  color: var(--fg-4);
+}
+.cp-about-row .btn { height: 24px; font-size: var(--text-base); }
 .cp-about-row {
   display: flex;
   justify-content: space-between;

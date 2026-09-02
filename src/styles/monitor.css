@@ -636,6 +636,13 @@
   0%   { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
 }
+.cp-fetching .sub {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+  letter-spacing: var(--track-caps-loose);
+}
 .cp-fetching .status {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

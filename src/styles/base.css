@@ -263,8 +263,12 @@ button:focus-visible, input:focus-visible,
 
 /* ── THE empty/setup state for every drawer tab (Queue, Review, AI
       Summary, Transcript). One geometry so the four faces agree:
-      centered on BOTH axes, same padding, same rhythm. Components keep
-      their own typography classes; this owns the box. ── */
+      centered on BOTH axes, same padding, same rhythm - and the same
+      TYPE. The box was shared and the words were not: the AI tab's title
+      was xl/bold/fg-1, Queue and Transcript were lg/semibold/fg-2, Review
+      had no title class and inherited lg/fg-3, so switching tabs on an
+      empty drawer changed the title's size, weight and colour. A pane adds
+      only its icon and its actions; pane-empty-contract holds it. ── */
 .cp-pane-empty {
   flex: 1;
   min-height: 100%;
@@ -277,3 +281,16 @@ button:focus-visible, input:focus-visible,
   gap: var(--s-2);
   padding: var(--s-8) var(--s-6);
 }
+.cp-pane-empty-title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--fg-2);
+}
+.cp-pane-empty-body {
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: var(--fg-4);
+  max-width: 280px;
+}
+.cp-pane-empty p { margin: 0; }
+

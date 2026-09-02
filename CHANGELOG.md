@@ -91,6 +91,18 @@ regression, a library duplication bug, and the app's missing select style.
 - **Four controls that receive `disabled` now look disabled** (queue reorder
   arrows at either end, the Move dialogs' folder rows, an empty project's
   "Choose picture", the transcript Tools menu while regenerating).
+- **The four drawer tabs share one empty state, words included.** The box
+  was shared and the type was not: switching tabs on an empty drawer changed
+  the title's size, weight and colour.
+- **Typography set inline in TSX is gone.** Fourteen sites bypassed every
+  typography rule; one set a `fontWeight: 500` no imported face renders (it
+  drew at 400), five minted a line-height off the scale, and the shortcut
+  editor's descriptions read a `--text-muted` defined nowhere and painted
+  the `#888` fallback. Two contracts now: no literal typography inline, and
+  every `var(--x)` written in TSX names a property something defines.
+- **The reader's play/skip buttons are the transport's**, with the same
+  press feedback and a playing state, instead of a second recipe with
+  neither.
 - Meaningful copy no longer sits on `--fg-5` (3.8:1): shortcut-sheet headings,
   the permissions screen's notes, the AI role label, ruler timecodes, queue
   numbers, the collapsed sidebar section's summary.

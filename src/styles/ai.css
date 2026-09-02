@@ -22,8 +22,6 @@
   color: var(--fg-3);
 }
 .cp-ai-icon { color: var(--fg-3); opacity: 0.85; }
-.cp-ai-empty-title { font-size: var(--text-xl); font-weight: var(--weight-bold); color: var(--fg-1); margin-top: 4px; }
-.cp-ai-empty-sub { font-size: var(--text-md); line-height: var(--leading-normal); color: var(--fg-4); max-width: 320px; }
 
 /* ── Model download card ─────────────────────────────────────────── */
 .cp-ai-model-card {

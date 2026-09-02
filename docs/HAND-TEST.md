@@ -857,6 +857,16 @@ The contracts prove the rules; only eyes prove the pixels.
     step brighter than before.
 14. **Anything red.** Error hints in Settings, the review composer's error,
     the source-URL error, the logs pill: one red, the light one.
+15. **Empty drawer, all four tabs.** With no source loaded, click Queue,
+    Review, AI Summary, Transcript in turn. The title is the same size,
+    weight and grey on every tab; only the icon and the words change.
+16. **Reader page (open a transcript from the Transcripts view).** The
+    play/skip buttons look like the main transport's: press one and it
+    dips; while playing, the Play button sits on the raised fill.
+17. **Sidebar, with an in/out range set.** The Selection timecode is
+    semibold mono; the SELECTION label above it matches the FILENAME label.
+18. **Settings > Keyboard.** A shortcut with a description shows it in the
+    normal secondary grey under its name, not a dimmer one-off grey.
 
 ## Two claims that only two machines can settle
 

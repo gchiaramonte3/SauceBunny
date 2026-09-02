@@ -10,13 +10,6 @@
   min-height: 0;
 }
 /* Geometry lives in .cp-pane-empty (base.css). */
-.cp-review-empty {
-  color: var(--fg-3);
-  font-family: var(--font-ui);
-  font-size: var(--text-lg);
-}
-.cp-review-empty p { margin: 0; }
-.cp-review-empty .sub { color: var(--fg-4); font-size: var(--text-md); margin-top: 6px; line-height: var(--leading-normal); }
 
 /* Reviewer identity avatar (toolbar) — click to set/change name + colour. */
 .cp-review-whoami {

@@ -680,14 +680,10 @@ export function Sidebar(props: Props) {
               </div>
             </div>
 
-            <div className="cp-field" style={{ marginTop: -4, marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ color: "var(--fg-4)", textTransform: "uppercase", letterSpacing: "0.08em", fontSize: 10, fontWeight: 600, fontFamily: "var(--font-ui)" }}>
-                  Selection
-                </span>
-                <span style={{ fontFamily: "var(--font-mono)", color: "var(--fg-1)", fontVariantNumeric: "tabular-nums", fontWeight: 500, fontSize: 11 }}>
-                  {selectionTc}
-                </span>
+            <div className="cp-field cp-sel-field">
+              <div className="cp-sel-row">
+                <label>Selection</label>
+                <span className="cp-sel-tc">{selectionTc}</span>
               </div>
             </div>
 
@@ -698,7 +694,6 @@ export function Sidebar(props: Props) {
                 className="cp-input"
                 value={exportOpts.filename}
                 onChange={(e) => { onFilenameEdit?.(); setExportOpts({ ...exportOpts, filename: e.target.value }); }}
-                style={{ fontFamily: "var(--font-ui)" }}
                 /* Spell-check ON — filenames are usually prose ("interview
                    with marc", "demo final cut") and a misspelled file is
                    hard to find on disk later. `lang="en"` is required for
@@ -797,8 +792,7 @@ export function Sidebar(props: Props) {
               ) : queueCount > 0 ? (
                 // Queue is the source of truth when it has items.
                 <button
-                  className="btn btn-primary cp-export-cta"
-                  style={{ flex: 1, height: 36, fontSize: 13 }}
+                  className="btn btn-primary cp-export-cta cp-export-cta-wide"
                   onClick={onExportQueue}
                   /* status gate: a running SINGLE export owns the shared
                      local-export cancel token, so the queue must wait. That
@@ -859,11 +853,7 @@ export function Sidebar(props: Props) {
               </div>
             )}
             {!success && !exporting && (
-              <div style={{
-                marginTop: 8,
-                fontFamily: "var(--font-ui)", fontSize: 10, color: "var(--fg-5)",
-                textAlign: "center", letterSpacing: "0.04em",
-              }}>
+              <div className="cp-export-fmt">
                 {formatLine(exportOpts)}
               </div>
             )}

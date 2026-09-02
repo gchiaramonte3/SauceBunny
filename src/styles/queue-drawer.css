@@ -280,19 +280,6 @@ body.cp-tab-dragging { cursor: grabbing; }
 .cp-queue-list { flex: 1; overflow-y: auto; padding: 8px; }
 /* Geometry lives in .cp-pane-empty (base.css); this is tone only. */
 .cp-queue-empty { color: var(--fg-4); }
-.cp-queue-empty-title {
-  font-family: var(--font-sans);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-semibold);
-  color: var(--fg-2);
-}
-.cp-queue-empty-body {
-  font-family: var(--font-ui);
-  font-size: var(--text-base);
-  line-height: var(--leading-normal);
-  color: var(--fg-4);
-  max-width: 260px;
-}
 
 .cp-queue-item {
   display: flex;
