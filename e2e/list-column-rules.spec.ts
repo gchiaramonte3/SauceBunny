@@ -163,4 +163,33 @@ test(`${view.name}: the table's last line ends where its rows end, with Name pin
     `the table's line stops ${m.trailingGap!.gap.toFixed(0)}px short of its rows (padding is ${m.trailingGap!.pad})`)
     .toBeLessThanOrEqual(m.trailingGap!.pad + 1);
 });
+
+test(`${view.name}: a long value in the last cells is clipped, not painted over the rule`, async ({ page }) => {
+  // Size and Date sit either side of the table's right-hand line and were the
+  // two cells with no clamp: `white-space: nowrap` and nothing else, so a
+  // value wider than its column overflowed the track and painted across the
+  // rule. Measured at scrollWidth 210 in a 120px cell.
+  await openList(page, view);
+  const m = await page.evaluate(() => {
+    const cells = [...document.querySelectorAll(".cp-lib-lrow > .cp-lib-lrow-date, .cp-lib-lrow > .cp-lib-lrow-size")] as HTMLElement[];
+    if (!cells.length) return null;
+    return cells.slice(0, 2).map((cell) => {
+      const before = cell.getBoundingClientRect().width;
+      const keep = cell.textContent;
+      cell.textContent = "Wednesday 31 August 2026 at 4:43:59 PM Pacific Daylight Time";
+      const after = cell.getBoundingClientRect().width;
+      const cs = getComputedStyle(cell);
+      cell.textContent = keep;
+      return { cls: cell.className, before: Math.round(before), after: Math.round(after), overflow: cs.overflow, ellipsis: cs.textOverflow };
+    });
+  });
+  // Canary: no such cells means this asserted nothing.
+  expect(m, "no size/date cells found").not.toBeNull();
+  expect(m!.length).toBeGreaterThanOrEqual(1);
+  for (const c of m!) {
+    expect(c.after, `${c.cls} grew from ${c.before} to ${c.after} to fit its text`).toBe(c.before);
+    expect(c.overflow, `${c.cls} does not clip`).toBe("hidden");
+    expect(c.ellipsis, `${c.cls} truncates with no ellipsis`).toBe("ellipsis");
+  }
+});
 }

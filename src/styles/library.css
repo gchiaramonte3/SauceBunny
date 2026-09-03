@@ -1527,7 +1527,19 @@
    The Name header has had exactly that bug since it was written, so both are
    scoped here rather than only the new one. */
 .cp-lib-lrow > .cp-lib-lrow-name,
-.cp-lib-lrow > .cp-lib-lrow-kind {
+.cp-lib-lrow > .cp-lib-lrow-kind,
+/* Size and Date were left out, and they are the two cells NEXT TO the table's
+   right-hand line. They carried `white-space: nowrap` and nothing else, so a
+   value wider than its column did not wrap - it overflowed the track and
+   painted straight across the column rule. Measured: a Held value at
+   scrollWidth 210 in a 120px cell, which is the one mechanism by which the
+   HELD content genuinely is wider than the line beside it.
+   `min-width: 0` below is what lets the clamp bite at all: a grid item's
+   automatic minimum is its content, so without it the cell refuses to be
+   narrower than its text and pushes the track instead of clipping. */
+.cp-lib-lrow > .cp-lib-lrow-size,
+.cp-lib-lrow > .cp-lib-lrow-date {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
