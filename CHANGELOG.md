@@ -5,6 +5,14 @@ All notable changes to Sauce Bunny. Format loosely follows
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.5.0] - 2026-09-03
+
+Session recording, a ledger of past review sessions, and the app no longer
+deletes anyone's files.
+
+
 ### Changed
 
 - **The app no longer deletes your files.** Two verbs are gone: the frames
